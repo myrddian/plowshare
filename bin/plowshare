@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+#
+# bin/plowshare -- start the server against this machine's deployment.
+#
+#
+# Why this file is committed, and why the settings are in it
+# ---------------------------------------------------------
+# Everything the server reads is a ${VAR:default} in
+# plowshare-server/src/main/resources/application.yml, and every default there
+# is loopback deliberately: EndToEndTest fails if a shipped default names a real
+# box, because then running the test suite dials it. A deployment therefore
+# cannot be expressed by editing the shipped file.
+#
+# It used to be expressed in plowshare-server/config/application.yml, which
+# Spring reads at HIGHER precedence than the shipped file. That works, and it
+# puts deployment values on a path the test JVM can also see -- a test once
+# deleted an operator's real config/application.yml because it asserted the
+# file's absence. PLOWSHARE_DATA_DIR is kept out of application.yml for exactly
+# this reason, said on PlowshareServerApplication.main: "a value here would be
+# read by every test as well".
+#
+# Environment set by this script reaches the server process and nothing else.
+# That is the whole argument. The settings below are committed, readable and
+# diffable, and they cannot leak into a test run -- except the four that name
+# real machines, which moved out on 2026-09-09; see below.
+#
+#
+# What is NOT in this file
+# ------------------------
+# The two API keys, read from ~/.config/plowshare/secrets.env (mode 600, outside
+# the repo so that no gitignore rule is load-bearing). They are deliberately not
+# flags: a flag lands in `ps aux` output and in shell history, where a 600-mode
+# file does not.
+#
+# The four values that name real machines -- both pools' base URLs and the model
+# each serves. They are not secret; they are out for a different reason. This
+# script is tracked, and InvariantsTest.no_source_names_the_reference_box sweeps
+# every tracked file outside docs/ for this machine's address, because no test
+# may dial a real box. That sweep does not know a launch script from a source
+# file, and it is right not to. So the defaults below are loopback, for the same
+# reason every default in application.yml is: a checkout dials nothing.
+#
+# This file does not read them. bin/plowshare-deployment does -- it exports
+# ~/.config/plowshare/deployment.env and then execs this script, which lands
+# those values on the "exported variable" rung of the order below rather than
+# above it. Reading them here would have inverted that order, because `source`
+# assigns whether or not the caller had already exported one.
+#
+#
+# Precedence, highest first: a flag, then an exported variable, then the default
+# written here, then the shipped application.yml.
+
+set -euo pipefail
+
+readonly REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SECRETS="${PLOWSHARE_SECRETS:-$HOME/.config/plowshare/secrets.env}"
+BUILD=1
+PRINT=0
+
+usage() {
+    cat <<'USAGE'
+plowshare -- start the Plowshare server.
+
+  bin/plowshare [flags]
+
+Endpoints
+  --llm-url URL          LM Studio / OpenAI-compatible base URL
+  --llm-model NAME       chat model for the `fast` class
+  --spark-url URL        second pool's base URL
+  --spark-model NAME     chat model for the `reasoning` class
+
+Server
+  --port N               HTTP port
+  --bind ADDR            interface to bind (127.0.0.1 keeps it off the LAN)
+  --data-dir PATH        images, tokens, exports. Empty keeps no files at all
+  --db-url URL           Postgres JDBC URL
+
+Behaviour
+  --no-auth              disable the bearer check (loopback development only)
+  --secrets PATH         where to read API keys from
+  --no-build             skip the rebuild and run the existing jar
+  --print                show the resolved configuration and exit
+  -h, --help             this
+
+Secrets are read from a file, never from a flag. See the header of this script.
+The server runs a content-addressed jar copy in
+${XDG_CACHE_HOME:-$HOME/.cache}/plowshare/server. PLOWSHARE_RUNTIME_DIR overrides
+that directory. Rebuilds cannot replace a running server's jar; old copies remain
+until removed by the operator after the corresponding server has stopped.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --llm-url)      LLM_BASE_URL="$2";          shift 2 ;;
+        --llm-model)    LLM_CHAT_MODEL="$2";        shift 2 ;;
+        --spark-url)    SPARK_BASE_URL="$2";        shift 2 ;;
+        --spark-model)  SPARK_CHAT_MODEL="$2";      shift 2 ;;
+        --port)         PLOWSHARE_PORT="$2";        shift 2 ;;
+        --bind)         PLOWSHARE_BIND="$2";        shift 2 ;;
+        --data-dir)     PLOWSHARE_DATA_DIR="$2";    shift 2 ;;
+        --db-url)       PLOWSHARE_DB_URL="$2";      shift 2 ;;
+        --no-auth)      PLOWSHARE_AUTH_ENABLED=false; shift ;;
+        --secrets)      SECRETS="$2";               shift 2 ;;
+        --no-build)     BUILD=0;                    shift ;;
+        --print)        PRINT=1;                    shift ;;
+        -h|--help)      usage; exit 0 ;;
+        *) echo "plowshare: unknown flag '$1'" >&2; echo >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+# Secrets first, so that the := defaults below never overwrite one.
+if [[ -f "$SECRETS" ]]; then
+    perms="$(stat -c '%a' "$SECRETS" 2>/dev/null || stat -f '%Lp' "$SECRETS")"
+    if [[ "$perms" != "600" ]]; then
+        echo "plowshare: $SECRETS is mode $perms; expected 600." >&2
+        echo "           chmod 600 '$SECRETS'" >&2
+        exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$SECRETS"
+    set +a
+else
+    echo "plowshare: no secrets file at $SECRETS -- continuing without API keys." >&2
+    echo "           A pool needing one will fail at its first call, not here." >&2
+fi
+
+# ---- this machine's deployment -------------------------------------------
+# `:=` means an exported variable already in the environment wins over these,
+# and a flag above wins over both.
+
+# The `fast` class: gemma, non-reasoning. The real box is named in
+# deployment.env, which bin/plowshare-deployment exports before calling this.
+: "${LLM_BASE_URL:=http://127.0.0.1:1234/v1}"
+
+# The `reasoning` class. Likewise.
+: "${SPARK_BASE_URL:=http://127.0.0.1:8000/v1}"
+
+# THE TWO MODEL NAMES GET NO DEFAULT HERE, AND EXPORTING AN EMPTY ONE IS WORSE
+# THAN NOT EXPORTING. application.yml already carries them, as
+# `fast: ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}` -- and Spring applies
+# that default only when the variable is UNSET. A blank exported from here is
+# set-but-empty, which resolves to a blank model name and LlmConfig refuses the
+# boot: "pool 'studio' declares a blank entry in models". Measured, 2026-09-10.
+#
+# A literal copy of the names here would be no better. That file's own comment
+# records two days of 404s caused by one placeholder having two defaults, and
+# says the two are meant to be edited together -- a third copy in this script is
+# the same hazard again. So the rule is: carry a model name only if somebody set
+# one, and otherwise leave the field to application.yml.
+if [[ -z "${LLM_CHAT_MODEL:-}" ]]; then unset LLM_CHAT_MODEL; fi
+if [[ -z "${SPARK_CHAT_MODEL:-}" ]]; then unset SPARK_CHAT_MODEL; fi
+# The refusal-fallback pool, which exists only in an overlay (see
+# bin/application-local.example.yml). Unset when empty for the reason the two
+# lines above are: deployment.env.example ships them blank, and an EMPTY
+# variable is not an absent one to Spring -- `${FALLBACK_BASE_URL:default}`
+# would bind the empty string and the boot would refuse a pool with no base-url.
+for fallback_var in FALLBACK_BASE_URL FALLBACK_CHAT_MODEL FALLBACK_API_KEY; do
+    if [[ -z "${!fallback_var:-}" ]]; then unset "$fallback_var"; fi
+done
+
+# Images, the auth token file and ejected payloads. Relative, resolved against
+# the server's working directory -- there is no absolute path right on two
+# machines. Set to nothing and the server keeps no files at all.
+: "${PLOWSHARE_DATA_DIR:=data}"
+
+: "${PLOWSHARE_PORT:=8091}"
+: "${PLOWSHARE_BIND:=127.0.0.1}"
+: "${PLOWSHARE_AUTH_ENABLED:=true}"
+: "${PLOWSHARE_DB_URL:=jdbc:postgresql://localhost:5432/plowshare}"
+
+export LLM_BASE_URL SPARK_BASE_URL \
+       PLOWSHARE_DATA_DIR PLOWSHARE_PORT \
+       PLOWSHARE_BIND PLOWSHARE_AUTH_ENABLED PLOWSHARE_DB_URL
+# Only if set, for the reason above: `export FOO` on an unset name still hands
+# the child nothing, but being explicit here is what stops a later edit folding
+# these back into the list above and reintroducing the blank.
+if [[ -n "${LLM_CHAT_MODEL:-}" ]]; then export LLM_CHAT_MODEL; fi
+if [[ -n "${SPARK_CHAT_MODEL:-}" ]]; then export SPARK_CHAT_MODEL; fi
+
+redacted() { [[ -n "${1:-}" ]] && echo "set (${#1} chars)" || echo "unset"; }
+
+if [[ "$PRINT" == 1 ]]; then
+    cat <<PRINTED
+llm-url      $LLM_BASE_URL
+llm-model    ${LLM_CHAT_MODEL:-unset, application.yml supplies it}
+spark-url    $SPARK_BASE_URL
+spark-model  ${SPARK_CHAT_MODEL:-unset, application.yml supplies it}
+port         $PLOWSHARE_PORT
+bind         $PLOWSHARE_BIND
+data-dir     ${PLOWSHARE_DATA_DIR:-<none: keeps no files>}
+db-url       $PLOWSHARE_DB_URL
+auth         $PLOWSHARE_AUTH_ENABLED
+overlay      ${SPRING_CONFIG_ADDITIONAL_LOCATION:-<none: application.yml alone>}
+fallback-url ${FALLBACK_BASE_URL:-unset, the overlay supplies it if there is one}
+fallback-model ${FALLBACK_CHAT_MODEL:-unset, the overlay supplies it if there is one}
+secrets      $SECRETS
+  LM_STUDIO_API_KEY  $(redacted "${LM_STUDIO_API_KEY:-}")
+  SPARK_API_KEY      $(redacted "${SPARK_API_KEY:-}")
+  FALLBACK_API_KEY   $(redacted "${FALLBACK_API_KEY:-}")
+PRINTED
+    exit 0
+fi
+
+if [[ "$PLOWSHARE_BIND" != "127.0.0.1" && "$PLOWSHARE_AUTH_ENABLED" == "false" ]]; then
+    echo "plowshare: refusing --no-auth while bound to $PLOWSHARE_BIND." >&2
+    echo "           An unauthenticated server reachable from the LAN lends" >&2
+    echo "           every project it holds to anyone who can route to it." >&2
+    exit 1
+fi
+
+# plowshare-server/ and not the repo root: bootRun ran here, so every relative
+# default in application.yml -- `data`, the sampling directory -- is written
+# against THIS directory. Running from the root would resolve `data` to a fresh
+# empty one beside the real state and look like a server that had never run.
+cd "$REPO/plowshare-server"
+if [[ "$BUILD" == 1 ]]; then
+    "$REPO/gradlew" --quiet :plowshare-server:bootJar
+fi
+
+# bootJar produces two: the executable one, and a `-plain.jar` holding only this
+# module's classes. Selecting by mtime would pick whichever was written last and
+# exec a jar with no Main-Class about one time in two, so name what is wanted.
+jar=""
+for candidate in build/libs/*.jar; do
+    [[ -e "$candidate" ]]           || continue
+    [[ "$candidate" == *-plain.jar ]] && continue
+    jar="$candidate"
+done
+if [[ -z "$jar" ]]; then
+    echo "plowshare: no executable jar in plowshare-server/build/libs." >&2
+    echo "           Run without --no-build, or ./gradlew :plowshare-server:bootJar" >&2
+    exit 1
+fi
+
+# exec, not a subshell: the server gets this shell's PID, so Ctrl-C and any
+# supervisor signal reach the JVM rather than a wrapper that would outlive it.
+# The jar and not `gradlew bootRun`, because bootRun forks from the Gradle
+# daemon and inherits the daemon's environment, which is not necessarily this
+# one -- the whole point of this script is the environment it sets.
+# A running Boot loader lazily reads this archive. Gradle may replace build/libs
+# during another build, leaving that loader's cached ZIP offsets inconsistent
+# with its bytes. Publish a launch snapshot outside the build tree, never replace
+# an existing snapshot, and retain exec so signals still reach the JVM directly.
+runtime_dir="${PLOWSHARE_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/plowshare/server}"
+mkdir -p "$runtime_dir"
+runtime_dir="$(cd "$runtime_dir" && pwd)"
+snapshot="$(mktemp "$runtime_dir/.launch.XXXXXXXX")"
+trap 'rm -f "$snapshot"' EXIT
+cp "$jar" "$snapshot"
+if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$snapshot")"
+elif command -v shasum >/dev/null 2>&1; then
+    digest="$(shasum -a 256 "$snapshot")"
+else
+    echo "plowshare: sha256sum or shasum is required to cache a server launch." >&2
+    exit 1
+fi
+digest="${digest%% *}"
+runtime_jar="$runtime_dir/$digest.jar"
+# Hard-link publication is atomic and cannot overwrite a jar another JVM uses.
+if ! ln "$snapshot" "$runtime_jar" 2>/dev/null && [[ ! -f "$runtime_jar" ]]; then
+    echo "plowshare: could not publish the server launch snapshot." >&2
+    exit 1
+fi
+rm -f "$snapshot"
+trap - EXIT
+exec java -jar "$runtime_jar"

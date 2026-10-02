@@ -1,0 +1,23 @@
+{
+  // The tests for this directory, typechecked where they cannot blind the
+  // guard.
+  //
+  // <b>It compiles the sources again rather than referencing them.</b> A
+  // project reference would make this read the neighbouring project's emitted
+  // declarations, and `rootDir` would then have to differ from the directory
+  // both live in. Compiling both together costs a second of `tsc -b` and keeps
+  // every path in the test files exactly what it is on disk.
+  //
+  // `types: ["node"]` because vitest brings Node's globals with it and a test
+  // that could not name `setTimeout` would be a test written around the guard
+  // rather than under it. Nothing here is emitted anywhere anything reads.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../../build/types/logic-tests",
+    "tsBuildInfoFile": "../../build/types/logic-tests/.tsbuildinfo"
+  },
+  "include": ["**/*.ts"]
+}

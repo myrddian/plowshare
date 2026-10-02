@@ -1,0 +1,71 @@
+{
+  // The options every one of the three projects shares. It is not a project
+  // itself — it has no `include`, is referenced by nobody, and `tsc -b` never
+  // reads it directly. What each of src/binding, src/logic and src/view adds on
+  // top is exactly the part that differs, which is `lib`/`types` and the
+  // reference list, and that narrowness is the point: the module edge should be
+  // legible from three short files rather than from a diff of three long ones.
+  //
+  // Mirrored from plowshare-console/tsconfig.json, WITH ONE DELIBERATE
+  // OMISSION: the console's `lib` is ["ES2022", "DOM", "DOM.Iterable"] and this
+  // module's is ES2022 alone. There is no DOM here and there must not be one in
+  // `logic/`, because the console is a browser bundle that has to be able to
+  // adopt that directory later (spec §3.1). `lib` is set per project below
+  // rather than here, so that adding DOM or Node to one of them is a visible
+  // edit to that project's own file.
+  "compilerOptions": {
+    "target": "ES2022",
+
+    // nodenext, where the console uses "bundler", and this is the one place the
+    // two modules genuinely differ rather than differ by oversight. The console
+    // is fed to Vite, which resolves what it likes; this module has ZERO
+    // runtime dependencies and no bundler, so the only things that will ever
+    // load these files are vitest and node itself. Node resolves ES modules by
+    // exact specifier, so nodenext is what makes the compiler agree with the
+    // runtime instead of blessing imports node will not find.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "moduleDetection": "force",
+
+    // The consequence of the line above, and the reason relative imports in
+    // this module are written `./wiring.ts` rather than `./wiring`. Nothing
+    // compiles this module to JavaScript — node strips the types and runs the
+    // file — so the specifier on disk is the specifier at runtime. An
+    // extensionless one is what nodenext rejects, and a `.js` one would name a
+    // file that does not exist: node 22.7+ does not remap `.js` back to `.ts`,
+    // it simply fails to find it. `rewriteRelativeImportExtensions` turns them
+    // into `.js` in the declarations emitted below, so the .d.ts files are
+    // still well-formed for anything that reads them.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+
+    // `emitDeclarationOnly`, WHERE THE CONSOLE WRITES `noEmit: true`, AND THIS
+    // IS A FORCED MOVE RATHER THAN A PREFERENCE. Measured: `composite: true`
+    // plus `noEmit: true` gives `TS6310: Referenced project may not disable
+    // emit` on both references, and project references are what task 1 was
+    // asked for. A referenced project must produce the declarations its
+    // referrer reads; there is no configuration in which it does not.
+    //
+    // What survives of the console's intent is the part that mattered — <b>no
+    // JavaScript is emitted anywhere in this module.</b> Nothing bundles it and
+    // nothing imports its output; the .d.ts files exist only so `tsc -b` can
+    // hand one project's types to the next, and they land under `build/` with
+    // the rest of this module's generated state rather than beside the sources
+    // the way the console's `dist/` does.
+    "emitDeclarationOnly": true,
+    "composite": true
+  }
+}

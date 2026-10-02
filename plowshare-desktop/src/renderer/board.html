@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Board &amp; Swarm · Plowshare</title>
+  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="desktop.css"><link rel="stylesheet" href="board.css"><script src="board.js" defer></script>
+</head>
+<body class="board-window">
+  <header class="titlebar"><div class="window-space"></div><span class="titlebar-name">PLOWSHARE</span><span class="board-window-name">Board &amp; Swarm</span><span id="board-connection"></span></header>
+  <main class="board-workspace">
+    <header class="board-toolbar"><div><h1><span data-icon="layers"></span><span id="board-title">Project board</span></h1><p id="board-description">Inspect the conversation behind the work</p></div><div class="board-controls"><div role="tablist" aria-label="Board inspection"><button id="view-board" role="tab" aria-controls="board-panel" aria-selected="true">Board</button><button id="view-swarm" role="tab" aria-controls="board-panel" aria-selected="false">Swarm</button></div><button id="board-refresh"><span data-icon="refresh"></span>Refresh</button></div></header>
+    <div id="board-error" class="error-banner" role="alert" hidden></div>
+    <div id="swarm-summary" class="swarm-summary" hidden></div>
+    <div id="board-panel" class="board-columns" role="tabpanel" aria-labelledby="view-board">
+      <section id="board-browser" class="board-browser" aria-label="Board topics">
+        <div class="board-filters"><div class="search-field"><span data-icon="search"></span><input id="board-search" type="search" placeholder="Find topics…" aria-label="Search topics"></div><select id="board-project" aria-label="Project"><option value="">All projects</option></select><select id="board-state" aria-label="Topic state"><option value="all">All states</option><option value="active">Open &amp; exhausted</option><option value="closed">Closed</option></select></div>
+        <div id="board-topics" aria-label="Topics"></div><button id="board-more" hidden>Load more topics</button><footer id="board-list-note"></footer>
+      </section>
+      <section id="board-detail" class="board-detail" tabindex="0" aria-label="Topic inspection"></section>
+    </div>
+    <footer class="board-footer"><span id="board-updated">Loading…</span><span>Inspection only · agent read positions stay unchanged</span></footer>
+  </main>
+</body>
+</html>

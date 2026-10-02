@@ -1,0 +1,20 @@
+# Explicit opt-in layer for installations without an existing SearXNG engine.
+# Add alongside compose.search.yaml. Never needed for an external engine.
+services:
+  searxng-provider:
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080
+    depends_on:
+      searxng:
+        condition: service_started
+  searxng:
+    image: ${SEARXNG_IMAGE:?Set a pinned official SearXNG image for the optional local engine.}
+    restart: unless-stopped
+    volumes:
+      - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/searxng/config:/etc/searxng
+      - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/searxng/cache:/var/cache/searxng
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

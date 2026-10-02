@@ -1,0 +1,17 @@
+# pnpm's store links. Never tracked, and already excluded from the
+# `invariants` task's declared inputs by the `**/node_modules/**` pattern the
+# console's arrival put there — see plowshare-server/build.gradle.kts for why
+# that exclusion cannot make the guard stale.
+node_modules/
+
+# Gradle's build directory for this module. Three things land here and none of
+# them is tracked: the Vitest JUnit XML, the .d.ts files `tsc -b` emits so one
+# project can reference another, and its .tsbuildinfo. The root .gitignore
+# already covers `build/`; repeated here because a reader of this file should
+# not have to go and check.
+#
+# There is deliberately NO `dist/` line, unlike the console's copy of this
+# file. Nothing bundles this module — zero runtime dependencies, no Vite — so
+# there is no output beside the sources to ignore, and a line pre-emptively
+# ignoring one would be the first quiet step towards there being one.
+build/

@@ -1,0 +1,56 @@
+# WHICH PROFILE SERVES WHICH MODEL, and how that model is being run.
+#
+# This is the file you edit when a new model arrives. Adding one is a line here;
+# it does not mean touching a profile, and two models that want the same numbers
+# point at one file rather than duplicating it.
+#
+# Copy this directory to PLOWSHARE_SAMPLING_DIR (default: ./sampling) and edit it
+# there. A `models.yaml` or `models.json` in that directory is MERGED over this
+# one key by key, so you add and override without re-stating what already works;
+# a profile file of the same name in that directory REPLACES the shipped one
+# whole, because a profile is a table and half a table is not a profile.
+#
+# MATCHING. The key is matched against the wire model name as the endpoint knows
+# it -- `google/gemma-4-26b-a4b`, `qwen3.5-9b` -- case-insensitively, with any
+# `vendor/` prefix stripped first. An exact match wins. Otherwise the LONGEST key
+# that the model name starts with wins, which is what makes these keys families:
+# `gemma` serves `gemma-3-27b-it` and `gemma-4-26b-a4b` alike, and the next
+# version needs no line at all.
+#
+# NO MATCH IS NOT AN ERROR. A model nothing here names gets no sampling
+# parameters whatsoever, and its own defaults apply -- which on a local runtime
+# means the values the model's own packaging ships. That is a safe answer and
+# not a guessed one; see any profile file's header for why it is often the BEST
+# answer. What it costs is that an agent's `sampling:` intent cannot be honoured,
+# and the boot log says so by name.
+#
+# MODE. Optional, and it is `mode:` because nothing in a request can tell this
+# server whether the model behind a wire name is running in thinking mode. Qwen
+# recommends a temperature a factor of two apart between its two modes, so
+# guessing it is not a small error -- you state it. Where you do not, the
+# profile's own `default` mode applies.
+
+models:
+
+  # Gemma. One mode; the family has no thinking split.
+  gemma:
+    profile: gemma
+
+  # Qwen 3.x, including `qwen3.5-9b`, which is what application.yml ships as the
+  # default for BOTH the `fast` and the `reasoning` class.
+  #
+  # `thinking` is stated rather than guessed, and it is stated as thinking
+  # because that is how a reasoning-capable Qwen serves by default and because
+  # the thinking numbers are the more conservative of the two here (0.6 against
+  # 0.7). If your node runs it with thinking off -- `/no_think`, or a build with
+  # the reasoning path disabled -- change this one word.
+  qwen3:
+    profile: qwen3
+    mode: thinking
+
+  # gpt-oss, including `gpt-oss-20b`. `reasoning_effort` lives in this profile
+  # and is the lever implementation rationale 1.1a has been waiting for.
+  gpt-oss:
+    profile: gpt-oss
+  glm:
+    profile: glm

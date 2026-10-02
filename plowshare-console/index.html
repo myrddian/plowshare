@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      No `referrer` meta and no `<link>` to anywhere: this page is served from
+      the jar and has no third party in it. The bootstrap token arrives in this
+      page's own URL and `auth.ts` strips it before anything can be navigated
+      to, which is the referrer hazard that would otherwise matter here.
+    -->
+    <meta name="referrer" content="no-referrer" />
+    <title>Plowshare</title>
+  </head>
+  <body>
+    <!--
+      Empty on purpose. Everything below this line is built as DOM by
+      `src/main.ts` -- there is no template with a hole in it for a value to be
+      interpolated into, which is the whole of how `no innerHTML with
+      interpolated content` is kept true rather than remembered.
+    -->
+    <main id="console"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

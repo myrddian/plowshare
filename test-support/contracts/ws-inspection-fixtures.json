@@ -1,0 +1,296 @@
+{
+  "job.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "id": "j",
+        "agent": "a",
+        "state": "RUNNING",
+        "cancelRequested": false,
+        "conversation": "c",
+        "outcome": null,
+        "limits": null,
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "job.limits": {
+    "code": "OK",
+    "payload": {
+      "id": "j",
+      "agent": "a",
+      "state": "RUNNING",
+      "cancelRequested": false,
+      "conversation": "c",
+      "outcome": null,
+      "limits": {
+        "maxTurns": null,
+        "noTurnCap": true,
+        "maxModelCalls": 100,
+        "noBudget": false,
+        "modelCallsSpent": 4
+      },
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "board.topics": {
+    "code": "OK",
+    "payload": {
+      "topics": [
+        {
+          "topic": {
+            "id": "root",
+            "project": "p",
+            "parent": null,
+            "root": "root",
+            "depth": 0,
+            "title": "Title",
+            "label": "label",
+            "account": "enzo",
+            "openerKind": "human",
+            "opener": "enzo",
+            "originConversation": null,
+            "state": "open",
+            "resolution": null,
+            "potTotal": 100,
+            "potSpent": 40,
+            "reserve": 10,
+            "quietNotifiedAt": "2026-10-02T00:00:00Z",
+            "openedAt": "2026-10-02T00:00:00Z",
+            "closedAt": null,
+            "future": {
+              "preserved": true
+            }
+          },
+          "messages": 3,
+          "documents": 1
+        }
+      ],
+      "more": true,
+      "offset": 200,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "board.messages": {
+    "code": "OK",
+    "payload": {
+      "topic": {
+        "id": "root",
+        "project": "p",
+        "parent": null,
+        "root": "root",
+        "depth": 0,
+        "title": "Title",
+        "label": "label",
+        "account": "enzo",
+        "openerKind": "human",
+        "opener": "enzo",
+        "originConversation": null,
+        "state": "open",
+        "resolution": null,
+        "potTotal": 100,
+        "potSpent": 40,
+        "reserve": 10,
+        "quietNotifiedAt": "2026-10-02T00:00:00Z",
+        "openedAt": "2026-10-02T00:00:00Z",
+        "closedAt": null,
+        "future": {
+          "preserved": true
+        }
+      },
+      "root": {
+        "id": "root",
+        "project": "p",
+        "parent": null,
+        "root": "root",
+        "depth": 0,
+        "title": "Title",
+        "label": "label",
+        "account": "enzo",
+        "openerKind": "human",
+        "opener": "enzo",
+        "originConversation": null,
+        "state": "open",
+        "resolution": null,
+        "potTotal": 100,
+        "potSpent": 40,
+        "reserve": 10,
+        "quietNotifiedAt": "2026-10-02T00:00:00Z",
+        "openedAt": "2026-10-02T00:00:00Z",
+        "closedAt": null,
+        "future": {
+          "preserved": true
+        }
+      },
+      "seats": [
+        {
+          "seat": {
+            "topic": "root",
+            "occupant": "worker",
+            "conversation": "c",
+            "passed": false,
+            "failedEnding": null,
+            "silentWakes": 1,
+            "seenThrough": null,
+            "alertsUsed": 0
+          },
+          "state": "queued",
+          "job": null,
+          "reason": null,
+          "position": 2,
+          "waitedMillis": 30,
+          "overdue": true
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg",
+          "topic": "root",
+          "replyTo": null,
+          "authorKind": "human",
+          "author": "enzo",
+          "conversation": null,
+          "entry": null,
+          "kind": "document",
+          "title": "Proposal",
+          "body": "full\nsource",
+          "alert": false,
+          "mentions": [
+            "worker"
+          ],
+          "postedAt": "2026-10-02T00:00:00Z"
+        }
+      ],
+      "decisions": [
+        {
+          "request": "msg",
+          "approved": false,
+          "reason": "needs revision",
+          "child": null
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "swarm.status": {
+    "code": "OK",
+    "payload": {
+      "pools": [
+        {
+          "pool": "worker",
+          "slots": 3,
+          "used": 1
+        }
+      ],
+      "ready": [
+        {
+          "topic": "root",
+          "member": "worker",
+          "specifier": "future_model",
+          "position": 0,
+          "waitedMillis": 30,
+          "overdue": true
+        }
+      ],
+      "topics": [
+        {
+          "topic": {
+            "id": "root",
+            "project": "p",
+            "parent": null,
+            "root": "root",
+            "depth": 0,
+            "title": "Title",
+            "label": "label",
+            "account": "enzo",
+            "openerKind": "human",
+            "opener": "enzo",
+            "originConversation": null,
+            "state": "open",
+            "resolution": null,
+            "potTotal": 100,
+            "potSpent": 40,
+            "reserve": 10,
+            "quietNotifiedAt": "2026-10-02T00:00:00Z",
+            "openedAt": "2026-10-02T00:00:00Z",
+            "closedAt": null,
+            "future": {
+              "preserved": true
+            }
+          },
+          "messages": 3,
+          "documents": 1
+        }
+      ],
+      "seats": [
+        {
+          "seat": {
+            "topic": "root",
+            "occupant": "worker",
+            "conversation": "c",
+            "passed": false,
+            "failedEnding": null,
+            "silentWakes": 1,
+            "seenThrough": null,
+            "alertsUsed": 0
+          },
+          "state": "queued",
+          "job": null,
+          "reason": null,
+          "position": 2,
+          "waitedMillis": 30,
+          "overdue": true
+        }
+      ],
+      "more": true,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "union.status": {
+    "code": "OK",
+    "payload": {
+      "eligible": true,
+      "enabled": false,
+      "state": "OFFLINE",
+      "syncHidden": [
+        ".env.example"
+      ],
+      "maxFileBytes": 1000000,
+      "openConflicts": 1,
+      "url": "/v1/sync/p.git",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "union.conflict.list": {
+    "code": "OK",
+    "payload": {
+      "conflicts": [
+        {
+          "n": 1,
+          "path": "src/main.ts",
+          "baseBlob": null,
+          "oursBlob": "abc",
+          "theirsBlob": "def",
+          "theirsAuthor": "worker",
+          "runId": null,
+          "openedAt": "2026-10-02T00:00:00Z"
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  }
+}

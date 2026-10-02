@@ -1,0 +1,68 @@
+-- The index `implementation rationale` §17.2 tied to a caller that did not exist yet.
+--
+-- V34's own comment already declined an index on `search_result_sets`, and
+-- V35 declined one on `fetched_pages`, on the same ground `V27` gave first:
+-- an index for a query nobody makes is not a hedge, it is a cost with no
+-- reader. `ResultSetStore.purgeExpired` and `FetchedPageStore.purgeExpired`
+-- both existed at the time, both scan on `fetched_at`, and neither had a
+-- caller -- `ResultSetStore.purgeExpired`'s own javadoc said so in as many
+-- words: "Nothing calls this method yet." `POST /v1/buffers/purge` ->
+-- `Buffers.purge()` is that caller now, reaching both stores every time an
+-- operator runs it, so the condition §17.2 set -- "whoever adds the caller
+-- should add the index in the same migration and not before" -- has fired
+-- for both.
+--
+-- WHY THIS IS TWO DIFFERENT SHAPES, NOT ONE INDEX TWICE. The two stores'
+-- purge statements are not the same query wearing two table names:
+--
+--   DELETE FROM search_result_sets WHERE fetched_at <= ?                  -- one predicate
+--   DELETE FROM fetched_pages      WHERE fetched_at <= ? AND last_read <= ?  -- two
+--
+-- `search_result_sets` gets exactly what its one predicate asks for: a
+-- single-column B-tree on `fetched_at`, below. There is no second column a
+-- composite could usefully lead or trail with -- `provider_key` and `hits`
+-- are never compared against a bound in any statement this store issues --
+-- so a composite here would be a wider index serving the same one query a
+-- narrower one already serves, which is `V27`'s objection with the table
+-- name changed.
+--
+-- `fetched_pages` is different because the `AND` is not incidental --
+-- `FetchedPageStore.PURGE_EXPIRED`'s own comment calls it "the whole of this
+-- statement's design": a row is purgeable only when it is BOTH past its TTL
+-- and not presently being read, because the liveness half exists precisely
+-- to stop the TTL half from evicting a page an agent is mid-read of. A
+-- single-column index on `fetched_at` alone would still require a heap visit
+-- for every row past its TTL just to learn that `last_read` keeps it alive --
+-- exactly the rows a busy long-lived fetch produces, and exactly the rows
+-- this table's own design says should be common rather than rare. A
+-- composite index on `(fetched_at, last_read)` carries `last_read` in the
+-- same index entry, so a row that fails the liveness half is rejected
+-- straight from the index, with no heap access spent learning something the
+-- index already knew. Postgres cannot use `last_read` to narrow the B-tree
+-- range the way it uses `fetched_at` -- the leading column is the one whose
+-- bound shapes the scan -- but it can and does evaluate a trailing column's
+-- condition against the index entry itself before ever touching the heap,
+-- which is exactly the saving this table's shape asks for.
+--
+-- COLUMN ORDER: `fetched_at` leads because it is the precondition the query
+-- itself states first and the one the store's own comment calls the first
+-- question ("is this fetch old enough to distrust") -- a row cannot be a
+-- purge candidate at all until it clears that bar, so bounding the scan on
+-- it first is what actually shrinks the range the second column is then
+-- checked against. Leading on `last_read` instead would bound the scan by
+-- "read least recently", which mixes freshly-fetched rows nobody has read
+-- yet in with long-stale ones, buying nothing `fetched_at` does not already
+-- buy and costing the one property that does the work here.
+--
+-- NEITHER INDEX SERVES `get` OR `find`. `ResultSetStore.get` and
+-- `FetchedPageStore.find` both resolve by primary key (`query_key`,
+-- `url_key`), which each table's own primary-key constraint already answers
+-- without help; `touchRead` writes `last_read` and reads by `url_key` alone.
+-- These indexes exist for `purgeExpired` and nothing else, which is the same
+-- fact both migrations' own comments recorded about the write paths they
+-- describe: one caller, one shape, no guessing at a second one.
+
+CREATE INDEX search_result_sets_by_fetched_at ON search_result_sets (fetched_at);
+
+CREATE INDEX fetched_pages_by_fetched_at_and_last_read
+    ON fetched_pages (fetched_at, last_read);

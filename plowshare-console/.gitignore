@@ -1,0 +1,14 @@
+# pnpm's store links. Never tracked, and deliberately excluded from the
+# `invariants` task's declared inputs as well -- see the exclusion list in
+# plowshare-server/build.gradle.kts for why that exclusion cannot make the
+# guard stale.
+node_modules/
+
+# Vite's output. It is copied into the server jar under static/ by
+# :plowshare-server:processResources; the copy in the jar is the artefact.
+dist/
+
+# Gradle's build directory for this module, which is also where the Vitest
+# JUnit XML lands. The root .gitignore already covers `build/`; repeated here
+# because a reader of this file should not have to go and check.
+build/

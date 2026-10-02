@@ -1,0 +1,129 @@
+{
+  // THE RUNTIME-NEUTRAL PROJECT. Spec §3.1: the console is a browser bundle, so
+  // one `node:` import or one `document` in here and the console can never
+  // adopt this directory, the flow in §2 quietly dies, and whoever tries a year
+  // from now is the one who finds out.
+  //
+  // Two fields carry that, and they are the compile-time half of the guard task
+  // 2 writes the scan half of:
+  //
+  //   - `lib` is ES2022 and nothing else. No DOM, no DOM.Iterable, so
+  //     `document`, `window`, `HTMLElement` and `DocumentFragment` are not
+  //     names this project has.
+  //   - `types` is empty, so no @types package is pulled in automatically.
+  //     `process` is not a global here. If a later task installs @types/node
+  //     for `view/`, THIS LINE is what stops it arriving here too — it must
+  //     stay empty.
+  //
+  //     <b>TASK 7 INSTALLED @types/node FOR `view/`, AND ONE HALF OF THAT LINE
+  //     IS NO LONGER TRUE.</b> `types: []` stops the package arriving as
+  //     ambient globals — `process` is still TS2591 here, measured — but it
+  //     does NOT stop an explicit `import … from 'node:fs'` resolving through
+  //     the package on disk. Measured on the day of that edit: a used
+  //     `readFileSync` import planted in `markdown.ts` and `tsc -b --force`
+  //     EXITS 0, where the line below records TS2307. So for that one rule the
+  //     compiler is no longer a guard and `src/neutrality.test.ts` is the
+  //     whole of it — which is the eventuality that file was written for and
+  //     says so in its own header.
+  //
+  // `references` is absent on purpose and not merely unneeded. This project
+  // does not reference `../binding` or `../view`, so an import of either is
+  // refused. The dependencies run one way (spec §3) and the compiler is told
+  // so.
+  //
+  // MEASURED, each rule broken on its own in this file and `tsc -b --force`
+  // run, because a guard that has never refused anything proves nothing:
+  //
+  //   import { readFileSync } from 'node:fs'   TS2307 (NO LONGER — see below)
+  //   process.cwd()                            TS2591 (NO LONGER — see below)
+  //   document.title                           TS2584 cannot find name
+  //   import from '../view/wiring.ts'          TS6059 + TS6307
+  //   import from '../binding/wiring.ts'       TS6059 + TS6307
+  //
+  // <b>RE-MEASURED 2026-09-12, AND FIVE OF SIX ARE GONE.</b> Planting each
+  // probe on its own and running `tsc -b --force`:
+  //
+  //   node: import   expected TS2307   COMPILES CLEAN
+  //   process        expected TS2591   COMPILES CLEAN
+  //   document       expected TS2584   TS2584          (the only survivor)
+  //   WebSocket      expected TS2304   COMPILES CLEAN
+  //   fetch          expected TS2304   COMPILES CLEAN
+  //   setTimeout     expected TS2304   COMPILES CLEAN
+  //
+  // <b>AND REPAIRED THE SAME DAY. All six refuse again</b>, measured the same
+  // way after the tests moved into `tsconfig.test.json`:
+  //
+  //   node: import   TS2307     process   TS2591     document     TS2584
+  //   WebSocket      TS2304     fetch     TS2304     setTimeout   TS2304
+  //
+  // Including the `node:` import, which the paragraph above had written off as
+  // permanently lost to @types/node. It was not lost to the package; it was
+  // lost to the test files that pull the package in, and excluding them gets
+  // it back.
+  //
+  // <b>And the cause is `include`, not `types`.</b> `**/*.ts` takes in this
+  // directory's test files; each imports `vitest`; and a .d.ts reached through
+  // an explicit import contributes its GLOBAL declarations to the entire
+  // program, `skipLibCheck` notwithstanding. So every file here can see Node's
+  // globals because its neighbours' tests asked for them. Measured by excluding
+  // `**/*.test.ts` and re-running the `process` probe: TS2591 comes straight
+  // back.
+  //
+  // `document` survives because `lib` is a different mechanism — it is the set
+  // of ambient libraries for this project and no import can widen it.
+  //
+  // <b>Both guards are live now, and neither is redundant.</b> The compiler
+  // reads the type graph and the scan reads the source text: `declare const
+  // process: never` gets past the first, and a `.d.ts` dragging in an ambient
+  // global gets past it too under `skipLibCheck`. The four rules added to
+  // `src/neutrality.test.ts` on the day the compiler was found blind — fetch,
+  // WebSocket, setTimeout, setInterval — stay, because a guard that was earning
+  // its keep alone is not one to remove when its partner recovers.
+  //
+  // <b>The first thing the repaired compiler caught</b> was real: `binding/`'s
+  // `eventsUrl` was building a query with `URLSearchParams`, a platform type
+  // that `types: []` is supposed to make unnameable there, and it compiled only
+  // because of this leak. It encodes by hand now.
+  //
+  // Every one of the five named `src/logic/wiring.ts` and a line number, at the
+  // time each was taken; task 3 and task 7 have since deleted every `wiring.ts`
+  // in the module, so the file names are history rather than a path to go and
+  // look at. The four still-live rules re-measure against any file here. The
+  // two hint texts are worth knowing about: TS2591 suggests installing
+  // @types/node and adding it to `types`, and TS2584 suggests adding `dom` to
+  // `lib`. <b>Both pieces of advice are wrong in this directory</b> — following
+  // either is the exact defect §3.1 is about — which is why they are written
+  // down here beside the field the advice would have somebody edit.
+  //
+  // Why this is not the whole guard, which is worth saying so task 2 is not
+  // mistaken for belt-and-braces: the compiler only objects to what it must
+  // resolve. `declare const process: never` or a string that happens to spell a
+  // global gets past it, and `skipLibCheck` means a .d.ts dragging in an
+  // ambient Node global would too. The scan reads the source text; this reads
+  // the type graph. Neither subsumes the other.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../build/types/logic",
+    "tsBuildInfoFile": "../../build/types/logic/.tsbuildinfo"
+  },
+
+  // TESTS ARE NOT IN THIS PROJECT, AND THAT IS WHAT MAKES `types: []` TRUE.
+  //
+  // Measured on 2026-09-12: with `**/*.ts` taking in this directory's own test
+  // files, five of the six probes below compiled clean. The cause was not
+  // `types` -- it was `include`. Each test imports vitest, and a .d.ts reached
+  // through an explicit import contributes its GLOBAL declarations to the
+  // entire program, `skipLibCheck` notwithstanding. So every file here could
+  // see `process`, `fetch`, `WebSocket` and the timers because its neighbours'
+  // tests asked for them.
+  //
+  // The tests are still typechecked -- `tsconfig.test.json` beside this file
+  // compiles them together with these sources and node's types -- so nothing is
+  // unchecked. What changed is that THIS program, the one whose neutrality is
+  // the point, no longer has a reason to know what a `process` is.
+  "exclude": ["**/*.test.ts"],
+  "include": ["**/*.ts"]
+}

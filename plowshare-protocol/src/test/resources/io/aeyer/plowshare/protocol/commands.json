@@ -1,0 +1,19 @@
+[
+  { "name": "an exit status comes back", "argv": ["sh", "-c", "exit 3"], "expect": { "exitCode": 3, "timedOut": false } },
+  { "name": "stdout and stderr are kept apart", "argv": ["sh", "-c", "printf out; printf err >&2"], "expect": { "exitCode": 0, "stdout": "out", "stderr": "err" } },
+  { "name": "the environment starts empty", "argv": ["sh", "-c", "printf \"${SECRET-unset}\""], "host": { "SECRET": "leaked" }, "expect": { "exitCode": 0, "stdout": "unset" } },
+  { "name": "an inherited variable passes through", "argv": ["sh", "-c", "printf \"$SECRET\""], "inherit": ["PATH", "SECRET"], "host": { "SECRET": "shared" }, "expect": { "stdout": "shared" } },
+  { "name": "an explicit variable is set", "argv": ["sh", "-c", "printf \"$GREETING\""], "env": { "GREETING": "hello" }, "expect": { "stdout": "hello" } },
+  { "name": "an explicit variable wins over an inherited one", "argv": ["sh", "-c", "printf \"$SECRET\""], "inherit": ["PATH", "SECRET"], "host": { "SECRET": "host" }, "env": { "SECRET": "file" }, "expect": { "stdout": "file" } },
+  { "name": "stdin is closed", "argv": ["sh", "-c", "cat; printf done"], "expect": { "exitCode": 0, "stdout": "done" } },
+  { "name": "output past the limit keeps its tail", "argv": ["sh", "-c", "printf '%03000d' 7"], "outputBytes": 1024, "expect": { "exitCode": 0, "stdoutLength": 1024, "stdoutCut": 1976, "stdoutEndsWith": "007" } },
+  { "name": "a command past its deadline is killed", "argv": ["sh", "-c", "sleep 30"], "timeoutMillis": 300, "expect": { "timedOut": true, "exitCode": null, "maxMillis": 8000 } },
+  { "name": "the whole tree is killed, not only the first process", "argv": ["sh", "-c", "sleep 30 & sleep 30 & wait"], "timeoutMillis": 300, "expect": { "timedOut": true, "maxMillis": 8000 } },
+  { "name": "a program not on the PATH is refused", "argv": ["plowshare-no-such-program"], "expect": { "refused": true } },
+  { "name": "an empty command is refused", "argv": [], "expect": { "refused": true } },
+  { "name": "stdin is given when the command has some", "argv": ["sh", "-c", "cat; printf done"], "stdin": "3\n", "expect": { "exitCode": 0, "stdout": "3\ndone" } },
+  { "name": "stdin of exactly 64 KiB is given", "argv": ["sh", "-c", "cat >/dev/null; printf done"], "stdinBytes": 65536, "expect": { "exitCode": 0, "stdout": "done" } },
+  { "name": "stdin past 64 KiB is refused, as output past its bound is cut", "argv": ["sh", "-c", "cat >/dev/null"], "stdinBytes": 65537, "expect": { "refused": true } },
+  { "name": "runs-for: a program still running at its deadline is stopped and ran for it", "argv": ["sh", "-c", "sleep 30 & wait"], "timeoutMillis": 400, "expect": { "timedOut": true, "exitCode": null, "ranFor": true, "minMillis": 300, "maxMillis": 8000 } },
+  { "name": "runs-for: a program that exits before its deadline did not run for it", "argv": ["sh", "-c", "printf started"], "timeoutMillis": 3000, "expect": { "exitCode": 0, "timedOut": false, "ranFor": false, "stdout": "started" } }
+]

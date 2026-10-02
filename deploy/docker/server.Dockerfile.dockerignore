@@ -1,0 +1,9 @@
+**
+!plowshare-server/
+!plowshare-server/build/
+!plowshare-server/build/libs/
+!plowshare-server/build/libs/*.jar
+!deploy/
+!deploy/docker/
+!deploy/docker/server-entrypoint.sh
+!deploy/docker/server-healthcheck.sh

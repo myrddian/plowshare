@@ -1,0 +1,265 @@
+{
+  "information.upload": {
+    "code": "ACCEPTED",
+    "payload": {
+      "revision": "r",
+      "resource": "q",
+      "created": true
+    }
+  },
+  "information.acquire": {
+    "code": "ACCEPTED",
+    "payload": {
+      "id": "a",
+      "state": "queued"
+    }
+  },
+  "information.list": {
+    "code": "OK",
+    "payload": []
+  },
+  "information.status": {
+    "code": "OK",
+    "payload": {
+      "id": "r",
+      "steps": [],
+      "inputs": [],
+      "can_manage": true
+    }
+  },
+  "information.read": {
+    "code": "OK",
+    "payload": {
+      "revision": "r",
+      "start": 0,
+      "end": 4,
+      "total": 4,
+      "text": "text"
+    }
+  },
+  "information.search": {
+    "code": "OK",
+    "payload": {
+      "query": "question",
+      "document": "00000000-0000-0000-0000-000000000001",
+      "limit": 10,
+      "hits": [
+        {
+          "score": 0.5,
+          "chunk": {
+            "chunkId": "00000000-0000-0000-0000-000000000003",
+            "text": "passage\nnext line",
+            "paragraphId": "00000000-0000-0000-0000-000000000002",
+            "paragraphOrdinal": 1,
+            "paragraphSummary": null,
+            "section": {
+              "id": "00000000-0000-0000-0000-000000000003",
+              "title": null,
+              "synthetic": true,
+              "summary": null
+            },
+            "chapter": null,
+            "documentId": "00000000-0000-0000-0000-000000000001",
+            "sourceName": "paper.pdf",
+            "title": "A paper",
+            "documentSummary": null
+          }
+        }
+      ]
+    }
+  },
+  "information.rank": {
+    "code": "OK",
+    "payload": {
+      "query": "question",
+      "limit": 10,
+      "documents": [
+        {
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "title": "A paper",
+          "summary": null,
+          "ingestedAt": "2026-10-02T00:00:00Z",
+          "score": 0.6
+        }
+      ],
+      "rankable": 1,
+      "unranked": 2
+    }
+  },
+  "information.ask": {
+    "code": "ACCEPTED",
+    "payload": {
+      "job": "j",
+      "revision": "r"
+    }
+  },
+  "information.evidence.record": {
+    "code": "OK",
+    "payload": {
+      "evidence": "e"
+    }
+  },
+  "information.evidence.read": {
+    "code": "OK",
+    "payload": {
+      "id": "e",
+      "revision_id": "r",
+      "start_offset": 0,
+      "end_offset": 4,
+      "quote": "text",
+      "locator": "chars 0..4"
+    }
+  },
+  "information.record.report": {
+    "code": "ACCEPTED",
+    "payload": {
+      "revision": "r",
+      "resource": "q",
+      "created": true
+    }
+  },
+  "information.finalise": {
+    "code": "OK",
+    "payload": {
+      "finalised": true
+    }
+  },
+  "information.link": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.unlink": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.share": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.unshare": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.withdraw": {
+    "code": "OK",
+    "payload": {
+      "availability": "withdrawn"
+    }
+  },
+  "information.exclude": {
+    "code": "OK",
+    "payload": {
+      "availability": "excluded"
+    }
+  },
+  "information.unexclude": {
+    "code": "OK",
+    "payload": {
+      "availability": "included"
+    }
+  },
+  "information.restore": {
+    "code": "OK",
+    "payload": {
+      "availability": "active"
+    }
+  },
+  "information.delete": {
+    "code": "OK",
+    "payload": {
+      "availability": "deleted"
+    }
+  },
+  "information.retry": {
+    "code": "OK",
+    "payload": {
+      "queued": true
+    }
+  },
+  "information.revise": {
+    "code": "ACCEPTED",
+    "payload": {
+      "revision": "r",
+      "resource": "q",
+      "created": true
+    }
+  },
+  "information.replace": {
+    "code": "ACCEPTED",
+    "payload": {
+      "revision": "r",
+      "resource": "q",
+      "created": true
+    }
+  },
+  "information.refresh": {
+    "code": "ACCEPTED",
+    "payload": {
+      "id": "a",
+      "state": "queued"
+    }
+  },
+  "information.rebuild": {
+    "code": "OK",
+    "payload": {
+      "queued": true
+    }
+  },
+  "information.allowance": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.events": {
+    "code": "OK",
+    "payload": {
+      "events": [],
+      "cursor": 0
+    }
+  },
+  "information.migration.list": {
+    "code": "OK",
+    "payload": {
+      "documents": [],
+      "payloads": []
+    }
+  },
+  "information.migration.adopt": {
+    "code": "OK",
+    "payload": {
+      "adopted": true
+    }
+  },
+  "information.migration.inspect": {
+    "code": "OK",
+    "payload": {
+      "log": [],
+      "entries": [],
+      "job": []
+    }
+  },
+  "information.migration.release": {
+    "code": "OK",
+    "payload": {
+      "released": true
+    }
+  },
+  "information.inventory": {
+    "code": "OK",
+    "payload": []
+  },
+  "information.acquisitions": {
+    "code": "OK",
+    "payload": []
+  }
+}

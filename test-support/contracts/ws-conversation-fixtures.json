@@ -1,0 +1,497 @@
+{
+  "conversation.open": {
+    "code": "OK",
+    "payload": {
+      "id": "c",
+      "project": null,
+      "maxModelCalls": null,
+      "modelCallsSpent": 4,
+      "maxTurns": null,
+      "noTurnCap": true,
+      "noBudget": true,
+      "title": null,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "id": "c",
+        "project": null,
+        "maxModelCalls": null,
+        "modelCallsSpent": 4,
+        "maxTurns": null,
+        "noTurnCap": true,
+        "noBudget": true,
+        "title": null,
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "conversation.lifecycle": {
+    "code": "OK",
+    "payload": {
+      "id": "c",
+      "lifecycle": "archived",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.turns": {
+    "code": "OK",
+    "payload": [
+      {
+        "ordinal": 1,
+        "utterance": "Work",
+        "answer": "allowance spent",
+        "ending": "CALL_BUDGET",
+        "promptTokens": null,
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "conversation.compactions": {
+    "code": "OK",
+    "payload": [
+      {
+        "throughOrdinal": 1,
+        "summary": "summary",
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "conversation.chat": {
+    "code": "OK",
+    "payload": {
+      "entries": [
+        {
+          "ordinal": 9,
+          "turnOrdinal": 3,
+          "kind": "future_kind",
+          "excerpt": "bounded\nsource",
+          "length": 200,
+          "cut": true,
+          "ejectedAt": null,
+          "supersededBy": 10,
+          "toolCallId": null,
+          "toolCalls": [
+            {
+              "id": "call",
+              "name": "future_tool",
+              "arguments": "{\"path\":\"source\"}",
+              "length": 17,
+              "cut": false,
+              "salient": "source",
+              "opened": {
+                "conversation": "child",
+                "agent": "worker"
+              }
+            }
+          ],
+          "handle": null,
+          "recordedAt": "2026-10-02T00:00:00Z",
+          "tookMillis": 12,
+          "dispatch": "future_route",
+          "wireModel": "future_model",
+          "completion": "called_tools",
+          "speaker": null,
+          "speakerName": null,
+          "outcome": null
+        },
+        {
+          "ordinal": 8,
+          "turnOrdinal": 3,
+          "kind": "tool_result",
+          "excerpt": null,
+          "length": 1000,
+          "cut": false,
+          "ejectedAt": "2026-10-02T00:00:00Z",
+          "supersededBy": null,
+          "toolCallId": "call",
+          "toolCalls": [],
+          "handle": "result",
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": null,
+          "speakerName": null,
+          "outcome": "exit 1"
+        }
+      ],
+      "total": 100,
+      "offset": 2,
+      "limit": 20,
+      "through": 120,
+      "oldest": 8,
+      "more": true,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.trajectory": {
+    "code": "OK",
+    "payload": {
+      "entries": [
+        {
+          "ordinal": 9,
+          "turnOrdinal": 3,
+          "kind": "future_kind",
+          "excerpt": "bounded\nsource",
+          "length": 200,
+          "cut": true,
+          "ejectedAt": null,
+          "supersededBy": 10,
+          "toolCallId": null,
+          "toolCalls": [
+            {
+              "id": "call",
+              "name": "future_tool",
+              "arguments": "{\"path\":\"source\"}",
+              "length": 17,
+              "cut": false,
+              "salient": "source",
+              "opened": {
+                "conversation": "child",
+                "agent": "worker"
+              }
+            }
+          ],
+          "handle": null,
+          "recordedAt": "2026-10-02T00:00:00Z",
+          "tookMillis": 12,
+          "dispatch": "future_route",
+          "wireModel": "future_model",
+          "completion": "called_tools",
+          "speaker": null,
+          "speakerName": null,
+          "outcome": null
+        },
+        {
+          "ordinal": 8,
+          "turnOrdinal": 3,
+          "kind": "tool_result",
+          "excerpt": null,
+          "length": 1000,
+          "cut": false,
+          "ejectedAt": "2026-10-02T00:00:00Z",
+          "supersededBy": null,
+          "toolCallId": "call",
+          "toolCalls": [],
+          "handle": "result",
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": null,
+          "speakerName": null,
+          "outcome": "exit 1"
+        }
+      ],
+      "total": 100,
+      "offset": 2,
+      "limit": 20,
+      "through": 120,
+      "oldest": 8,
+      "more": true,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.context": {
+    "code": "OK",
+    "payload": {
+      "sent": 120,
+      "sentAtTurn": 3,
+      "turns": 4,
+      "turnsMeasured": 2,
+      "measuredTurns": [
+        {
+          "turn": 1,
+          "promptTokens": 200,
+          "grewBy": null,
+          "since": null
+        },
+        {
+          "turn": 3,
+          "promptTokens": 120,
+          "grewBy": -80,
+          "since": 1
+        }
+      ],
+      "systemPromptTokens": {
+        "tokens": 12,
+        "basis": "ESTIMATED",
+        "how": "server heuristic"
+      },
+      "toolTokens": {
+        "tokens": 90,
+        "basis": "BOUND",
+        "how": "tokenizer upper bound"
+      },
+      "messageTokens": null,
+      "cacheHitRate": null,
+      "unavailable": [
+        {
+          "component": "cacheHitRate",
+          "reason": "not exposed by model"
+        }
+      ],
+      "prefix": {
+        "agent": "a",
+        "model": "future_model",
+        "systemPromptCharacters": 30,
+        "toolCharacters": 400,
+        "systemPromptTokens": {
+          "tokens": 12,
+          "basis": "ESTIMATED",
+          "how": "server heuristic"
+        },
+        "toolTokens": {
+          "tokens": 90,
+          "basis": "BOUND",
+          "how": "tokenizer upper bound"
+        },
+        "tools": [
+          {
+            "name": "future_tool",
+            "characters": 400
+          }
+        ],
+        "contextLength": 10000
+      },
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.projection": {
+    "code": "OK",
+    "payload": {
+      "agent": "a",
+      "turn": 3,
+      "systemBlockAsSent": true,
+      "messages": [
+        {
+          "role": "system",
+          "content": "source"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "agent.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "a",
+        "tools": [
+          "future_tool"
+        ],
+        "calls": [],
+        "scopes": [
+          "workspace:read"
+        ],
+        "served": true,
+        "withheld": [],
+        "bot": true,
+        "description": "Helper",
+        "preferred": true,
+        "model": "future_model",
+        "orchestrations": [
+          "check"
+        ],
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "agent.define": {
+    "code": "CREATED",
+    "payload": {
+      "agent": {
+        "name": "a",
+        "tools": [
+          "future_tool"
+        ],
+        "calls": [],
+        "scopes": [
+          "workspace:read"
+        ],
+        "served": true,
+        "withheld": [],
+        "bot": true,
+        "description": "Helper",
+        "preferred": true,
+        "model": "future_model",
+        "orchestrations": [
+          "check"
+        ],
+        "future": {
+          "preserved": true
+        }
+      },
+      "restartRequired": true,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "p",
+        "workspace": "/server/work",
+        "lent": [
+          "/server/extra"
+        ],
+        "exclusions": [
+          "private"
+        ],
+        "machine": null,
+        "members": [
+          "enzo"
+        ],
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "project.define": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.lend": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.unlend": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.workspace": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.member.add": {
+    "code": "OK",
+    "payload": {
+      "project": "p",
+      "members": [
+        "enzo",
+        "member"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "project.member.remove": {
+    "code": "OK",
+    "payload": {
+      "project": "p",
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "conversation.latest": {
+    "code": "OK"
+  },
+  "project.move": {
+    "code": "NO_CONTENT"
+  },
+  "project.forget": {
+    "code": "NO_CONTENT"
+  }
+}

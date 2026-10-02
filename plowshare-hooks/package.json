@@ -1,0 +1,9 @@
+{
+  "name": "@plowshare/hooks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "./index.ts",
+  "exports": { ".": { "types": "./index.ts" } },
+  "description": "Types for Plowshare hooks. No runtime code: a hook imports these with `import type`."
+}

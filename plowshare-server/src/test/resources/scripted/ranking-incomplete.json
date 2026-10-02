@@ -1,0 +1,450 @@
+{
+  "objectives": [
+    {
+      "id": "o1",
+      "theme": "Synthetic theme 265",
+      "intent": "Synthetic intent 266",
+      "anchors": [
+        "Synthetic anchors 267",
+        "Synthetic anchors 268",
+        "Synthetic anchors 269",
+        "Synthetic anchors 270"
+      ],
+      "objective": "Synthetic objective 271",
+      "expected_evidence": "Synthetic expected_evidence 272"
+    },
+    {
+      "id": "o2",
+      "theme": "Synthetic theme 273",
+      "intent": "Synthetic intent 274",
+      "anchors": [
+        "Synthetic anchors 267",
+        "Synthetic anchors 268",
+        "Synthetic anchors 275"
+      ],
+      "objective": "Synthetic objective 276",
+      "expected_evidence": "Synthetic expected_evidence 277"
+    },
+    {
+      "id": "o3",
+      "theme": "Synthetic theme 278",
+      "intent": "Synthetic intent 279",
+      "anchors": [
+        "Synthetic anchors 267",
+        "Synthetic anchors 269",
+        "Synthetic anchors 270",
+        "Synthetic anchors 280"
+      ],
+      "objective": "Synthetic objective 281",
+      "expected_evidence": "Synthetic expected_evidence 282"
+    },
+    {
+      "id": "o4",
+      "theme": "Synthetic theme 283",
+      "intent": "Synthetic intent 284",
+      "anchors": [
+        "Synthetic anchors 267",
+        "Synthetic anchors 275",
+        "Synthetic anchors 285"
+      ],
+      "objective": "Synthetic objective 286",
+      "expected_evidence": "Synthetic expected_evidence 287"
+    },
+    {
+      "id": "o5",
+      "theme": "Synthetic theme 288",
+      "intent": "Synthetic intent 289",
+      "anchors": [
+        "Synthetic anchors 267",
+        "Synthetic anchors 290"
+      ],
+      "objective": "Synthetic objective 291",
+      "expected_evidence": "Synthetic expected_evidence 292"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "8d8ca989-0bd6-540b-85fa-205bc02350f4",
+      "revision": "45566351-6aa6-58fe-844e-671e541ccc4f",
+      "title": "Synthetic title 293",
+      "url": "https://fixture.example.invalid/source/51f92b9cab418498",
+      "wave": 0,
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "frequency": 3,
+      "start": 0,
+      "end": 42,
+      "relevance": 0.1,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "b239bdb6-9515-5275-8de6-75d298a27f7e",
+      "revision": "a9057fea-e603-519c-a7f1-ed23ef51e507",
+      "title": "Synthetic title 293",
+      "url": "https://fixture.example.invalid/source/5cd30003d647ea71",
+      "wave": 0,
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "frequency": 3,
+      "start": 0,
+      "end": 42,
+      "relevance": 0.1,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "3ead9e6f-5b53-5111-9ac7-6ebf5fb7fc07",
+      "revision": "0bbb561b-27d7-55d9-a2ab-a5730fe89c03",
+      "title": "Synthetic title 295",
+      "url": "https://fixture.example.invalid/source/87058eb102203237",
+      "wave": 0,
+      "objectives": [
+        "o2",
+        "o3",
+        "o5"
+      ],
+      "frequency": 3,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "5504dd8e-3473-597c-8228-c12194f9dea8",
+      "revision": "c12506ae-f907-5905-a02e-93bc04eba97c",
+      "title": "Synthetic title 296",
+      "url": "https://fixture.example.invalid/source/38013464d3320021",
+      "wave": 0,
+      "objectives": [
+        "o1",
+        "o5"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "c1943cf4-049c-5a7a-8f75-f31fd00438ca",
+      "revision": "7e2039a7-32ad-5c4c-b3bf-4d52c288398b",
+      "title": "Synthetic title 297",
+      "url": "https://fixture.example.invalid/source/5f107511b233d078",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "9bf12cb2-1b81-57d4-b408-f705635a8153",
+      "revision": "7aae80c2-2884-5c6f-bd4c-8f9aa16fd331",
+      "title": "Synthetic title 298",
+      "url": "https://fixture.example.invalid/source/07d6882a128041dd",
+      "wave": 0,
+      "objectives": [
+        "o3"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "ffd2a7d7-8ead-5778-8bd5-962568e299b6",
+      "revision": "a9057fea-e603-519c-a7f1-ed23ef51e507",
+      "title": "Synthetic title 293",
+      "url": "https://fixture.example.invalid/source/5cd30003d647ea71",
+      "wave": 0,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4",
+        "o5"
+      ],
+      "frequency": 6,
+      "start": 0,
+      "end": 42,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 299"
+    },
+    {
+      "id": "df933a22-f3a3-53e8-bac4-a07eb8b666e6",
+      "revision": "45566351-6aa6-58fe-844e-671e541ccc4f",
+      "title": "Synthetic title 293",
+      "url": "https://fixture.example.invalid/source/51f92b9cab418498",
+      "wave": 0,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4",
+        "o5"
+      ],
+      "frequency": 6,
+      "start": 0,
+      "end": 42,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 299"
+    },
+    {
+      "id": "34cff83a-abdb-55a1-b8fb-f2affa0d853b",
+      "revision": "6409be1a-f2b2-50ab-8d83-33d383b4da26",
+      "title": "Synthetic title 300",
+      "url": "https://fixture.example.invalid/source/5c49e79c93faf8ea",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 395,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "e8cd8716-8225-5701-88a6-2020b2050109",
+      "revision": "9be972a8-3c6b-5f20-bb44-bd443b0b6605",
+      "title": "Synthetic title 301",
+      "url": "https://fixture.example.invalid/source/c10277cdd90717c7",
+      "wave": 0,
+      "objectives": [
+        "o2"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 7,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "54c99932-6b40-58c0-96c4-f23e69b2a884",
+      "revision": "0ca515b0-dcc6-534a-80f8-7b765a05e86d",
+      "title": "Synthetic title 302",
+      "url": "https://fixture.example.invalid/source/84c1fa7f0c625945",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "1963928a-85f5-5d31-859a-0e2c10b19043",
+      "revision": "dc5aa157-5db1-5ed3-8466-3181b55d5abf",
+      "title": "Synthetic title 303",
+      "url": "https://fixture.example.invalid/source/39fa03c69356d00e",
+      "wave": 0,
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "frequency": 2,
+      "start": 0,
+      "end": 1087,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "78bae960-edc1-5515-b190-29fec50d75df",
+      "revision": "b769233a-e155-5135-bb06-d70a17f8efa9",
+      "title": "Synthetic title 304",
+      "url": "https://fixture.example.invalid/source/cb75b05c53468e41",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "e42f27b3-cbc1-59f0-a770-ba2fc2d906d6",
+      "revision": "c497f2ee-b059-5e5b-a288-7da4c30a818d",
+      "title": "Synthetic title 305",
+      "url": "https://fixture.example.invalid/source/2e4b3f5491baf57b",
+      "wave": 0,
+      "objectives": [
+        "o2"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 7,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "2793aaef-ba00-55a7-8f9d-387ced326538",
+      "revision": "31e07be1-91b1-5d81-8db7-81751322c2a1",
+      "title": "Synthetic title 306",
+      "url": "https://fixture.example.invalid/source/c7588c02c3a25892",
+      "wave": 0,
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "frequency": 2,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "0b0b1444-5e3e-52cf-8468-7578a14167c6",
+      "revision": "9a414c58-68ae-51ed-b83e-554747992b3e",
+      "title": "Synthetic title 307",
+      "url": "https://fixture.example.invalid/source/81fc9f7d82902309",
+      "wave": 0,
+      "objectives": [
+        "o5"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "70c0c515-a536-5758-904f-a587af7bfc51",
+      "revision": "da7d344b-c3ad-5e79-ab19-51a765647db2",
+      "title": "Synthetic title 308",
+      "url": "https://fixture.example.invalid/source/867e345bfe1c3993",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 736,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "533e249c-de58-5868-bc31-5c4d706ed5c0",
+      "revision": "2262e64e-9889-536c-9c78-6cad20dbea9e",
+      "title": "Synthetic title 309",
+      "url": "https://fixture.example.invalid/source/8f93ac1b8f4c58ad",
+      "wave": 0,
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "frequency": 2,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "8fa028ec-0a07-5792-a53e-9bfc7f8cce5c",
+      "revision": "f45c99fa-16a3-5423-91ae-dbedf90e5c8e",
+      "title": "Synthetic title 310",
+      "url": "https://fixture.example.invalid/source/d334e49d49187e0b",
+      "wave": 0,
+      "objectives": [
+        "o5"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "4787a02f-21d5-5ad9-a63c-22ea6c97b62f",
+      "revision": "b5ef1262-067a-5f03-9fde-c6924f1ba966",
+      "title": "Synthetic title 311",
+      "url": "https://fixture.example.invalid/source/02562187ab205c46",
+      "wave": 0,
+      "objectives": [
+        "o1"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 4000,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    },
+    {
+      "id": "c6d19878-e16f-50e2-915d-8baca971c852",
+      "revision": "c6295995-818c-582f-b4af-b29b26f01452",
+      "title": "Synthetic title 312",
+      "url": "https://fixture.example.invalid/source/186ea7ec34ae787e",
+      "wave": 0,
+      "objectives": [
+        "o5"
+      ],
+      "frequency": 1,
+      "start": 0,
+      "end": 2919,
+      "relevance": 0,
+      "coverage": "Synthetic coverage 294"
+    }
+  ],
+  "response": {
+    "ranking": [
+      {
+        "evidence": "3ead9e6f-5b53-5111-9ac7-6ebf5fb7fc07",
+        "objective": "o1",
+        "score": 0.7,
+        "rationale": "Synthetic rationale 313"
+      },
+      {
+        "evidence": "3ead9e6f-5b53-5111-9ac7-6ebf5fb7fc07",
+        "objective": "o2",
+        "score": 0.9,
+        "rationale": "Synthetic rationale 314"
+      },
+      {
+        "evidence": "3ead9e6f-5b53-5111-9ac7-6ebf5fb7fc07",
+        "objective": "o3",
+        "score": 0.9,
+        "rationale": "Synthetic rationale 315"
+      },
+      {
+        "evidence": "3ead9e6f-5b53-5111-9ac7-6ebf5fb7fc07",
+        "objective": "o5",
+        "score": 0.8,
+        "rationale": "Synthetic rationale 316"
+      },
+      {
+        "evidence": "5504dd8e-3473-597c-8228-c12194f9dea8",
+        "objective": "o1",
+        "score": 0.6,
+        "rationale": "Synthetic rationale 317"
+      },
+      {
+        "evidence": "5504dd8e-3473-597c-8228-c12194f9dea8",
+        "objective": "o5",
+        "score": 0.5,
+        "rationale": "Synthetic rationale 318"
+      },
+      {
+        "evidence": "c1943cf4-049c-5a7a-8f75-f31fd00438ca",
+        "objective": "o1",
+        "score": 0.5,
+        "rationale": "Synthetic rationale 319"
+      },
+      {
+        "evidence": "9bf12cb2-1b81-57d4-b408-f705635a8153",
+        "objective": "o3",
+        "score": 0.7,
+        "rationale": "Synthetic rationale 320"
+      }
+    ]
+  }
+}

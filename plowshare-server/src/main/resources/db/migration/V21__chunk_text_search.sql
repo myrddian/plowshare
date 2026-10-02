@@ -1,0 +1,194 @@
+-- The lexical half of retrieval: what a chunk's WORDS are, beside what its
+-- meaning is.
+--
+-- This file is written once. `MigrationsAreImmutableTest` freezes every
+-- migration that is on `master`, by asking git for `master`'s blobs, so the
+-- decisions below cannot be edited afterwards -- they can only be added to by a
+-- later migration.
+--
+-- WHY THIS IS NEW WORK AND NOT A PORT, said first because two documents say
+-- otherwise. `implementation rationale` and the v1 design both describe hybrid retrieval
+-- -- `tsvector`, BM25, reciprocal rank fusion -- as inherited from Anchor. It is
+-- not. The survey grepped Anchor's whole server tree for `tsvector`,
+-- `to_tsquery`, `ts_rank`, `BM25` and `rrf` and found ZERO hits, and V18 repeats
+-- that finding in the paragraph where it declines to guess this column's shape:
+-- "a column whose shape is decided by a retrieval design nobody has written
+-- would be the worst thing to freeze here." That design now exists -- it is
+-- `DocumentStore.LEXICAL_SQL` and `RetrievalService.fuse` -- so this column is
+-- shaped by a read that is written rather than by one that is imagined, which is
+-- exactly the order V18 asked for.
+--
+-- WHAT THE VECTOR HALF IS BAD AT, which is the whole case for this file. A 768
+-- wide embedding of a passage is a summary of what it is ABOUT, and a rare token
+-- -- an identifier, a version number, a constant's name, `hnsw.ef_search` --
+-- barely moves that summary. Asking `chunks_by_vector` for the passage that
+-- mentions `MAX_HITS` returns the passages about limits and caps, which is
+-- exactly what an embedding is for and exactly not what was asked. That failure
+-- has the shape this repository names most often: the rows come back, they are
+-- plausible, they are sorted, and nothing goes red. A word index cannot be
+-- fooled that way, because it matches the token or it does not.
+--
+-- WHAT THIS IS NOT: IT IS NOT BM25, and the ROADMAP's word for it should be read
+-- as an aspiration rather than as a description of what landed. BM25 is term
+-- frequency saturation plus INVERSE DOCUMENT FREQUENCY, and Postgres's full text
+-- search keeps no corpus-wide term statistics at all -- there is nowhere for an
+-- IDF term to come from, and `ts_rank`/`ts_rank_cd` therefore weigh a word that
+-- appears in every chunk exactly as heavily as one that appears in one. That is
+-- a real weakness and it is answered twice below: by the query being a
+-- CONJUNCTION, so a chunk is a candidate only if every content word of the
+-- question is in it, and by the fusion consuming only the ORDINAL RANK of this
+-- side and never its score -- see `RetrievalService.RRF_K`. A calibrated score
+-- would need statistics this database does not keep; a rank needs none.
+
+-- ---------------------------------------------------------------------------
+-- 1. the column
+-- ---------------------------------------------------------------------------
+
+-- The chunk's text as lexemes: stemmed, stopped, and positioned.
+--
+-- GENERATED ALWAYS AS ... STORED, AND THE ALTERNATIVES ARE BOTH WORSE IN THE
+-- SAME WAY. A plain column that `DocumentStore` fills on insert, or a trigger
+-- that fills it, each admit a state this one cannot reach: a chunk whose `text`
+-- says one thing and whose index says another. That divergence has NO SYMPTOM.
+-- The row is perfect, the search misses it, and nothing goes red -- the same
+-- failure the embedding coupling is written about one column over, except that
+-- here it can be made impossible rather than merely avoided. Nothing can write
+-- this column: Postgres refuses an INSERT or UPDATE that names it, so there is
+-- no code path, present or future, in this repository or in a psql session, that
+-- can put a lexical index out of step with the text it indexes.
+--
+-- It also means this column needs no backfill and no repair door. `chunks`
+-- carries an `embedding` that is NULLABLE precisely because a model call can
+-- fail after the text is durable, and `DocumentStore.unembedded` exists to
+-- finish the job later. Nothing analogous is possible or needed here: the
+-- lexeme vector is computed by the database inside the same statement that
+-- writes the text, from that text, with no endpoint and nothing to be down.
+--
+-- WHY THE CONFIGURATION IS A LITERAL AND NOT `to_tsvector(text)`. The one
+-- argument form reads `default_text_search_config`, which is a SESSION SETTING,
+-- so it is not immutable and Postgres REFUSES it in a generated column outright
+-- -- measured against pgvector/pgvector:pg16, 2026-09-04: "generation expression
+-- is not immutable". This is a case where the database enforces the honest
+-- thing: an index whose meaning depended on a connection's settings would stem
+-- one chunk one way and the next chunk another, with no way to tell from the
+-- rows.
+--
+-- WHY `english`, AND WHAT IT WELDS IN. Stemming is what makes a question about
+-- "refilling" reach a chunk that says "refilled" -- `simple`, the language
+-- neutral alternative, keeps every word whole and every stopword, so it matches
+-- only on exact forms and lets "the" and "is" be search terms. The corpus this
+-- server is built for is English papers, notes and source, so `english` is the
+-- configuration that is right about the text it will actually hold; what it
+-- costs is that a French or German document is stemmed by English rules, which
+-- degrades that document's lexical recall and breaks nothing.
+--
+-- AND THE COUPLING THAT MATTERS MORE THAN THE CHOICE: THE QUERY SIDE MUST NAME
+-- THE SAME CONFIGURATION. `DocumentStore.LEXICAL_SQL` spells `english` in its
+-- `websearch_to_tsquery` for that reason and `DocumentStoreTest` asserts that
+-- this file and that constant agree. A question stemmed by a different
+-- configuration than the corpus does not fail -- it parses, the operator runs,
+-- rows come back or do not -- it just quietly stops matching, which is the
+-- vector half's model mismatch wearing a different hat. There is no width check
+-- to catch this one, so the check is a test.
+--
+-- CHANGING THE CONFIGURATION IS A REWRITE OF THIS COLUMN AND A REBUILD OF THE
+-- INDEX BELOW, NOT A SETTING -- `application.yml` says the same sentence about
+-- `embedding-model` and `chunk-target-bytes`, and it is true here for the same
+-- reason: every stored value was computed under the rule in force when the row
+-- was written. It is cheaper than those two, because it needs no model and no
+-- re-ingest -- it is one ALTER -- but it is still a data change and never a
+-- configuration one.
+--
+-- WHAT IS INDEXED IS THE CHUNK'S TEXT AND ONLY THAT. Not the document title and
+-- not the source name, which the obvious `setweight` arrangement would fold in
+-- with an A/B weight. Two reasons. A title is not in the chunk, so folding it in
+-- would make every chunk of a paper called "Retry Budgets" a lexical match for
+-- every question about retry budgets -- twenty identical-scoring candidates that
+-- crowd out the one paragraph that actually discusses it. And it would require
+-- the title to be denormalised onto this row, because a generated column may
+-- only read its own row, which would put a second copy of `documents.title`
+-- where a re-ingest could leave it stale. Searching a document BY its title is a
+-- different question from searching the corpus, and it is answered by a query
+-- over `documents`, additively, on the day something asks it.
+ALTER TABLE chunks
+    ADD COLUMN text_search tsvector
+        GENERATED ALWAYS AS (to_tsvector('english', text)) STORED;
+
+-- WHAT THIS STATEMENT COSTS, said out loud because it is not free. Adding a
+-- STORED generated column rewrites the whole table under an ACCESS EXCLUSIVE
+-- lock: every existing chunk is read, its lexemes computed, and the row written
+-- again. At the corpus sizes V18 sizes itself against -- twenty thousand rows
+-- for a hundred documents -- that is seconds on a laptop, and this server is
+-- single user with no concurrent reader to block. It is recorded because the
+-- number that makes it cheap is a fact about today's corpus and not about this
+-- statement.
+
+-- ---------------------------------------------------------------------------
+-- 2. the index
+-- ---------------------------------------------------------------------------
+
+-- THE INDEX THAT MAKES THE COLUMN WORTH HAVING, and the second one this table
+-- carries. `chunks_by_vector` answers "what is this about"; this answers "which
+-- of these words are in it", and the two are asked in the same breath by
+-- `RetrievalService` in hybrid mode.
+--
+-- GIN AND NOT GIST. A GiST index over `tsvector` is lossy -- it stores a
+-- signature, so every candidate must be rechecked against the heap and a false
+-- positive costs a page read -- and it is chosen when writes dominate reads.
+-- This table's writes are an ingest, which is already dominated by a model call
+-- per chunk, so a slower and exact index is unambiguously the right trade here.
+--
+-- THE HAZARD `chunks_by_vector` HAS AND THIS INDEX DOES NOT, which is worth
+-- stating precisely because the two indexes sit one statement apart and the rule
+-- for one is not the rule for the other. `DocumentStoreTest` records, measured,
+-- that appending a second key to the vector search's ORDER BY makes
+-- `chunks_by_vector` VANISH from the plan -- no error, same rows, sequential
+-- scan -- because an HNSW index supplies the ORDER and a query that asks for a
+-- different order cannot be served by it. A GIN index supplies no order at all.
+-- It supplies the FILTER, `text_search @@ query`, and the ranking is a Sort over
+-- whatever survives it. So a second ORDER BY key costs this index nothing --
+-- measured on the same container, the plan is byte for byte the same Bitmap
+-- Index Scan with one more sort key -- and `LEXICAL_SQL` therefore breaks its
+-- ties in SQL where the vector search cannot. That is not a style difference: a
+-- LIMIT over an unbroken tie takes an arbitrary subset of the tied rows, so the
+-- lexical side's CANDIDATE SET, and not merely its order, would otherwise vary
+-- between two runs of the same question.
+--
+-- AND THE FILTER IS NOT OPTIONAL, which is this side's version of `embedding IS
+-- NOT NULL`. `ts_rank_cd` is a plain function: it answers 0 for a chunk the
+-- query does not match at all, rather than declining to answer. So a query that
+-- ordered by rank WITHOUT the `@@` predicate would (a) lose this index entirely,
+-- since there would be nothing for it to serve, and (b) return the whole corpus
+-- ranked, with every non-matching chunk scoring 0 and a LIMIT scooping up
+-- whichever of them the scan reached first. Under fusion that is worse than it
+-- sounds: those zero-scored chunks would arrive with genuine-looking ranks and
+-- contribute genuine-looking reciprocal-rank scores. Both halves of the pair are
+-- measured and pinned by tests over `LEXICAL_SQL` itself.
+CREATE INDEX chunks_by_text ON chunks USING gin (text_search);
+
+-- NO PARTIAL PREDICATE ON THIS INDEX, although the read that uses it always
+-- carries `embedding IS NOT NULL` beside the `@@`. `... WHERE embedding IS NOT
+-- NULL` would shrink the index by exactly the number of chunks an interrupted
+-- ingest left behind -- which is zero on a healthy corpus and transient
+-- otherwise -- and would weld into this frozen file a retrieval decision that
+-- lives in `RetrievalService` and is argued there: that what a question can
+-- reach is the EMBEDDED corpus, so that one number can honestly say what a
+-- search covered. The day that decision is revisited -- and the lexemes for
+-- every chunk, embedded or not, are already sitting in the column above,
+-- because a generated column cannot be conditional -- it is a change to one
+-- predicate in one Java string, and this index still serves it.
+
+-- ALSO NOT HERE: a partial index on `embedding IS NULL` for `DocumentStore
+-- .coverage`, whose javadoc records that it is a full pass over `chunks` and
+-- fine at current sizing. Nothing in this file changes that: the lexical half
+-- adds a second index scan per search and no second coverage count, so the
+-- statement that was a few milliseconds before this migration is the same few
+-- milliseconds after it. When it stops being fine it is its own migration with
+-- its own argument, and bundling it here would be smuggling one.
+
+COMMENT ON COLUMN chunks.text_search IS
+    'The chunk''s own text as english lexemes, computed by the database and '
+    'writable by nothing -- so a lexical index that disagrees with the text it '
+    'indexes is unreachable rather than merely unlikely. The query side must '
+    'name the same text search configuration or it silently stops matching; '
+    'DocumentStore.LEXICAL_SQL does, and a test compares the two spellings.';

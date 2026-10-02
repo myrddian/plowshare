@@ -1,0 +1,761 @@
+[
+  {
+    "name": "memory_index",
+    "description": "List every active memory as a summary plus the scope describing when it applies. Fast and free \u2014 no model runs. Call this first when you want to see what is remembered, or before deciding whether to ask a question.\n\nPass `project` for one project's own memories; omit it for the memories that hold everywhere. The index carries no memory contents: fetch anything you intend to rely on with memory_read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project whose memories to list. Omit for the memories that hold everywhere."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "memory_read",
+    "description": "Read specific memories in full, verbatim, with their provenance and state. Fast and free \u2014 no model runs. Use when you already know which memories you want, typically from memory_index or from a recall.\n\nNobody has to ask you to read. A summary is not the memory: read the ones that bear on what you are about to say or do before you rely on them.\n\nA memory that has been superseded or invalidated is still readable here, and the reason recorded on it is the point: it is what stops you rediscovering a fact that stopped being true and acting on it again.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "A memory id, as shown by memory_index or a recall."
+          },
+          "description": "The memories to read, by id."
+        }
+      },
+      "required": [
+        "ids"
+      ]
+    }
+  },
+  {
+    "name": "memory_recall",
+    "description": "Ask the archive a question in natural language and get back the memories that answer it, verbatim. Takes a moment \u2014 the question is embedded and matched by meaning, so a memory that shares no words with your question can still be the answer. Use when you do not already know which memory you need, especially before starting work in an unfamiliar area. Nobody has to ask you to.\n\nPass `project` to ask from a project: its own memories come first, and the ones that hold everywhere fill the rest. Retired memories are never returned. An empty answer means the archive holds nothing close to the question, not that the archive is broken \u2014 and if any memory could not be searched at all, the answer says so and says how many, so an empty result is never something you have to guess about.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What you want to know, in plain language."
+        },
+        "project": {
+          "type": "string",
+          "description": "The project to ask from. Omit to ask only what holds everywhere."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "How many memories to return at most. Omit for the default."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "memory_write",
+    "description": "Record something worth remembering across sessions.\n\nNobody has to ask you to write. When something qualifies, write it when you learn it, on your own judgement \u2014 a person saying \"remember this\" is one reason, not the only one.\n\nWrite durable facts, hard-won gotchas, and decisions with the reason behind them \u2014 the things a future agent would waste an afternoon rediscovering. Do not write transcript summaries, restatements of what the code already says, or notes that only matter to the task in front of you.\n\n`summary` is one line: what this memory is. `scope` says when it applies (\"working on payments auth, or anything touching retries\"), and is how a future recall finds it \u2014 a vague scope is a memory nobody gets back. `body` is the detail. `project` files it under one project; omit it for something that holds everywhere. Say who you are in `formed_by`.\n\nThe write is never refused, and it takes a moment: a scribe on the server decides whether this is a new memory, more detail on one already held, or a replacement for one that has stopped being true. The answer tells you which it chose and why, and names the memory it merged into or replaced.\n\nYou cannot choose that yourself, and there is no argument for it: naming a memory to replace would retire one you have not read. Write what is true now and say what changed in the summary.\n\nIf nothing judged the write \u2014 no scribe is deployed, or it was busy \u2014 the memory is still written, as a new one, and the answer says which of those happened rather than leaving you to assume it was judged.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "One line: the claim itself, stated so it stands alone."
+        },
+        "scope": {
+          "type": "string",
+          "description": "When this memory applies, in prose. This is how a future recall finds it."
+        },
+        "body": {
+          "type": "string",
+          "description": "The detail behind the summary."
+        },
+        "project": {
+          "type": "string",
+          "description": "The project this belongs to. Omit for something that holds everywhere."
+        },
+        "formed_by": {
+          "type": "string",
+          "description": "Who is writing this \u2014 you."
+        },
+        "formed_where": {
+          "type": "string",
+          "description": "The situation it came out of, in prose. Optional, and worth filling in: it is what a later reader judges the claim by."
+        }
+      },
+      "required": [
+        "summary",
+        "scope",
+        "body"
+      ]
+    }
+  },
+  {
+    "name": "memory_navigate",
+    "description": "Navigate memory digests to a lesson, original log, or surviving summary. Runs an ephemeral navigator with its own system allowance; may take time. The answer identifies its sources, level, and incomplete navigation. Use memory_recall for a shallow search.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project name; omit for global memories"
+        },
+        "question": {
+          "type": "string",
+          "description": "What you want to remember"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "memory_digest",
+    "description": "Build or refresh a home's memory digest tree. Returns a job id; use agent_poll and agent_result. Folds also trigger this work automatically.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project; omit for global"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "agent_run",
+    "description": "Start one of this server's agents on a task, and get back a job id straight away. The run happens on the server; this call does not wait for it.\n\nAgents are files an operator deploys, so which ones exist is a property of this deployment \u2014 if you name one that is not there, the answer lists the ones that are.\n\n`project` fixes which archive the run reads, and the agent cannot widen it: an agent runs against the tier its job was started for. Omit it for the memories that hold everywhere.\n\nPoll with agent_poll and read the ending with agent_result. Jobs live in the server's memory: a restart loses the handle, though anything the run wrote to the archive or the queue survives.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Which agent to run, by name."
+        },
+        "task": {
+          "type": "string",
+          "description": "What it is being asked to do, in plain language."
+        },
+        "project": {
+          "type": "string",
+          "description": "The archive it reads from. Omit for the memories that hold everywhere."
+        }
+      },
+      "required": [
+        "agent",
+        "task"
+      ]
+    }
+  },
+  {
+    "name": "agent_poll",
+    "description": "Ask whether a run has finished. Fast and free \u2014 no model runs.\n\nSays running or finished, and nothing about what it concluded: read that with agent_result once it has finished. An id this server does not know is an error rather than \"not finished\", because after a restart the run really is gone and waiting for it would be waiting forever.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "description": "The job id, as agent_run returned it."
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
+    "name": "agent_result",
+    "description": "Read how a run ended and what it produced.\n\nIt tells you FIRST whether the run answered or stopped, and the difference is the whole point: a run that ran out of turns, spent its budget, was cancelled, or could not reach something it needed has text describing what it managed \u2014 not a conclusion. Only an answered run's text is an answer.\n\nWhat a run concluded and wrote down is in the archive and the proposal queue, not here: read those with memory_read and memory_proposals.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "description": "The job id, as agent_run returned it."
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
+    "name": "agent_cancel",
+    "description": "Ask a run to stop.\n\nIt stops at its next turn boundary rather than immediately \u2014 a turn already in flight is paid for either way \u2014 so the job still reads as running for a moment afterwards. Whatever it already wrote to the archive or the queue stands; cancelling does not undo anything.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "description": "The job id, as agent_run returned it."
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
+    "name": "memory_curate",
+    "description": "Review one project's memories and decide which of them hold for every project, not just this one. Starts a job and returns its id; the pass runs on the server.\n\nIt skips anything already ruled on and anything the global archive already holds word for word, then puts each survivor to a judge. Confident rulings are applied at once \u2014 the memory is copied into the global archive and the project's record retired \u2014 and everything the judge is unsure about is filed for a person, which you can read with memory_proposals.\n\nThis costs model calls, roughly two per memory considered. `max_model_calls` bounds the whole pass; omit it for the server's configured budget. A pass that runs out says so and keeps everything it already did.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project whose memories to review."
+        },
+        "max_model_calls": {
+          "type": "integer",
+          "description": "How many model calls the whole pass may spend. Omit for the server's configured budget. Roughly two calls per memory considered."
+        }
+      },
+      "required": [
+        "project"
+      ]
+    }
+  },
+  {
+    "name": "memory_proposals",
+    "description": "List the promotions waiting on a decision: memories a curator thinks may belong in the global archive but would not settle by itself. Fast and free \u2014 no model runs.\n\nPass `project` for one project's queue; omit it for the global one. Settled proposals are not listed \u2014 a rejection is remembered so the curator stops asking, not so you keep seeing it.\n\nThe reason on each is one sentence written by whoever asked. Read the memory itself with memory_read before deciding.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Whose queue to list. Omit for the global one."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "memory_resolve",
+    "description": "Settle one waiting proposal, once.\n\n`decision` is \"accept\" or \"reject\". Accepting copies the memory into the global archive, which every project reads, and retires the project's own record with a link forward to the new one. Rejecting records that the claim belongs where it is \u2014 and that record is the point: it is what stops the same memory being proposed again next week, and the week after.\n\nNeither is reversible and a settled proposal is never re-opened, so read the memory with memory_read first. Say who you are in `by`; it is what tells your decision from the curator's own on a row read months later.\n\nIf the memory has been superseded or invalidated since the proposal was filed, accepting is refused rather than applied: a promoted memory that had stopped being true would be read by every project.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposal_id": {
+          "type": "string",
+          "description": "The proposal, as memory_proposals showed it."
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "reject"
+          ],
+          "description": "\"accept\" promotes the memory into the global archive; \"reject\" records that it belongs where it is."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why. Recorded on the proposal, and it is what a later reader sees."
+        },
+        "by": {
+          "type": "string",
+          "description": "Who is deciding \u2014 you."
+        }
+      },
+      "required": [
+        "proposal_id",
+        "decision",
+        "by"
+      ]
+    }
+  },
+  {
+    "name": "project_define",
+    "description": "Give a project a workspace: the directory on the SERVER's disk that the project sits in. Replaces the whole definition \u2014 including any directories the project was being lent.\n\nA project is the scope that owns memories; this is where the files that go with them are. An agent runs in a project and reaches that project's own directories and no other project's \u2014 it cannot widen that, and there is no global workspace, because the global tier is every project at once and names no single filesystem.\n\nThe workspace is ONE directory and stays one: a project's full name is MACHINE/PATH/NAME, so it is part of what the project is called. To let a project read a second directory as well, use project_lend, which adds without renaming anything.\n\n`workspace` is a path on the machine the server runs on, which may not be this one. It must already exist and be a directory; the server says so if it is not.\n\nThis is for a project whose files are ON THE SERVER. A project whose files are on another machine is not defined here at all \u2014 it is rooted by the Plowshare client running on that machine, which is the only party that can see those files. Asking for one of those is refused, and the refusal names the machine that holds it.\n\n`exclusions` fences off paths inside anything the project reaches \u2014 the workspace and anything lent alongside it. More are always added and cannot be removed by anyone: the server's own configuration, which holds its model API key, and its agents directory, where writing a file would grant an agent new tools at the next restart. The answer lists everything that is fenced off.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, by name."
+        },
+        "workspace": {
+          "type": "string",
+          "description": "The directory on the server's disk the project sits in. One directory: it is part of the project's full name. Use project_lend to add more."
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "A path inside one of the project's directories."
+          },
+          "description": "Paths that agents may not reach, inside the workspace or inside anything lent alongside it. Omit for none. The server's configuration and its agents directory are always excluded and are not yours to send."
+        }
+      },
+      "required": [
+        "project",
+        "workspace"
+      ]
+    }
+  },
+  {
+    "name": "project_workspace_set",
+    "description": "Point an existing project at a different directory, keeping the exclusions it already has and everything it is being lent.\n\nThis is the one to use when a checkout moves to a different directory. project_define writes a whole definition and therefore replaces the exclusions and the lent directories; this changes only the workspace, so paths somebody fenced off earlier stay fenced off and directories somebody lent stay lent.\n\nIt does NOT rename the project. If what moved is the project itself \u2014 to a different machine, so that it needs a different name \u2014 that is project_move, and it leaves the workspace alone.\n\nThe project must already have a workspace \u2014 a name that has none is an error rather than a new project, so a typo cannot quietly create one holding a real directory. Use project_define for that.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, which must already have a workspace."
+        },
+        "workspace": {
+          "type": "string",
+          "description": "The directory to point it at. Its lent directories are not touched."
+        }
+      },
+      "required": [
+        "project",
+        "workspace"
+      ]
+    }
+  },
+  {
+    "name": "project_lend",
+    "description": "Let a project also read and write further directories on the SERVER's disk, on top of its workspace. Adds; nothing already set is replaced.\n\nThis is the one to use when an agent cannot reach something it should. The commonest case: directories whose name starts with a dot \u2014 .github, .git, .config \u2014 are unreachable unless a root names one, so an agent that cannot read .github/workflows/ci.yml needs that directory lent explicitly.\n\nA lent directory does NOT have to be inside the workspace. It can be anywhere on the server the mandatory exclusions do not cover, and lending one of those reaches nothing rather than being an error \u2014 the server drops a root it will not honour, and the answer shows you what survived.\n\nIt does NOT move the project. A project's full name is MACHINE/PATH/NAME, so the workspace is part of its identity and lending leaves it exactly where it was \u2014 which is why this is a separate verb rather than project_workspace_set with two paths.\n\nEvery directory must already exist and be a directory on the server; the refusal names which one is not.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, which must already have a workspace."
+        },
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "A directory on the server's disk."
+          },
+          "description": "The directories. At least one \u2014 a call naming none would change nothing while answering as though it had."
+        }
+      },
+      "required": [
+        "project",
+        "roots"
+      ]
+    }
+  },
+  {
+    "name": "project_unlend",
+    "description": "Stop lending a project directories it was lent. The workspace, the exclusions and everything else are untouched.\n\nNot project_forget, which drops the project's workspace and everything lent with it. This takes back only what you name.\n\nThe paths are not checked against the server's disk, because the usual reason to take a directory back is that it is gone. A directory the project was not lending is left out of the answer rather than being an error \u2014 read the answer to see what it reaches now.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, which must already have a workspace."
+        },
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "A directory on the server's disk."
+          },
+          "description": "The directories. At least one \u2014 a call naming none would change nothing while answering as though it had."
+        }
+      },
+      "required": [
+        "project",
+        "roots"
+      ]
+    }
+  },
+  {
+    "name": "project_move",
+    "description": "Move a PROJECT: give it a different name and carry its whole archive with it. Not the same as project_workspace_set, which moves a project's WORKSPACE \u2014 the directory it sits in \u2014 and leaves its name alone.\n\nA project's full name is MACHINE/PATH/NAME, so a project that moves to another machine gets a different name; this is how that is recorded. Everything the project has remembered follows automatically \u2014 memories and conversations reach it through an internal id, so nothing is rewritten and nothing is lost.\n\nThe workspace, the directories lent alongside it and the exclusions are untouched. This moves the project, not its files.\n\nRefused if another project already has the name you asked for: two projects cannot share one, and letting them would merge two archives with nothing able to tell them apart afterwards. Also refused while a live Plowshare client is rooting either name \u2014 close that client first, move the project, then start it again.\n\nA project that has no workspace can still be moved. That is the usual case for a project whose files are on a machine other than the server.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, by the name it has now."
+        },
+        "to": {
+          "type": "string",
+          "description": "The name it should have instead. Nothing else may already have it."
+        }
+      },
+      "required": [
+        "project",
+        "to"
+      ]
+    }
+  },
+  {
+    "name": "project_forget",
+    "description": "Drop a project's workspace, and every directory lent alongside it. Its jobs go back to having no file access on the server. To take back one lent directory and keep the rest, use project_unlend.\n\nIts memories are NOT touched. A project's archive and its workspace are separate things: everything it has remembered stays readable and still answers recalls. Nothing on disk is deleted either \u2014 this forgets where the project's files are, not the files.\n\nA project that has no workspace is an error rather than silence, so a mistyped name cannot read as a workspace successfully removed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project whose workspace, and lent directories, to drop."
+        }
+      },
+      "required": [
+        "project"
+      ]
+    }
+  },
+  {
+    "name": "conversation_list",
+    "description": "List the conversations open in one tier, oldest first. A conversation is a person's thread of utterances with an agent, holding its own budget and its whole history; this is how you find the id the other conversation_* tools take. Bounded: 20 at a time, with the total and the next offset in the answer.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Which tier to list. Omit for the global one; a project's conversations are not in it."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Where in the list to start, counting from 0 at the oldest. Omit for the first 20."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "conversation_search",
+    "description": "Find where something was said, by its words, across every conversation in one tier. This is how you get an id when you have a phrase and not a conversation; the other conversation_* tools all start from an id. Each hit names the conversation and the entry number to read it at with conversation_trajectory, and shows the words around the match rather than the start of the entry, so a match in the middle of a large tool result is visible. It matches on words and not on meaning: a question matches an entry only if every one of its content words is in that entry, stemmed, so 'refilling' finds 'refilled' and a question of nothing but common words finds nothing. It searches what was said \u2014 utterances, answers, tool results and the summaries a fold left, including entries a fold has since covered \u2014 and not the harness's own records of a run, which are read with conversation_trajectory. A tool result whose payload a retention sweep has ejected cannot be found at all, because its words are gone; the answer says how many of those there were rather than leaving them silently missing. Bounded: 20 hits at a time, each shown to 500 characters with the entry's real length beside it, and the total and the next offset in the answer.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "The words to look for, in prose. Every content word has to be present in an entry for it to match, and common words are ignored \u2014 so a shorter question finds more."
+        },
+        "project": {
+          "type": "string",
+          "description": "Which tier to search. Omit for the global one; a project's conversations are not in it, and this search does not cross the boundary."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Where in the hits to start, counting from 0 at the closest. Omit for the first 20."
+        }
+      },
+      "required": [
+        "q"
+      ]
+    }
+  },
+  {
+    "name": "conversation_chat",
+    "description": "Read what the model is shown in one conversation, one page at a time. This is the projection: entries a compaction folded away are gone and replaced by the summary that stands for them, and kinds no model ever sees are absent. Use this to see the conversation as the model reads it; use conversation_trajectory to see what actually happened. Bounded: 20 entries at a time, each shown to 500 characters with its real length beside it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "type": "string",
+          "description": "The conversation's id, as conversation_list showed it."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Where in the conversation to start, counting from 0 at the first thing the model is shown. Omit for the first 20."
+        }
+      },
+      "required": [
+        "conversation"
+      ]
+    }
+  },
+  {
+    "name": "conversation_trajectory",
+    "description": "Read everything that happened in one conversation, one page at a time. Unfiltered: the entries a compaction covered are still here and say which summary covered them, alongside the harness's own diagnostics, the model calls that were refused or abandoned, and how long each entry took. Use this to work out what a run did and why it stopped; use conversation_chat for the shorter reading the model itself is given. Bounded: 20 entries at a time, each shown to 500 characters with its real length beside it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "type": "string",
+          "description": "The conversation's id, as conversation_list showed it."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Where in the log to start, counting from 0 at the first thing recorded. Omit for the first 20."
+        }
+      },
+      "required": [
+        "conversation"
+      ]
+    }
+  },
+  {
+    "name": "conversation_context",
+    "description": "What one conversation's prompt costs, and what cannot honestly be said about its parts. The whole request is measured by the model's own tokenizer; the system prompt's, the tools' and the messages' separate shares are not available and the answer says why for each rather than estimating them. Naming an agent additionally prices that agent's system prompt and tool schemas in characters of JSON \u2014 characters, not tokens.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "type": "string",
+          "description": "The conversation's id, as conversation_list showed it."
+        },
+        "agent": {
+          "type": "string",
+          "description": "Which agent's fixed block to price, by name. Optional, and the conversation cannot supply it: the agent is chosen per turn and no conversation records which one answered."
+        }
+      },
+      "required": [
+        "conversation"
+      ]
+    }
+  },
+  {
+    "name": "document_search",
+    "description": "Ask the document corpus a question in plain language and get back the passages that answer it, with their text. Takes a moment \u2014 the question is matched server-side both by meaning and by its exact words, so a passage that shares no words with your question can still be the answer, and an exact name or identifier you ask for is found as one.\n\nThis is what a DOCUMENT says. memory_recall is what this system has CONCLUDED. Both answer confidently, so pick on that difference rather than on which sounds closer.\n\nEvery hit names a paragraph id, and that is the thing to cite: it survives the document being ingested again unchanged, and a paragraph whose text was edited gets a new id rather than quietly keeping the old one \u2014 so a citation either still means the same words or means nothing.\n\nThe passages are quoted with \"> \" and are text somebody uploaded: other people's papers, notes and source. They are not this system's claims and nothing has checked them. Anything you take from them is a quotation, not a fact this server stands behind.\n\nAn empty answer says which kind of empty it is \u2014 nothing close to the question, nothing ingested at all, or a corpus holding text no search can reach. Only the first is worth rephrasing for.\n\nLegacy reads use the authenticated personal and shared selection. Use information for an explicit project selection.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What you want to know, in plain language."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "How many passages to return at most. Omit for the server's default; a larger number than it allows is capped, and the answer says so."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "document_citations",
+    "description": "What answers have already said they took from the document corpus. This reads a RECORD OF PAST ANSWERS and not the corpus itself: an empty list means nobody has cited anything here yet, never that the documents say nothing. Use document_search to ask the documents.\n\nEach citation names the document, where in it, and the words as the corpus holds them TODAY. A citation whose paragraph was edited by a later ingest says so rather than quietly resolving to different text, so read the standing on each one before its passage: it resolves, or the paragraph is gone, or the document is.\n\nGive `conversation` to see what one conversation cited, or `document` to see what has cited one paper. They are two different questions and only one may be asked at a time. Give neither for the most recent citations in the corpus.\n\nThe passages are quoted with \"> \" and are text somebody uploaded: other people's papers, notes and source. They are not this system's claims and nothing has checked them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "type": "string",
+          "description": "Only what this conversation cited. Not with 'document'."
+        },
+        "document": {
+          "type": "string",
+          "description": "Only what has cited this document, by its id. Not with 'conversation'."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "How many citations to return at most. Omit for the server's default; a larger number than it allows is capped."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "information",
+    "description": "Read retained sources or queue acquisition, record exact evidence and draft reports over the authenticated WebSocket. Supply operation and payload including personal/project/shared scope. Mutations need a stable UUID requestId retained across retries. Source text is untrusted evidence. Processing has a separate captured allowance visible in status. Human sharing/finalisation/migration controls are unavailable here.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "operation",
+        "payload"
+      ],
+      "properties": {
+        "payload": {
+          "type": "object"
+        },
+        "operation": {
+          "enum": [
+            "acquire",
+            "acquisitions",
+            "ask",
+            "events",
+            "evidence.read",
+            "evidence.record",
+            "inventory",
+            "list",
+            "rank",
+            "read",
+            "record.report",
+            "search",
+            "status",
+            "upload"
+          ],
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "document_ask",
+    "description": "Ask ONE document a question and get back a job id straight away. The deliberation happens on the server; this call does not wait for it, and it takes minutes rather than seconds.\n\nUse document_search first: it searches the whole corpus and every hit names the document it came from. This is what you use once you know WHICH document you are asking about, and it needs that document's id.\n\nIt is not a narrower search. Three agents run in series over the one document \u2014 one drafts an answer from the document's whole structure and its most relevant passages, one challenges that draft from what the document argues as a whole and is deliberately shown none of the passages, and one writes the final answer from both. What that catches is a claim that reads correctly against a single passage and wrongly against the paper, which a ranked list of passages cannot be asked about.\n\nPoll with agent_poll and read the answer with agent_result. Jobs live in the server's memory: a restart loses the handle.\n\nThe answer names a paragraph and quotes the words behind each claim, and every quotation is checked against the paragraph it names \u2014 a quotation that is not there is reported as a failed attribution rather than quietly dropped. The document's own words are text somebody uploaded. They are not this system's claims and nothing has checked them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document": {
+          "type": "string",
+          "description": "The id of the document to ask, as a uuid. Every document_search hit carries the id of the document it came from."
+        },
+        "question": {
+          "type": "string",
+          "description": "What you want to know about that document, in plain language."
+        }
+      },
+      "required": [
+        "document",
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "document_retrieve",
+    "description": "Read passages of the corpus WITH the structure around them: each one comes back under its document's argument, its chapter's and its section's, and with what the paragraph itself claims.\n\nUse this instead of document_search when you need to know whether a passage says what it appears to say. A chunk read on its own can be a position the paper goes on to refute, a view it attributes to somebody else, or a claim it qualifies three sections later, and a ranked list of passages cannot tell you which. The summaries above it are what can.\n\nPass a document id to read one paper, or leave it out to read the whole corpus. One embedding call and one index scan; it answers straight away and costs no deliberation.\n\nEvery passage names the paragraph to cite. The passage and every summary above it are about text somebody uploaded \u2014 they are not this system's claims and nothing has checked them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What you want to know, in plain language. Matched by meaning against the corpus's passages."
+        },
+        "document": {
+          "type": "string",
+          "description": "Optional. The id of one document to read, as a uuid. Leave it out to read the whole corpus. Every document_list row and every document_search hit carries an id."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Optional. How many passages at most. Defaults to 5; each one carries four levels of summary, so a large number is a large answer."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "document_list",
+    "description": "List the documents in the corpus, newest first, with what each one argues and how much of it there is.\n\nThis is how you find a document's id, which document_ask and document_outline both need. document_search finds documents a question happens to reach; this one answers what is here at all.\n\nPass a naming to narrow it \u2014 a piece of the filename it was filed under, or of its title, in any case. Leave it out for everything. The count of matches comes back beside the page, so you can tell a corpus that holds nothing from a naming that matched nothing.\n\nTitles and summaries are drawn from documents somebody uploaded. They are not this system's claims.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "naming": {
+          "type": "string",
+          "description": "Optional. Part of the name a document was filed under, or of its title. Case does not matter. Leave it out for the whole corpus."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Optional. How many documents at most."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Optional. How many to skip, for reading past the first page."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "document_rank",
+    "description": "Rank whole documents by how close each one's own summary is to a question. One comparison per document; it does not look inside them.\n\nThis is the cheap way to find WHICH PAPER to work on. document_search reads passages from across the corpus and every hit names a document, but a document can win on one striking sentence; this compares against what each document is about as a whole. Use it to narrow, then document_outline to check the shape of a candidate, then document_ask to actually ask it.\n\nIT RANKS BY SUBJECT AND NOT BY AGREEMENT. A paper that spends forty pages demolishing a claim ranks high for that claim, because it is about it. Nothing in this answer says what a document concludes.\n\nThe answer says how many documents could be ranked and how many were skipped because nothing has embedded their summary yet, so an empty result is never ambiguous between \"the corpus holds nothing like this\" and \"the corpus is not ready\".\n\nSummaries are a model's paraphrase of documents somebody uploaded. They are not this system's claims.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What you want to find a paper about, in plain language. Matched against each document's summary rather than its passages."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Optional. How many documents at most. Omit for the server's default."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "document_outline",
+    "description": "Show one document's structure: its chapters, the sections under them, and what each of those covers. No passage text.\n\nRead this before document_ask. An ask is three model calls in series over one paper and takes minutes; the outline is one read and tells you whether this is the paper that would answer your question, and which part of it to ask about.\n\nSome chapters and sections have no title, because the document declared no heading there and the corpus grouped its text anyway. Those come back as \"(unnamed segment)\". That is a fact about the document and not a missing value.\n\nNeeds the document's id, which document_list and every document_search hit carry. Titles and summaries describe uploaded text and are not this system's claims.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document": {
+          "type": "string",
+          "description": "The id of the document whose structure you want, as a uuid."
+        }
+      },
+      "required": [
+        "document"
+      ]
+    }
+  },
+  {
+    "name": "search",
+    "description": "Search for information from outside this project and get back a page of results \u2014 a URL, a title and a short snippet for each. Use this for anything the archive and the corpus do not already hold: a current fact, an outside reference, documentation for something this project does not define.\n\n`max` is the most results worth looking for \u2014 a ceiling, not a target. A query with three good answers against a `max` of fifty has not come up short; that is a fact about the query. `page_size` is how many you want handed back right now.\n\nTo read a later page of the SAME search, call this again with the exact same `query` and `max` and a higher `page`. There is no handle to write down: a later page is addressed by re-sending the query it belongs to, so changing `query` or `max` between calls starts a different search from page one instead of continuing this one. Asking for `page` 1 again is a NEW search \u2014 it looks for fresh results rather than repeating what it said before, and it costs what the first one cost.\n\nA search can come back with nothing, or refuse outright with a sentence saying what to try instead. Either way you get text back \u2014 never an error you have to guess the meaning of.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "What to search for, in plain language or as search terms."
+        },
+        "page_size": {
+          "type": "integer",
+          "description": "How many results to return on this page. Omit for the default of 10."
+        },
+        "max": {
+          "type": "integer",
+          "description": "The most results worth looking for \u2014 a ceiling, not a target. Send the SAME value on every page of one search: a page is addressed by its query and max, and a different max is a different search. Omit for the default of 30."
+        },
+        "page": {
+          "type": "integer",
+          "description": "Which page to read, counting from one. A page after the first only works against the exact query and max that produced page one; asking for page 1 again searches again rather than repeating the last answer. Omit for page one."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "fetch",
+    "description": "Read a web page by URL and get back its title and readable text, a window at a time. Takes a moment \u2014 a page is fetched once and then served from a shared buffer, so reading the same url again costs nothing further while it stays live.\n\nPass only 'url' to read from the start. The answer says how many characters the page holds in total and whether more remain; call fetch again with the same 'url' and 'offset' set to the number this call reported, to keep reading where this window left off.\n\nThe text is quoted with \"> \" because it is someone else's words \u2014 the whole body of a page written by anyone, arriving in your context. It is not this system's claim and nothing has checked it. A refusal (a page that could not be read, or a fetcher blocked from reaching it) is reported the same way search reports an empty answer: as text you can act on, not as an error.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The page to read, as a full http:// or https:// URL."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Where to start reading, in characters into the page's stored text. Omit for the start of the page. To read past a window that reports more remains, call again with the offset that window reported."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "client_root_project_here",
+    "description": "Say that THIS machine \u2014 the one this Plowshare client is running on \u2014 holds a project's files, and serve them. A run in that project then reads and writes here, through this client, whichever machine it was started from.\n\nThis is the only tool that can talk about the machine you are on. Every project tool talks about the SERVER's disk instead: project_define gives a project a directory there, project_workspace_set points it at a different one, project_lend adds further directories and project_unlend takes them back, project_move renames a project, and project_forget drops the lot. None of them can see the files where you are, and this one changes nothing on the server's disk.\n\nIt roots ONE directory, which is a choice about this tool and not a limit on what a client can lend: `plowshare --workspace a,b` lends both and roots the first, because a project's full name is MACHINE/PATH/NAME and only one directory can be the PATH in it. There is no client-side equivalent of project_lend yet.\n\n`path` is a directory on this machine and must be ABSOLUTE. A relative path would be read against whatever directory this process happened to be started in, which is the one directory nobody chose to lend.\n\nUntil you call this, this client serves no files at all: a run it starts reaches only what the server itself can see, and says nothing about the difference. That is a smaller capability rather than an error.\n\nOne project at a time, and one machine per project. Calling this again serves somewhere else and stops serving what it served before \u2014 the answer says which. If another live Plowshare client already holds this project, the server turns this claim away, and a run started afterwards reports the channel as down rather than quietly reaching the wrong machine.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, by the same name a run gives it."
+        },
+        "path": {
+          "type": "string",
+          "description": "The absolute path of its directory on this machine \u2014 the one this client is running on, not the server."
+        }
+      },
+      "required": [
+        "project",
+        "path"
+      ]
+    }
+  }
+]

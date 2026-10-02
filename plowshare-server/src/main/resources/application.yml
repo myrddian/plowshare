@@ -1,0 +1,1562 @@
+spring:
+  application:
+    name: plowshare-server
+  datasource:
+    # Default points at a local Postgres on the standard port; Anchor's own
+    # compose stack claims 5433, so 5432 stays free for Plowshare to avoid a
+    # collision when both run on one box.
+    url: ${PLOWSHARE_DB_URL:jdbc:postgresql://localhost:5432/plowshare}
+    username: ${PLOWSHARE_DB_USER:plowshare}
+    password: ${PLOWSHARE_DB_PASSWORD:plowshare}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  # What POST /v1/documents will accept, and it is NOT left at Boot's default.
+  # That default is 1MB, which refuses most of the corpus this endpoint exists
+  # for, and it refuses it as a MaxUploadSizeExceededException rather than as
+  # anything naming a key.
+  #
+  # 8MB is the number the file channel already agrees on -- LocalProvider
+  # .MAX_FILE_BYTES and ClientEnforcer.MAX_FILE_BYTES are both 8 MiB -- and the
+  # argument is that a document too large for the client to read off the disk
+  # should not be able to arrive by another door. A second number here would be
+  # a second thing to keep in step with those two.
+  #
+  # max-request-size is a little larger than max-file-size because a multipart
+  # request is the file PLUS its part headers and the other fields (`name`,
+  # `by`); sizing them equally refuses an 8MB file for the boundary markers
+  # around it.
+  servlet:
+    multipart:
+      max-file-size: ${PLOWSHARE_MAX_UPLOAD:8MB}
+      max-request-size: ${PLOWSHARE_MAX_UPLOAD_REQUEST:9MB}
+
+server:
+  # Anchor defaults to 8090; one digit up keeps both runnable on one box
+  # without a port clash needing to be discovered at boot time.
+  port: ${PLOWSHARE_PORT:8091}
+  # Loopback unless an operator says otherwise, and the default is the whole of
+  # what stands between this port and a network.
+  #
+  # IT IS NO LONGER THE WHOLE OF WHAT STANDS BETWEEN A REQUEST AND THE ARCHIVE.
+  # This block used to say "there is no authentication, and the design spec says
+  # so rather than pretending otherwise". Slice 4 built it: plowshare.auth below
+  # gates every /v1 path, including the two WebSocket upgrades, and a request
+  # with no access token is refused before any handler runs.
+  #
+  # What that changes about the session id, said plainly because the old
+  # sentence is quoted in several files: a session id is still a name and not a
+  # secret — SessionRegistry.attach is computeIfAbsent and find asks only that
+  # an id be non-blank — but nobody reaches the socket to attach under one
+  # without the operator's credential. Holding that credential means being the
+  # operator, and the operator may attach to any session by name. That is
+  # correct for a single-user system and it is the honest description of what
+  # was already true.
+  #
+  # This key still matters and is not made redundant by that: an unauthenticated
+  # caller reaching the port can still spend its CPU on TLS-less connections and
+  # on the filter's digest, and plowshare.auth.enabled is one line away from
+  # being false. Two independent bounds, not one behind the other.
+  #
+  # The spec used to offer "the server binds loopback in every deployment this
+  # project has" as one of three bounds on that. It was false: this block set a
+  # port and no address, so the container bound EVERY interface and a run of
+  # this server was reachable from whatever network it was on. Offering an
+  # untrue sentence as a bound on a capability is the worst place to be wrong,
+  # which is why the correction was to the spec first and is now to the tree.
+  #
+  # PLOWSHARE_BIND is the escape, and it is deliberately an env var with a safe
+  # default rather than a commented-out key: an operator who wants this server
+  # reachable from the network says so in one place, once, on purpose — and now
+  # has an answer to the authentication question this comment used to hand them
+  # unbuilt. 0.0.0.0 restores the pre-slice-3 behaviour exactly.
+  address: ${PLOWSHARE_BIND:127.0.0.1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+# The inference hosts, one entry per box. Same shape as Anchor's lmstudio.*,
+# deliberately: both projects are meant to point at one LM Studio, and an
+# operator who already set LLM_BASE_URL for Anchor should not need a second
+# variable for the same box. See LlmProperties and PoolProperties for what each
+# key does.
+#
+# This prefix is closed: LlmProperties binds with ignoreUnknownFields = false,
+# so a key that no setter accepts — a `base-url` left at the llm level after it
+# moved into a pool, say — stops the boot by name rather than being discarded in
+# silence while the server talks to some other host.
+plowshare:
+  llm:
+    # One embedding model for the whole archive. Changing it is a re-embed of
+    # every row, not a setting — vectors are comparable only within one model's
+    # space, and a question embedded with a different model does not error, it
+    # returns nonsense.
+    #
+    # THIS LINE IS THE DEFAULT, and LlmProperties no longer carries one. Both of
+    # these keys used to be written twice — here and as a Java field initializer
+    # — and this file won at every boot, because Spring binds over an
+    # initializer. The Java values were therefore dead in the way that costs
+    # most: nothing compared them against these lines, nothing failed when they
+    # drifted, and deleting a key here would have brought a stale one back to
+    # life in silence. Removing a key here now stops the boot naming it, which is
+    # the report an operator can act on.
+    embedding-model: ${LLM_EMBEDDING_MODEL:nomic-embed-text}
+    # Must match the vector(n) width in V1__memories.sql. LlmConfig refuses a
+    # non-positive value at boot, because embedding-dim: 0 otherwise produces a
+    # mismatch message asserting that vector(0) is what the schema holds, which
+    # is false — and 0 is what an unbound LlmProperties answers, for the reason
+    # above.
+    embedding-dim: ${LLM_EMBEDDING_DIM:768}
+    # The largest input, in TOKENS as plowshare.llm.tokenizer counts them, that
+    # may be sent to the embedding endpoint. THE SAME KIND OF THING AS
+    # embedding-model ABOVE: changing it is a re-chunk and a re-embed of every
+    # document, not a setting. Every chunk already stored was cut under the rule
+    # in force when it was written, and a re-ingest will NOT repair one whose
+    # paragraph did not change -- the identity rule keeps that paragraph's chunks
+    # and their vectors on purpose, because that is what makes re-ingesting an
+    # edited document cheap.
+    #
+    # TOKENS, COUNTED BY THE TOKENIZER BEAN. Bytes are not tokens. This key was
+    # embedding-max-input-bytes: 2048, on the argument that no tokenizer emits
+    # more tokens than its input has bytes -- a bound that could not be wrong,
+    # and a quarter of the window for English prose. It refused every 300-word
+    # digest summary the archive wrote (2-3 KB each), so none of them was
+    # embedded. The count is now the one Tokenizer every surface on this server
+    # counts with, and a real tokenizer replacing the ratio heuristic behind
+    # that interface moves this ceiling with nothing else to edit.
+    #
+    # WHY 1536 AND NOT 2048. Measured against the reference node 2026-09-03:
+    # nomic-embed-text reports loaded_context_length 2048 AND max_context_length
+    # 2048, so there is no headroom to be bought by raising this. The shipped
+    # tokenizer ESTIMATES (four characters a token) and an estimate can be low,
+    # so the ceiling sits a quarter under the window: the count can be short by
+    # a third before the endpoint sees more than it holds. Prose is inside that
+    # margin. WHAT IT DOES NOT COVER: text that tokenizes far denser than four
+    # characters a token -- a script without spaces above all, where a real
+    # tokenizer spends about a token a character -- can still be under-counted
+    # past it, and there the endpoint is the only backstop. A measured
+    # tokenizer is what closes that, and this key is where the margin goes back.
+    #
+    # Enforced twice, deliberately. documents.Chunker never emits a chunk over
+    # it, cutting an oversized run at the ceiling and RECORDING the cut on the
+    # row; DispatchingEmbeddingClient refuses any input over it before anything
+    # leaves the process. Both count with the same Tokenizer, so they cannot
+    # disagree about what a chunk costs. The second is the one that matters: a
+    # silently truncated input produces a vector for text that is not the text,
+    # and nothing downstream can tell that from a correct one.
+    #
+    # LlmConfig refuses a non-positive value at boot, for the reason it refuses
+    # a non-positive embedding-dim: zero here is not "no ceiling", it is a
+    # server with the defect this key exists to close.
+    embedding-max-input-tokens: ${LLM_EMBEDDING_MAX_INPUT_TOKENS:1536}
+    # What a model's context length is assumed to be when nobody could say what
+    # it really is. The bottom of three tiers, and the only one that always
+    # answers.
+    #
+    # The order, exactly. A pools[...].context-lengths[<model>] entry wins over
+    # everything, because an operator holding a margin under what the node
+    # reports is doing it deliberately. Failing that, what the node itself
+    # reports wins — LM Studio's GET /api/v0/models, read for
+    # loaded_context_length and deliberately not max_context_length — because
+    # the box's own answer is better information than any blanket number this
+    # key can hold. Failing both, this.
+    #
+    # WHY IT EXISTS AT ALL. Compaction takes no decision without a bound to fold
+    # towards, so before this key a model whose length could not be determined
+    # never folded: the server kept working, conversations kept running, and the
+    # only report anyone got was one warning at boot. That is a silent
+    # off-switch on the whole mechanism, and what it ends in is a conversation
+    # that grows until the endpoint refuses it — the exact failure compaction is
+    # there to prevent.
+    #
+    # WHY 64000, AND WHY NOT MORE. The two directions of being wrong are not
+    # symmetric, and this is the sentence to keep. A default that is too SMALL
+    # folds earlier than it needed to: history is summarised while it would
+    # still have fitted, which costs a summarising call and loses some detail.
+    # Wasteful, and safe. A default that is too LARGE folds after the prompt has
+    # already passed what the endpoint will accept: the call is refused, and
+    # folding then is repairing damage that has already been done. Wrong in the
+    # direction that breaks a conversation.
+    #
+    # 64000 is safe against the reference node by a wide margin — measured
+    # 2026-09-03, gpt-oss-20b reports loaded_context_length 120064 and
+    # max_context_length 131072 — and it is not safe against every node. Plenty
+    # of local models load at 8K or 32K, and against one of those a 64K
+    # assumption fails in the bad direction. That is accepted rather than hidden,
+    # for one reason: this number is only ever reached once BOTH other tiers have
+    # failed, which for an LM Studio pool means the box could not be asked at
+    # all. An operator serving a small model, or one whose node cannot be probed,
+    # sets context-lengths for it and never reaches this line — and the boot log
+    # and the first fold both say which tier answered, so nobody has to guess
+    # which case they are in.
+    default-context-length: ${LLM_DEFAULT_CONTEXT_LENGTH:64000}
+    # WHAT A CLASS NAME MEANS, FOR THE WHOLE SERVER. One class, one wire model.
+    #
+    # This was per pool until 2026-09-07, and per pool a class could mean two
+    # things at once. LlmDispatcher.route resolves a specifier by walking every
+    # pool and taking the LIGHTEST LOADED one that serves it, so two pools
+    # mapping `fast` to different models made the model a function of which box
+    # was busier: the same request answered by qwen or by GLM depending on queue
+    # depth, with nothing logged. That shipped when the Spark pool was added and
+    # was reverted the same day by deleting the second pool's map. One map is the
+    # shape fix — there is no second entry left to disagree with.
+    #
+    # THE KEY WAS BUILT FOR CAPACITY AND STILL DOES THAT. Its old comment said
+    # "the field exists so that adding a second [node] is config" — a second node
+    # serving the SAME model. Two pools both listing the model a class names both
+    # answer that class, because LlmPool.resolve answers for a class only when
+    # the pool serves the model it names, and the dispatcher load-balances
+    # between them. What is gone is one class meaning two models, which nothing
+    # ever wanted.
+    #
+    # context-lengths and compaction-thresholds DID NOT MOVE and are still per
+    # pool. A class is a statement about the fleet; a context length is a
+    # property of THIS NODE SERVING THAT MODEL — two nodes may load one model at
+    # different --ctx-size, and an operator may hold a margin under what a node
+    # reports. Moving those would assert a model has one length wherever it runs.
+    #
+    # LlmConfig REFUSES THE BOOT for a class naming a model no pool serves,
+    # naming the class, the model and every pool it searched. That check is what
+    # the move buys: per pool it was not a statement about anything, so the fault
+    # could only surface at the first request that named the class — and an agent
+    # naming an unserved model is DISABLED rather than refused, so the report was
+    # one quietly missing agent.
+    #
+    # THE PLACEHOLDER IS REPEATED FROM `models` BELOW, DEFAULT AND ALL, and the
+    # two must agree. They did not: 773c063 moved the pool's chat model default
+    # to qwen3.8-27b and left these two at qwen3.5-9b, so a boot with no
+    # LLM_CHAT_MODEL set sent `model: qwen3.5-9b` to a box that did not serve it
+    # and got a 404 at the first turn. Nothing caught it, because the old
+    # per-pool resolve returned whatever the map said without checking the pool
+    # served it. Both halves of that are now closed — the clause in resolve and
+    # the boot refusal above — so this drift cannot recur silently.
+    classes:
+      # ONE PLACEHOLDER PER MODEL, REFERENCED IN BOTH PLACES IT APPEARS, and
+      # that discipline is not style. Until 2026-09-07 `models` defaulted to
+      # qwen3.8-27b while these two defaulted to qwen3.5-9b -- one placeholder,
+      # two different defaults -- so with LLM_CHAT_MODEL unset every agent named
+      # a model the pool never served and got a 404 on its first turn. Live for
+      # two days, caught by the check below rather than by anyone noticing.
+      # Change a model here and change it in that pool's `models`, or the boot
+      # refuses; the two are meant to be edited together.
+      fast: ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
+      reasoning: ${SPARK_CHAT_MODEL:openai/gpt-oss-120b}
+      # REFUSAL FALLBACK -- a class an agent's `fallback:` can name. Commented,
+      # because a class must be served by a pool below or the boot refuses, and
+      # this jar ships no low-refusal pool. See the example pool at the end of
+      # `pools` for the rest, and bin/application-local.example.yml for the
+      # overlay bin/plowshare-deployment reads so none of this needs editing here.
+      #
+      # low_refusal_osint: ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
+    # WHICH MACHINE RUNS HARNESS WORK. Not a class: `fast` and `reasoning` above
+    # say what kind of thinking an agent's job needs, and a fold needs no kind of
+    # thinking, it needs a machine. This key was introduced because
+    # `plowshare.memory.model` was `fast`, which said "run memory digests
+    # wherever the quick conversational agents run" -- a sentence nobody meant.
+    system: ${SYSTEM_MODEL:openai/gpt-oss-120b}
+    # A TYPE THAT WANTS A DIFFERENT MACHINE, and the reason is measured rather
+    # than felt. implementation rationale
+    # §5.1: the shipped memory prompts on gpt-oss-120b answer NONE where Gemma
+    # finds the branch, take 38s at medium effort to choose one, and write 533
+    # words against their own 300-word limit. A fold is long-form summarising
+    # and wants the large model; a digest is terse and instruction-bound and
+    # does not.
+    #
+    # Commented at their default of "inherit", like the pool keys below: a key
+    # an operator cannot see is a key they will guess at.
+    system-overrides:
+      memory: ${SYSTEM_MEMORY_MODEL:fast}
+      # Required orchestration builder (orchestrations/design_orchestration.md).
+      # Unset: the system model. It interviews the person, reads definitions and drafts a procedure.
+      authoring: ${SYSTEM_AUTHORING_MODEL:}
+      # The stuck trap's advisor (agents/stuck_advisor.md). Unset: the system model.
+      # Whatever model this names is sent the brief -- the person's question, the
+      # run's tool calls and excerpts of their results -- so name one you would
+      # send those to.
+      advisor: ${SYSTEM_ADVISOR_MODEL:}
+      # The call validator (agents/call_validator.md), asked when a run writes a call to a safe
+      # tool as text twice in a row. Unset: the system model. Whatever model this names is sent
+      # the held reply, the tool's schema and the run's request, so name one you would send
+      # those to.
+      validator: ${SYSTEM_VALIDATOR_MODEL:}
+      # The acceptance checker (agents/acceptance_checker.md), run by the harness for an
+      # orchestration whose definition names it: at the plan, on each answer the conductor gives
+      # its questions, and before the acceptance commands run. Unset: the system model. Whatever
+      # model this names reads the run's spec.md, plan.md and the project's files with read-only
+      # tools, so name one you would send those to.
+      checker: ${SYSTEM_CHECKER_MODEL:}
+      # The command judge (agents/command_judge.md), asked before a person is asked to allow a
+      # run's acceptance commands or its check: clearly safe, nobody is asked. Unset: the system
+      # model. Whatever model this names is sent the commands, their input and the directory they
+      # run in, so name one you would send those to.
+      judge: ${SYSTEM_JUDGE_MODEL:}
+    #   compaction: <specifier>
+    # One pool per inference host. A second machine is a second entry here and
+    # no code change. LLM_BASE_URL keeps the name Anchor already uses, so an
+    # operator who configured one box does not learn a second vocabulary.
+    #
+    # A pool cannot be overridden key by key. A property source of higher
+    # precedence that names any key inside pools[0] replaces the whole list
+    # entry rather than merging with it, and the half it discards is not
+    # reported — measured, including a variant where a restated pool lost its
+    # then-per-pool classes map in silence. (That map has since moved to
+    # plowshare.llm.classes above, which is a top-level key and so is not subject
+    # to this; the measurement is kept because it is about list entries and every
+    # remaining pool key is one.) The placeholders below are therefore the
+    # supported override: the host, the models, the key and the width are
+    # placeholders, and this YAML stays the sole source of the pool itself. The
+    # slot counts below are not, deliberately — they are a property of the box
+    # rather than of a deployment, and a second box is a second entry here in any
+    # case, since a pool cannot be assembled from an environment variable.
+    pools:
+      # NAMED FOR THE BOX, NOT FOR WHERE THE BOX IS. This was `local` until
+      # 2026-09-07, which is a property of a pool wearing its name: two local
+      # instances can exist, and both of this fleet's nodes are on the operator's
+      # own network, so calling one of them `local` implied the other was not.
+      # `spark` below was named after its hardware from the start, and that is
+      # what made its neighbour's name visible as wrong. This box is a Mac
+      # Studio.
+      #
+      # AND THE WORD WAS ALREADY TAKEN, for something that earns it:
+      # LocalProvider.NAME is "local", naming the FILE provider — the server's
+      # own disk as against a client machine's. That is a real binary with two
+      # values and no third, so `local` there is a name for a kind rather than a
+      # property, and one string meaning two unrelated things in two subsystems
+      # is what a grep cannot tell apart.
+      #
+      # `name: studio` sits two lines above `provider: lmstudio`, which reads as
+      # a collision and is the point: the box and the software it happens to run
+      # are different things, and having both on screen is what makes that
+      # legible. It must not be named for the provider — `lmstudio` would be the
+      # same category error a third time, coupling an identity to software that
+      # can change without the box changing. An operator who would rather not
+      # rely on a reader noticing should use `mac`, at the cost of the parallel
+      # with `spark`.
+      #
+      # Nothing branches on a pool's name. It reaches logs, the dispatcher's boot
+      # line and refusal messages, so a rename is operator-visible and no more —
+      # and LLM_BASE_URL is not pool-named, so a deployment setting it is
+      # unaffected.
+      - name: studio
+        base-url: ${LLM_BASE_URL:http://localhost:1234/v1}
+        # Env-var form, never a literal. A key committed in YAML is how keys leak.
+        api-key: ${LM_STUDIO_API_KEY:}
+        # Whether a caller that asks for prompt-processing progress may get it
+        # from LM Studio's own websocket API instead of /v1. Off, and /v1 stays
+        # the path every call takes until an operator says otherwise.
+        #
+        # Only /v1 is the contract every backend honours, so this is opt-in per
+        # pool and meaningless unless provider is lmstudio. What it buys is the
+        # one figure /v1 has no field for: measured 2026-09-02 against the
+        # reference box, a novel 30 415-token prompt took 119 seconds before its
+        # first token, and over /v1 that is 119 seconds in which a run shows
+        # nothing at all. The same request over the websocket reports progress
+        # throughout. The same api-key above authenticates both.
+        prefill-progress: ${LM_STUDIO_PREFILL_PROGRESS:false}
+        # Verified against `GET /v1/models` on the reference box 2026-08-29:
+        # it serves exactly these two ids, and a single-input /v1/embeddings
+        # call returned a 768-wide vector, matching embedding-dim and the
+        # vector(768) column in V1__memories.sql. This is worth re-checking
+        # whenever the box's loaded models change: a wire model name is matched
+        # exactly by the endpoint, and a name the server does not know fails at
+        # the call rather than at startup — where the write path swallows it,
+        # so the symptom is an archive that stores everything and embeds
+        # nothing rather than an error.
+        #
+        # The first entry repeats embedding-model's own placeholder rather than
+        # the literal: a pool only serves what it lists, so an operator who
+        # exports LLM_EMBEDDING_MODEL and finds nothing routes to it has a
+        # configuration puzzle with two halves that must agree. Repeating the
+        # expression makes them agree by construction — and where they still do
+        # not, LlmConfig refuses the boot instead of leaving every memory
+        # unembedded and every recall empty.
+        models:
+          - ${LLM_EMBEDDING_MODEL:nomic-embed-text}
+          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
+        # WHICH OF THIS POOL'S MODELS CAN BE SHOWN A PICTURE.
+        #
+        # Declared and not discovered, because /v1 has no field to read it from
+        # -- the same reason `context-lengths` is written out for a pool whose
+        # provider cannot be asked. LM Studio's own /api/v0/models does say
+        # `type: vlm`, but that is a vendor endpoint one provider has and the
+        # rule has to hold for all of them.
+        #
+        # MEASURED 2026-09-07 before it was written here: a 64x64 PNG through
+        # the OpenAI image_url shape came back "A red square is in the image."
+        # in 3.0s. Audio was measured the same day and does NOT work -- the
+        # model's 751-tensor audio tower is loaded and LM Studio exposes no door
+        # to it, so `vision` is the whole of what this pool can be shown.
+        vision:
+          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
+        # Which backend this is, and therefore what may be asked of it beyond
+        # /v1. It changes no chat and no embedding call: those go to /v1 either
+        # way, because that is the contract every backend honours.
+        #
+        # The reference box runs LM Studio, which publishes a fact /v1 has no
+        # field for — how many tokens each model is currently LOADED at, which
+        # is not the same as what the model is capable of. Verified against
+        # `GET /api/v0/models` on 2026-08-31: qwen3.5-9b reports
+        # max_context_length 262144 and loaded_context_length 128000. Building a
+        # prompt to the first is valid for the model and refused by the server
+        # running it.
+        #
+        # THAT MEASUREMENT IS ABOUT A MODEL THAT IS NO LONGER THE DEFAULT --
+        # 773c063 moved the chat default to qwen3.8-27b on 2026-09-06 and this
+        # paragraph was not revisited. It is kept rather than restated for the
+        # current model, and deliberately: what it is evidence for is that the
+        # two numbers DIFFER, by a factor of two on a real box, which is the
+        # whole reason `provider` is worth declaring. Re-measuring against
+        # qwen3.8-27b would produce a different pair of numbers and the same
+        # argument, and a figure nobody re-checks is worse read as current than
+        # read as dated. Treat both numbers as historical; the ratio is the point.
+        #
+        # Set this to `openai` if LLM_BASE_URL is retargeted at anything that is
+        # not LM Studio. Left as lmstudio, that endpoint 404s the vendor path
+        # and the pool logs one warning and carries on with no length — nothing
+        # else changes, but the warning is there to be acted on.
+        provider: ${LLM_PROVIDER:lmstudio}
+        # A context length an operator has decided rather than left to be
+        # discovered, keyed by wire model name. A configured value WINS over a
+        # discovered one, on purpose: an operator holding a margin under what
+        # the node reports is doing it deliberately. Where neither answers,
+        # LlmConfig names the pool and the model at boot — a warning, not a
+        # refusal, because a model name the server does not know is meant to
+        # fail at the call rather than at startup.
+        #
+        # Commented at its default of "nothing", like the keys below. Both
+        # spellings of a dotted key bind — measured on Spring Boot 3.3.5 — and
+        # the bracketed one is shown because it is explicit about where the key
+        # ends.
+        # context-lengths:
+        #   "[qwen3.5-9b]": 128000
+        # The prompt size, in tokens, at which a fold of a conversation on this
+        # model becomes DUE: its older turns are folded into a summary when the
+        # turn ends, if the conversation is still over this then. Keyed by wire
+        # model, like the key above, and a configured value wins over the
+        # default the same way.
+        #
+        # The default follows the context length the model turns out to be
+        # loaded at (implementation rationale
+        # §1a): NONE at 64K or less, which cannot spare room to an early fold;
+        # 60% just above 64K, rising linearly to 75% at 200K and staying there —
+        # 87 895 tokens on a 131 072 window. It is not the wall, and folding at
+        # the wall is what this replaced: measured 2026-09-02, a turn costs
+        # roughly 0.845 s more for every further thousand tokens of history it
+        # carries. See implementation rationale
+        #
+        # Those are one model's curves on one box. Set this if you serve
+        # something else, or the same thing on faster hardware. Lower folds more
+        # often, which is cheaper per turn and loses more to summarising; it may
+        # not pass the model's context length, and must stay below the in-turn
+        # threshold below — the boot refuses either wherever it can see both.
+        # compaction-thresholds:
+        #   "[qwen3.5-9b]": 40000
+        # The prompt size, in tokens, at which a conversation on this model folds
+        # NOW, inside a turn: at the next tool-call boundary, before the next
+        # model call, keeping the turn's request and its latest whole steps. A
+        # single turn of a hundred model calls can outgrow the window before it
+        # ends, which is why this exists. The default is 90% at 64K or less,
+        # falling linearly to 80% at 128K and 80% beyond; a configured value must
+        # be above compaction-thresholds and within the context length.
+        # compaction-now-thresholds:
+        #   "[qwen3.5-9b]": 100000
+        # NO `classes` HERE, AND SETTING ONE STOPS THE BOOT. The key is
+        # plowshare.llm.classes, above, one map for the server. LlmConfig refuses
+        # a pool that still declares it, naming this pool and the new location,
+        # rather than ignoring it — an operator who upgraded without moving the
+        # key would otherwise get a server whose classes resolve to nothing and
+        # whose configuration still looks correct.
+        #
+        # The reference box generates one stream at a time and will embed while
+        # it does. This is the whole reason the dispatcher exists.
+        #
+        # Written out rather than left to the defaults, unlike the keys below:
+        # LlmConfig refuses a lane sized to zero, and an operator who wants a
+        # lane switched off has to be able to see the key before they can be
+        # told that removing the pool is what does it.
+        chat: 1
+        embedding: 2
+        submit-timeout: 30s
+        # The rest of a pool, commented at its default rather than set, because
+        # a key an operator cannot see is a key they will guess at.
+        #
+        # Every duration in this pool, submit-timeout above included, takes a
+        # bare number as SECONDS, except retry-initial-backoff, which takes
+        # MILLISECONDS — it keeps the unit of
+        # the retry-initial-backoff-ms key it replaced, so a value carried
+        # across still means what it meant. Writing the unit works everywhere
+        # and always wins; prefer it. See PoolProperties for the whole account.
+        #
+        # chat-timeout bounds the three model calls that still block — the
+        # compaction summariser, the scribe and the schedule reader — and
+        # nothing else. Every turn an
+        # agent takes is streamed, because a model that thinks for 96 seconds
+        # blows a 60-second wait on an answer that arrives all at once. Raising
+        # this will not help a turn; see PoolProperties#chatTimeout.
+        #
+        # max-stream-duration is not a second spelling of streaming-timeout.
+        # That one is inactivity between chunks; this one is the whole of a
+        # streaming call, and it is the only total bound a stream has, because
+        # okhttp-sse switches the call timeout off once the response opens. An
+        # endpoint emitting one keepalive byte a minute never trips the
+        # inactivity bound at all.
+        #
+        # streaming-timeout bounds the silence BEFORE the first chunk as well as
+        # the gaps between chunks, and the first one is the expensive one: the
+        # node reads the whole prompt before it emits anything and that prefill
+        # is silent. It was 90s, chosen against inter-chunk gaps before any
+        # prefill had been measured; a 30 415-token prompt then prefilled for
+        # 119 seconds and blew it. 300s clears that with margin and covers a
+        # prompt of roughly 76 700 tokens at the rate it implies — not the
+        # 128 000 this pool's chat model is loaded at, which would need about
+        # 500s. See PoolProperties#streamingTimeout for why the answer to that
+        # is not simply a larger number here.
+        #
+        # LlmConfig refuses the boot, naming the pool and the key, for a
+        # non-positive value of any of the first five (retry-max-attempts must
+        # be at least 1, meaning one attempt and no retry) — and for a NEGATIVE
+        # retry-initial-backoff, where 0ms is a real setting meaning "retry with
+        # no pause". (This said "none of the six may be zero", which told an
+        # operator a value was refused that the code's own error message
+        # recommends.) Zero is worth calling out because
+        # OkHttp reads it as "no timeout" and that is not what it does here: a
+        # chat-timeout of 0 falls back to the transport's own twenty-second
+        # ceiling, which is SHORTER than the sixty it replaced, and a
+        # streaming-timeout of 0 loses every bound except max-stream-duration.
+        # Before that check, a negative value failed the boot as OkHttp's
+        # "timeout < 0" — three words naming neither the pool nor the key.
+        # chat-timeout: 60s
+        # streaming-timeout: 300s
+        # max-stream-duration: 10m
+        # embedding-timeout: 30s
+        # retry-max-attempts: 2
+        # retry-initial-backoff: 500ms
+  # Where an operator's agent definitions live: a directory of .md files with
+  # YAML frontmatter, one per agent. A filesystem path and never a classpath
+  # location, because an agent is configuration rather than code — changing a
+  # prompt is not a rebuild — and because the definitions this repository ships
+  # are inside the jar at run time, where nothing can list them as a Path.
+  #
+  # `agents`, relative to the process's working directory, is the default. There
+  # is no absolute path that is right on two machines, and a server started with
+  # no key at all should still pick up a directory dropped beside it.
+  #
+  # Seed it from plowshare-server/src/main/resources/agents, which holds the
+  # scribe and the promotion judge this server is built around. They are
+  # reference copies: edit yours, not those.
+  #
+  # The asymmetry is deliberate and is the spec's. A directory that IS NOT THERE
+  # starts the server — no scribe judges anything, every write is filed as new
+  # and says so in its own reason, and a write is never lost over an agent
+  # nobody deployed. A directory that IS there and is wrong STOPS the boot
+  # naming the file and the key: a cycle, an unknown tool, an unknown callee, a
+  # model no pool serves. A path that exists and is not a directory also stops
+  # the boot, because that is a typo rather than a decision.
+
+      # THE SECOND HOST, AND SINCE 2026-09-09 A ROUTED ONE.
+      #
+      # A DGX Spark serving vLLM over plain /v1. It was declared and deliberately
+      # not routed to -- no agent and no class named its model, so declaring it
+      # cost a provider at boot and nothing else. `plowshare.llm.classes` now
+      # maps `reasoning` onto the model below, so work does reach it, and the
+      # paragraph that used to say otherwise was stale rather than wrong when
+      # written.
+      #
+      # That split is deliberate rather than timid. `requireModelServed`
+      # DISABLES an agent naming a model no pool serves -- it only refuses the
+      # boot for the three required agents -- so pointing an agent here before
+      # the node actually serves this model would not fail loudly. It would
+      # come back as one quietly missing agent.
+      #
+      # PROVIDER openai AND NOT lmstudio. The LM Studio decorator exists for the
+      # facts /v1 has no field for, read over its own /api/v0. vLLM serves /v1
+      # and nothing else, so the plain provider is the whole of what is true
+      # here -- and `canDiscover()` is false for it, which is why the next key
+      # is written out rather than left to be found. vLLM does report
+      # max_model_len on /v1/models, which the plain provider does not read; the
+      # key below is therefore hand-kept and checkable against that field.
+      #
+      # WHY context-lengths IS SET. Without it
+      # `warnAboutUnknownContextLengths` names this model at every boot and
+      # compaction falls back to default-context-length, 64000 -- half of what
+      # this node serves, so folds would start far earlier than they need to.
+      #
+      # THE NUMBER IS THE SERVED WINDOW, NOT THE MODEL'S MAXIMUM. Under
+      # llama.cpp that was the sharper warning, because --ctx-size is divided
+      # across --parallel slots and raising concurrency silently shrank it. vLLM
+      # does not: --max-model-len is per request and concurrency draws on a
+      # shared KV cache instead. So this survives `chat` being raised -- what it
+      # does not survive is --max-model-len being lowered to fit the cache, which
+      # is the one change that makes this line a lie without announcing itself.
+      #
+      # THE WIRE NAME IS LOAD-BEARING. `SamplingProfiles` matches a family by
+      # startsWith after stripping a `vendor/` prefix, so `openai/gpt-oss-120b`
+      # reaches the shipped `gpt-oss` profile. A name that matches nothing
+      # resolves to the default profile and never says so -- the failure is
+      # silent and looks like the model being bad.
+      #
+      # vLLM reports the HuggingFace repo id it was launched with, which is
+      # already the name above; --served-model-name overrides it and must then
+      # match this key, `classes.reasoning` and `context-lengths` together. Under
+      # llama.cpp the same hazard was the GGUF's absolute path, fixed with
+      # --alias; the flag differs, the rule does not.
+      - name: spark
+        # llama.cpp's own default port, on loopback. THE ADDRESS OF A REAL NODE
+        # IS NEVER THE SHIPPED DEFAULT: it would put one deployment's network
+        # into everyone's jar, and a test context inheriting it would dial a
+        # live machine. An operator points this at the box, exactly as
+        # LLM_BASE_URL already does for `studio`.
+        base-url: ${SPARK_BASE_URL:http://localhost:30000/v1}
+        api-key: ${SPARK_API_KEY:}
+        models:
+          - ${SPARK_CHAT_MODEL:openai/gpt-oss-120b}
+        provider: openai
+        # THIS POOL IS REACHED BY MODEL NAME, AND NOTHING ELSE REACHES IT.
+        #
+        # A first draft mapped `fast` and `reasoning` on this pool as well, back
+        # when `classes` was a per-pool key. That is the bug the key was moved
+        # for: `LlmDispatcher.route` resolves a specifier by walking every pool
+        # and taking the LIGHTEST LOADED one that serves it, so `studio` and
+        # `spark` both answering to `fast` meant the request landed on qwen or on
+        # GLM depending on which node happened to be busier -- two models behind
+        # one name, chosen by load.
+        #
+        # It is no longer expressible. `fast` names one model server-wide, and a
+        # pool answers for a class only when it serves the model that class
+        # names -- so this pool would answer `fast` only by listing qwen, which
+        # would be a second node serving the SAME model and is exactly the
+        # capacity case the key exists for.
+        #
+        # So: this pool's model is served by exactly one pool, naming it routes
+        # here and nowhere else. `fast` resolves to `studio`; `reasoning` now
+        # resolves here, which is the sentence at the top of this block. An agent
+        # that wants this model can also say so by name.
+        # THE THIRD PLACE THE MODEL NAME APPEARS, and the one that does not
+        # follow the placeholder. `classes.reasoning` and `models` above are both
+        # ${SPARK_CHAT_MODEL}, so they move together; a map KEY cannot be a
+        # placeholder, so this one is a literal and must be edited by hand.
+        #
+        # That is not a latent trap, because the boot refuses the mismatch by
+        # name -- "pool 'spark' sets a context-length for X, which it does not
+        # serve" -- which is how this very line was found after the node changed
+        # models. The discipline note on `classes` says "both places it appears";
+        # it is three, and this is the third.
+        context-lengths:
+          "[openai/gpt-oss-120b]": 131072
+        # EIGHT, and not `studio`'s one. vLLM batches continuously: concurrent
+        # requests share one KV cache rather than each taking a slice of the
+        # context, so parallelism here costs throughput headroom and not window.
+        # That is the whole difference from the llama.cpp note above, and it is
+        # why this number can be raised at all.
+        #
+        # It is a ceiling on what THIS server keeps in flight, not a promise the
+        # node can serve them: vLLM queues past --max-num-seqs, so a number above
+        # that buys latency and no throughput. No embedding lane: this node
+        # serves one completion model and LlmConfig refuses a lane sized to
+        # zero, so the key is absent rather than set to 0.
+        chat: 8
+        # SWARM SLOTS -- spec 2026-09-29 §5. How many of the eight the swarm scheduler
+        # may fill with board work at once; the other three are never taken by swarm
+        # work. They are not held for a person: people's turns share them with every
+        # other run that is not scheduled.
+        # Below `chat`, or the boot refuses it. Absent means none: `studio` has one
+        # chat slot, so it can take no swarm work and says nothing.
+        swarm: 5
+        submit-timeout: 30s
+
+      # ---- REFUSAL FALLBACK: an example, commented ----------------------------
+      #
+      # An agent can have a probable refusal from its own model answered by a
+      # different model. Three pieces, and all three are needed:
+      #
+      #   1. A POOL that serves the low-refusal model. Any OpenAI-compatible
+      #      endpoint -- the Spark, a Mac, another server; nothing about an agent
+      #      depends on which.
+      #
+      #      - name: refusal-fallback
+      #        base-url: ${FALLBACK_BASE_URL:http://localhost:8001/v1}
+      #        api-key: ${FALLBACK_API_KEY:}
+      #        models:
+      #          - ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
+      #        provider: openai
+      #        chat: 2
+      #        submit-timeout: 30s
+      #
+      #   2. A CLASS naming that model -- the commented `low_refusal_osint` line
+      #      under plowshare.llm.classes above.
+      #
+      #   3. An AGENT that is allowed to use it. Refusals are only rerouted for an
+      #      agent whose definition says so; detection alone reroutes nothing.
+      #      In the agent's .md frontmatter (for an operator's own agents,
+      #      $PLOWSHARE_DATA_DIR/global/agents/<name>.md):
+      #
+      #        fallback:
+      #          when: [refusal]          # `when`, not `on`: YAML reads `on` as true
+      #          model: low_refusal_osint # a class above, or a wire model
+      #          max-attempts: 1          # the only value accepted
+      #
+      # Uncommenting here works, but a pool list cannot be extended key by key
+      # (see the note above `pools`), so a deployment is better served by the
+      # overlay: copy bin/application-local.example.yml to
+      # ~/.config/plowshare/application-local.yml and start with
+      # bin/plowshare-deployment, which hands it to Spring as an additional
+      # config location.
+      #
+      # WHAT HAPPENS WITHOUT IT. An agent whose fallback class no pool serves
+      # boots with its fallback dropped and a warning, and behaves as it would
+      # with none. A fallback that is configured but unreachable leaves the
+      # agent's own answer standing. Neither stops a run.
+
+  agents:
+    # `directory` retired with task 10: it named a standalone filesystem path
+    # for an operator's own .md agent definitions, worked around the classpath
+    # not being loadable as a Path, and is superseded now that agents load
+    # from the shipped classpath seed layered under this server's own data
+    # tree (global/agents/, global/bots/, and each project's own tier) --
+    # ClasspathDefinitions and DataLayout, respectively. Left in place it would
+    # have loaded the same shipped definitions twice, from two sources.
+    #
+    # How many model calls one curator pass may spend when the caller of
+    # memory_curate names no number of its own. Task 9's arithmetic, not a round
+    # number: a ruling is TWO model calls, because promotion_judge.md tells the
+    # judge to read the memory before it rules, so 200 settles about a hundred
+    # candidates. Spending it is not a failure — the pass stops, says so, and
+    # keeps every promotion and proposal it already made.
+    curator-budget: ${PLOWSHARE_CURATOR_BUDGET:200}
+  # What a conversation is opened with when whoever opened it did not say.
+  #
+  # WHY THIS KEY EXISTS, given that this server spent several slices refusing to
+  # have it. POST /v1/conversations answered 400 to a body with no
+  # `maxModelCalls`, and the argument was good: a curator pass has a knowable
+  # workload — a candidate set, two model calls a ruling — so curator-budget
+  # above is arithmetic, and how much a person is going to say has no such
+  # arithmetic behind it. A number the SERVER computed from nothing would be
+  # folklore, which is the thing this project keeps deleting rather than adding.
+  #
+  # That argument is kept in full and nothing here computes anything. What it got
+  # wrong is who the refusal reached. It did not reach a script that could be
+  # taught the number; it reached a PERSON, through a console that had to put a
+  # "model calls" field in front of them before they could open a conversation at
+  # all — asking them for exactly the number nobody has a method for, with no
+  # explanation, before they had said a word. The owner's judgement on that
+  # field: "from a user point of view it is messy and quite convoluted with no
+  # explanation ... it should just inherit that from the system".
+  #
+  # An operator setting a cost policy for their own box, once, in the file that
+  # already holds every other cost bound this server takes, is a different act
+  # from a server inventing a number on a caller's behalf. This is that act. A
+  # body that names maxModelCalls is still honoured exactly as it was, and 0 is
+  # still refused rather than folded into this — a caller sending 0 has said
+  # something, and it is not the same as saying nothing.
+  #
+  # WHY 240. Arithmetic on a measurement that is already in the tree, rather than
+  # a round number: interlocutor.md records that "a full turn of this agent costs
+  # about twelve calls", measured, and sets its own max-model-calls at 40 for
+  # "three of those with room" — a number that bounds a run started on the
+  # agent's own behalf and is inert for a turn of an actual conversation, which
+  # spends the conversation's. Twenty such turns is 240, and twenty utterances is
+  # a conversation rather than a question.
+  #
+  # The two directions of being wrong are not symmetric here either. Too SMALL
+  # stops a person mid-thought at a bound they never set, and the remedy —
+  # opening another conversation — loses the history. Too LARGE costs a tab left
+  # open on a loop more of somebody's inference budget before CALL_BUDGET ends
+  # it. Neither breaks anything: spending a budget is a designed ending, the
+  # conversation says so, and every turn it did take is in the archive. That is
+  # what makes a number in the middle safe to ship and an operator's to change.
+  conversations:
+    default-budget: ${PLOWSHARE_CONVERSATION_BUDGET:240}
+    # What becomes of a conversation's stored tool results, and where they are
+    # written first.
+    #
+    # WHAT THE PROBLEM IS, because these keys make no sense without it. The
+    # `entries` table holds tool output whole: file bodies up to
+    # FileTools.MAX_DISPLAY_CHARS, which is 100 000 characters, read off this
+    # machine's disk or a person's, kept for ever, and redeemable from several
+    # machines under presence through `result_read`. Every run gets a
+    # conversation now -- a curator pass over a few hundred memories is a few
+    # hundred of them -- so the volume stopped being "what a person typed" and
+    # became "everything the system has ever done". Nothing removed one until
+    # V19.
+    #
+    # WHAT RETENTION DOES, and it is narrower than "deletes conversations". It
+    # nulls `entries.content` for tool results and keeps the row: the trajectory
+    # stays complete -- no gaps in ordinals, no dangling handles -- and what goes
+    # is the bytes. A six-month-old run is still reviewable; you simply cannot
+    # re-read the file it read. `result_read` on such a handle answers with when
+    # it was ejected and where it went, rather than with "there is no result at
+    # that address", which would send a model looking for a handle it never
+    # invented.
+    #
+    # WHAT TRIGGERS IT: nothing here. There is no scheduler in this server and
+    # this file adds no interval key. A sweep is `POST /v1/retention/sweep`, and
+    # when it runs is the operator's business -- cron, a systemd timer, a
+    # CronJob, a person. Two reasons, and archive.Retention carries four: a
+    # sweep deletes bytes and a timer deletes them with nobody watching, and a
+    # timer started from a bean would fire in every one of the dozens of tests
+    # that stand a Spring context up against a real database. A sweep is safe to
+    # call twice.
+    retention:
+      # Where an ejected payload is written before it is taken out of the row.
+      #
+      # SERVER-ROOTED, AND SAID RATHER THAN DISCOVERED. Under presence this
+      # server may hold no user disk at all -- the person's files are on their
+      # own box, reached through the file channel -- so there is no "their
+      # machine" for an export to land on, and an export that tried would either
+      # fail on a headless deployment or write to whichever machine happened to
+      # be attached. That sentence is where the data directory came from: it is
+      # the argument for this server owning files at all, found here, for a
+      # different feature, before there was anywhere to put them. The consequence
+      # an operator has to know: IF THIS SERVER'S DISK
+      # IS NOT BACKED UP, NEITHER IS THE EXPORT. Retention moves a liability out
+      # of the database onto a filesystem; it does not make it somebody else's.
+      #
+      # THE FORMAT IS OPEN AND IS NOT INHERITED FROM ANYWHERE ELSE IN THIS
+      # CODEBASE. An export nobody can open without the system that wrote it is
+      # not an export. Per tree:
+      #
+      #     <exports>/<root conversation id>/manifest.jsonl
+      #     <exports>/<root conversation id>/payloads/<conversation>/<ordinal>.txt
+      #
+      # The payload files hold exactly the bytes the tool returned, UTF-8, one
+      # per result, nothing wrapped around them -- `cat` works, `grep -r` works,
+      # a text editor works. The manifest is JSON Lines, one object per line:
+      # which conversation and which tree, the origin, the agent, the project,
+      # where in the log, the call, the handle, the size, when it happened and
+      # when it went. `jq` reads it, `wc -l` counts it, `head` shows the front of
+      # it, and a truncated file is still valid up to its last newline.
+      #
+      # KEPT BY DEFAULT, unlike the two ages below, and the asymmetry is
+      # deliberate. An age decides WHETHER anything is ejected; this decides
+      # whether what is ejected is KEPT ANYWHERE. Nothing is ejected until an
+      # operator sets an age or marks a conversation by hand, so an unused
+      # directory costs nothing -- but on the day something is ejected, the
+      # default that loses the bytes and the default that keeps them are not
+      # equally good guesses.
+      #
+      # UNSET, AND THE DIRECTORY IS THE DATA DIRECTORY'S OWN PLACE FOR THEM:
+      #
+      #     <data-dir>/projects/<project-id>/exports/<root conversation id>/
+      #
+      # This key is the OVERRIDE. It was the only way to say it before there was
+      # a data directory, and its default was a bare relative `exports` that
+      # landed wherever the server happened to start; the tree is now one root
+      # with a known shape under it, Maven's arrangement, and every path in it is
+      # still individually nameable. Set this and the trees go under the
+      # directory you name instead -- still one per project id, so "which project
+      # is this export of" has the same answer on every deployment.
+      #
+      # BY THE PROJECT'S ID AND NEVER ITS NAME. A project can be renamed, and a
+      # directory named for a name is one a rename orphans with nothing failing.
+      # The manifest still carries the name on every line, because that is the
+      # word a person reading the file typed.
+      #
+      # A COST, if you already set this key: trees written from now on land one
+      # level deeper than the ones already there. The old ones are untouched and
+      # still open -- the manifest's paths are relative to their own tree, which
+      # is exactly what that property was for.
+      #
+      # SET IT TO NOTHING -- `export-directory: ""` -- to keep no export at all.
+      # That is a real configuration, a deployment that wants the liability gone
+      # rather than moved, and `result_read` then tells a model this server keeps
+      # none rather than naming an empty place. It is also the value that fences
+      # off nothing, because there is nothing to fence. NOT SETTING THE KEY and
+      # SETTING IT TO NOTHING are therefore two different configurations, which
+      # is why the key is absent below rather than present and blank.
+      #
+      # NO PROJECT'S WORKSPACE MAY COVER THIS DIRECTORY, whatever a `projects`
+      # row says. It is a mandatory exclusion beside the configuration file, the
+      # sampling directory, the data directory and the operator token -- and it
+      # is the first of them fenced for the confidentiality of USER CONTENT
+      # rather than for a credential or for a boot-time input. Every property
+      # that makes an export a good archive (`cat` works, `grep -r` works, the
+      # manifest names every conversation and handle in the tree) makes it a good
+      # thing for an agent to find, and one conversation's ejected file bodies
+      # are not another conversation's to read.
+      #
+      # IT WAS FENCED BEFORE THAT ENTRY EXISTED, BUT ONLY BY ACCIDENT OF ITS OLD
+      # DEFAULT. `exports` was relative, so it landed under the working
+      # directory, which is excluded as a location; setting PLOWSHARE_EXPORT_DIR
+      # to an absolute path -- the ordinary thing to do when the payloads outgrow
+      # the disk the server is installed on -- put it outside every fence, and
+      # nothing said so. Safe because of where a default happened to put it is
+      # not the same as safe because of a rule. The data directory is fenced by
+      # its root for the same reason, so that a subdirectory added later does not
+      # have to be remembered.
+      # PLOWSHARE_EXPORT_DIR IS RETIRED, and this is the notice. It worked
+      # because this key used to be written here with that variable as its
+      # placeholder; the key is now absent, so unset means the data directory,
+      # and there is nothing for the variable to substitute into. To move the
+      # whole tree, including these, set PLOWSHARE_DATA_DIR. To move ONLY the
+      # exports, uncomment the line below or export
+      # PLOWSHARE_CONVERSATIONS_RETENTION_EXPORTDIRECTORY.
+      #
+      # An operator upgrading with PLOWSHARE_EXPORT_DIR still set loses nothing:
+      # what is already written stays where it is and stays readable, and new
+      # trees go under the data directory.
+      #
+      # export-directory: /srv/plowshare-exports
+      # How many days a curator's ruling is kept before a sweep marks it.
+      #
+      # UNSET, AND THAT IS THE DEFAULT RATHER THAN A GAP. This file ships numbers
+      # when there is arithmetic for them -- curator-budget is 200 because a
+      # ruling is two model calls, default-budget is 240 because a turn of the
+      # interlocutor measured about twelve. There is no arithmetic for "how many
+      # days a curator trace is worth keeping"; it depends on what this operator
+      # debugs, how often, and what their disk costs.
+      #
+      # AND THE TWO DIRECTIONS OF BEING WRONG ARE NOT SYMMETRIC, which is what
+      # decides it. default-budget can ship a number because both ways of being
+      # wrong there are recoverable: too small stops somebody mid-thought, too
+      # large costs some inference budget, and spending a budget is a designed
+      # ending. Here, too large costs disk and TOO SMALL DELETES A FILE BODY. A
+      # default that deletes is a default that has to be right, and this one
+      # cannot be derived -- so an unconfigured server ejects nothing however
+      # often a sweep is run.
+      #
+      # WHY THE CURATOR IS THE ONE TO SET FIRST. What a curator pass DECIDED is
+      # recorded by the machinery it acts through -- proposals, promotions, the
+      # reason log -- independently of any conversation. Its conversation is a
+      # debugging trace of how it got there rather than the record of what was
+      # decided, so trimming it soonest loses nothing that matters. That the
+      # decision record exists elsewhere is a fact this policy relies on, not a
+      # guarantee it makes.
+      #
+      # Zero is refused rather than read as "off": leave the key unset. "0 days"
+      # reads as "never" to one person and "immediately" to another, and the one
+      # who typed it meaning the first would find out from their data.
+      curator-after-days: ${PLOWSHARE_CURATOR_EJECT_AFTER_DAYS:}
+      # How many days a run started on its own behalf -- a script, CI, curl, an
+      # MCP `agent_run` -- is kept before a sweep marks it. Unset, for the reason
+      # above.
+      #
+      # LOOSER IS NOT FREE, and the design corrects itself on exactly this. The
+      # tempting justification is that the caller already has the record, and it
+      # only half holds: a foreign harness logs the BOUNDARY -- the call it made
+      # and the answer it got -- and has no idea which files the run read, which
+      # calls failed or how many steps it took. PLOWSHARE'S RECORD OF THE
+      # INTERIOR IS THE ONLY ONE THAT EXISTS. So this is a deployment's decision
+      # about its own disk, not a discount justified by somebody else's log.
+      submission-after-days: ${PLOWSHARE_SUBMISSION_EJECT_AFTER_DAYS:}
+      # THERE IS NO `turn-after-days` AND THERE IS NO `delegation-after-days`,
+      # and both absences are decisions.
+      #
+      # A PERSON'S CONVERSATION IS NEVER MARKED AUTOMATICALLY. A key here would
+      # be this server offering to decide, on a timer, that somebody is finished
+      # with what they said. They archive it themselves and mark it themselves,
+      # through PUT /v1/conversations/{id}/lifecycle, and a sweep then ejects it
+      # like any other marked tree; what has no configuration is the DECIDING.
+      #
+      # A DELEGATED CHILD FOLLOWS ITS ROOT, and it follows it structurally rather
+      # than by a rule anyone applies. The lifecycle column lives on the ROOT of
+      # a conversation tree and a child carries NULL --
+      # conversations_a_root_is_where_the_lifecycle_lives -- so there is no state
+      # on a child to age and no row for a policy to select. Archive a parent and
+      # its children go with it because there is one state and it is the
+      # parent's, which is also what makes an archived root with live branches a
+      # thing the table cannot hold.
+  # What is kept of the RUNS this server has done, as opposed to what was said
+  # in them.
+  #
+  # ITS OWN PREFIX AND NOT A THIRD KEY UNDER plowshare.conversations.retention,
+  # for the reason that prefix exists: retention there is a policy about
+  # CONVERSATIONS, applied per origin. A job is not a conversation and need not
+  # have one -- a curator pass and a document ingest are both jobs and neither is
+  # one agent's run -- and V24__jobs.sql is at pains to keep the two apart,
+  # because a conversation row is DEMOTED and its payload ejected while a job row
+  # is DELETED outright. One prefix for both would file a delete under a heading
+  # that says nothing here deletes.
+  #
+  # WHAT A JOB ROW IS: an identifier, the name it was polled under, the project,
+  # when it started, and -- once something files an outcome -- how it ended and
+  # what it did. No text at all. Everything readable the run produced is in
+  # another table under its own policy, which is why pruning this one is cheap to
+  # be relaxed about and why the row is deleted rather than emptied.
+  #
+  # WHY THE TABLE EXISTS AT ALL: job ids used to come from an in-process counter
+  # and restarted at job_000001 on every boot, so two unrelated runs on two
+  # different days shared a name and nothing durable could reference either. Ids
+  # are now minted the way every id this server shows is minted -- sortable by
+  # when it was made -- and every run is written down.
+  jobs:
+    # How many days a job record is kept before a sweep prunes it.
+    #
+    # UNSET, on curator-after-days' reasoning exactly: this file ships numbers
+    # when there is arithmetic for them and there is none for how long a record
+    # of a run is worth keeping. The two directions of being wrong are not
+    # symmetric either -- too large costs a few hundred bytes per run, too small
+    # deletes the only durable evidence that a half-hour ingest happened -- so an
+    # unconfigured server prunes nothing however often a sweep is run.
+    #
+    # PRUNED BY `POST /v1/retention/sweep`, the same verb and the same call as
+    # everything above. There is still no scheduler and this file still adds no
+    # interval key; every reason a sweep is an explicit operation applies to a
+    # prune unchanged, and a second mechanism would be a second thing to
+    # misconfigure. It is safe to call twice.
+    #
+    # Zero is refused rather than read as "off": leave the key unset, for the
+    # reason curator-after-days gives.
+    retention-after-days: ${PLOWSHARE_JOB_RETENTION_DAYS:}
+    # How often a job that is still running publishes that it is, over the
+    # event socket.
+    #
+    # A NUMBER IS SHIPPED HERE, unlike the key above, because there is
+    # arithmetic for this one and there is none for that one.
+    #
+    # Measured against a live server: a turn ran twelve minutes and the socket
+    # carried `started`, `model_call`, and then nothing at all until `ended`.
+    # For the whole expensive part of a turn a client cannot tell a model that
+    # is thinking from a server that is gone, and no client-side timeout can
+    # tell them apart either -- a local model may legitimately run twenty
+    # minutes, so any cutoff short enough to catch a dead server eventually
+    # kills real work. A beat inverts it: "no answer yet" stops being evidence
+    # of anything and "no beat for three intervals" becomes evidence of exactly
+    # one thing.
+    #
+    # UNDER SIXTY SECONDS, WHICH IS THE WHOLE OF WHY IT IS TWENTY. Sixty is
+    # where a proxy or a load balancer commonly cuts a connection with no
+    # traffic on it, and this server is meant to be reached remotely. A third
+    # rather than a half of it, so that one dropped beat -- the stream is
+    # droppable by design -- is still not a cut connection. Not lower, because
+    # a beat is traffic: twelve minutes at twenty seconds is thirty-six frames
+    # and at one second is seven hundred, every one identical to the last, on
+    # every listener attached.
+    #
+    # ZERO OR NEGATIVE TURNS THEM OFF, and that is a real configuration rather
+    # than a mistake: a deployment whose clients are all on the same machine
+    # has no idle proxy to keep open and an operator who may prefer the
+    # silence. Nothing else changes -- a job still says that it started and
+    # how it ended.
+    heartbeat: ${PLOWSHARE_JOB_HEARTBEAT:20s}
+  events:
+    # Whether this server fires schedules by itself. On by default: Plowshare is a
+    # remote harness, and a schedule that needs an operator's cron to wake it is not
+    # one. The test classpath turns it off (src/test/resources/config).
+    ticker-enabled: ${PLOWSHARE_EVENTS_TICKER:true}
+    # Whether boot frees what a restart interrupted: firings left started are
+    # abandoned, long-missed ticks rolled forward, and waiting firings drained.
+    # Separate from ticker-enabled on purpose -- a started firing holds its
+    # target, so a server that skips this never starts anything for that target
+    # again, ticker or not. Only the test classpath turns it off.
+    recover-at-boot: ${PLOWSHARE_EVENTS_RECOVER_AT_BOOT:true}
+    # How often due schedules are looked for. LIVE -- see EventsProperties. A fire
+    # time is honoured to within this. ISO-8601, as every live duration is.
+    tick-interval: ${PLOWSHARE_EVENTS_TICK_INTERVAL:PT15S}
+  swarm:
+    # Re-owe unread addressed messages and deliver pending resolutions after restart.
+    recover-at-boot: ${PLOWSHARE_SWARM_RECOVER_AT_BOOT:true}
+    # THE SWARM SCHEDULER -- spec 2026-09-29 §5. How many swarm calls a pool admits
+    # is `swarm:` on the pool itself; the first two say how they take turns, the
+    # last two how far board wakes may spend a topic's pot.
+    #
+    # Steps a run keeps its place for: inside its quantum it goes back ahead of every
+    # fresh waiter when its tools return; past it, it waits its turn in the rotation.
+    # LIVE -- see SwarmProperties.
+    quantum: ${PLOWSHARE_SWARM_QUANTUM:4}
+    # How long a run may wait for a slot before it is logged and shown overdue.
+    # Nothing ends a wait but cancellation. LIVE; ISO-8601, as every live duration is.
+    wait-warning: ${PLOWSHARE_SWARM_WAIT_WARNING:PT10M}
+    # Steps one board wake may take before it must end; the seat is owed a fresh
+    # wake if unread messages still address it. LIVE -- see SwarmProperties.
+    wake-cap: ${PLOWSHARE_SWARM_WAKE_CAP:12}
+    # Maximum approved child depth below a root. LIVE.
+    max-depth: ${PLOWSHARE_SWARM_MAX_DEPTH:2}
+    # Percent of a root topic's model-call pot kept for the openers, so a topic run
+    # dry by its members can still be closed with a real resolution. LIVE.
+    closing-reserve: ${PLOWSHARE_SWARM_CLOSING_RESERVE:10}
+  # WHERE THIS SERVER KEEPS WHAT IT OWNS -- plowshare.data.dir -- AND WHY THERE
+  # IS NO KEY FOR IT IN THIS FILE.
+  #
+  # The tree:
+  #
+  #     <data-dir>/
+  #         layout.properties            what shape this tree is, and what wrote it
+  #         projects/<project-id>/exports/   ejected conversation payloads
+  #         projects/<project-id>/images/    images a model may be shown, by UID
+  #         global/exports/              the tier that is not a project
+  #         global/images/               the same
+  #
+  # One root, a known shape under it, and every path in it still individually
+  # nameable -- Maven's arrangement. Before it there were three keys naming three
+  # unrelated directories, each defaulting to something relative, which is a
+  # layout only in the sense that a pile is one.
+  #
+  # `data`, relative to the working directory, is the default, and it is set by
+  # PlowshareServerApplication.main rather than here. A value in this file is a
+  # value EVERY TEST READS TOO, and this repository stands dozens of Spring
+  # contexts up against a real database -- each of them would create and mark a
+  # data directory beside whichever module it ran in. It is the same reason
+  # plowshare.auth.token-file is not in this file either. Set PLOWSHARE_DATA_DIR
+  # or --plowshare.data.dir=... to move it; both outrank main's default. Set
+  # PLOWSHARE_DATA_DIR to nothing and this server keeps no files at all.
+  #
+  # ON FIRST START the tree is created and layout.properties written into it. A
+  # directory that already holds files and has no marker STOPS THE BOOT rather
+  # than being adopted: a later version that moves a subdirectory has to tell a
+  # fresh install from an older layout from an arrangement somebody made on
+  # purpose, and a version that guesses is one that eventually moves somebody's
+  # files for them. The refusal says exactly what to write to adopt the tree.
+  #
+  # NO PROJECT'S WORKSPACE MAY COVER IT. Named by its root and not by its
+  # contents, so that the rule survives a subdirectory being added -- which is
+  # exactly how the export directory came to be outside the fence for as long as
+  # it was.
+  #
+  # WHAT IS NOT IN IT. The operator token stays at
+  # ~/.config/plowshare/console-token because PlowshareClient.consoleTokenFile()
+  # HARDCODES that path: it is a contract between two binaries, not server state,
+  # and moving it breaks the CLI. The configuration file and the working
+  # directory are fence parameters -- paths this server never uses and only
+  # protects. The sampling directory is named by its own key above and has not
+  # moved. Agent and bot definitions are not a fence parameter here at all any
+  # more: they live inside this tree, at global/agents/ and global/bots/, so
+  # naming this root already covers them.
+  #
+  # RESERVED AND NOT BUILT: projects/<id>/agents/, which is a design rather than
+  # a layout. Per-project agents mean N registries or a merged view, plus a
+  # decision about whether REQUIRED is per-project; there is one AgentRegistry
+  # today, read once at boot. The tree permits it; nothing creates it.
+  #
+  # images/ WAS on that list and is no longer, and this paragraph is the sweep.
+  # It said the directory had no producer. POST /v1/images is that producer,
+  # DataLayout.imagesFor is where the tree answers for it, and ImageStore makes
+  # the directory on the FIRST WRITE rather than at boot -- which is exports'
+  # own reason and not a new one: a server that is shown nothing should not
+  # leave an empty images/ behind to explain. DataLayout.VERSION did not move,
+  # because nothing moved; a directory the layout already named was filled.
+
+  # The server's own configuration file: the one holding the model API key
+  # above.
+  #
+  # NOT the whole of the rule. Spring Boot also loads from ./ and ./config/,
+  # under every name, extension and profile it accepts, so naming one file left
+  # `config/application.yml` — which OUTRANKS it — readable. The exclusion is
+  # therefore the server's WORKING DIRECTORY, derived rather than listed; this
+  # key is for a deployment that keeps its configuration somewhere else. A
+  # workspace that contains the directory this server runs in reaches nothing
+  # inside it, and one that IS that directory is refused by name.
+  #
+  # No project's workspace may cover it, whatever a `projects` row says —
+  # a file_read reaching this file defeats in one call the one rule this project
+  # keeps without exceptions. The sampling directory, the operator token file,
+  # the export directory and the data directory are the other mandatory
+  # exclusions and are NOT repeated here: they are read from
+  # plowshare.llm.sampling-directory, plowshare.auth.token-file,
+  # plowshare.conversations.retention.export-directory and plowshare.data.dir,
+  # so the directory an operator writes profiles or ejected payloads into and
+  # the directory no agent may reach cannot drift apart. A profile file is
+  # there for the first one's reason: it decides what every agent is sampled
+  # at, effective at the next boot, and nothing in a request afterwards would
+  # show that it had been edited.
+  #
+  # AGENT AND BOT DEFINITIONS ARE NOT A KEY IN THIS LIST. task 10 retired the
+  # standalone directory key that used to be read here, on the same one-key
+  # argument the sampling directory still is. Definitions now live
+  # inside plowshare.data.dir's own tree -- global/agents/, global/bots/, and
+  # each project's own tier -- so naming the data directory's root, already
+  # above, is what fences them off; there is nothing left for a second key to
+  # name and no second entry to keep in step when a subdirectory is added.
+  #
+  # `application.yml`, relative to the process's working directory, is the
+  # default, for the reason the sampling directory is relative. Set it when the
+  # file lives somewhere else; a deployment that keeps no configuration on disk
+  # at all — key in the environment, YAML inside the jar — leaves it naming a
+  # path nothing resolves to, which excludes nothing because there is nothing
+  # there to exclude.
+  workspace:
+    config-file: ${PLOWSHARE_CONFIG_FILE:application.yml}
+  # Console authentication. AuthFilter refuses every /v1 path — the REST API,
+  # the /v1/events listener socket and the /v1/files channel — to a request
+  # carrying no valid access token, as an `Authorization: Bearer` header or as
+  # the ps_access cookie. /v1/auth and /v1/auth/refresh are open, because a gate
+  # that refused the way through it could never be passed, and so is everything
+  # outside /v1 — the console's own static assets, which are the same bytes for
+  # every install.
+  #
+  # PLOWSHARE_AUTH_ENABLED is the escape, the same shape as PLOWSHARE_BIND
+  # above: an env var with the safe default, so an operator who opens this says
+  # so in one place, once, on purpose. `false` is a server that authenticates
+  # NOTHING, and AuthFilter logs a warning at startup naming exactly that —
+  # a configuration left this way is visible in the log an operator reads and
+  # not only in a file nobody re-opens.
+  #
+  # THAT WINDOW IS CLOSED, and this paragraph is the sweep. It said turning the
+  # gate off was the only way to use this server, because between the commit
+  # that added the filter and the commit that added POST /v1/auth nothing could
+  # mint a credential over HTTP. Both now exist. A server started with this key
+  # at its default prints one line when it comes up —
+  #
+  #     Plowshare console: http://127.0.0.1:8091/?token=<48 hex chars>
+  #
+  # — which is the browser's way in, single-use, and writes a second, long-lived
+  # operator token to ~/.config/plowshare/console-token at mode 600, which is
+  # the CLI's. `plowshare` and the MCP client read that file with no flag and no
+  # export; PLOWSHARE_TOKEN overrides it for a server on another machine.
+  #
+  # WHERE THAT FILE GOES IS DELIBERATELY NOT A KEY IN THIS BLOCK. It is
+  # plowshare.auth.token-file, and PlowshareServerApplication.main sets it as a
+  # default property instead — a value here would be read by every test as well,
+  # and each @SpringBootTest would then overwrite the live credential of
+  # whatever server the operator is actually using. Set it on the command line
+  # (--plowshare.auth.token-file=...) or as PLOWSHARE_AUTH_TOKEN_FILE to move
+  # it; both outrank main's default. AuthProperties.getTokenFile carries the
+  # argument.
+  #
+  # The lifetimes are the design's, and they are also AuthProperties' own
+  # defaults. Written out here rather than left implicit, for the reason the
+  # pool's lane sizes are: a key an operator cannot see is a key they will guess
+  # at. The cookie names are configurable and the refresh one is not read by the
+  # filter at all — its Path is narrowed to /v1/auth so it never rides on an
+  # ordinary request, and AuthController.refresh is its only reader.
+  auth:
+    enabled: ${PLOWSHARE_AUTH_ENABLED:true}
+    access-lifetime: 15m
+    refresh-lifetime: 7d
+    access-cookie: ps_access
+    refresh-cookie: ps_refresh
+    # POST /v1/auth/ticket mints one of these for the caller to present as
+    # ?ticket=... on the /v1/events upgrade -- the one credential this server
+    # designs to sit in a URL, and therefore in access logs, on purpose.
+    # Seconds rather than minutes is the other half of what makes that
+    # defensible; the first half is that TokenStore.spendTicket is single-use.
+    # See AuthProperties.getTicketLifetime for the full argument.
+    ticket-lifetime: ${PLOWSHARE_TICKET_LIFETIME:10s}
+    # LoginAttempts's throttle on POST /v1/auth/login, and both are env vars
+    # rather than constants because the throttle is also a denial of service
+    # against this server's one admin: five wrong passwords lock out the only
+    # operator there is for fifteen minutes, with no recovery but a restart.
+    # See AuthProperties.getLoginMaxFailures/getLoginLockout for the full
+    # argument.
+    login-max-failures: ${PLOWSHARE_LOGIN_MAX_FAILURES:5}
+    login-lockout: ${PLOWSHARE_LOGIN_LOCKOUT:15m}
+    # The one admin account's login name, and it is safe to default here in a
+    # way token-file above is not. That key's "off" value is a real path with
+    # a side effect if written naively, so it is set only by
+    # PlowshareServerApplication.main, which a test context never calls. This
+    # key's "off" value is the empty string below, which is safe to read in
+    # every context including a test's: AdminSeed treats a blank admin-handle
+    # as "no admin has been asked for yet" and does nothing at all — no
+    # lookup, no password check, no boot refusal. See AuthProperties
+    # .getAdminHandle() for the full account, and for what happens once an
+    # operator sets this.
+    admin-handle: ${PLOWSHARE_ADMIN_HANDLE:}
+    # THERE IS NO admin-password KEY HERE, AND THAT IS DELIBERATE. Binding it
+    # the way admin-handle is bound would make it a field on AuthProperties, a
+    # singleton that lives for the whole process — so the plaintext password
+    # would sit in the heap for as long as the server runs rather than for as
+    # long as seeding it needs. AdminSeed reads PLOWSHARE_ADMIN_PASSWORD
+    # directly from the environment instead, at the one moment it uses it. See
+    # AdminSeed's class javadoc for the full account, including what that does
+    # and does not buy: a String cannot be wiped, so this narrows how long the
+    # value is held rather than keeping it out of the heap altogether.
+  # The archive's three tuning numbers. Defaults match Excalibur's
+  # excalibur.example.toml — see ArchiveProperties for why that matters.
+  # The corpus. Two numbers, and the third one an ingest depends on is
+  # deliberately NOT here: the ceiling is plowshare.llm.embedding-max-input-tokens
+  # above, because it is a fact about the loaded embedding model rather than
+  # about this pipeline, and every caller of that endpoint needs it. Two
+  # spellings of one bound that had to agree is the drift embedding-model's own
+  # comment is written about.
+  documents:
+    # What chunk packing aims at, in TOKENS as plowshare.llm.tokenizer counts
+    # them -- the same tokenizer the ceiling is counted with. A target and not
+    # the ceiling: whole sentences are added while they fit under this, and one
+    # that would not fit starts the next chunk. DocumentsConfig refuses a target
+    # above the ceiling at boot, and Chunking refuses the same pair wherever one
+    # is made.
+    #
+    # LIKE THE CEILING, CHANGING THIS IS A RE-CHUNK AND A RE-EMBED OF THE
+    # CORPUS, NOT A SETTING. Every stored chunk was packed under the rule in
+    # force when it was written, and re-ingesting will NOT repair one whose
+    # paragraph did not change -- the identity rule keeps an unchanged
+    # paragraph's chunks and their vectors on purpose, because that is what
+    # makes re-ingesting an edited document cheap.
+    #
+    # 400 because it is where the byte target sat: this key was
+    # chunk-target-bytes: 1600, and 1600 characters of prose at the shipped
+    # four characters a token is 400. So a chunk packed out of prose is the size
+    # it always was and a changed paragraph re-chunks to what its neighbours
+    # already are. What moved is the ceiling, which only an oversized run
+    # reaches. How big a chunk should be for retrieval is its own question, and
+    # this number has not been measured against one.
+    chunk-target-tokens: ${PLOWSHARE_CHUNK_TARGET_TOKENS:400}
+    # How many chunks go to the embedding endpoint in one request.
+    #
+    # THE NUMBER ANCHOR DOES NOT HAVE. Its EmbeddingService sends a document's
+    # every chunk as ONE request, so a single failure costs the whole document
+    # -- after the summarisation cascade has been paid for -- and there is no
+    # boundary at which the work can be stopped or resumed. This is that
+    # boundary: a failed batch costs a batch, and cancellation lands between
+    # batches, so a very large value is also an ingest that takes a long time to
+    # notice it was cancelled.
+    #
+    # 32 against the reference node's embedding lane of 2. Lower is more round
+    # trips; higher is a larger blast radius and a coarser cancel.
+    embed-batch-size: ${PLOWSHARE_EMBED_BATCH_SIZE:32}
+    # How many MODEL CALLS one ingest's summariser cascade may spend, across
+    # every run in it.
+    #
+    # curator-budget's counterpart above, and the precedent it follows: a curator
+    # pass is a server-side job with its own allowance, shared by reference
+    # across every ruling, and an ingest is that shape. It is what answers the
+    # collision the port survey names -- 242 calls against an interlocutor's
+    # allowance of 40 -- without either charging a person's conversation six
+    # times its whole allowance for one tool call or exempting the most expensive
+    # operation in the system from the one honest cost bound it has.
+    #
+    # 300, AND IT IS ARITHMETIC RATHER THAN A ROUND NUMBER -- MEASURED, since the
+    # cascade went to four tiers. One call a paragraph, plus one per section,
+    # chapter and document, plus one per fold of span-size summaries wherever a
+    # unit has more children than fit one call.
+    #
+    # SummariserTest.a_thirty_page_paper_costs_two_hundred_and_thirty_three_calls_
+    # of_an_allowance_of_300 runs that arithmetic over the paper this number was
+    # written against -- seven sections of 29 paragraphs, at span-size 12 -- and
+    # gets 233: 203 paragraphs, 21 folds, 7 sections, 1 chapter, 1 document.
+    # Measured at a 6.5 s median on gpt-oss-20b
+    # (implementation rationale), that is about
+    # twenty-five minutes serial. So 300 HOLDS, with room for a paper a quarter
+    # longer and not for one twice as long: it is the binding constraint now
+    # rather than a comfortable one.
+    #
+    # WHAT WOULD BREAK IT IS A SHAPE AND NOT A LENGTH, which is the part the
+    # arithmetic hides. The tiers above the paragraphs cost sections + chapters +
+    # 1, and a section holds several paragraphs in any document a person wrote --
+    # so the upper tiers are a twentieth of the bill on a paper and half of it on
+    # a document that heads every paragraph. That document exists (generated
+    # notes, minutes, changelogs) and it is what to look at first if an ingest
+    # reports CALL_BUDGET on something short.
+    #
+    # SPENDING IT IS NOT A FAILURE. The cascade stops, says so, and keeps every
+    # summary it already paid for; the next ingest of the same document finds
+    # exactly the paragraphs it never reached, because a paragraph holding no
+    # summary IS the query that says what is still owed. So this number is a
+    # ceiling on what one ingest costs before somebody looks at it, and not a
+    # limit on how large a document may be.
+    #
+    # 1000 AND NOT 300, AND THE MEASUREMENT IS WHY. Every sentence above still
+    # holds; what did not hold is the number. Four papers of Anchor's eval set,
+    # ingested 2026-09-06 on this server:
+    #
+    #   2212.12473   8 pages    59 paragraphs    76 calls
+    #   1504.04279  12 pages   121 paragraphs   ~140 calls
+    #   2410.02545  30 pages   166 paragraphs   ~190 calls
+    #   1903.05495  30 pages   436 paragraphs    496 calls
+    #
+    # THE LAST ONE IS THE POINT. Same page count as the one above it and nearly
+    # three times the paragraphs -- the shape this file's own comment names, a
+    # document whose layout produces many short units, arriving as an ordinary
+    # 30-page paper. At 300 it stops a little over half way.
+    #
+    # WHAT THAT COSTS IS NOT A LOST INGEST -- the resume works, and it is why
+    # `implementation rationale` loops. It is that the common case
+    # needs several passes to finish, and a document left part-way IS REFUSED BY
+    # THE ASK until it does: `Deliberation.whyItCannotBeAsked` returns UNAVAILABLE
+    # while any chapter or section is unsummarised. So the visible symptom of a
+    # budget set too low is a corpus that will not answer, one document at a
+    # time, for a reason two layers away from the number that caused it.
+    ingest-budget: ${PLOWSHARE_INGEST_BUDGET:1000}
+    # How many summaries one fold of the cascade reads -- AND, THE SAME NUMBER IN
+    # ITS OTHER JOB, how many a tier may be shown at once.
+    #
+    # THE FOLD IS NO LONGER A TIER. It was one while this server had no hierarchy
+    # to hang a middle level on; V26 and the detectors gave it chapters and
+    # sections, so paragraph -> section -> chapter -> document are four real
+    # tiers again and span_summariser is how a tier's children are made to fit
+    # ONE call. The reason it survives at all is a limit in Anchor a faithful
+    # port would otherwise inherit blind: with no detected heading Anchor puts
+    # ONE synthetic section over every paragraph in the document and calls
+    # summariseSection once with all of them -- two hundred summaries in a single
+    # prompt on a real paper. Its corpus has not made that fail; nobody
+    # established that it holds.
+    #
+    # SO "FITS" IS THIS NUMBER, AND THE RULE IS A COUNT ON PURPOSE. Each child of
+    # a tier was written by an agent that was told how long to be -- one sentence
+    # at the paragraph level, 2-4 at the section level, 3-5 at the chapter level
+    # -- so a child's own length is bounded by the agent that wrote it. How MANY
+    # children a unit has is bounded by nothing, and is exactly the dimension
+    # that runs to two hundred. Bounding the count bounds the prompt.
+    #
+    # AT LEAST 2, refused at boot and again in Summariser's constructor: a fold
+    # of one is a paraphrase, and a span of one would fold a level into a level
+    # of the same length and never finish. A run of one is therefore carried
+    # rather than folded -- which is the opposite of what a TIER does over one
+    # child, and deliberately: a fold's output has no row and no reader, and a
+    # section's and a chapter's summary are read by the per-document ask.
+    #
+    # 12, and what it trades is legibility against attention. A larger span puts
+    # more of the document in front of one call -- which is where an argument's
+    # arc is easiest to see and hardest to hold -- and makes a shallower tree; a
+    # smaller one makes more, shorter folds and a deeper one. 12 one-sentence
+    # summaries is a few hundred tokens, which is a length this node's models
+    # answer well on, and it puts a 29-paragraph section one fold from its
+    # summary.
+    span-size: ${PLOWSHARE_SPAN_SIZE:12}
+    # How many MODEL CALLS one per-document ask may spend, across all three of
+    # its stages.
+    #
+    # ingest-budget's counterpart, and the difference is what makes it a small
+    # number: an ingest's cost scales with the document and a deliberation's does
+    # not. It is a proposer, a critic and a synthesiser -- three calls over one
+    # document however long the document is -- plus ONE retry of a critic whose
+    # JSON did not parse, which Anchor performs and does not budget for, because
+    # nothing in Anchor counts model calls at all.
+    #
+    # FOUR IS THE FLOOR AND DeliberationConfig REFUSES LESS. An allowance below a
+    # pass's worst case is a deliberation that reports CALL_BUDGET the first time
+    # a small model answers a JSON question in prose -- which is the ordinary
+    # failure the retry exists for, not an exceptional one.
+    #
+    # RAISING IT BUYS NOTHING TODAY. Nothing in a pass loops: the three
+    # definitions each declare one turn and one model call, so four is not a
+    # ceiling the work approaches, it is exactly what the work costs.
+    #
+    # AND IT IS NOT MOVABLE ON A RUNNING PASS. POST /v1/jobs/{id}/limits reads
+    # RunLimits off the job and only an AGENT RUN has them, so it refuses a
+    # deliberation in as many words -- exactly as it refuses a curator pass. The
+    # per-request override is `maxModelCalls` on POST /v1/documents/{id}/ask, and
+    # this key is the default that body falls back to. What it is for is a stage
+    # growing a second call later: a number an operator changes rather than a
+    # constant somebody recompiles.
+    ask-budget: ${PLOWSHARE_ASK_BUDGET:5}
+  # The operator's policy over search providers -- what V33's search_providers
+  # registry deliberately does not hold. A row there records what a provider
+  # IS (its key, its base URL, the facts it fetched about itself, its health);
+  # these four keys record what an operator WANTS, and all four are LIVE (see
+  # Live and SearchProperties) -- a PUT to /v1/config reaches the next search
+  # with no restart, on the terms plowshare.documents.ingest-budget above
+  # already set.
+  search:
+    # Which providers a search walks, in order, until one answers -- and it is
+    # EMPTY ON PURPOSE. A server with no provider registered should search
+    # nothing and say so, not guess at a rung nobody configured. Naming a
+    # provider_key ProviderStore has no row for is accepted here and answered
+    # later, as a model's refusal out of SearchLadder -- see SearchProperties'
+    # own comment for why that cost is taken knowingly, on ingest-budget's
+    # precedent.
+    ladder: ${PLOWSHARE_SEARCH_LADDER:}
+    # Domains this deployment's fetcher cannot load, and that a search should
+    # therefore not offer. Two readers now. A provider that declares
+    # `domainExclusion` in its capabilities is handed the list and applies it
+    # itself; the search walk still matches no host against it here. The
+    # matcher that was deferred to slice 2 arrived with it: FetchService
+    # consults ignoredDomainsNow() before spending a call and refuses a
+    # suppressed host without dialling.
+    #
+    # It is CAPABILITY DATA, NOT A PROHIBITION -- a site that serves a desktop
+    # browser while refusing a headless request is the worked example. The
+    # refusal says this deployment's fetcher is blocked there, not that the
+    # page is forbidden, which is why a fetch provider on a higher rung is free
+    # to reach every domain on this list without that code changing.
+    ignored-domains: ${PLOWSHARE_SEARCH_IGNORED_DOMAINS:}
+    # How many CONSECUTIVE failures a provider may have before the ladder
+    # treats it as unhealthy and skips it. SearchConfig refuses anything below
+    # 1 at boot -- a threshold that low would skip every provider before it
+    # ever ran a search.
+    failure-threshold: ${PLOWSHARE_SEARCH_FAILURE_THRESHOLD:5}
+    # How long one search's result set is held for a follow-up question before
+    # it is treated as gone. SearchConfig refuses anything that is not a
+    # positive duration at boot.
+    result-set-ttl: ${PLOWSHARE_SEARCH_RESULT_SET_TTL:PT30M}
+    # The budget one call to a provider is given, applied per request by
+    # RemoteSearchProvider. NOT one of the four live keys above -- see
+    # SearchProperties' own comment on getTimeout() for why: it is a client
+    # library's dial, not a way to steer traffic away from a misbehaving rung,
+    # so it binds once at boot like every ordinary property in this server.
+    # SearchConfig refuses anything that is not a positive duration at boot.
+    timeout: ${PLOWSHARE_SEARCH_TIMEOUT:PT10S}
+  # The one page an agent reads at a time, held whole so it is fetched once and
+  # read back in windows -- V35__fetched_pages's table, and the two levers an
+  # operator turns over it without a restart plus the two values bound once
+  # because they are not operator levers at all. See FetchProperties' own
+  # comment for why the split falls this way rather than four-of-four, on
+  # search's own precedent above.
+  fetch:
+    # How long a fetched page is kept before it is a candidate for purging.
+    # LIVE -- see FetchProperties -- because a disk budget an operator is
+    # watching is exactly the kind of thing plowshare.search.result-set-ttl
+    # already made a runtime lever rather than a redeploy.
+    ttl: ${PLOWSHARE_FETCH_TTL:PT24H}
+    # How recently a page must have been read for it to still count as being
+    # read, which keeps a page an agent is mid-document through from being
+    # purged out from under it the moment its fetch alone crosses ttl above.
+    # LIVE, on ttl's own reasoning.
+    live-window: ${PLOWSHARE_FETCH_LIVE_WINDOW:PT10M}
+    # How many characters of a stored page's text one page-turn hands a model.
+    # NOT live -- it is the shape of what every reader is handed, not an ops
+    # dial, and changing it mid-flight would mean two agents reading the same
+    # stored page see different page boundaries depending on who asked first.
+    # FetchConfig refuses anything below 1 at boot.
+    window: ${PLOWSHARE_FETCH_WINDOW:8000}
+    # The budget one fetch call is given. NOT live, on
+    # plowshare.search.timeout's own reasoning immediately above: a client
+    # library's dial, not a way to steer traffic away from a misbehaving
+    # source, so it binds once at boot like every ordinary property in this
+    # server. FetchConfig refuses anything that is not a positive duration at
+    # boot.
+    timeout: ${PLOWSHARE_FETCH_TIMEOUT:PT30S}
+    # host:port entries fetch may reach on a private address (loopback,
+    # RFC 1918, link-local, CGNAT), on that port only. Every other private
+    # address is refused. Comma-separated; an IPv6 host goes in brackets:
+    # [fd12::5]:8080. NOT live and on no route: bound at boot, so nothing a
+    # token, an agent or a project file can reach widens it. The never tier
+    # (0.0.0.0/8, 169.254.169.254, multicast, reserved) is refused even here,
+    # and an entry naming one of those literally refuses the boot.
+    allow-private: ${PLOWSHARE_FETCH_ALLOW_PRIVATE:}
+  archive:
+    max-body-chars: ${PLOWSHARE_MAX_BODY_CHARS:8000}
+    index-threshold: ${PLOWSHARE_INDEX_THRESHOLD:200}
+    half-life-days: ${PLOWSHARE_HALF_LIFE_DAYS:30.0}
+  # A project's own hooks, from projects/<id>/hooks/ — see
+  # implementation rationale The harness
+  # (always on) is not affected by any of these.
+  hooks:
+    # Off only for a bad night: every project's hooks stop, and nothing else does.
+    enabled: ${PLOWSHARE_HOOKS_ENABLED:true}
+    # Per hook call, waiting for a free context included. Tool stages that run out
+    # refuse; prompt stages add nothing. Also bounds loading a file: a module whose
+    # top level does not finish in time is a file that did not load.
+    timeout: ${PLOWSHARE_HOOKS_TIMEOUT:2s}
+    # Contexts one hook may hold at once. Unset means min(CPU cores, 8).
+    # pool-max: 8
+    idle: ${PLOWSHARE_HOOKS_IDLE:5m}
+  # Harness profiles: per-model pipeline configuration. A small model needs earlier
+  # traps and a second opinion; a large one does not, and tokens spent guiding it
+  # are waste. A pool assigns a profile to each model it serves
+  # (plowshare.llm.pools[].harness-profiles); a model it does not runs the default.
+  # PLOWSHARE_HARNESS_PROFILE= (blank) sets no default, so a model with no
+  # assignment runs no harness hooks at all.
+  # See implementation rationale
+  harness:
+    default-profile: ${PLOWSHARE_HARNESS_PROFILE:standard}
+    # harness:stuck fires on signs of being stuck, never on a step count (see StuckSignals):
+    # the same failure coming back (repeat-failures), failed calls in a row (failure-streak),
+    # the same call with the same answer coming back with only reading between (repeat-calls),
+    # and steps in a row that only read or searched (read-only-steps). 0 turns one off.
+    # most-per-turn caps the consults; the advisor usually answers nothing, and then nothing
+    # is sent to the model.
+    profiles:
+      guided:
+        - hook: harness:stuck
+          repeat-failures: 2
+          failure-streak: 4
+          repeat-calls: 3
+          read-only-steps: 10
+          most-per-turn: 2
+      standard:
+        - hook: harness:stuck
+          repeat-failures: 3
+          failure-streak: 4
+          repeat-calls: 3
+          read-only-steps: 12
+          most-per-turn: 1
+      minimal: []
+
+logging:
+  level:
+    root: INFO
+    io.aeyer.plowshare: INFO

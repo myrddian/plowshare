@@ -1,0 +1,101 @@
+import { describe, it, expect, vi } from 'vitest';
+import { createUsage } from './usage';
+import { mountUsagePanel } from './usage-panel';
+import { usageRange, usageText } from '../../../plowshare-client-ts/src/operations/usage-presentation.ts';
+import type { UsageReport } from '../../../plowshare-client-ts/src/operations/usage.ts';
+import type { EventStreamOptions } from '../events';
+const makeReport = (): UsageReport => ({ filters: { type: 'usage.models', filter: { ...usageRange(), scope: 'subtree', group_by: ['model'], limit: 100 } }, totals: { calls: '2', attempts: '2', active_calls: '0', incomplete_attempts: '0', unknown_cost_attempts: '0', input_tokens: '1000000', output_tokens: '500000', input_tokens_known: '2', output_tokens_known: '2', costs: { USD: '0.005' }, usage_complete: true, cost_complete: true, complete: true }, groups: [], cursor: null, health: { watermark: '12', as_of: '2026-10-02T01:00:00Z', capture_enabled: true, historical_usage: 'not_imported' } });
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+describe('usage panel', () => {
+    it('changes comparison locally, persists the default, and never replaces recorded costs', async () => {
+        const root = document.createElement('div'), select = vi.fn(async () => { }), read = vi.fn(), storage = { getItem: () => null, setItem: vi.fn() };
+        const panel = mountUsagePanel(root, { select, read, storage });
+        await tick();
+        panel.update({ report: makeReport(), revision: 0, stale: false, loading: false });
+        expect(root.textContent).toContain('USD 1.2');
+        expect(root.textContent).toContain('USD 0.005');
+        const price = root.querySelector<HTMLSelectElement>('[data-usage-price]')!;
+        price.value = 'openai-gpt-4.1';
+        price.dispatchEvent(new Event('change'));
+        expect(root.textContent).toContain('USD 6');
+        expect(root.textContent).toContain('USD 0.005');
+        expect(read).not.toHaveBeenCalled();
+        expect(select).toHaveBeenCalledOnce();
+        expect(storage.setItem).toHaveBeenCalledOnce();
+        expect(usageText(makeReport())).toContain('USD 1.2');
+        price.value = 'custom';
+        price.dispatchEvent(new Event('change'));
+        expect(root.querySelector<HTMLElement>('[data-usage-custom]')!.hidden).toBe(false);
+        const input = root.querySelector<HTMLInputElement>('[data-usage-input]')!;
+        input.value = '-1';
+        input.dispatchEvent(new Event('change'));
+        expect(root.querySelector('[role=alert]')!.textContent).toContain('nonnegative');
+        panel.destroy();
+        expect(root.textContent).toBe('');
+    });
+    it('rejects old scopes, safely displays run hierarchy and drills down without mixing inclusive totals', async () => {
+        const root = document.createElement('div'), select = vi.fn(async () => { }), panel = mountUsagePanel(root, { select, read: vi.fn() });
+        await tick();
+        const group = root.querySelector<HTMLSelectElement>('[data-usage-group]')!;
+        group.value = 'run';
+        group.dispatchEvent(new Event('change'));
+        await tick();
+        const report = makeReport();
+        report.filters.filter.group_by = ['run', 'agent'];
+        report.groups = [{ ...report.totals, run: 'leaf', agent: '<img src=x>', ancestor_runs: ['idle', 'root'] }];
+        panel.update({ report, revision: 0, stale: false, loading: false });
+        expect(root.querySelector('img')).toBeNull();
+        expect(root.querySelectorAll('[data-usage-run]')).toHaveLength(3);
+        root.querySelector<HTMLButtonElement>('[data-usage-run="idle"]')!.click();
+        await tick();
+        expect(select).toHaveBeenLastCalledWith('usage.run', expect.objectContaining({ run: 'idle', scope: 'subtree' }));
+        panel.update({ report, revision: 1, stale: false, loading: false });
+        expect(root.textContent).not.toContain('USD 1.2');
+        panel.destroy();
+    });
+    it('reads context as a separate operation with explicit conversation and agent controls', async () => {
+        const root = document.createElement('div'), read = vi.fn(async () => ({ count: { tokens: null, basis: 'UNKNOWN', gaps: ['template not supported'] } })), panel = mountUsagePanel(root, { select: async () => { }, read });
+        root.querySelector<HTMLInputElement>('[data-usage-count-conversation]')!.value = 'chat';
+        root.querySelector<HTMLInputElement>('[data-usage-count-agent]')!.value = 'hermes';
+        root.querySelector<HTMLButtonElement>('[data-usage-count]')!.click();
+        await tick();
+        expect(read).toHaveBeenCalledWith('conversation.context.count', { conversation: 'chat', agent: 'hermes' });
+        expect(root.querySelector('[data-usage-count-result]')!.textContent).toContain('Unknown tokens');
+        panel.destroy();
+    });
+    it('subscribes after the first connection, retains stale measurements, reconciles on reconnect and unsubscribes on close', async () => {
+        const root = document.createElement('div');
+        let options!: EventStreamOptions;
+        let open = false, index = 0;
+        const ask = vi.fn(async (type: string) => { if (!open)
+            throw new Error('not connected'); if (type === 'usage.unsubscribe')
+            return { code: 'OK', payload: {} }; const report = makeReport(); return { code: 'OK', payload: { subscription: 's' + (++index), revision: 0, filters: report.filters, report } }; });
+        const close = vi.fn(), screen = createUsage({ root, session: 'one', project: null, openStream: value => { options = value; return { ask, close, status: () => ({ state: open ? 'open' : 'connecting', attempt: 0, retryInMs: null }) }; } });
+        await screen.load();
+        open = true;
+        options.onStatus?.({ state: 'open', attempt: 0, retryInMs: null });
+        await tick();
+        expect(root.textContent).toContain('USD 1.2');
+        options.onStatus?.({ state: 'reconnecting', attempt: 1, retryInMs: 100 });
+        expect(root.textContent).toContain('Last snapshot');
+        expect(root.textContent).toContain('USD 1.2');
+        options.onStatus?.({ state: 'open', attempt: 0, retryInMs: null });
+        await tick();
+        expect(index).toBe(2);
+        screen.destroy();
+        await tick();
+        expect(ask).toHaveBeenCalledWith('usage.unsubscribe', { subscription: 's2' });
+        expect(close).toHaveBeenCalledOnce();
+        expect(root.childElementCount).toBe(0);
+    });
+});
+
+it('preserves a paged breakdown across unrelated desktop state updates and resets on a newer usage snapshot',async()=>{
+    const root=document.createElement('div'),report=makeReport();report.groups=[{...report.totals,model:'first-model'}];report.cursor='signed-page';
+    const later={...report,groups:[{...report.totals,model:'later-model'}],cursor:null};
+    const read=vi.fn(async()=>later),panel=mountUsagePanel(root,{select:async()=>{},read});await tick();
+    const snapshot={report,subscription:'s',revision:0,stale:false,loading:false};panel.update(snapshot);
+    root.querySelector<HTMLButtonElement>('[data-usage-more]')!.click();await tick();expect(root.textContent).toContain('later-model');
+    panel.update(structuredClone(snapshot));expect(root.textContent).toContain('later-model');expect(root.textContent).not.toContain('first-model');
+    panel.update({...snapshot,revision:1});expect(root.textContent).toContain('first-model');panel.destroy();
+});

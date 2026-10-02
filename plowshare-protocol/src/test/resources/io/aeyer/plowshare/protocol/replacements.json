@@ -1,0 +1,15 @@
+[
+  { "name": "one occurrence", "text": "alpha beta gamma", "old": "beta", "new": "BETA", "result": "alpha BETA gamma" },
+  { "name": "the new text may be empty", "text": "alpha beta gamma", "old": " beta", "new": "", "result": "alpha gamma" },
+  { "name": "CRLF survives", "text": "one\r\ntwo\r\nthree\r\n", "old": "two", "new": "2", "result": "one\r\n2\r\nthree\r\n" },
+  { "name": "no final newline survives", "text": "one\ntwo", "old": "one", "new": "1", "result": "1\ntwo" },
+  { "name": "a match across lines", "text": "a\nb\nc\n", "old": "a\nb", "new": "ab", "result": "ab\nc\n" },
+  { "name": "outside the BMP", "text": "x 🎵 y 🎶 z", "old": "🎶", "new": "♪", "result": "x 🎵 y ♪ z" },
+  { "name": "the replacement contains the old text", "text": "cat", "old": "cat", "new": "catcat", "result": "catcat" },
+  { "name": "absent", "text": "alpha beta", "old": "delta", "new": "x", "refused": "absent", "count": 0 },
+  { "name": "case matters", "text": "Alpha", "old": "alpha", "new": "x", "refused": "absent", "count": 0 },
+  { "name": "twice", "text": "a b a", "old": "a", "new": "x", "refused": "ambiguous", "count": 2 },
+  { "name": "overlapping counts", "text": "aaa", "old": "aa", "new": "x", "refused": "ambiguous", "count": 2 },
+  { "name": "empty old", "text": "anything", "old": "", "new": "x", "refused": "empty", "count": 0 },
+  { "name": "empty old in an empty file", "text": "", "old": "", "new": "x", "refused": "empty", "count": 0 }
+]

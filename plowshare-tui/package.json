@@ -1,0 +1,37 @@
+{
+  "name": "plowshare-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/view/main.ts",
+    "demo": "node src/view/terminal/demo.ts",
+    "demo:board": "node src/view/terminal/demo.ts --board",
+    "demo:swarm": "node src/view/terminal/demo.ts --swarm",
+    "typecheck": "tsc -b --force",
+    "test": "vitest run --maxWorkers=2",
+    "test:ci": "vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile.junit=build/vitest/junit.xml"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "ink": "^7.1.1",
+    "react": "^19.3.0",
+    "plowshare-client-ts": "link:../plowshare-client-ts",
+    "plowshare-client-node": "link:../plowshare-client-node"
+  }
+}

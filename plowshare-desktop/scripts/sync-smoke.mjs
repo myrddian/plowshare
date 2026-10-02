@@ -1,0 +1,44 @@
+import { _electron as electron, expect } from 'playwright/test';
+import executablePath from 'electron';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { protocolFixture } from './protocol-fixture.mjs';
+import { SyncFixture, git } from './sync-fixture.mjs';
+const temporary=await realpath(await mkdtemp(join(tmpdir(),'plowshare-sync-smoke-'))),root=join(temporary,'Research');
+await mkdir(root);await writeFile(join(root,'notes.md'),'base\n');await mkdir('build/smoke',{recursive:true});
+const union=new SyncFixture(join(temporary,'hubs')),fixture=await protocolFixture({rotateTokens:true,union});
+const env={...process.env,PLOWSHARE_CONFIG_DIR:join(temporary,'credentials'),PLOWSHARE_DESKTOP_CONFIG:join(temporary,'config'),PLOWSHARE_DESKTOP_PROFILE:join(temporary,'profile')};delete env.ELECTRON_RUN_AS_NODE;
+let app;
+const launch=async()=>{app=await electron.launch({executablePath,args:[resolve('.')],env});return app.firstWindow();};
+try {
+  let page=await launch();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+  await app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},root);
+  await page.locator('#project-add').click();await page.locator('#files-choose').click();await expect(page.locator('[data-project="Research"]')).toHaveAttribute('aria-current','true');
+  await page.locator('#files-open').click();await expect(page.locator('[data-sync-kind="on"]')).toBeEnabled();await page.locator('[data-sync-kind="on"]').click();
+  await expect(page.locator('#project-sync')).toContainText('Server copy enabled');await expect(page.locator('[data-sync-kind="now"]')).toBeEnabled();
+  assert.equal(git('--git-dir',union.row('Research').hub,'show','main:notes.md'),'base');
+  await union.edit('Research','server\n');await writeFile(join(root,'notes.md'),'mine\n');
+  await page.locator('[data-sync-refresh]').click();await expect(page.locator('#project-sync')).toContainText('offline');await page.locator('[data-sync-kind="now"]').click();
+  await expect(page.locator('[data-sync-path="notes.md"]')).toBeEnabled();await page.locator('[data-sync-path="notes.md"]').click();
+  await expect(page.locator('.sync-versions')).toContainText('mine');await expect(page.locator('.sync-versions')).toContainText('server');
+  await expect(page.locator('[data-sync-how="done"]')).toBeDisabled();
+  await page.locator('[data-sync-merge]').fill('reviewed merged version\n');
+  // Status pushes must preserve the edited draft and cursor.
+  await page.locator('[data-sync-refresh]').click();await expect(page.locator('[data-sync-merge]')).toHaveValue('reviewed merged version\n');
+  await page.screenshot({path:'build/smoke/sync-conflict.png'});await page.locator('[data-sync-how="done"]').click();
+  await expect(page.locator('#project-sync')).toContainText('Resolved notes.md.');assert.equal(await readFile(join(root,'notes.md'),'utf8'),'reviewed merged version\n');
+  assert.equal(fixture.frames.filter(frame=>frame.type==='union.conflict.resolve').length,1);
+  await page.locator('[data-sync-kind="now"]').click();await expect(page.locator('[data-sync-kind="now"]')).toBeEnabled();
+  await app.close();app=undefined;
+  page=await launch();await expect.poll(()=>fixture.liveFileClaims.length).toBe(1);
+  await page.locator('[data-project="Research"]').click();await page.locator('#files-open').click();await expect(page.locator('#project-sync')).toContainText('Server copy enabled');
+  assert.equal(fixture.loginCount(),1,'Saved account and sync resume without another password login');
+  await expect(page.locator('[data-sync-kind="off"]')).toBeDisabled();await page.locator('[data-sync-confirm]').check();await expect(page.locator('[data-sync-kind="off"]')).toBeEnabled();await page.locator('[data-sync-kind="off"]').click();
+  await expect(page.locator('#project-sync')).toContainText('Sync disabled');assert.equal(await readFile(join(root,'notes.md'),'utf8'),'reviewed merged version\n');
+  await page.setViewportSize({width:860,height:640});await page.screenshot({path:'build/smoke/sync-compact.png'});
+  assert.deepEqual(errors,[]);assert.ok(fixture.rotations>3);
+  console.log('PASS: native project sync controls, real Git smart HTTP bytes, WS lifecycle, conflict review and merge, retained drafts, saved-token restart and guarded server-copy removal.');
+} finally {if(app)await app.close();union.close();await fixture.close();await rm(temporary,{recursive:true,force:true});}

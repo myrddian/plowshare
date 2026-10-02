@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./src/binding"
+    },
+    {
+      "path": "./src/binding/tsconfig.test.json"
+    },
+    {
+      "path": "./src/tsconfig.test.json"
+    },
+    {
+      "path": "./src/jobs"
+    },
+    {
+      "path": "./src/jobs/tsconfig.test.json"
+    },
+    {
+      "path": "./src/operations"
+    },
+    {
+      "path": "./src/operations/tsconfig.test.json"
+    }
+  ]
+}

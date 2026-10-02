@@ -1,0 +1,57 @@
+{
+  "name": "plowshare-client-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "files": [
+    "build/*.js",
+    "build/*.d.ts",
+    "build/sync/*.js",
+    "build/sync/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "plowshare-client-ts": "link:../plowshare-client-ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "^5.9.3"
+  },
+  "exports": {
+    "./sync/*": {
+      "types": "./build/sync/*.d.ts",
+      "import": "./build/sync/*.js"
+    },
+    "./enforcer": {
+      "types": "./build/enforcer.d.ts",
+      "import": "./build/enforcer.js"
+    },
+    "./runner": {
+      "types": "./build/runner.d.ts",
+      "import": "./build/runner.js"
+    },
+    "./rooter": {
+      "types": "./build/rooter.d.ts",
+      "import": "./build/rooter.js"
+    },
+    "./session": {
+      "types": "./build/session.d.ts",
+      "import": "./build/session.js"
+    },
+    "./credentials": {
+      "types": "./build/credentials.d.ts",
+      "import": "./build/credentials.js"
+    },
+    "./marker": {
+      "types": "./build/marker.d.ts",
+      "import": "./build/marker.js"
+    }
+  }
+}

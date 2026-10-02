@@ -1,0 +1,24 @@
+# Add this layer to a Plowshare deployment to use an existing SearXNG engine.
+# It starts only the Plowshare adapter; no SearXNG engine is included.
+name: plowshare
+services:
+  searxng-provider:
+    image: plowshare/search-searxng:${PLOWSHARE_VERSION:-0.1.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/search-searxng.Dockerfile
+      args:
+        SOURCE_REVISION: ${PLOWSHARE_SOURCE_REVISION:-unknown}
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-}
+      SEARXNG_TIMEOUT_MS: ${SEARXNG_TIMEOUT_MS:-15000}
+    restart: unless-stopped
+    mem_limit: 768m
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../build/package-tests",
+    "tsBuildInfoFile": "../build/package-tests/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["package.test.ts"]
+}

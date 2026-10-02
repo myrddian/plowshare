@@ -1,0 +1,63 @@
+# GPT-OSS -- the family whose distinguishing knob is not a sampling parameter.
+#
+# The vendor's numbers: temperature 1.0, top_p 0.95 (some sources 1.0), and no
+# top_k recommendation at all -- so this file states none rather than borrowing
+# one from a family that has nothing to do with it.
+#
+# REASONING_EFFORT IS THE POINT OF THIS FILE. `low` / `medium` / `high`, medium
+# the default. It is not a sampling parameter; it is how much of the generation
+# is thinking the model then discards, and on this family it is the answer to a
+# question implementation rationale 1.1a has had open since it was written: the paragraph
+# summariser -- 87% of every model call an ingest makes -- was measured spending
+# 250 reasoning tokens against 330 completion at the median, four out of five
+# tokens produced for a one-sentence summary being thought and thrown away. On
+# Gemma there is no such knob. A profile therefore holds HOW TO TALK TO THIS
+# MODEL, not merely how to sample from it, which is why this key lives here.
+#
+# THE SPREAD IS ON EFFORT AND NOT ON TEMPERATURE. All three entries sit at the
+# vendor's 1.0/0.95, and what an intent moves is how long the model deliberates:
+# a one-sentence label wants little of it, a proposer drafting against a critic
+# wants all of it. This is also the one family where the three intents are
+# genuinely different requests, which is worth noticing -- on Gemma and Qwen the
+# vocabulary is nearly flat because their vendors publish one configuration each.
+#
+# A WARNING WORTH READING BEFORE YOU TRUST THIS. No transport in this repository
+# has verified that it can send `reasoning_effort`: it is not in the field list
+# LM Studio documents for its OpenAI-compatible endpoint, and OpenAiTransport
+# declares that it does not carry it. So on today's backends these three values
+# are DROPPED, with a warning naming the pool and the parameter, and the three
+# intents collapse to one request. That is the mechanism working, not failing --
+# the alternative was writing an unverified field onto the wire and never knowing
+# whether it was read. The day somebody confirms the spelling against a live
+# endpoint, one enum constant in OpenAiTransport.carries() turns this file on.
+#
+# MAX_TOKENS. 30 000 is the vendor's own figure for a high-effort generation, so
+# it is a ceiling that cannot truncate a correct answer rather than a budget
+# somebody guessed. It is here and not in the other two profiles because it is
+# the only such figure any of these vendors publishes. PoolProperties:343 records
+# that this server's ten-minute stream cap exists precisely because there was no
+# max_tokens to stop a runaway; this is the first real bound, and it is a loose
+# one -- a tight per-task bound is a per-agent fact and does not belong in a file
+# about a model.
+
+modes:
+
+  default:
+
+    precise:
+      temperature: 1.0
+      top_p: 0.95
+      reasoning_effort: low
+      max_tokens: 30000
+
+    balanced:
+      temperature: 1.0
+      top_p: 0.95
+      reasoning_effort: medium
+      max_tokens: 30000
+
+    exploratory:
+      temperature: 1.0
+      top_p: 0.95
+      reasoning_effort: high
+      max_tokens: 30000

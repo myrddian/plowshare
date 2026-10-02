@@ -1,0 +1,23 @@
+services:
+  fixtures:
+    image: node:26.7.0-bookworm@sha256:e929171d35b9df7773a3ec5b068e387fa109441dc90f91e6560af5d39b7e9bf1
+    command: [node, /fixture.mjs]
+    volumes:
+      - ${PLOWSHARE_CI_FIXTURE_SCRIPT:?Supply the shared fixture path}:/fixture.mjs:ro
+    read_only: true
+    mem_limit: 128m
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  server:
+    restart: 'no'
+    depends_on:
+      fixtures: {condition: service_healthy}
+  postgres:
+    restart: 'no'
+  searxng-provider:
+    restart: 'no'
+    depends_on:
+      fixtures: {condition: service_healthy}

@@ -1,0 +1,33 @@
+{
+  // The assertion project. See `fits.ts` for the whole argument; what follows
+  // is only what is unusual about these options.
+  //
+  // `lib` NAMES "DOM", AND THIS IS THE ONLY FILE IN THE MODULE THAT MAY. The
+  // two globals `fits.ts` asserts over — `WebSocket` and `fetch` — have to be
+  // nameable somewhere for the assertion to exist at all, and the alternative
+  // is installing @types/node, which `src/neutrality.test.ts` names as the
+  // first of the four edits that blind the guards. A `lib` cannot leak the way
+  // a package can: it applies to the files of this project and to nothing else,
+  // and no project references this one, so `binding/` and `logic/` are compiled
+  // exactly as they were before this directory existed.
+  //
+  // Binding interfaces now arrive through plowshare-client-ts package
+  // declarations; Gradle builds that package before checking these assignments.
+  // The dependency still goes one way, so this project's DOM lib cannot reach
+  // the shared package.
+  //
+  // NOTHING SHIPS FROM HERE. Every declaration in `fits.ts` is a type or a
+  // one-line lambda that exists to be type-checked; no file imports it and the
+  // view must not. If that ever stops being true, this project's `lib` becomes
+  // a DOM in a module whose whole design is that it has none.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../build/types/platform",
+    "tsBuildInfoFile": "../../build/types/platform/.tsbuildinfo"
+  },
+  "references": [],
+  "include": ["**/*.ts"]
+}

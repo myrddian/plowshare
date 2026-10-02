@@ -1,0 +1,577 @@
+{
+  "approval.list": {
+    "code": "OK",
+    "payload": {
+      "approvals": [
+        {
+          "id": "a",
+          "conversation": "c",
+          "askedIn": "c_child",
+          "agent": "worker",
+          "side": "remote",
+          "command": [],
+          "cwd": "/work",
+          "reason": "review set",
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [],
+          "createdAt": "2026-10-02T00:00:00Z",
+          "answeredAt": null,
+          "commands": [
+            [
+              "pnpm",
+              "check"
+            ],
+            [
+              "git",
+              "diff"
+            ]
+          ],
+          "judged": "needs review"
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "approval.answer": {
+    "code": "OK",
+    "payload": {
+      "id": "a",
+      "state": "allowed",
+      "job": "j",
+      "busy": false,
+      "note": null,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "approval.revoke": {
+    "code": "OK",
+    "payload": {
+      "id": "a",
+      "revoked": false,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "board.topup": {
+    "code": "OK",
+    "payload": {
+      "id": "root",
+      "project": "p",
+      "parent": null,
+      "root": "root",
+      "depth": 0,
+      "title": "Title",
+      "label": "label",
+      "account": "enzo",
+      "openerKind": "human",
+      "opener": "enzo",
+      "originConversation": null,
+      "state": "open",
+      "resolution": null,
+      "potTotal": 100,
+      "potSpent": 40,
+      "reserve": 10,
+      "quietNotifiedAt": "2026-10-02T00:00:00Z",
+      "openedAt": "2026-10-02T00:00:00Z",
+      "closedAt": null,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "buffer.purge": {
+    "code": "OK",
+    "payload": {
+      "fetchedPages": 3,
+      "resultSets": 2,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "retention.sweep": {
+    "code": "OK",
+    "payload": {
+      "marked": 3,
+      "conversations": 2,
+      "payloads": 5,
+      "characters": 200,
+      "prunedJobs": 1,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "provider.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "providerKey": "key",
+        "baseUrl": "http://search",
+        "facts": {
+          "providerKey": "key",
+          "name": "Search",
+          "version": "1",
+          "description": null,
+          "verbs": [
+            "SEARCH",
+            "FUTURE_VERB"
+          ],
+          "costClass": "FREE",
+          "networkTier": "LOCAL",
+          "maxResults": 10,
+          "maxQueryLength": 1000,
+          "domainExclusion": false
+        },
+        "lastHealthAt": null,
+        "lastHealthStatus": null,
+        "consecutiveFailures": 0,
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "inbox.list": {
+    "code": "OK",
+    "payload": {
+      "items": [
+        {
+          "id": "i1",
+          "handle": "enzo",
+          "kind": "future_notice",
+          "firing": null,
+          "conversation": null,
+          "ending": null,
+          "answer": "notice\nbody",
+          "arrivedAt": "2026-10-02T00:00:00Z",
+          "readAt": null
+        }
+      ],
+      "unread": 2,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "inbox.read": {
+    "code": "OK",
+    "payload": {
+      "marked": 1,
+      "unread": 2,
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "todos.read": {
+    "code": "OK",
+    "payload": [
+      {
+        "id": "todo",
+        "parent": null,
+        "position": 0,
+        "text": "Work",
+        "status": "in_progress",
+        "summary": null,
+        "locked": true,
+        "stage": "check",
+        "updatedAt": "2026-10-02T00:00:00Z",
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "orchestration.definitions": {
+    "code": "OK",
+    "payload": {
+      "definitions": [
+        {
+          "name": "check",
+          "description": "Check",
+          "tier": "global",
+          "stages": [
+            {
+              "id": "check",
+              "doneWhen": "validated",
+              "mayReturnTo": []
+            }
+          ],
+          "triggers": [
+            "manual"
+          ],
+          "served": true,
+          "withheld": null
+        },
+        {
+          "name": "disabled",
+          "description": null,
+          "tier": null,
+          "stages": [],
+          "triggers": [],
+          "served": false,
+          "withheld": "disabled"
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "orchestration.list": {
+    "code": "OK",
+    "payload": {
+      "orchestrations": [
+        {
+          "id": "o",
+          "definition": "check",
+          "tier": "global",
+          "project": null,
+          "state": "asking",
+          "pendingCap": "future_cap",
+          "result": null,
+          "failure": null,
+          "returnsUsed": 1,
+          "maxReturns": 3,
+          "nudges": 2,
+          "restarts": 1,
+          "callerAgent": "worker",
+          "callerConversation": null,
+          "conductorConversation": "c",
+          "parent": null,
+          "depth": 0,
+          "waitingFor": null,
+          "createdAt": "2026-10-02T00:00:00Z",
+          "endedAt": null,
+          "stalledSince": "2026-10-02T00:00:00Z"
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "orchestration.status": {
+    "code": "OK",
+    "payload": {
+      "orchestration": {
+        "id": "o",
+        "definition": "check",
+        "tier": "global",
+        "project": null,
+        "state": "asking",
+        "pendingCap": "future_cap",
+        "result": null,
+        "failure": null,
+        "returnsUsed": 1,
+        "maxReturns": 3,
+        "nudges": 2,
+        "restarts": 1,
+        "callerAgent": "worker",
+        "callerConversation": null,
+        "conductorConversation": "c",
+        "parent": null,
+        "depth": 0,
+        "waitingFor": null,
+        "createdAt": "2026-10-02T00:00:00Z",
+        "endedAt": null,
+        "stalledSince": "2026-10-02T00:00:00Z"
+      },
+      "todos": [
+        {
+          "id": "todo",
+          "parent": null,
+          "position": 0,
+          "text": "Work",
+          "status": "in_progress",
+          "summary": null,
+          "locked": true,
+          "stage": "check",
+          "updatedAt": "2026-10-02T00:00:00Z",
+          "future": {
+            "preserved": true
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg",
+          "kind": "question",
+          "text": "Choose",
+          "author": "conductor",
+          "createdAt": "2026-10-02T00:00:00Z",
+          "deliveredAt": null,
+          "capKind": null,
+          "structure": {
+            "lead": "Choose",
+            "questions": [
+              {
+                "header": "Choice",
+                "question": "Which?",
+                "multi": true,
+                "options": [
+                  {
+                    "label": "first",
+                    "description": "Do it",
+                    "preview": "diff"
+                  }
+                ]
+              }
+            ],
+            "draft": {
+              "name": "plan",
+              "path": "plan.md",
+              "text": "source"
+            }
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "child",
+          "state": "future_state"
+        }
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "orchestration.answer": {
+    "code": "OK",
+    "payload": {
+      "id": "o",
+      "state": "running",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "orchestration.cancel": {
+    "code": "OK",
+    "payload": {
+      "id": "o",
+      "state": "cancelled",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "orchestration.caps": {
+    "code": "OK",
+    "payload": {
+      "project": "p",
+      "steps": {
+        "value": 0,
+        "source": "project"
+      },
+      "budget": {
+        "value": null,
+        "source": "default"
+      },
+      "autoContinue": {
+        "value": null,
+        "source": "default"
+      },
+      "time": {
+        "value": null,
+        "source": "default"
+      },
+      "failedChecks": {
+        "value": 5,
+        "source": "default"
+      },
+      "applied": 3,
+      "said": "project file unavailable",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "schedule.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "weekday",
+        "cron": "0 0 9 * * MON-FRI",
+        "zone": "Australia/Melbourne",
+        "emits": "daily",
+        "paused": true,
+        "nextFireAt": "2026-10-02T00:00:00Z",
+        "definedBy": "enzo",
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "schedule.define": {
+    "code": "OK",
+    "payload": {
+      "name": "weekday",
+      "cron": "0 0 9 * * MON-FRI",
+      "zone": "Australia/Melbourne",
+      "emits": "daily",
+      "paused": true,
+      "nextFireAt": "2026-10-02T00:00:00Z",
+      "definedBy": "enzo",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "schedule.read": {
+    "code": "OK",
+    "payload": {
+      "cron": "0 0 9 * * MON-FRI",
+      "zone": "UTC",
+      "when": "weekday mornings",
+      "agent": "worker",
+      "task": "check",
+      "intoConversation": true,
+      "project": null,
+      "conversation": "c",
+      "nextFires": [
+        "2026-10-02T00:00:00Z"
+      ],
+      "names": {
+        "schedule": "s",
+        "trigger": "t",
+        "event": "e"
+      },
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "trigger.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "t",
+        "event": "daily",
+        "project": "p",
+        "conversation": null,
+        "agent": "worker",
+        "task": "check",
+        "maxModelCalls": null,
+        "maxTurns": null,
+        "queueCap": 2,
+        "paused": false,
+        "definedBy": "enzo",
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "trigger.define": {
+    "code": "OK",
+    "payload": {
+      "name": "t",
+      "event": "daily",
+      "project": "p",
+      "conversation": null,
+      "agent": "worker",
+      "task": "check",
+      "maxModelCalls": null,
+      "maxTurns": null,
+      "queueCap": 2,
+      "paused": false,
+      "definedBy": "enzo",
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "event.fire": {
+    "code": "OK",
+    "payload": [
+      {
+        "id": "f",
+        "event": "daily",
+        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "schedule": null,
+        "fireAt": null,
+        "trigger": "t",
+        "target": "trigger:t",
+        "status": "queued",
+        "supersededBy": null,
+        "reason": null,
+        "jobId": null,
+        "arrivedAt": "2026-10-02T00:00:00Z",
+        "startedAt": null,
+        "finishedAt": null,
+        "topic": null,
+        "future": {
+          "preserved": true
+        }
+      },
+      {
+        "id": "unmatched",
+        "event": "daily",
+        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "schedule": null,
+        "fireAt": null,
+        "trigger": null,
+        "target": null,
+        "status": "unmatched",
+        "supersededBy": null,
+        "reason": "no matching trigger",
+        "jobId": null,
+        "arrivedAt": "2026-10-02T00:00:00Z",
+        "startedAt": null,
+        "finishedAt": null,
+        "topic": null
+      }
+    ]
+  },
+  "firing.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "id": "f",
+        "event": "daily",
+        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "schedule": null,
+        "fireAt": null,
+        "trigger": "t",
+        "target": "trigger:t",
+        "status": "queued",
+        "supersededBy": null,
+        "reason": null,
+        "jobId": null,
+        "arrivedAt": "2026-10-02T00:00:00Z",
+        "startedAt": null,
+        "finishedAt": null,
+        "topic": null,
+        "future": {
+          "preserved": true
+        }
+      }
+    ]
+  },
+  "provider.deregister": {
+    "code": "NO_CONTENT"
+  },
+  "schedule.pause": {
+    "code": "NO_CONTENT"
+  },
+  "schedule.forget": {
+    "code": "NO_CONTENT"
+  },
+  "trigger.pause": {
+    "code": "NO_CONTENT"
+  },
+  "trigger.forget": {
+    "code": "NO_CONTENT"
+  }
+}

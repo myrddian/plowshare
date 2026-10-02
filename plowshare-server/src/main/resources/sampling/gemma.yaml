@@ -1,0 +1,57 @@
+# GEMMA -- what an intent means on this family.
+#
+# Google's own guidance for Gemma: temperature 1.0, top_p 0.95 (one source says
+# 0.96), top_k 64. It adds that a deterministic fact-extraction task may want the
+# temperature lowered toward 0.2 and top_p toward 0.8.
+#
+# THIS FILE TAKES THE SECOND HALF OF THAT ADVICE AND DELIBERATELY DECLINES THE
+# FIRST, and the reason is a measurement rather than a preference.
+#
+# implementation rationale ran this server's
+# summariser cascade against a real paper on a real node at temperature 0.0. Two
+# paragraphs produced 3 999 completion tokens, 3 997 of them reasoning, and EMPTY
+# CONTENT -- and they did it DETERMINISTICALLY, the same paragraph looping on two
+# consecutive ingests of identical bytes. That is the signature of greedy
+# decoding on a model tuned for sampling. At 1.0 the same six calls finished
+# correctly.
+#
+# So the temperature axis on this family has exactly two measured points: 1.0
+# works and 0.0 fails catastrophically. NOTHING BETWEEN THEM HAS BEEN TESTED AT
+# ALL. Walking down it toward 0.2 on a vendor's sentence, on the model that
+# produced the failure this whole mechanism exists to fix, would be trading a
+# measurement for a guess in the direction the measurement warns about.
+#
+# Truncation is the safe lever and it is the one this file pulls. Lowering top_p
+# and top_k narrows WHICH tokens can be drawn without flattening the distribution
+# they are drawn from, so it buys reproducibility without the degenerate-loop
+# risk. `precise` therefore holds the temperature at the vendor's own 1.0 and
+# takes the vendor's own deterministic-task top_p of 0.8.
+#
+# EXPLORATORY IS THE SAME AS BALANCED HERE, AND THAT IS SAID RATHER THAN PAPERED
+# OVER. Google names one recommended configuration and one tightening below it;
+# it names nothing above. A wider top_p or a temperature over 1.0 would be a
+# number this repository invented and then attributed to a vendor, which is the
+# exact failure that put a Gemma constant into five agent files. Where a profile
+# cannot honestly spread, it says so.
+
+modes:
+
+  default:
+
+    # The vendor's recommendation, with its own deterministic-task nucleus.
+    precise:
+      temperature: 1.0
+      top_p: 0.8
+      top_k: 64
+
+    # The vendor's recommendation, unmodified.
+    balanced:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+
+    # Identical to `balanced` on purpose. See the header.
+    exploratory:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64

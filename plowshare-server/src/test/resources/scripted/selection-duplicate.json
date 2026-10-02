@@ -1,0 +1,162 @@
+{
+  "sources": [
+    {
+      "key": "https://fixture.example.invalid/source/b58afc3211244233",
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 62"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/1d7de5048cfe5d85",
+      "objectives": [
+        "o1",
+        "o3"
+      ],
+      "rationale": "Synthetic rationale 63"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/aff808996c5a332f",
+      "objectives": [
+        "o1",
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 64"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/724c8567cdc09bbd",
+      "objectives": [
+        "o1",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 65"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/3a8f74b8af539f19",
+      "objectives": [
+        "o1",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 66"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/7cfa085ae05871c8",
+      "objectives": [
+        "o1",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 67"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/d2cf4113e1ed1271",
+      "objectives": [
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 68"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/a6068a2e9bedc9c2",
+      "objectives": [
+        "o2",
+        "o3"
+      ],
+      "rationale": "Synthetic rationale 69"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/9ad399b599caf50b",
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 70"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/df4e89c3be686656",
+      "objectives": [
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 71"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/cc791d7bc7a39909",
+      "objectives": [
+        "o1",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 72"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/e94432e42d3dbdb8",
+      "objectives": [
+        "o2"
+      ],
+      "rationale": "Synthetic rationale 73"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/abb8a8f79b63ca5b",
+      "objectives": [
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 74"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/23aec5bcc8eb519a",
+      "objectives": [
+        "o3"
+      ],
+      "rationale": "Synthetic rationale 75"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/aa6a006c9b66e09e",
+      "objectives": [
+        "o2"
+      ],
+      "rationale": "Synthetic rationale 76"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/693512a7ebb84734",
+      "objectives": [
+        "o3"
+      ],
+      "rationale": "Synthetic rationale 77"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/658fef8175a03a52",
+      "objectives": [
+        "o1",
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 78"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/ad8a8bff95506640",
+      "objectives": [
+        "o1",
+        "o3",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 79"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/481e078c00e65222",
+      "objectives": [
+        "o2",
+        "o4"
+      ],
+      "rationale": "Synthetic rationale 80"
+    },
+    {
+      "key": "https://fixture.example.invalid/source/e94432e42d3dbdb8",
+      "objectives": [
+        "o2"
+      ],
+      "rationale": "Synthetic rationale 81"
+    }
+  ]
+}

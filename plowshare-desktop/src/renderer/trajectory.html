@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Trajectory · Plowshare</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="desktop.css">
+  <script src="trajectory.js" defer></script>
+</head>
+<body class="trajectory-window">
+  <header class="titlebar"><div class="window-space"></div><span class="titlebar-name">PLOWSHARE</span><span class="trajectory-title" id="trajectory-title">Trajectory</span><span class="trajectory-connection" id="trajectory-connection"></span></header>
+  <main class="trajectory-workspace">
+    <header class="trajectory-toolbar"><div><h1><span data-icon="route"></span>Trajectory</h1><p id="trajectory-summary">Loading conversation…</p></div><div class="trajectory-actions"><button id="trajectory-reload"><span data-icon="refresh"></span>Refresh</button><button id="trajectory-follow" aria-pressed="true"><span data-icon="follow"></span>Following</button></div></header>
+    <div id="trajectory-error" class="error-banner" role="alert" hidden></div>
+    <div id="trajectory-approvals" class="approval-bar" hidden></div>
+    <div id="trajectory-strip" class="trajectory-strip" aria-label="Execution overview"></div>
+    <div class="trajectory-columns">
+      <section class="trajectory-log" aria-label="Trajectory steps">
+        <div class="trajectory-filter"><div class="search-field"><span data-icon="search"></span><input id="trajectory-search" type="search" placeholder="Search steps, tools and text…" aria-label="Search trajectory"></div><span class="filter-symbol" data-icon="filter"></span><select id="trajectory-filter" aria-label="Filter trajectory"><option value="all">All steps</option><option value="tools">Tools</option><option value="failed">Failures</option></select></div>
+        <section id="trajectory-run" class="trajectory-run" aria-label="Current run" hidden><p id="trajectory-run-status" role="status"></p><div id="trajectory-run-items"></div></section>
+        <button id="trajectory-earlier" class="load-earlier" hidden><span data-icon="history"></span>Load earlier entries</button>
+        <div id="trajectory-rows" role="list" tabindex="0" aria-label="Execution steps; use arrow keys"></div>
+        <details id="trajectory-diagnostics" class="trajectory-diagnostics" hidden><summary>Job diagnostics</summary><div id="trajectory-diagnostics-content"></div></details>
+        <footer class="trajectory-log-footer"><span id="trajectory-conversation"></span><span>↑ ↓ Select · / Search</span></footer>
+      </section>
+      <section class="trajectory-detail" aria-label="Selected entry detail"><header id="trajectory-detail-heading"></header><div id="trajectory-detail-content" tabindex="0"></div></section>
+    </div>
+  </main>
+</body>
+</html>

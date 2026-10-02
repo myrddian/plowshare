@@ -1,0 +1,94 @@
+# QWEN 3.x -- and this is the family application.yml points at by default, so
+# this file is the one that governs an out-of-the-box Plowshare.
+#
+# Qwen's own guidance, and the sentence that matters most is not a number:
+#
+#     DO NOT use greedy decoding, as it can lead to performance degradation and
+#     endless repetitions.
+#
+# That is the vendor of `qwen3.5-9b` -- the model application.yml names as the
+# default for BOTH the `fast` and the `reasoning` class -- describing the exact
+# failure this project spent an afternoon diagnosing. Before this mechanism
+# existed, `ChatRequest.of` hardcoded temperature 0.0 and every call in the
+# server ran that model in the one way its vendor explicitly forbids.
+#
+# TWO MODES, ONE MODEL, AND THE MODE IS STATED IN models.yaml.
+#
+#   thinking      temperature 0.6, top_p 0.95, top_k 20, min_p 0
+#   non-thinking  temperature 0.7, top_p 0.80, top_k 20, min_p 0
+#
+# Nothing in a request tells this server which of those a wire name is running
+# as, and the two are a factor of two apart on temperature, so it is declared by
+# a person in models.yaml and never inferred. A mapping that states no mode falls
+# back to `default` below, which is `thinking`.
+#
+# WHAT THE SPREAD IS AND IS NOT. The temperature is the mode's own, in all three
+# entries, always: the vendor recommends one value per mode and the only other
+# measured point on any model in this repository is zero, which is the failure.
+# `precise` moves the nucleus instead, to 0.8 -- which is not a number invented
+# here either, it is the top_p Qwen recommends for this same model in its other
+# mode. In non-thinking mode 0.8 is already the recommendation, so `precise`,
+# `balanced` and `exploratory` are the same three numbers and this file says so
+# rather than manufacturing a difference.
+#
+# TWO PIECES OF THE GUIDANCE ARE NOT SENT, AND THAT IS DELIBERATE.
+#   * `min_p: 0` is Qwen's recommendation and is also the default everywhere this
+#     project has looked, so sending it would change nothing while adding a field
+#     no transport here has verified.
+#   * a presence penalty of 0-2 against repetition is offered as a remedy rather
+#     than a setting, and picking a number inside a range a vendor left open is
+#     the kind of invention this whole design exists to stop.
+
+modes:
+
+  # WHAT AN UNSTATED MODE GETS. Thinking, because that is how a reasoning-capable
+  # Qwen serves unless somebody turns it off, and because 0.6 is the more
+  # conservative of the two temperatures.
+  default:
+    precise:
+      temperature: 0.6
+      top_p: 0.8
+      top_k: 20
+    balanced:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+    exploratory:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+
+  # Written out rather than aliased to `default` with a YAML anchor. This is a
+  # file a person edits, and the two entries meaning the same thing today is a
+  # fact about today's guidance rather than a structural identity -- somebody
+  # changing what an unstated mode falls back to should not be silently changing
+  # what `mode: thinking` means as well.
+  thinking:
+    precise:
+      temperature: 0.6
+      top_p: 0.8
+      top_k: 20
+    balanced:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+    exploratory:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+
+  # All three identical, because the vendor names one configuration for this mode
+  # and this file does not invent a second. See the header.
+  non-thinking:
+    precise:
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+    balanced:
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+    exploratory:
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20

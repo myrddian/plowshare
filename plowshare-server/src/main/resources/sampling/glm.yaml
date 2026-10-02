@@ -1,0 +1,89 @@
+# GLM -- what an intent means on this family.
+#
+# Z.ai's guidance for GLM-4.7-Flash names TWO configurations and not three:
+# temperature 1.0 / top_p 0.95 for general use, and temperature 0.7 / top_p 1.0
+# specifically FOR TOOL CALLING. This file maps those two onto three intents and
+# says where the seam is rather than inventing a third point.
+#
+# WHY `precise` TAKES THE TOOL-CALLING NUMBERS AND NOT A LOWER TEMPERATURE.
+# `precise` is what every summariser and every structured-output agent in this
+# repository declares, and what those agents want is not creative restraint --
+# it is one shape, emitted reliably, parseable on the first attempt. That is the
+# same demand a tool call makes, so the vendor's tool-calling pair is the honest
+# answer for this intent. Reaching for a lower temperature instead would be
+# inventing a number in the direction `gemma.yaml` was burned by: that family's
+# only two measured points are 1.0 (works) and 0.0 (loops deterministically,
+# 3 997 reasoning tokens and empty content), and nothing between them is known.
+# Note the shape of the vendor's advice here -- tightening the temperature while
+# OPENING top_p to 1.0 -- which is the opposite axis from Gemma's, and a reason
+# to take it as given rather than to reason by analogy from the other file.
+#
+# EXPLORATORY IS THE SAME AS BALANCED, and that is stated rather than papered
+# over, for the reason `gemma.yaml` gives at length: the vendor names one
+# general configuration and one tightening for a specific task. It names nothing
+# above. A wider top_p or a temperature over 1.0 would be a number this
+# repository made up and then attributed to Z.ai.
+#
+# WHAT THIS FILE CANNOT SAY. The vendor also requires `min_p` 0.01 (llama.cpp
+# defaults to 0.05, which is wrong for this family) and `repeat_penalty` 1.0,
+# i.e. off. `Sampling` carries temperature, top_p and top_k and nothing else, so
+# neither can be expressed here and neither is silently dropped -- they are set
+# as server-side defaults on the llama.cpp command line, with `--min-p 0.01
+# --repeat-penalty 1.0`. If a pool serving this family is ever launched without
+# them, this file's numbers are still right and the two missing ones are not
+# visible from inside Plowshare at all. That is the cost of the split and it is
+# recorded here because this is where somebody will look for it.
+#
+# REASONING IS TURNED OFF ON EVERY INTENT, AND THAT IS A MEASUREMENT.
+#
+# GLM-4.7-Flash reasons by default and llama.cpp preserves it. Measured against
+# the node on 2026-09-07, one prompt at max_tokens 1024 -- a realistic
+# summariser allowance:
+#
+#   reasoning_effort=none    1.3s    0 reasoning chars   409-char answer  stop
+#   reasoning_effort=low    17.2s  5300 reasoning chars     0-char answer  LENGTH
+#   reasoning_effort=medium 17.3s  5306 reasoning chars    84-char answer  LENGTH
+#   reasoning_effort=high   17.3s  5172 reasoning chars     0-char answer  LENGTH
+#   omitted                 16.5s  4658 reasoning chars   338-char answer  stop
+#
+# So `low`, `medium`, `high` and omission are ONE behaviour on this family, and
+# `none` is the only value that changes anything. On gpt-oss the three
+# gradations are real; here the field is a switch. This is what a per-family
+# profile is for.
+#
+# AND THE FAILURE IT AVOIDS IS THE ONE gemma.yaml ALREADY RECORDS. At 1024
+# tokens with reasoning on, this model returned a 5 300-character reasoning
+# trace and an EMPTY ANSWER, truncated at `length` before it wrote a word --
+# the same shape as the Gemma runaway that put this whole mechanism here, from
+# a different cause. An ingest cascade would have filed empty summaries.
+#
+# `exploratory` takes it too, which looks wrong and is not. There is no third
+# reasoning setting to spend it on: the alternative is not "more thinking", it
+# is the 17-second truncation above.
+#
+# top_k IS ABSENT ON PURPOSE. Z.ai's published guidance names temperature and
+# top_p; it does not name a top_k. An omitted value is left to the endpoint's
+# own default rather than filled in with a neighbouring family's 64.
+
+modes:
+
+  default:
+
+    # The vendor's tool-calling configuration. See the header for why this, and
+    # not a lower temperature, is what `precise` means on this family.
+    precise:
+      temperature: 0.7
+      top_p: 1.0
+      reasoning_effort: none
+
+    # The vendor's general recommendation, unmodified.
+    balanced:
+      temperature: 1.0
+      top_p: 0.95
+      reasoning_effort: none
+
+    # Identical to `balanced` on purpose. See the header.
+    exploratory:
+      temperature: 1.0
+      top_p: 0.95
+      reasoning_effort: none

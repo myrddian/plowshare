@@ -1,0 +1,88 @@
+import { _electron as electron, expect } from 'playwright/test';
+import executablePath from 'electron';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { protocolFixture } from './protocol-fixture.mjs';
+const profile = await mkdtemp(join(tmpdir(), 'plowshare-board-smoke-'));
+const env = { ...process.env, PLOWSHARE_DESKTOP_CONFIG: join(profile, 'config'), PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'), PLOWSHARE_DESKTOP_PROFILE: profile }; delete env.ELECTRON_RUN_AS_NODE;
+await mkdir('build/smoke', { recursive: true });
+const fixture = await protocolFixture(); let app;
+try {
+  app = await electron.launch({ executablePath, args: [resolve('.')], env });
+  const page = await app.firstWindow(), errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.locator('[data-project="Plowshare"]').click();
+  const opened = app.waitForEvent('window'); await page.locator('#board-open').click(); const board = await opened;
+  board.on('pageerror', error => errors.push(error.message));
+  await expect(board.locator('#board-detail h2')).toHaveText('How should device sync work?');
+  await expect(board.locator('.board-message')).toHaveCount(3);
+  await expect(board.locator('.board-message table')).toHaveCount(1);
+  await expect(board.locator('.board-budget')).toContainText('49 / 120');
+  await board.locator('[data-topic="demo-child"]').last().click();
+  await expect(board.locator('#board-detail h2')).toHaveText('Compare conflict strategies');
+  await board.locator('.board-breadcrumb [data-topic="demo-board"]').click();
+  await expect(board.locator('#board-detail h2')).toHaveText('How should device sync work?');
+  await board.locator('#view-swarm').click(); await expect(board.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
+  await expect(board.locator('.swarm-member')).toHaveCount(3);
+  await expect(board.locator('.topic-row')).toHaveCount(0);
+  await expect(board.locator('#board-title')).toHaveText('Swarm members');
+  await expect(board.locator('.swarm-member').first()).toContainText('search · offline conflict strategies · ok');
+  await board.screenshot({ path: 'build/smoke/swarm-demo.png' });
+  for (const [at, tool] of [[0, 'search'], [1, 'board_post']]) {
+    const actorOpened = app.waitForEvent('window');
+    await board.locator('.swarm-member').nth(at).click(); const actor = await actorOpened;
+    await expect(actor.locator('#trajectory-rows')).toContainText(tool);
+    await actor.evaluate(() => window.close());
+  }
+
+  await assert.rejects(board.evaluate(() => window.plowshare.request({ action: 'run', conversation: 'demo-desktop', agent: 'plowshare', text: 'Forbidden' })), /only inspect/);
+  await assert.rejects(board.evaluate(() => window.plowshare.request({ action: 'board-trajectory', conversation: 'demo-global' })), /displayed/);
+  await board.evaluate(() => window.close());
+
+  await page.locator('#connection-button').click(); await page.locator('#server-url').fill(fixture.base);
+  await page.locator('#handle').fill('fixture'); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
+  await expect(page.locator('#connection-label')).toHaveText('Connected');
+  const liveOpened = app.waitForEvent('window'); await page.locator('#board-open').click(); const live = await liveOpened;
+  live.on('pageerror', error => errors.push(error.message));
+  await expect(live.locator('#board-detail h2')).toHaveText('How should device sync work?');
+  fixture.appendBoardMessage(); await expect(live.locator('#board-detail')).toContainText('A fresh swarm update from another session.', { timeout: 10000 });
+  const trajectoryOpened = app.waitForEvent('window'); await live.locator('.board-seat').first().click(); const trajectory = await trajectoryOpened;
+  trajectory.on('pageerror', error => errors.push(error.message));
+  await expect(trajectory.locator('#trajectory-rows')).toContainText('Researching conflict strategies.');
+  await assert.rejects(trajectory.evaluate(() => window.plowshare.request({ action: 'board-inspection', view: 'swarm' })), /only read/);
+  fixture.appendTurn('fixture-board-seat', 'A later board seat result.');
+  await expect(trajectory.locator('#trajectory-rows')).toContainText('A later board seat result.');
+  await live.locator('#view-swarm').click(); await expect(live.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
+  await expect(live.locator('.swarm-member')).toHaveCount(3);
+  await expect(live.locator('.topic-row')).toHaveCount(0);
+  await expect(live.locator('.swarm-member').nth(1)).toContainText('reasoning · waiting 12s');
+  await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
+  await live.locator('.swarm-member').nth(1).click();
+  // This live fixture intentionally shares a conversation; reuse its native trajectory.
+  await expect(trajectory.locator('#trajectory-rows')).toContainText('Researching conflict strategies.');
+  fixture.setRefuseBoard(true); await live.locator('#board-refresh').click();
+  await expect(live.locator('#board-error')).toContainText('temporarily unavailable');
+  await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
+  fixture.setRefuseBoard(false); await live.locator('#board-refresh').click(); await expect(live.locator('#board-error')).toBeHidden();
+  await live.screenshot({ path: 'build/smoke/swarm-live.png' });
+  await live.setViewportSize({ width: 920, height: 680 });
+  assert.equal(await live.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await live.screenshot({ path: 'build/smoke/board-compact.png' });
+  fixture.disconnect(); await expect(live.locator('#board-error')).toContainText('Reconnect');
+  await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
+  await page.locator('#connection-button').click(); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
+  await expect(page.locator('#connection-label')).toHaveText('Connected'); await expect(live.locator('#board-error')).toBeHidden();
+  await live.evaluate(() => window.close());
+  const reads = fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length;
+  await new Promise(resolve => setTimeout(resolve, 4500));
+  assert.equal(fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length, reads, 'Closing the inspector stops its reads.');
+  const reopened = app.waitForEvent('window'); await page.locator('#board-open').click(); const ending = await reopened;
+  await expect(ending.locator('#board-detail h2')).toHaveText('How should device sync work?');
+  await page.locator('#connection-button').click(); await page.locator('#use-demo').click();
+  await expect.poll(() => ending.isClosed()).toBe(true); await expect.poll(() => trajectory.isClosed()).toBe(true);
+  assert.equal(fixture.frames.filter(f => ['board.post','board.open','board.topup','agent.run','inbox.read'].includes(f.type)).length, 0);
+  assert.deepEqual(errors, []);
+  console.log('Board smoke passed: topic tree, threaded messages, child/parent navigation, live swarm updates, seat trajectory follow, isolation, failures, reconnect, account reset, compact layout and polling lifetime.');
+} finally { await app?.close(); await fixture.close(); await rm(profile, { recursive: true, force: true }); }

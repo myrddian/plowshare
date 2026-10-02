@@ -1,0 +1,45 @@
+{
+  "name": "plowshare-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plowshare remote agent workspace",
+  "type": "module",
+  "main": "build/main.cjs",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/profile.test.ts src/client.test.ts src/job-store.test.ts src/operator.test.ts src/caps.test.ts src/activity.test.ts src/library.test.ts src/sync.test.ts src/schedules.test.ts src/runs.test.ts src/workspace.test.ts src/project-config.test.ts src/connection-config.test.ts src/files.test.ts src/board.test.ts src/renderer/markdown.test.ts src/renderer/approvals.test.ts",
+    "test:board": "node scripts/build.mjs && node --experimental-strip-types scripts/board-smoke.mjs",
+    "test:electron": "node scripts/build.mjs && node --experimental-strip-types scripts/smoke.mjs",
+    "test:projects": "node scripts/build.mjs && node --experimental-strip-types scripts/projects-smoke.mjs",
+    "test:bots": "node scripts/build.mjs && node --experimental-strip-types scripts/bots-smoke.mjs",
+    "test:login": "node scripts/build.mjs && node --experimental-strip-types scripts/login-smoke.mjs",
+    "test:files": "node scripts/build.mjs && node --experimental-strip-types scripts/files-smoke.mjs",
+    "test:approvals": "node scripts/build.mjs && node --experimental-strip-types scripts/approvals-smoke.mjs",
+    "test:runs": "node scripts/build.mjs && node --experimental-strip-types scripts/runs-smoke.mjs",
+    "test:library": "node scripts/library-smoke.mjs",
+    "test:sync": "node scripts/build.mjs && node scripts/sync-smoke.mjs",
+    "test:builder": "node scripts/build.mjs && node --experimental-strip-types scripts/builder-smoke.mjs",
+    "test:controls": "node scripts/build.mjs && node --experimental-strip-types scripts/controls-smoke.mjs",
+    "test:transport": "node scripts/build.mjs && node --experimental-strip-types scripts/transport-smoke.mjs",
+    "test:recovery": "node scripts/build.mjs && node --experimental-strip-types scripts/recovery-smoke.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.0.4",
+    "@types/node": "^22.20.2",
+    "electron": "44.5.1",
+    "esbuild": "0.28.2",
+    "playwright": "^1.58.2",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.3"
+  },
+  "dependencies": {
+    "plowshare-client-node": "link:../plowshare-client-node",
+    "plowshare-client-ts": "link:../plowshare-client-ts"
+  }
+}

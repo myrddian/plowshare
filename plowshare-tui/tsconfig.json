@@ -1,0 +1,36 @@
+{
+  // Binding is now built by plowshare-client-ts and consumed through package
+  // declarations. This solution checks TUI-only projects; Gradle builds the
+  // shared package first, or run its pnpm build before this module's scripts.
+  // The solution file. It compiles nothing itself — `files: []` — and exists to
+  // name the three projects that do, so that `tsc -b` builds them in dependency
+  // order and enforces the edge between them while doing it.
+  //
+  // WHY THE EDGE IS A COMPILER PROBLEM AND NOT ONLY A SCAN'S. Task 2 writes a
+  // source scan over `logic/`, and that scan is the guard of record because it
+  // reads what is written rather than what resolves. But a scan runs when the
+  // suite runs; this runs when anything is compiled, and it names the file and
+  // the rule in the same breath. The plan calls these the two halves, and this
+  // is the first one.
+  //
+  // <b>`tsc --noEmit` against this file checks nothing.</b> That is how a
+  // solution file behaves — `files` is empty, so there is no program — and it
+  // exits 0, which is precisely the shape of stale-green this repository has
+  // been bitten by before. The type check is `tsc -b` (`pnpm run typecheck`),
+  // which is what `:plowshare-tui:pnpmTypecheck` runs and what the verification
+  // in the plan should be read as. Said here rather than discovered.
+  // A FOURTH PATH, ADDED BY TASK 5, THAT IS NOT A FOURTH LAYER. `./src/platform`
+  // holds two assignments and no runtime code: it names the platform's own
+  // `WebSocket` and `fetch` and asserts they satisfy the structural interfaces
+  // `binding/` declares for them, which task 4 argued and never ran. It is
+  // listed here because a check nothing executes is not a check — `tsc -b` is
+  // what executes this one — and it is the only project whose `lib` names DOM.
+  // See `src/platform/tsconfig.json` for why that cannot reach the other three.
+  "files": [],
+  "references": [
+    { "path": "./src/logic" },
+    { "path": "./src/view" },
+    { "path": "./src/platform" },
+    { "path": "./src/logic/tsconfig.test.json" }
+  ]
+}

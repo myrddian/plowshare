@@ -1,0 +1,22 @@
+{
+  "name": "plowshare-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": { "node": ">=22.12" },
+  "bin": { "plowshare-cli": "build/main.js" },
+  "files": ["build/*.js", "build/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test build-tests/*.test.js"
+  },
+  "dependencies": { "plowshare-client-ts": "link:../plowshare-client-ts", "plowshare-client-node": "link:../plowshare-client-node" },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.3"
+  }
+}

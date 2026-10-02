@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../build/operations",
+    "tsBuildInfoFile": "../../build/operations/.tsbuildinfo"
+  },
+  "include": [
+    "**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../binding"
+    }
+  ]
+}

@@ -1,0 +1,385 @@
+{
+  "description": "Synthetic nonempty WS replies derived from the actual Java response records; not live deployment evidence.",
+  "replies": {
+    "memory.index": [
+      {
+        "id": "memory_fixture",
+        "summary": "build instructions",
+        "scope": "the project",
+        "unsearchable": false
+      }
+    ],
+    "memory.read": {
+      "id": "memory_fixture",
+      "summary": "build instructions",
+      "scope": "the project",
+      "formed": {
+        "at": "2026-10-02T00:00:00Z",
+        "by": "person",
+        "where": "review"
+      },
+      "state": "active",
+      "pinned": false,
+      "uses": 0,
+      "lastUsed": null,
+      "body": "first line\nsecond line",
+      "supersedes": null,
+      "supersededBy": null,
+      "invalidation": null,
+      "home": {
+        "project": null,
+        "global": true
+      }
+    },
+    "memory.invalidate": {
+      "id": "memory_fixture",
+      "summary": "build instructions",
+      "scope": "the project",
+      "formed": {
+        "at": "2026-10-02T00:00:00Z",
+        "by": "person",
+        "where": "review"
+      },
+      "state": "invalidated",
+      "pinned": false,
+      "uses": 0,
+      "lastUsed": null,
+      "body": "first line\nsecond line",
+      "supersedes": null,
+      "supersededBy": null,
+      "invalidation": {
+        "at": "2026-10-02T00:00:00Z",
+        "by": "person",
+        "reason": "obsolete"
+      },
+      "home": {
+        "project": null,
+        "global": true
+      }
+    },
+    "memory.recall": {
+      "question": "build?",
+      "limit": 5,
+      "memories": [
+        {
+          "id": "memory_fixture",
+          "summary": "build instructions",
+          "scope": "the project",
+          "formed": {
+            "at": "2026-10-02T00:00:00Z",
+            "by": "person",
+            "where": "review"
+          },
+          "state": "active",
+          "pinned": false,
+          "uses": 0,
+          "lastUsed": null,
+          "body": "first line\nsecond line",
+          "supersedes": null,
+          "supersededBy": null,
+          "invalidation": null,
+          "home": {
+            "project": null,
+            "global": true
+          }
+        }
+      ],
+      "unsearchable": 2
+    },
+    "memory.write": {
+      "kind": "new",
+      "memoryId": "memory_fixture",
+      "reason": "new fact",
+      "targetId": null,
+      "demoted": []
+    },
+    "memory.navigate": {
+      "level": "lesson",
+      "ids": [
+        "memory_fixture"
+      ],
+      "text": "allowance spent",
+      "complete": false,
+      "modelCalls": 4
+    },
+    "memory.reembed": {
+      "repaired": [
+        "memory_fixture"
+      ],
+      "failed": [
+        "another_memory"
+      ]
+    },
+    "proposal.list": [
+      {
+        "id": "proposal_fixture",
+        "memoryId": "memory_fixture",
+        "project": "repo",
+        "action": "promote",
+        "reason": "shared knowledge",
+        "state": "accepted",
+        "createdAt": "2026-10-02T00:00:00Z",
+        "proposedBy": "person",
+        "resolvedAt": "2026-10-02T00:00:00Z",
+        "resolvedBy": "person",
+        "resolution": "accepted"
+      }
+    ],
+    "proposal.resolve": {
+      "proposal": {
+        "id": "proposal_fixture",
+        "memoryId": "memory_fixture",
+        "project": "repo",
+        "action": "promote",
+        "reason": "shared knowledge",
+        "state": "accepted",
+        "createdAt": "2026-10-02T00:00:00Z",
+        "proposedBy": "person",
+        "resolvedAt": "2026-10-02T00:00:00Z",
+        "resolvedBy": "person",
+        "resolution": "accepted"
+      },
+      "promotedId": "global_memory",
+      "demoted": []
+    },
+    "proposal.reconsider": {
+      "reopened": [
+        "proposal_fixture"
+      ],
+      "refused": []
+    },
+    "conversation.search": {
+      "hits": [
+        {
+          "conversationId": "conversation_fixture",
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "rank": 0.8,
+          "snippet": "some words",
+          "length": 10,
+          "supersededBy": null,
+          "handle": null,
+          "recordedAt": "2026-10-02T00:00:00Z"
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 20,
+      "reach": {
+        "searched": 1,
+        "ejected": 2,
+        "recordedOnly": 3
+      }
+    },
+    "document.retrieve": {
+      "query": "question",
+      "document": "00000000-0000-0000-0000-000000000001",
+      "limit": 10,
+      "hits": [
+        {
+          "score": 0.5,
+          "chunk": {
+            "chunkId": "00000000-0000-0000-0000-000000000003",
+            "text": "passage\nnext line",
+            "paragraphId": "00000000-0000-0000-0000-000000000002",
+            "paragraphOrdinal": 1,
+            "paragraphSummary": null,
+            "section": {
+              "id": "00000000-0000-0000-0000-000000000003",
+              "title": null,
+              "synthetic": true,
+              "summary": null
+            },
+            "chapter": null,
+            "documentId": "00000000-0000-0000-0000-000000000001",
+            "sourceName": "paper.pdf",
+            "title": "A paper",
+            "documentSummary": null
+          }
+        }
+      ]
+    },
+    "document.list": {
+      "documents": [
+        {
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "title": "A paper",
+          "summary": null,
+          "vocabulary": null,
+          "ingestedAt": "2026-10-02T00:00:00Z",
+          "ingestedBy": "person",
+          "byteSize": 100,
+          "chapters": 1,
+          "sections": 1,
+          "paragraphs": 1,
+          "chunks": 1
+        }
+      ],
+      "total": 1,
+      "limit": 20,
+      "offset": 0,
+      "naming": null
+    },
+    "document.detail": {
+      "documentId": "00000000-0000-0000-0000-000000000001",
+      "sourceName": "paper.pdf",
+      "title": "A paper",
+      "summary": null,
+      "vocabulary": null,
+      "ingestedAt": "2026-10-02T00:00:00Z",
+      "ingestedBy": "person",
+      "byteSize": 100,
+      "chapters": [
+        {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "title": null,
+          "synthetic": true,
+          "summary": null,
+          "sections": [
+            {
+              "id": "00000000-0000-0000-0000-000000000003",
+              "title": null,
+              "synthetic": true,
+              "summary": null
+            }
+          ]
+        }
+      ]
+    },
+    "document.chunk": {
+      "chunkId": "00000000-0000-0000-0000-000000000003",
+      "text": "passage\nnext line",
+      "paragraphId": "00000000-0000-0000-0000-000000000002",
+      "paragraphOrdinal": 1,
+      "paragraphSummary": null,
+      "section": {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "title": null,
+        "synthetic": true,
+        "summary": null
+      },
+      "chapter": null,
+      "documentId": "00000000-0000-0000-0000-000000000001",
+      "sourceName": "paper.pdf",
+      "title": "A paper",
+      "documentSummary": null
+    },
+    "document.rank": {
+      "query": "question",
+      "limit": 10,
+      "documents": [
+        {
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "title": "A paper",
+          "summary": null,
+          "ingestedAt": "2026-10-02T00:00:00Z",
+          "score": 0.6
+        }
+      ],
+      "rankable": 1,
+      "unranked": 2
+    },
+    "document.stance": {
+      "documentId": "00000000-0000-0000-0000-000000000001",
+      "claim": "question",
+      "topical": 0.5,
+      "stance": -0.3,
+      "basis": "vector_only"
+    },
+    "document.citations": {
+      "scope": "conversation",
+      "limit": 20,
+      "citations": [
+        {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "standing": "resolves",
+          "paragraphId": "00000000-0000-0000-0000-000000000002",
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "paragraphOrdinal": 1,
+          "title": "A paper",
+          "paragraphText": "whole paragraph",
+          "conversationId": "conversation_fixture",
+          "turnOrdinal": 1,
+          "agent": "reader",
+          "citedAt": "2026-10-02T00:00:00Z"
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "standing": "paragraph_gone",
+          "paragraphId": null,
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "paragraphOrdinal": 1,
+          "title": "A paper",
+          "paragraphText": null,
+          "conversationId": "conversation_fixture",
+          "turnOrdinal": 1,
+          "agent": "reader",
+          "citedAt": "2026-10-02T00:00:00Z"
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "standing": "document_gone",
+          "paragraphId": null,
+          "documentId": null,
+          "sourceName": "paper.pdf",
+          "paragraphOrdinal": 1,
+          "title": "A paper",
+          "paragraphText": null,
+          "conversationId": "conversation_fixture",
+          "turnOrdinal": 1,
+          "agent": "reader",
+          "citedAt": "2026-10-02T00:00:00Z"
+        }
+      ]
+    },
+    "document.search": {
+      "query": "question",
+      "limit": 5,
+      "mode": "lexical",
+      "hits": [
+        {
+          "chunkId": "00000000-0000-0000-0000-000000000003",
+          "text": "passage\nnext line",
+          "similarity": 0.7,
+          "paragraphId": "00000000-0000-0000-0000-000000000002",
+          "paragraphText": "whole paragraph",
+          "paragraphOrdinal": 1,
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "title": "A paper"
+        }
+      ],
+      "searchable": 1,
+      "unsearchable": 2
+    },
+    "web.search": {
+      "hits": [
+        {
+          "url": "https://example.invalid",
+          "title": "title",
+          "snippet": "first line\nnext line"
+        }
+      ],
+      "page": 1,
+      "pageSize": 10,
+      "total": 1,
+      "hasMore": false,
+      "refusal": null
+    },
+    "web.fetch": {
+      "url": "https://example.invalid",
+      "title": null,
+      "text": "first line\nnext line",
+      "offset": 0,
+      "nextOffset": 20,
+      "total": 30,
+      "hasMore": true,
+      "refusal": null
+    }
+  }
+}

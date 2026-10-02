@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+CLIENT="$(cd "$HERE/.." && pwd -P)/plowshare-mcp"
+if ! command -v node >/dev/null 2>&1; then
+    echo "plowshare-mcp requires Node 22.12 or newer." >&2
+    exit 2
+fi
+if ! node -e 'const [major,minor]=process.versions.node.split(".").map(Number);process.exit(major>22||(major===22&&minor>=12)?0:1)'; then
+    echo "plowshare-mcp requires Node 22.12 or newer." >&2
+    exit 2
+fi
+if [[ ! -f "$CLIENT/build/main.js" || ! -f "$CLIENT/node_modules/plowshare-client-ts/build/operations/direct.js" || ! -f "$CLIENT/node_modules/plowshare-client-node/build/session.js" ]]; then
+    echo "Build MCP with ./gradlew :plowshare-mcp:assemble" >&2
+    exit 2
+fi
+exec node "$CLIENT/build/main.js" "$@"

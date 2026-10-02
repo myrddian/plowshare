@@ -1,0 +1,17 @@
+# User manual
+
+- [Installation and distributions](distributions.md)
+- [Docker deployment](../deploy/docker/README.md)
+- [Shared login](client-login.md)
+- [CLI](../plowshare-cli/README.md)
+- [MCP server](../plowshare-mcp/README.md)
+- [Desktop](../plowshare-desktop/README.md)
+- [TypeScript client](../plowshare-client-ts/README.md)
+- [Node client](../plowshare-client-node/README.md)
+- [Hooks](../plowshare-hooks/README.md)
+- [Conversation search](conversation-retrieval.md)
+- [Memory navigation](memory-digests.md)
+- [Information and evidence](information-system.md)
+- [Model usage and pricing configuration](model-usage-accounting.md)
+- [JavaScript orchestrations](scripted-orchestrations.md)
+- [Using the research workflow](scripted-research.md)

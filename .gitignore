@@ -1,0 +1,53 @@
+# Build output
+build/
+target/
+out/
+.gradle/
+
+# Local config — machine-specific, holds endpoints and keys
+plowshare.toml
+plowshare.yml
+.env
+
+# Deployment-owned state; never tracked. ANCHORED with a leading slash, and both
+# places a server is actually started from are listed: an unanchored `data/`
+# matches a directory of that name at ANY depth, which since the data directory
+# landed includes the Java package
+# plowshare-server/src/main/java/io/aeyer/plowshare/server/data/ -- source that
+# `git add` would silently skip and a reviewer would never see in a diff.
+/data/
+/plowshare-server/data/
+
+# The old export directory, for a deployment upgraded from before the data
+# directory. Same anchoring rule.
+/exports/
+/plowshare-server/exports/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+
+# Agent worktrees are transient; the harness creates and removes them.
+.claude/worktrees/
+
+# Gradle daemon home created by sandboxed builds.
+.gradle-home/
+__pycache__/
+*.pyc
+
+# Local, untracked deployment overrides. Spring reads ./config/ with higher
+# precedence than the packaged application.yml, and the working directory is
+# already a mandatory exclusion, so a key here is fenced from every workspace.
+/config/
+/plowshare-server/config/
+
+# Subagent-driven-development scratch: ledgers, briefs, review packages. The
+# git history is the record; this directory is working state for one plan run.
+.superpowers/
+
+# JavaScript dependencies and local package caches
+node_modules/
+.pnpm-store/

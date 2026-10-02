@@ -1,0 +1,10 @@
+# Include only the compiled adapter and its launcher in the image context.
+**
+!extensions/
+!extensions/search-searxng/
+!extensions/search-searxng/build/
+!extensions/search-searxng/build/libs/
+!extensions/search-searxng/build/libs/*.jar
+!deploy/
+!deploy/docker/
+!deploy/docker/search-provider-entrypoint.sh

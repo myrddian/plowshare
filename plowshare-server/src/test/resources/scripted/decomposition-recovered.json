@@ -1,0 +1,171 @@
+{
+  "rationale": "Synthetic rationale 1",
+  "sub_questions": [
+    "Synthetic sub_questions 2",
+    "Synthetic sub_questions 3",
+    "Synthetic sub_questions 4",
+    "Synthetic sub_questions 5",
+    "Synthetic sub_questions 6",
+    "Synthetic sub_questions 7",
+    "Synthetic sub_questions 8",
+    "Synthetic sub_questions 9"
+  ],
+  "queries": [
+    {
+      "query": "\"Synthetic query 10\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 2",
+      "expected_evidence": "Synthetic expected_evidence 11"
+    },
+    {
+      "query": "\"Synthetic query 12\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 2",
+      "expected_evidence": "Synthetic expected_evidence 13"
+    },
+    {
+      "query": "\"Synthetic query 14\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 2",
+      "expected_evidence": "Synthetic expected_evidence 15"
+    },
+    {
+      "query": "\"Synthetic query 16\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 2",
+      "expected_evidence": "Synthetic expected_evidence 17"
+    },
+    {
+      "query": "\"Synthetic query 18\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 2",
+      "expected_evidence": "Synthetic expected_evidence 19"
+    },
+    {
+      "query": "\"Synthetic query 20\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 3",
+      "expected_evidence": "Synthetic expected_evidence 21"
+    },
+    {
+      "query": "\"Synthetic query 22\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 3",
+      "expected_evidence": "Synthetic expected_evidence 23"
+    },
+    {
+      "query": "\"Synthetic query 24\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 3",
+      "expected_evidence": "Synthetic expected_evidence 25"
+    },
+    {
+      "query": "\"Synthetic query 26\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 3",
+      "expected_evidence": "Synthetic expected_evidence 27"
+    },
+    {
+      "query": "\"Synthetic query 28\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 3",
+      "expected_evidence": "Synthetic expected_evidence 29"
+    },
+    {
+      "query": "\"Synthetic query 30\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 4",
+      "expected_evidence": "Synthetic expected_evidence 31"
+    },
+    {
+      "query": "\"Synthetic query 32\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 4",
+      "expected_evidence": "Synthetic expected_evidence 33"
+    },
+    {
+      "query": "\"Synthetic query 34\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 4",
+      "expected_evidence": "Synthetic expected_evidence 35"
+    },
+    {
+      "query": "\"Synthetic query 36\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 4",
+      "expected_evidence": "Synthetic expected_evidence 37"
+    },
+    {
+      "query": "\"Synthetic query 38\"",
+      "type": "TERMINOLOGICAL",
+      "sub_question": "Synthetic sub_questions 4",
+      "expected_evidence": "Synthetic expected_evidence 39"
+    },
+    {
+      "query": "\"Synthetic query 40\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 5",
+      "expected_evidence": "Synthetic expected_evidence 41"
+    },
+    {
+      "query": "\"Synthetic query 42\"",
+      "type": "TERMINOLOGICAL",
+      "sub_question": "Synthetic sub_questions 5",
+      "expected_evidence": "Synthetic expected_evidence 43"
+    },
+    {
+      "query": "\"Synthetic query 44\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 5",
+      "expected_evidence": "Synthetic expected_evidence 45"
+    },
+    {
+      "query": "\"Synthetic query 46\"",
+      "type": "ENTITY_CENTRIC",
+      "sub_question": "Synthetic sub_questions 5",
+      "expected_evidence": "Synthetic expected_evidence 47"
+    },
+    {
+      "query": "\"Synthetic query 48\"",
+      "type": "ADVERSARIAL",
+      "sub_question": "Synthetic sub_questions 7",
+      "expected_evidence": "Synthetic expected_evidence 49"
+    },
+    {
+      "query": "\"Synthetic query 50\"",
+      "type": "ADVERSARIAL",
+      "sub_question": "Synthetic sub_questions 7",
+      "expected_evidence": "Synthetic expected_evidence 51"
+    },
+    {
+      "query": "\"Synthetic query 52\"",
+      "type": "ADVERSARIAL",
+      "sub_question": "Synthetic sub_questions 8",
+      "expected_evidence": "Synthetic expected_evidence 53"
+    },
+    {
+      "query": "\"Synthetic query 54\"",
+      "type": "ADVERSARIAL",
+      "sub_question": "Synthetic sub_questions 9",
+      "expected_evidence": "Synthetic expected_evidence 55"
+    },
+    {
+      "query": "\"Synthetic query 56\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 6",
+      "expected_evidence": "Synthetic expected_evidence 57"
+    },
+    {
+      "query": "\"Synthetic query 58\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 6",
+      "expected_evidence": "Synthetic expected_evidence 59"
+    },
+    {
+      "query": "\"Synthetic query 60\"",
+      "type": "TOPIC_CENTRIC",
+      "sub_question": "Synthetic sub_questions 6",
+      "expected_evidence": "Synthetic expected_evidence 61"
+    }
+  ]
+}

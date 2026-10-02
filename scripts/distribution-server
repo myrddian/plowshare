@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+installation=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "${1:-}" = '--help' ]; then
+  echo 'plowshare-server [Spring Boot options]. Requires Java 21 and PostgreSQL.'
+  echo 'Set PLOWSHARE_SERVER_CONFIG to your external configuration directory.'
+  exit 0
+fi
+if ! command -v java >/dev/null 2>&1; then echo 'Java 21 is required on PATH.' >&2; exit 1; fi
+if [ "${PLOWSHARE_AUTH_ENABLED:-true}" = 'false' ] && [ "${PLOWSHARE_BIND:-127.0.0.1}" != '127.0.0.1' ]; then
+  echo 'Refusing disabled authentication on a public bind, as the development launcher does.' >&2
+  exit 1
+fi
+configuration=${PLOWSHARE_SERVER_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/plowshare-server}
+data=${PLOWSHARE_SERVER_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/plowshare-server}
+cache=${PLOWSHARE_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/plowshare/server}
+mkdir -p "$data" "$cache"
+# An installed jar may be replaced during an upgrade; hold an immutable snapshot.
+jar="$installation/lib/plowshare-server.jar"
+if command -v sha256sum >/dev/null 2>&1; then digest=$(sha256sum "$jar" | cut -d ' ' -f1)
+else digest=$(shasum -a 256 "$jar" | cut -d ' ' -f1); fi
+snapshot="$cache/$digest.jar"
+if [ ! -f "$snapshot" ]; then
+  temporary=$(mktemp "$cache/.launch.XXXXXX")
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  cp "$jar" "$temporary"
+  chmod 600 "$temporary"
+  mv -n "$temporary" "$snapshot"
+  rm -f "$temporary"
+  trap - EXIT HUP INT TERM
+fi
+cd "$data"
+exec java -jar "$snapshot" "--spring.config.additional-location=optional:file:$configuration/" "$@"

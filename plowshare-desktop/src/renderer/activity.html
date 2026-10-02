@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Activity · Plowshare</title>
+  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="desktop.css">
+  <script src="activity.js" defer></script>
+</head>
+<body class="activity-window">
+  <header class="titlebar"><div class="window-space"></div><span class="titlebar-name">PLOWSHARE</span><span class="trajectory-title">Activity</span><span class="trajectory-connection" id="activity-connection"></span></header>
+  <main class="activity-workspace">
+    <header class="activity-toolbar"><div><h1><span data-icon="inbox" id="activity-icon"></span><span id="activity-title">Inbox</span></h1><p id="activity-caption">Across your account</p></div><button id="activity-refresh"><span data-icon="refresh"></span>Refresh</button></header>
+    <div class="activity-tabs" role="tablist" aria-label="Account activity"><button id="activity-inbox" role="tab" aria-selected="true" aria-controls="activity-panel"><span data-icon="inbox"></span>Inbox <span id="activity-unread"></span></button><button id="activity-runs" role="tab" aria-selected="false" aria-controls="activity-panel"><span data-icon="route"></span>Runs</button><button id="activity-definitions" role="tab" aria-selected="false" aria-controls="activity-panel">Definitions</button><button id="activity-builder" role="tab" aria-selected="false" aria-controls="activity-panel">Orchestration builder</button><button id="activity-schedules" role="tab" aria-selected="false" aria-controls="activity-panel">Scheduled work</button></div>
+    <details id="builder-form" class="builder-form" hidden open><summary>Authoring intent and caller</summary>
+      <div class="run-actions"><label>Project<select id="builder-project"><option value="">Choose project</option></select></label><button id="builder-prepare">Check project</button><label>Caller agent<select id="builder-agent"></select></label><label>Revise definition<select id="builder-revision"><option value="">New procedure</option></select></label></div>
+      <label>What should this agent-driven procedure achieve?<textarea id="builder-intent" maxlength="8000" rows="3" placeholder="Describe outputs, evidence, checkpoints and how much discretion the agents should have."></textarea></label>
+      <div class="run-actions"><button id="builder-start">Interview and draft</button><span id="builder-ready" role="status">Choose a project and check its available capabilities.</span></div>
+      <p>To revise an active draft, answer its review question with the changes you want. Studio validates the new draft before installation.</p></details><div id="builder-status" class="builder-status" hidden><p id="builder-launch" role="status"></p><button id="builder-caller" hidden>Inspect caller trajectory</button></div><div id="activity-error" class="error-banner" role="alert" hidden></div>
+    <div id="activity-panel" class="activity-columns" role="tabpanel" aria-labelledby="activity-inbox">
+      <section class="activity-list-column" aria-label="Activity list"><div id="inbox-filter-control"><label class="inbox-filter-control"><span><span data-icon="filter"></span>Status</span><select id="inbox-filter" aria-label="Filter mailbox by read status"><option value="unread" selected>Unread</option><option value="all">All items</option><option value="read">Read</option></select></label><label class="inbox-filter-control"><span><span data-icon="layers"></span>Type</span><select id="inbox-type" aria-label="Filter mailbox by message type"><option value="">All types</option></select></label></div><label id="definitions-scope" class="inbox-filter-control" hidden>Scope<select id="definitions-project"><option value="">Global</option></select></label><div class="search-field"><span data-icon="search"></span><input id="activity-search" class="filter" type="search" placeholder="Filter activity…" aria-label="Filter activity"></div><div id="activity-list" aria-label="Items"></div><button id="inbox-older" class="load-earlier" hidden><span data-icon="history"></span>Load older items</button><footer id="activity-list-note"></footer></section>
+      <section class="activity-detail" aria-label="Selected activity"><div id="activity-detail" tabindex="0"></div></section>
+    </div>
+  </main>
+</body>
+</html>

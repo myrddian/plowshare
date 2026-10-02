@@ -1,0 +1,1260 @@
+{
+  "selection": {
+    "sources": [
+      {
+        "key": "https://fixture.example.invalid/source/3a8f74b8af539f19",
+        "objectives": [
+          "o1",
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 82"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/974a73ec83834992",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 83"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/1e93e680038171a4",
+        "objectives": [
+          "o4"
+        ],
+        "rationale": "Synthetic rationale 84"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/98655665e18ab38e",
+        "objectives": [
+          "o1",
+          "o4"
+        ],
+        "rationale": "Synthetic rationale 85"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/20235dc7c9dcc733",
+        "objectives": [
+          "o1",
+          "o2",
+          "o4"
+        ],
+        "rationale": "Synthetic rationale 86"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/aff808996c5a332f",
+        "objectives": [
+          "o1",
+          "o2",
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 87"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/693512a7ebb84734",
+        "objectives": [
+          "o1"
+        ],
+        "rationale": "Synthetic rationale 88"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/8f9dd577f55dec6b",
+        "objectives": [
+          "o1",
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 89"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/23aec5bcc8eb519a",
+        "objectives": [
+          "o1",
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 90"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/b58afc3211244233",
+        "objectives": [
+          "o1",
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 91"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/724c8567cdc09bbd",
+        "objectives": [
+          "o1"
+        ],
+        "rationale": "Synthetic rationale 92"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/5b23b4243d0cad76",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 93"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/b2427a37e73368fc",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 94"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/e3cad494a342d3c9",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 95"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/aa755507d7d6d83f",
+        "objectives": [
+          "o4"
+        ],
+        "rationale": "Synthetic rationale 96"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/3aa13f8c6624acfd",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 97"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/5e947e84bfa8aefe",
+        "objectives": [
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 98"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/3042af5a68641de2",
+        "objectives": [
+          "o2",
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 99"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/abb8a8f79b63ca5b",
+        "objectives": [
+          "o3"
+        ],
+        "rationale": "Synthetic rationale 100"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/2e56b36f243b6c06",
+        "objectives": [
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 101"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/d476fb18e7a33484",
+        "objectives": [
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 102"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/5156748d038ef51b",
+        "objectives": [
+          "o2"
+        ],
+        "rationale": "Synthetic rationale 103"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/768d242e5d88074e",
+        "objectives": [
+          "o1"
+        ],
+        "rationale": "Synthetic rationale 104"
+      },
+      {
+        "key": "https://fixture.example.invalid/source/1e95fa0618a7f90c",
+        "objectives": [
+          "o1"
+        ],
+        "rationale": "Synthetic rationale 105"
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "key": "Synthetic key 106",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 156720,
+        "text": "Synthetic text 108",
+        "start": 156602,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.202727747126086,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 37,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ]
+    },
+    {
+      "wave": 0,
+      "title": "Synthetic title 109",
+      "revision": "7424d329-8003-54c5-82da-a761c3f0bc05",
+      "frequency": 1,
+      "objectives": [],
+      "key": "7424d329-8003-54c5-82da-a761c3f0bc05"
+    },
+    {
+      "key": "Synthetic key 110",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 2424,
+        "text": "Synthetic text 111",
+        "start": 2402,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.21255867406376017,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 31,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ]
+    },
+    {
+      "key": "Synthetic key 112",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 71994,
+        "text": "Synthetic text 113",
+        "start": 71418,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.22108756178095434,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 19,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/658fef8175a03a52",
+      "wave": 0,
+      "title": "Synthetic title 114",
+      "snippet": "Synthetic snippet 115",
+      "frequency": 18,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/658fef8175a03a52"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/44dd6c5b862afc01",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "snippet": "Synthetic snippet 116",
+      "frequency": 18,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/44dd6c5b862afc01"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/ad8a8bff95506640",
+      "wave": 0,
+      "title": "Synthetic title 117",
+      "snippet": "Synthetic snippet 118",
+      "frequency": 18,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/ad8a8bff95506640"
+    },
+    {
+      "key": "Synthetic key 119",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 148452,
+        "text": "Synthetic text 120",
+        "start": 148199,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.21898660433451522,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 17,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3"
+      ]
+    },
+    {
+      "key": "Synthetic key 121",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 57205,
+        "text": "Synthetic text 122",
+        "start": 56345,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.23601233959197998,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 10,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3",
+        "o4"
+      ]
+    },
+    {
+      "key": "Synthetic key 123",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 146522,
+        "text": "Synthetic text 124",
+        "start": 146492,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.22239482402801514,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 16,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3"
+      ]
+    },
+    {
+      "key": "Synthetic key 125",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 59757,
+        "text": "Synthetic text 126",
+        "start": 59045,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.22335488935439984,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 5,
+      "objectives": [
+        "o1",
+        "o2",
+        "o4"
+      ]
+    },
+    {
+      "key": "Synthetic key 127",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 60573,
+        "text": "Synthetic text 128",
+        "start": 59759,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2475070658317673,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 13,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/98655665e18ab38e",
+      "wave": 0,
+      "title": "Synthetic title 129",
+      "snippet": "Synthetic snippet 130",
+      "frequency": 4,
+      "objectives": [
+        "o1",
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/98655665e18ab38e"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/20235dc7c9dcc733",
+      "wave": 0,
+      "title": "Synthetic title 131",
+      "snippet": "Synthetic snippet 132",
+      "frequency": 3,
+      "objectives": [
+        "o1",
+        "o2",
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/20235dc7c9dcc733"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/aff808996c5a332f",
+      "wave": 0,
+      "title": "Synthetic title 133",
+      "snippet": "Synthetic snippet 134",
+      "frequency": 7,
+      "objectives": [
+        "o1",
+        "o2",
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/aff808996c5a332f"
+    },
+    {
+      "key": "Synthetic key 135",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 26758,
+        "text": "Synthetic text 136",
+        "start": 25692,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2131519063530024,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 3,
+      "objectives": [
+        "o2",
+        "o4"
+      ]
+    },
+    {
+      "key": "Synthetic key 137",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 50385,
+        "text": "Synthetic text 138",
+        "start": 50214,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.27147950913072805,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 7,
+      "objectives": [
+        "o1",
+        "o3"
+      ]
+    },
+    {
+      "key": "Synthetic key 139",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 76433,
+        "text": "Synthetic text 140",
+        "start": 75829,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.27345713693413976,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 3,
+      "objectives": [
+        "o2",
+        "o4"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/3a8f74b8af539f19",
+      "wave": 0,
+      "title": "Synthetic title 141",
+      "snippet": "Synthetic snippet 142",
+      "frequency": 4,
+      "objectives": [
+        "o1",
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/3a8f74b8af539f19"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/974a73ec83834992",
+      "wave": 0,
+      "title": "Synthetic title 143",
+      "snippet": "Synthetic snippet 144",
+      "frequency": 4,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/974a73ec83834992"
+    },
+    {
+      "key": "Synthetic key 145",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 47602,
+        "text": "Synthetic text 146",
+        "start": 47335,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2519429621764413,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 3,
+      "objectives": [
+        "o3",
+        "o4"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/5627309f3152f916",
+      "wave": 0,
+      "title": "Synthetic title 147",
+      "snippet": "Synthetic snippet 148",
+      "frequency": 4,
+      "objectives": [
+        "o1",
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/5627309f3152f916"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/b58afc3211244233",
+      "wave": 0,
+      "title": "Synthetic title 149",
+      "snippet": "Synthetic snippet 150",
+      "frequency": 3,
+      "objectives": [
+        "o1",
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/b58afc3211244233"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/1e93e680038171a4",
+      "wave": 0,
+      "title": "Synthetic title 151",
+      "snippet": "Synthetic snippet 152",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/1e93e680038171a4"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/3f68dd706d99e765",
+      "wave": 0,
+      "title": "Synthetic title 153",
+      "snippet": "Synthetic snippet 154",
+      "frequency": 4,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/3f68dd706d99e765"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/af284c5dffbfd98e",
+      "wave": 0,
+      "title": "Synthetic title 155",
+      "snippet": "Synthetic snippet 156",
+      "frequency": 3,
+      "objectives": [
+        "o1",
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/af284c5dffbfd98e"
+    },
+    {
+      "key": "Synthetic key 157",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 66311,
+        "text": "Synthetic text 158",
+        "start": 65985,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2542420019526477,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/693512a7ebb84734",
+      "wave": 0,
+      "title": "Synthetic title 159",
+      "snippet": "Synthetic snippet 160",
+      "frequency": 4,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/693512a7ebb84734"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/23aec5bcc8eb519a",
+      "wave": 0,
+      "title": "Synthetic title 161",
+      "snippet": "Synthetic snippet 162",
+      "frequency": 2,
+      "objectives": [
+        "o1",
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/23aec5bcc8eb519a"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/aa755507d7d6d83f",
+      "wave": 0,
+      "title": "Synthetic title 163",
+      "snippet": "Synthetic snippet 164",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/aa755507d7d6d83f"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/3042af5a68641de2",
+      "wave": 0,
+      "title": "Synthetic title 165",
+      "snippet": "Synthetic snippet 166",
+      "frequency": 2,
+      "objectives": [
+        "o2",
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/3042af5a68641de2"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/bede4bc9e3ebad31",
+      "wave": 0,
+      "title": "Synthetic title 167",
+      "snippet": "Synthetic snippet 168",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/bede4bc9e3ebad31"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/cb7e6376976a7b98",
+      "wave": 0,
+      "title": "Synthetic title 169",
+      "snippet": "Synthetic snippet 170",
+      "frequency": 2,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/cb7e6376976a7b98"
+    },
+    {
+      "key": "Synthetic key 171",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 154604,
+        "text": "Synthetic text 172",
+        "start": 153871,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.21276347561100128,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ]
+    },
+    {
+      "key": "Synthetic key 173",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 59043,
+        "text": "Synthetic text 174",
+        "start": 58637,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2384417426121751,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 2,
+      "objectives": [
+        "o1",
+        "o2"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/b2427a37e73368fc",
+      "wave": 0,
+      "title": "Synthetic title 175",
+      "snippet": "Synthetic snippet 176",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/b2427a37e73368fc"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/33137225f025f23a",
+      "wave": 0,
+      "title": "Synthetic title 177",
+      "snippet": "Synthetic snippet 178",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/33137225f025f23a"
+    },
+    {
+      "key": "Synthetic key 179",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 2557,
+        "text": "Synthetic text 180",
+        "start": 2384,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.25799428743072905,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 2,
+      "objectives": [
+        "o2"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/3aa13f8c6624acfd",
+      "wave": 0,
+      "title": "Synthetic title 181",
+      "snippet": "Synthetic snippet 182",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/3aa13f8c6624acfd"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/463b567665bcd4bf",
+      "wave": 0,
+      "title": "Synthetic title 183",
+      "snippet": "Synthetic snippet 184",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/463b567665bcd4bf"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/a6068a2e9bedc9c2",
+      "wave": 0,
+      "title": "Synthetic title 185",
+      "snippet": "Synthetic snippet 186",
+      "frequency": 2,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/a6068a2e9bedc9c2"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/c1beec64d5c80d8f",
+      "wave": 0,
+      "title": "Synthetic title 187",
+      "snippet": "Synthetic snippet 188",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/c1beec64d5c80d8f"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/123c45782199c0f6",
+      "wave": 0,
+      "title": "Synthetic title 189",
+      "snippet": "Synthetic snippet 190",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/123c45782199c0f6"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/724c8567cdc09bbd",
+      "wave": 0,
+      "title": "Synthetic title 191",
+      "snippet": "Synthetic snippet 192",
+      "frequency": 2,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/724c8567cdc09bbd"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/5e947e84bfa8aefe",
+      "wave": 0,
+      "title": "Synthetic title 193",
+      "snippet": "Synthetic snippet 194",
+      "frequency": 2,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/5e947e84bfa8aefe"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/e3cad494a342d3c9",
+      "wave": 0,
+      "title": "Synthetic title 195",
+      "snippet": "Synthetic snippet 196",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/e3cad494a342d3c9"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/dfc45af73478876b",
+      "wave": 0,
+      "title": "Synthetic title 197",
+      "snippet": "Synthetic snippet 198",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/dfc45af73478876b"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/2f9a0bab8f009e84",
+      "wave": 0,
+      "title": "Synthetic title 199",
+      "snippet": "Synthetic snippet 200",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/2f9a0bab8f009e84"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/5ce27edb3af8da50",
+      "wave": 0,
+      "title": "Synthetic title 201",
+      "snippet": "Synthetic snippet 202",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/5ce27edb3af8da50"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/d476fb18e7a33484",
+      "wave": 0,
+      "title": "Synthetic title 203",
+      "snippet": "Synthetic snippet 204",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/d476fb18e7a33484"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/a25a2e2b24fa48c8",
+      "wave": 0,
+      "title": "Synthetic title 205",
+      "snippet": "Synthetic snippet 206",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/a25a2e2b24fa48c8"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/711204384c371e23",
+      "wave": 0,
+      "title": "Synthetic title 207",
+      "snippet": "Synthetic snippet 208",
+      "frequency": 1,
+      "objectives": [
+        "o4"
+      ],
+      "key": "https://fixture.example.invalid/source/711204384c371e23"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/6c5060f4e159d1dc",
+      "wave": 0,
+      "title": "Synthetic title 209",
+      "snippet": "Synthetic snippet 210",
+      "frequency": 2,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/6c5060f4e159d1dc"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/5156748d038ef51b",
+      "wave": 0,
+      "title": "Synthetic title 211",
+      "snippet": "Synthetic snippet 212",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/5156748d038ef51b"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/5b23b4243d0cad76",
+      "wave": 0,
+      "title": "Synthetic title 213",
+      "snippet": "Synthetic snippet 214",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/5b23b4243d0cad76"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/768d242e5d88074e",
+      "wave": 0,
+      "title": "Synthetic title 215",
+      "snippet": "Synthetic snippet 216",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/768d242e5d88074e"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/8e7623a5c6782721",
+      "wave": 0,
+      "title": "Synthetic title 217",
+      "snippet": "Synthetic snippet 218",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/8e7623a5c6782721"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/e9401e37b67e86b9",
+      "wave": 0,
+      "title": "Synthetic title 219",
+      "snippet": "Synthetic snippet 220",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/e9401e37b67e86b9"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/608b7002e126a07d",
+      "wave": 0,
+      "title": "Synthetic title 221",
+      "snippet": "Synthetic snippet 222",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/608b7002e126a07d"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/200a71f90a1849ac",
+      "wave": 0,
+      "title": "Synthetic title 223",
+      "snippet": "Synthetic snippet 224",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/200a71f90a1849ac"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/abb8a8f79b63ca5b",
+      "wave": 0,
+      "title": "Synthetic title 225",
+      "snippet": "Synthetic snippet 226",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/abb8a8f79b63ca5b"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/8490c772ef97b7f0",
+      "wave": 0,
+      "title": "Synthetic title 227",
+      "snippet": "Synthetic snippet 228",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/8490c772ef97b7f0"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/2e56b36f243b6c06",
+      "wave": 0,
+      "title": "Synthetic title 229",
+      "snippet": "Synthetic snippet 230",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/2e56b36f243b6c06"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/8300b7bd70662ce5",
+      "wave": 0,
+      "title": "Synthetic title 231",
+      "snippet": "Synthetic snippet 232",
+      "frequency": 1,
+      "objectives": [
+        "o3"
+      ],
+      "key": "https://fixture.example.invalid/source/8300b7bd70662ce5"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/fe692d2f5f35d875",
+      "wave": 0,
+      "title": "Synthetic title 233",
+      "snippet": "Synthetic snippet 234",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/fe692d2f5f35d875"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/2ccc6f046eaec4ee",
+      "wave": 0,
+      "title": "Synthetic title 235",
+      "snippet": "Synthetic snippet 236",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/2ccc6f046eaec4ee"
+    },
+    {
+      "key": "Synthetic key 237",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 69136,
+        "text": "Synthetic text 238",
+        "start": 68420,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.18027528877103982,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/f882a5d1b3e16e97",
+      "wave": 0,
+      "title": "Synthetic title 239",
+      "snippet": "Synthetic snippet 240",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/f882a5d1b3e16e97"
+    },
+    {
+      "key": "Synthetic key 241",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 146482,
+        "text": "Synthetic text 242",
+        "start": 146403,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.23720716570679534,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ]
+    },
+    {
+      "url": "https://fixture.example.invalid/source/98db3acaa03b7312",
+      "wave": 0,
+      "title": "Synthetic title 243",
+      "snippet": "Synthetic snippet 244",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/98db3acaa03b7312"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/1e95fa0618a7f90c",
+      "wave": 0,
+      "title": "Synthetic title 245",
+      "snippet": "Synthetic snippet 246",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/1e95fa0618a7f90c"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/17138c10849c2317",
+      "wave": 0,
+      "title": "Synthetic title 247",
+      "snippet": "Synthetic snippet 248",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/17138c10849c2317"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/e13ab12f5ef8c087",
+      "wave": 0,
+      "title": "Synthetic title 249",
+      "snippet": "Synthetic snippet 250",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/e13ab12f5ef8c087"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/51f0b283ac6809b1",
+      "wave": 0,
+      "title": "Synthetic title 251",
+      "snippet": "Synthetic snippet 252",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/51f0b283ac6809b1"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/791a756cc2c5d3b5",
+      "wave": 0,
+      "title": "Synthetic title 253",
+      "snippet": "Synthetic snippet 254",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/791a756cc2c5d3b5"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/3fdd3c29c49f4291",
+      "wave": 0,
+      "title": "Synthetic title 255",
+      "snippet": "Synthetic snippet 256",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/3fdd3c29c49f4291"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/1bac64c21a3b9b44",
+      "wave": 0,
+      "title": "Synthetic title 257",
+      "snippet": "Synthetic snippet 258",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/1bac64c21a3b9b44"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/a52d46557b6e623f",
+      "wave": 0,
+      "title": "Synthetic title 259",
+      "snippet": "Synthetic snippet 260",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ],
+      "key": "https://fixture.example.invalid/source/a52d46557b6e623f"
+    },
+    {
+      "url": "https://fixture.example.invalid/source/b1049b0536ae4db5",
+      "wave": 0,
+      "title": "Synthetic title 261",
+      "snippet": "Synthetic snippet 262",
+      "frequency": 1,
+      "objectives": [
+        "o1"
+      ],
+      "key": "https://fixture.example.invalid/source/b1049b0536ae4db5"
+    },
+    {
+      "key": "Synthetic key 263",
+      "wave": 0,
+      "title": "Synthetic title 107",
+      "window": {
+        "end": 35628,
+        "text": "Synthetic text 264",
+        "start": 35523,
+        "title": "Synthetic title 107",
+        "matched": true,
+        "distance": 0.2614140666373995,
+        "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05"
+      },
+      "revision": "52ceada9-65e3-5ca6-8624-3e2689e32e05",
+      "frequency": 1,
+      "objectives": [
+        "o2"
+      ]
+    }
+  ]
+}

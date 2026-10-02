@@ -1,0 +1,389 @@
+{
+  "formatVersion": 1,
+  "kind": "source-audit-not-runtime-proof",
+  "commands": [
+    {
+      "legacy": "information",
+      "typescript": "information <operation>",
+      "frame": "information.*",
+      "legacyFlags": [],
+      "payload": "scoped operation payload; preserve requestId for mutations",
+      "sourceLine": 265
+    },
+    {
+      "legacy": "memory navigate",
+      "typescript": "memory navigate",
+      "frame": "memory.navigate",
+      "legacyFlags": [
+        "--project"
+      ],
+      "payload": "question,project",
+      "sourceLine": 275
+    },
+    {
+      "legacy": "memory digest",
+      "typescript": "memory digest",
+      "frame": "memory.digest",
+      "legacyFlags": [
+        "--project"
+      ],
+      "payload": "project",
+      "sourceLine": 282
+    },
+    {
+      "legacy": "memory index",
+      "typescript": "memory index",
+      "frame": "memory.index",
+      "legacyFlags": [
+        "--project"
+      ],
+      "payload": "project",
+      "sourceLine": 287
+    },
+    {
+      "legacy": "memory read",
+      "typescript": "memory read",
+      "frame": "memory.read",
+      "legacyFlags": [],
+      "payload": "memory; one id per invocation (loop for legacy multi-id reads)",
+      "sourceLine": 290
+    },
+    {
+      "legacy": "memory recall",
+      "typescript": "memory recall",
+      "frame": "memory.recall",
+      "legacyFlags": [
+        "--project",
+        "--limit"
+      ],
+      "payload": "question,project,limit",
+      "sourceLine": 294
+    },
+    {
+      "legacy": "memory write",
+      "typescript": "memory write",
+      "frame": "memory.write",
+      "legacyFlags": [
+        "--summary",
+        "--scope",
+        "--body",
+        "--project",
+        "--by",
+        "--where"
+      ],
+      "payload": "proposal:{summary,scope,body,formedBy,formedWhere}; project selects tier",
+      "sourceLine": 298
+    },
+    {
+      "legacy": "memory curate",
+      "typescript": "memory curate",
+      "frame": "agent.curate",
+      "legacyFlags": [
+        "--max-model-calls"
+      ],
+      "payload": "project,maxModelCalls",
+      "sourceLine": 305
+    },
+    {
+      "legacy": "memory proposals",
+      "typescript": "memory proposals",
+      "frame": "proposal.list",
+      "legacyFlags": [
+        "--project"
+      ],
+      "payload": "project",
+      "sourceLine": 310
+    },
+    {
+      "legacy": "memory resolve",
+      "typescript": "memory resolve",
+      "frame": "proposal.resolve",
+      "legacyFlags": [
+        "--reason",
+        "--by"
+      ],
+      "payload": "proposal,accept,by,reason; accept|reject becomes a boolean",
+      "sourceLine": 313
+    },
+    {
+      "legacy": "conversation list",
+      "typescript": "conversation list",
+      "frame": "conversation.list",
+      "legacyFlags": [
+        "--project"
+      ],
+      "payload": "project",
+      "sourceLine": 320
+    },
+    {
+      "legacy": "conversation search",
+      "typescript": "conversation search",
+      "frame": "conversation.search",
+      "legacyFlags": [
+        "--project",
+        "--offset",
+        "--limit"
+      ],
+      "payload": "q,project,offset,limit; mode:lexical preserves legacy matching",
+      "sourceLine": 323
+    },
+    {
+      "legacy": "conversation chat",
+      "typescript": "conversation chat",
+      "frame": "conversation.chat",
+      "legacyFlags": [
+        "--offset",
+        "--limit"
+      ],
+      "payload": "conversation,offset,limit",
+      "sourceLine": 332
+    },
+    {
+      "legacy": "conversation trajectory",
+      "typescript": "conversation trajectory",
+      "frame": "conversation.trajectory",
+      "legacyFlags": [
+        "--offset",
+        "--limit"
+      ],
+      "payload": "conversation,offset,limit",
+      "sourceLine": 336
+    },
+    {
+      "legacy": "conversation context",
+      "typescript": "conversation context",
+      "frame": "conversation.context",
+      "legacyFlags": [
+        "--agent"
+      ],
+      "payload": "conversation,agent",
+      "sourceLine": 341
+    },
+    {
+      "legacy": "document retrieve",
+      "typescript": "document retrieve",
+      "frame": "document.retrieve",
+      "legacyFlags": [
+        "--document",
+        "--limit"
+      ],
+      "payload": "query,document,limit",
+      "sourceLine": 347
+    },
+    {
+      "legacy": "document rank",
+      "typescript": "document rank",
+      "frame": "document.rank",
+      "legacyFlags": [
+        "--limit"
+      ],
+      "payload": "query,limit",
+      "sourceLine": 354
+    },
+    {
+      "legacy": "document stance",
+      "typescript": "document stance",
+      "frame": "document.stance",
+      "legacyFlags": [],
+      "payload": "document,claim",
+      "sourceLine": 360
+    },
+    {
+      "legacy": "document list",
+      "typescript": "document list",
+      "frame": "document.list",
+      "legacyFlags": [
+        "--naming",
+        "--limit",
+        "--offset"
+      ],
+      "payload": "q,offset,limit",
+      "sourceLine": 366
+    },
+    {
+      "legacy": "document show",
+      "typescript": "document outline",
+      "frame": "document.detail",
+      "legacyFlags": [],
+      "payload": "document",
+      "sourceLine": 372
+    },
+    {
+      "legacy": "document search",
+      "typescript": "document search",
+      "frame": "document.search",
+      "legacyFlags": [
+        "--limit"
+      ],
+      "payload": "query,limit",
+      "sourceLine": 377
+    },
+    {
+      "legacy": "document ask",
+      "typescript": "document ask",
+      "frame": "document.ask",
+      "legacyFlags": [
+        "--max-model-calls"
+      ],
+      "payload": "document,question,maxModelCalls",
+      "sourceLine": 382
+    },
+    {
+      "legacy": "document citations",
+      "typescript": "document citations",
+      "frame": "document.citations",
+      "legacyFlags": [
+        "--conversation",
+        "--document",
+        "--limit"
+      ],
+      "payload": "conversation,document,limit",
+      "sourceLine": 392
+    },
+    {
+      "legacy": "search",
+      "typescript": "web search",
+      "frame": "web.search",
+      "legacyFlags": [
+        "--page-size",
+        "--max",
+        "--page"
+      ],
+      "payload": "query,pageSize,max,page; preserve max across pages",
+      "sourceLine": 407
+    },
+    {
+      "legacy": "fetch",
+      "typescript": "web fetch",
+      "frame": "web.fetch",
+      "legacyFlags": [
+        "--offset"
+      ],
+      "payload": "url,offset",
+      "sourceLine": 420
+    },
+    {
+      "legacy": "project define",
+      "typescript": "project define",
+      "frame": "project.define",
+      "legacyFlags": [
+        "--exclude"
+      ],
+      "payload": "name,workspace,exclusions",
+      "sourceLine": 428
+    },
+    {
+      "legacy": "project workspace",
+      "typescript": "project workspace",
+      "frame": "project.workspace",
+      "legacyFlags": [],
+      "payload": "project,workspace",
+      "sourceLine": 433
+    },
+    {
+      "legacy": "project lend",
+      "typescript": "project lend",
+      "frame": "project.lend",
+      "legacyFlags": [],
+      "payload": "project,roots",
+      "sourceLine": 437
+    },
+    {
+      "legacy": "project unlend",
+      "typescript": "project unlend",
+      "frame": "project.unlend",
+      "legacyFlags": [],
+      "payload": "project,roots",
+      "sourceLine": 443
+    },
+    {
+      "legacy": "project rename",
+      "typescript": "project move",
+      "frame": "project.move",
+      "legacyFlags": [],
+      "payload": "project,to",
+      "sourceLine": 448
+    },
+    {
+      "legacy": "project forget",
+      "typescript": "project forget",
+      "frame": "project.forget",
+      "legacyFlags": [],
+      "payload": "project",
+      "sourceLine": 453
+    },
+    {
+      "legacy": "job status",
+      "typescript": "job status",
+      "frame": "job.status",
+      "legacyFlags": [],
+      "payload": "job",
+      "sourceLine": 459
+    },
+    {
+      "legacy": "job cancel",
+      "typescript": "job cancel",
+      "frame": "job.cancel",
+      "legacyFlags": [],
+      "payload": "job",
+      "sourceLine": 463
+    },
+    {
+      "legacy": "run",
+      "typescript": "agent run / conversation open + agent run",
+      "frame": "agent.run",
+      "payload": "agent,task,project OR conversation; --root explicitly supplies local file presence",
+      "difference": "--wait watches terminal outcome; --watch streams progress. Set budget at conversation.open, not agent.run."
+    },
+    {
+      "legacy": "talk",
+      "typescript": "bin/plowshare-talk",
+      "frame": "conversation.open + agent.run",
+      "payload": "existing lightweight TUI; shared Node authentication and WS/file bindings",
+      "difference": "Recover explicit conversation and accepted job handles; uncertain submissions are never replayed."
+    }
+  ],
+  "counts": {
+    "legacyCommands": 35,
+    "legacyTableCommands": 33
+  },
+  "legacyExplicitDefaults": {
+    "web.search": {
+      "pageSize": 10,
+      "max": 30,
+      "page": 1
+    },
+    "web.fetch": {
+      "offset": 0
+    },
+    "provenance": {
+      "formedBy": "OS user unless --by",
+      "formedWhere": "empty unless --where"
+    }
+  },
+  "reviewedDifferences": [
+    "Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --url replaces --server, --root replaces --workspace, and global options precede the command.",
+    "Structured Outcome JSON replaces Java prose; raw fields and incomplete/refused outcomes remain visible.",
+    "Java exits 0 success, 1 incomplete/nonanswered, 2 usage/refusal/unavailable. TS exits 0 success, 1 refusal/unavailable job ending, 2 usage/auth bootstrap, 3 accepted/running/cancelling, 4 incomplete/nonanswered, 5 unknown/deadline/protocol.",
+    "Global scope is explicit with --global or JSON project:null; blank project is refused. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.",
+    "One memory.read per invocation replaces Java multi-id reads; no implicit provenance defaults for JSON writes/resolutions.",
+    "Auth/bootstrap stays HTTP; operational reads, mutations and observers are WS. Existing sync Git bytes retain their documented HTTP transport.",
+    "PDF/image conversion is server-side; clients stream bytes and read cached text windows."
+  ],
+  "evidence": {
+    "sources": {
+      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Commands.java": "7273de359133124549360f24f496c912b08d3446ecb5081d81da88cdd6fc623b",
+      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Plowshare.java": "628317a17d1967406c2e0afa8d76dca87d97ab67575277873617f0055b0bba3b",
+      "plowshare-client-ts/src/operations/catalog.ts": "05676373ca6aea3badb1d2ff22ffe005b5e839d66280e837305effd1a6b7ddd9",
+      "plowshare-client-ts/src/operations/direct.ts": "f5f14ddbed94784fcaa68138c55bd5bf9c1ca101504c545c613b0bc30f68f637",
+      "plowshare-cli/src/run.ts": "dd8075c51a5a7f0e18c6024662ddfe81d6eaf3d30f9ef681b5dc01c00c45a36b"
+    },
+    "runtime": [
+      "plowshare-client/src/test/java/io/aeyer/plowshare/client/cli/CommandsTest.java",
+      "plowshare-cli/src/socket.test.ts",
+      "plowshare-mcp/src/socket.test.ts",
+      "plowshare-tui/src/view/composition.test.ts",
+      "plowshare-desktop/scripts/transport-smoke.mjs"
+    ]
+  }
+}

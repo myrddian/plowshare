@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# bin/plowshare-searxng -- bring up the SearXNG provider and register it.
+#
+#
+# Boot order
+# ----------
+#   1.  bin/plowshare-deployment     the server, on :8091
+#   2.  bin/plowshare-searxng        this: the provider, then registration
+#
+# That order is forced rather than stylistic. Registration is an HTTP call to
+# the server, and the operator token it needs is written at the server's boot.
+# Run this first and it will wait, then say plainly which of the two is missing.
+#
+# Both are safe to re-run. ProviderStore.upsert is the whole of registration --
+# `ON CONFLICT (provider_key) DO UPDATE`, moving the URL rather than adding a
+# row, and resetting consecutiveFailures, on the argument that a redeployment
+# is a new thing wearing an old provider's key. So a second run after a restart
+# is the intended way to use this, not a thing to avoid.
+#
+#
+# Why this is not folded into bin/plowshare-deployment
+# ----------------------------------------------------
+# That script ends in `exec java -jar`: it BECOMES the server, so nothing
+# appended after it would ever run. Registration has to happen from a process
+# that outlives the handoff, which is this one.
+#
+# The architecture is not the reason. "Providers are external programs the
+# server does not own" is a rule about the SERVER's lifetime, not about an
+# operator's tooling -- a systemd unit would do exactly what this does.
+#
+#
+# What it does not do
+# -------------------
+# It does not own the provider it starts. If the port is already listening it
+# leaves that process alone, and it never kills one: stopping the server should
+# not silently take search down with it, and a script that supervised both
+# would need PID files and orphan handling to buy nothing.
+
+set -euo pipefail
+
+readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO="$(cd "$HERE/.." && pwd)"
+DEPLOYMENT="${PLOWSHARE_DEPLOYMENT:-$HOME/.config/plowshare/deployment.env}"
+
+# Only names the caller left unset, so an exported variable still wins -- the
+# same order bin/plowshare states and bin/plowshare-deployment preserves.
+if [[ -f "$DEPLOYMENT" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        [[ -z "$trimmed" || "${trimmed:0:1}" == "#" || "$trimmed" != *=* ]] && continue
+        key="${trimmed%%=*}"; value="${trimmed#*=}"; key="${key//[[:space:]]/}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        value="${value%"${value##*[![:space:]]}"}"
+        [[ -z "${!key:-}" ]] && export "$key=$value"
+    done < "$DEPLOYMENT"
+fi
+
+SEARXNG_URL="${PLOWSHARE_EXT_SEARXNG_BASE_URL:-}"
+PORT="${PLOWSHARE_EXT_SEARXNG_PORT:-8100}"
+SERVER="${PLOWSHARE_URL:-http://127.0.0.1:8091}"
+TOKEN_FILE="${PLOWSHARE_TOKEN_FILE:-$HOME/.config/plowshare/console-token}"
+JAR="$REPO/extensions/search-searxng/build/libs/search-searxng-0.1.0-SNAPSHOT.jar"
+LOG="${PLOWSHARE_EXT_SEARXNG_LOG:-/tmp/plowshare-searxng.log}"
+
+if [[ -z "$SEARXNG_URL" ]]; then
+    echo "plowshare-searxng: PLOWSHARE_EXT_SEARXNG_BASE_URL is not set." >&2
+    echo "                   Set it in $DEPLOYMENT -- there is no default," >&2
+    echo "                   because a provider that can reach nothing is worse" >&2
+    echo "                   than one that never started." >&2
+    exit 1
+fi
+
+listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+# ---- 1. the provider process ---------------------------------------------
+if listening "$PORT"; then
+    echo "plowshare-searxng: something already listens on :$PORT -- leaving it."
+else
+    [[ -f "$JAR" ]] || { echo "plowshare-searxng: no jar at $JAR" >&2
+                         echo "                   ./gradlew :extensions:search-searxng:build" >&2
+                         exit 1; }
+    echo "plowshare-searxng: starting the provider on :$PORT against $SEARXNG_URL"
+    nohup java -jar "$JAR" \
+        --plowshare.ext.searxng.base-url="$SEARXNG_URL" \
+        --server.port="$PORT" > "$LOG" 2>&1 &
+fi
+
+for _ in $(seq 1 30); do
+    curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
+    sleep 1
+done
+curl -sf --max-time 3 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 || {
+    echo "plowshare-searxng: the provider never answered /health -- see $LOG" >&2; exit 1; }
+
+# ---- 2. the server, which must already be up ------------------------------
+for _ in $(seq 1 30); do
+    curl -s --max-time 2 -o /dev/null "$SERVER/" && break
+    sleep 1
+done
+curl -s --max-time 3 -o /dev/null "$SERVER/" 2>/dev/null || {
+    echo "plowshare-searxng: no server at $SERVER." >&2
+    echo "                   Start it first:  bin/plowshare-deployment" >&2
+    exit 1; }
+
+[[ -r "$TOKEN_FILE" ]] || { echo "plowshare-searxng: no token at $TOKEN_FILE" >&2
+                            echo "                   The server writes it at boot." >&2
+                            exit 1; }
+# The FIRST line: the server writes the operator token there and the console URL
+# on a second line. Reading the whole file would present both, concatenated.
+TOKEN="$(head -n 1 "$TOKEN_FILE" | tr -d '\n')"
+auth=(-H "Authorization: Bearer $TOKEN")
+
+# ---- 3. register (an upsert, so this is the normal path, not a repair) ----
+code="$(curl -s -o /tmp/plowshare-register.json -w '%{http_code}' --max-time 20 -X POST \
+        "${auth[@]}" -H 'Content-Type: application/json' \
+        -d "{\"baseUrl\":\"http://127.0.0.1:$PORT\"}" "$SERVER/v1/search/providers")"
+[[ "$code" == 2* ]] || { echo "plowshare-searxng: registration failed ($code)" >&2
+                         head -c 300 /tmp/plowshare-register.json >&2; echo >&2; exit 1; }
+echo "plowshare-searxng: registered searxng -> http://127.0.0.1:$PORT ($code)"
+
+# ---- 4. the ladder: append, never clobber --------------------------------
+# An operator may have ordered several rungs. Overwriting the key to put this
+# one on would silently drop the rest, so the current value is read first and
+# this key is added only when it is absent.
+current="$(curl -s --max-time 5 "${auth[@]}" "$SERVER/v1/config" \
+  | python3 -c "
+import sys, json
+try: xs = json.load(sys.stdin)
+except Exception: xs = []
+xs = xs if isinstance(xs, list) else xs.get('settings', [])
+print(next((s.get('value','') for s in xs if s.get('key')=='plowshare.search.ladder'), ''))
+" 2>/dev/null || echo "")"
+
+if [[ ",$current," == *",searxng,"* ]]; then
+    echo "plowshare-searxng: ladder already carries searxng ('$current') -- unchanged."
+else
+    next="searxng"; [[ -n "$current" ]] && next="$current,searxng"
+    curl -s -o /dev/null --max-time 5 -X PUT "${auth[@]}" -H 'Content-Type: text/plain' \
+        --data-raw "$next" "$SERVER/v1/config/plowshare.search.ladder"
+    echo "plowshare-searxng: ladder '$current' -> '$next'"
+fi
+
+echo "plowshare-searxng: ready."

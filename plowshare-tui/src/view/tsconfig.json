@@ -1,0 +1,58 @@
+{
+  // The readline view, and the only project allowed to know it is on a
+  // terminal.
+  //
+  // `references` names the other two, which is what makes `main.ts`'s imports
+  // legal while the same imports written the other way round are not. The list
+  // is the dependency direction in spec §3, stated to the compiler:
+  // view → binding and view → logic, and nothing back.
+  //
+  // <b>NODE TYPES ARRIVED HERE IN TASK 7, AND THIS IS THE ONLY PROJECT THAT
+  // MAY HAVE THEM.</b> The comment that stood here expected task 5 to install
+  // @types/node; task 5 found another way (`src/platform/tsconfig.json`'s
+  // `lib: DOM`, which cannot leak) and left `types: []` intact. Task 7 could
+  // not: the emitter needs `node:util`'s `styleText` and the loop needs
+  // `node:readline`, `node:process` and a `WebSocket` global, and there is no
+  // arrangement in which a terminal view does not name the things a terminal
+  // has. `src/logic/tsconfig.json` and `src/binding/tsconfig.json` keep
+  // `types: []`, which is what confines this to the one directory whose whole
+  // job is knowing it is on a terminal.
+  //
+  // <b>WHAT THAT COST, STATED WHERE THE EDIT IS RATHER THAN DISCOVERED
+  // LATER.</b> `src/neutrality.test.ts` names installing @types/node as the
+  // first of the four edits that quietly undo the compiler's half of the
+  // guard, and it was right about the mechanism and wrong about the blast
+  // radius. RE-MEASURED 2026-09-12 and written up in `../logic/tsconfig.json`:
+  // `types: []` does not stop ambient globals either, once any file IN THE
+  // PROJECT imports a package whose .d.ts declares them — and `logic/`'s own
+  // test files import vitest, which was enough to blind five of that file's six
+  // probes. Those tests now live in a `tsconfig.test.json` of their own and all
+  // six refuse again, the `node:` import included. So: `types: []` stops a
+  // package arriving as ambient globals only while nothing in the project
+  // imports it, and it does NOT stop an explicit `import … from 'node:fs'`
+  // resolving
+  // through it. So TS2307 is no longer what refuses a `node:` import in
+  // `logic/` — <b>the source scan is</b>, on its own, for that one rule. It was
+  // measured on the day of this edit rather than assumed: a `node:fs` import
+  // planted in `logic/markdown.ts` now compiles clean under `tsc -b --force`
+  // and is caught only by `src/neutrality.test.ts`. That is the file's stated
+  // reason for existing, arriving.
+  //
+  // `lib` stays ES2022 with no DOM even here. The view is a terminal; a
+  // `document` in it would be a mistake in any of the three directories, and
+  // the only reason `logic/` gets the stronger argument is that its violation
+  // is the silent one. @types/node declares `WebSocket`, `fetch` and
+  // `TextDecoder` itself, so nothing here needs a DOM to reach a wire.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../../build/types/view",
+    "tsBuildInfoFile": "../../build/types/view/.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../logic" }
+  ],
+  "include": ["**/*.ts"]
+}

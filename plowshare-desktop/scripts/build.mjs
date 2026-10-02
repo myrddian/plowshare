@@ -1,0 +1,12 @@
+import { build } from 'esbuild';
+import { mkdir, copyFile } from 'node:fs/promises';
+await mkdir('build/renderer', { recursive: true });
+await build({ entryPoints: ['src/main.ts'], outfile: 'build/main.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });
+await build({ entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'] });
+await build({ entryPoints: ['src/renderer/app.ts'], outfile: 'build/renderer/app.js', bundle: true, platform: 'browser', target: 'chrome130' });
+await build({ entryPoints: ['src/renderer/trajectory.ts'], outfile: 'build/renderer/trajectory.js', bundle: true, platform: 'browser', target: 'chrome130' });
+await build({ entryPoints: ['src/renderer/activity.ts'], outfile: 'build/renderer/activity.js', bundle: true, platform: 'browser', target: 'chrome130' });
+await build({ entryPoints: ['src/renderer/board.ts'], outfile: 'build/renderer/board.js', bundle: true, platform: 'browser', target: 'chrome130' });
+await build({ entryPoints: ['src/renderer/library.ts'], outfile: 'build/renderer/library.js', bundle: true, platform: 'browser', target: 'chrome130' });
+for (const file of ['index.html', 'trajectory.html', 'activity.html', 'style.css', 'desktop.css', 'board.html', 'board.css', 'library.html', 'library.css']) await copyFile(`src/renderer/${file}`, `build/renderer/${file}`);
+console.log('Built Electron main, isolated preload and renderer.');
