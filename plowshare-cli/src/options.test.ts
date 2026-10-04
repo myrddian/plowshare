@@ -15,6 +15,45 @@ test('explicit scope overrides the environment and leaves payload scope to share
     assert.throws(() => options(['--global', '--project', 'chosen', 'memory', 'index'], env), Usage)
 })
 
+test('server and url select the origin before or after commands and override the environment', () => {
+    const env = { PLOWSHARE_URL: 'https://configured.example.test' }
+    assert.equal(options(['project', 'list'], env).base, env.PLOWSHARE_URL)
+    for (const flag of ['--server', '--url']) {
+        assert.equal(options([flag, 'https://chosen.example.test/', 'project', 'list'], env).base, 'https://chosen.example.test')
+        assert.equal(options(['project', 'list', flag, 'https://chosen.example.test'], env).base, 'https://chosen.example.test')
+        assert.throws(() => options(['project', 'list', flag], env), Usage)
+        for (const url of [' ', 'ws://example.test', 'https://user:secret@example.test', 'https://example.test/v1', 'https://example.test?x=1', 'https://example.test#fragment']) {
+            assert.throws(() => options([flag, url, 'project', 'list'], env), error => error instanceof Usage && !error.message.includes('secret'))
+        }
+    }
+    assert.equal(options(['--server', 'https://first.example.test', '--url', 'https://last.example.test', 'project', 'list'], env).base, 'https://last.example.test')
+    assert.equal(options(['--url', 'https://first.example.test', '--server', 'https://last.example.test', 'project', 'list'], env).base, 'https://last.example.test')
+    assert.equal(options(['project', 'list'], {}).base, undefined)
+    assert.throws(() => options(['project', 'list'], { PLOWSHARE_URL: '' }), Usage)
+})
+
+test('online commands require a server before credentials, prompts or stdin are used', async () => {
+    let output = ''
+    const forbidden = async (): Promise<never> => { throw new Error('must not prompt or read') }
+    const io = { env: {}, stdout: (text: string) => { output += text }, stderr: () => {}, stdin: forbidden, login: forbidden, setup: forbidden }
+    for (const command of [['login'], ['setup'], ['logout'], ['project', 'list'], ['conversation', 'follow', 'cnv_one']]) {
+        output = ''
+        assert.equal(await run([...command, '--json'], io), 2)
+        const result = JSON.parse(output)
+        assert.match(result.said, /--server ORIGIN.*PLOWSHARE_URL/)
+        assert.equal(result.submission, 'not-submitted')
+    }
+    output = ''
+    assert.equal(await run(['project', 'list', '--validate', '--json'], io), 0)
+    assert.equal(JSON.parse(output).executed, false)
+    output = ''
+    assert.equal(await run(['--help'], io), 0)
+    assert.match(output, /--server ORIGIN/)
+    output = ''
+    assert.equal(await run(['--help', '--json'], io), 0)
+    assert.ok(JSON.parse(output).options.includes('--server'))
+})
+
 test('job wait/poll/result share the status request with explicit wait policy', () => {
     assert.equal(options(['job', 'wait', 'j'], {}).command, 'job status j')
     assert.equal(options(['job', 'wait', 'j'], {}).wait, true)
@@ -52,7 +91,7 @@ test('help and input errors need no credentials, terminal or network', async t =
     assert.match(JSON.parse(output).said, /needs project/)
     output = ''
     assert.equal(await run(['--json', 'memory', 'index'], io), 2)
-    assert.match(JSON.parse(output).said, /Sign in first/)
+    assert.match(JSON.parse(output).said, /Specify a server/)
     assert.equal(errors, '')
     output = ''
     assert.equal(await run(['--json', 'conversation', 'follow'], io), 2)

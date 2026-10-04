@@ -36,6 +36,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -85,6 +86,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Unreachable}'s throw — so that one test's own scaffolding says plainly which of the two rules its
  * run is under, instead of quietly breaking the invariant above for the rest of the file.
  */
+@Tag("full-db")
 @Testcontainers
 class DurableJobsTest {
 

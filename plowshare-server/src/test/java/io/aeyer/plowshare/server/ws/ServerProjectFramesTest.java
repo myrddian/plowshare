@@ -25,6 +25,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
+@Tag("full-db")
 @Testcontainers
 class ServerProjectFramesTest {
   @Container

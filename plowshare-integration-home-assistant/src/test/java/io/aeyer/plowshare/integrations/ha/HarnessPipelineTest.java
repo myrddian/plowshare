@@ -38,6 +38,7 @@ import org.testcontainers.junit.jupiter.*;
 /**
  * Real core/harness/SDK/runtime/HA transport, with deterministic inference and simulated devices.
  */
+@Tag("full-db")
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(

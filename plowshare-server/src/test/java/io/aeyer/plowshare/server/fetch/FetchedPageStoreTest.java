@@ -9,6 +9,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -22,6 +23,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * truncated table per test. There is no shared {@code PostgresTest} base in this module, so this
  * test carries its own container rather than sharing one.
  */
+@Tag("full-db")
 @Testcontainers
 class FetchedPageStoreTest {
 

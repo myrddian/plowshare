@@ -30,6 +30,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -74,6 +75,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * refusal names the domain, it carries the exact "this deployment's fetcher is blocked at" wording
  * rather than anything implying the page itself is forbidden, and no dial was spent.
  */
+@Tag("full-db")
 @Testcontainers
 class FetchEndToEndTest {
 

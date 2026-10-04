@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -69,6 +70,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * them, and an eighth constant added without a migration fails there rather than at the first
  * conversation that reaches it.
  */
+@Tag("full-db")
 @Testcontainers
 class TurnStoreTest {
 

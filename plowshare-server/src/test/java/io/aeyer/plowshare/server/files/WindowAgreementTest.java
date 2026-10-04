@@ -24,6 +24,7 @@ import java.util.Set;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -85,6 +86,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * asymmetry is the two designs and not an accident: a client's workspace is set over its own socket
  * and a server's comes out of a table an operator writes.
  */
+@Tag("full-db")
 @Testcontainers
 class WindowAgreementTest {
 

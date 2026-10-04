@@ -20,6 +20,7 @@ import org.springframework.web.socket.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
+@Tag("full-db")
 @Testcontainers
 class ServerAdministrationTest {
   @Container

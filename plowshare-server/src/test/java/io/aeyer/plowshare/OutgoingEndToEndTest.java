@@ -18,12 +18,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
 /** Real authenticated WS + SDK + A2A fixture peer + migrated Postgres, with no inference. */
+@Tag("full-db")
 @Testcontainers
+// The application must release its pool and workers before its class-owned database stops.
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(
     classes = {PlowshareServerApplication.class, EndToEndTest.StubbedEmbeddings.class},
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

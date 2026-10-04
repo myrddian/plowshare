@@ -3,10 +3,10 @@
 Build the server and clients, then sign in once to your existing admin account:
 
 ```sh
-bin/plowshare-cli --url http://127.0.0.1:8091 login
-bin/plowshare-cli --url http://127.0.0.1:8091 memory index
-bin/plowshare-talk --url http://127.0.0.1:8091
-bin/plowshare-mcp --url http://127.0.0.1:8091
+bin/plowshare-cli --server https://plowshare.example.com login
+bin/plowshare-cli --server https://plowshare.example.com memory index
+bin/plowshare-talk --url https://plowshare.example.com
+bin/plowshare-mcp --url https://plowshare.example.com
 ```
 
 Only `login` asks for a handle and password. Password entry is hidden. If the
@@ -22,9 +22,12 @@ saved server is available, it discovers that login (including one created by the
 CLI). With multiple saved servers, choose the server explicitly. Explicit Disconnect
 or Use demo disables automatic startup reconnect while retaining saved tokens.
 Leave the password blank to connect manually using the saved login. Desktop clears the
-password form immediately and keeps tokens out of renderer state. All clients
-default to the same `http://127.0.0.1:8091` origin; choose the actual server URL
-when different. Origins, including ports, have separate saved credentials.
+password form immediately and keeps tokens out of renderer state. The CLI requires
+`--server ORIGIN`, its `--url` alias, or `PLOWSHARE_URL` for online commands; it has
+no default endpoint. Flags override the environment and may appear before or after
+the command. Help, version and offline validation need no server. Select the same
+origin in each client to share its login. Origins, including ports, have separate
+saved credentials.
 
 Credentials live in `$XDG_CONFIG_HOME/plowshare/credentials`, or
 `~/.config/plowshare/credentials` when XDG is unset. `PLOWSHARE_CONFIG_DIR`
@@ -53,7 +56,7 @@ If a refresh was interrupted, sign in again. Automatic stale-lock reclamation is
 not implemented because it could race a client still rotating credentials.
 
 ```sh
-bin/plowshare-cli --url http://127.0.0.1:8091 logout
+bin/plowshare-cli --server https://plowshare.example.com logout
 ```
 
 Logout renews and revokes the shared session on the server, then deletes the local

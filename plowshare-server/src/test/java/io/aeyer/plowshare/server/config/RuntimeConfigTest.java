@@ -10,6 +10,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,6 +40,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * else, so a test of it never boots an application — which is what keeps the boot-precedence rules
  * of {@code RuntimeConfigSeed} out of the way of the plain question of whether a row round-trips.
  */
+@Tag("full-db")
 @Testcontainers
 class RuntimeConfigTest {
 

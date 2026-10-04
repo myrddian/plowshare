@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * tables, so every assertion here talks to the database directly with a {@link JdbcTemplate}, the
  * same shape {@code AdminStoreTest} uses for the table it introduces.
  */
+@Tag("full-db")
 @Testcontainers
 class EventsSchemaTest {
 

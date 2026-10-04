@@ -19,8 +19,8 @@ package first. The CLI depends on `plowshare-client-ts` and `plowshare-client-no
 and TypeScript are development/test dependencies. Publishing/distribution and
 typed response DTOs and MCP parity remain later work.
 
-Run `bin/plowshare-cli login` once to save tokens shared by CLI, TUI, MCP and
-desktop. Only login prompts; passwords are hidden and never saved. `logout`
+Run `bin/plowshare-cli --server <server-origin> login` once to save tokens shared
+by CLI, TUI, MCP and desktop. Only login prompts; passwords are hidden and never saved. `logout`
 revokes the shared session and removes its local file. See
 [shared login](../docs/client-login.md) for origins, persistence,
 renewal coordination and recovery. `PLOWSHARE_HANDLE` and `PLOWSHARE_PASSWORD`
@@ -31,8 +31,23 @@ authenticated smart HTTP endpoint; union control and conflict operations use WS.
 There is no supported WS Git-object contract. The CLI serves local files only
 with an explicit `--root`; local commands default to off.
 
-Options may precede or follow the command. Use `--` before literal arguments beginning with a dash. `PLOWSHARE_URL` defaults to
-`http://127.0.0.1:8091`; `--url` must name an origin. `--project` overrides
+Select the server with `--server ORIGIN` (`--url ORIGIN` is an alias), or set
+`PLOWSHARE_URL` for repeated commands. An explicit flag overrides the environment;
+if repeated, the last `--server`/`--url` wins. The value must be an HTTP(S) origin
+without credentials, a path, query or fragment. Online commands require a server;
+there is no default endpoint. Help, version and offline validation need none.
+Saved credentials are selected by the chosen origin, so switching servers uses
+that server's login.
+
+```sh
+bin/plowshare-cli --server https://plowshare.example.com login
+bin/plowshare-cli project list --server https://plowshare.example.com
+export PLOWSHARE_URL=https://plowshare.example.com
+bin/plowshare-cli project list
+```
+
+Options may precede or follow the command. Use `--` before literal arguments
+beginning with a dash. `--project` overrides
 `PLOWSHARE_PROJECT`, and `--global` explicitly overrides it with global scope.
 JSON payloads may name another project, including `project:null` for global.
 Omitted recall limits, budgets and optional pagination retain the server's defaults.

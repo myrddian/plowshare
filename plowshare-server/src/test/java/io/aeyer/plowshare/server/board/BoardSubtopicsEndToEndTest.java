@@ -59,6 +59,7 @@ import java.util.function.Function;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -67,6 +68,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** A bot's request reaches the board and returns as a resolution through the real runtime. */
+@Tag("full-db")
 @Testcontainers
 class BoardSubtopicsEndToEndTest {
 

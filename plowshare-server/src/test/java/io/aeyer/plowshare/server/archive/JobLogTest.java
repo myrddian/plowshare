@@ -18,6 +18,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -53,6 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@code Instant.now()} asserts nothing on the day it is written and something different a year
  * later.
  */
+@Tag("full-db")
 @Testcontainers
 class JobLogTest {
 

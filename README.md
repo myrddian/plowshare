@@ -399,9 +399,11 @@ Run `./gradlew format` to apply Google Java Style, or `./gradlew formatCheck` to
 check formatting without editing files.
 
 Run `./gradlew check` for the repository's Java and TypeScript checks, including
-Java formatting. Database
-tests use Testcontainers and require Docker; contract checks also require
-Python 3. Native distribution checks are opt-in and documented separately.
+Java formatting. Ordinary `test` and `check` runs exclude database tests and do
+not require Docker. Use `./gradlew check -PfullDb` to include PostgreSQL tests;
+these use Testcontainers and require Docker. Contract checks require Python 3.
+See the [build guide](docs/manual/15-building-and-extending.md) for focused commands.
+Native distribution checks are opt-in and documented separately.
 Changes to capabilities should update the shared contracts and relevant clients.
 
 

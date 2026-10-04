@@ -18,6 +18,7 @@ import org.springframework.jdbc.datasource.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
+@Tag("full-db")
 @Testcontainers
 class ManagedPricingTest {
   @Container

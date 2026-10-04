@@ -56,6 +56,7 @@ import java.util.function.Function;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -70,6 +71,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Only the model is a stand-in — one that answers every call "noted." and says nothing on the
  * board, so every wake here is a silent one and each is counted as such.
  */
+@Tag("full-db")
 @Testcontainers
 class BoardEndToEndTest {
 

@@ -32,6 +32,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -50,6 +51,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * way {@code Turn} does, so the thing under test is {@code Compaction.TurnTranscript.closed}
  * calling {@link Citing} and not a fixture standing in for it.
  */
+@Tag("full-db")
 @Testcontainers
 class CitationRecordingTest {
 

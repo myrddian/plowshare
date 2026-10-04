@@ -78,6 +78,7 @@ import java.util.function.UnaryOperator;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -94,6 +95,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * decides every ending of a conductor's turn from the row — with the model replaced by a voice that
  * records what it was told and the caller replaced by a delivery that records what reached it.
  */
+@Tag("full-db")
 @Testcontainers
 class OrchestrationsTest {
 

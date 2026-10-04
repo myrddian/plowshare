@@ -26,6 +26,7 @@ import java.util.Set;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -42,6 +43,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@link SearchProvider} is a hand written fake, on {@code SearchLadderTest}'s own reasoning: this
  * class's job is deciding when to dial at all, not how one dial behaves.
  */
+@Tag("full-db")
 @Testcontainers
 class SearchServiceTest {
 

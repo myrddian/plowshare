@@ -20,6 +20,7 @@ import okhttp3.mockwebserver.*;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Real dispatcher, pool, transport, journal, and PostgreSQL; only the inference server is a
  * fixture.
  */
+@Tag("full-db")
 @Testcontainers
 @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class InferenceCaptureTest {

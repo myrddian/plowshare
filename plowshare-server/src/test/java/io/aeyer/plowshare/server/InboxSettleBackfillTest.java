@@ -10,6 +10,7 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -24,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * run's ending, a stall, an approval's continuation — are left as they were. Stops at V67, writes
  * the rows, then lets V68 land on them ({@link LogOwnerBackfillTest}'s shape).
  */
+@Tag("full-db")
 @Testcontainers
 class InboxSettleBackfillTest {
 

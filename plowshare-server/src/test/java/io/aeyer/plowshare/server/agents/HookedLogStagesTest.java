@@ -49,6 +49,7 @@ import java.util.function.Predicate;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -59,6 +60,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Spec 2026-09-28-hooks-reach-the-log decisions 7–9, over a real Postgres and a Java hook layer.
  */
+@Tag("full-db")
 @Testcontainers
 class HookedLogStagesTest {
 

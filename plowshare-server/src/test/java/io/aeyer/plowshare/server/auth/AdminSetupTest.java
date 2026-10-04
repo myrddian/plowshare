@@ -28,6 +28,7 @@ import org.testcontainers.junit.jupiter.*;
 /**
  * Real database and filter: setup consumption, races, restart persistence, and project authority.
  */
+@Tag("full-db")
 @Testcontainers
 class AdminSetupTest {
   @Container

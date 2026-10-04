@@ -10,6 +10,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -30,6 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Spring's own and is exercised wherever this server boots; what needs pinning here is each
  * accessor's arithmetic, and a properties object plus a store is the whole of it.
  */
+@Tag("full-db")
 @Testcontainers
 class SearchPropertiesTest {
 

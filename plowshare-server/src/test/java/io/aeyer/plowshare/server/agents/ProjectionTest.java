@@ -51,6 +51,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -113,6 +114,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * socket is opened and no port is bound; the only remote thing in the file is the Postgres
  * container Testcontainers chose a port for.
  */
+@Tag("full-db")
 @Testcontainers
 class ProjectionTest {
 

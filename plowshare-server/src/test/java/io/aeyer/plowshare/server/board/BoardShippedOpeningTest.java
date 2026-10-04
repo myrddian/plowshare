@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,6 +28,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** Actual shipped entry points reach the starting-topic tool and get their resolution back. */
+@Tag("full-db")
 @Testcontainers
 class BoardShippedOpeningTest {
   @Container

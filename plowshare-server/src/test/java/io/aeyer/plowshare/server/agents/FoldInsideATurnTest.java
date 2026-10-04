@@ -44,6 +44,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -62,6 +63,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@link Tokenizer} handed in, what a step appended is not counted and the turn stands at the
  * model's own counts; the tests that weigh steps hand one in.
  */
+@Tag("full-db")
 @Testcontainers
 class FoldInsideATurnTest {
 

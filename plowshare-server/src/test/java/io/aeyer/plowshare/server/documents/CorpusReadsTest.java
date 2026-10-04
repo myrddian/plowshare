@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -38,6 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * retrieval never go near a model: what is under test is the join and the gating, and a real
  * embedder would only make the ordering unpredictable.
  */
+@Tag("full-db")
 @Testcontainers
 class CorpusReadsTest {
 

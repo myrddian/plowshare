@@ -11,6 +11,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * is that no project can be named into it, and a backfill that leaves a NULL behind is that rule
  * broken by the schema rather than by a caller.
  */
+@Tag("full-db")
 @Testcontainers
 class ProjectIdBackfillTest {
 

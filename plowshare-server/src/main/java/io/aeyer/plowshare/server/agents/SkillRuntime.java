@@ -53,6 +53,7 @@ public final class SkillRuntime {
               definition.prompt()
                   + "\n\n"
                   + instructions(execution.skill())
+                  + (execution.mode() == SkillDefinition.Mode.DIRECT ? directGuidance() : "")
                   + "\nInvocation UUID: "
                   + execution.invocation());
       if (!execution.skill().allowedTools().isEmpty()) {
@@ -118,6 +119,8 @@ public final class SkillRuntime {
         + catalog
         + "\nYou may choose a relevant listed skill and invoke skill_run as part of the user's task without a slash command. "
         + "Use the current task as invocation arguments and a stable UUID. A skill with mode null needs explicit context configuration first. "
+        + "DIRECT activation supplies instructions for you to execute here; it does not start a background worker. "
+        + "Continue an already invoked skill using its instructions and the user's clarification as conversation context, not by invoking it again. "
         + "Only granted skills with effective agentVisible=true are available for model-selected invocation. "
         + "The harness does not match or execute descriptions itself; existing tool permissions and approvals still apply.";
   }
@@ -265,12 +268,16 @@ public final class SkillRuntime {
     try {
       if (mode == SkillDefinition.Mode.DIRECT) {
         executions.running(account, id, parent.conversationId());
-        return "Skill invocation "
-            + id
-            + " is running DIRECT under '"
+        return "Skill '"
+            + name
+            + "' is activated in DIRECT mode under '"
             + caller.name()
-            + "'.\n\n"
+            + "'. Read and execute these instructions yourself in this conversation.\n"
+            + "Invocation UUID for skill_read: "
+            + id
+            + "\n\n"
             + instructions(skill)
+            + directGuidance()
             + "\n\nInvocation arguments (user data):\n"
             + input;
       }
@@ -380,7 +387,15 @@ public final class SkillRuntime {
 
   private static String receipt(SkillExecutions.Execution execution, String payload) {
     if (!execution.payload().equals(payload))
-      throw bad("That invocation UUID already names a different request. Nothing ran.");
+      throw bad(
+          "That invocation UUID already names a different request. This call ran nothing. "
+              + "The original invocation is "
+              + execution.state()
+              + " in mode "
+              + execution.mode()
+              + "; its arguments and mode are fixed. "
+              + "Do not generate a new UUID to bypass this refusal or repeat the original work."
+              + receiptGuidance(execution));
     return "Skill invocation "
         + execution.invocation()
         + " is "
@@ -389,7 +404,50 @@ public final class SkillRuntime {
             ? "."
             : " in conversation " + execution.conversation() + ".")
         + " It was not replayed."
-        + (execution.result() == null ? "" : "\n" + execution.result());
+        + (execution.result() == null ? "" : "\n" + execution.result())
+        + receiptGuidance(execution);
+  }
+
+  /** A DIRECT receipt describes inline execution, never a queued worker or a retry instruction. */
+  private static String receiptGuidance(SkillExecutions.Execution execution) {
+    if (execution.mode() != SkillDefinition.Mode.DIRECT) return "";
+    String next =
+        switch (execution.state()) {
+          case "running", "awaiting" ->
+              "Continue the supplied skill instructions yourself using permitted tools.";
+          case "finished" ->
+              "The earlier run ended. Use its recorded instructions and result as conversation context "
+                  + "to answer the user's follow-up with your current permissions. "
+                  + "A clarification does not require another skill invocation.";
+          default ->
+              "Inspect the existing invocation's state and recorded result before taking further action; "
+                  + "do not retry it with a new UUID.";
+        };
+    return "\nDIRECT executes inline in this conversation under '"
+        + execution.executor()
+        + "'; no background worker is waiting to return a plan or result. "
+        + next;
+  }
+
+  /**
+   * Activation is an instruction handoff to this executor, not completion of the requested work.
+   */
+  private static String directGuidance() {
+    return "\n\nExecution guidance for DIRECT:\n"
+        + "The skill is now activated here. You are its executor: perform the supplied instructions "
+        + "with your permitted tools and verify the requested result. "
+        + "Do not call skill_run again or generate another invocation UUID to carry out this activation. "
+        + "There is no delegated or background worker to wait for.\n"
+        + "The invocation arguments stay fixed. Use relevant conversation context, including later "
+        + "user clarifications, as additional task information without rewriting those arguments. "
+        + "Ask only for missing information that materially affects the task; the user's command "
+        + "already requests the work, so do not ask for redundant permission to perform it.\n"
+        + "An ordinary final answer ends this DIRECT run; an approval pause retains it. "
+        + "If you need clarification, ask the concrete question and state what is still unfinished. "
+        + "When the user answers, continue the task from the recorded instructions and result with "
+        + "your current permissions. Do not restart the skill merely to incorporate the answer. "
+        + "Report what you actually did and the verified result; do not end with a promise that "
+        + "the harness or another agent will do the work after your reply.";
   }
 
   private static String instructions(SkillDefinition skill) {
@@ -421,8 +479,10 @@ public final class SkillRuntime {
           RUN,
           "Run a granted skill from the available skills catalog when it helps complete the user's task. "
               + "Model-selected invocation requires effective agentVisible=true and a configured mode. "
-              + "Hidden skills need an explicit /skill command dispatched through command_dispatch. "
+              + "Hidden skills require an explicit /skill command: the harness loads DIRECT instructions before inference, "
+              + "while delegated modes use command_dispatch. "
               + "Reuse the invocation UUID when inspecting a previous request; never retry ambiguous work with a new UUID. "
+              + "The UUID fixes the original arguments and mode; user clarifications are conversation context, not a replacement invocation. "
               + "INHERITED, SUMMARISED and NEW delegate to the skill's Agent; DIRECT loads it in this conversation.",
           ToolArguments.object(
               Map.of(

@@ -34,6 +34,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -57,6 +58,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * and folds run on the calling thread because a fold on a thread this class has no handle on is one
  * the teardown cannot join.
  */
+@Tag("full-db")
 @Testcontainers
 class DeliberationLoggingTest {
 

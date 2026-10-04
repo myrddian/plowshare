@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * stopped maintaining the invariant would fail here rather than quietly produce a corpus whose two
  * edges point at different documents.
  */
+@Tag("full-db")
 @Testcontainers
 class HierarchySchemaTest {
 

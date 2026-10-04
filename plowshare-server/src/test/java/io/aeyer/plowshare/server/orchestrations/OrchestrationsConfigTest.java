@@ -105,6 +105,7 @@ import java.util.function.UnaryOperator;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -126,6 +127,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * turn's free drains, and what a boot picks back up — over a real Postgres, with the model and the
  * caller replaced by fakes.
  */
+@Tag("full-db")
 @Testcontainers
 class OrchestrationsConfigTest {
 
@@ -1981,7 +1983,7 @@ class OrchestrationsConfigTest {
     Turn turn = mock(Turn.class);
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
-        .withUserConfiguration(OrchestrationsConfig.class)
+        .withUserConfiguration(OrchestrationsConfig.class, CallerOrchestrationsConfig.class)
         .withBean(CallerAccess.class, () -> mock(CallerAccess.class))
         .withBean(JdbcTemplate.class, () -> mockJdbc)
         .withBean(UnitOfWork.class, () -> work)
@@ -2045,8 +2047,8 @@ class OrchestrationsConfigTest {
         .withBean(TodoBoard.class, () -> board)
         .withBean(Turn.class, () -> turn)
         .withBean(Callers.class, () -> mock(Callers.class))
-        // No OrchestrationResolver bean: callerOrchestrations's @ConditionalOnBean does
-        // not fire, so the provider the trigger noticing reads finds nothing available.
+        // This narrow engine context omits CallerOrchestrationsConfig, so the provider
+        // the trigger noticing reads finds no caller-facing services.
         .withBean(Inbox.class, () -> mock(Inbox.class))
         .withBean(JobRuntime.class, () -> runtime)
         .withBean(JobStore.class, () -> mock(JobStore.class))

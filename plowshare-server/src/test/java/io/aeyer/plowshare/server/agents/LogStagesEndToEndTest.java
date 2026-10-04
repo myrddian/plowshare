@@ -42,6 +42,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -58,6 +59,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * a marker only when the folder lost it (slice 4, amended 2026-09-29). Every decision is a HOOK
  * entry in the log it was taken for, read back here from the archive.
  */
+@Tag("full-db")
 @Testcontainers
 class LogStagesEndToEndTest {
 

@@ -21,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
+@Tag("full-db")
 @Testcontainers
 class CodeWorkspaceMonitorTest {
   @Container

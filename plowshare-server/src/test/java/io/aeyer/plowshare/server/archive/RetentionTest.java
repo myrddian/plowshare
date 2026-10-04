@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -61,6 +62,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * tested against {@code Instant.now()} is a test that asserts nothing on the day it is written and
  * something different a year later.
  */
+@Tag("full-db")
 @Testcontainers
 class RetentionTest {
 

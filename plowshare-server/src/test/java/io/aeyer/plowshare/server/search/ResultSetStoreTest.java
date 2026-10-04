@@ -12,6 +12,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * two classes together end to end; every other test uses a {@link QueryKey#of} value too, so none
  * of them could pass against a schema that dropped or weakened that constraint.
  */
+@Tag("full-db")
 @Testcontainers
 class ResultSetStoreTest {
 

@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -45,6 +46,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * could not read a PDF and had no outline to give it. {@code
  * the_documents_own_outline_becomes_its_chapters} is the first time that branch runs on real bytes.
  */
+@Tag("full-db")
 @Testcontainers
 class HierarchyIngestTest {
 

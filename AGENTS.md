@@ -97,16 +97,36 @@ cohesive changes and existing lifecycle/access primitives over new frameworks.
 Do not add speculative abstractions, swallowing catches, unchecked casts, or
 nullable success values to conceal an error.
 
+### Database test policy
+
+- **Mock database dependencies by default.** Test service and tool behavior
+  through mocked repository interfaces; small in-memory fakes are appropriate
+  when they make the contract clearer. Do not start PostgreSQL for behavior that
+  can be verified without it.
+- Real database tests are exceptions: place them behind `@Tag("full-db")` and
+  the explicit `-PfullDb` flag. Use them only when the assertion requires actual
+  PostgreSQL behavior, such as Flyway migrations, SQL constraints or row mapping,
+  transaction rollback, locking or concurrent persistence.
+- **Never run real database tests unless the current change requires them or
+  the user explicitly requests them.** Routine builds, unrelated changes and
+  general confidence checks are not reasons to enable `-PfullDb`. State the
+  database-specific reason before running them and select the smallest relevant
+  test set with `--tests`. Run the entire database suite only when its breadth is
+  necessary for the change or explicitly requested. This rule also applies to
+  the database-backed `dockerSmoke` task and manual CI verification.
+
 ```sh
 ./gradlew format                 # Apply Google Java formatting to all modules.
 ./gradlew formatCheck            # Read-only formatting check.
 ./gradlew :plowshare-server:test --tests 'fully.qualified.RelevantTest'
-./gradlew check                  # Java, Javadoc, formatting and client checks.
+./gradlew check                  # Java, Javadoc, formatting and client checks; no Docker tests.
+./gradlew check -PfullDb         # Full DB coverage only when required or explicitly requested.
 ```
 
 The build requires Java 21, Node.js 22.12+, pnpm and Python 3. Database tests require
-Docker/Testcontainers. Native SDK and distribution checks have additional
-toolchains and are explicit entry points; see [SDKs](docs/sdks.md) and
+the explicit `-PfullDb` flag and Docker/Testcontainers. Default runs use the
+non-database tests, including mocks and in-memory fakes. Native SDK and
+distribution checks have additional toolchains and are explicit entry points; see [SDKs](docs/sdks.md) and
 [distributions](docs/distributions.md).
 
 Run meaningful tests for changed behavior, including invalid inputs and relevant

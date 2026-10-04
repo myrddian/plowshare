@@ -174,6 +174,70 @@ class BoundCommandsTest {
   }
 
   @Test
+  void direct_instructions_are_loaded_during_preparation_without_a_model_dispatch_or_replay() {
+    offer("mode: DIRECT\n");
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(
+            "Read and execute these instructions.\nInstructions.\nOriginal arguments: request");
+    var prepared = prepare(true, "/skill:review request");
+    assertNull(prepared.refusal());
+    assertNull(prepared.tool());
+    assertNull(prepared.unfinished());
+    assertTrue(
+        prepared.notice().contains("The user has issued the following command: /skill:review"));
+    assertTrue(
+        prepared.notice().contains("Read the skill instructions below and execute them yourself"));
+    assertTrue(prepared.notice().contains("Instructions."));
+    assertFalse(prepared.notice().contains("\"definitionHash\""));
+    assertTrue(prepared.fence(SkillRuntime.RUN).contains("already activated"));
+    var saved = stored.get();
+    assertEquals("finished", saved.state());
+    when(store.bind(any(), any(), any(), any(), any(), any(), any())).thenReturn(saved);
+    var repeated = prepare(true, "/skill:review request");
+    assertNull(repeated.refusal());
+    assertTrue(repeated.notice().contains("It was not replayed"));
+    verify(runtime, times(1))
+        .dispatch(
+            argThat(bound -> bound.id().equals(id) && bound.arguments().equals("request")),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any());
+  }
+
+  @Test
+  void direct_activation_failure_is_recorded_and_not_presented_as_ready_to_execute() {
+    offer("mode: DIRECT\n");
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenThrow(new IllegalStateException("The pinned definition changed. Nothing ran."));
+    var prepared = prepare(true, "/skill:review request");
+    assertTrue(prepared.refusal().contains("pinned definition changed"));
+    assertNull(prepared.notice());
+    assertEquals("failed", stored.get().state());
+    when(store.pending("alice", "parent", "bot")).thenReturn(List.of(stored.get()));
+    assertNotNull(prepare(false, "Resume").refusal());
+    verify(runtime, times(1))
+        .dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void direct_commands_require_authority_and_ordinary_text_never_loads_the_skill() {
+    offer("mode: DIRECT\n");
+    assertNull(prepare(true, "Review this work").notice());
+    verifyNoInteractions(runtime);
+    doThrow(new IllegalStateException("Project access refused"))
+        .when(callers)
+        .requireWork(any(), any());
+    assertNotNull(prepare(true, "/skill:review request").refusal());
+    verifyNoInteractions(runtime);
+    verify(store, never()).claim(any());
+  }
+
+  @Test
   void invalid_or_ungranted_commands_are_not_downgraded_to_chat_or_given_a_default_mode() {
     assertNotNull(prepare(true, "/skill:unknown request").refusal());
     assertNotNull(prepare(true, "/skill:review").refusal());

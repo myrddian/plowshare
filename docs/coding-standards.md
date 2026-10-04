@@ -276,12 +276,24 @@ validate main-source references, not the accuracy or completeness of comments.
 ## Verification and review
 
 Run focused tests while iterating and `./gradlew check` before handing off broad
-changes. Repository tests should use the actual PostgreSQL dialect through the
-existing Testcontainers fixtures. Cover validation, project isolation, row
-mapping, rollback and affected-row semantics relevant to the change. For durable
-state transitions, cover races, replay and recovery where the contract requires
-them. Test service behavior through its interfaces as well as real persistence
-integration; mocks alone cannot prove database semantics.
+changes. Mock database dependencies by default, using repository interfaces or
+small in-memory fakes for service and tool decisions. Real PostgreSQL tests must
+use the existing Testcontainers fixtures, declare `@Tag("full-db")` and require
+the explicit `-PfullDb` flag. Ordinary `test` and `check` runs exclude them.
+
+Never enable real database tests unless the current change requires PostgreSQL
+verification or the user explicitly requests it. Flyway migration changes are a
+typical reason; SQL constraints, row mapping, transaction rollback, locking and
+concurrent persistence may also require real database evidence. State the reason
+before running and select the smallest relevant test set with `--tests`.
+Routine builds and unrelated changes must remain in the default mode. An entire
+database suite or database-backed smoke run needs a reason that requires that
+breadth, or an explicit user request.
+
+Cover validation, project isolation and failure behavior relevant to the change
+in the default tests. When database verification is required, cover the relevant
+row mapping, rollback, affected-row, race, replay and recovery semantics against
+PostgreSQL; mocks alone cannot prove those semantics.
 
 Keep Flyway migrations append-only, update shared contracts and regenerate derived
 catalogs with their owning tools. Preserve explicit permissions and lifecycle

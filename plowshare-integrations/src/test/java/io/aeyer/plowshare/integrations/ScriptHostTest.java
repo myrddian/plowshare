@@ -3,11 +3,48 @@ package io.aeyer.plowshare.integrations;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.*;
 
 class ScriptHostTest {
   private final ScriptHost host = new ScriptHost(Duration.ofSeconds(5));
+
+  @Test
+  void worker_output_preserves_unicode_when_stdout_uses_ascii() throws Exception {
+    String message = "Office temperature is 30 °C. — 温度";
+    var input = Json.object();
+    input.put("source", "export default {onEvent(e,c){c.state.message=e.message;return []}};");
+    input.put("handler", "onEvent");
+    input.set("event", Json.object().put("message", message));
+    input.set("context", Json.object());
+    var builder =
+        new ProcessBuilder(
+            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+            "-Dsun.stdout.encoding=US-ASCII",
+            "-cp",
+            System.getProperty("integration.worker.classpath"),
+            ScriptWorker.class.getName());
+    builder.environment().clear();
+    Process worker = builder.start();
+    try {
+      try (var stdin = worker.getOutputStream()) {
+        stdin.write(Json.MAPPER.writeValueAsBytes(input));
+      }
+      assertTrue(worker.waitFor(10, TimeUnit.SECONDS), "worker did not finish");
+      assertEquals(0, worker.exitValue());
+      var output =
+          Json.parse(
+              new String(
+                  worker.getInputStream().readNBytes(Json.MAX_MESSAGE + 1),
+                  StandardCharsets.UTF_8));
+      assertEquals(message, output.path("state").path("message").asText());
+    } finally {
+      worker.destroyForcibly();
+    }
+  }
 
   @Test
   void handler_returns_effects_and_explicit_state_without_external_io() throws Exception {

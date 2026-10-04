@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -69,6 +70,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * V2's and V5's argument for the constraints existing, since a psql session, a later migration or a
  * second writer does not go through Java.
  */
+@Tag("full-db")
 @Testcontainers
 class ConversationStoreTest {
 

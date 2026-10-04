@@ -12,6 +12,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,6 +22,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** V74's shapes, each the constraint the spec's §4 argues for. */
+@Tag("full-db")
 @Testcontainers
 class BoardSchemaTest {
 

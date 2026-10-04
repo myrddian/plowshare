@@ -19,6 +19,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -47,6 +48,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * class called — a mock {@link AdminStore#create} could return successfully having recorded nothing
  * at all, and would not be lying about anything this test could tell from the mock alone.
  */
+@Tag("full-db")
 @Testcontainers
 class AdminSeedTest {
 

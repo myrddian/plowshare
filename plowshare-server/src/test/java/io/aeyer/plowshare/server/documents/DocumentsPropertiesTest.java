@@ -15,6 +15,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -48,6 +49,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Spring's own and is exercised by every context test that boots this server; what needs pinning
  * here is the accessor's arithmetic, and a properties object plus a store is the whole of it.
  */
+@Tag("full-db")
 @Testcontainers
 class DocumentsPropertiesTest {
 

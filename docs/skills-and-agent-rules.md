@@ -125,9 +125,14 @@ to summarise it. The folder call spends the shared model budget, observes job
 cancellation and is attributed as a FOLD inference. It leaves the parent's entries
 and compaction state untouched. The child loads its own role, rules and skill.
 
-DIRECT returns the skill instructions to the current Agent or Bot in the current
-log. Constraints take effect before later tool calls, including calls from the
-same model batch. The skill keeps the current executor's role and grants.
+For an explicit DIRECT command, the harness loads and activates the pinned skill
+before the first model call. Its command notice tells the current Agent or Bot to
+read and execute the skill body, with frontmatter removed, and includes the
+original arguments as user data. No `command_dispatch` or `skill_run` call is
+needed. Skill constraints apply to the first inference's offered tools as well
+as execution. Model-selected DIRECT activation still returns the instructions
+through `skill_run`, with constraints applied before later calls in the same
+batch. Both paths retain the current executor's role and grants.
 
 Migration V90 retains accepted instructions, source, origin, executor and mode.
 The source is pinned before child model work begins and is reapplied on resume.
@@ -142,6 +147,14 @@ converted into new grants. `skill_read` remains available for package resources.
 Resource reads verify that the currently reachable package still matches the
 pinned source and origin; a changed or missing package is not silently replaced.
 DIRECT constraints finish with the current run; an approval pause retains them.
+Activation and receipt messages tell the current executor to perform the supplied
+instructions with its permitted tools, rather than wait for a background worker
+or invoke the skill again. An ordinary clarification question ends that run;
+the user's answer adds conversation context, not replacement invocation arguments.
+The agent continues the task from the recorded instructions and result with its
+current permissions. A changed-request refusal reports the original invocation's
+state and warns against bypassing it with a fresh UUID. These messages do not
+extend skill constraints into a later run or automatically resume work.
 
 ## Skill grants
 
@@ -190,11 +203,14 @@ collisions with native client commands.
 
 The harness validates the selected Agent's catalog and binds the original
 arguments, definition hash, mode, owning account, conversation, caller and source
-run in migration V91. It sends a readable notice beginning "The following command
-has been invoked" plus structured JSON. The Agent invokes `command_dispatch`
-with only that UUID. Model-supplied replacement arguments are refused. Direct
-skill/agent/orchestration start tools are fenced for that bound command. A model
-that ends without dispatch does not produce a successful command outcome.
+run in migration V91. An explicit DIRECT skill is activated by the harness once
+before inference; its notice begins "The user has issued the following command"
+and contains the skill instructions and original arguments. Delegated skills and
+orchestrations receive a dispatch notice and structured JSON; the Agent invokes
+`command_dispatch` with only that UUID. Model-supplied replacement arguments are
+refused. Skill/agent/orchestration start alternatives are fenced and withheld
+from the model's tool catalog for the bound command. A model that ends before a
+required dispatch does not produce a successful command outcome.
 Existing orchestration phrase notices are suppressed for bound slash commands.
 
 Dispatch claims the receipt once before invoking the operation. Orchestration

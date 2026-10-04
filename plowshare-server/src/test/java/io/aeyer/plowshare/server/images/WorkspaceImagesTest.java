@@ -24,6 +24,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -68,6 +69,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * the two failing resolutions reaching a model as two different sentences — is {@code
  * DelegationTest}'s, because that is where a tool result can be read.
  */
+@Tag("full-db")
 @Testcontainers
 class WorkspaceImagesTest {
 

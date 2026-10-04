@@ -69,9 +69,9 @@ test('one prompted login serves concurrent CLI processes, saves rotated tokens a
     const fake = await fixture(), directory = await mkdtemp(join(tmpdir(), 'plowshare-login-'))
     let out = ''
     try {
-        const code = await run(['--url', fake.base, 'login'], { env: { PLOWSHARE_CONFIG_DIR: directory }, stdout: text => { out += text }, stderr: () => {}, stdin: async () => '', login: async () => ({ handle: 'operator', password: 'never-save-password' }) })
+        const code = await run(['--server', fake.base, 'login'], { env: { PLOWSHARE_CONFIG_DIR: directory }, stdout: text => { out += text }, stderr: () => {}, stdin: async () => '', login: async () => ({ handle: 'operator', password: 'never-save-password' }) })
         assert.equal(code, 0); assert.ok(!out.includes('never-save-password'))
-        const results = await Promise.all([child(['--url', fake.base, '--json', 'memory', 'index'], directory), child(['--url', fake.base, '--json', 'memory', 'index'], directory)])
+        const results = await Promise.all([child(['--server', fake.base, '--json', 'memory', 'index'], directory), child(['--url', fake.base, '--json', 'memory', 'index'], directory)])
         for (const result of results) { assert.equal(result.code, 0, result.err + result.out); assert.equal(JSON.parse(result.out).status, 'completed'); assert.ok(!result.out.includes('refresh-')) }
         assert.deepEqual(fake.counts(), { logins: 1, refreshes: 2 })
         const privateDirectory = join(directory, 'credentials'), files = await readdir(privateDirectory)

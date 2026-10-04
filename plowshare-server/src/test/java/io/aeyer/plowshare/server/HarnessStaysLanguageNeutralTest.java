@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,6 +25,10 @@ import org.junit.jupiter.api.Test;
  * words, "it could of been JS or typesafe and that would no longer be true".
  */
 class HarnessStaysLanguageNeutralTest {
+
+  // Literal contents need no backtracking. Consume runs possessively so long source lines
+  // cannot exhaust the regex engine's stack on platforms with smaller thread stacks.
+  private static final Pattern JAVA_LITERAL = Pattern.compile("\"(?:[^\"\\\\\\n]++|\\\\.)*+\"");
 
   private static final List<Path> PROMPTS =
       List.of(Path.of("src/main/resources/agents"), Path.of("src/main/resources/orchestrations"));
@@ -89,7 +95,6 @@ class HarnessStaysLanguageNeutralTest {
    */
   @Test
   void no_harness_string_names_an_ecosystem() throws IOException {
-    Pattern literal = Pattern.compile("\"(?:[^\"\\\\\\n]|\\\\.)*\"");
     List<String> named = new ArrayList<>();
     try (Stream<Path> files = Files.walk(Path.of("src/main/java"))) {
       for (Path file : files.filter(each -> each.toString().endsWith(".java")).sorted().toList()) {
@@ -100,7 +105,7 @@ class HarnessStaysLanguageNeutralTest {
             continue;
           }
           int at = n + 1;
-          var found = literal.matcher(line);
+          var found = JAVA_LITERAL.matcher(line);
           while (found.find()) {
             String text = found.group().toLowerCase(Locale.ROOT);
             // Grammar routing identifiers and the parser fingerprint are data,
@@ -124,5 +129,14 @@ class HarnessStaysLanguageNeutralTest {
       }
     }
     assertEquals(List.of(), named);
+  }
+
+  @Test
+  void long_escaped_literals_are_scanned_without_exhausting_the_stack() {
+    String literal = "\"" + "value ".repeat(10_000) + "\\\"quoted\\\"" + "\"";
+    var found = JAVA_LITERAL.matcher("return " + literal + ";");
+    assertTrue(found.find());
+    assertEquals(literal, found.group());
+    assertFalse(found.find());
   }
 }

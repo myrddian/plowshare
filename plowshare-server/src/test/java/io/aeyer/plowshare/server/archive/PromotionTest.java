@@ -25,6 +25,7 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -62,6 +63,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * StubEmbeddingClient} gives at length: a live model would make every assertion here a measurement
  * of that model on that day.
  */
+@Tag("full-db")
 @Testcontainers
 class PromotionTest {
 

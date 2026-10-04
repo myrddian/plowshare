@@ -55,6 +55,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -71,6 +72,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * that is real: swc4j and GraalJS run the hook, Postgres holds the snapshot, the pin and the {@code
  * log.open} entries, and the hook's records carry {@code tier: 'local'}.
  */
+@Tag("full-db")
 @Testcontainers
 class LocalHooksEndToEndTest {
 

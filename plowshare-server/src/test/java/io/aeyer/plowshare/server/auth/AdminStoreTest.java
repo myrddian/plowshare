@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -19,6 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * archive.ProjectStoreTest} pattern for a store test: Testcontainers for the database, {@link
  * Flyway} to build the schema, a plain {@link JdbcTemplate} underneath the store under test.
  */
+@Tag("full-db")
 @Testcontainers
 class AdminStoreTest {
 

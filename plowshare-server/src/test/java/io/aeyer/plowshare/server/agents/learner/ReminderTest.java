@@ -26,6 +26,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -41,6 +42,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * a use, and that a memory with no vector is not reachable — and an assertion against a mocked
  * {@code Archive} would be an assertion about the mock.
  */
+@Tag("full-db")
 @Testcontainers
 class ReminderTest {
 

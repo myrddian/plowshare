@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -18,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * This follows {@code ProjectIdBackfillTest}: migrate to the version before, seed, then migrate the
  * rest.
  */
+@Tag("full-db")
 @Testcontainers
 class TheBufferIsEmptiedOnceTest {
 

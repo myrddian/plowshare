@@ -13,6 +13,7 @@ import java.util.Set;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -27,6 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * RuntimeConfigTest}'s shape: no Spring context, a Testcontainers Postgres migrated once for the
  * class, and a fresh store over a truncated table per test.
  */
+@Tag("full-db")
 @Testcontainers
 class ProviderStoreTest {
 

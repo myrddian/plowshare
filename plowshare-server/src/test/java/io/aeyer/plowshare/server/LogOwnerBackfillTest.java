@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -21,6 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * root's, and a log with no run in its tree stays unowned. Stops at V62, writes the rows a running
  * server held, then lets V63 land on them ({@link ProjectIdBackfillTest}'s shape).
  */
+@Tag("full-db")
 @Testcontainers
 class LogOwnerBackfillTest {
 

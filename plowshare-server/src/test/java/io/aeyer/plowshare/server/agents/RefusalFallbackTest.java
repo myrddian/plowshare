@@ -42,6 +42,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -57,6 +58,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * are about what the <em>next</em> request carries, and that is read back out of the log by {@code
  * Compaction} — a fixture transcript would be asserting what the test itself handed over.
  */
+@Tag("full-db")
 @Testcontainers
 class RefusalFallbackTest {
 

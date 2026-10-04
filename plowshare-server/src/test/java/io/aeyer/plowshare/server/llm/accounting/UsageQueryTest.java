@@ -24,6 +24,7 @@ import org.springframework.jdbc.datasource.*;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
+@Tag("full-db")
 @Testcontainers
 @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class UsageQueryTest {

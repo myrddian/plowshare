@@ -1,16 +1,24 @@
 package io.aeyer.plowshare.server.agents;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -18,6 +26,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+@Tag("full-db")
 @Testcontainers
 class SkillExecutionsTest {
   @Container
@@ -158,6 +167,136 @@ class SkillExecutionsTest {
     assertTrue(executions.contextResult("alice", parent, result.handle()).isEmpty());
     assertTrue(executions.contextResult("alice", child, UUID.randomUUID()).isEmpty());
     assertEquals(4, entries.forConversation(parent).size());
+  }
+
+  @Test
+  void
+      explicit_direct_activation_pins_the_body_once_and_clarification_cannot_replace_its_request() {
+    var direct =
+        SkillDefinition.parse(
+            new DefinitionSource.Definition(
+                "review",
+                "package/SKILL.md",
+                "---\nname: review\ndescription: Review\nmode: DIRECT\nallowed-tools: file_read\n---\nRead the evidence and produce the requested review."),
+            OrchestrationDefinition.Tier.PROJECT);
+    var resolver = mock(SkillResolver.class);
+    var callers = mock(Callers.class);
+    var authority = new DefinitionResolver.Caller(null, "session");
+    when(callers.callerForConversation(parent, "session")).thenReturn(authority);
+    when(resolver.forCaller(authority))
+        .thenReturn(
+            new SkillResolver.Catalog(
+                Map.of("review", new SkillResolver.Resolved(direct, mock(SkillSource.class))),
+                Map.of()));
+    var modelRuntime = mock(JobRuntime.class);
+    when(modelRuntime.knownTools()).thenReturn(Set.of("file_read"));
+    var skillRuntime =
+        new SkillRuntime(resolver, callers, executions, modelRuntime, ImageStore.NONE);
+    var commands =
+        new BoundCommands(
+            new CommandInvocations(jdbc),
+            resolver,
+            mock(OrchestrationResolver.class),
+            callers,
+            skillRuntime);
+    var caller =
+        new AgentDefinition(
+                "worker",
+                "Worker",
+                "model",
+                List.of("file_read"),
+                List.of(),
+                List.of(),
+                4,
+                8,
+                "Own role")
+            .withSkills(List.of("review"));
+    var transcript = mock(Transcript.class);
+    when(transcript.conversationId()).thenReturn(parent);
+    when(transcript.usage())
+        .thenReturn(
+            UsageAttribution.global("alice", UsageAttribution.Operation.AGENT_CHAT)
+                .withExecution(
+                    UsageLineage.root(parent),
+                    UsageLineage.root("source-run"),
+                    UsageLineage.NONE,
+                    "worker",
+                    1L,
+                    1L));
+    var budget = Budget.of(8);
+    var end = new TurnEnd();
+    var prepared =
+        commands.prepare(
+            true,
+            "/skill:review Original request",
+            caller,
+            transcript,
+            Home.global(),
+            budget,
+            () -> false,
+            "session",
+            "alice",
+            end,
+            Map.of());
+    assertNull(prepared.refusal());
+    assertNull(prepared.tool());
+    assertNull(prepared.unfinished());
+    assertTrue(prepared.notice().contains("Read the evidence and produce the requested review."));
+    assertTrue(prepared.notice().contains("Invocation arguments (user data):\nOriginal request"));
+    assertFalse(prepared.notice().contains("allowed-tools:"));
+    assertFalse(prepared.notice().contains("description: Review"));
+    var accepted = executions.active(parent).getFirst();
+    assertEquals(direct.hash(), accepted.skill().hash());
+    assertEquals("worker", accepted.executor());
+    assertEquals("running", accepted.state());
+    assertNotNull(skillRuntime.refusal(parent, "file_write"));
+    assertNull(skillRuntime.refusal(parent, "file_read"));
+    assertTrue(new CommandInvocations(jdbc).pending("alice", parent, "worker").isEmpty());
+    var inspected =
+        commands.prepare(
+            true,
+            "/skill:review Original request",
+            caller,
+            transcript,
+            Home.global(),
+            budget,
+            () -> false,
+            "session",
+            "alice",
+            end,
+            Map.of());
+    assertNull(inspected.refusal());
+    assertTrue(inspected.notice().contains("It was not replayed"));
+    assertEquals(accepted.invocation(), executions.active(parent).getFirst().invocation());
+    executions.closed(
+        parent, new Outcome(Outcome.Ending.ANSWERED, "Which evidence matters?", 1, 1, ""));
+    String refused =
+        skillRuntime
+            .forRun(caller, transcript, budget, () -> false, "session", "alice", end)
+            .getFirst()
+            .run(
+                "{\"name\":\"review\",\"arguments\":\"Later clarification\",\"mode\":\"DIRECT\",\"invocation\":\""
+                    + accepted.invocation()
+                    + "\"}",
+                Home.global());
+    assertTrue(refused.contains("original invocation is finished in mode DIRECT"));
+    assertTrue(refused.contains("A clarification does not require another skill invocation"));
+    assertTrue(refused.contains("Do not generate a new UUID"));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM skill_executions WHERE parent_conversation = ?",
+            Integer.class,
+            parent));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM command_invocations WHERE conversation = ?",
+            Integer.class,
+            parent));
+    verify(modelRuntime, never())
+        .run(any(), anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    verify(callers, never()).readAgent(any(), any());
   }
 
   @Test

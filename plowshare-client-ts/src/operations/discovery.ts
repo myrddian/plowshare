@@ -63,7 +63,7 @@ export function discovery(target = '') {
     const selected = target && Object.hasOwn(aliases, target) ? aliases[target as keyof typeof aliases].command : target;
     return {
         version: 1, $defs: OPERATION_SCHEMAS.$defs, exits: EXIT_SEMANTICS,
-        options: ['--json', '--help', '--version', '--new-conversation', '--standalone', '--validate', '--url', '--project', '--global', '--payload -', '--wait', '--watch', '--root', '--sync', '--poll-ms', '--timeout-ms'],
+        options: ['--json', '--help', '--version', '--new-conversation', '--standalone', '--validate', '--server', '--url', '--project', '--global', '--payload -', '--wait', '--watch', '--root', '--sync', '--poll-ms', '--timeout-ms'],
         optionPlacement: 'before or after commands; -- ends option parsing',
         authentication: 'Help and validation are offline. Execution needs authenticated WS and existing account/project grants.',
         replay: 'disabled',

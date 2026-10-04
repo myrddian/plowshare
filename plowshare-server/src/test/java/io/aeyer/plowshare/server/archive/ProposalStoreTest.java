@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -68,6 +69,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * queue handled correctly. Measured here on 2026-08-29, and the reason the insert is now {@code ON
  * CONFLICT ... DO NOTHING}.
  */
+@Tag("full-db")
 @Testcontainers
 class ProposalStoreTest {
 

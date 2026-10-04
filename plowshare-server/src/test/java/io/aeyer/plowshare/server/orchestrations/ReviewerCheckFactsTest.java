@@ -33,6 +33,7 @@ import java.util.function.UnaryOperator;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -49,6 +50,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * passed 26 of 26, code_reviewer (which runs nothing) reported with "High" confidence that one of
  * those tests fails, and the conductor sent the work back to {@code code} on that claim, twice.
  */
+@Tag("full-db")
 @Testcontainers
 class ReviewerCheckFactsTest {
 

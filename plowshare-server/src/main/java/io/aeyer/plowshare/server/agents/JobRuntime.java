@@ -1891,7 +1891,20 @@ public final class JobRuntime {
           Ending.UNAVAILABLE, bound.refusal(), List.of(), 0, 0, "command binding refused");
     }
     if (bound != null && bound.tool() != null) offered.put(BoundCommands.DISPATCH, bound.tool());
-    List<ToolSchema> schemas = offered.values().stream().map(AgentTool::schema).toList();
+    if (skills != null) {
+      // An explicit DIRECT command may have activated after offeredTo. Apply its tool fence before
+      // the first inference as well as at execution, so the model sees only permitted operations.
+      offered
+          .entrySet()
+          .removeIf(entry -> skills.refusal(transcript.conversationId(), entry.getKey()) != null);
+    }
+    // Keep orchestration operations in offered for the harness's bound dispatch, but do not
+    // advertise alternatives that this command's execution fence would refuse.
+    List<ToolSchema> schemas =
+        offered.entrySet().stream()
+            .filter(entry -> bound == null || bound.fence(entry.getKey()) == null)
+            .map(entry -> entry.getValue().schema())
+            .toList();
     // EVERY RUN STAGE FROM HERE ON IS TOLD WHAT THE RUN HOLDS, not what its definition
     // declares: a declared tool nothing answers to is not held, and one handed on in extras
     // -- a conductor's, an orchestration's -- is. The stuck trap judges a run by it: a

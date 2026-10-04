@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Real journal, real JobRuntime and actual ESM; command effects and hooks are controlled fixtures.
  */
+@Tag("full-db")
 @Testcontainers
 class ScriptRuntimeTest {
   @Container

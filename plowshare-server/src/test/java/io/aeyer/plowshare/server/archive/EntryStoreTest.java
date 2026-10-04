@@ -38,6 +38,7 @@ import java.util.stream.IntStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -62,6 +63,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * — {@code TurnStoreTest.every_ending_this_server_can_reach_is_a_turn_this_table_holds}, one table
  * over, and for the same reason.
  */
+@Tag("full-db")
 @Testcontainers
 class EntryStoreTest {
 

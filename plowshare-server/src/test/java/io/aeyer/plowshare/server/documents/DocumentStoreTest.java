@@ -20,6 +20,7 @@ import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -45,6 +46,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>No embedding client anywhere in this class. The store writes chunks unembedded and vectors are
  * attached afterwards, which is exactly what lets a test of the corpus never go near a model.
  */
+@Tag("full-db")
 @Testcontainers
 class DocumentStoreTest {
 

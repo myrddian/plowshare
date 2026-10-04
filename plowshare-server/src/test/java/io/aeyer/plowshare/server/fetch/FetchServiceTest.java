@@ -27,6 +27,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -48,6 +49,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * is a truer count besides: it is exactly the seam the class comment on {@link PageFetcher} says a
  * facade depends on.
  */
+@Tag("full-db")
 @Testcontainers
 class FetchServiceTest {
 

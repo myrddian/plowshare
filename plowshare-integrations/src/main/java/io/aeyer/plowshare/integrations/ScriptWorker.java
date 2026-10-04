@@ -86,7 +86,9 @@ public final class ScriptWorker {
             || output.path("effects").size() > 32
             || !output.path("state").isObject())
           throw new IllegalArgumentException("invalid handler output");
-        System.out.print(output);
+        // The pipe protocol is UTF-8 even when the credential-free process has no locale
+        // and its console PrintStream defaults to ASCII. Write bytes without console encoding.
+        System.out.write(Json.MAPPER.writeValueAsBytes(output));
       }
     } catch (Throwable failed) {
       System.err.print("integration handler failed");

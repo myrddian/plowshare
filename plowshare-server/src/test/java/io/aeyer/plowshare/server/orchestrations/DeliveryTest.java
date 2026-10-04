@@ -29,6 +29,7 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -43,6 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * conversation, waits for a busy one's drain, falls back to the inbox, and is delivered once — with
  * the caller's voice and the inbox replaced by fakes that record what reached them.
  */
+@Tag("full-db")
 @Testcontainers
 class DeliveryTest {
 

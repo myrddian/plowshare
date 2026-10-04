@@ -78,6 +78,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.MediaType;
@@ -121,6 +122,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * a_turn_with_no_session_is_an_ordinary_turn} is what stops the conversation path from quietly
  * requiring one.
  */
+@Tag("full-db")
 @Testcontainers
 class TurnTest {
 

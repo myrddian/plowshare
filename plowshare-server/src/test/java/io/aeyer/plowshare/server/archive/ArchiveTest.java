@@ -23,6 +23,7 @@ import java.util.Locale;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -46,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>The tier tests at the end are <b>not</b> ports. Excalibur has one pool, so nothing upstream
  * covers them; they are the design spec's rules stated as tests.
  */
+@Tag("full-db")
 @Testcontainers
 class ArchiveTest {
 

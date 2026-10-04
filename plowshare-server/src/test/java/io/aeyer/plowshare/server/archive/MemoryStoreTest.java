@@ -17,6 +17,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -39,6 +40,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * path entirely — is asserted here on {@link MemoryStore#loadAll} and {@link MemoryStore#index},
  * because the state column is now the only thing that can guarantee it.
  */
+@Tag("full-db")
 @Testcontainers
 class MemoryStoreTest {
 

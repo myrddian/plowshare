@@ -58,7 +58,11 @@ class SourceSelectionTest {
     assertEquals(19, selected.path("fetchAudit").size());
     var repeated =
         java.util.stream.StreamSupport.stream(selected.path("selected").spliterator(), false)
-            .filter(v -> v.path("url").asText().equals("https://fixture.example.invalid/source/e94432e42d3dbdb8"))
+            .filter(
+                v ->
+                    v.path("url")
+                        .asText()
+                        .equals("https://fixture.example.invalid/source/e94432e42d3dbdb8"))
             .findFirst()
             .orElseThrow();
     assertEquals(2, repeated.path("selection_rationales").size());

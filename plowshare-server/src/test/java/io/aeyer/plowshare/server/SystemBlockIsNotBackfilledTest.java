@@ -11,6 +11,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * recorded, and {@code system_blocks} is empty. A future editor who adds an {@code UPDATE turns SET
  * system_block = ...} to a later migration fails here rather than in an audit six months on.
  */
+@Tag("full-db")
 @Testcontainers
 class SystemBlockIsNotBackfilledTest {
 

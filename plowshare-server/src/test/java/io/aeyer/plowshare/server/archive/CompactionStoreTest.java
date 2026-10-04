@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -47,6 +48,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * that only checked the conversation would let a compaction claim to have summarised turns 1 to 40
  * of a conversation with three.
  */
+@Tag("full-db")
 @Testcontainers
 class CompactionStoreTest {
 

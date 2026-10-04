@@ -58,6 +58,7 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
@@ -81,6 +82,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>The transport is scripted, on {@code ScribeTest}'s pattern, so a pass's answer is a fixture
  * rather than a model's mood.
  */
+@Tag("full-db")
 @Testcontainers
 class LearnerTest {
 

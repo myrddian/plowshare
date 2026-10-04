@@ -869,6 +869,103 @@ class JobRuntimeTest {
   }
 
   @Test
+  void direct_command_instructions_and_tool_constraints_are_present_on_the_first_inference()
+      throws Exception {
+    var active = new AtomicBoolean();
+    var commands = org.mockito.Mockito.mock(BoundCommands.class);
+    var prepared = org.mockito.Mockito.mock(BoundCommands.Prepared.class);
+    org.mockito.Mockito.when(prepared.notice())
+        .thenReturn(
+            "The user has issued the following command: /skill:review\nRead and execute the pinned skill body.");
+    org.mockito.Mockito.when(prepared.fence("skill_run"))
+        .thenReturn("The DIRECT skill is already activated.");
+    org.mockito.Mockito.when(
+            commands.prepare(
+                org.mockito.ArgumentMatchers.eq(true),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            invocation -> {
+              active.set(true);
+              return prepared;
+            });
+    var skills = org.mockito.Mockito.mock(SkillRuntime.class);
+    org.mockito.Mockito.when(
+            skills.decorate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(invocation -> invocation.getArgument(1));
+    org.mockito.Mockito.when(
+            skills.forRun(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(Probe.returning("skill_run", "must not invoke")));
+    org.mockito.Mockito.when(
+            skills.refusal(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("probe_write")))
+        .thenAnswer(invocation -> active.get() ? "Skill permits reads only" : null);
+    var transport =
+        new Scripted()
+            .then(() -> asking("", call("read", "probe_read", "{}")))
+            .then(() -> answer("Verified review"));
+    var runtime =
+        runtimeOver(
+            transport,
+            Probe.returning("probe_read", "Evidence"),
+            Probe.returning("probe_write", "must not write"));
+    runtime.useSkills(skills);
+    runtime.useBoundCommands(commands);
+    var transcript = new Recorded(List.of(), "direct-conversation");
+    var outcome =
+        runtime.run(
+            agent("echo").withTools(List.of("probe_read", "probe_write")),
+            "/skill:review request",
+            Home.global(),
+            Budget.of(4),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript,
+            TurnCap.of(4),
+            List.of(),
+            "alice",
+            true);
+    assertTrue(outcome.answered());
+    var first = transport.calls().getFirst();
+    assertTrue(
+        first.messages().stream()
+            .anyMatch(
+                message ->
+                    message
+                        .content()
+                        .toString()
+                        .contains("Read and execute the pinned skill body")));
+    assertTrue(first.tools().stream().anyMatch(tool -> tool.name().equals("probe_read")));
+    assertFalse(
+        first.tools().stream()
+            .anyMatch(
+                tool ->
+                    List.of("command_dispatch", "skill_run", "probe_write").contains(tool.name())));
+    assertTrue(
+        transcript.entries().stream()
+            .anyMatch(
+                entry ->
+                    entry.kind() == EntryKind.NOTICE
+                        && entry.content().contains("pinned skill body")));
+  }
+
+  @Test
   void a_bound_command_is_not_a_successful_answer_until_the_agent_dispatches_it() throws Exception {
     for (boolean dispatches : List.of(false, true)) {
       var dispatched = new AtomicBoolean();

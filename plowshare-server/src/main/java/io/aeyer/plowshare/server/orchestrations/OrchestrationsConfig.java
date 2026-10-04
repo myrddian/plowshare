@@ -59,7 +59,6 @@ import java.util.function.UnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationListener;
@@ -387,18 +386,6 @@ public class OrchestrationsConfig {
       JobStore jobs,
       ConversationStore conversations) {
     return new OrchestrationCancel(orchestrations, store, jobs, conversations);
-  }
-
-  @Bean
-  @ConditionalOnBean(OrchestrationResolver.class)
-  public CallerOrchestrations callerOrchestrations(
-      OrchestrationResolver resolver,
-      Callers callers,
-      Orchestrations orchestrations,
-      OrchestrationCancel cancel,
-      OrchestrationStore store,
-      TodoBoard board) {
-    return new CallerOrchestrations(resolver, callers, orchestrations, cancel, store, board);
   }
 
   /**

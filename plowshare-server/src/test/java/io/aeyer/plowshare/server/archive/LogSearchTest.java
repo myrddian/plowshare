@@ -18,6 +18,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,6 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * plan are all facts of the database rather than of this repository's Java, and they are measured
  * against {@code pgvector/pgvector:pg16} exactly as {@code V21}'s were.
  */
+@Tag("full-db")
 @Testcontainers
 class LogSearchTest {
 

@@ -29,6 +29,13 @@ function fields(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
 }
 
+/** Offline help and payload validation need no origin; all online paths fail before
+ * prompting, opening the credential store or attempting any network traffic. */
+function requireServer(base: string | undefined): string {
+    if (base === undefined) throw new Usage('Specify a server with --server ORIGIN, --url ORIGIN or PLOWSHARE_URL.')
+    return base
+}
+
 export function exitFor(result: Result): number {
     switch (result.kind) {
         case 'refused': return 1
@@ -107,8 +114,9 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         if (['login', 'logout', 'setup'].includes(opts.command)) {
             if (opts.newConversation || opts.standalone) throw new Usage('--new-conversation and --standalone apply to agent run')
             if (opts.validate) throw new Usage('--validate applies to ordinary operation payloads; login/logout do not take it')
-            const store = new Credentials(opts.base, credentialDirectory(io.env), control.signal)
-            const door = { base: opts.base, fetch: (url: string, init: Parameters<typeof fetch>[1]) => fetch(url, { ...init, signal: control.signal, redirect: 'error' as const }) }
+            const base = requireServer(opts.base)
+            const store = new Credentials(base, credentialDirectory(io.env), control.signal)
+            const door = { base, fetch: (url: string, init: Parameters<typeof fetch>[1]) => fetch(url, { ...init, signal: control.signal, redirect: 'error' as const }) }
             if (opts.command !== 'logout') {
                 let handle = io.env['PLOWSHARE_HANDLE'], password = io.env['PLOWSHARE_PASSWORD']
                 if (!handle && !password) {
@@ -196,6 +204,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
             io.stdout(JSON.stringify({ status: 'validated', operation, scope, mutation, payload: parsed.request.payload, executed: false }) + '\n')
             return 0
         }
+        const base = requireServer(opts.base)
         observing = opts.watch || follow !== undefined || presence || sync?.kind === 'on'
         const emit = (push: unknown): void => {
             if (json) io.stdout(JSON.stringify({ operation, status: 'event', event: push }) + '\n')
@@ -205,7 +214,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         if (opts.watch && (parsed.request.type === 'job.status' || parsed.request.type === 'job.cancel')) progress?.identify(parsed.request.payload.job)
         let following = false
         const earlyGrowth: unknown[] = []
-        connection = await authenticateConfigured(opts.base, io.env, control.signal, () => undefined, {
+        connection = await authenticateConfigured(base, io.env, control.signal, () => undefined, {
             onPresenceLost: () => { if (active && !control.signal.aborted) { lost = true; control.abort() } },
             onWrite: () => syncing?.changed(),
             onPush: push => {
@@ -236,7 +245,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
             if (presence || sync !== undefined) record('rooted', { project: claim.project, root: claim.root, commandDefault: 'off' })
             if ((opts.sync || sync !== undefined) && claim.project.startsWith('client:')) throw new Usage('Client-only DISJOINT projects cannot be synced or exported')
             if (opts.sync || sync !== undefined) {
-                syncing = syncer({ claim, handle: connection.handle, base: opts.base, asker: connection, bearer: () => connection!.bearer(), strict: true, signal: control.signal,
+                syncing = syncer({ claim, handle: connection.handle, base, asker: connection, bearer: () => connection!.bearer(), strict: true, signal: control.signal,
                     tell: (trouble, lines) => {
                         if (!active || control.signal.aborted) return
                         if (trouble) { syncFailed = true; control.abort() }

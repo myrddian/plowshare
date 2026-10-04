@@ -80,7 +80,7 @@ def build():
             'counts':{'legacyCommands':len(rows),'legacyTableCommands':len(declarations)},
             'legacyExplicitDefaults':{'web.search':{'pageSize':10,'max':30,'page':1},'web.fetch':{'offset':0},'provenance':{'formedBy':'OS user unless --by','formedWhere':'empty unless --where'}},
             'reviewedDifferences':[
-                'Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --url replaces --server, --root replaces --workspace, and global options precede the command.',
+                'Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --server and --url select the explicit server origin, --root replaces --workspace, and global options may precede or follow the command.',
                 'Structured Outcome JSON replaces Java prose; raw fields and incomplete/refused outcomes remain visible.',
                 'Java exits 0 success, 1 incomplete/nonanswered, 2 usage/refusal/unavailable. TS exits 0 success, 1 refusal/unavailable job ending, 2 usage/auth bootstrap, 3 accepted/running/cancelling, 4 incomplete/nonanswered, 5 unknown/deadline/protocol.',
                 'Global scope is explicit with --global or JSON project:null; blank project is refused. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.',

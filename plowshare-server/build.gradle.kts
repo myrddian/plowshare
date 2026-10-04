@@ -221,9 +221,8 @@ dependencies {
 // So the tree is declared as the guard's input instead of being inferred from
 // the compile classpath.
 //
-// WHY ITS OWN TASK, rather than inputs.files on `test`. Measured: `test` starts
-// thirteen Testcontainers Postgres instances and the full server suite takes
-// ~50s.
+// Keep repository-wide inputs on this small task rather than invalidating all
+// server tests, including opt-in database coverage, for documentation edits.
 // The edits this guard must react to — a comment, a plan, a resource — are the
 // cheapest and most frequent edits in this repository, and javadoc-heavy ones at
 // that. Hanging the whole suite off them trades a silent guard for a suite that

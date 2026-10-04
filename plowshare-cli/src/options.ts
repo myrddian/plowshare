@@ -1,6 +1,6 @@
 import { isPayloadCommand } from 'plowshare-client-ts/operations/commands'
 
-export const HELP = `First-run setup: plowshare-cli setup --url <server-origin>
+export const HELP = `First-run setup: plowshare-cli --server <server-origin> setup
 Usage: plowshare-cli [options] setup|login|logout
        plowshare-cli [options] memory <verb> [JSON payload or text]
        plowshare-cli [options] search <text or JSON payload>
@@ -54,7 +54,8 @@ Options (before or after the command; -- ends option parsing):
   --standalone           agent run without a reusable conversation; supports images
   --validate             validate input offline; show operation and effective scope
   --json                 JSON result on stdout (observers/root/sync emit NDJSON)
-  --url ORIGIN           server origin (PLOWSHARE_URL or http://127.0.0.1:8091)
+  --server ORIGIN        server HTTP(S) origin (or PLOWSHARE_URL; required online)
+  --url ORIGIN           alias for --server
   --project NAME         server framework project (PLOWSHARE_PROJECT otherwise)
   --global               override the environment tier with global
   --payload -            read the command's JSON payload from stdin
@@ -82,7 +83,7 @@ export interface Options {
     readonly validate: boolean
     readonly newConversation: boolean
     readonly standalone: boolean
-    readonly base: string
+    readonly base: string | undefined
     readonly project?: string
     readonly command: string
     readonly inputPayload: boolean
@@ -99,7 +100,7 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
     let json = false, help = false, validate = false, wait = false, watch = false, inputPayload = false
     let newConversation = false, standalone = false, version = false
     let root: string | undefined, sync = false
-    let url = env['PLOWSHARE_URL'] ?? 'http://127.0.0.1:8091'
+    let url = env['PLOWSHARE_URL']
     let project = env['PLOWSHARE_PROJECT'] || undefined
     let pollMs = 1000, timeoutMs = 30000, cursor = 0, scopeChosen = false
     const value = (flag: string): string => {
@@ -130,7 +131,7 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
             case '--watch': watch = true; wait = true; break
             case '--root': root = value(flag); break
             case '--sync': sync = true; break
-            case '--url': url = value(flag); break
+            case '--server': case '--url': url = value(flag); break
             case '--project':
                 if (scopeChosen) throw new Usage('choose --project or --global once')
                 project = value(flag); scopeChosen = true; break
@@ -145,16 +146,18 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
             default: throw new Usage('unknown option; see --help')
         }
     }
-    if (help || version) return { json, help, version, validate, newConversation, standalone, base: '', command: parts.join(' ').trim(), inputPayload: false, wait: false, watch: false, pollMs, timeoutMs, sync: false }
+    if (help || version) return { json, help, version, validate, newConversation, standalone, base: undefined, command: parts.join(' ').trim(), inputPayload: false, wait: false, watch: false, pollMs, timeoutMs, sync: false }
     if (newConversation && standalone) throw new Usage('choose --new-conversation or --standalone')
     if (project !== undefined && project.trim() === '') throw new Usage('project must be a nonblank name; use --global explicitly')
-    let base: string
-    try {
-        const parsed = new URL(url)
-        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password
-            || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error()
-        base = parsed.origin
-    } catch { throw new Usage('--url must be an HTTP(S) origin without credentials, path, query or fragment') }
+    let base: string | undefined
+    if (url !== undefined) {
+        try {
+            const parsed = new URL(url)
+            if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password
+                || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error()
+            base = parsed.origin
+        } catch { throw new Usage('--server/--url must be an HTTP(S) origin without credentials, path, query or fragment') }
+    }
     if (parts[0] === 'job' && parts[1] === 'watch') { watch = true; wait = true; parts[1] = 'status' }
     if (parts[0] === 'job' && ['wait', 'poll', 'result'].includes(parts[1] ?? '')) {
         wait ||= parts[1] === 'wait'

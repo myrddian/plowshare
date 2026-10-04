@@ -3,6 +3,16 @@ plugins {
     id("com.diffplug.spotless") version "7.0.4"
 }
 
+// Database coverage is an explicit run mode, including in CI. Keep the value
+// in test task inputs so switching modes cannot restore the other mode's cache.
+val fullDb = providers.gradleProperty("fullDb").map { value ->
+    when (value) {
+        "", "true" -> true
+        "false" -> false
+        else -> throw GradleException("Use -PfullDb, -PfullDb=true or -PfullDb=false.")
+    }
+}.orElse(false).get()
+
 allprojects {
     group = "io.aeyer"
     version = "0.1.0-SNAPSHOT"
@@ -77,7 +87,15 @@ val legacyCliAuditCheck by tasks.registering(Exec::class) {
     workingDir = rootDir
     commandLine("python3", "test-support/contracts/audit_legacy_cli.py", "--check")
 }
-tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, manualCheck, clientManifestCheck, legacyCliAuditCheck) }
+val databaseTestBoundaryCheck by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Refuses Docker test fixtures without the full-db opt-in tag."
+    workingDir = rootDir
+    inputs.file("scripts/check-database-tests.py")
+    inputs.files(fileTree(rootDir) { include("*/src/test/java/**/*.java") })
+    commandLine("python3", "scripts/check-database-tests.py")
+}
+tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, manualCheck, clientManifestCheck, legacyCliAuditCheck, databaseTestBoundaryCheck) }
 
 subprojects {
     apply(plugin = "java")
@@ -121,7 +139,11 @@ subprojects {
     }
 
     tasks.withType<Test>().configureEach {
-        useJUnitPlatform()
+        dependsOn(rootProject.tasks.named("databaseTestBoundaryCheck"))
+        inputs.property("fullDb", fullDb)
+        useJUnitPlatform {
+            if (!fullDb) excludeTags("full-db")
+        }
         testLogging {
             events("passed", "skipped", "failed")
         }
@@ -185,6 +207,9 @@ tasks.register<Exec>("dockerSmoke") {
     description = "Checks prebuilt Linux server/adapter images in an isolated disposable Compose project."
     dependsOn(":plowshare-client-ts:clientBuild")
     workingDir = rootDir
+    doFirst {
+        if (!fullDb) throw GradleException("Database smoke tests require -PfullDb: ./gradlew dockerSmoke -PfullDb")
+    }
     commandLine("bash", "scripts/ci/docker-smoke.sh")
 }
 tasks.register<Exec>("distributionCheck") {

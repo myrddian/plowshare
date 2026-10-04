@@ -49,14 +49,17 @@ cp plowshare-0.1.0-darwin-arm64 "$HOME/.local/bin/plowshare"
 chmod +x "$HOME/.local/bin/plowshare"
 export PATH="$HOME/.local/bin:$PATH"
 plowshare --version
-plowshare --url http://127.0.0.1:8091 login
+plowshare --server https://plowshare.example.com login
 plowshare talk --url http://127.0.0.1:8091
 ```
 
 `plowshare [CLI command]` runs the CLI, `plowshare talk` opens the TUI, and
 `plowshare mcp` runs stdio MCP. Each mode supports `--help`; MCP help goes to stderr.
-`plowshare cli` is an explicit alias for CLI mode. The executable retains the caller's
-working directory for project discovery, and stores credentials/configuration outside
+`plowshare cli` is an explicit alias for CLI mode. Select its server with
+`plowshare cli --server ORIGIN <command>` or `PLOWSHARE_URL`; `--url` remains
+an alias. Online CLI commands require an explicit HTTP(S) origin and have no
+default endpoint. Help, version and offline validation need no server. The executable
+retains the caller's working directory for project discovery, and stores credentials/configuration outside
 the installation. No source checkout, TypeScript, pnpm, Node, Bun or Java is needed
 to run the clients. Java and PostgreSQL are server requirements only.
 

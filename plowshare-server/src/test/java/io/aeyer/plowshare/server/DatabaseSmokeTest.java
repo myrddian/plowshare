@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.DriverManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -13,6 +14,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Proves the database the rest of this project assumes actually exists: a Postgres a test can
  * reach, carrying the pgvector extension.
  */
+@Tag("full-db")
 @Testcontainers
 class DatabaseSmokeTest {
 

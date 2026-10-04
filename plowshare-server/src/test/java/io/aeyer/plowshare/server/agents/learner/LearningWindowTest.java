@@ -16,6 +16,7 @@ import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -33,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * would be a model's, reached differently on each run and unauditable afterwards. That is reason 1
  * of the four on {@link LearningWindow}, and this file is what it buys.
  */
+@Tag("full-db")
 @Testcontainers
 class LearningWindowTest {
 

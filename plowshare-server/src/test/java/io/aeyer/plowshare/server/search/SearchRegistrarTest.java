@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -28,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * against the LLM transport: the thing under test is what this class does with an HTTP response,
  * and a loopback server is the only double that is also a real socket.
  */
+@Tag("full-db")
 @Testcontainers
 class SearchRegistrarTest {
 
