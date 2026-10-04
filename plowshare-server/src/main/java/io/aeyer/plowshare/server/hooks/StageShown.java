@@ -12,8 +12,8 @@ import java.util.Objects;
  */
 public record StageShown(String id, String title, int index, int count) {
 
-    public StageShown {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(title, "title");
-    }
+  public StageShown {
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(title, "title");
+  }
 }

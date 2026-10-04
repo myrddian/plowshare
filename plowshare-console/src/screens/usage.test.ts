@@ -99,3 +99,62 @@ it('preserves a paged breakdown across unrelated desktop state updates and reset
     panel.update(structuredClone(snapshot));expect(root.textContent).toContain('later-model');expect(root.textContent).not.toContain('first-model');
     panel.update({...snapshot,revision:1});expect(root.textContent).toContain('first-model');panel.destroy();
 });
+
+describe('Usage workspace', () => {
+    it('separates views and compares providers locally without changing recorded costs', async () => {
+        const root = document.createElement('div'), select = vi.fn(async () => {}), read = vi.fn(async () => ({ calls: [], cursor: null }));
+        const panel = mountUsagePanel(root, { overview: true, context: false, select, read }); await tick();
+        const report = makeReport(); report.health.tracking_started_at = '2026-10-03T06:45:59Z';
+        panel.update({ report, revision: 0, stale: false, loading: false });
+        const view = (key: string) => root.querySelector<HTMLElement>(`[data-usage-view="${key}"]`)!;
+        const tab = (key: string) => root.querySelector<HTMLButtonElement>(`[data-usage-tab="${key}"]`)!;
+        expect(view('overview').hidden).toBe(false); expect(view('pricing').hidden).toBe(true);
+        expect(view('overview').textContent).not.toContain('Reference rates'); expect(view('overview').textContent).not.toContain('watermark');
+        expect(view('overview').textContent).toContain('Earlier history is not imported');
+        expect(read).not.toHaveBeenCalled(); tab('calls').click(); await tick();
+        expect(read).toHaveBeenCalledOnce(); expect(read).toHaveBeenCalledWith('usage.calls', expect.objectContaining({ scope: 'subtree', limit: 20 }));
+        tab('pricing').click();
+        const provider = root.querySelector<HTMLSelectElement>('[data-usage-provider]')!, model = root.querySelector<HTMLSelectElement>('[data-usage-price]')!;
+        provider.value = 'Anthropic'; provider.dispatchEvent(new Event('change'));
+        expect(model.value).toBe('anthropic-sonnet-5.5'); expect(view('pricing').textContent).toContain('USD 7');
+        model.value = 'anthropic-opus-5.5'; model.dispatchEvent(new Event('change'));
+        expect(view('pricing').textContent).toContain('USD 14'); expect(view('pricing').textContent).toContain('USD 0.005');
+        provider.value = 'Google'; provider.dispatchEvent(new Event('change'));
+        expect(model.value).toBe('google-gemini-2.5-flash'); expect(view('pricing').textContent).toContain('USD 1.55');
+        expect(select).toHaveBeenCalledOnce(); expect(read).toHaveBeenCalledOnce();
+        const updated = structuredClone(report); updated.totals.input_tokens = '2000000';
+        panel.update({ report: updated, revision: 1, stale: false, loading: false });
+        expect(view('pricing').hidden).toBe(false); expect(view('pricing').textContent).toContain('USD 1.85');
+        expect(root.querySelector('[data-usage-count]')).toBeNull();
+        tab('pricing').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        expect(view('recording').hidden).toBe(false); expect(tab('recording').getAttribute('aria-selected')).toBe('true');
+        panel.destroy();
+    });
+    it('restores provider/model preferences and distinguishes missing measurements from known zero', async () => {
+        const root = document.createElement('div'), storage = { getItem: () => JSON.stringify({ id: 'anthropic-opus-5.5', input: '4', output: '20' }), setItem: vi.fn() };
+        const panel = mountUsagePanel(root, { overview: true, context: false, storage, select: async () => {}, read: vi.fn() }); await tick();
+        const report = makeReport(); Object.assign(report.totals, { input_tokens: '0', input_tokens_known: '0', output_tokens: '0', output_tokens_known: '2', usage_complete: false });
+        report.groups = [{ ...report.totals, model: '<img src=x onerror=alert(1)>' }];
+        panel.update({ report, revision: 0, stale: false, loading: false });
+        expect(root.querySelector<HTMLSelectElement>('[data-usage-provider]')!.value).toBe('Anthropic');
+        expect(root.querySelector<HTMLSelectElement>('[data-usage-price]')!.value).toBe('anthropic-opus-5.5');
+        const values = [...root.querySelectorAll('.usage-stat strong')].map(el => el.textContent);
+        expect(values.slice(0, 2)).toEqual(['Not reported', '0']); expect(root.querySelector('img')).toBeNull();
+        expect(root.querySelector('[data-usage-comparison]')!.textContent).toContain('Partial token subtotal');
+        panel.destroy();
+    });
+    it('shows readable attempts and rejects call pages from an old scope', async () => {
+        const root = document.createElement('div'); let resolve!: (value: unknown) => void;
+        const read = vi.fn(() => new Promise<unknown>(done => { resolve = done; }));
+        const panel = mountUsagePanel(root, { overview: true, context: false, select: async () => {}, read }); await tick();
+        panel.update({ report: makeReport(), revision: 0, stale: false, loading: false });
+        root.querySelector<HTMLButtonElement>('[data-usage-tab="calls"]')!.click();
+        resolve({ calls: [{ agent_name: '<script>', wire_model: 'test', call_id: 'call', operation: 'AGENT_CHAT', lifecycle: 'SUCCEEDED', attempts: [{ attempt_number: 1, usage_coverage: 'UNKNOWN', input_tokens: null, output_tokens: '0', cost_kind: 'UNPRICED', cost_amount: null }] }], cursor: null }); await tick();
+        expect(root.querySelector('[data-usage-calls]')!.textContent).toContain('Not reported');
+        expect(root.querySelector('[data-usage-calls]')!.textContent).toContain('Raw server record'); expect(root.querySelector('script')).toBeNull();
+        root.querySelector<HTMLButtonElement>('[data-usage-view="calls"] button')!.click();
+        const type = root.querySelector<HTMLSelectElement>('[data-usage-type]')!; type.value = 'usage.project'; type.dispatchEvent(new Event('change'));
+        resolve({ calls: [{ agent_name: 'old scope' }], cursor: null }); await tick();
+        expect(root.querySelector('[data-usage-calls]')!.textContent).not.toContain('old scope'); panel.destroy();
+    });
+});

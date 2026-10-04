@@ -1,10 +1,18 @@
 # Plowshare desktop
 
 A runnable Electron application with the selected amber/charcoal styling,
-an atomic Plowshare mark and a floating conversation panel. Navigation, controls and trajectory entry types share a local outline SVG icon
+the current application icon and a floating conversation panel. Navigation, controls and trajectory entry types share a local outline SVG icon
 set in `src/renderer/icons.ts`. Icons inherit text colour; icon-only controls
 keep accessible labels and tooltips. Repeated conversation subtitles and heavy
 action borders are omitted to keep the interface quiet.
+The sidebar shows Plowshare beside the same icon as the native app. The window
+titlebar holds the breadcrumb, Find, Refresh, Context and the server dropdown.
+Assistant replies use a neutral label rather than repeating the app name.
+Drag the edges of the navigation sidebar and context panel to resize them. The
+dividers in Activity, Trajectory, Board and Library also resize their lists.
+Widths are remembered across launches and adapt to smaller windows. Focus a
+divider to use the arrow keys (Shift for larger steps), Home/End for its limits,
+or double-click it to restore the default width.
 Authentication, WS bindings, typed requests, response readers, job lifecycle,
 Markdown, trajectory and board models come from `plowshare-client-ts`. The
 main process uses `plowshare-client-node` for fenced files and shared saved login.
@@ -25,6 +33,18 @@ not already installed. Development profile data lives in ignored
 `plowshare-desktop/build/profile`; `PLOWSHARE_DESKTOP_PROFILE` can select an
 isolated profile. This is a development app, not a signed installer.
 
+The application uses the approved black-on-ivory atomic ploughshare emblem as
+its native icon. On macOS, `pnpm start` and `./bin/plowshare-desktop` build and
+launch a dedicated `Plowshare.app` bundle so the Dock and application menu use
+**Plowshare**. This preserves the development profile and uses the same icon as
+the sidebar and distribution. The first launch may download the native runtime;
+each launch rebuilds the bundle with the current source.
+Icon sources and platform exports live in `assets/icons`. After changing them,
+quit and relaunch the app (`pnpm start` or `./bin/plowshare-desktop`); for an
+installed `.app`, rebuild with `./gradlew clientDistributions` and replace it
+with the newly packaged application. No icon-generation tools are needed for
+normal builds.
+
 ## Try the interface
 
 It starts in **Offline demo**, with visibly labelled sample conversations,
@@ -35,16 +55,53 @@ they never invoke a model or call your server.
 - Start two conversations and send messages while another demo run streams.
   Demo runs include a short simulated thinking pause before their local reply.
 - Drag the chat grip slightly, or focus it and use arrow keys. Dock or expand the panel.
-- Open **Trajectory ↗** in its own native window: select steps at left to inspect
+- Open **Trajectory** in the main content area: select steps at left to inspect
   published reasoning, messages, paired tool inputs/results and timings at right.
+  Model folds do not hide user history: original entries remain visible and name the
+  model summary that superseded them.
   Search or filter steps, use arrow keys, and toggle following the latest entry.
-- Open **Inbox** or **Runs** in their shared native Activity window. Inspect
+- Open **Inbox** or **Runs** in the main content area. Inspect
   sample notices, research stages and results independently of chat. **Mark read**
   changes only the displayed item; opening Inbox sends no receipt.
-- Open **Board** or **Swarm** in their shared native inspector. Select a topic to
+- Open **Board** or **Swarm** in the main content area. Select a topic to
   read full messages, documents, decisions and resolutions; navigate children and
   ancestors, and open a seat's live trajectory. Swarm shows active topics, queued
   model calls and shared pool occupancy. Use the Plowshare demo workspace for samples.
+- Click the toolbar **Help** icon for **Library → Manual**. Install the shared
+  [manual](../docs/manual/installation.md) first; chapter links resolve current
+  revision UUIDs from stable supplied names and chapter tags.
+- Open **Library** from the sidebar. **Reports** contains generated reports, including drafts.
+  A compact collection filter sits beside the tabs; source questions sit above
+  the reader, and the saved text fills the available reading height. Reports
+  render Markdown after reading the complete text over WebSocket; **Show source**
+  exposes the original Markdown for exact quotations across formatting or repeated text.
+  **Documents** reads consumed corpus text with generated summaries beside it;
+  **Manage document sources and imports** contains source acquisition, saved text,
+  questions, evidence and extraction recovery. Document search stays in Library.
+  **Memories** is a separate sidebar page with memory/proposal maintenance and
+  recall/navigation searches.
+- In **Board**, choose **Post to board**, then select a project and open topic,
+  write your message and submit. The server attributes the post to your account.
+  The draft and request UUID survive a refused/unknown acknowledgment and app
+  reload. Only an explicit retry resubmits, using the same durable receipt.
+  Edits create a new request identity; no post is retried automatically. This
+  requires the updated server (`board.post`, migration V89). Reports filtering
+  also requires server support for `information.list.kind`.
+- Choose **New topic** to select a project, enter its title, label and opening
+  message, and optionally limit model calls. The server opens it as you and
+  wakes the project's configured swarm. `board.open` uses the V89 receipt store
+  to prevent duplicate topics or wakes on an explicit retry; drafts survive
+  unconfirmed replies. Projects need configured swarm members to start work.
+- Select a failed member in **Swarm** or a topic's seat in **Board**, then choose
+  **Retry member…**. Set the step limit for that retry (default 24). Each step is
+  one model response and its requested tools. It keeps the member's conversation
+  and uses the topic's remaining shared model-call allowance; it adds no budget.
+  Unconfirmed requests keep their identity across reloads: choose **Check pending
+  member retry…** to reconcile explicitly without creating another wake. Requires
+  the updated server's `board.retry` operation.
+- Open **Manage work** from the sidebar to save memories, manage conversations,
+  review permissions or adjust work limits. Options load automatically when you
+  choose a task and workspace; each change still has a separate review and confirmation.
 - Stop a running job or filter the conversation list.
 - Read formatted Markdown, including tables, nested lists, quotes and code blocks.
   The demo context meter is labelled as a sample.
@@ -55,8 +112,11 @@ they never invoke a model or call your server.
 - Write a longer draft: the composer grows to a bounded height and shrinks again.
   Use **Latest** to return from scrollback. Empty conversations offer prompt
   suggestions that fill the draft without sending it.
-- Open context for prompt usage, model and declared tools. Conversation IDs and
-  tool lists are expandable. In compact windows context opens as a drawer;
+- Open **Info → Context** for the current server-constructed projection before your next
+  prompt: system block, full projected messages, tool calls/results and actual
+  offered schemas. Drafts are excluded; Count tokens explicitly measures that
+  captured projection. Snapshots retain their capture time and errors preserve
+  the last successful value. Memories has its own main-area screen. In compact windows context opens as a drawer;
   close it with its button, the backdrop or Escape.
 - Use **Find** or **⌘/Ctrl K** to switch between loaded conversation names,
   workspaces and existing actions. Arrow keys select, Enter opens and Escape
@@ -67,17 +127,44 @@ they never invoke a model or call your server.
 The movement is bounded inside the workspace; it does not create a separate
 native chat window.
 
-Trajectory windows stay attached to their conversation when the main chat
-switches. Opening the same trajectory focuses its existing window. They are
-read-only, share the neutral core trajectory model, and close when you switch
-accounts/servers or return to demo. Closing one does not cancel a job. The main
-chat keeps execution out of the transcript and the context sidebar.
+Inbox, Runs, Scheduled work, Orchestration, Library, Memories, Board, Swarm and
+Manage work replace the chat area while
+keeping the sidebar and workspace header. Trajectory uses the breadcrumb
+**Workspace / Conversation / Trajectory**; click the conversation to return to
+chat with its draft preserved. Inspection pages retain their selection when
+reopened. Trajectories stay attached to their conversation, are read-only, share
+the neutral core trajectory model, and clear when you switch accounts/servers or
+return to demo. Changing views does not cancel a job.
 
 The trajectory timeline contains recorded conversation steps. A separate current
 run panel shows live reasoning, response text and stopped or uncertain outcomes.
 Successful completion returns **Follow latest** to the recorded answer. Raw
 lifecycle events and heartbeats remain available under the collapsed **Job
 diagnostics** disclosure, with expandable, copyable records for each job.
+
+In **Runs**, click a stage to open its conductor trajectory filtered to that stage's
+recorded visits, including returns to an earlier stage. Older entries load when needed.
+Pending agent questions also appear in chat. A popup opens for the active workspace
+or caller conversation; questions from other workspaces remain in a waiting queue.
+The popup supports choices, multiple selections, other answers, notes, and free text.
+Later, Escape, and the close button preserve the draft without answering or cancelling.
+A changed question requires review, and another client's answer closes the old form.
+
+Questions and their answers appear once under the relevant stage; the current question
+has its answer controls there. Historical questions are expandable. Journals that lack
+unambiguous stage timing keep their questions in a separate disclosure rather than
+assigning them to an arbitrary stage.
+
+Conductor/caller links remain beside the run details. Delegations are navigated in
+place: **>** marks an agent call and **<** marks its recorded result. Each spawn call
+has an inline trajectory shortcut and a **Trajectory** link in the top right of the
+selected step. Repeated calls to the same agent open their specific child logs; nested
+calls work the same way. An `orchestrate_*` call's recorded receipt opens its conductor
+after server status confirms the caller relationship. Opening a trajectory reads and
+follows existing work; it starts no agent turn. Project children keep their parent's
+authenticated session. Active runs have a highlighted **Cancel run** button in the
+top right; it also cancels descendants. The redundant run-record list is omitted from
+this view; stage and conductor trajectories provide the detailed activity.
 
 ## Use a Plowshare server
 
@@ -91,9 +178,9 @@ and cancellation, and account approval questions with allow-once/deny controls.
 Independent jobs stay attached to their conversation when you switch views.
 Real server operations retain the server's permissions and allowance behavior.
 
-The selected chat and open native trajectory windows share a complete set of
-live conversation follows. Switching chats keeps inspection windows followed;
-closing a window removes its follow without cancelling work. Later harness or
+The selected chat and retained trajectory pages share a complete set of
+live conversation follows. Switching chats keeps inspection pages followed;
+closing a page removes its follow without cancelling work. Later harness or
 other-client turns arrive automatically, preserving their speaker labels.
 Reconnect restores the open views and reads missed entries by ordinal without
 resubmitting turns or approvals. Loaded earlier history stays in memory.
@@ -153,14 +240,13 @@ for the process boundaries used here.
 
 ## Current limits
 
-Live document browsing, memory management and semantic search are not implemented
-in this test build. Union/sync integration is also pending. Their demo cards remain
-labelled examples. Closing the application disconnects it and does not cancel
-server jobs. Active job handles are retained for reconnects within the same
+Live document browsing, memory management and search use the connected server.
+Closing the application disconnects it and does not cancel server jobs. Active job handles are retained for reconnects within the same
 window, but are not restored after app quit. The Chat jobs list tracks those
 jobs; the separate Runs view discovers account orchestrations.
 
-The native **Activity** window has **Inbox** and **Runs** tabs. Inbox shows up to
+The **Inbox** and **Runs** pages are separate sidebar destinations. **Scheduled work**
+is separate too; **Orchestration** shares only **Definitions** and **Orchestration builder** tabs. Inbox shows up to
 20 read and unread results/notices initially, rendered as Markdown. **Load older
 items** extends the mailbox history without changing the unread counter.
 The **Status** selector defaults to **Unread**; choose **All items** or **Read**
@@ -180,8 +266,8 @@ This keeps an older active root visible behind newer completed phases, across
 projects. Inspect stages, results/failures, parent/child runs and question
 options/drafts. Account notifications and a 15-second timer refresh activity;
 read failures retain previous snapshots, and reconnect rereads without replaying
-receipts or decisions. Closing Activity does not cancel work. Switching
-accounts/servers or returning to demo closes the window and clears live data.
+receipts or decisions. Leaving Activity does not cancel work. Switching
+accounts/servers or returning to demo clears its live data.
 
 A successful chat reply can leave an orchestration working. Full orchestration
 records, actor/conductor conversations, definitions, human decisions and
@@ -224,7 +310,7 @@ read refusal and selected status notifications. Three Markdown tests cover
 formatting, literal partial streams and unsafe markup/links.
 The native smoke test launches
 Electron against an isolated temporary profile and a local **protocol fixture**;
-it checks separate trajectory and account Activity windows, live badges,
+it checks embedded trajectory and account Activity pages, live badges,
 explicit receipts/refusal, persisted read history and older mailbox pages, old active roots, structured
 question inspection, parent/child navigation, activity permissions and compact
 layout, plus paired tool records and search/filtering,
@@ -249,6 +335,12 @@ reader, plus the formatted row, conversation isolation and compact layout in Ele
 It does not establish a successful run against a real Plowshare deployment.
 Screenshots are written under `build/smoke`.
 
+`pnpm test:navigation` verifies that sidebar sections and trajectories use one
+native window, breadcrumbs return to chat, drafts survive navigation, modal
+dialogs cover embedded pages, and inspection pages retain their IPC permissions.
+`pnpm test:panes` verifies drag and keyboard resizing, width persistence after
+restart, reset, compact drawers and the dividers inside inspection pages.
+
 `./gradlew :plowshare-desktop:check :plowshare-desktop:assemble` reaches the
 headless checks and build. Native smoke testing stays opt-in because it opens
 a window and needs a desktop session. Native testing for this initial slice
@@ -260,7 +352,7 @@ in the consolidation plan.
 The sidebar and Find palette open the inspector, initially scoped to the selected
 project. Its project and state filters, topic search and Load more control browse
 all topics owned by your account. Child topics share their root's call allowance.
-The Swarm tab lists members on current topics, with state and recent recorded
+The Swarm page lists members on current topics, with state and recent recorded
 actions. Clicking a member opens its trajectory directly. Queue arrival positions
 and waits, plus shared pool occupancy, provide supporting diagnostics; fair sharing can serve a later arrival first. Seat states come
 from durable firings and the current scheduler snapshot, not from locally started
@@ -276,6 +368,8 @@ snapshot and show an error. Update/restart the server to load these new frames.
 Inspection sends no posts, decisions, top-ups or agent read receipts. Seat/message
 links open an author's conversation; selecting a specific writing entry is a
 later enhancement. Board hooks and TUI write controls remain separate stages.
+Explicit **New topic** and **Post to board** actions use `board.open` and
+`board.post`; both require an authenticated project member and a durable UUID.
 
 `pnpm test:board` exercises the native inspector against an isolated local
 protocol fixture: demo/live topics, full Markdown messages, children/ancestors,
@@ -370,3 +464,76 @@ keeps the next launch offline. Connection/project preferences follow
 those desktop preferences only. Tokens remain in the shared private credentials
 store. `pnpm test:login` exercises fresh-process restoration and failure recovery
 with an isolated fixture account.
+
+The context meter labels the latest measured **turn peak**, including its turn
+number when available. A successful model fold reduces later projections but does
+not rewrite the peak of an earlier request. Exact next-projection counting is a
+separate explicit usage operation and may be unavailable for the selected provider.
+
+Click **Projects** to collapse or expand its search and project/conversation list.
+The choice is saved in the desktop profile. Account destinations move up beneath
+Projects while its list is collapsed.
+**Manage work** remains the workspace action screen. Server administration (users,
+permissions and server settings) is a separate product area; these navigation
+changes do not add a server administration API or screen.
+
+### Usage and token recording
+
+Open Usage from Connection settings, the sidebar or Find. It uses the main
+workspace width, defaults to accessible account queries, and separates recorded
+tokens/calls from optional reference cost comparisons. Overview, Calls, Pricing
+and Recording have separate tabs. Pricing offers provider and model dropdowns
+plus custom USD rates; comparisons use the current recorded token subtotal,
+recalculate locally, and never replace saved cost estimates. Rates show their
+check date and source, and incomplete measurements stay marked as partial.
+Initial reports, live
+replacement snapshots and reconnects use WS only. The server now enables durable
+token recording by default; optional configured prices determine detailed cost
+estimates. Capture-disabled, unknown, empty and stale states stay explicit.
+Historical activity from before recording began is not reconstructed as zero.
+
+The context preview uses the authenticated `conversation.context.snapshot` WS
+frame, routed through the conversation's owning project session. Refresh builds
+current context without generating or counting; explicit Count tokens measures
+the same snapshot. Image IDs are shown while image bytes are explicitly omitted.
+Temporary execution prompts are not anticipated.
+
+Run `node --experimental-strip-types scripts/usage-smoke.mjs` after building to
+verify the full workspace UI, push updates, reconnects and context preview.
+
+## Skills and orchestration commands
+
+The right **Info** panel has exactly three tabs: **Context**, **Commands**, and
+**Files**. Context retains the constructed projection preview and token count.
+Files contains project file access, saved folder controls and synchronization.
+The tabs support arrow keys, Home and End. Adding a project opens Files.
+
+The selected Bot's server-provided command catalog appears directly in **Info → Commands**.
+Commands include help and executor details. Clicking one prepares an editable
+draft; Send uses ordinary conversation transport. A portable skill without a
+package mode requires an explicit context selection. The server binds the
+invocation and the handling Agent calls `command_dispatch`.
+
+Orchestration commands also have a **Start workflow** button. It submits the
+editable message through `orchestration.start`, using the selected Bot's grant
+and the conversation's project, without a caller-model dispatch. The server
+creates the workflow's caller conversation; existing chat history is not passed
+as context. Follow progress and plan-review questions in Runs. The desktop saves
+the request ID before submission and keeps it after an uncertain acknowledgment,
+including across page reloads; retrying the same work recovers the same run.
+After a confirmed receipt, another explicit launch creates a new run.
+
+`pnpm test:info-board` verifies the three tabs, readable Post button, new topic
+selection, retained request identity after failure and a subsequent person post.
+
+Run `node scripts/build.mjs` then
+`node --experimental-strip-types scripts/commands-smoke.mjs` to verify command
+help, explicit mode selection, preserved multiline arguments, compact-window
+visibility, direct workflow launch and recovery without duplicate runs. See
+[server skill conventions](../docs/skills-and-agent-rules.md).
+
+Server administrators can open **Server administration** from the sidebar to manage accounts, roles, password resets, sessions and audit history. See the [administration manual](../docs/server-administration.md).
+
+Service accounts are managed under **Server administration → Service accounts**. Grant server project roles, issue expiring scoped credentials, rotate or revoke individual tokens, and disable an integration account. Machine credentials are revealed once and excluded from desktop snapshots and saved preferences. See [server administration](../docs/server-administration.md#service-accounts-and-scoped-tokens).
+
+Server pricing is under **Server administration → Pricing**. Edit currency, input/output/cache rates, per-attempt fees and tiers for a served route/model. The editor prevents stale changes and preserves recorded cost snapshots. Its usage button opens recorded statistics. CLI/TUI equivalents are documented in [server administration](../docs/server-administration.md#model-pricing-and-usage-statistics).

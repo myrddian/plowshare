@@ -1,14 +1,18 @@
-import { mountUsagePanel, type UsagePanel } from '../../../plowshare-console/src/screens/usage-panel.ts';
+import { botDisplayName, botDetails } from './bot-details.ts';
+import { installPaneResize } from './pane-resize.ts';
+import { installProjectAccess } from './project-access.ts';
+import { installServerAdmin } from './server-admin.ts';
 import { installOperator } from './operator.ts';
-import { installInformation } from './information.ts';
 import { activeJob, stoppedJob, homeKey, contextKey } from '../shared.ts';
-import type { DesktopState, Entry, Job, Request } from '../shared.ts';
+import type { DesktopState, Entry, Job, Request, WorkspaceRoute } from '../shared.ts';
 import { markdownHtml } from './markdown.ts';
 import { icon, mountIcons } from './icons.ts';
 import { installNavigation } from './navigation.ts';
 import type { NavigationItem } from './navigation.ts';
 import { copyButton, installCopyControls } from './copy.ts';
 import { describePace } from 'plowshare-client-ts/operations/pace';
+import { installQuestionPopup } from './question-popup.ts';
+import { commandDraft, composerCommand, desktopCommands, installCommandPicker, installCommands } from './commands.ts';
 import { installSync } from './sync.ts';
 import { installApprovalControls, noticeApproval } from './approvals.ts';
 
@@ -16,6 +20,11 @@ mountIcons();
 installCopyControls();
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => document.querySelector(selector)!;
+const content = new WeakMap<HTMLElement, string>();
+function setHTML(element: HTMLElement, html: string) {
+  if (content.get(element) === html) return;
+  element.innerHTML = html; content.set(element, html);
+}
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const dialog = $<HTMLDialogElement>('#connection-dialog');
 const draft = $<HTMLTextAreaElement>('#draft');
@@ -24,15 +33,37 @@ const stage = $('#stage');
 const chat = $('#chat');
 const agentSelect = $<HTMLSelectElement>('#agent');
 let state: DesktopState;
+const commandPicker = installCommandPicker($('#slash-commands'), draft, name => {
+  const command = state.agents[scope]?.find(row => row.name === agentSelect.value)?.commands?.find(row => row.command === name);
+  if (command?.kind === 'skill' && command.mode === null) {
+    draft.value = `${name} `; drafts[selected] = draft.value; persist(); render(); showInfoTab('commands');
+    $('#agent-commands').querySelector<HTMLSelectElement>(`[aria-label="Context for ${CSS.escape(name)}"]`)?.focus();
+    return false;
+  }
+  draft.value = command ? commandDraft(command, '', '') : `${name} `;
+  drafts[selected] = draft.value; persist(); render();
+});
+const commandControls = installCommands($('#agent-commands'), command => {
+  draft.value = command; drafts[selected] = command; persist(); render(); draft.focus();
+}, () => draft.value, async (command, text) => {
+  const identity = JSON.stringify([state.base, state.handle, selected, agentSelect.value, command.name, text]);
+  const key = `plowshare-workflow-request:${identity}`;
+  const requestId = localStorage.getItem(key) ?? crypto.randomUUID();
+  localStorage.setItem(key, requestId);
+  await request({ action: 'workflow-start', conversation: selected, agent: agentSelect.value, definition: command.name, text, requestId });
+  localStorage.removeItem(key);
+});
 const approvalControls = installApprovalControls(document, () => state, request, render);
-const information=installInformation(window.plowshare,()=>state,()=>scope);
+const questionPopup = installQuestionPopup($<HTMLDialogElement>('#question-dialog'), $('#question-waiting'), request);
 let selected = '';
 let selectionStamp = '';
 let scope = 'Research';
-let tab: 'context' | 'memory' | 'usage' = 'context';
 let drafts: Record<string, string> = {};
 let chosenAgents: Record<string, string> = {};
-let preferences: Record<string, { selected: string; scope: string; drafts: Record<string, string>; projectExpansion?: Record<string, boolean> }> = {};
+let preferences: Record<string, { selected: string; scope: string; drafts: Record<string, string>; projectExpansion?: Record<string, boolean>; chosenAgents?: Record<string, string>; personalBotExpansion?: Record<string, boolean> }> = {};
+let personalBotExpansion: Record<string, boolean> = {};
+let personalBotsLoading = false;
+let personalBotReadKey = '';
 let projectExpansion: Record<string, boolean> = {};
 let filterExpansion: Record<string, boolean> = {};
 let identity = '';
@@ -45,13 +76,19 @@ let busy = false;
 let navigation: ReturnType<typeof installNavigation> | undefined;
 let connectionError = '';
 let sidebarHidden = false;
+let projectsCollapsed = false;
+let personalCollapsed = false;
+let personalConversationsCollapsed = false;
+let personalBotsCollapsed = true;
+let personalVisible = false;
+let workspaceRoute: WorkspaceRoute = { kind: 'chat', label: 'Conversation' };
 const historyBusy = new Set<string>();
 const measurements = new Map<string, { at: number; pending: boolean }>();
 try { preferences = JSON.parse(localStorage.getItem('plowshare.desktop.ui.v1') ?? '{}'); } catch { /* Start with a clean view if a local draft is unreadable. */ }
 
 function persist() {
   if (!identity) return;
-  preferences[identity] = { selected, scope, drafts, projectExpansion };
+  preferences[identity] = { selected, scope, drafts, projectExpansion, chosenAgents, personalBotExpansion };
   try { localStorage.setItem('plowshare.desktop.ui.v1', JSON.stringify(preferences)); } catch { /* Drafts still remain in this window if storage is full. */ }
 }
 function key(next: DesktopState) { return next.mode === 'demo' ? 'demo' : `${next.base}|${next.handle}`; }
@@ -62,22 +99,28 @@ function title(id: string) {
 }
 function selectedJob(): Job | undefined { return state?.jobs.filter(job => job.conversation === selected).at(-1); }
 function update(next: DesktopState) {
-  if (!state?.connected && next.connected) measurements.clear();
+  if (!state?.connected && next.connected) { measurements.clear(); snapshotReads.clear(); }
   const nextIdentity = key(next);
   if (nextIdentity !== identity) {
     persist(); identity = nextIdentity;
     const saved = preferences[identity];
     drafts = saved?.drafts ?? {}; selected = saved?.selected ?? ''; scope = saved?.scope ?? (next.mode === 'demo' ? 'Research' : '');
     projectExpansion = saved?.projectExpansion ?? {}; filterExpansion = {};
-    chosenAgents = {}; signature = ''; measurements.clear();
+    chosenAgents = saved?.chosenAgents ?? {}; personalBotExpansion = saved?.personalBotExpansion ?? {};
+    personalBotReadKey = ''; signature = ''; measurements.clear();
   }
   state = next;
+  const botReadKey = state.personal && state.connected ? JSON.stringify([identity, state.personal.project, state.agents[state.personal.project]?.filter(row => row.bot).map(row => row.name)]) : '';
+  if (!personalBotsCollapsed && botReadKey && botReadKey !== personalBotReadKey && state.agents[state.personal!.project]) {
+    personalBotReadKey = botReadKey; void refreshPersonalBots();
+  }
   const opening = state.mode === 'live' && /^(Connecting|Opening projects)/.test(state.connection);
   if (next.jobRecoveryError) error(next.jobRecoveryError);
   if (next.connectionPersistenceError) error(next.connectionPersistenceError);
   else if (connectionError && $('#error span').textContent === connectionError) $('#error').hidden = true;
   connectionError = next.connectionPersistenceError ?? '';
-  if (!opening && !state.projects.some(row => row.name === scope)) scope = '';
+  if (!opening && !state.projects.some(row => row.name === scope)) scope = state.personal?.project ?? '';
+  if (!scope && state.personal) scope = state.personal.project;
   const rows = state.conversations.filter(row => homeKey(row.project) === scope);
   if (!opening && !rows.some(row => row.id === selected)) selected = rows[0]?.id ?? '';
   if (draft.dataset.conversation !== selected) { draft.value = drafts[selected] ?? ''; draft.dataset.conversation = selected; signature = ''; }
@@ -107,7 +150,9 @@ async function loadHistory(id = selected, before?: number) {
   finally { historyBusy.delete(id); }
 }
 async function choose(id: string) {
+  personalVisible = false;
   const row = state.conversations.find(row => row.id === id); if (!row) return;
+  await request({ action: 'workspace-chat' });
   const previousScope = scope;
   if (selected) drafts[selected] = draft.value;
   selected = id; scope = homeKey(row.project); projectExpansion[scope] = true; filterExpansion[scope] = true; draft.dataset.conversation = selected; draft.value = drafts[selected] ?? '';
@@ -119,6 +164,8 @@ async function choose(id: string) {
   await loadHistory(id);
 }
 async function chooseScope(nextScope: string) {
+  personalVisible = false;
+  await request({ action: 'workspace-chat' });
   if (selected) drafts[selected] = draft.value;
   scope = nextScope; projectExpansion[scope] = true; filterExpansion[scope] = true; selected = ''; signature = '';
   update(state);
@@ -126,7 +173,7 @@ async function chooseScope(nextScope: string) {
   catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); }
 }
 async function newConversation() {
-  if (busy || (state.mode === 'live' && !state.connected)) return;
+  if (busy || (state.mode === 'live' && !state.connected) || state.projects.find(row => row.name === scope)?.role === 'VIEWER') return;
   busy = true;
   try {
     const reply = await request({ action: 'create', ...(scope ? { project: scope } : {}) });
@@ -144,39 +191,58 @@ function openConnect() {
   if (!dialog.open) dialog.showModal();
 }
 
+const serverAdministration = installServerAdmin(request);
+const projectAccess = installProjectAccess(request);
+
 function render() {
+  serverAdministration.update(state);
+  projectAccess.update(state);
   if (!state) return;
   renderFiles();
+  $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
+  questionPopup.update(state, scope, selected);
   const filter = $<HTMLInputElement>('#conversation-filter').value.toLowerCase();
   const rows = state.conversations.filter(row => homeKey(row.project) === scope);
   $('#conversation-count').textContent = String(rows.length);
-  const conversationRows = (project: string) => state.conversations.filter(row => homeKey(row.project) === project && title(row.id).toLowerCase().includes(filter)).map(row => {
+  const conversationRows = (project: string, includes: (id: string) => boolean = () => true) => state.conversations.filter(row => homeKey(row.project) === project && includes(row.id) && title(row.id).toLowerCase().includes(filter)).map(row => {
     const job = state.jobs.find(job => job.conversation === row.id && activeJob(job));
     return `<button class="conversation-row" data-conversation="${esc(row.id)}" ${row.id === selected ? 'aria-current="page"' : ''}><span class="conversation-icon ${job ? 'is-active' : ''}">${icon(job ? 'activity' : 'message')}</span><div><span class="row-title">${esc(title(row.id))}</span>${job ? `<small>${esc(job.status)}</small>` : ''}</div></button>`;
   }).join('');
-  $('#conversations').innerHTML = ['', ...state.projects.map(row => row.name)].map((project, index) => {
+  const personal = state.personal;
+  $('#personal-navigation').hidden = !personal;
+  setHTML($('#personal-conversations'), personal ? conversationRows(personal.project) || '<p class="no-running">No conversations yet.</p>' : '');
+  setHTML($('#personal-sections'), personal ? ['In', 'Out', 'Resources', 'Archive', 'Planning'].map(section =>
+    `<button data-personal-section="${section}" ${personalVisible && personal.section === section ? 'aria-current="page"' : ''}>${icon(section === 'In' ? 'inbox' : 'folder')}<span>${personalSectionName(section)}</span></button>`).join('') : '');
+  setHTML($('#personal-bots'), personal ? (personalBotsLoading ? '<p class="no-running" role="status">Loading bot conversations…</p>' : '')
+    + (personal.botsError ? `<p class="no-running" role="alert">${esc(personal.botsError)}</p>` : '')
+    + (state.agents[personal.project] ?? []).filter(row => row.bot).map((bot, index) => {
+      const expanded = personalBotExpansion[bot.name] === true;
+      const chats = conversationRows(personal.project, id => personalBotConversations(bot.name).includes(id));
+      return `<section class="personal-bot-group" data-personal-bot-group="${esc(bot.name)}"><div class="personal-bot-heading"><button class="project-toggle icon-button" data-personal-bot-toggle="${esc(bot.name)}" aria-expanded="${expanded}" aria-controls="personal-bot-conversations-${index}" aria-label="${expanded ? 'Collapse' : 'Expand'} ${esc(botDisplayName(bot))}">${icon('chevron')}</button><button class="personal-bot-name" data-personal-bot-open="${esc(bot.name)}" ${!bot.served && !personalBotConversations(bot.name).length ? 'disabled' : ''}>${esc(botDisplayName(bot))}${bot.preferred ? '<small>Default</small>' : ''}</button><button class="icon-button" data-personal-bot-new="${esc(bot.name)}" aria-label="New conversation with ${esc(botDisplayName(bot))}" ${!bot.served || busy ? 'disabled' : ''}>${icon('plus')}</button></div><nav id="personal-bot-conversations-${index}" class="personal-bot-conversations" ${expanded ? '' : 'hidden'} aria-label="Conversations with ${esc(botDisplayName(bot))}">${chats || '<p class="no-running">No conversations yet.</p>'}</nav></section>`;
+    }).join('') : '');
+  renderPersonal();
+  setHTML($('#conversations'), state.projects.filter(row => row.kind !== 'personal').map(row => row.name).map((project, index) => {
     const folder = state.projectFolders?.find(row => row.name === project);
     const recorded = state.projects.find(row => row.name === project);
     const path = recorded?.workspace ?? folder?.path;
     const machine = recorded?.workspace ? recorded.machine ?? 'Server' : folder?.machine;
-    const location = path ? `${machine ?? 'Server'} · ${path}` : '';
+    const location = [recorded?.type === 'DISJOINT' ? 'DISJOINT · no sync' : undefined, path ? `${machine ?? 'Server'} · ${path}` : undefined].filter(Boolean).join(' · ');
     const expanded = filter ? filterExpansion[project] ?? true : projectExpansion[project] ?? scope === project;
     const items = expanded ? conversationRows(project) : '';
-    return `<section class="project-group"><div class="project-heading" ${scope === project ? 'data-current="true"' : ''}><button class="project-toggle icon-button" data-project-toggle="${esc(project)}" aria-expanded="${expanded}" aria-controls="project-conversations-${index}" aria-label="${expanded ? 'Collapse' : 'Expand'} ${esc(project || 'Global workspace')}">${icon('chevron')}</button><button class="project-row" data-project="${esc(project)}" ${scope === project ? 'aria-current="true"' : ''} title="${esc([location, folder?.error].filter(Boolean).join(' · ') || 'Open project')}"><span class="project-name">${esc(project || 'Global workspace')}${location ? `<small class="project-location">${esc(location)}</small>` : ''}</span>${folder ? `<small class="project-presence ${folder.files.status}" aria-label="${esc(folder.error ? 'Files unavailable' : folder.files.status)}">${icon(folder.files.status === 'ready' ? 'check' : folder.error || folder.files.status === 'lost' ? 'alert' : 'folder')}</small>` : ''}</button></div><div id="project-conversations-${index}" class="project-conversations" ${expanded ? '' : 'hidden'}>${items || '<p class="no-running">No conversations loaded.</p>'}</div></section>`;
-  }).join('');
+    return `<section class="project-group"><div class="project-heading" ${scope === project ? 'data-current="true"' : ''}><button class="project-toggle icon-button" data-project-toggle="${esc(project)}" aria-expanded="${expanded}" aria-controls="project-conversations-${index}" aria-label="${expanded ? 'Collapse' : 'Expand'} ${esc(scopeName(project))}">${icon('chevron')}</button><button class="project-row" data-project="${esc(project)}" ${scope === project ? 'aria-current="true"' : ''} title="${esc([location, folder?.error].filter(Boolean).join(' · ') || 'Open project')}"><span class="project-name">${esc(scopeName(project))}${location ? `<small class="project-location">${esc(location)}</small>` : ''}</span>${folder ? `<small class="project-presence ${folder.files.status}" aria-label="${esc(folder.error ? 'Files unavailable' : folder.files.status)}">${icon(folder.files.status === 'ready' ? 'check' : folder.error || folder.files.status === 'lost' ? 'alert' : 'folder')}</small>` : ''}</button><button type="button" data-project-access="${esc(project)}" aria-label="Access for ${esc(scopeName(project))}" ${!state.connected ? 'disabled' : ''}>Access</button></div><div id="project-conversations-${index}" class="project-conversations" ${expanded ? '' : 'hidden'}>${items || '<p class="no-running">No conversations loaded.</p>'}</div></section>`;
+  }).join(''));
   const jobs = state.jobs.filter(activeJob);
   $('#running-count').textContent = String(jobs.length);
   $('#inbox-count').textContent = state.activity.inbox.unread === undefined ? '—' : String(state.activity.inbox.unread);
-  $('#inbox-open').title = state.activity.inbox.error || 'Open account inbox';
+  $('#inbox-open').title = state.activity.inbox.error || 'Open account mailbox';
   $('#runs-count').textContent = state.activity.runs.loaded ? String(state.activity.runs.items.filter(run => !run.parent && ['running', 'asking', 'waiting'].includes(run.state)).length) : '—';
   $('#runs-open').title = state.activity.runs.error || 'Open account runs';
-  $('#running-jobs').innerHTML = jobs.map(job => `<button class="running-row" ${job.source==='information'?'data-information-job':`data-conversation="${esc(job.conversation)}"`}>${icon('activity')}<span>${esc(job.source==='information'?job.task:title(job.conversation))}</span></button>`).join('') || '<div class="no-running">No active runs.</div>';
-  $('#scope-caption').textContent = scope || 'Global workspace';
+  setHTML($('#running-jobs'), jobs.map(job => `<button class="running-row" ${job.source==='information'?'data-information-job':`data-conversation="${esc(job.conversation)}"`}>${icon('activity')}<span>${esc(job.source==='information'?job.task:title(job.conversation))}</span></button>`).join('') || '<div class="no-running">No active runs.</div>');
+  $('#scope-caption').textContent = scopeName(scope);
   $('#title-caption').textContent = selected ? title(selected) : 'New conversation';
   $('#chat-title').textContent = selected ? title(selected) : 'An open field';
   $('#connection-label').textContent = state.connection;
-  $('#footer-status').textContent = state.mode === 'demo' ? 'Offline demo · local data' : `${state.connection} · ${state.base}`;
-  $('#chat-footer-mode').textContent = state.mode === 'demo' ? 'Local demo · no model calls' : 'Plowshare server · WebSocket';
+  $('#chat-footer-mode').textContent = state.mode === 'demo' ? 'Local demo · no model calls' : state.connected ? 'Server connected' : 'Server unavailable';
   $('#notice').hidden = state.mode === 'live' && state.connected;
   if (state.mode === 'live') {
     $('#notice .demo-mark').textContent = 'OFFLINE';
@@ -191,16 +257,30 @@ function render() {
   const preferred = roster.find(row => row.preferred);
   const previousAgent = chosenAgents[selected] ?? (preferred ? preferred.served && preferred.bot ? preferred.name : '' : bots[0]?.name ?? '');
   const unmet = preferred && (!preferred.served || !preferred.bot) && !chosenAgents[selected];
-  agentSelect.innerHTML = (unmet ? `<option value="">Default ${esc(preferred.name)} unavailable · choose an agent</option>` : '') + bots.map(row => `<option value="${esc(row.name)}">${esc(row.name)}${row.model ? ` · ${esc(row.model)}` : ''}</option>`).join('') || '<option value="">No conversational agent</option>';
-  agentSelect.value = bots.some(row => row.name === previousAgent) ? previousAgent : '';
-  draft.placeholder = agentSelect.value ? `Message ${agentSelect.value}…` : 'Choose an agent to continue…';
+  setHTML(agentSelect, (unmet ? `<option value="">Default ${esc(preferred.name)} unavailable · choose an agent</option>` : '') + bots.map(row => `<option value="${esc(row.name)}">${esc(botDisplayName(row))}${row.model ? ` · ${esc(row.model)}` : ''}</option>`).join('') || '<option value="">No conversational agent</option>');
+  const desiredAgent = bots.some(row => row.name === previousAgent) ? previousAgent : '';
+  if (agentSelect.value !== desiredAgent) agentSelect.value = desiredAgent;
+  const commandAgent = bots.find(row => row.name === agentSelect.value);
+  let identityPanel = document.querySelector<HTMLElement>('#agent-identity');
+  if (!identityPanel) { identityPanel = document.createElement('details'); identityPanel.id = 'agent-identity'; identityPanel.className = 'agent-identity'; agentSelect.closest('.composer-footer')?.after(identityPanel); }
+  const snapshot = state.connected ? state.contextSnapshots?.[contextKey(selected, agentSelect.value)]?.value : undefined;
+  const access = commandAgent;
+  identityPanel.hidden = !access;
+  if (access) setHTML(identityPanel, botDetails(access, state.files, snapshot));
+  commandControls.update(commandAgent?.commands ?? [], state.mode === 'live' && state.connected && state.projects.find(row => row.name === scope)?.role !== 'VIEWER', commandAgent?.withheld ?? [], commandAgent?.commands !== undefined);
+  commandPicker.update(commandAgent?.commands ?? []);
+  draft.placeholder = agentSelect.value ? scope === state.personal?.project ? 'Capture an idea, explore your knowledge, or make a plan…' : 'Ask anything…' : 'Choose an agent to continue…';
   const job = selectedJob(); const active = job !== undefined && activeJob(job);
   const available = state.mode === 'demo' || state.connected;
   const preparing = state.projectPreparing?.includes(scope) === true;
-  $<HTMLButtonElement>('#send').disabled = !available || preparing || active || busy || !draft.value.trim() || !agentSelect.value;
-  $<HTMLButtonElement>('#new-conversation').disabled = !available || preparing || busy;
+  const viewer = state.projects.find(row => row.name === scope)?.role === 'VIEWER';
+  if (viewer) draft.placeholder = 'Viewer access · read project conversations';
+  const typedCommand = composerCommand(draft.value);
+  const localCommand = typedCommand && !/^\/(skill|orchestration):/.test(typedCommand.name);
+  $<HTMLButtonElement>('#send').disabled = (viewer && !localCommand) || !available || preparing || busy || !draft.value.trim() || (!localCommand && (active || !agentSelect.value));
+  $<HTMLButtonElement>('#new-conversation').disabled = viewer || !available || preparing || busy;
   $('#cancel').hidden = !active || job?.status === 'starting' || job?.id.startsWith('pending-') === true || !available;
-  $<HTMLButtonElement>('#cancel').disabled = job?.status === 'cancelling';
+  $<HTMLButtonElement>('#cancel').disabled = viewer || job?.status === 'cancelling';
   const statusText = active ? job.status === 'unknown' ? 'Outcome uncertain' : job.status === 'cancelling' ? 'Stopping…' : job.phase === 'thinking' ? 'Reasoning…' : job.phase === 'answer' ? 'Responding…' : job.phase === 'tool' ? `Using ${job.tool || 'a tool'}…` : 'Working…' : !available ? 'Reconnect to send' : preparing ? 'Connecting project files…' : 'Ready';
   if ($('#composer-status-text').textContent !== statusText) $('#composer-status-text').textContent = statusText;
   // Keep the indicator mounted: streamed deltas must not restart its CSS animation.
@@ -208,13 +288,18 @@ function render() {
   indicator.hidden = !available || !job || !['starting', 'running'].includes(job.status);
   indicator.dataset.phase = job?.phase ?? 'working';
   $<HTMLButtonElement>('#trajectory-open').disabled = !selected;
-  renderTranscript(); renderInspector(); renderApprovals(); renderStatus(); measureContext();
-  fitDraft();
+  if (workspaceRoute.kind === 'chat') { renderTranscript(); renderInspector(); }
+  renderApprovals(); renderStatus(); measureContext(); refreshCurrentProjection(); renderBreadcrumb();
+  if (workspaceRoute.kind === 'chat' && !personalVisible) fitDraft();
   navigation?.refresh();
 }
+let draftSize = '';
 function fitDraft() {
   // Bound growth so long drafts cannot push the composer out of a compact window.
   const maximum = Math.min(160, Math.floor(window.innerHeight * .2));
+  if (!draft.clientWidth) return;
+  const nextSize = JSON.stringify([draft.value, draft.clientWidth, maximum]);
+  if (nextSize === draftSize) return; draftSize = nextSize;
   draft.style.height = '0px';
   const height = Math.max(44, Math.min(maximum, draft.scrollHeight));
   draft.style.height = `${height}px`;
@@ -234,6 +319,15 @@ function measureContext(force = false) {
   void request({ action: 'context', conversation: selected, agent }).catch(() => {})
     .finally(() => { if (measurements.get(key) === reading) reading.pending = false; });
 }
+const snapshotReads = new Map<string, string>();
+function refreshCurrentProjection() {
+  if (!selected || !agentSelect.value || inspectorHidden || workspaceRoute.kind !== 'chat' || state.mode !== 'live' || !state.connected) return;
+  const id = `${identity}:${contextKey(selected,agentSelect.value)}`, job = selectedJob();
+  const stamp = JSON.stringify([state.history[selected]?.through, job?.id, job?.status, job?.ending]);
+  if (snapshotReads.get(id) === stamp) return;
+  snapshotReads.set(id, stamp);
+  refreshProjection(false);
+}
 const compact = (n: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n).toLowerCase();
 function renderStatus() {
   const reading = state.contexts[contextKey(selected, agentSelect.value)];
@@ -245,14 +339,15 @@ function renderStatus() {
   const percent = measured && sized ? Math.floor(sent / limit * 100) : undefined;
   const stale = reading?.status === 'unavailable' || (state.mode === 'live' && !state.connected);
   const sample = reading?.sample ? 'Sample · ' : '';
+  const peak = reading?.sentAtTurn === undefined ? 'Last turn peak' : `Turn ${reading.sentAtTurn} peak`;
   $('#context-model').textContent = reading?.model || agent?.model || '';
   $('#context-model').title = reading?.model || agent?.model || '';
   $('#context-model').parentElement!.hidden = !$('#context-model').textContent;
-  $('#context-label').textContent = `${sample}${stale && measured ? 'Last measured · ' : ''}${measured ? `${compact(sent)}${sized ? ` / ${compact(limit)}` : ' tokens'}${percent === undefined ? '' : ` · ${percent}%`}` : `Context not measured${sized ? ` · max ${compact(limit)}` : ''}`}`;
-  $('#context-status').title = reading?.detail || 'Model-reported tokens in the newest measured prompt. Your unsent draft is not included.';
+  $('#context-label').textContent = `${sample}${stale && measured ? 'Last measured · ' : ''}${measured ? `${peak} · ${compact(sent)}${sized ? ` / ${compact(limit)}` : ' tokens'}${percent === undefined ? '' : ` · ${percent}%`}` : `Context not measured${sized ? ` · max ${compact(limit)}` : ''}`}`;
+  $('#context-status').title = reading?.detail || 'Peak model-reported prompt tokens in the latest measured turn. A fold can reduce subsequent requests without changing this historical peak; the next turn supplies a new measurement. Your unsent draft is not included.';
   const meter = $<HTMLProgressElement>('#context-meter'); meter.hidden = percent === undefined;
   meter.value = Math.min(percent ?? 0, 100);
-  meter.setAttribute('aria-label', `${sample}${stale ? 'Last measured context' : 'Context'} ${percent ?? 'unknown'} percent`);
+  meter.setAttribute('aria-label', `${sample}${stale ? 'Last measured turn peak' : peak} ${percent ?? 'unknown'} percent`);
   $('#context-status').dataset.level = percent !== undefined && percent >= 85 ? 'high' : 'normal';
   $('#context-status').dataset.stale = String(stale);
   const allowance = job?.allowance;
@@ -277,7 +372,7 @@ function renderStatus() {
   const alerts: { label: string; text: string; kind: string }[] = [];
   if (state.connected && state.liveHistory?.status === 'unavailable') alerts.push({ label: 'Live updates unavailable', text: state.liveHistory.detail || 'Refresh manually to read later conversation turns.', kind: 'warning' });
   else if (state.connected && state.history[selected]?.error) alerts.push({ label: 'History catch-up unavailable', text: state.history[selected].error!, kind: 'warning' });
-  if (percent !== undefined && percent >= 85 && !stale) alerts.push({ label: 'Context near limit', text: 'This conversation is nearing the selected model’s context limit.', kind: 'warning' });
+  if (percent !== undefined && percent >= 85 && !stale) alerts.push({ label: 'Last turn approached limit', text: 'The latest measured turn had a large prompt. A fold may have reduced subsequent requests.', kind: 'warning' });
   if (!agentSelect.value) alerts.push({ label: 'Agent unavailable', text: 'Choose a served conversational agent before sending.', kind: 'warning' });
   if (job?.status === 'unknown') alerts.push({ label: 'Outcome uncertain', text: job.detail || 'The job may still be running on the server. Reconnect to check its state.', kind: 'warning' });
   else if (job?.status === 'interrupted') alerts.push({ label: 'Request interrupted', text: job.detail || 'Inspect the trajectory before retrying.', kind: 'warning' });
@@ -302,7 +397,7 @@ function renderTranscript() {
   content += entries.map(entry => {
     if (!entry.text || (entry.kind === 'answer' && (entry.asked ?? 0) > 0) || !['utterance', 'answer', 'summary'].includes(entry.kind)) return '';
     const kind = entry.kind === 'utterance' ? 'person' : entry.kind === 'summary' ? 'summary' : 'answer';
-    const label = kind === 'person' ? entry.speaker === 'harness' ? `Harness · ${entry.speakerName ?? 'external'}` : 'You' : kind === 'summary' ? 'Conversation summary' : 'Plowshare';
+    const label = kind === 'person' ? entry.speaker === 'harness' ? `Harness · ${entry.speakerName ?? 'external'}` : 'You' : kind === 'summary' ? 'Conversation summary' : 'Assistant';
     const approval = noticeApproval(state, { kind: 'approval', answer: entry.text });
     const ownApproval = approval && (approval.conversation === selected || approval.askedIn === selected);
     return message(kind, label, entry.text, entry.cut ? `Excerpt shown · ${entry.length ?? ''} characters in source` : '') + (ownApproval ? approvalControls.prompt(approval) : '');
@@ -324,52 +419,125 @@ function renderTranscript() {
 function message(kind: string, label: string, body: string, note = '') {
   return `<article class="message ${kind}" ${kind === 'answer' ? `data-copy-source="${esc(body)}"` : ''}><div class="message-label">${kind === 'answer' ? `<span class="answer-mark">${icon('sparkles')}</span>` : ''}<span>${esc(label)}</span>${kind === 'answer' ? copyButton('Copy answer as Markdown', 'answer') : ''}</div><div class="message-body ${kind === 'answer' ? 'markdown-body' : ''}">${kind === 'answer' ? markdownHtml(body) : esc(body)}</div>${note ? `<p class="history-note">${esc(note)}</p>` : ''}</article>`;
 }
-let usagePanel: UsagePanel | undefined;
-let usageIdentity = '';
-function renderInspector() {
-  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.tab === tab)));
-  $('#inspector-content').setAttribute('aria-labelledby', `tab-${tab}`);
-  const conversation = current();
-  const agent = (state.agents[scope] ?? []).find(row => row.name === agentSelect.value);
-  const reading = state.contexts[contextKey(selected, agentSelect.value)];
-  if (tab === 'usage') {
-    const view = `${identity}:${scope}:${selected}:${agentSelect.value}`;
-    if (!usagePanel || usageIdentity !== view) {
-      usagePanel?.destroy(); usageIdentity = view;
-      const root = $('#inspector-content'); root.dataset.stamp = ''; root.dataset.view = '';
-      usagePanel = mountUsagePanel(root, {
-        select: async (type, filter) => { await window.plowshare.request({action:'usage-open',type,filter}); },
-        read: async (type, payload) => (await window.plowshare.request({action:'usage-read',type,payload})).usage,
-        conversation: () => selected, agent: () => agentSelect.value,
-        project: scope === 'Global' ? null : scope, storage: localStorage,
-      });
+function scopeName(project: string) { return project === state.personal?.project ? 'Personal' : state.projects.find(row => row.name === project)?.displayName || project || 'Global resources'; }
+function personalSectionName(section: string) { return section === 'In' ? 'Inbox' : section; }
+function personalBotConversations(bot: string) {
+  const personal = state.personal;
+  return personal ? state.conversations.filter(row => row.project === personal.project &&
+    (chosenAgents[row.id] === bot || personal.botLatest?.[bot] === row.id || state.jobs.some(job => job.conversation === row.id && job.agent === bot))).map(row => row.id) : [];
+}
+async function refreshPersonalBots() {
+  if (personalBotsLoading || !state.personal || !state.connected) return;
+  personalBotsLoading = true; render();
+  try { await request({ action: 'personal-bots' }); }
+  catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); }
+  finally { personalBotsLoading = false; render(); }
+}
+async function openPersonalBot(bot: string, create = false) {
+  const personal = state.personal; if (!personal || busy) return;
+  const existing = personal.botLatest?.[bot] ?? personalBotConversations(bot).at(-1);
+  if (!create && existing) { chosenAgents[existing] = bot; await choose(existing); persist(); return; }
+  if (!state.agents[personal.project]?.some(row => row.name === bot && row.bot && row.served)) return;
+  busy = true; render();
+  try {
+    const reply = await request({ action: 'create', project: personal.project });
+    if (reply.conversation) {
+      chosenAgents[reply.conversation] = bot; personalBotExpansion[bot] = true;
+      await choose(reply.conversation); persist(); draft.focus();
     }
-    if (state.usage) usagePanel.update(state.usage);
-    return;
+  } catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); }
+  finally { busy = false; render(); }
+}
+function renderPersonal() {
+  const personal = state.personal;
+  const showPersonal = personalVisible && !!personal && workspaceRoute.kind === 'chat';
+  if ($('#personal-panel').hidden === showPersonal) $('#personal-panel').hidden = !showPersonal;
+  // Background state updates must not reveal chat underneath an embedded page.
+  const hideStage = workspaceRoute.kind !== 'chat' || showPersonal;
+  if (stage.hidden !== hideStage) stage.hidden = hideStage;
+  if (!showPersonal || !personal) return;
+  $('#personal-title').textContent = personalSectionName(personal.section ?? 'Personal');
+  $('#personal-path').textContent = personal.path ?? personal.root ?? '';
+  const section = personal.section ?? 'Resources';
+  const path = personal.path ?? section;
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  const bots = section === 'Bots' ? (state.agents[personal.project] ?? []).filter(row => row.bot).map(row =>
+    `<button class="personal-bot" data-personal-bot="${esc(row.name)}" ${!row.served ? 'disabled' : ''}>${icon('cpu')}<span>${esc(row.name)}</span>${row.preferred ? '<small>Default</small>' : ''}</button>`).join('') : '';
+  setHTML($('#personal-content'), (personal.error ? `<p role="alert">${esc(personal.error)}</p>` : '')
+    + (parent ? `<button class="secondary-button" data-personal-path="${esc(parent)}">Back</button>` : '')
+    + bots + (personal.text !== undefined ? `<pre class="personal-preview">${esc(personal.text)}</pre>` : personal.note ? `<p>${esc(personal.note)}</p>` : (personal.entries ?? []).map(row =>
+      `<button class="personal-file" data-personal-path="${esc(row.path)}">${icon(row.directory ? 'folder' : 'file')}<span>${esc(row.name)}</span></button>`).join('') || '<p>This section is empty. Add files in your personal folder.</p>'));
+}
+$('#personal-sections').addEventListener('click', event => {
+  const section = (event.target as HTMLElement).closest<HTMLElement>('[data-personal-section]')?.dataset.personalSection as NonNullable<DesktopState['personal']>['section'];
+  if (!section) return;
+  personalVisible = true; if (state.personal) state.personal.section = section; renderPersonal(); action({ action: 'personal-section', section });
+});
+$('#personal-close').addEventListener('click', () => { personalVisible = false; render(); });
+$('#personal-conversations').addEventListener('click', event => {
+  const id = (event.target as HTMLElement).closest<HTMLElement>('[data-conversation]')?.dataset.conversation; if (id) void choose(id);
+});
+$('#personal-content').addEventListener('click', event => {
+  const target = event.target as HTMLElement;
+  const path = target.closest<HTMLElement>('[data-personal-path]')?.dataset.personalPath;
+  if (path && state.personal?.section) action({ action: 'personal-section', section: state.personal.section, path });
+  const bot = target.closest<HTMLElement>('[data-personal-bot]')?.dataset.personalBot;
+  if (bot) void openPersonalBot(bot, true);
+});
+$('#personal-bots').addEventListener('click', event => {
+  const target = event.target as HTMLElement;
+  const toggle = target.closest<HTMLElement>('[data-personal-bot-toggle]');
+  if (toggle) { personalBotExpansion[toggle.dataset.personalBotToggle!] = toggle.getAttribute('aria-expanded') !== 'true'; render(); persist(); return; }
+  const create = target.closest<HTMLElement>('[data-personal-bot-new]')?.dataset.personalBotNew;
+  if (create) { void openPersonalBot(create, true); return; }
+  const bot = target.closest<HTMLElement>('[data-personal-bot-open]')?.dataset.personalBotOpen;
+  if (bot) { void openPersonalBot(bot); return; }
+  const id = target.closest<HTMLElement>('[data-conversation]')?.dataset.conversation;
+  const group = target.closest<HTMLElement>('[data-personal-bot-group]')?.dataset.personalBotGroup;
+  if (id && group) { chosenAgents[id] = group; void choose(id); }
+});
+$('#personal-conversation-new').addEventListener('click', () => { if (state.personal) void chooseScope(state.personal.project).then(newConversation); });
+$('#personal-bots-files').addEventListener('click', () => { personalVisible = true; action({ action: 'personal-section', section: 'Bots' }); });
+
+function renderInspector() {
+  const reading = state.contextSnapshots?.[contextKey(selected, agentSelect.value)], snapshot = reading?.value;
+  const disconnected = state.mode === 'live' && !state.connected;
+  const enabled = !!selected && !!agentSelect.value && state.mode === 'live' && state.connected && !reading?.loading;
+  $<HTMLButtonElement>('#context-refresh').disabled = !enabled;
+  $<HTMLButtonElement>('#context-count').disabled = !enabled;
+  let content = `<section class="context-section"><h3>${esc(selected ? title(selected) : 'New conversation')}</h3><p class="context-note">Current agent projection, before your next prompt. Your draft is excluded.</p>`;
+  if (reading?.loading) content += '<p role="status">Constructing context…</p>';
+  if (reading?.error) content += `<p role="alert">${esc(reading.error)}${snapshot ? ' Showing the last snapshot.' : ''}</p>`;
+  if (disconnected && snapshot) content += '<p role="status">Disconnected · last snapshot</p>';
+  if (!snapshot) content += `<p>${state.mode === 'demo' ? 'Connect to see the server’s constructed projection.' : selected ? 'No context snapshot loaded.' : 'Select a conversation to inspect its context.'}</p>`;
+  else {
+    content += `<div class="context-key"><span>Agent</span><strong>${esc(snapshot.agent)}</strong></div><div class="context-key"><span>Model</span><strong>${esc(snapshot.model)}</strong></div><p class="context-note">Captured ${esc(new Date(snapshot.captured_at).toLocaleTimeString())}${selectedJob() && activeJob(selectedJob()!) ? ' · work in progress; refresh to update' : ''}</p>`;
+    const count = snapshot.count;
+    content += `<div class="context-key"><span>Projection tokens</span><strong>${count?.tokens == null ? count?.basis === 'UNKNOWN' ? 'Unknown' : 'Not counted' : esc(BigInt(count.tokens).toLocaleString())}</strong></div>${count ? `<p class="context-note">${esc(count.basis.toLowerCase())}${count.gaps.length ? ' · ' + esc(count.gaps.join(', ')) : ''}</p>` : ''}`;
+    content += '<p class="context-note">Includes the system block, projected conversation and offered tool schemas. Temporary prompts added during execution can change the next request.</p>';
   }
-  if (usagePanel) { usagePanel.destroy(); usagePanel = undefined; void window.plowshare.request({action:'usage-close'}); }
-  let content = '';
-  if (tab === 'context') {
-    content = `<section class="context-section thread-context"><div class="eyebrow section-label">${icon('message')}Conversation</div><h3>${esc(selected ? title(selected) : 'New conversation')}</h3><span class="scope-badge">${icon('folder')}${esc(conversation?.project ?? (scope || 'Global'))}</span>${selected ? `<details class="context-details" data-context-details="identity"><summary>Conversation details</summary><div class="context-key"><span>ID</span><code>${esc(selected)}</code></div></details>` : ''}</section>`;
-    const stale = reading?.status === 'unavailable' || (state.mode === 'live' && !state.connected);
-    content += `<section class="context-section"><div class="section-heading"><span class="eyebrow section-label">${icon('layers')}Context window</span>${reading?.sample ? '<span class="context-tag">Sample</span>' : stale ? '<span class="context-tag">Last measured</span>' : ''}</div><div class="context-key"><span>Prompt tokens</span><strong>${reading?.sent === undefined ? 'Not measured' : esc(reading.sent.toLocaleString())}</strong></div><div class="context-key"><span>Model limit</span><strong>${reading?.limit === undefined ? 'Unavailable' : esc(reading.limit.toLocaleString())}</strong></div><p class="context-note">${esc(reading?.detail || 'Unsent drafts are not included.')}</p></section>`;
-    content += `<section class="context-section"><div class="eyebrow section-label">${icon('sparkles')}Agent</div><h3>${esc(agent?.name ?? 'No agent selected')}</h3>${agent?.description ? `<p>${esc(agent.description)}</p>` : ''}${agent?.model ? `<div class="context-key"><span>Model</span><strong>${esc(agent.model)}</strong></div>` : ''}<details class="context-details" data-context-details="tools"><summary>${icon('tool')}Declared tools <span>${agent?.tools.length ?? 0}</span></summary><div class="tool-tags">${agent?.tools.map(tool => `<code>${esc(tool)}</code>`).join('') || '<p>No tools declared.</p>'}</div></details></section>`;
-    if (state.mode === 'demo') content += `<section class="context-section"><div class="section-heading"><span class="eyebrow section-label">${icon('book')}Sources</span><span class="context-tag">Sample</span></div><div class="document-card"><h3><span class="doc-icon">${icon('file')}</span>Program overview</h3><p>Historical background</p></div><div class="document-card"><h3><span class="doc-icon">${icon('file')}</span>Research notes</h3><p>Questions and observations</p></div><p class="context-note">Design samples · no files connected.</p></section>`;
-    else content += `<section class="context-section"><div class="eyebrow section-label">${icon('book')}Sources</div><p>Document browsing is not connected yet.</p></section>`;
-  } else {
-    content = `<section class="context-section"><div class="eyebrow section-label">${icon('brain')}Memory</div><h3>${state.mode === 'demo' ? 'Remembered context' : 'Memory is not connected yet'}</h3><p>${state.mode === 'demo' ? 'Sample knowledge for this workspace.' : 'Browsing and maintenance are planned.'}</p></section>`;
-    if (state.mode === 'demo') content += '<section class="context-section"><div class="section-heading"><span class="eyebrow">Project lesson</span><span class="context-tag">Sample</span></div><h3>Keep questions connected to sources</h3><p>Useful conclusions should retain their provenance, and uncertainty should remain visible.</p></section>';
-    content += `<details class="context-details" data-context-details="planned"><summary>Planned memory controls</summary><p>Read and recall · navigate provenance · digest and curate · review proposals. Conversation search and memory navigation remain separate actions.</p></details>`;
+  if (selected) content += `<details class="context-details" data-context-details="identity"><summary>Conversation details</summary><div class="context-key"><span>ID</span><code>${esc(selected)}</code></div></details>`;
+  content += '</section>';
+  if (snapshot) {
+    content += `<section class="context-section"><h3>Constructed projection</h3>${snapshot.messages.map((message, index) => `<details class="context-details projection-message" data-context-details="message-${index}"><summary>${index + 1} · ${esc(message.role)}${message.tool_call_id ? ' · ' + esc(message.tool_call_id) : ''}</summary>${message.parts.map(part => part.type === 'text' ? `<pre>${esc(part.text)}</pre>` : `<p>Image ${esc(part.uid)} · image bytes omitted from this preview.</p>`).join('')}${message.tool_calls.length ? `<pre>${esc(JSON.stringify(message.tool_calls, null, 2))}</pre>` : ''}</details>`).join('')}</section>`;
+    content += `<section class="context-section"><details class="context-details" data-context-details="schemas"><summary>Offered tools · ${snapshot.tools.length}</summary>${snapshot.tools.map(tool => `<h4>${esc(tool.name)}</h4><p>${esc(tool.description)}</p><pre>${esc(JSON.stringify(tool.parameters, null, 2))}</pre>`).join('') || '<p>No tools offered.</p>'}</details><details class="context-details" data-context-details="sampling"><summary>Request settings</summary><pre>${esc(JSON.stringify(snapshot.sampling, null, 2))}</pre></details></section>`;
   }
-  const element = $('#inspector-content');
-  // Preserve disclosures during context refreshes; token streaming does not rebuild this pane.
-  const view = `${identity}:${selected}:${tab}`;
+  const element = $('#inspector-content'), view = `${identity}:${selected}:${agentSelect.value}`;
   if (element.dataset.stamp !== content || element.dataset.view !== view) {
-    const sameView = element.dataset.view === view;
+    const sameView = element.dataset.view === view, scroll = sameView ? element.scrollTop : 0;
     const open = sameView ? new Set([...element.querySelectorAll<HTMLDetailsElement>('details[open]')].map(row => row.dataset.contextDetails)) : new Set();
     element.innerHTML = content; element.dataset.stamp = content; element.dataset.view = view;
     element.querySelectorAll<HTMLDetailsElement>('details').forEach(row => { row.open = open.has(row.dataset.contextDetails); });
+    element.scrollTop = scroll;
   }
+}
+$('#context-refresh').addEventListener('click', () => refreshProjection(false));
+$('#context-count').addEventListener('click', () => refreshProjection(true));
+function refreshProjection(measure: boolean) {
+  const conversation = selected, agent = agentSelect.value, account = identity;
+  if (conversation && agent) void request({action:'context-snapshot', conversation, agent, measure}).catch(reason => {
+    if (conversation === selected && agent === agentSelect.value && account === identity) error(reason instanceof Error ? reason.message : String(reason));
+  });
 }
 function renderApprovals() {
   const approvals = state.approvals.filter(row => row.state === 'asked');
@@ -377,11 +545,17 @@ function renderApprovals() {
   bar.innerHTML = approvals.map(row => approvalControls.prompt(row, row.conversation === selected ? '' : title(row.conversation))).join('');
 }
 
+$('#usage-open').addEventListener('click', () => action({action:'usage'}));
+$('#connection-usage').addEventListener('click', () => { dialog.close(); action({action:'usage'}); });
 $('#board-open').addEventListener('click', () => action({ action: 'board-inspection', view: 'board', ...(scope ? { project: scope } : {}) }));
 $('#swarm-open').addEventListener('click', () => action({ action: 'board-inspection', view: 'swarm', ...(scope ? { project: scope } : {}) }));
-$('#library-open').addEventListener('click', () => action({action:'library',view:'documents',project:scope || null}));
+$('#manual-open').addEventListener('click', () => action({action:'library',view:'manual',project:null}));
+$('#library-open').addEventListener('click', () => action({action:'library',view:'sources',project:scope || null}));
 $('#inbox-open').addEventListener('click', () => action({ action: 'activity', view: 'inbox' }));
 $('#runs-open').addEventListener('click', () => action({ action: 'activity', view: 'runs' }));
+$('#studio-open').addEventListener('click', () => action({ action: 'activity', view: 'builder' }));
+$('#schedules-open').addEventListener('click', () => action({ action: 'activity', view: 'schedules' }));
+$('#memories-open').addEventListener('click', () => action({ action: 'library', view: 'memories', project: scope || null }));
 $('#trajectory-open').addEventListener('click', () => { if (selected) action({ action: 'trajectory', conversation: selected }); });
 document.addEventListener('click', event => {
   const link = (event.target as HTMLElement).closest<HTMLElement>('[data-web-link]');
@@ -406,14 +580,22 @@ $('#conversations').addEventListener('click', event => {
   const id = (event.target as HTMLElement).closest<HTMLElement>('[data-conversation]')?.dataset.conversation;
   if (id) void choose(id);
 });
-$('#running-jobs').addEventListener('click', event => { if((event.target as HTMLElement).closest('[data-information-job]')){information.open();return;}const id = (event.target as HTMLElement).closest<HTMLElement>('[data-conversation]')?.dataset.conversation; if (id) void choose(id); });
+$('#running-jobs').addEventListener('click', event => { if((event.target as HTMLElement).closest('[data-information-job]')){void action({action:'library',view:'sources',project:scope||null});return;}const id = (event.target as HTMLElement).closest<HTMLElement>('[data-conversation]')?.dataset.conversation; if (id) void choose(id); });
 $('#conversation-filter').addEventListener('input', () => { filterExpansion = {}; render(); });
-agentSelect.addEventListener('change', () => { chosenAgents[selected] = agentSelect.value; render(); });
+agentSelect.addEventListener('change', () => { chosenAgents[selected] = agentSelect.value; render(); persist(); });
 draft.addEventListener('input', () => { drafts[selected] = draft.value; persist(); render(); });
 draft.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $<HTMLFormElement>('#composer').requestSubmit(); } });
 $('#composer').addEventListener('submit', async event => {
   event.preventDefault(); if ($<HTMLButtonElement>('#send').disabled || busy) return;
-  const message = draft.value.trim(); const agent = agentSelect.value; if (!message) return;
+  const message = draft.value; const agent = agentSelect.value; if (!message.trim()) return;
+  const command = composerCommand(message);
+  if (command && !/^\/(skill|orchestration):/.test(command.name)) {
+    try {
+      await runWorkspaceCommand(command.name, command.argumentsText);
+      if (draft.value === message) { draft.value = ''; drafts[selected] = ''; persist(); render(); }
+    } catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); }
+    return;
+  }
   if (!selected) await newConversation();
   if (!selected) return;
   const conversation = selected;
@@ -429,18 +611,11 @@ transcript.addEventListener('click', event => {
   if (button.id === 'load-earlier') void loadHistory(selected, state.history[selected]?.oldest);
 });
 $('#refresh').addEventListener('click', async () => {
+  if (workspaceRoute.kind === 'manage') { $('#workspace-manage [data-read]').click(); return; }
+  if (workspaceRoute.kind !== 'chat') { action({ action: 'workspace-refresh' }); return; }
   try { await request({ action: 'scope', ...(scope ? { project: scope } : {}) }); await request({ action: 'refresh' }); await loadHistory(); }
   catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); }
   measureContext(true);
-});
-document.querySelectorAll<HTMLElement>('[data-tab]').forEach(button => {
-  button.addEventListener('click', () => { tab = button.dataset.tab as typeof tab; renderInspector(); });
-  button.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-    const tabs = [...document.querySelectorAll<HTMLButtonElement>('[data-tab]')];
-    const next = tabs[(tabs.indexOf(button as HTMLButtonElement) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-    next.click(); next.focus();
-  });
 });
 function move() { chat.style.transform = docked || expanded ? 'none' : `translate(${offset.x}px, ${offset.y}px)`; }
 $('#dock').addEventListener('click', () => {
@@ -453,7 +628,7 @@ $('#expand').addEventListener('click', () => {
   $('#expand').setAttribute('aria-label', expanded ? 'Restore chat size' : 'Expand chat');
   $('#expand').title = expanded ? 'Restore chat size' : 'Expand chat';
   $('#expand').innerHTML = icon(expanded ? 'minimize' : 'maximize'); $('#expand').setAttribute('aria-pressed', String(expanded));
-  reflectInspector(); move();
+  reflectInspector(); sidebarResize.refresh(); contextResize.refresh(); move();
 });
 $('#inspector-toggle').addEventListener('click', () => {
   showInspector(getComputedStyle($('#inspector')).display === 'none');
@@ -463,7 +638,7 @@ function showInspector(show: boolean) {
   inspectorHidden = !show;
   stage.classList.toggle('inspector-hidden', !show);
   stage.classList.toggle('show-inspector', show);
-  reflectInspector();
+  reflectInspector(); sidebarResize.refresh(); contextResize.refresh();
   if (!show) $('#inspector-toggle').focus();
   else if (window.innerWidth <= 1010) $('#inspector-close').focus();
 }
@@ -473,6 +648,56 @@ function reflectInspector() {
   $('#context-scrim').hidden = !shown || window.innerWidth > 1010;
 }
 $('#inspector-close').addEventListener('click', () => showInspector(false));
+type InfoTab = 'context' | 'commands' | 'files';
+let infoTab: InfoTab = 'context';
+function showInfoTab(tab: InfoTab) {
+  infoTab = tab;
+  for (const name of ['context', 'commands', 'files'] as const) {
+    const active = name === tab;
+    const button = $<HTMLButtonElement>(`#info-${name}-tab`);
+    button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+    $(`#info-${name}`).hidden = !active;
+  }
+  showInspector(true);
+  if (tab === 'context') refreshCurrentProjection();
+  if (tab === 'commands' && state.mode === 'live' && state.connected) action({ action: 'scope', ...(scope ? { project: scope } : {}) });
+}
+
+async function runWorkspaceCommand(name: string, argument: string) {
+  if (name === '/') { showInfoTab('commands'); return; }
+  if (name === '/project') {
+    if (!argument.trim()) throw new Error('Use /project <name>.');
+    if (!state.projects.some(row => row.name === argument.trim())) throw new Error('Choose a project listed in the sidebar.');
+    await chooseScope(argument.trim()); return;
+  }
+  if (!desktopCommands.some(([command]) => command === name)) throw new Error(`Unknown command: ${name}. Use /help to see available commands.`);
+  if (argument.trim()) throw new Error(`${name} does not take arguments. Use /help to see available commands.`);
+  if (['/help', '/commands', '/skills', '/orchestrations'].includes(name)) { showInfoTab('commands'); return; }
+  if (name === '/new') { await newConversation(); return; }
+  if (name === '/bots') { $('#agent-identity').setAttribute('open', ''); agentSelect.focus(); return; }
+  if (name === '/projects') { setSidebar(false); setProjectsCollapsed(false); $('#conversation-filter').focus(); return; }
+  if (name === '/conversations') { $('#navigation-open').click(); return; }
+  if (name === '/context') { showInfoTab('context'); return; }
+  if (name === '/earlier') { await loadHistory(selected, state.history[selected]?.oldest); return; }
+  if (name === '/refresh') { await request({ action: 'scope', ...(scope ? { project: scope } : {}) }); await request({ action: 'refresh' }); await loadHistory(); return; }
+  if (name === '/cancel') {
+    const job = selectedJob(); if (!job || !activeJob(job)) throw new Error('This conversation has no active chat job.');
+    await request({ action: 'cancel', job: job.id }); return;
+  }
+  const button = ({ '/log': '#trajectory-open', '/trajectory': '#trajectory-open', '/inbox': '#inbox-open', '/runs': '#runs-open', '/schedule': '#schedules-open', '/memory': '#memories-open', '/board': '#board-open', '/swarm': '#swarm-open', '/usage': '#usage-open', '/approvals': '#controls-button' } as Record<string, string>)[name];
+  if (button) $(button).click();
+}
+for (const name of ['context', 'commands', 'files'] as const) {
+  const button = $<HTMLButtonElement>(`#info-${name}-tab`);
+  button.addEventListener('click', () => showInfoTab(name));
+  button.addEventListener('keydown', event => {
+    const tabs: InfoTab[] = ['context', 'commands', 'files'];
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : event.key === 'ArrowRight' ? (tabs.indexOf(infoTab) + 1) % 3 : event.key === 'ArrowLeft' ? (tabs.indexOf(infoTab) + 2) % 3 : -1;
+    if (next < 0) return;
+    event.preventDefault(); showInfoTab(tabs[next]!); $(`#info-${tabs[next]}-tab`).focus();
+  });
+}
+
 $('#context-scrim').addEventListener('click', () => showInspector(false));
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !dialog.open && !navigation?.isOpen() && window.innerWidth <= 1010 && $('#inspector-toggle').getAttribute('aria-expanded') === 'true') { event.preventDefault(); showInspector(false); }
@@ -491,21 +716,65 @@ grip.addEventListener('keydown', event => {
   if (docked || expanded || !event.key.startsWith('Arrow')) return;
   event.preventDefault(); offset.x = clamp(offset.x + (event.key === 'ArrowRight' ? 4 : event.key === 'ArrowLeft' ? -4 : 0)); offset.y = clamp(offset.y + (event.key === 'ArrowDown' ? 4 : event.key === 'ArrowUp' ? -4 : 0)); move();
 });
+function persistLayout() {
+  try { localStorage.setItem('plowshare.desktop.layout.v1', JSON.stringify({ sidebarHidden, projectsCollapsed, personalCollapsed, personalConversationsCollapsed, personalBotsCollapsed })); } catch { /* Keep the visible choice. */ }
+}
 function setSidebar(hidden: boolean) {
   sidebarHidden = hidden;
   $('.workspace').classList.toggle('sidebar-hidden', hidden); $('#sidebar').hidden = hidden;
   $('#sidebar-toggle').setAttribute('aria-expanded', String(!hidden));
   $('#sidebar-toggle').setAttribute('aria-label', hidden ? 'Show sidebar' : 'Hide sidebar');
   $('#sidebar-toggle').title = `${hidden ? 'Show' : 'Hide'} sidebar · ⌘/Ctrl B`;
-  try { localStorage.setItem('plowshare.desktop.layout.v1', JSON.stringify({ sidebarHidden: hidden })); } catch { /* The view still changes when profile storage is unavailable. */ }
+  persistLayout();
   reflectInspector(); fitDraft(); reflectLatest();
 }
-try { sidebarHidden = JSON.parse(localStorage.getItem('plowshare.desktop.layout.v1') ?? '{}').sidebarHidden === true; } catch { /* Use the workspace layout. */ }
+try { const layout = JSON.parse(localStorage.getItem('plowshare.desktop.layout.v1') ?? '{}'); sidebarHidden = layout.sidebarHidden === true; projectsCollapsed = layout.projectsCollapsed === true; personalCollapsed = layout.personalCollapsed === true; personalConversationsCollapsed = layout.personalConversationsCollapsed === true; personalBotsCollapsed = layout.personalBotsCollapsed !== false; } catch { /* Use the workspace layout. */ }
 setSidebar(sidebarHidden);
-$('#information-button').addEventListener('click',()=>{try{information.open();}catch(reason){error(reason instanceof Error?reason.message:String(reason));}});
+function setProjectsCollapsed(collapsed: boolean) {
+  projectsCollapsed = collapsed;
+  $('#sidebar').classList.toggle('projects-collapsed', collapsed);
+  $('#sidebar-projects').hidden = collapsed;
+  $('#projects-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('#project-add').hidden = collapsed;
+  persistLayout();
+}
+setProjectsCollapsed(projectsCollapsed);
+$('#projects-toggle').addEventListener('click', () => setProjectsCollapsed(!projectsCollapsed));
+function setPersonalCollapsed(collapsed: boolean) {
+  personalCollapsed = collapsed;
+  $('#personal-contents').hidden = collapsed;
+  $('#personal-toggle').setAttribute('aria-expanded', String(!collapsed));
+  persistLayout();
+}
+setPersonalCollapsed(personalCollapsed);
+$('#personal-toggle').addEventListener('click', () => setPersonalCollapsed(!personalCollapsed));
+function reflectPersonalSections() {
+  $('#personal-conversations').hidden = personalConversationsCollapsed;
+  $('#personal-conversations-toggle').setAttribute('aria-expanded', String(!personalConversationsCollapsed));
+  $('#personal-bots').hidden = personalBotsCollapsed;
+  $('#personal-bots-toggle').setAttribute('aria-expanded', String(!personalBotsCollapsed));
+}
+reflectPersonalSections();
+$('#personal-conversations-toggle').addEventListener('click', () => { personalConversationsCollapsed = !personalConversationsCollapsed; reflectPersonalSections(); persistLayout(); });
+$('#personal-bots-toggle').addEventListener('click', () => { personalBotsCollapsed = !personalBotsCollapsed; reflectPersonalSections(); persistLayout(); if (!personalBotsCollapsed) void refreshPersonalBots(); });
+const sidebarResize = installPaneResize({
+  container: $('.workspace'), pane: $('#sidebar'), other: $('.main-area'),
+  key: 'sidebar', label: 'Resize navigation sidebar', property: '--sidebar-width', minimum: 200,
+  maximum: () => Math.min(480, $('.workspace').clientWidth - (window.innerWidth > 1010 && getComputedStyle($('#inspector')).display !== 'none' ? 700 : 520)),
+});
+const contextResize = installPaneResize({
+  container: stage, pane: $('#inspector'), other: chat, side: 'right',
+  key: 'context', label: 'Resize Info panel', property: '--context-width', minimum: 220,
+  maximum: () => {
+    const style = getComputedStyle(stage);
+    const space = window.innerWidth <= 1010 ? 40 : parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.columnGap) + 350;
+    return Math.min(520, stage.clientWidth - space);
+  },
+});
+
 $('#sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarHidden));
 document.addEventListener('keydown', event => {
-  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.isComposing || document.querySelector('dialog[open]') || navigation?.isOpen()) return;
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.isComposing || document.querySelector('dialog:modal') || navigation?.isOpen()) return;
   if (event.key.toLowerCase() === 'n') { event.preventDefault(); void newConversation(); }
   if (event.key.toLowerCase() === 'b') {
     event.preventDefault();
@@ -518,23 +787,24 @@ navigation = installNavigation((): NavigationItem[] => {
   const available = state.mode === 'demo' || state.connected;
   return [
     ...[...state.conversations].sort((a, b) => Number(b.id === selected) - Number(a.id === selected)).map(row => ({
-      id: `conversation:${row.id}`, title: title(row.id), detail: `${row.project || 'Global workspace'}${row.id === selected ? ' · Current' : ''}`,
+      id: `conversation:${row.id}`, title: title(row.id), detail: `${scopeName(row.project ?? '')}${row.id === selected ? ' · Current' : ''}`,
       group: 'Conversations' as const, icon: 'message' as const, run: async () => { await choose(row.id); draft.focus(); },
     })),
-    ...['', ...state.projects.map(row => row.name)].map(name => ({
-      id: `workspace:${name}`, title: name || 'Global workspace', detail: name === scope ? 'Current workspace' : 'Switch workspace',
+    ...state.projects.map(row => row.name).map(name => ({
+      id: `workspace:${name}`, title: scopeName(name), detail: name === scope ? 'Current workspace' : 'Switch workspace',
       group: 'Workspaces' as const, icon: 'folder' as const, disabled: !available,
       run: async () => { await chooseScope(name); draft.focus(); },
     })),
-    { id: 'new', title: 'New conversation', detail: scope || 'Global workspace', group: 'Actions', icon: 'plus', shortcut: '⌘/Ctrl N', disabled: !available || busy, run: newConversation },
-    { id: 'compose', title: 'Focus message', detail: 'Return to your draft', group: 'Actions', icon: 'message', run: () => draft.focus() },
+    { id: 'new', title: 'New conversation', detail: scopeName(scope), group: 'Actions', icon: 'plus', shortcut: '⌘/Ctrl N', disabled: !available || busy, run: newConversation },
+    { id: 'compose', title: 'Focus message', detail: 'Return to your draft', group: 'Actions', icon: 'message', run: async () => { await request({ action: 'workspace-chat' }); draft.focus(); } },
     { id: 'board', title: 'Open board', detail: 'Inspect topics, messages and decisions', group: 'Actions', icon: 'layers', run: () => action({ action: 'board-inspection', view: 'board', ...(scope ? { project: scope } : {}) }) },
-    { id: 'swarm', title: 'Open swarm', detail: 'Inspect active seats and the model queue', group: 'Actions', icon: 'activity', run: () => action({ action: 'board-inspection', view: 'swarm', ...(scope ? { project: scope } : {}) }) },
-    { id: 'trajectory', title: 'Open trajectory', detail: 'Inspect this conversation in its own window', group: 'Actions', icon: 'route', disabled: !selected, run: () => action({ action: 'trajectory', conversation: selected }) },
-    { id: 'context', title: 'Toggle context panel', detail: 'Model usage, agent and sources', group: 'Actions', icon: 'panel', run: () => $('#inspector-toggle').click() },
+    { id: 'swarm', title: 'Open swarm', detail: 'Inspect active seats and the model queue', group: 'Actions', icon: 'swarm', run: () => action({ action: 'board-inspection', view: 'swarm', ...(scope ? { project: scope } : {}) }) },
+    { id: 'trajectory', title: 'Open trajectory', detail: 'Inspect this conversation’s recorded steps', group: 'Actions', icon: 'route', disabled: !selected, run: () => action({ action: 'trajectory', conversation: selected }) },
+    { id: 'usage', title: 'Usage', detail: 'Recorded calls, tokens and costs on this server', group: 'Actions', icon: 'activity', run: () => action({action:'usage'}) },
+    { id: 'context', title: 'Toggle Info panel', detail: 'Current constructed projection and offered tools', group: 'Actions', icon: 'panel', run: async () => { await request({ action: 'workspace-chat' }); $('#inspector-toggle').click(); } },
     { id: 'sidebar', title: sidebarHidden ? 'Show sidebar' : 'Hide sidebar', detail: 'Conversation navigation', group: 'Actions', icon: 'sidebar', shortcut: '⌘/Ctrl B', run: () => setSidebar(!sidebarHidden) },
     { id: 'files', title: 'Project files', detail: 'Connect or disconnect a local folder', group: 'Actions', icon: 'folder', run: () => $('#files-open').click() },
-    { id: 'connection', title: 'Connection settings', detail: state.mode === 'demo' ? 'Connect a Plowshare server' : state.base, group: 'Actions', icon: 'server', run: openConnect },
+    { id: 'connection', title: 'Connection settings', detail: state.mode === 'demo' ? 'Connect your server' : state.base, group: 'Actions', icon: 'server', run: openConnect },
   ];
 }, error);
 $('#connection-form').addEventListener('submit', async event => {
@@ -552,14 +822,14 @@ $('#connection-form').addEventListener('submit', async event => {
 $('#use-demo').addEventListener('click', async () => { await request({ action: 'demo' }); dialog.close(); });
 $('#disconnect').addEventListener('click', async () => { await request({ action: 'disconnect' }); dialog.close(); });
 window.plowshare.subscribe(update);
-void request({ action: 'bootstrap' }).then(async () => {
+void request({ action: 'bootstrap' }).then(async reply => {
+  if (reply.route) showWorkspace(reply.route);
   if (state.mode === 'live' && state.connected) {
     await request({ action: 'scope', ...(scope ? { project: scope } : {}) });
     await loadHistory();
   }
 }).catch(reason => error(reason.message));
 
-const filesDialog = $<HTMLDialogElement>('#files-dialog');
 const renderSync = installSync(request);
 let filePicking = false;
 let addingProject = false;
@@ -606,9 +876,8 @@ function renderFiles() {
   $<HTMLButtonElement>('#files-withdraw').disabled = filePicking;
   $<HTMLButtonElement>('#files-choose').disabled = filePicking || files.status === 'opening' || !state.connected;
 }
-$('#project-add').addEventListener('click', () => { addingProject = true; $('#files-error').hidden = true; renderFiles(); filesDialog.showModal(); });
-$('#files-open').addEventListener('click', () => { deniedFileAccess.delete(fileAccessKey()); addingProject = false; $('#files-error').hidden = true; renderFiles(); filesDialog.showModal(); });
-$('#files-close').addEventListener('click', () => filesDialog.close());
+$('#project-add').addEventListener('click', async () => { await request({action:'workspace-chat'}); addingProject = true; $('#files-error').hidden = true; renderFiles(); showInfoTab('files'); });
+$('#files-open').addEventListener('click', async () => { await request({action:'workspace-chat'}); deniedFileAccess.delete(fileAccessKey()); addingProject = false; $('#files-error').hidden = true; renderFiles(); showInfoTab('files'); });
 $('#file-access-allow').addEventListener('click', async () => {
   const project = scope;
   const saved = state.projectFolders?.some(row => row.name === project);
@@ -639,7 +908,7 @@ $('#files-choose').addEventListener('click', async () => {
   filePicking = true; $('#files-error').hidden = true; renderFiles();
   try {
     const reply = await request({ action: 'files-choose', ...(!addingProject && scope ? { project: scope } : {}) });
-    if (reply.rootProject) { await chooseScope(reply.rootProject); filesDialog.close(); }
+    if (reply.rootProject) { await chooseScope(reply.rootProject); addingProject = false; renderFiles(); }
   } catch (error) { $('#files-error').textContent = String(error); $('#files-error').hidden = false; }
   finally { filePicking = false; renderFiles(); }
 });
@@ -659,5 +928,97 @@ for (const [selector, actionName] of [['#files-reopen', 'project-open'], ['#file
   });
 }
 
-const operatorControls = installOperator(window.plowshare, () => state, () => scope);
-$('#controls-button').addEventListener('click', () => { try { operatorControls.open(); } catch (reason) { error(reason instanceof Error ? reason.message : String(reason)); } });
+const operatorControls = installOperator(window.plowshare, () => state, () => scope, { host: $('#workspace-manage'), close: () => action({ action: 'workspace-chat' }) });
+$('#workspace-manage').classList.add('workspace-manage');
+$('#controls-button').addEventListener('click', () => {
+  if (!state.connected) { error('Connect to manage work.'); return; }
+  action({ action: 'workspace-chat', manage: true });
+});
+
+function renderBreadcrumb() {
+  const trajectory = workspaceRoute.kind === 'trajectory';
+  $('#scope-caption').textContent = personalVisible ? 'Personal' : scopeName(workspaceRoute.kind === 'chat' ? scope : workspaceRoute.project ?? scope);
+  const caption = $<HTMLButtonElement>('#title-caption');
+  caption.textContent = personalVisible ? personalSectionName(state.personal?.section ?? 'Personal') : trajectory ? workspaceRoute.title ?? 'Conversation' : workspaceRoute.kind === 'chat' ? selected ? title(selected) : 'New conversation' : workspaceRoute.label;
+  caption.disabled = workspaceRoute.kind !== 'chat' && (!trajectory || !state?.conversations.some(row => row.id === workspaceRoute.conversation));
+  caption.title = trajectory ? 'Return to conversation' : caption.disabled ? workspaceRoute.label : 'Conversation';
+  $('#view-divider').hidden = !trajectory; $('#view-caption').hidden = !trajectory;
+  $('#view-caption').textContent = workspaceRoute.label;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.account-navigation button')) {
+    const current = button.id === ({ Mailbox: 'inbox-open', Runs: 'runs-open', Definitions: 'studio-open', 'Orchestration builder': 'studio-open', 'Scheduled work': 'schedules-open', Memories: 'memories-open', Library: 'library-open', Usage: 'usage-open', Board: 'board-open', Swarm: 'swarm-open', 'Manage work': 'controls-button' } as Record<string, string>)[workspaceRoute.label];
+    if (current) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+  }
+}
+let layoutFrame = 0, layoutStamp = '';
+function reportWorkspaceLayout() {
+  if (layoutFrame) return;
+  layoutFrame = requestAnimationFrame(() => {
+    layoutFrame = 0;
+    const bounds = $('#workspace-view-host').getBoundingClientRect();
+    const layout = { action: 'workspace-layout' as const, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+      visible: !['chat', 'manage'].includes(workspaceRoute.kind) && !document.querySelector('dialog:modal') };
+    const stamp = JSON.stringify(layout); if (stamp === layoutStamp) return;
+    layoutStamp = stamp;
+    void window.plowshare.request(layout).catch(reason => error(reason.message));
+  });
+}
+function showWorkspace(route: WorkspaceRoute) {
+  const changed = JSON.stringify(route) !== JSON.stringify(workspaceRoute);
+  if (!changed) return;
+  workspaceRoute = route;
+  if (route.kind !== 'chat') personalVisible = false;
+  renderPersonal();
+  $('#workspace-view-host').hidden = route.kind === 'chat';
+  $('#workspace-manage').hidden = route.kind !== 'manage';
+  $('#inspector-toggle').hidden = route.kind !== 'chat';
+  if (changed) {
+    if (route.kind === 'manage') { try { operatorControls.open(); } catch (reason) { error(String(reason)); } }
+    else operatorControls.close();
+    if (route.kind === 'chat') { signature = ''; render(); }
+  }
+  renderBreadcrumb(); reportWorkspaceLayout();
+}
+$('#scope-caption').addEventListener('click', () => void chooseScope(workspaceRoute.project ?? scope));
+$('#title-caption').addEventListener('click', () => {
+  if (workspaceRoute.kind === 'trajectory' && workspaceRoute.conversation) void choose(workspaceRoute.conversation);
+});
+window.plowshare.subscribeWorkspace?.(message => {
+  if (message.route) showWorkspace(message.route);
+  if (message.shortcut) document.dispatchEvent(new KeyboardEvent('keydown', { key: message.shortcut, ctrlKey: true, bubbles: true }));
+});
+new ResizeObserver(reportWorkspaceLayout).observe($('#workspace-view-host'));
+const modalLayout = new MutationObserver(reportWorkspaceLayout);
+modalLayout.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open', 'hidden'] });
+window.addEventListener('resize', reportWorkspaceLayout);
+
+$('#server-setup').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('#server-setup'); button.disabled = true;
+  const temporaryPassword = $<HTMLInputElement>('#setup-temporary').value;
+  const password = $<HTMLInputElement>('#setup-password').value, repeated = $<HTMLInputElement>('#setup-repeat').value;
+  for (const id of ['setup-temporary', 'setup-password', 'setup-repeat']) $<HTMLInputElement>('#' + id).value = '';
+  try {
+    if (password !== repeated) throw new Error('The administrator passwords did not match.');
+    await request({ action: 'server-setup', base: $<HTMLInputElement>('#server-url').value, temporaryPassword, handle: $<HTMLInputElement>('#setup-handle').value, password });
+    dialog.close();
+  } catch (reason) { $('#connect-error').textContent = reason instanceof Error ? reason.message : String(reason); $('#connect-error').hidden = false; }
+  finally { button.disabled = false; }
+});
+$('#server-project-add').addEventListener('click', () => { $('#server-project-error').hidden = true; $<HTMLSelectElement>('#server-project-type').value = 'MANAGED'; $<HTMLInputElement>('#server-project-writes').value = '.'; $<HTMLInputElement>('#server-project-workspace').required = false; $('#server-project-path-note').textContent = 'Leave the path blank to provision a server workspace.'; $<HTMLDialogElement>('#server-project-dialog').showModal(); });
+$('#server-project-type').addEventListener('change', () => {
+  const disjoint = $<HTMLSelectElement>('#server-project-type').value === 'DISJOINT';
+  $<HTMLInputElement>('#server-project-workspace').required = disjoint;
+  $<HTMLInputElement>('#server-project-writes').value = disjoint ? '' : '.';
+  $('#server-project-path-note').textContent = disjoint ? 'Choose an existing server checkout managed by your pipeline. Plowshare will not sync it to clients.' : 'Leave the path blank to provision a server workspace.';
+});
+$('#server-project-close').addEventListener('click', () => $<HTMLDialogElement>('#server-project-dialog').close());
+$('#server-project-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = $<HTMLFormElement>('#server-project-form'), button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  button.disabled = true;
+  try {
+    await request({ action: 'server-project-create', name: $<HTMLInputElement>('#server-project-name').value, workspace: $<HTMLInputElement>('#server-project-workspace').value, type: $<HTMLSelectElement>('#server-project-type').value as 'MANAGED' | 'DISJOINT', writePaths: $<HTMLInputElement>('#server-project-writes').value.split(',').map(path => path.trim()).filter(Boolean) });
+    $<HTMLDialogElement>('#server-project-dialog').close(); form.reset();
+  } catch (reason) { $('#server-project-error').textContent = reason instanceof Error ? reason.message : String(reason); $('#server-project-error').hidden = false; }
+  finally { button.disabled = false; }
+});
+
+document.querySelector('#conversations')!.addEventListener('click', event => {const button=(event.target as Element).closest<HTMLElement>('[data-project-access]');if(button?.dataset.projectAccess) projectAccess.open(button.dataset.projectAccess);});

@@ -4,6 +4,9 @@ Development launcher: `bin/plowshare-cli`. It uses the shared TypeScript client'
 WS operations and runs without a TTY, Ink, React or Electron. The existing
 `bin/plowshare` server and `bin/plowshare-talk` launchers remain available.
 
+For `outgoing send`, `outgoing peers`, `outgoing status` and `outgoing cancel`,
+follow the [A2A sending manual](../docs/a2a-sending.md).
+
 Build from the repository root with Node 22.12+ and the pinned pnpm:
 
 ```sh

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -15,7 +17,7 @@ const inspections = JSON.parse(await readFile(new URL('../../test-support/contra
 const conversations = JSON.parse(await readFile(new URL('../../test-support/contracts/ws-conversation-fixtures.json', import.meta.url), 'utf8')) as Record<string, Outcome>
 const retrieval = (JSON.parse(await readFile(new URL('../../test-support/contracts/ws-retrieval-fixtures.json', import.meta.url), 'utf8')) as { replies: Record<string, Record<string, unknown> | unknown[]> }).replies
 
-async function fixture(script: Script, flagged = false, refuseLogin = false) {
+async function fixture(script: Script, flagged = false, refuseLogin = false, machineCredential?: string) {
     const paths: string[] = [], frames: Frame[] = [], sessions: string[] = []
     let seen: ((frame: Frame) => void) | undefined
     const server = createServer(async (req, res) => {
@@ -31,7 +33,8 @@ async function fixture(script: Script, flagged = false, refuseLogin = false) {
             assert.equal(req.headers.cookie, 'ps_refresh=fixture-refresh-secret')
             res.writeHead(204, { 'Set-Cookie': ['ps_access=renewed-access-secret; Path=/', 'ps_refresh=renewed-refresh-secret; Path=/'] }).end()
         } else if (req.url === '/v1/auth/ticket') {
-            assert.equal(req.headers.authorization, 'Bearer renewed-access-secret')
+            assert.equal(req.headers.authorization, 'Bearer ' + (machineCredential ?? 'renewed-access-secret'))
+            if (machineCredential === 'pss_revoked-test') { res.writeHead(401).end(); return }
             res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ticket: 'ticket-secret' }))
         } else res.writeHead(404).end()
     })
@@ -73,7 +76,7 @@ async function fixture(script: Script, flagged = false, refuseLogin = false) {
 
 function cli(base: string, args: string[], input = '', extraEnv: Record<string, string> = {}) {
     const child = spawn(process.execPath, [main, '--url', base, ...args], {
-        env: { ...process.env, PLOWSHARE_HANDLE: 'fixture', PLOWSHARE_PASSWORD: 'fixture-password-secret', PLOWSHARE_PROJECT: '', ...extraEnv },
+        env: { ...process.env, PLOWSHARE_TOKEN: '', PLOWSHARE_HANDLE: 'fixture', PLOWSHARE_PASSWORD: 'fixture-password-secret', PLOWSHARE_PROJECT: '', ...extraEnv },
         stdio: ['pipe', 'pipe', 'pipe'],
     })
     let stdout = '', stderr = ''
@@ -349,6 +352,14 @@ test('broader operator commands use native WS with server fields, scope and full
         ['document search', 'document.search', { query: 'x', mode: 'LEXICAL' }, 0],
         ['web search', 'web.search', { query: 'x', pageSize: 10, max: 20, page: 2 }, 1],
         ['web fetch', 'web.fetch', { url: 'https://example.com', offset: 809 }, 0],
+        ['admin accounts', 'admin.accounts', {}, 0],
+        ['admin account create', 'admin.account.create', { handle: 'member', serverAdmin: false }, 0],
+        ['admin account update', 'admin.account.update', { handle: 'member', enabled: false }, 0],
+        ['admin account reset', 'admin.account.reset', { handle: 'member' }, 0],
+        ['admin sessions', 'admin.sessions', { handle: 'member' }, 0],
+        ['admin session revoke', 'admin.session.revoke', { handle: 'member' }, 0],
+        ['admin audit', 'admin.audit', { limit: 25, before: 0 }, 0],
+        ['project create', 'project.create', { name: 'integration', type: 'DISJOINT', workspace: '/server/pipeline', writePaths: ['generated', 'reports'] }, 0],
         ['project list', 'project.list', {}, 0],
         ['project define', 'project.define', { name: 'p', workspace: '/server/work', lent: ['/server/extra'], exclusions: ['private'] }, 0],
         ['project lend', 'project.lend', { project: 'p', roots: ['/server/extra'] }, 0],
@@ -356,6 +367,8 @@ test('broader operator commands use native WS with server fields, scope and full
         ['project workspace', 'project.workspace', { project: 'p', workspace: '/server/new' }, 0],
         ['project move', 'project.move', { project: 'p', to: 'renamed' }, 0],
         ['project forget', 'project.forget', { project: 'p' }, 0],
+        ['project access', 'project.access', { project: 'p' }, 0],
+        ['project member-role', 'project.member.role', { project: 'p', handle: 'member', role: 'VIEWER' }, 0],
         ['project member-add', 'project.member.add', { project: 'p', handle: 'member' }, 0],
         ['project member-remove', 'project.member.remove', { project: 'p', handle: 'member' }, 0],
     ]
@@ -737,5 +750,57 @@ test('orchestration wait exposes asking questions and detaches on interruption',
         const reply=JSON.parse(result.stdout);assert.equal(reply.orchestration,'orc_one');assert.equal(reply.code,'INTERRUPTED')
         assert.ok(fake.frames.every(f=>f.type==='orchestration.status'))
         assert.equal(reply.nextActions[0].action,'inspect')
+    } finally {await fake.close()}
+})
+
+
+test('service automation uses its bearer without login, refresh or credential persistence', {timeout:10000}, async () => {
+    const directory=await mkdtemp(join(tmpdir(),'plowshare-service-cli-'))
+    const fake=await fixture(frame=>frame.type==='admin.status' ? {code:'OK',payload:{handle:'@service/fixture-token',serverAdmin:false}} : conversations['project.list']!,false,false,'pss_machine-test')
+    try {
+        const result=await cli(fake.base,['project','list','--json'],'',{PLOWSHARE_TOKEN:'pss_machine-test',PLOWSHARE_CONFIG_DIR:directory}).done
+        assert.equal(result.code,0,result.stdout+result.stderr)
+        assert.deepEqual(fake.paths,['/v1/auth/ticket'])
+        assert.deepEqual(fake.frames.map(row=>row.type),['admin.status','project.list'])
+        assert.deepEqual(await readdir(directory),[])
+        assert.ok(!(result.stdout+result.stderr).includes('pss_machine-test'))
+    } finally {await fake.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('revoked machine credentials fail without falling back to a saved or password login', {timeout:10000}, async () => {
+    const fake=await fixture(()=>{throw new Error('No frame should be submitted')},false,false,'pss_revoked-test')
+    try {
+        const result=await cli(fake.base,['project','list','--json'],'',{PLOWSHARE_TOKEN:'pss_revoked-test'}).done
+        assert.notEqual(result.code,0)
+        assert.deepEqual(fake.paths,['/v1/auth/ticket']);assert.equal(fake.frames.length,0)
+        assert.ok(!(result.stdout+result.stderr).includes('pss_revoked-test'))
+    } finally {await fake.close()}
+})
+
+test('pricing list and set run once over authenticated WS and retain stale-edit failures', { timeout: 10000 }, async () => {
+    const fake = await fixture(frame => frame.type === 'admin.pricing.list' ? conversations['admin.pricing.list']! : {code:'BAD_REQUEST',said:'Pricing changed; refresh before saving'})
+    try {
+        const listed=await cli(fake.base,['admin','pricing','list','--json']).done
+        assert.equal(listed.code,0,listed.stdout+listed.stderr)
+        assert.equal(JSON.parse(listed.stdout).outcome.payload[0].billingRoute,'hosted')
+        const payload={billingRoute:'hosted',model:'deployment',expectedVersion:'boot:',mode:'TOKEN',currency:'USD',rates:{input:'0.40',output:'1.60'}}
+        const saved=await cli(fake.base,['admin','pricing','set',JSON.stringify(payload),'--json']).done
+        assert.equal(saved.code,1,saved.stdout+saved.stderr)
+        assert.deepEqual(fake.frames.map(frame => frame.type),['admin.pricing.list','admin.pricing.set'])
+        assert.deepEqual(fake.frames[1]!.payload,payload)
+        noSecrets(listed.stdout+saved.stdout)
+    } finally { await fake.close() }
+})
+
+test('usage statistics can be queried from the CLI over WS', {timeout:10000}, async () => {
+    const totals={calls:'1',attempts:'1',active_calls:'0',incomplete_attempts:'0',unknown_cost_attempts:'0',input_tokens:'100',output_tokens:'10',input_tokens_known:'1',output_tokens_known:'1',costs:{USD:'0.000056'},usage_complete:true,cost_complete:true,complete:true}
+    const fake=await fixture(frame => ({code:'OK',payload:{filters:{type:frame.type,filter:frame.payload},totals,groups:[],cursor:null,health:{watermark:'1',as_of:'2026-10-04T00:00:00Z',capture_enabled:true,historical_usage:'retained'}}}))
+    try {
+        for (const command of [['usage','models'],['usage','pools'],['usage','project','{"project":"automation"}']]) {
+            const result=await cli(fake.base,[...command,'--json']).done
+            assert.equal(result.code,0,result.stdout+result.stderr)
+            assert.equal(JSON.parse(result.stdout).outcome.payload.totals.input_tokens,'100')
+        }
+        assert.deepEqual(fake.frames.map(frame => frame.type),['usage.models','usage.pools','usage.project'])
     } finally {await fake.close()}
 })

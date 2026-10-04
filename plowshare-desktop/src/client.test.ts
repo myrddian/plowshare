@@ -1,4 +1,4 @@
-import { agentWire, conversationWire, entryWire, entryPageWire, contextWire, approvalWire } from './wire-fixtures.ts';
+import { projectWire, agentWire, conversationWire, entryWire, entryPageWire, contextWire, approvalWire } from './wire-fixtures.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DesktopClient, validatedBase } from './client.ts';
@@ -10,6 +10,7 @@ function fixture() {
   let push: (value: unknown) => void = () => {};
   let closed: () => void = () => {};
   let calls: { type: string; payload: Record<string, unknown> }[] = [];
+  let onWorkflow: (payload: Record<string, unknown>) => Promise<Outcome> = async payload => ({code:'ACCEPTED',payload:{id:'orc_fixture',state:'running',requestId:payload.requestId}});
   let onRun: (payload: Record<string, unknown>) => Promise<Outcome> = async () => ({ code: 'ACCEPTED', payload: { id: 'job-one' } });
   let onStatus: (payload: Record<string, unknown>) => Outcome | Promise<Outcome> = payload => ({ code: 'OK', payload: { id: payload.job, state: 'RUNNING' } });
   let onHistory: () => Outcome = () => ({ code: 'OK', payload: entryPageWire() });
@@ -17,6 +18,8 @@ function fixture() {
   let onApproval: () => Outcome | Promise<Outcome> = () => ({ code: 'OK' });
   let onInformation: (type: string,payload: Record<string,unknown>) => Outcome | Promise<Outcome> = () => ({code:"OK",payload:[]});
   let projects: unknown = [];
+  let serverAdmin = false;
+  let onAdmin: (type: string,payload: Record<string,unknown>) => Outcome | Promise<Outcome> = () => ({code:'OK',payload:[]});
   let onAgents: () => Outcome | Promise<Outcome> = () => ({ code: 'OK', payload: [agentWire()] });
   let onApprovals: (() => Outcome) | undefined;
   let onContext: (payload: Record<string, unknown>) => Outcome | Promise<Outcome> = () => ({ code: 'OK', payload: contextWire() });
@@ -25,18 +28,22 @@ function fixture() {
   let onUsage: (type:string,payload:Record<string,unknown>)=>Promise<Outcome>|Outcome=()=>({code:'OK'});
   const connector: Connector = async (_base, _handle, _password, incoming, gone) => {
     push = incoming; closed = gone;
-    return { session: 'desktop-session', connection: {
+    return { session: 'desktop-session', serverAdmin, connection: {
       close() {},
       async ask(type, unknownPayload) {
         const payload = (unknownPayload ?? {}) as Record<string, unknown>;
         calls.push({ type, payload });
+        if(type==='admin.status') return {code:'OK',payload:{handle:'fixture',serverAdmin}};
+        if(type.startsWith('admin.') || ['project.access','project.member.role','project.member.add','project.member.remove'].includes(type)) return onAdmin(type,payload);
         if(type.startsWith('usage.'))return onUsage(type,payload);
         if(type.startsWith('information.'))return onInformation(type,payload);
+        if (type === 'orchestration.start') return onWorkflow(payload);
         if (type === 'agent.run') return onRun(payload);
         if (type === 'job.cancel') return { code: 'OK', payload: { id: payload.job, state: 'RUNNING' } };
         if (type === 'job.status') return onStatus(payload);
         if (type === 'conversation.context') return onContext(payload);
         if (type === 'agent.list') return onAgents();
+        if (type === 'project.create') return { code: 'OK', payload: projectWire(String(payload.name), { workspace: String(payload.workspace) }) };
         if (type === 'project.list') return { code: 'OK', payload: projects };
         if (type === 'conversation.list') return { code: 'OK', payload: [conversationWire('first'), conversationWire('second')] };
         if (type === 'conversation.trajectory') return onTrajectory(payload);
@@ -50,7 +57,8 @@ function fixture() {
     } };
   };
   const client = new DesktopClient(() => {}, connector);
-  return { client, calls, agents: (value: typeof onAgents) => { onAgents = value; }, projects: (value: unknown) => { projects = value; }, rawApprovals: (value: () => Outcome) => { onApprovals = value; }, push: (value: unknown) => push(value), closed: () => closed(),
+  return { client, calls, administration: (value: typeof onAdmin) => { onAdmin = value; }, admin: (value: boolean) => { serverAdmin = value; }, agents: (value: typeof onAgents) => { onAgents = value; }, projects: (value: unknown) => { projects = value; }, rawApprovals: (value: () => Outcome) => { onApprovals = value; }, push: (value: unknown) => push(value), closed: () => closed(),
+    workflow: (value: typeof onWorkflow) => { onWorkflow = value; },
     run: (value: typeof onRun) => { onRun = value; }, status: (value: typeof onStatus) => { onStatus = value; },
     usage: (value: typeof onUsage)=>{onUsage=value;},
     information: (value: typeof onInformation) => {onInformation=value;},
@@ -485,11 +493,12 @@ test('a terminal reply missing its identity or answered flag cannot finish a des
 
 test('context measurements use model counts and remain scoped to conversation and agent', async t => {
   const f = fixture(); t.after(() => f.client.dispose()); await connect(f.client);
-  f.context(payload => ({ code: 'OK', payload: contextWire(payload.agent === 'other' ? null : payload.conversation === 'first' ? 15240 : 400, {}, { model: String(payload.agent), contextLength: 131072 }) }));
+  f.context(payload => ({ code: 'OK', payload: contextWire(payload.agent === 'other' ? null : payload.conversation === 'first' ? 15240 : 400, { sentAtTurn: 48 }, { model: String(payload.agent), contextLength: 131072 }) }));
   await f.client.dispatch({ action: 'context', conversation: 'first', agent: 'bot' });
   await f.client.dispatch({ action: 'context', conversation: 'second', agent: 'bot' });
   await f.client.dispatch({ action: 'context', conversation: 'first', agent: 'other' });
   assert.equal(f.client.state.contexts[contextKey('first', 'bot')].sent, 15240);
+  assert.equal(f.client.state.contexts[contextKey('first', 'bot')].sentAtTurn, 48);
   assert.equal(f.client.state.contexts[contextKey('second', 'bot')].sent, 400);
   assert.equal(f.client.state.contexts[contextKey('first', 'other')].sent, undefined);
   assert.equal(f.client.state.contexts[contextKey('first', 'other')].limit, 131072);
@@ -624,4 +633,61 @@ test('restored job status cannot attach another conversation outcome to the save
   assert.equal(f.client.state.jobs[0].status,'unknown');
   assert.equal(f.client.state.jobs[0].text,'');
   assert.equal(f.calls.some(call=>call.type==='agent.run'),false);
+});
+
+
+test('direct workflow starts check the agent grant, preserve the request key and never dispatch a caller turn', async t => {
+  const f=fixture();t.after(()=>f.client.dispose());
+  f.agents(()=>({code:'OK',payload:[agentWire({commands:[{command:'/orchestration:research',aliases:[],kind:'orchestration',name:'research',description:'Research',argumentHint:'Work',executor:'researcher',mode:null,tier:'GLOBAL',hash:'fixture'}]})]}));
+  await connect(f.client);
+  const input={action:'workflow-start' as const,conversation:'first',agent:'bot',definition:'research',text:'Original\nquestion',requestId:'00000000-0000-0000-0000-000000000001'};
+  await assert.rejects(f.client.dispatch({...input,definition:'ungranted'}),/granted/);
+  assert.equal(f.calls.some(call=>call.type==='orchestration.start'),false);
+  let finish!:(answer:Outcome)=>void;
+  f.workflow(()=>new Promise(resolve=>{finish=resolve;}));
+  const launching=f.client.dispatch(input);
+  await assert.rejects(f.client.dispatch(input),/already in progress/);
+  finish({code:'ACCEPTED',payload:{id:'orc_fixture',state:'running',requestId:input.requestId}});
+  assert.match((await launching).notice!,/Follow.*Runs/);
+  assert.deepEqual(f.calls.find(call=>call.type==='orchestration.start')!.payload,{agent:'bot',definition:'research',request:'Original\nquestion',requestId:input.requestId});
+  assert.equal(f.calls.some(call=>call.type==='agent.run'),false);
+});
+
+test('server project creation requires the persisted role and uses one WS mutation', async t => {
+  const f = fixture(); t.after(() => f.client.dispose()); await connect(f.client);
+  await assert.rejects(f.client.dispatch({ action: 'server-project-create', name: 'example', workspace: '/srv/example' }), /administrator/);
+  assert.equal(f.calls.filter(row => row.type === 'project.create').length, 0);
+  f.admin(true); await connect(f.client);
+  f.projects([projectWire('example', { workspace: '/srv/example' })]);
+  await f.client.dispatch({ action: 'server-project-create', name: 'example', workspace: '/srv/example' });
+  assert.deepEqual(f.calls.filter(row => row.type === 'project.create'), [{ type: 'project.create', payload: { name: 'example', workspace: '/srv/example', type: 'MANAGED' } }]);
+  assert.equal(f.client.state.projects.find(row => row.name === 'example')?.workspace, '/srv/example');
+});
+
+
+test('server account operations recheck the role and keep credentials out of state', async () => {
+  const f=fixture(); f.admin(true);
+  await f.client.dispatch({action:'connect',base:'http://127.0.0.1:8091',handle:'fixture',password:'fixture'});
+  const credential={account:{handle:'worker',enabled:true,serverAdmin:false,mustChangePassword:true,createdAt:'2026-10-04T00:00:00Z'},temporaryPassword:'one-time-test-password'};
+  f.administration(()=>({code:'OK',payload:credential}));
+  const reply=await f.client.dispatch({action:'server-admin',operation:'admin.account.create',payload:{handle:'worker'}});
+  assert.deepEqual(reply.administration,credential);
+  assert.ok(!JSON.stringify(reply.state).includes(credential.temporaryPassword));
+  assert.equal(f.calls.filter(row=>row.type==='admin.account.create').length,1);
+  f.admin(false);
+  await assert.rejects(f.client.dispatch({action:'server-admin',operation:'admin.account.reset',payload:{handle:'worker'}}),/administrator/);
+  assert.equal(f.calls.filter(row=>row.type==='admin.account.reset').length,0);
+  f.client.dispose();
+});
+
+
+test('regular project managers use project access commands without server administrator access', async () => {
+  const f=fixture(); await f.client.dispatch({action:'connect',base:'http://fixture.invalid',handle:'fixture',password:'fixture-password'});
+  const access={project:'integration',role:'MANAGER',permissions:['read','work','manage'],members:[{handle:'worker',role:'VIEWER'}],history:[]};
+  f.administration(()=>({code:'OK',payload:access}));
+  const reply=await f.client.dispatch({action:'project-access',operation:'project.member.role',project:'integration',handle:'worker',role:'VIEWER'});
+  assert.deepEqual(reply.administration,access);assert.equal(reply.state.serverAdmin,false);
+  assert.deepEqual(f.calls.filter(row=>row.type==='project.member.role').at(-1)?.payload,{project:'integration',handle:'worker',role:'VIEWER'});
+  f.administration(()=>({code:'BAD_REQUEST',said:'MANAGER access required'}));
+  await assert.rejects(f.client.dispatch({action:'project-access',operation:'project.member.remove',project:'integration',handle:'worker'}),/MANAGER access/);
 });

@@ -39,9 +39,12 @@ services:
       PLOWSHARE_DB_URL: jdbc:postgresql://postgres:5432/plowshare
       PLOWSHARE_DB_USER: plowshare
       PLOWSHARE_DB_PASSWORD_FILE: /run/secrets/database-password
-      PLOWSHARE_ADMIN_HANDLE: ${PLOWSHARE_ADMIN_HANDLE:-admin}
+      PLOWSHARE_ADMIN_HANDLE: ${PLOWSHARE_ADMIN_HANDLE:-}
       PLOWSHARE_ADMIN_PASSWORD_FILE: /run/secrets/admin-password
       PLOWSHARE_AUTH_ENABLED: "true"
+      PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY: /var/lib/plowshare-workspaces
+      PLOWSHARE_PERSONAL_SEND_TO_ANY_PROJECT: ${PLOWSHARE_PERSONAL_SEND_TO_ANY_PROJECT:-true}
+      PLOWSHARE_PERSONAL_ACCEPT_FROM_ANY_PROJECT: ${PLOWSHARE_PERSONAL_ACCEPT_FROM_ANY_PROJECT:-true}
       PLOWSHARE_SEARCH_LADDER: ${PLOWSHARE_SEARCH_LADDER:-}
       PLOWSHARE_SEARCH_TIMEOUT: ${PLOWSHARE_SEARCH_TIMEOUT:-PT20S}
       JAVA_TOOL_OPTIONS: ${PLOWSHARE_JAVA_TOOL_OPTIONS:--Xms256m -Xmx3g -Djava.awt.headless=true}
@@ -50,6 +53,7 @@ services:
       - admin-password
     volumes:
       - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/data:/var/lib/plowshare
+      - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/workspaces:/var/lib/plowshare-workspaces
       - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/config:/etc/plowshare:ro
     ports:
       - ${PLOWSHARE_LISTEN_ADDRESS:-127.0.0.1}:${PLOWSHARE_PUBLISHED_PORT:-8091}:8091

@@ -49,7 +49,7 @@ export function installNavigation(items: () => NavigationItem[], onError: (messa
   }
   function open() {
     if (dialog.open) { input.focus(); return; }
-    if (document.querySelector('dialog[open]')) return;
+    if (document.querySelector('dialog:modal')) return;
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     restoreFocus = true;
     input.value = '';

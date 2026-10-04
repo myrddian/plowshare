@@ -1,5 +1,9 @@
 # Plowshare
 
+Read the [Plowshare manual](docs/manual/README.md) for everyday use, functional
+guides and architecture. Its [Library installer](docs/manual/installation.md)
+retains the Markdown chapters in the server's information system for users and agents.
+
 Plowshare is a general-purpose agent framework with a Java server and shared
 TypeScript clients. It brings conversations, scoped agents, durable memory,
 documents and coordinated workflows into one system. The server owns the work
@@ -15,6 +19,70 @@ pipeline, coding workflows and swarm members are examples you can adapt.
 automated runtime and client checks, but live model quality, research cost and
 some end-to-end workflow acceptance remain open. Treat it as a developing
 framework rather than a production-ready service.
+
+See [server administration](docs/server-administration.md) for account creation, roles, password recovery, session revocation and audit history across the CLI, TUI and desktop.
+
+## First server setup
+
+The server's first start prints a temporary `admin` account and a random password.
+That account can only complete setup. From a client machine, run:
+
+```sh
+plowshare-cli setup --url http://your-server:8091
+```
+
+Enter `admin` and the temporary password, then choose the first administrator's
+handle and a unique password of at least 12 characters. Setup consumes the
+previous account and saves the new login for the CLI, TUI and desktop. The
+administrator and projects persist in the server database. Restarting an
+unfinished setup rotates the temporary password; a completed setup never
+creates another temporary account. Existing password accounts keep their
+administrator role when upgrading.
+
+A server-side project is a scope of work managed by Plowshare's agent framework.
+It groups conversations, memory, agent and orchestration definitions, skills,
+and retained information. A server workspace lets its agents create and update
+files as part of that work. The project remains available after clients disconnect.
+
+Integrations use the SDK to submit agentic or information tasks to the framework
+in a project's scope. The [outbound A2A adapter](plowshare-a2a/README.md) uses that
+SDK. The [Home Assistant binding](plowshare-integration-home-assistant/README.md)
+uses selected state observations and configured actions through the integration
+runtime; a `home-assistant` project can hold its skills, generated files and ongoing tasks.
+
+Project skills live in the server data tree at
+`projects/<project-id>/skills/<skill-name>/SKILL.md`; see
+[Skills and agent rules](docs/skills-and-agent-rules.md). Skills still require
+explicit grants and invocation. Server schedules can drive ongoing work.
+
+An administrator can provision server files with:
+
+```sh
+plowshare-cli project create '{"name":"home-assistant"}'
+```
+
+For a pipeline-managed checkout, use `type: "DISJOINT"`, an existing server
+`workspace`, and explicit `writePaths`, such as `["generated", "reports"]`.
+DISJOINT never syncs to clients and defaults to no server workspace writes.
+The TUI supports `/project create`; the desktop offers **Add server project**.
+`/admin status` shows the server role. Project membership controls who can use
+the framework scope.
+
+The `.plowshare/project` file identifies a checkout by project name. Clients
+can recognize a checkout of a server project without moving its server files
+or enabling sync. See [Project creation, permissions and checkout discovery](docs/projects.md)
+for CLI/TUI/GUI instructions, pipeline ownership and writable-area examples.
+
+Authentication and setup use HTTP before a WebSocket can be opened; the status-only
+`/ready` probe is an operational HTTP exception. Project
+administration uses the authenticated WebSocket. The search-provider helpers
+use the saved administrator login for operational HTTP endpoints that have no
+WebSocket contracts. Build the CLI before running `bin/plowshare-searxng`. First-run setup is enabled by
+the server entrypoint (`plowshare.auth.first-run-setup`). It replaces the legacy
+startup operator-token bypass. Deployments explicitly opting out retain the
+legacy bootstrap mechanism; configured `PLOWSHARE_ADMIN_HANDLE` and
+`PLOWSHARE_ADMIN_PASSWORD` still support initial provisioning with mandatory
+password rotation.
 
 ## What you can build
 
@@ -94,11 +162,27 @@ and [bundled definitions](plowshare-server/src/main/resources/orchestrations).
 
 **Message-board swarms.** A project or server `swarm.md` selects member agents and
 a root model-call budget. Topics retain messages, member conversations, approved
-subtopics and resolutions; a scheduler shares configured swarm slots across
-accounts, topics and members. Current members can read, research and post board
-messages/documents. Definitions with file mutation, command execution, memory
-writes or agent delegation are refused as swarm members. The
+subtopics and resolutions; a scheduler shares swarm slots across
+accounts, topics and members. Each pool defaults to half its chat slots, rounded
+down; an explicit `swarm` count overrides that default, and `swarm: 0` disables it.
+Members run with their normal tools and grants,
+including mutation, execution and delegation when permitted. The default limit per wake is 12 model steps, independently of each agent's
+ordinary turn limit. In the desktop, a failed member offers **Retry member…** with
+an editable step limit; it continues the same conversation within the shared
+remaining budget. Board tools read the current topic with `board_read({})`;
+explicit topic arguments use `bdt_` IDs. The
 [bundled swarm](plowshare-server/src/main/resources/global/swarm.md) is an example.
+
+**Agent and bot messaging.** `send_message` addresses a persistent instance or a
+fresh task instance. The board transport durably queues recipient wakes, supplies
+return addresses, and generates an outcome reply when an expected final reply is
+missing. The harness controls visibility and retains document-input restrictions.
+See [agent messaging](docs/agent-messaging.md).
+For project-to-project delivery, route files and `Personal:<account-name>`
+addresses, see the [Internal project messaging manual](docs/internal-messaging.md).
+Routes can target an existing conversation with `conversation`, or create one
+dedicated log on first use with `retainConversation: true`. Retained route logs
+survive restarts; routes without either option keep the shared default behavior.
 
 **Execution and automation.** Jobs have inspectable status, cancellation and
 bounded model-call allowances. Schedules emit events; triggers start configured
@@ -146,7 +230,6 @@ export LLM_EMBEDDING_MODEL=your-embedding-model
 export SPARK_BASE_URL=http://127.0.0.1:8000/v1
 export SPARK_CHAT_MODEL=your-reasoning-model
 export SYSTEM_MODEL=reasoning
-export PLOWSHARE_ADMIN_HANDLE=admin
 ```
 
 Replace the example endpoints and model IDs. Use `LLM_PROVIDER=lmstudio` for an
@@ -154,17 +237,55 @@ LM Studio endpoint. The shipped database vectors are 768-dimensional; use a
 compatible embedding model and review its input limits. The two chat classes
 can use the same model service, with pool capacity configured for that service.
 
-Supply `PLOWSHARE_DB_PASSWORD`, an initial `PLOWSHARE_ADMIN_PASSWORD`, and any
+Supply `PLOWSHARE_DB_PASSWORD` and any
 `LM_STUDIO_API_KEY` / `SPARK_API_KEY` through your deployment environment or the
 launcher's mode-0600 `~/.config/plowshare/secrets.env` file. This file is sourced
-as shell assignments and belongs outside the checkout. The initial admin password
-must be nonblank and pass the server's placeholder checks. First login requires
-a password change; later boots preserve the account.
+as shell assignments and belongs outside the checkout. Leave the admin seed
+variables unset to use first-run CLI setup. Explicit environment provisioning
+with `PLOWSHARE_ADMIN_HANDLE` and `PLOWSHARE_ADMIN_PASSWORD` remains available;
+those accounts must change their password on first login.
 
 The [shipped application configuration](plowshare-server/src/main/resources/application.yml)
 is the source of truth for defaults. Use a Spring configuration overlay for a
 different pool layout or advanced settings; the
 [example overlay](bin/application-local.example.yml) demonstrates its structure.
+
+To tune prompt latency for your hardware, set `max-context-lengths` inside each
+pool, keyed by its served wire model name. For example, add this to a pool that
+serves `openai/gpt-oss-120b`:
+
+```yaml
+max-context-lengths:
+  "[openai/gpt-oss-120b]": 65536
+```
+
+The effective context is the smaller of the model's reported or configured
+capacity and this maximum. When capacity is unknown, the maximum caps
+`default-context-length`. Folding and the clients' context meters use that same
+ceiling. Smaller budgets fold earlier; the full recorded history stays available.
+This is a working-context budget: a large new message or tool result can overshoot
+before the next fold boundary. `context-lengths` still declares capacity for
+endpoints that cannot report it; changing `default-context-length` alone does not
+cap a model with a known capacity. Spring replaces the whole pool list in an
+overlay, so retain every pool you want to serve.
+
+`plowshare.llm.prompt-timeout` sets one wall-clock chat prompt timeout across all
+pools, for both blocking and streaming calls, including silent prefill. Leave it
+unset to retain the existing pool limits. `plowshare.llm.fold-timeout` is also
+unset by default, so folds use the existing streaming limits: five minutes of
+inactivity and ten minutes total, unless the pool configures different values.
+An explicit fold timeout uses the larger of its value and the general prompt
+timeout; a smaller fold value emits a prominent startup warning. With no global
+prompt override, the comparison uses the folding pool's `max-stream-duration`.
+Optional environment overrides are:
+
+```sh
+export PLOWSHARE_LLM_PROMPTTIMEOUT=120s
+export PLOWSHARE_LLM_FOLDTIMEOUT=10m
+```
+
+These are inference budgets; the pool's `submit-timeout` separately bounds its
+queue wait. Configuration changes take effect at server restart.
 
 ### 2. Build and start the server
 
@@ -228,6 +349,30 @@ commands default to off. The [CLI guide](plowshare-cli/README.md) covers project
 administration, rooting, synchronization, job observation and offline `--validate`.
 Use `/board` and `/swarm` in the TUI to inspect a project's discussion and members.
 
+## Personal space
+
+Each account has a private Personal space, separate from Projects. New conversations
+and standalone agent/orchestration runs without an explicit project use Personal.
+Global remains the shared setup and resource scope; global conversation history is
+read-only. On upgrade, owned global conversations move to their owner's Personal
+space without changing their ids or logs.
+
+Personal is a server-created union. The desktop mounts it automatically at
+`~/.plowshare/personal`; the TUI mounts it when started outside a project. Its desktop
+navigation has **In**, **Out**, **Resources**, **Archive**, **Planning**, and **Bots**.
+The files can be edited locally or through the normal project file tools.
+
+Put reusable skills in `Resources/skills/<name>/SKILL.md`, agents in
+`Resources/agents`, orchestrations in `Resources/orchestrations`, hooks in
+`Resources/hooks`, and bots/default-bot selection in `Bots`. These definitions
+follow the account into its projects. A project's definitions and rooted session
+definitions take precedence over Personal, then global and shipped definitions.
+Personal hooks run before the project's and session's hooks; ordinary capability
+and execution grants still apply.
+
+See [the Personal space contract](docs/personal-space.md)
+for storage, ownership, migration and synchronization details.
+
 ## Customize and contribute
 
 Start with a [bundled agent](plowshare-server/src/main/resources/agents),
@@ -247,7 +392,14 @@ contracts), [plowshare-client-node](plowshare-client-node/README.md) (credential
 files and platform services), and the client modules. Search adapters live in
 `extensions/` as separate services.
 
-Run `./gradlew check` for the repository's Java and TypeScript checks. Database
+Read [AGENTS.md](AGENTS.md) and the [coding standards](docs/coding-standards.md)
+before contributing. System boundaries use interfaces, specialist repositories
+own JDBC access, and comments explain contracts and non-obvious invariants.
+Run `./gradlew format` to apply Google Java Style, or `./gradlew formatCheck` to
+check formatting without editing files.
+
+Run `./gradlew check` for the repository's Java and TypeScript checks, including
+Java formatting. Database
 tests use Testcontainers and require Docker; contract checks also require
 Python 3. Native distribution checks are opt-in and documented separately.
 Changes to capabilities should update the shared contracts and relevant clients.
@@ -256,3 +408,9 @@ Changes to capabilities should update the shared contracts and relevant clients.
 ## License
 
 Plowshare is licensed under the [Apache License 2.0](LICENSE).
+
+Language integrations use the [SDKs and roadmap](docs/sdks.md): JS/TS, Java/JVM, Python, C# and Go. Messaging and Skills are implemented; the [A2A receiving manual](docs/a2a-receiving.md) configures inbound text messages and durable tasks.
+
+Java integrations use [plowshare-sdk](plowshare-sdk/README.md). The [A2A adapter](plowshare-a2a/README.md) runs on that SDK and communicates with Plowshare over WebSocket.
+
+Use the [A2A sending manual](docs/a2a-sending.md) to configure a remote peer, send from the CLI, SDK or an agent, follow results and request cancellation.

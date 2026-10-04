@@ -36,8 +36,8 @@ describe('typed requests cover the actual server contracts', () => {
         const cli = new Set([...Object.values(CLI_OPERATIONS), ...Object.values(MEMORY_OPERATIONS), ...Object.values(OBSERVER_OPERATIONS), ...Object.values(SYNC_OPERATIONS), 'conversation.search', 'job.status', 'job.cancel'])
         const remaining = Object.keys(BOUND_OPERATIONS).filter(frame => !cli.has(frame))
         expect([...cli, ...remaining].sort()).toEqual(typed)
-        expect(cli.size).toBe(140)
-        expect(remaining.sort()).toEqual(['usage.subscribe','usage.unsubscribe'])
+        expect(cli.size).toBe(184)
+        expect(remaining.sort()).toEqual(['incoming.cancel','incoming.catalog','incoming.receive','incoming.status','outgoing.advertise','outgoing.claim','outgoing.report','usage.subscribe','usage.unsubscribe'])
     })
     it.each([
         ['approval.list', 'ws/ApprovalFrames', 'ListBody', []], ['approval.answer', 'ws/ApprovalFrames', 'AnswerBody', []],
@@ -49,6 +49,9 @@ describe('typed requests cover the actual server contracts', () => {
         ['orchestration.list', 'ws/OrchestrationFrames', 'ListBody', []], ['orchestration.status', 'ws/OrchestrationFrames', 'IdBody', []],
         ['orchestration.answer', 'ws/OrchestrationFrames', 'AnswerBody', []], ['orchestration.cancel', 'ws/OrchestrationFrames', 'IdBody', []],
         ['orchestration.caps', 'ws/CapsFrames', 'CapsBody', []], ['orchestration.record', 'ws/RecordFrames', 'RecordWindow', []],
+        ['message.instances', 'ws/MessageFrames', 'ListBody', []], ['message.instance.open', 'ws/MessageFrames', 'OpenBody', []],
+        ['message.instance', 'ws/MessageFrames', 'IdBody', []], ['message.deliveries', 'ws/MessageFrames', 'DeliveriesBody', []],
+        ['message.delivery', 'ws/MessageFrames', 'DeliveryBody', []],
         ['board.topics', 'ws/BoardInspectionFrames', 'ListBody', []],
         ['board.topup', 'api/BoardController', 'Topup', ['topic']], ['web.search', 'api/SearchController', 'SearchRequest', []],
     ] as const)('%s fields match the Java DTO and explicit path identifiers', (operation, file, name, extras) => {

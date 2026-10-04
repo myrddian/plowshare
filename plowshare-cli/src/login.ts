@@ -44,3 +44,11 @@ async function promptPassword(label: string, signal: AbortSignal): Promise<strin
     if (!password) throw new Usage('Enter a password.')
     return password
 }
+
+export async function promptSetup(signal: AbortSignal): Promise<{ handle: string; password: string }> {
+    if (!process.stdin.isTTY || !process.stderr.isTTY) throw new Usage('Setup needs a terminal, or PLOWSHARE_NEW_HANDLE and PLOWSHARE_NEW_PASSWORD.')
+    const line = createInterface({ input: process.stdin, output: process.stderr })
+    let handle: string
+    try { handle = (await line.question('First administrator handle: ', { signal })).trim() } finally { line.close() }
+    return { handle, password: await promptNewPassword(signal) }
+}

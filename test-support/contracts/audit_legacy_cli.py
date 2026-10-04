@@ -53,7 +53,8 @@ def build():
     direct = read(DIRECT).split('export const MEMORY_OPERATIONS = {', 1)[1].split('} as const', 1)[0]
     mappings.update({'memory '+verb: frame for verb, frame in re.findall(r"(\w+): '([^']+)'", direct)})
     mappings.update({'conversation search': 'conversation.search', 'job status': 'job.status', 'job cancel': 'job.cancel'})
-    declarations = list(re.finditer(r'add\(all,\s*new Command\("([^"\n]+)",\s*"([^"\n]*)"', source))
+    # Google Java formatting may wrap either argument list onto the next line.
+    declarations = list(re.finditer(r'add\(\s*all,\s*new Command\(\s*"([^"\n]+)",\s*"([^"\n]*)"', source))
     rows = []
     for i, match in enumerate(declarations):
         name = (match[1]+' '+match[2]).strip()

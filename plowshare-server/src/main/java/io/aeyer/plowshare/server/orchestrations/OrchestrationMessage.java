@@ -15,51 +15,69 @@ import java.time.Instant;
  * @param deliveredAt when this message was delivered to whoever needed to see it, or {@code null}
  *     while still undelivered
  * @param capKind which cap this message answered — {@code turn_cap} or {@code call_budget}, or
- *     {@code stuck} (V58) — or {@code null} for a question, or an answer to no cap at all. Copied from the row's own
- *     {@code pending_cap} at the moment the answer was written, because that same write clears it
- *     — V49, {@link OrchestrationStore#answer}
+ *     {@code stuck} (V58) — or {@code null} for a question, or an answer to no cap at all. Copied
+ *     from the row's own {@code pending_cap} at the moment the answer was written, because that
+ *     same write clears it — V49, {@link OrchestrationStore#answer}
  * @param structure the question's options or the answer's choices, as JSON text (V70), or {@code
  *     null} for a plain question or answer
  */
 public record OrchestrationMessage(
-        String id, String orchestration, Kind kind, String text, String author, Instant createdAt,
-        Instant deliveredAt, String capKind, String structure) {
+    String id,
+    String orchestration,
+    Kind kind,
+    String text,
+    String author,
+    Instant createdAt,
+    Instant deliveredAt,
+    String capKind,
+    String structure) {
 
-    /** A message with no structure — every message written before V70, and every plain one. */
-    public OrchestrationMessage(String id, String orchestration, Kind kind, String text,
-            String author, Instant createdAt, Instant deliveredAt, String capKind) {
-        this(id, orchestration, kind, text, author, createdAt, deliveredAt, capKind, null);
+  /** A message with no structure — every message written before V70, and every plain one. */
+  public OrchestrationMessage(
+      String id,
+      String orchestration,
+      Kind kind,
+      String text,
+      String author,
+      Instant createdAt,
+      Instant deliveredAt,
+      String capKind) {
+    this(id, orchestration, kind, text, author, createdAt, deliveredAt, capKind, null);
+  }
+
+  /**
+   * Which side of the exchange this message is. {@code orchestration_messages.kind} stores the wire
+   * name.
+   */
+  public enum Kind {
+    QUESTION("question"),
+    ANSWER("answer");
+
+    private final String wire;
+
+    Kind(String wire) {
+      this.wire = wire;
     }
 
-    /** Which side of the exchange this message is. {@code orchestration_messages.kind} stores the
-     *  wire name. */
-    public enum Kind {
-        QUESTION("question"),
-        ANSWER("answer");
-
-        private final String wire;
-
-        Kind(String wire) {
-            this.wire = wire;
-        }
-
-        public String wire() {
-            return wire;
-        }
-
-        /**
-         * @throws IllegalArgumentException if no kind is spelled {@code wire}
-         */
-        public static Kind of(String wire) {
-            for (Kind kind : values()) {
-                if (kind.wire.equals(wire)) {
-                    return kind;
-                }
-            }
-            throw new IllegalArgumentException(
-                    "no orchestration message kind is spelled '" + wire + "'; this row was"
-                            + " written by something that knows a kind this build does not, and"
-                            + " orchestration_messages_kind_is_known should have refused it");
-        }
+    public String wire() {
+      return wire;
     }
+
+    /**
+     * @throws IllegalArgumentException if no kind is spelled {@code wire}
+     */
+    public static Kind of(String wire) {
+      for (Kind kind : values()) {
+        if (kind.wire.equals(wire)) {
+          return kind;
+        }
+      }
+      throw new IllegalArgumentException(
+          "no orchestration message kind is spelled '"
+              + wire
+              + "'; this row was"
+              + " written by something that knows a kind this build does not, and"
+              + " orchestration_messages_kind_is_known should have refused it");
+    }
+  }
 }

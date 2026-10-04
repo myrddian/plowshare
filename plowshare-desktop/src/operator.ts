@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { request, resultOf, type Request as WsRequest } from 'plowshare-client-ts/operations/direct';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import type { DesktopState } from './shared.ts';
@@ -13,7 +14,7 @@ export class OperatorClient {
   private state: () => DesktopState; private send: (ask: WsRequest) => Promise<Outcome>; private changed: () => void;
   private submit: (ask: WsRequest, conversation?: string, agent?: string) => Promise<Outcome>;
   private readCaps: (project: string) => Promise<CapsFile>; private saveCaps: (project: string, file: CapsFile, key: CapKey, value: number) => Promise<void>;
-  private epoch = 0; private busy = false; private pending?: { ask?: WsRequest; file?: CapsFile; key?: CapKey; value?: number; selected?: unknown; generation: number };
+  private epoch = 0; private messageRevision = 0; private busy = false; private pending?: { ask?: WsRequest; file?: CapsFile; key?: CapKey; value?: number; selected?: unknown; generation: number };
   constructor(state: () => DesktopState, send: (ask: WsRequest) => Promise<Outcome>, changed: () => void,
     submit: (ask: WsRequest, conversation?: string, agent?: string) => Promise<Outcome>,
     readCaps: (project: string) => Promise<CapsFile>, saveCaps: (project: string, file: CapsFile, key: CapKey, value: number) => Promise<void>) {
@@ -30,6 +31,17 @@ export class OperatorClient {
   }
   private async read(kind: OperatorKind, project?: string): Promise<Record<string, unknown>> {
     const tier = project ? { project } : {};
+    if (kind.startsWith('message-')) {
+      if (!project) throw new Error('Choose a project for message instances.');
+      const instances: Record<string, unknown>[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const page = object(await this.checked(request('message.instances', { project, offset, limit: 200 })));
+        instances.push(...rows(page.instances));
+        if (!page.more) break;
+      }
+      const agents = kind === 'message-open' ? rows(await this.checked(request('agent.list', { project }))) : [];
+      return { instances, agents };
+    }
     if (kind.startsWith('memory-') || kind === 'agent-curate') return { memories: await this.checked(request('memory.index', tier)) };
     if (kind.startsWith('conversation-')) {
       const active = await this.checked(request('conversation.list', tier)), archived = await this.checked(request('conversation.list', { ...tier, lifecycle: 'archived' }));
@@ -43,6 +55,9 @@ export class OperatorClient {
     return { caps: await this.checked(request('orchestration.caps', { project })), file: await this.readCaps(project) };
   }
   private selected(kind: OperatorKind, data: Record<string, unknown>, payload: Record<string, unknown>) {
+    if (kind === 'message-deliveries') return rows(data.deliveries).find(row => row.message === payload.message);
+    if (kind === 'message-open') return rows(data.agents).find(row => row.name === payload.agent);
+    if (kind.startsWith('message-')) return rows(data.instances).find(row => row.id === payload.instance);
     if (kind.startsWith('conversation-')) return rows(data.conversations).find(row => row.id === payload.conversation);
     if (kind === 'job-limits') { const job = rows(data.jobs).find(row => row.id === payload.job); return job && { id: job.id, agent: job.agent, conversation: job.conversation, state: job.state, limits: job.limits }; }
     if (kind.startsWith('approval-')) return rows(data.approvals).find(row => row.id === payload.id);
@@ -58,12 +73,29 @@ export class OperatorClient {
     if (generation !== this.epoch) throw new Error('The selected control changed.');
     this.state().operator = { kind, project, data, identity: JSON.stringify([this.state().base, this.state().handle, kind, project, data]) }; this.changed();
   }
+  async messages(identity: string, instance: string, offset = 0) {
+    const view = this.state().operator;
+    if (this.busy || !view || view.kind !== 'message-deliveries' || view.identity !== identity) throw new Error('Read the message controls again.');
+    if (!rows(view.data.instances).some(row => row.id === instance)) throw new Error('Choose an instance from the current listing.');
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Choose a valid message page.');
+    const revision = ++this.messageRevision, generation = this.epoch;
+    const page = object(await this.checked(request('message.deliveries', { instance, offset, limit: 200 })));
+    if (revision !== this.messageRevision || generation !== this.epoch || this.state().operator !== view) return;
+    view.data = { ...view.data, deliveries: page.deliveries, messageInstance: instance, messageOffset: page.offset, messageMore: page.more };
+    this.pending = undefined; delete view.preview; delete view.error; this.changed();
+  }
   preview(identity: string, input: Record<string, unknown>) {
     const view = this.state().operator;
     if (!view || view.identity !== identity || this.busy || !this.state().connected) throw new Error('Read the current control before reviewing a change.');
+    this.messageRevision++;
     const tier = view.project ? { project: view.project } : {}; let ask: WsRequest | undefined, file: CapsFile | undefined, key: CapKey | undefined, value: number | undefined;
     let summary = '';
     switch (view.kind) {
+      case 'message-deliveries': ask = request('message.cancel', { message: string(input.id, 'message', 512) }); summary = 'Cancel handling this message and finish an expected reply if it has no final reply.'; break;
+      case 'message-open': if (!view.project) throw new Error('Choose a project.'); ask = request('message.instance.open', { project: view.project, agent: string(input.agent, 'agent or bot', 512), makeDefault: input.makeDefault === 'true', requestId: randomUUID() }); summary = 'Create a persistent instance with its own conversation and address.'; break;
+      case 'message-default': ask = request('message.instance.default', { instance: string(input.id, 'instance', 512) }); summary = 'Use this persistent instance for messages addressed to this agent or bot name in the project.'; break;
+      case 'message-stop': ask = request('message.instance.stop', { instance: string(input.id, 'instance', 512) }); summary = 'Stop this instance, cancel its pending message handling, and finish expected replies.'; break;
+      case 'message-archive': ask = request('message.instance.archive', { instance: string(input.id, 'instance', 512) }); summary = 'Stop and archive this instance and its conversation.'; break;
       case 'memory-write': ask = request('memory.write', { ...tier, proposal: { summary: string(input.summary, 'summary', 512), scope: string(input.scope, 'memory scope', 512), body: string(input.body, 'memory body', 100000), formedBy: this.state().handle, formedWhere: view.project ?? '' } }); summary = 'Submit this memory for server judgement. It may be merged, proposed or refused.'; break;
       case 'memory-digest': ask = request('memory.digest', tier); summary = 'Start model-backed digest maintenance in this scope.'; break;
       case 'agent-curate': if (!view.project) throw new Error('Choose a project for curation.'); ask = request('agent.curate', { project: view.project, maxModelCalls: number(input.maxModelCalls, 'model-call limit') }); summary = 'Start model-backed agent curation for this project.'; break;
@@ -84,6 +116,7 @@ export class OperatorClient {
     const selected = this.selected(view.kind, view.data, payload);
     if (view.kind === 'board-topup' && Number(payload.maxModelCalls) <= Number(object(selected).potTotal)) throw new Error('Enter a new total above the current topic pot.');
     if (selected === undefined) throw new Error('Choose an item from the current listing.');
+    if (view.kind === 'message-deliveries' && !['queued', 'running', 'awaiting'].includes(String(object(selected).state))) throw new Error('Choose a pending message to cancel.');
     this.pending = { ask, file, key, value, selected, generation: this.epoch };
     view.preview = { identity: JSON.stringify([identity, payload, summary]), summary, payload, ...(selected ? {subject: object(selected)} : {}) }; delete view.error; this.changed();
   }
@@ -92,7 +125,9 @@ export class OperatorClient {
     if (this.busy || !view?.preview || view.preview.identity !== identity || !pending || pending.generation !== this.epoch) throw new Error('Review this change again before applying it.');
     this.busy = true; view.busy = true; this.changed(); let sent = false, capsSaved = false;
     try {
-      const fresh = await this.read(view.kind, view.project);
+      const fresh = view.kind === 'message-deliveries'
+        ? { ...view.data, deliveries: [await this.checked(request('message.delivery', { message: String(view.preview.payload.message) }))] }
+        : await this.read(view.kind, view.project);
       if (pending.generation !== this.epoch || !this.state().connected) throw new Error('The connection changed before submission.');
       if (JSON.stringify(this.selected(view.kind, fresh, view.preview.payload)) !== JSON.stringify(pending.selected)) throw new Error('The displayed item changed. Read it and review again.');
       sent = true;

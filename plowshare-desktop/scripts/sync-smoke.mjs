@@ -1,5 +1,6 @@
 import { _electron as electron, expect } from 'playwright/test';
-import executablePath from 'electron';
+const packaged=process.env.PLOWSHARE_PACKAGED_EXECUTABLE;
+const executablePath=packaged ?? (await import('electron')).default;
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,7 +12,7 @@ await mkdir(root);await writeFile(join(root,'notes.md'),'base\n');await mkdir('b
 const union=new SyncFixture(join(temporary,'hubs')),fixture=await protocolFixture({rotateTokens:true,union});
 const env={...process.env,PLOWSHARE_CONFIG_DIR:join(temporary,'credentials'),PLOWSHARE_DESKTOP_CONFIG:join(temporary,'config'),PLOWSHARE_DESKTOP_PROFILE:join(temporary,'profile')};delete env.ELECTRON_RUN_AS_NODE;
 let app;
-const launch=async()=>{app=await electron.launch({executablePath,args:[resolve('.')],env});return app.firstWindow();};
+const launch=async()=>{app=await electron.launch({executablePath,args:packaged?[]:[resolve('.')],env});return app.firstWindow();};
 try {
   let page=await launch();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);

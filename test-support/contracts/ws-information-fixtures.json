@@ -261,5 +261,171 @@
   "information.acquisitions": {
     "code": "OK",
     "payload": []
+  },
+  "information.await": {
+    "code": "OK",
+    "payload": {
+      "expected": 1,
+      "settled": 1,
+      "ready": 1,
+      "pending": 0,
+      "complete": true,
+      "outcomes": [
+        {
+          "revision": "r",
+          "state": "ready"
+        }
+      ]
+    }
+  },
+  "information.outline": {
+    "code": "OK",
+    "payload": {
+      "revision": "r",
+      "language": "typescript",
+      "status": "ready",
+      "reason": null,
+      "parser_version": "declarations-v1",
+      "source_hash": "source-hash",
+      "symbol_count": 1,
+      "offset": 0,
+      "has_more": false,
+      "symbols": [
+        {
+          "ordinal": 1,
+          "name": "load",
+          "kind": "function",
+          "qualified_name": "load",
+          "parent_ordinal": null,
+          "signature": "function load()",
+          "start_offset": 5,
+          "end_offset": 23,
+          "start_line": 2,
+          "end_line": 2
+        }
+      ],
+      "locator": "extracted-text:utf16",
+      "role": "Syntax navigation only",
+      "source_kind": "retained_revision"
+    }
+  },
+  "information.symbols": {
+    "code": "OK",
+    "payload": {
+      "query": "load",
+      "offset": 0,
+      "has_more": false,
+      "symbols": [
+        {
+          "ordinal": 1,
+          "name": "load",
+          "kind": "function",
+          "qualified_name": "load",
+          "parent_ordinal": null,
+          "signature": "function load()",
+          "start_offset": 5,
+          "end_offset": 23,
+          "start_line": 2,
+          "end_line": 2,
+          "revision": "r",
+          "source_name": "src/load.ts",
+          "language": "typescript",
+          "outline_status": "ready",
+          "source_hash": "source-hash",
+          "parser_version": "declarations-v1"
+        }
+      ],
+      "locator": "extracted-text:utf16",
+      "role": "Syntax navigation only",
+      "source_kind": "retained_revision"
+    }
+  },
+  "information.tags": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
+  },
+  "information.facets": {
+    "code": "OK",
+    "payload": {
+      "total": 1,
+      "facets": {
+        "kind": [
+          {
+            "value": "source",
+            "count": 1
+          }
+        ],
+        "tags": [
+          {
+            "value": "my project",
+            "count": 1
+          }
+        ],
+        "autoTag": [
+          {
+            "value": "postgresql",
+            "count": 1
+          }
+        ],
+        "author": [
+          {
+            "value": "reader",
+            "count": 1
+          }
+        ],
+        "when": [
+          {
+            "value": "2024-10",
+            "count": 1
+          }
+        ],
+        "subtype": [
+          {
+            "value": "text",
+            "count": 1
+          }
+        ],
+        "documentAuthor": [
+          {
+            "value": "Ada Lovelace",
+            "count": 1
+          }
+        ],
+        "tagGroup": [
+          {
+            "value": "databases",
+            "count": 1
+          }
+        ]
+      },
+      "hasMore": {
+        "kind": false,
+        "tags": false,
+        "autoTag": false,
+        "author": false,
+        "when": false,
+        "subtype": false,
+        "documentAuthor": false,
+        "tagGroup": false
+      },
+      "tagGraph": {
+        "edges": [
+          {
+            "group": "databases",
+            "tag": "postgresql",
+            "count": 1
+          }
+        ],
+        "hasMore": false
+      }
+    }
+  },
+  "information.tags.groups": {
+    "code": "OK",
+    "payload": {
+      "changed": true
+    }
   }
 }

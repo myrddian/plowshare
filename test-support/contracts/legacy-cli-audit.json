@@ -8,7 +8,7 @@
       "frame": "information.*",
       "legacyFlags": [],
       "payload": "scoped operation payload; preserve requestId for mutations",
-      "sourceLine": 265
+      "sourceLine": 270
     },
     {
       "legacy": "memory navigate",
@@ -18,7 +18,7 @@
         "--project"
       ],
       "payload": "question,project",
-      "sourceLine": 275
+      "sourceLine": 301
     },
     {
       "legacy": "memory digest",
@@ -28,7 +28,7 @@
         "--project"
       ],
       "payload": "project",
-      "sourceLine": 282
+      "sourceLine": 323
     },
     {
       "legacy": "memory index",
@@ -38,7 +38,7 @@
         "--project"
       ],
       "payload": "project",
-      "sourceLine": 287
+      "sourceLine": 337
     },
     {
       "legacy": "memory read",
@@ -46,7 +46,7 @@
       "frame": "memory.read",
       "legacyFlags": [],
       "payload": "memory; one id per invocation (loop for legacy multi-id reads)",
-      "sourceLine": 290
+      "sourceLine": 348
     },
     {
       "legacy": "memory recall",
@@ -57,7 +57,7 @@
         "--limit"
       ],
       "payload": "question,project,limit",
-      "sourceLine": 294
+      "sourceLine": 360
     },
     {
       "legacy": "memory write",
@@ -72,7 +72,7 @@
         "--where"
       ],
       "payload": "proposal:{summary,scope,body,formedBy,formedWhere}; project selects tier",
-      "sourceLine": 298
+      "sourceLine": 372
     },
     {
       "legacy": "memory curate",
@@ -82,7 +82,7 @@
         "--max-model-calls"
       ],
       "payload": "project,maxModelCalls",
-      "sourceLine": 305
+      "sourceLine": 385
     },
     {
       "legacy": "memory proposals",
@@ -92,7 +92,7 @@
         "--project"
       ],
       "payload": "project",
-      "sourceLine": 310
+      "sourceLine": 398
     },
     {
       "legacy": "memory resolve",
@@ -103,7 +103,7 @@
         "--by"
       ],
       "payload": "proposal,accept,by,reason; accept|reject becomes a boolean",
-      "sourceLine": 313
+      "sourceLine": 409
     },
     {
       "legacy": "conversation list",
@@ -113,7 +113,7 @@
         "--project"
       ],
       "payload": "project",
-      "sourceLine": 320
+      "sourceLine": 423
     },
     {
       "legacy": "conversation search",
@@ -125,7 +125,7 @@
         "--limit"
       ],
       "payload": "q,project,offset,limit; mode:lexical preserves legacy matching",
-      "sourceLine": 323
+      "sourceLine": 434
     },
     {
       "legacy": "conversation chat",
@@ -136,7 +136,7 @@
         "--limit"
       ],
       "payload": "conversation,offset,limit",
-      "sourceLine": 332
+      "sourceLine": 450
     },
     {
       "legacy": "conversation trajectory",
@@ -147,7 +147,7 @@
         "--limit"
       ],
       "payload": "conversation,offset,limit",
-      "sourceLine": 336
+      "sourceLine": 462
     },
     {
       "legacy": "conversation context",
@@ -157,7 +157,7 @@
         "--agent"
       ],
       "payload": "conversation,agent",
-      "sourceLine": 341
+      "sourceLine": 475
     },
     {
       "legacy": "document retrieve",
@@ -168,7 +168,7 @@
         "--limit"
       ],
       "payload": "query,document,limit",
-      "sourceLine": 347
+      "sourceLine": 489
     },
     {
       "legacy": "document rank",
@@ -178,7 +178,7 @@
         "--limit"
       ],
       "payload": "query,limit",
-      "sourceLine": 354
+      "sourceLine": 504
     },
     {
       "legacy": "document stance",
@@ -186,7 +186,7 @@
       "frame": "document.stance",
       "legacyFlags": [],
       "payload": "document,claim",
-      "sourceLine": 360
+      "sourceLine": 518
     },
     {
       "legacy": "document list",
@@ -198,7 +198,7 @@
         "--offset"
       ],
       "payload": "q,offset,limit",
-      "sourceLine": 366
+      "sourceLine": 532
     },
     {
       "legacy": "document show",
@@ -206,7 +206,7 @@
       "frame": "document.detail",
       "legacyFlags": [],
       "payload": "document",
-      "sourceLine": 372
+      "sourceLine": 546
     },
     {
       "legacy": "document search",
@@ -216,7 +216,7 @@
         "--limit"
       ],
       "payload": "query,limit",
-      "sourceLine": 377
+      "sourceLine": 559
     },
     {
       "legacy": "document ask",
@@ -226,7 +226,7 @@
         "--max-model-calls"
       ],
       "payload": "document,question,maxModelCalls",
-      "sourceLine": 382
+      "sourceLine": 572
     },
     {
       "legacy": "document citations",
@@ -238,7 +238,7 @@
         "--limit"
       ],
       "payload": "conversation,document,limit",
-      "sourceLine": 392
+      "sourceLine": 589
     },
     {
       "legacy": "search",
@@ -250,7 +250,7 @@
         "--page"
       ],
       "payload": "query,pageSize,max,page; preserve max across pages",
-      "sourceLine": 407
+      "sourceLine": 610
     },
     {
       "legacy": "fetch",
@@ -260,7 +260,7 @@
         "--offset"
       ],
       "payload": "url,offset",
-      "sourceLine": 420
+      "sourceLine": 630
     },
     {
       "legacy": "project define",
@@ -270,7 +270,7 @@
         "--exclude"
       ],
       "payload": "name,workspace,exclusions",
-      "sourceLine": 428
+      "sourceLine": 646
     },
     {
       "legacy": "project workspace",
@@ -278,7 +278,7 @@
       "frame": "project.workspace",
       "legacyFlags": [],
       "payload": "project,workspace",
-      "sourceLine": 433
+      "sourceLine": 659
     },
     {
       "legacy": "project lend",
@@ -286,7 +286,7 @@
       "frame": "project.lend",
       "legacyFlags": [],
       "payload": "project,roots",
-      "sourceLine": 437
+      "sourceLine": 671
     },
     {
       "legacy": "project unlend",
@@ -294,7 +294,7 @@
       "frame": "project.unlend",
       "legacyFlags": [],
       "payload": "project,roots",
-      "sourceLine": 443
+      "sourceLine": 685
     },
     {
       "legacy": "project rename",
@@ -302,7 +302,7 @@
       "frame": "project.move",
       "legacyFlags": [],
       "payload": "project,to",
-      "sourceLine": 448
+      "sourceLine": 698
     },
     {
       "legacy": "project forget",
@@ -310,7 +310,7 @@
       "frame": "project.forget",
       "legacyFlags": [],
       "payload": "project",
-      "sourceLine": 453
+      "sourceLine": 711
     },
     {
       "legacy": "job status",
@@ -318,7 +318,7 @@
       "frame": "job.status",
       "legacyFlags": [],
       "payload": "job",
-      "sourceLine": 459
+      "sourceLine": 725
     },
     {
       "legacy": "job cancel",
@@ -326,7 +326,7 @@
       "frame": "job.cancel",
       "legacyFlags": [],
       "payload": "job",
-      "sourceLine": 463
+      "sourceLine": 737
     },
     {
       "legacy": "run",
@@ -372,11 +372,11 @@
   ],
   "evidence": {
     "sources": {
-      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Commands.java": "7273de359133124549360f24f496c912b08d3446ecb5081d81da88cdd6fc623b",
-      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Plowshare.java": "628317a17d1967406c2e0afa8d76dca87d97ab67575277873617f0055b0bba3b",
-      "plowshare-client-ts/src/operations/catalog.ts": "05676373ca6aea3badb1d2ff22ffe005b5e839d66280e837305effd1a6b7ddd9",
-      "plowshare-client-ts/src/operations/direct.ts": "f5f14ddbed94784fcaa68138c55bd5bf9c1ca101504c545c613b0bc30f68f637",
-      "plowshare-cli/src/run.ts": "dd8075c51a5a7f0e18c6024662ddfe81d6eaf3d30f9ef681b5dc01c00c45a36b"
+      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Commands.java": "34223bb09f3000fe9a92ecf53548b61ab5db1273fe919c76fcde21cceda794df",
+      "plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Plowshare.java": "91b76ab91c9daf22dc59f9ad744cf17f6f9a09abda1e19426d40886ee012710f",
+      "plowshare-client-ts/src/operations/catalog.ts": "58afe635df272d3dfa20039f98c0deb255398c1c094b0e26e3db1e0117900e4f",
+      "plowshare-client-ts/src/operations/direct.ts": "c2c4105edb4747c930d2e18a5ccc6ceffbef68ba9ea325baf37a778cffe86e5a",
+      "plowshare-cli/src/run.ts": "e26ac95783cdbcbd602457eeceb403717c765e3b8d6671092fc8734d4c8883af"
     },
     "runtime": [
       "plowshare-client/src/test/java/io/aeyer/plowshare/client/cli/CommandsTest.java",

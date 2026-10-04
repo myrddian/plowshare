@@ -122,10 +122,11 @@ BACKGROUND_PARITY = [{'id': 'orchestration-discovery',
                    'without downgrade'},
  {'id': 'project-cap-settings',
   'frames': ['orchestration.caps'],
-  'sources': ['plowshare-tui/src/logic/caps.ts', 'plowshare-tui/src/view/main.ts'],
-  'existingTui': 'local .plowshare/environment.yml changes before continuation answer, then effective settings '
+  'sources': ['plowshare-tui/src/logic/caps.ts', 'plowshare-tui/src/view/main.ts',
+              'plowshare-client-node/src/settings.ts'],
+  'existingTui': 'local project JSON or legacy environment.yml changes before continuation answer, then effective settings '
                  'read/applied; failed write sends no answer',
-  'desktopStatus': 'implemented; reviewed local environment.yml change then orchestration.caps reload, preserving '
+  'desktopStatus': 'implemented; reviewed local project settings change then orchestration.caps reload, preserving '
                    'saved/unconfirmed status on failure'},
  {'id': 'scheduled-event-work',
   'frames': ['schedule.read',
@@ -269,7 +270,7 @@ def inventory():
     bound_catalog = read(administrative_source).split("export const BOUND_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
     bound_frames = dict(re.findall(r"'([a-z.]+)': '([^']+)'", bound_catalog))
     typed_frames = set()
-    for source in [direct_source, cli_source, administrative_source, "plowshare-client-ts/src/operations/information-payloads.ts", "plowshare-client-ts/src/operations/usage.ts"]:
+    for source in [direct_source, cli_source, administrative_source, "plowshare-client-ts/src/operations/information-payloads.ts", "plowshare-client-ts/src/operations/usage.ts", "plowshare-client-ts/src/operations/messaging.ts"]:
         typed_frames.update(re.findall(r"^\s*'([a-z]+(?:\.[a-z]+)+)':", read(source), re.M))
     assert typed_frames == set(areas), "typed payload catalog differs from the registered WS surface"
     assert one_shot_frames.isdisjoint(bound_frames) and cli_frames | set(bound_frames) == typed_frames
@@ -279,12 +280,13 @@ def inventory():
         builders[frame] = [{"source": usage_source, "function": "UsageClient / UsageWatch socket-owned view lifecycle"}]
     response_families = {}
     for family, name, expected_types, expected_operations in [
-        ("administrative", "AdministrativeReplies", 30, 28),
-        ("conversation", "ConversationReplies", 20, 21),
+        ("administrative", "AdministrativeReplies", 34, 31),
+        ("conversation", "ConversationReplies", 38, 42),
         ("inspection", "InspectionReplies", 14, 7),
-        ("information", "InformationReplies", 9, 34),
+        ("information", "InformationReplies", 19, 40),
+        ("messaging", "MessagingReplies", 5, 9),
     ]:
-        source = f"plowshare-client-ts/src/operations/{family}-replies.ts"
+        source = f"plowshare-client-ts/src/operations/{family}-replies.ts" if family != "messaging" else "plowshare-client-ts/src/operations/messaging.ts"
         text = read(source)
         types = [value for value in re.findall(r"^export interface (\w+)\s*\{", text, re.M) if value != name]
         operations = re.findall(r"'([^']+)':", re.search(rf"export interface {name} \{{([^}}]+)\}}", text, re.S).group(1))
@@ -297,6 +299,9 @@ def inventory():
     response_operations = set(retrieval_operations) | reply_extra | set(re.findall(r"'([^']+)':", usage_replies))
     for family in response_families.values():
         response_operations.update(family["operations"])
+    adapter_replies = {"incoming.catalog", "incoming.receive", "incoming.status", "incoming.cancel"}
+    assert adapter_replies <= set(bound_frames) and adapter_replies <= response_operations
+    response_operations -= adapter_replies
     assert response_operations == one_shot_frames, "one-shot WS response coverage is incomplete"
     for frame in bound_frames:
         builders.setdefault(frame, []).append({"source": administrative_source, "function": "request (bound platform adapter)"})
@@ -383,7 +388,7 @@ def inventory():
             row["contract"]["scope"] = "personal plus shared by default; explicit project membership; per-revision publication"
             row["typescript"].update(tuiUserSurface="implemented-information-command", desktop="implemented-information-library",
                                      headlessCli="implemented-information-command")
-            row["internalAgent"] = {"adapter": "registered-information_read-and-information_write", "grant": "librarian read; research conductor read/write; root account and home pinned by server", "reason": "external capability wrapper; internal runtime binds information_read and information_write with root authority"}
+            row["internalAgent"] = {"adapter": "registered-information_read-and-information_write", "grant": "Farnsworth, Aristoxenus, Daedalus, Interlocutor, Librarian and research conductor read/write; root account and home pinned by server", "reason": "external capability wrapper; internal runtime binds information_read and information_write with root authority"}
             row["semantics"] = "MCP permits source/evidence/draft report operations only. Human CLI/client controls expose owner publication, management and operator migration."
             row["work"] = ["live-mcp-deployment-validation"]
         rows.append(row)
@@ -407,6 +412,14 @@ def inventory():
                    "registeredRequestFrames": len(areas), "directMemoryCommandsRequired": len(memory), "headlessCliRequestFrames": len(cli_frames), "headlessCliOneShotFrames": len(one_shot_frames), "headlessCliObserverFrames": len(observer_frames), "headlessCliSyncFrames": len(sync_frames), "typedRequestFrames": len(typed_frames),
                    "mcpModelAdapters": len(INTERNAL_BINDINGS), "mcpOperatorOrPlatformBoundaries": len(OPERATOR_BOUNDARIES),
                    "typescriptMcpTools": len(rows), "typescriptMcpServerTools": len([r for r in rows if r["transport"]["frame"] is not None])},
+        "javaSdk": {
+            "module": "plowshare-sdk", "protocol": "plowshare-v1", "transport": "persistent authenticated websocket",
+            "typedFacade": "plowshare-sdk/src/main/java/io/aeyer/plowshare/sdk/WsServerClient.java",
+            "rawSurface": "all registered request frames; complete outcome JSON retained",
+            "legacyEntryPoints": "Java CLI and MCP use the SDK; HttpServerClient is compatibility only",
+            "httpException": "multipart image upload; authentication and file presence are platform concerns",
+            "outboundA2a": "plowshare-a2a; A2A 1.0 JSON-RPC SendMessage/GetTask/CancelTask, configured peers, durable outbox",
+        },
         "boundaries": {
             "authority": "Java server owns durable state, retrieval and execution",
             "transport": "WS required for every supported operation; no silent HTTP fallback or mutation replay",
@@ -488,7 +501,7 @@ def inventory():
             "lifecycleConsumers": ["plowshare-tui/src/view/main.ts", "plowshare-desktop/src/client.ts"],
             "operations": {"source": "plowshare-client-ts/src/operations", "status": f"48 existing request builders extracted; {len(typed_frames)} typed payloads and shared WS dispatch",
                            "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-                           "headlessCli": f"{len(cli_frames)} WS operations: {len(one_shot_frames)} one-shot commands and {len(observer_frames)} persistent observer subscriptions and {len(sync_frames)} rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits",
+                           "headlessCli": f"{len(cli_frames)} WS operations: {len(one_shot_frames)} one-shot commands and {len(observer_frames)} persistent observer subscriptions and {len(sync_frames)} rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
                            "boundOperations": bound_frames,
                            "remaining": "distribution and legacy retirement remain separate; CLI migration audit and runtime transport acceptance are recorded in legacy-cli-audit.json and parity-signoff-2026-10-02.md"},
             "observation": {"source": observer_source, "status": "job watch, --watch submissions and conversation follow implemented in CLI",
@@ -527,9 +540,10 @@ def inventory():
             "sources": ["plowshare-desktop/src/workspace.ts", "plowshare-desktop/src/project-config.ts", "plowshare-desktop/src/renderer/app.ts"],
             "composition": "one DesktopClient per project with independent event/file session and existing job lifecycle; account client for global conversations and Inbox/Runs/Board; aggregate display and route requests/follows by owner",
             "authentication": "single account token owner; serialize refresh/ticket/channel opens; retain rotation even on socket-open failure; no extra password sign-ins",
+            "botIdentity": "optional authored display-name and resolved definition origin; desktop consolidates identity, resolved grants, timestamped offered tools, withheld permissions and local folder state",
             "definitionRefresh": "WS agent.list re-reads the asking caller's rooted-session definitions via DefinitionResolver.refreshForCaller; preserves other sessions and sessionless cache entries; server directory stamps alone cannot detect client edits",
             "configuration": "~/.config/plowshare/desktop-projects.json; XDG_CONFIG_HOME supported; server/account/project/path/machine/enabled mappings, atomic 0600 writes, no credentials; corrupt config reported and preserved",
-            "restoration": "enabled local mappings after login; paused projects remain paused; missing/moved/other-machine paths remain unavailable; project selection or explicit action recovers canonical same-machine server paths when no local mapping exists; same-session bot discovery after attachment; Refresh reloads rosters; saved mappings survive server project-list refusal; quit waits for in-flight authentication",
+            "restoration": "enabled local mappings after login; paused projects remain paused; missing/moved/other-machine paths remain unavailable; project selection attaches only approved enabled local mappings; explicit folder approval recovers canonical same-machine server paths when no local mapping exists; same-session bot discovery after attachment; Refresh reloads rosters; saved mappings survive server project-list refusal; quit waits for in-flight authentication",
             "tests": ["plowshare-desktop/src/workspace.test.ts", "plowshare-desktop/src/project-config.test.ts", "plowshare-desktop/scripts/projects-smoke.mjs", "plowshare-desktop/scripts/bots-smoke.mjs"],
             "limits": "same-project exclusive server presence remains; durable accepted-job receipts and explicit reconciliation implemented; union/sync controls implemented"
         },
@@ -543,6 +557,8 @@ def inventory():
             "limits": "no desktop union/sync integration or local environment editor; PDF/image conversion remains server-side; server still owns membership, approval and exclusive-presence policy"
         },
         "informationSystem": {"implementation": "docs/information-system.md", "operations": information_frames,
+                              "reports": "run-unique resource names, research-question display titles after extraction, feedback revisions preserve identity; Runs opens the exact retained main report revision in its project scope without finalising",
+                              "handoffTest": "plowshare-desktop/scripts/report-handoff-smoke.mjs",
                               "desktop": "plowshare-desktop/src/renderer/information.ts", "console": "plowshare-console/src/screens/information.ts",
                               "tests": "real authenticated WebSocket, PostgreSQL lifecycle, adapter and native Electron fixtures; no live research quality claim"},
         "desktopWindows": [

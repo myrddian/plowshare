@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plowshare internal message routes version 1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "routes"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "name",
+          "project",
+          "agent"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![\\s\\S]*[\\r\\n\\u0000])\\S(?:[\\s\\S]*\\S)?$"
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?![\\s\\S]*[\\r\\n\\u0000])\\S(?:[\\s\\S]*\\S)?$"
+          },
+          "agent": {
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "^(?![\\s\\S]*[\\r\\n\\u0000])\\S(?:[\\s\\S]*\\S)?$"
+              },
+              {
+                "not": {
+                  "pattern": "^ins_"
+                }
+              }
+            ]
+          },
+          "conversation": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 512,
+            "pattern": "^cnv_[A-Za-z0-9]+$",
+            "description": "An active account-owned root conversation in the destination project, compatible with the configured agent."
+          },
+          "retainConversation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Create one dedicated persistent conversation on first use and retain its instance for this account, source project and route name."
+          }
+        },
+        "not": {
+          "required": [
+            "conversation",
+            "retainConversation"
+          ]
+        }
+      }
+    }
+  }
+}

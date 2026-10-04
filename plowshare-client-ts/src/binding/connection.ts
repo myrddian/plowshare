@@ -84,6 +84,8 @@ export interface Socket {
 export interface ConnectOptions {
     /** The socket, already open. See {@link Socket}. */
     readonly socket: Socket
+    /** Platform-supplied deadline; cancellation removes the pending request, never replays it. */
+    readonly deadline?: { readonly milliseconds: number; readonly schedule: (expired: () => void, milliseconds: number) => () => void }
 
     /**
      * Every frame that is not an answer to something this client asked.
@@ -157,14 +159,23 @@ export interface Connection {
 
 /** One outstanding question. */
 interface Waiting {
-    readonly answered: (outcome: Outcome) => void
+    readonly type: string
+    readonly answered: (reply: Reply) => void
     readonly failed: (trouble: Error) => void
+    cancelDeadline?: () => void
 }
+
+/** Complete envelope and checked outcome, including opaque future fields in raw. */
+export interface Reply { readonly outcome: Outcome; readonly raw: Readonly<Record<string, unknown>> }
+export interface Connected extends Connection { request(type: string, payload?: unknown): Promise<Reply> }
 
 /** Delivery state for recovery without replaying a mutation. */
 export class ConnectionFault extends Error {
     readonly code: 'NOT_SUBMITTED' | 'RESPONSE_LOST' | 'INVALID_ENVELOPE'
     constructor(code: ConnectionFault['code'], message: string) { super(message); this.code = code }
+    get delivery(): 'NOT_SUBMITTED' | 'UNKNOWN' | 'INVALID_RESPONSE' {
+        return this.code === 'RESPONSE_LOST' ? 'UNKNOWN' : this.code === 'INVALID_ENVELOPE' ? 'INVALID_RESPONSE' : 'NOT_SUBMITTED'
+    }
 }
 
 /**
@@ -179,7 +190,9 @@ export class ConnectionFault extends Error {
  * `crypto` this project has no types for and no need of. Nothing reads it but
  * the map below.
  */
-export function connect(options: ConnectOptions): Connection {
+export function connect(options: ConnectOptions): Connected {
+    if (options.deadline !== undefined && (!Number.isFinite(options.deadline.milliseconds) || options.deadline.milliseconds <= 0))
+        throw new Error('a positive request deadline is required')
     const socket = options.socket
     const onPush = options.onPush
     const onClose = options.onClose
@@ -223,8 +236,18 @@ export function connect(options: ConnectOptions): Connection {
             // would blame a question this frame was never an answer to.
             return
         }
+        // Accounting subscriptions use envelopes with a null correlation id.
+        // They are notifications, never replies to an outstanding question.
+        if (isAnswer(frame) && frame['id'] === null) {
+            if (frame['protocol_version'] === CURRENT_VERSION && typeof frame['type'] === 'string') onPush?.(frame)
+            return
+        }
         if (!isAnswer(frame)) {
-            onPush?.(frame)
+            try { onPush?.(frame) } catch { /* Consumer failures cannot strand requests. */ }
+            return
+        }
+        if (frame['id'] === null && frame['protocol_version'] === CURRENT_VERSION) {
+            try { onPush?.(frame) } catch { /* Isolate consumers. */ }
             return
         }
         answer(frame)
@@ -241,8 +264,9 @@ export function connect(options: ConnectOptions): Connection {
             return
         }
         waiting.delete(id as string)
+        asker.cancelDeadline?.()
         const version = frame['protocol_version']
-        if (version !== CURRENT_VERSION) {
+        if (version !== CURRENT_VERSION || frame['type'] !== asker.type) {
             // §3.2: the envelope is a handshake, so this is refused rather than
             // read as data. Per frame, and not by tearing the connection down,
             // because that is how the server refuses in the other direction —
@@ -253,7 +277,7 @@ export function connect(options: ConnectOptions): Connection {
             return
         }
         try {
-            asker.answered(outcomeIn(frame['payload']))
+            asker.answered({ outcome: outcomeIn(frame['payload']), raw: frame })
         } catch (trouble) {
             asker.failed(new ConnectionFault('INVALID_ENVELOPE', trouble instanceof Error ? trouble.message : 'response envelope is unreadable'))
         }
@@ -265,29 +289,38 @@ export function connect(options: ConnectOptions): Connection {
         const stranded = [...waiting.values()]
         waiting.clear()
         for (const asker of stranded) {
+            asker.cancelDeadline?.()
             asker.failed(new ConnectionFault('RESPONSE_LOST', why))
         }
     }
 
-    return {
-        ask(type: string, payload?: unknown): Promise<Outcome> {
+    function request(type: string, payload?: unknown): Promise<Reply> {
             if (!open) {
                 return Promise.reject(new ConnectionFault('NOT_SUBMITTED',
                     `this connection is closed; "${type}" was not sent`))
             }
+            if (waiting.size >= 64) return Promise.reject(new ConnectionFault('NOT_SUBMITTED', 'too many outstanding requests; frame was not submitted'))
             issued += 1
             const id = String(issued)
-            return new Promise<Outcome>((answered, failed) => {
-                waiting.set(id, { answered, failed })
+            return new Promise<Reply>((answered, failed) => {
+                const asker: Waiting = { type, answered, failed }
+                waiting.set(id, asker)
                 try {
                     socket.send(JSON.stringify(asking(id, type, payload)))
                 } catch (trouble) {
                     // Nothing left the process, so nothing will answer this id.
                     waiting.delete(id)
                     failed(new ConnectionFault('NOT_SUBMITTED', 'socket refused the frame before submission'))
+                    return
                 }
+                if (options.deadline !== undefined && waiting.has(id)) asker.cancelDeadline = options.deadline.schedule(() => {
+                    if (waiting.delete(id)) failed(new ConnectionFault('RESPONSE_LOST', 'response deadline expired; outcome is unknown; request was not replayed'))
+                }, options.deadline.milliseconds)
             })
-        },
+    }
+    return {
+        request,
+        ask: async (type, payload) => (await request(type, payload)).outcome,
 
         close(): void {
             strand('this connection was closed before this frame was answered')

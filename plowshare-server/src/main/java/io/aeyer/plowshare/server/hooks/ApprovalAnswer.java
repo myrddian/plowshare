@@ -13,12 +13,12 @@ import java.util.Objects;
  */
 public record ApprovalAnswer(String approval, String decision, String scope) {
 
-    public static final String ALLOW = "allow";
-    public static final String DENY = "deny";
-    public static final String REVOKE = "revoke";
+  public static final String ALLOW = "allow";
+  public static final String DENY = "deny";
+  public static final String REVOKE = "revoke";
 
-    public ApprovalAnswer {
-        Objects.requireNonNull(approval, "approval");
-        Objects.requireNonNull(decision, "decision");
-    }
+  public ApprovalAnswer {
+    Objects.requireNonNull(approval, "approval");
+    Objects.requireNonNull(decision, "decision");
+  }
 }

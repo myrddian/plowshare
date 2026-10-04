@@ -122,3 +122,45 @@ describe('administrative commands preserve authority', () => {
         }
     })
 })
+
+
+describe('server account administration', () => {
+    it('preserves false booleans and audit cursors without borrowing a project scope', () => {
+        expect(parseCommand('admin account update {"handle":"worker","enabled":false,"serverAdmin":false}', 'repo')).toMatchObject({kind:'request',request:{type:'admin.account.update',payload:{handle:'worker',enabled:false,serverAdmin:false}}})
+        expect(parseCommand('admin audit {"before":0,"limit":100}', 'repo')).toMatchObject({kind:'request',request:{type:'admin.audit',payload:{before:0,limit:100}}})
+        for (const command of ['admin account update {"handle":"worker"}', 'admin account create {"handle":"worker","serverAdmin":"yes"}', 'admin audit {"limit":101}']) expect(parseCommand(command).kind).toBe('usage')
+    })
+})
+
+
+describe('project access roles', () => {
+    it('defaults membership additions to the server role and validates explicit roles', () => {
+        expect(parseCommand('project member-add {"handle":"worker","role":"VIEWER"}', 'integration')).toMatchObject({kind:'request',request:{type:'project.member.add',payload:{project:'integration',handle:'worker',role:'VIEWER'}}})
+        expect(parseCommand('project member-role {"handle":"worker","role":"MANAGER"}', 'integration')).toMatchObject({kind:'request',request:{type:'project.member.role'}})
+        expect(parseCommand('project access', 'integration')).toMatchObject({kind:'request',request:{type:'project.access',payload:{project:'integration'}}})
+        expect(parseCommand('project member-role {"handle":"worker","role":"ADMIN"}', 'integration')).toMatchObject({kind:'usage'})
+    })
+})
+
+
+describe('service token scope validation', () => {
+    it('preserves structured scopes and bounds expiry without inheriting the current project', () => {
+        const payload={handle:'integration',name:'production',scopes:[{project:'automation',role:'VIEWER'}],expiresInDays:30}
+        expect(parseCommand('admin service token create '+JSON.stringify(payload),'elsewhere')).toEqual({kind:'request',request:{type:'admin.service.token.create',payload}})
+        expect(parseCommand('admin service account update {"handle":"integration","enabled":false}').kind).toBe('request')
+        for(const change of [{scopes:[]},{scopes:[{project:'Personal:someone',role:'VIEWER'}]},{scopes:[{project:'automation',role:'ADMIN'}]},{scopes:[payload.scopes[0],payload.scopes[0]]},{expiresInDays:0},{expiresInDays:366},{expiresInDays:1.5}]) expect(parseCommand('admin service token create '+JSON.stringify({...payload,...change})).kind).toBe('usage')
+        expect(parseCommand('admin service account update {"handle":"integration","enabled":"false"}').kind).toBe('usage')
+        expect(parseCommand('admin service token revoke {"handle":"integration","id":"bad"}').kind).toBe('usage')
+    })
+})
+
+describe('server pricing administration', () => {
+    const payload = {billingRoute:'hosted',model:'deployment',expectedVersion:'boot:',mode:'TOKEN',currency:'USD',rates:{input:'0.40',output:'1.60'}}
+    it('parses exact decimal rates for CLI and TUI, without inheriting a project', () => {
+        expect(parseCommand('admin pricing list','elsewhere')).toEqual({kind:'request',request:{type:'admin.pricing.list',payload:{}}})
+        expect(parseCommand('admin pricing set '+JSON.stringify(payload),'elsewhere')).toEqual({kind:'request',request:{type:'admin.pricing.set',payload}})
+    })
+    it('rejects lossy numeric rates, malformed tiers, modes and currency before sending', () => {
+        for (const invalid of [{rates:{input:0.4,output:'1.6'}},{rates:{input:'-1',output:'1.6'}},{mode:'FREE'},{currency:'usd'},{expectedVersion:''},{tiers:[{fromInputTokens:1.5,rates:{input:'1'}}]},{rates:{input:'0',output:'0',unknown:'1'}},{mode:'INCLUDED'}]) expect(parseCommand('admin pricing set '+JSON.stringify({...payload,...invalid})).kind).toBe('usage')
+    })
+})

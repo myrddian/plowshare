@@ -6,7 +6,8 @@ import type { Claim } from 'plowshare-client-ts/binding/auth';
 import type { Socket } from 'plowshare-client-ts/binding/connection';
 import { rooter, sameClaim } from 'plowshare-client-node/rooter';
 import { enforcing } from 'plowshare-client-node/enforcer';
-import { mark, markedName, namedAfter, thisMachine } from 'plowshare-client-node/marker';
+import { discover, mark, markedName, resolveMarked, type Marked, namedAfter, thisMachine } from 'plowshare-client-node/marker';
+import { projectLabel } from 'plowshare-client-ts/operations/project-label';
 import { noticingWrites } from 'plowshare-client-node/sync/syncer';
 
 import type { FilePresenceState } from './files-shared.ts';
@@ -23,18 +24,22 @@ async function validateMarker(root: string) {
   }
 }
 
-export async function identifyFolder(directory: string, project?: string): Promise<{ root: string; project: string }> {
-  const root = await realpath(directory);
+export async function identifyFolder(directory: string, project?: string): Promise<Marked> {
+  let root = await realpath(directory);
   if (!(await stat(root)).isDirectory()) throw new Error('Choose a directory.');
   await validateMarker(root);
+  const found = await discover(root);
+  if (found) { root = found.root; await validateMarker(root); }
   const existing = await markedName(root);
-  const name = project ?? existing ?? namedAfter(root);
+  if (found?.kind === 'DISJOINT' && project && projectLabel(project) !== found.project) throw new Error('The manifest belongs to a different project.');
+  const name = found?.kind === 'DISJOINT' ? found.project : project ?? existing ?? namedAfter(root);
   if (!name.trim() || name.length > 512 || /[\r\n\0]/.test(name)) throw new Error('Invalid project name.');
   if (existing && existing !== name) throw new Error(`This folder belongs to ${existing}. Select that workspace first.`);
-  return { root, project: name };
+  return { root, project: name, ...(found?.kind ? {kind:found.kind}: {}) };
 }
 
 export class FilePresence {
+  private readonly connection: import('plowshare-client-ts/binding/connection').Connection | undefined;
   private alive = true;
   private busy = false;
   private lifetime?: AbortController;
@@ -42,8 +47,8 @@ export class FilePresence {
   private commands = new Set<Promise<unknown>>();
   private readonly held;
   private readonly changed: (state: FilePresenceState) => void;
-  constructor(open: FileOpener, changed: (state: FilePresenceState) => void, wrote: () => void = () => {}) {
-    this.changed = changed;
+  constructor(open: FileOpener, changed: (state: FilePresenceState) => void, wrote: () => void = () => {}, connection?: import('plowshare-client-ts/binding/connection').Connection) {
+    this.changed = changed; this.connection = connection;
     this.held = rooter({
       requireReadyProject: true,
       open: async claim => {
@@ -81,7 +86,12 @@ export class FilePresence {
     return operation.finally(() => { this.busy = false; if (this.opening === operation) this.opening = undefined; });
   }
   private async root(directory: string, project?: string): Promise<string> {
-    const { root, project: name } = await identifyFolder(directory, project);
+    let found = await identifyFolder(directory, project);
+    if (found.kind === 'DISJOINT') {
+      if (!this.connection) throw new Error('A client project needs its signed-in connection');
+      found = await resolveMarked(found, this.connection, thisMachine(process.env, hostname()));
+    }
+    const {root, project:name} = found;
     if (!this.alive) throw new Error('The connection changed while choosing files.');
     const claim = { project: name, root, machine: thisMachine(process.env, hostname()) };
     if (sameClaim(this.held.current(), claim)) return name;

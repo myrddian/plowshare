@@ -8,6 +8,7 @@ import { isAbsolute } from 'node:path';
 import { DesktopClient, serverConnector } from './client.ts';
 import type { Connector } from './client.ts';
 import { identifyFolder } from './files.ts';
+import { personalDirectory, readPersonal } from 'plowshare-client-node/personal';
 import { thisMachine } from 'plowshare-client-node/marker';
 import type { ProjectStore, SavedProject } from './project-config.ts';
 import type { DesktopState, Reply, Request } from './shared.ts';
@@ -29,6 +30,7 @@ export class DesktopWorkspace {
   private errors = new Map<string, string>();
   private configError?: string;
   private scope = '';
+  private personal?: DesktopState['personal'];
   private authoring?: DesktopState['authoring'];
   private authoringIdentity = '';
   private authoringBusy = false;
@@ -59,10 +61,14 @@ export class DesktopWorkspace {
   get selectionToken() { return this.token; }
   get library() { return this.control.library; }
   get runs() { return this.control.runs; }
+  spawnedConversation(parent: string, key: string) {
+    return this.control.runs.spawnedConversation(parent, key, this.state.history[parent]?.entries ?? []);
+  }
   get activity() { return this.control.activity; }
   get board() { return this.control.board; }
   get state(): DesktopState {
     const state = structuredClone(this.control.state);
+    state.personal = structuredClone(this.personal);
     if (this.operatorOwner) state.operator = structuredClone(this.operatorOwner.state.operator);
     if (this.authoringIdentity === `${state.base}|${state.handle}`) state.authoring = structuredClone(this.authoring);
     if (state.mode !== 'live') return state;
@@ -78,6 +84,7 @@ export class DesktopWorkspace {
       Object.assign(state.agents, child.state.agents);
       Object.assign(state.history, child.state.history);
       Object.assign(state.contexts, child.state.contexts);
+      state.contextSnapshots = { ...state.contextSnapshots, ...child.state.contextSnapshots };
     }
     state.projects = [...new Map([...this.saved.map(row => ({ name: row.name })), ...state.projects].map(row => [row.name, row])).values()];
     state.projectFolders = this.saved.map(row => {
@@ -87,6 +94,7 @@ export class DesktopWorkspace {
         connected: child?.state.connected ?? false, files, sync: child?.state.sync,
         ...(this.errors.has(row.name) ? { error: this.errors.get(row.name) } : {}) };
     });
+    if (state.personal && this.errors.has(state.personal.project)) state.personal.error = this.errors.get(state.personal.project);
     state.projectConfigError = this.configError;
     state.localMachine = thisMachine(process.env, hostname());
     state.projectPreparing = [...this.attachments.keys()];
@@ -100,7 +108,7 @@ export class DesktopWorkspace {
     if (!this.jobStore || this.jobRestoring || this.transitioning || this.closing || this.control.state.mode !== 'live') return;
     const { base, handle } = this.control.state;
     if (!handle) return;
-    const rows = [...this.unrestoredJobs, ...this.control.savedJobs(), ...[...this.children.values()].flatMap(child => child.savedJobs())];
+    const rows = [...this.unrestoredJobs, ...this.control.savedJobs(), ...[...this.children.values()].flatMap(child => child.savedJobs())].filter(row => !row.project?.startsWith('client:'));
     const receipt = JSON.stringify([base, handle, rows]); if (receipt === this.lastReceipts) return;
     this.lastReceipts = receipt;
     const token = this.token;
@@ -146,7 +154,12 @@ export class DesktopWorkspace {
   private projectOfConversation(id: string) { return this.state.conversations.find(row => row.id === id)?.project; }
   private async conversationOwner(id: string) {
     const row = this.state.conversations.find(value => value.id === id);
-    if (!row && inspectionConversation(this.control.state, id)) return this.control;
+    if (!row) {
+      // A delegated conversation inherits the owning parent's authenticated session.
+      // It need not be listed as a top-level chat, and must not be rerouted globally.
+      const owner = [this.control, ...this.children.values()].find(client => inspectionConversation(client.state, id));
+      if (owner) return owner;
+    }
     if (!row) throw new Error('Choose an available conversation.');
     const owner = await this.clientFor(row.project);
     owner.retainConversation(row);
@@ -191,6 +204,25 @@ export class DesktopWorkspace {
   private async root(directory: string, project?: string, selectProject = true): Promise<Reply> {
     this.requireLive(); const token = this.token;
     const folder = await identifyFolder(directory, project); this.same(token);
+    if (folder.kind === 'DISJOINT') {
+      const held = [...this.children.entries()].find(([key, value]) => key.startsWith('client:') && value.state.files.root === folder.root);
+      if (held) { if (selectProject) this.scope = held[0]; this.emit(); return {state:this.state,rootProject:held[0]}; }
+      let key: string | undefined;
+      const child = new DesktopClient(() => { if (key && this.children.get(key) === child) this.emit(); },
+        (_base, _handle, _password, push, closed) => this.control.openPeer(push, closed), {accountActivity:false});
+      try {
+        await child.dispatch({action:'connect',base:this.control.state.base,handle:this.control.state.handle,password:'authenticated-project-session'}); this.same(token);
+        const attached = await child.rootDirectory(folder.root, folder.project); this.same(token);
+        key = attached.rootProject;
+        const old = this.children.get(key); if (old) await old.shutdown();
+        this.children.set(key,child);
+        const mapping: SavedProject = {server:this.control.state.base,account:this.control.state.handle,name:key,path:folder.root,machine:thisMachine(process.env,hostname()),enabled:true};
+        if (!key.startsWith('client:')) await this.store.put(mapping);
+        this.same(token); this.saved = [...this.saved.filter(row=>row.name!==key),mapping];
+        this.errors.delete(key); if (selectProject) this.scope=key; this.emit();
+        return {state:this.state,rootProject:key};
+      } catch (error) { if (key && this.children.get(key) === child) this.children.delete(key); await child.shutdown(); throw error; }
+    }
     const mapping: SavedProject = { server: this.control.state.base, account: this.control.state.handle,
       name: folder.project, path: folder.root, machine: thisMachine(process.env, hostname()), enabled: true };
     const previous = this.saved.find(row => row.name === mapping.name);
@@ -207,6 +239,20 @@ export class DesktopWorkspace {
     }
     return { state: this.state, rootProject: mapping.name };
   }
+  private async mountPersonal(token: object) {
+    const project = this.control.state.projects.find(row => row.kind === 'personal');
+    if (!project) { this.personal = undefined; return; }
+    this.personal = { project: project.name };
+    try {
+      const root = await personalDirectory(this.control.state.base, this.control.state.handle, project.name); this.same(token);
+      this.personal.root = root;
+      const mapping: SavedProject = { server: this.control.state.base, account: this.control.state.handle,
+        name: project.name, path: root, machine: thisMachine(process.env, hostname()), enabled: true };
+      this.saved = [...this.saved.filter(row => row.name !== project.name), mapping];
+      this.scope = project.name;
+    } catch (error) { this.personal.error = error instanceof Error ? error.message : String(error); }
+  }
+
   private async startProject(mapping: SavedProject, token: object) {
     try {
       if (mapping.machine !== thisMachine(process.env, hostname())) throw new Error('This saved folder belongs to another machine. Choose its location on this computer.');
@@ -215,7 +261,7 @@ export class DesktopWorkspace {
       const child = await this.clientFor(mapping.name); this.same(token);
       await child.rootDirectory(mapping.path, mapping.name); this.same(token);
       this.control.state.projects = [...this.control.state.projects.filter(row => row.name !== mapping.name),
-        { name: mapping.name, machine: mapping.machine, workspace: mapping.path }];
+        { ...this.control.state.projects.find(row => row.name === mapping.name), name: mapping.name, machine: mapping.machine, workspace: mapping.path }];
       this.errors.delete(mapping.name);
     } catch (error) {
       if (token === this.token) this.errors.set(mapping.name, error instanceof Error ? error.message : String(error));
@@ -261,6 +307,10 @@ export class DesktopWorkspace {
       this.restoring = this.restoreConnection();
       try { return await this.restoring; } finally { this.restoring = undefined; }
     }
+    if (request.action === 'server-setup') {
+      const login = await this.control.initializeAdministrator(request);
+      request = { action: 'connect', ...login, password: '' };
+    }
     if (request.action === 'connect') {
       this.initialized = true;
       const login = await this.control.login(request);
@@ -277,13 +327,14 @@ export class DesktopWorkspace {
       try {
         await this.control.dispatch(request); this.same(token);
         await this.rememberConnection(true); this.same(token);
-        // Only folders explicitly added by this account are restored. Server paths are hints.
+        await this.mountPersonal(token); this.same(token);
+        // Personal is the fixed account mount; other folders are explicit choices.
         await Promise.allSettled(this.saved.filter(row => row.enabled).map(row => this.startProject(row, token)));
         this.same(token);
         if (this.jobStore) {
           this.jobRestoring = true;
           try {
-            const jobs = await this.jobStore.load(base, handle); this.same(token);
+            const jobs = (await this.jobStore.load(base, handle)).filter(row => !row.project?.startsWith('client:')); this.same(token);
             for (const row of jobs) {
               try { const owner = await this.clientFor(row.project); this.same(token); await owner.restoreJobs([row]); }
               catch (error) { this.same(token); this.unrestoredJobs.push(row); this.control.state.jobRecoveryError = `Receipt ${row.id} is retained, but its project could not be restored: ${String(error)}`; }
@@ -295,6 +346,7 @@ export class DesktopWorkspace {
       return { state: this.state };
     }
     if (request.action === 'disconnect' || request.action === 'demo') {
+      this.personal = undefined;
       this.initialized = true;
       await this.rememberConnection(false);
       this.transitioning = true; this.token = {}; const token = this.token;
@@ -306,13 +358,15 @@ export class DesktopWorkspace {
     if (request.action === 'project-open' || request.action === 'project-remove' || request.action === 'files-withdraw') {
       this.requireLive(); const token = this.token;
       const name = request.project ?? this.scope;
+      if (name === this.personal?.project && request.action !== 'project-open') throw new Error('Personal space is always mounted for this account.');
       const mapping = this.saved.find(row => row.name === name);
       if (!mapping) {
         if (request.action !== 'project-open') throw new Error('Add a local folder for this project first.');
         return this.recoverProject(name);
       }
       if (request.action === 'project-open') {
-        const enabled = { ...mapping, enabled: true }; await this.store.put(enabled); this.same(token);
+        const enabled = { ...mapping, enabled: true };
+        if (name !== this.personal?.project) await this.store.put(enabled); this.same(token);
         Object.assign(mapping, enabled); await this.startProject(mapping, token);
       } else {
         if (request.action === 'project-remove') await this.store.remove(mapping.server, mapping.account, name);
@@ -325,13 +379,40 @@ export class DesktopWorkspace {
       }
       this.emit(); return { state: this.state };
     }
+    if (request.action === 'personal-bots') {
+      this.requireLive(); const token = this.token;
+      if (!this.personal) throw new Error('Personal space is unavailable.');
+      const project = this.personal.project;
+      try {
+        const owner = await this.clientFor(project); this.same(token);
+        const latest = await owner.botConversations(project); this.same(token);
+        this.personal.botLatest = latest;
+        delete this.personal.botsError;
+      } catch (error) { this.same(token); this.personal.botsError = error instanceof Error ? error.message : String(error); }
+      this.emit(); return { state: this.state };
+    }
+    if (request.action === 'personal-section') {
+      this.requireLive(); const token = this.token;
+      if (!this.personal?.root) throw new Error(this.personal?.error || 'Personal space is unavailable.');
+      this.personal.section = request.section;
+      this.personal.path = request.path ?? request.section;
+      this.personal.entries = [];
+      delete this.personal.text; delete this.personal.note;
+      try {
+        const content = await readPersonal(this.personal.root, request.section, request.path); this.same(token);
+        Object.assign(this.personal, content); delete this.personal.error;
+        if (content.text === undefined) delete this.personal.text;
+        if (content.note === undefined) delete this.personal.note;
+      } catch (error) { this.same(token); this.personal.error = String(error); }
+      this.emit(); return { state: this.state };
+    }
     if (request.action === 'operator-prepare') {
       this.requireLive(); const token = this.token;
       if (request.kind === 'caps') await this.prepareProject(request.project);
       const owner = await this.clientFor(request.project); this.same(token); this.operatorOwner = owner;
       await owner.dispatch(request); this.same(token); this.emit(); return { state: this.state };
     }
-    if (request.action === 'operator-preview' || request.action === 'operator-apply') {
+    if (request.action === 'operator-preview' || request.action === 'operator-apply' || request.action === 'operator-messages') {
       this.requireLive(); const owner = this.operatorOwner;
       if (!owner?.state.connected) throw new Error('Read this control again.');
       await owner.dispatch(request); this.emit(); return { state: this.state };
@@ -399,7 +480,7 @@ export class DesktopWorkspace {
         return { state: this.state, notice: `Project files unavailable: ${error instanceof Error ? error.message : String(error)}. Use Connect files to choose the folder.` };
       }
       owner = await this.clientFor(request.project);
-    } else if (request.action === 'run' || request.action === 'history' || request.action === 'context') owner = await this.conversationOwner(request.conversation);
+    } else if (request.action === 'workflow-start' || request.action === 'run' || request.action === 'history' || request.action === 'context' || request.action === 'context-snapshot') owner = await this.conversationOwner(request.conversation);
     else if (request.action === 'cancel') owner = [...this.children.values(), this.control].find(client => client.state.jobs.some(row => row.id === request.job)) ?? this.control;
     else if (request.action === 'answer') {
       const approval = this.state.approvals.find(row => row.id === request.id);

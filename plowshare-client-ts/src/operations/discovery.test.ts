@@ -18,7 +18,20 @@ describe('offline command discovery', () => {
             expect(row.input, name).toBeDefined();expect(row.result, name).toBeDefined()
         }
     })
-    it.each(['information acquire','agent run','orchestration start'])('discovers usable %s fields, example, scope and results', command => {
+    it('agrees with validation and canonical schemas on required web paging', () => {
+        const row = discovery().commands.find(row => row.command === 'web search')!
+        expect(row.required).toEqual(['query', 'pageSize', 'max', 'page'])
+        expect(row.optional).toEqual([])
+        expect(row.input?.['required']).toEqual(row.required)
+        expect(row.pagination).toEqual(['pageSize', 'max', 'page'])
+        expect(parseCommand(`web search ${JSON.stringify(row.example)}`).kind).toBe('request')
+        for (const field of row.pagination) {
+            const payload = { ...(row.example as Record<string, unknown>) }; delete payload[field]
+            expect(parseCommand(`web search ${JSON.stringify(payload)}`).kind).toBe('usage')
+            expect(parseCommand(`web search ${JSON.stringify({ ...(row.example as Record<string, unknown>), [field]: 0 })}`).kind).toBe('usage')
+        }
+    })
+    it.each(['information acquire','agent run','orchestration start','admin account create','admin account update','admin account reset','admin session revoke','admin service account create','admin service account update','admin service token create','admin service token rotate','admin service token revoke'])('discovers usable %s fields, example, scope and results', command => {
         const row = discovery().commands.find(row => row.command === command)!
         expect(parseCommand(`${command} ${JSON.stringify(row.example)}`).kind).toBe('request')
         expect(row.mutation).toBe(true);expect(row.required?.length).toBeGreaterThan(0)

@@ -1,0 +1,16 @@
+{
+  "protocolVersion": "plowshare-v1",
+  "cases": [
+    { "name": "success", "response": { "code": "OK", "payload": { "nullable": null, "future": { "nested": [1, "two"] } }, "futureOutcome": true } },
+    { "name": "refusal", "response": { "code": "CONFLICT", "said": "fixture refusal" } },
+    { "name": "wrong-type", "type": "job.status", "response": { "code": "OK" }, "delivery": "INVALID_RESPONSE" },
+    { "name": "wrong-version", "version": "plowshare-future", "response": { "code": "OK" }, "delivery": "INVALID_RESPONSE" },
+    { "name": "unknown-code", "response": { "code": "NOT_A_CODE" }, "delivery": "INVALID_RESPONSE" },
+    { "name": "non-string-code", "response": { "code": [] }, "delivery": "INVALID_RESPONSE" },
+    { "name": "malformed-said", "response": { "code": "OK", "said": [] }, "delivery": "INVALID_RESPONSE" },
+    { "name": "missing-outcome", "response": [], "delivery": "INVALID_RESPONSE" },
+    { "name": "push", "push": true, "response": { "code": "OK", "payload": {} } },
+    { "name": "timeout", "silent": true, "delivery": "UNKNOWN" },
+    { "name": "disconnect", "disconnect": true, "delivery": "UNKNOWN" }
+  ]
+}

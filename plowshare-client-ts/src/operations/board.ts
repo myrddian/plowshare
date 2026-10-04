@@ -33,6 +33,9 @@ export interface BoardInspection {
   view?: BoardView; project?: string; selected?: string;
   memberLimit?: number; activity?: Record<string, Reading<SwarmActivity>>;
   topics: Reading<TopicSummary[]> & { more?: boolean };
+  opening?: { busy?: boolean; notice?: string; error?: string };
+  retrying?: { project: string; topic: string; member: string; requestId: string; maxTurns: number; refused?: boolean; busy?: boolean; notice?: string; error?: string };
+  posting?: { project: string; topics: TopicSummary[]; more: boolean; loading?: boolean; busy?: boolean; notice?: string; error?: string };
   details: Record<string, Reading<TopicDetail>>; swarm: Reading<SwarmStatus>;
 }
 export const emptyBoard = (): BoardInspection => ({ topics: {}, details: {}, swarm: {} });
@@ -52,6 +55,8 @@ const seat = (v: unknown): v is SeatView => obj(v) && fields(v['seat'], ['topic'
   && fields(v, ['position','waitedMillis'], nullable(num)) && typeof v['overdue'] === 'boolean';
 const message = (v: unknown): v is BoardMessage => fields(v, ['id','topic','authorKind','author','kind','body','postedAt'], str)
   && fields(v, ['replyTo','conversation','title'], nullable(str)) && obj(v) && nullable(num)(v['entry']) && typeof v['alert'] === 'boolean' && array(v['mentions'], str);
+export const isBoardMessage = message;
+export const isBoardTopic = topic;
 const decision = (v: unknown) => obj(v) && fields(v, ['request','reason'], str) && typeof v['approved'] === 'boolean' && nullable(str)(v['child']);
 export function topicsOf(v: unknown): { topics: TopicSummary[]; more: boolean; offset: number } {
   if (!obj(v) || !array(v['topics'], summary) || typeof v['more'] !== 'boolean' || !num(v['offset'])) throw new Error('The server returned an incomplete topic list.');

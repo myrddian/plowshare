@@ -31,15 +31,15 @@ describe('the demo\'s fixture', () => {
         expect(child?.entries.some((entry) => entry.calls?.some((call) => call.opened?.agent === 'test_runner'))).toBe(true)
     })
 
-    it('folds honestly: the fold stands in for the rows it covers, and the log says they were superseded', async () => {
+    it('shows both original history and model folds, with supersession recorded in the log', async () => {
         const root = (await demoReads().tail('demo_root'))!
         const size = { rows: 40, columns: 160 }
         const extras = { children: new Map(), zone: 'UTC' }
         const trajectory = describeExplorer(explorerOpened(levelOf('demo_root', 'plowshare', root, 'trajectory'), 'trajectory'),
             size, extras).map(plainOf).join('\n')
         expect(trajectory).toContain('FOLD')
-        expect(trajectory).not.toContain('what is in this repo?')
-        expect(trajectory).not.toContain('Six modules')
+        expect(trajectory).toContain('what is in this repo?')
+        expect(trajectory).toContain('Six modules')
         const log = describeExplorer(explorerOpened(levelOf('demo_root', 'plowshare', root, 'log'), 'log'), size, extras)
             .map(plainOf)
         expect(log.filter((line) => line.includes('superseded by #3'))).toHaveLength(2)

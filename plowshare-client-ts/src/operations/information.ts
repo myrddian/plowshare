@@ -1,7 +1,8 @@
+export type InformationCorpus = 'documents' | 'code'
 export type InformationScope = { kind: 'personal' | 'shared'; includeShared?: boolean }
     | { kind: 'project'; project: string; includeShared?: boolean }
 export const INFORMATION_OPERATIONS = [
-    'upload', 'acquire', 'refresh', 'revise', 'replace', 'list', 'inventory', 'acquisitions', 'status', 'read',
+    'upload', 'acquire', 'refresh', 'revise', 'replace', 'list', 'facets', 'tags', 'tags.groups', 'inventory', 'acquisitions', 'status', 'await', 'read', 'outline', 'symbols',
     'search', 'rank', 'ask', 'evidence.record', 'evidence.read', 'record.report', 'finalise',
     'link', 'unlink', 'share', 'unshare', 'withdraw', 'exclude', 'unexclude', 'restore', 'delete', 'retry',
     'rebuild', 'allowance', 'events', 'migration.list', 'migration.adopt', 'migration.inspect', 'migration.release',
@@ -13,11 +14,16 @@ export interface InformationTransport { ask(type: string, payload: unknown): Pro
 export class InformationClient {
     private readonly transport: InformationTransport
     readonly scope: InformationScope
-    constructor(transport: InformationTransport, scope: InformationScope) { this.transport=transport;this.scope=scope }
+    readonly corpus: InformationCorpus
+    constructor(transport: InformationTransport, scope: InformationScope, corpus: InformationCorpus = 'documents') {
+        this.transport=transport;this.scope=scope;this.corpus=corpus
+    }
     async call(operation: InformationOperation, payload: Record<string, unknown> = {}): Promise<unknown> {
         if (!(INFORMATION_OPERATIONS as readonly string[]).includes(operation)) throw new Error('Unknown information operation.')
         if (this.scope.kind === 'project' && !this.scope.project.trim()) throw new Error('Select a project.')
-        const outcome = await this.transport.ask(`information.${operation}`, { ...payload, scope: this.scope })
+        const outcome = await this.transport.ask(`information.${operation}`, {
+            ...(this.corpus === 'code' ? { corpus: this.corpus } : {}), ...payload, scope: this.scope,
+        })
         if (outcome.code !== 'OK' && outcome.code !== 'ACCEPTED') throw new Error(outcome.said ?? `Information request answered ${outcome.code}.`)
         return outcome.payload
     }

@@ -396,3 +396,18 @@ describe('what cannot be read is not mistaken for an answer', () => {
         expect(pushes).toEqual([])
     })
 })
+
+
+it('delivers revisioned enveloped notifications without consuming an outstanding reply', async () => {
+    const socket = new FakeSocket(), pushes: unknown[] = [];
+    const connection = connect({socket, onPush: frame => pushes.push(frame)});
+    const pending = connection.ask('usage.models', {}), asked = socket.frame(0);
+    const update = {id:null,type:'usage.updated',protocol_version:CURRENT_VERSION,payload:{subscription:'sub',revision:2}};
+    socket.deliver(update);
+    socket.deliver({...update,protocol_version:'unrecognized'});
+    socket.deliver({...update,type:'usage.closed'});
+    expect(pushes).toEqual([update,{...update,type:'usage.closed'}]);
+    socket.deliver(answering(asked.id,asked.type,{code:'OK',payload:{report:'reply'}}));
+    expect(await pending).toEqual({code:'OK',payload:{report:'reply'}});
+    connection.close();
+});

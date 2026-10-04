@@ -2,45 +2,94 @@ package io.aeyer.plowshare.server.information;
 
 import java.util.Objects;
 
-/** Resource selection derived by an adapter from its authenticated caller, never model ownership. */
-public record InformationContext(String account, Selection selection) {
+/**
+ * Resource selection derived by an adapter from its authenticated caller, never model ownership.
+ */
+public record InformationContext(
+    String account, Selection selection, Corpus corpus, InformationFacets facets) {
 
-    public InformationContext {
-        if (account == null || account.isBlank()) {
-            throw new IllegalArgumentException("information needs an authenticated account");
-        }
-        Objects.requireNonNull(selection, "selection");
+  public InformationContext(String account, Selection selection, Corpus corpus) {
+    this(account, selection, corpus, InformationFacets.NONE);
+  }
+
+  public InformationContext withFacets(Object value) {
+    return new InformationContext(account, selection, corpus, InformationFacets.from(value));
+  }
+
+  public InformationContext(String account, Selection selection) {
+    this(account, selection, Corpus.DOCUMENTS);
+  }
+
+  public enum Corpus {
+    DOCUMENTS("document"),
+    CODE("code");
+    private final String documentType;
+
+    Corpus(String documentType) {
+      this.documentType = documentType;
     }
 
-    public enum Scope {
-        PERSONAL, PROJECT, SHARED
+    public String documentType() {
+      return documentType;
+    }
+  }
+
+  /** Corpus selection changes discovery, never ownership or workspace permissions. */
+  public InformationContext withCorpus(Object value) {
+    if (value == null) return this;
+    if (!(value instanceof String name))
+      throw new io.aeyer.plowshare.server.faults.CallerFault("corpus must be documents or code");
+    Corpus selected =
+        switch (name) {
+          case "documents" -> Corpus.DOCUMENTS;
+          case "code" -> Corpus.CODE;
+          default ->
+              throw new io.aeyer.plowshare.server.faults.CallerFault(
+                  "corpus must be documents or code");
+        };
+    return new InformationContext(account, selection, selected, facets);
+  }
+
+  public InformationContext {
+    if (account == null || account.isBlank()) {
+      throw new IllegalArgumentException("information needs an authenticated account");
+    }
+    Objects.requireNonNull(selection, "selection");
+    Objects.requireNonNull(corpus, "corpus");
+    Objects.requireNonNull(facets, "facets");
+  }
+
+  public enum Scope {
+    PERSONAL,
+    PROJECT,
+    SHARED
+  }
+
+  public record Selection(Scope scope, String project, boolean includeShared) {
+    public Selection {
+      Objects.requireNonNull(scope, "scope");
+      if (scope == Scope.PROJECT) {
+        if (project == null || project.isBlank()) {
+          throw new IllegalArgumentException("project information selection needs a project");
+        }
+      } else if (project != null) {
+        throw new IllegalArgumentException("only project selection may name a project");
+      }
+      if (scope == Scope.SHARED && includeShared) {
+        throw new IllegalArgumentException("shared selection does not take includeShared");
+      }
     }
 
-    public record Selection(Scope scope, String project, boolean includeShared) {
-        public Selection {
-            Objects.requireNonNull(scope, "scope");
-            if (scope == Scope.PROJECT) {
-                if (project == null || project.isBlank()) {
-                    throw new IllegalArgumentException("project information selection needs a project");
-                }
-            } else if (project != null) {
-                throw new IllegalArgumentException("only project selection may name a project");
-            }
-            if (scope == Scope.SHARED && includeShared) {
-                throw new IllegalArgumentException("shared selection does not take includeShared");
-            }
-        }
-
-        public static Selection personal() {
-            return new Selection(Scope.PERSONAL, null, true);
-        }
-
-        public static Selection project(String project) {
-            return new Selection(Scope.PROJECT, project, true);
-        }
-
-        public static Selection shared() {
-            return new Selection(Scope.SHARED, null, false);
-        }
+    public static Selection personal() {
+      return new Selection(Scope.PERSONAL, null, true);
     }
+
+    public static Selection project(String project) {
+      return new Selection(Scope.PROJECT, project, true);
+    }
+
+    public static Selection shared() {
+      return new Selection(Scope.SHARED, null, false);
+    }
+  }
 }

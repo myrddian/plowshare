@@ -1,5 +1,6 @@
 import type { Outcome } from '../binding/envelope.ts'
 import type { JsonValue } from './administration.ts'
+import { isBoardMessage, type BoardMessage } from './board.ts'
 import { object, text, named, bool, count, nullable, list, record, strings, json, noContent, type Check } from './wire-checks.ts'
 
 /** Complete server wire records. Nullable values and future fields remain intact. */
@@ -65,9 +66,10 @@ export interface OrchestrationStatus { readonly orchestration: RunView; readonly
 export interface OrchestrationAnswered { readonly id: string; readonly state: string }
 export interface OrchestrationCancelled { readonly id: string; readonly state: string }
 export interface SettingView { readonly value: number | null; readonly source: string }
+export interface BooleanSettingView { readonly value: boolean | null; readonly source: string }
 export interface CapsView {
     readonly project: string; readonly steps: SettingView; readonly budget: SettingView; readonly autoContinue: SettingView
-    readonly time: SettingView; readonly failedChecks: SettingView; readonly applied: number; readonly said: string | null
+    readonly time: SettingView; readonly failedChecks: SettingView; readonly autoIncrease: BooleanSettingView; readonly applied: number; readonly said: string | null
 }
 export interface ScheduleRecord {
     readonly name: string; readonly cron: string; readonly zone: string; readonly emits: string; readonly paused: boolean
@@ -90,11 +92,17 @@ export interface FiringRecord {
     readonly reason: string | null; readonly jobId: string | null; readonly arrivedAt: string; readonly startedAt: string | null
     readonly finishedAt: string | null; readonly topic: string | null
 }
+export interface BoardOpened { readonly requestId: string; readonly topic: BoardTopic; readonly message: BoardMessage }
+export interface BoardRetried { readonly requestId: string; readonly member: string; readonly maxTurns: number; readonly message: BoardMessage }
+export interface BoardPosted { readonly requestId: string; readonly message: BoardMessage }
 export interface AdministrativeReplies {
     'approval.list': ApprovalListed
     'approval.answer': ApprovalAnswered
     'approval.revoke': ApprovalRevoked
     'board.topup': BoardTopic
+    'board.open': BoardOpened
+    'board.retry': BoardRetried
+    'board.post': BoardPosted
     'buffer.purge': BufferPurgeReport
     'retention.sweep': SweepReport
     'provider.list': readonly ProviderRegistration[]
@@ -154,6 +162,9 @@ const readers = {
     'approval.list': record({ approvals: list(approval) }),
     'approval.answer': record({ id: named, state: named, job: nullable(named), busy: bool, note: nullable(text) }),
     'approval.revoke': record({ id: named, revoked: bool }), 'board.topup': boardTopicCheck,
+    'board.open': record({ requestId: named, topic: boardTopicCheck, message: isBoardMessage }),
+    'board.retry': record({ requestId: named, member: named, maxTurns: value => count(value) && (value as number) > 0, message: isBoardMessage }),
+    'board.post': record({ requestId: named, message: isBoardMessage }),
     'buffer.purge': record({ fetchedPages: count, resultSets: count }),
     'retention.sweep': record({ marked: count, conversations: count, payloads: count, characters: count, prunedJobs: count }),
     'provider.list': list(provider), 'provider.deregister': noContent,
@@ -161,7 +172,7 @@ const readers = {
     'orchestration.definitions': record({ definitions: list(definition) }), 'orchestration.list': record({ orchestrations: list(run) }),
     'orchestration.status': record({ orchestration: run, todos: list(todo), messages: list(message), children: list(record({ id: named, state: named })) }),
     'orchestration.answer': record({ id: named, state: named }), 'orchestration.cancel': record({ id: named, state: named }),
-    'orchestration.caps': record({ project: named, steps: setting, budget: setting, autoContinue: setting, time: setting, failedChecks: setting, applied: count, said: nullable(text) }),
+    'orchestration.caps': record({ project: named, steps: setting, budget: setting, autoContinue: setting, time: setting, failedChecks: setting, autoIncrease: record({value: nullable(bool), source: text}), applied: count, said: nullable(text) }),
     'schedule.list': list(schedule), 'schedule.define': schedule, 'schedule.read': proposal, 'schedule.pause': noContent, 'schedule.forget': noContent,
     'trigger.list': list(trigger), 'trigger.define': trigger, 'trigger.pause': noContent, 'trigger.forget': noContent,
     'event.fire': list(firing), 'firing.list': list(firing),

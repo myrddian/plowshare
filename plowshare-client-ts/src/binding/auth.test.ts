@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 const LISTENING_AS = 'a-listening-session'
 
 import {
-    MustChangePassword, SignInRefused, openFiles, openSocket, refresh, signIn, standing, ticket,
+    MustChangePassword, SignInRefused, openFiles, openSocket, openServiceSocket, refresh, signIn, standing, ticket,
 } from './auth.ts'
 import type { Answer, Door, Sent, Tokens } from './auth.ts'
 import type { Arrival, Socket } from './connection.ts'
@@ -521,5 +521,29 @@ describe('the session endpoint answers both of the questions a client has', () =
     it('reads a 401 as no session at all, which is the filter answering', async () => {
         const { door } = doorway({ '/v1/auth/session': { status: 401 } })
         expect(await standing(door, PAIR)).toEqual({ signedIn: false, mustChangePassword: false })
+    })
+})
+
+
+describe('service credential sockets', () => {
+    it('tickets the bearer directly without login, refresh, persistence or password setup', async () => {
+        const {door,calls}=doorway({'/v1/auth/ticket':{status:200,body:{ticket:'machine-ticket'}}})
+        let url = ''
+        const opened=await openServiceSocket({...door,session:LISTENING_AS,open:async value=>{url=value;return new FakeSocket()}},'pss_machine-test')
+        expect(calls.map(row=>row.path)).toEqual(['/v1/auth/ticket'])
+        expect(calls[0]!.headers['Authorization']).toBe('Bearer pss_machine-test')
+        expect(new URL(url).searchParams.get('ticket')).toBe('machine-ticket')
+        expect(url).not.toContain('pss_machine-test')
+        expect(opened.tokens).toEqual({access:'pss_machine-test'})
+        opened.connection.close()
+    })
+    it('rejects invalid or revoked credentials without retrying or opening a socket', async () => {
+        const {door,calls}=doorway({'/v1/auth/ticket':{status:401}})
+        let opened=false
+        const options={...door,session:LISTENING_AS,open:async()=>{opened=true;return new FakeSocket()}}
+        await expect(openServiceSocket(options,'human-access')).rejects.toThrow('service credential')
+        expect(calls).toHaveLength(0)
+        await expect(openServiceSocket(options,'pss_revoked')).rejects.toThrow()
+        expect(calls).toHaveLength(1);expect(opened).toBe(false)
     })
 })

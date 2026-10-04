@@ -38,5 +38,11 @@
   { "name": "a time cap past a week", "text": "caps:\n  time: 10081\n", "refusedLine": 2 },
   { "name": "failed-checks of zero", "text": "caps:\n  failed-checks: 0\n", "refusedLine": 2 },
   { "name": "failed-checks past a hundred", "text": "caps:\n  failed-checks: 101\n", "refusedLine": 2 },
-  { "name": "a time cap written as a duration", "text": "caps:\n  time: 90m\n", "refusedLine": 2 }
+  { "name": "a time cap written as a duration", "text": "caps:\n  time: 90m\n", "refusedLine": 2 },
+  {"name": "project automatic increases true", "text": "caps:\n  auto-increase: true\n", "expect": {"local": null, "server": null, "caps": {"autoIncrease": true}}},
+  {"name": "project automatic increases false", "text": "caps:\n  auto-increase: false\n", "expect": {"local": null, "server": null, "caps": {"autoIncrease": false}}},
+  {"name": "refuse non boolean automatic increase 1", "text": "caps:\n  auto-increase: 1\n", "refusedLine": 2},
+  {"name": "refuse non boolean automatic increase yes", "text": "caps:\n  auto-increase: yes\n", "refusedLine": 2},
+  {"name": "refuse non boolean automatic increase null", "text": "caps:\n  auto-increase: null\n", "refusedLine": 2},
+  {"name": "refuse non boolean automatic increase True", "text": "caps:\n  auto-increase: True\n", "refusedLine": 2}
 ]

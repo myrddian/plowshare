@@ -10,17 +10,17 @@ package io.aeyer.plowshare.server.orchestrations;
 @FunctionalInterface
 public interface CheckFailures {
 
-    /** Counts nothing and asks nobody. */
-    CheckFailures NONE = (run, what, output) -> false;
+  /** Counts nothing and asks nobody. */
+  CheckFailures NONE = (run, what, output) -> false;
 
-    /**
-     * One more failure.
-     *
-     * @param run the run whose check failed
-     * @param what what failed, as the person's question names it — {@code check `pytest -q`}
-     * @param output the end of its output, some twenty lines
-     * @return whether the person was asked, in which case the conductor's turn ends: the run is
-     *     asking, and their answer is its next message
-     */
-    boolean failed(String run, String what, String output);
+  /**
+   * One more failure.
+   *
+   * @param run the run whose check failed
+   * @param what what failed, as the person's question names it — {@code check `pytest -q`}
+   * @param output the end of its output, some twenty lines
+   * @return whether the person was asked, in which case the conductor's turn ends: the run is
+   *     asking, and their answer is its next message
+   */
+  boolean failed(String run, String what, String output);
 }

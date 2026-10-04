@@ -1,5 +1,7 @@
 # User manual
 
+- [Complete Plowshare manual](manual/README.md)
+- [Install the manual in the Library](manual/installation.md)
 - [Installation and distributions](distributions.md)
 - [Docker deployment](../deploy/docker/README.md)
 - [Shared login](client-login.md)

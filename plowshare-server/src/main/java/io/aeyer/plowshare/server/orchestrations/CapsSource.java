@@ -12,12 +12,12 @@ import io.aeyer.plowshare.server.agents.ProjectCaps;
 @FunctionalInterface
 public interface CapsSource {
 
-    /** No caps anywhere: every run keeps its definition's own numbers. */
-    CapsSource NONE = project -> ProjectCaps.NONE;
+  /** No caps anywhere: every run keeps its definition's own numbers. */
+  CapsSource NONE = project -> ProjectCaps.NONE;
 
-    /**
-     * @param project the run's project, or null
-     * @return its caps
-     */
-    ProjectCaps capsFor(String project);
+  /**
+   * @param project the run's project, or null
+   * @return its caps
+   */
+  ProjectCaps capsFor(String project);
 }

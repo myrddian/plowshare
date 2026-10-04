@@ -11,7 +11,7 @@ import java.util.Objects;
  */
 public record LogClosing(String ending, int turns) {
 
-    public LogClosing {
-        Objects.requireNonNull(ending, "ending");
-    }
+  public LogClosing {
+    Objects.requireNonNull(ending, "ending");
+  }
 }

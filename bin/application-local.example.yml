@@ -36,6 +36,8 @@ plowshare:
     # than merging it. So the two shipped pools are restated here as shipped --
     # same placeholders, same defaults -- with the fallback pool after them.
     # If application.yml's pools change, change them here too.
+    # Omitted `swarm` defaults to half of each pool's `chat` slots, rounded down.
+    # Set `swarm: 0` on a pool to exclude it from swarm work.
     pools:
       - name: studio
         base-url: ${LLM_BASE_URL:http://localhost:1234/v1}

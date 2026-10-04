@@ -33,14 +33,14 @@ try {
   await expect(page.locator('#file-access-prompt')).toBeHidden();
   await expect(page.locator('#files-label')).toHaveText('File access denied');
   assert.equal(fixture.fileClaim, undefined, 'Denying file access grants nothing');
-  await page.locator('#files-open').click(); await page.locator('#files-close').click();
+  await page.locator('#files-open').click(); await page.locator('#inspector-close').click();
   await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
   await page.locator('#file-access-allow').click();
   assert.equal(fixture.fileClaim, undefined, 'Canceling the access picker grants nothing');
   await expect(page.locator('#file-access-prompt')).toBeVisible();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, root);
   await page.locator('#file-access-allow').click();
-  await expect(page.locator('#files-dialog')).toBeHidden();
+  await expect(page.locator('#info-files')).toBeHidden();
   await expect(page.locator('[data-project="Research"]')).toHaveAttribute('aria-current', 'true');
   await expect(page.locator('#files-label')).toHaveText('Files connected');
   await expect(page.locator('#file-access-prompt')).toBeHidden();
@@ -68,7 +68,7 @@ try {
   await page.locator('#files-open').click();
   await expect(page.locator('#files-root')).toHaveText(`${fixture.fileClaim.machine} · ${root}`);
   await page.screenshot({ path: 'build/smoke/files-connected.png' });
-  await page.locator('#files-close').click();
+  await page.locator('#inspector-close').click();
   fixture.loseFiles();
   await expect(page.locator('#files-label')).toHaveText('Files disconnected');
   assert.equal((await bootstrap()).state.files.status, 'lost');
@@ -89,7 +89,7 @@ try {
   await page.locator('#files-open').click(); await page.locator('#files-withdraw').click();
   await expect(page.locator('#files-label')).toHaveText('Connect files');
   await expect.poll(() => fixture.fileClaim).toBeUndefined();
-  await page.locator('#files-close').click();
+  await page.locator('#inspector-close').click();
   await page.locator('#file-access-deny').click();
   await expect(page.locator('#file-access-prompt')).toBeHidden();
   const denied = (await bootstrap()).state.projectFolders.find(row => row.name === 'Research');
@@ -101,7 +101,7 @@ try {
   fixture.setRefuseFiles(true);
   await page.locator('#files-choose').click(); await expect(page.locator('#files-error')).toContainText('already rooted');
   await assert.rejects(readFile(join(other, '.plowshare/project')), { code: 'ENOENT' });
-  fixture.setRefuseFiles(false); await page.locator('#files-close').click();
+  fixture.setRefuseFiles(false); await page.locator('#inspector-close').click();
   // Disconnect withdraws a live claim; reconnect never replays it.
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, root);
   await page.evaluate(() => window.plowshare.request({ action: 'files-choose', project: 'Research' }));

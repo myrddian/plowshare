@@ -197,7 +197,7 @@ function routesOf(source: string): string[] {
 
 /** The enum constants of `Code.java`: an ALL_CAPS name opening a declaration. */
 function constantsOf(source: string): string[] {
-    return [...source.matchAll(/^ {4}([A-Z][A-Z_0-9]*)\(/gm)].map((found) => found[1] ?? '')
+    return [...source.matchAll(/^[ \t]+([A-Z][A-Z_0-9]*)\(/gm)].map((found) => found[1] ?? '')
 }
 
 /**
@@ -232,7 +232,7 @@ describe('the codes this client knows are the codes the server can send', () => 
     it('reads the four successes off the server rather than asserting its own', () => {
         // Derived from the file, not from a list here: the four are exactly the
         // constants whose status is 2xx. A fifth added over there arrives here.
-        const successes = [...java('Code.java').matchAll(/^ {4}([A-Z][A-Z_0-9]*)\((2\d\d),/gm)]
+        const successes = [...java('Code.java').matchAll(/^[ \t]+([A-Z][A-Z_0-9]*)\((2\d\d),/gm)]
             .map((found) => found[1] ?? '')
 
         expect(successes).toEqual(['OK', 'ACCEPTED', 'NO_CONTENT', 'CREATED'])
@@ -675,20 +675,21 @@ describe('the harness questions this client knows are the server\'s own', () => 
         expect([constant('TURN_CAP'), constant('CALL_BUDGET'), constant('TIME_CAP')]).toEqual([...CAP_KINDS])
         expect([constant('STUCK'), constant('UNCOVERED'), constant('CHECK_FAILURES'), constant('INSTALL'),
             constant('CONCERNS'), constant('PRODUCT_CHECK')]).toEqual([...PERSON_ONLY_KINDS])
-        expect(source).toContain('PERSON_ONLY = Set.of(STUCK, UNCOVERED, CHECK_FAILURES, INSTALL,\n'
-            + '            CONCERNS, PRODUCT_CHECK)')
+        expect(source).toMatch(/PERSON_ONLY\s*=\s*Set\.of\(\s*STUCK,\s*UNCOVERED,\s*CHECK_FAILURES,\s*INSTALL,\s*CONCERNS,\s*PRODUCT_CHECK\)/)
     })
 
     it('reads the caps `orchestration.caps` answers with, each setting CapsFrames.CapsView names', () => {
         // A setting the server adds and this client does not read is a cap `/cap` never shows.
         const view = componentsOf(serverWs('CapsFrames.java'), 'CapsView')
-        expect(view).toEqual(['project', 'steps', 'budget', 'autoContinue', 'time', 'failedChecks',
+        expect(view).toEqual(['project', 'steps', 'budget', 'autoContinue', 'time', 'failedChecks', 'autoIncrease',
             'applied', 'said'])
         const caps = capsOf({ code: OK, payload: {
             project: 'story', steps: { source: 'definition' }, budget: { source: 'definition' },
             autoContinue: { source: 'definition' }, time: { value: 90, source: '.plowshare/environment.yml' },
+            autoIncrease: { value: true, source: '.plowshare/environment.yml' },
             failedChecks: { value: 5, source: 'default' }, applied: 0 } })
         expect(caps?.time).toEqual({ value: 90, source: '.plowshare/environment.yml' })
+        expect(caps?.autoIncrease).toEqual({ value: true, source: '.plowshare/environment.yml' })
         expect(caps?.failedChecks).toEqual({ value: 5, source: 'default' })
     })
 })
@@ -795,7 +796,7 @@ describe('the door this client knocks on is the door the server opened', () => {
         // preference: login and refresh are open, so a token on them would be
         // noise, and ticket and session are gated, so a call without one is a
         // 401 answered before the controller is ever entered.
-        const open = /OPEN = Set\.of\(([^)]*)\)/.exec(serverAuth('AuthFilter.java'))?.[1] ?? ''
+        const open = /OPEN =\s*Set\.of\(([^)]*)\)/.exec(serverAuth('AuthFilter.java'))?.[1] ?? ''
 
         expect(open).toContain('"/v1/auth/login"')
         expect(open).toContain('"/v1/auth/refresh"')
@@ -1037,7 +1038,7 @@ describe('an environment file reads as EnvironmentFile reads it', () => {
         expect([...settings.matchAll(/"([^"]+)"/g)].map((found) => found[1])).toEqual([...CAP_KEYS])
         const inherit = /DEFAULT_INHERIT = List\.of\(([^)]*)\)/.exec(source)?.[1] ?? ''
         expect([...inherit.matchAll(/"([^"]+)"/g)].map((found) => found[1])).toEqual([...DEFAULT_INHERIT])
-        const shells = /SHELLS = Set\.of\(([^)]*)\)/.exec(source)?.[1] ?? ''
+        const shells = /SHELLS =\s*Set\.of\(([^)]*)\)/.exec(source)?.[1] ?? ''
         const declared = [...shells.matchAll(/"([^"]+)"/g)].map((found) => found[1] ?? '')
         expect(declared.length).toBeGreaterThan(0)
         expect([...SHELLS].sort()).toEqual(declared.sort())
@@ -1059,7 +1060,7 @@ describe('an environment file reads as EnvironmentFile reads it', () => {
 
 describe('the record this client reads is the record the server keeps', () => {
     it('asks in the shape RecordFrames binds, and reads the page RecordPageView writes', () => {
-        const frames = serverWs('RecordFrames.java')
+        const frames = serverWs('RecordFrames.java').replace(/\s+/g, ' ').replace(/\(\s+/g, '(')
         expect(frames).toContain(
             'record RecordWindow(String root, Integer after, Integer before, Boolean tail,')
         expect(frames).toContain('Integer limit, List<String> kinds)')
@@ -1082,7 +1083,7 @@ describe('the record this client reads is the record the server keeps', () => {
 
     it('names every kind RecordKind spells, and no other', () => {
         const source = readFileSync(join(ORCHESTRATIONS, 'RecordKind.java'), 'utf8')
-        const spelled = [...source.matchAll(/^ {4}[A-Z_]+\("([a-z_]+)"\)/gm)].map((found) => found[1])
+        const spelled = [...source.matchAll(/^[ \t]+[A-Z_]+\("([a-z_]+)"\)/gm)].map((found) => found[1])
         expect(spelled.length).toBeGreaterThan(0)
         expect(spelled).toEqual([...MILESTONE_KINDS, TOOL_CALL])
     })

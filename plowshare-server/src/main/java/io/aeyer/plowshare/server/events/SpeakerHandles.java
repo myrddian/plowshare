@@ -6,7 +6,7 @@ import java.util.Optional;
 @FunctionalInterface
 public interface SpeakerHandles {
 
-    SpeakerHandles NONE = session -> Optional.empty();
+  SpeakerHandles NONE = session -> Optional.empty();
 
-    Optional<String> handleOf(String session);
+  Optional<String> handleOf(String session);
 }

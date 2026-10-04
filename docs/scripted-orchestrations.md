@@ -53,10 +53,12 @@ workspace; this does not execute Node.js in the desktop or TUI.
 | --- | --- | --- |
 | Shipped | Server resources `orchestrations/<name>.js` | Packaged with the server. |
 | Server | `<PLOWSHARE_DATA_DIR>/global/orchestrations/<name>.js` | Boot-time server definitions can shadow shipped definitions. |
+| Personal | Account Personal `Resources/orchestrations/<name>.js`, synchronized to its server project tier | Account-bound resolution inherits it below project/session definitions. |
 | Project | `<PLOWSHARE_DATA_DIR>/projects/<numeric-project-id>/orchestrations/<name>.js` | Project definitions can shadow the boot set. The ID is not the project name. |
 | Session | Client workspace `.plowshare/orchestrations/<name>.js` | Loaded over the existing file channel for an eligible bound session; used when the project tier has not defined that name. |
 
-The current precedence is project → session → server → shipped. Project files
+The current precedence for eligible account-bound work is project → session →
+Personal → server → shipped. Personal's own project is not loaded twice. Project files
 participate in resolver fingerprint invalidation. Client file edits are seen when
 the session reconnects; they are not in the server's filesystem fingerprint.
 Server boot definitions require reloading the

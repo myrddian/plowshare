@@ -16,7 +16,7 @@ import { createMemory } from './memory'
 import { createProjects } from './projects'
 import { createProposals } from './proposals'
 import type { Screen, Transport } from './screen'
-import { asInboxChanged, type InboxPage } from './wire'
+import { asInboxChanged, type InboxPage, type ProjectView } from './wire'
 
 /**
  * The eight views, and the moving between them.
@@ -258,7 +258,7 @@ export function createShell(options: ShellOptions): Shell {
     const transport: Transport = options.transport ?? api
     const scope = options.scope ?? window
     const session = options.session ?? mintSession()
-    const project = options.project ?? null
+    let project = options.project ?? null
     const openReal = options.openStream ?? openEventStream
     const shared = multiplex(openReal, session)
 
@@ -455,7 +455,7 @@ export function createShell(options: ShellOptions): Shell {
         show,
         current: () => showing,
         element: () => shell,
-        start(): Promise<void> {
+        async start(): Promise<void> {
             // A listener that does nothing: the rail wants the socket's status
             // and none of its frames, and `shared.open` requires both a
             // subscriber to deliver a status to and a caller to count as the
@@ -475,6 +475,12 @@ export function createShell(options: ShellOptions): Shell {
             })
             if (badgeStream.status().state === 'open') {
                 askUnread()
+            }
+            if (project === null) {
+                try {
+                    const projects = await transport.get<readonly ProjectView[]>('/v1/projects');
+                    project = projects?.find(row => row.kind === 'personal')?.name ?? null;
+                } catch { /* Individual screens retain their own visible connection failures. */ }
             }
             return show(viewFromHash(scope.location.hash) ?? 'chat')
         },

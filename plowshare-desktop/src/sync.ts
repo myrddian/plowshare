@@ -66,6 +66,7 @@ export class DesktopSync {
     })());
     this.timer = setInterval(() => { void this.refresh().catch(() => undefined); }, 30_000); this.timer.unref?.();
   }
+  async ready(): Promise<void> { await this.starting; if (this.value?.error) throw new Error(this.value.error); }
   refresh(): Promise<void> {
     if (this.flight) return this.flight;
     const value = this.value, token = this.token;

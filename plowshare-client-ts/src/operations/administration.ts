@@ -4,10 +4,17 @@ type Tier = { readonly project?: string | null }
 type Id = { readonly id: string }
 type Page = { readonly offset?: number; readonly limit?: number }
 export interface AdministrativePayloads {
+    'outgoing.send': Tier & { readonly requestId: string; readonly peer: string; readonly message: Readonly<Record<string, JsonValue>>; readonly conversation?: string | null }
+    'outgoing.status': Id
+    'outgoing.cancel': Id
+    'outgoing.peers': Tier
     'approval.list': Tier & { readonly conversation?: string | null; readonly mine?: boolean }
     'approval.answer': Id & { readonly decision: 'once' | 'conversation' | 'project' | 'deny'; readonly prefix?: readonly string[] }
     'approval.revoke': Id
     'board.topup': { readonly topic: string; readonly maxModelCalls: number }
+    'board.open': { readonly project: string; readonly title: string; readonly label: string; readonly body: string; readonly requestId: string; readonly maxModelCalls?: number }
+    'board.retry': { readonly project: string; readonly topic: string; readonly member: string; readonly requestId: string; readonly maxTurns: number }
+    'board.post': { readonly project: string; readonly topic: string; readonly body: string; readonly requestId: string }
     'buffer.purge': Record<string, never>
     'retention.sweep': Record<string, never>
     'provider.list': Record<string, never>
@@ -41,6 +48,14 @@ export interface AdministrativePayloads {
 
 /** Persistent observer/presence operations are typed for platform adapters, not one-shot commands. */
 export interface BoundPayloads {
+    'incoming.catalog': { readonly project: string; readonly agent: string }
+    'incoming.receive': { readonly project: string; readonly client: string; readonly agent: string; readonly requestId: string; readonly context?: string | null; readonly body: string; readonly command?: string | null; readonly source?: Readonly<Record<string, JsonValue>> | null }
+    'incoming.status': { readonly project: string; readonly client: string; readonly id: string }
+    'incoming.cancel': { readonly project: string; readonly client: string; readonly id: string }
+
+    'outgoing.advertise': Tier & { readonly peers: readonly string[]; readonly agentCards?: Readonly<Record<string, Readonly<Record<string, JsonValue>>>> | null }
+    'outgoing.claim': Tier & { readonly peers: readonly string[] }
+    'outgoing.report': Id & { readonly revision: number; readonly state: string; readonly remoteTask?: string | null; readonly remoteContext?: string | null; readonly result?: Readonly<Record<string, JsonValue>> | null; readonly error?: string | null }
     'usage.subscribe': import('./usage.ts').UsagePayloads['usage.subscribe']
     'usage.unsubscribe': { readonly subscription: string }
     'job.stream': { readonly on?: boolean }
@@ -55,6 +70,12 @@ export interface BoundPayloads {
     'union.conflict.resolve': { readonly project: string; readonly n: number; readonly resolution: 'mine' | 'theirs' | 'merged' }
 }
 export const BOUND_OPERATIONS = {
+    'incoming.catalog': 'persistent inbound adapter', 'incoming.receive': 'persistent inbound adapter',
+    'incoming.status': 'persistent inbound adapter', 'incoming.cancel': 'persistent inbound adapter',
+
+    'outgoing.advertise': 'persistent outbound adapter',
+    'outgoing.claim': 'persistent outbound adapter',
+    'outgoing.report': 'persistent outbound adapter',
     'usage.subscribe': 'usage-view-snapshot-subscription', 'usage.unsubscribe': 'usage-view-snapshot-subscription',
     'job.stream': 'persistent-observer', 'conversation.follow': 'persistent-observer',
     'union.enable': 'rooted-filesystem-presence', 'union.begin': 'rooted-filesystem-presence',

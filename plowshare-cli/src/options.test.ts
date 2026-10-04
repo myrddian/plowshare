@@ -120,3 +120,23 @@ test('agent runs default to a new scoped conversation and explicit modes validat
     output = ''
     assert.equal(await run(['job', 'status', 'job_1', '--new-conversation', '--validate', '--json'], io), 2)
 })
+
+
+test('targeted help, group help, aliases and version work offline without stdin', async () => {
+    let output = '', reads = 0
+    const io = { env: { PLOWSHARE_URL: 'invalid-url' }, stdout: (text: string) => { output += text }, stderr: () => {}, stdin: async () => { reads++; throw new Error('must stay offline') } }
+    assert.equal(await run(['web', 'search', '--help', '--json'], io), 0)
+    let help = JSON.parse(output)
+    assert.deepEqual(help.commands.map((row: {command: string}) => row.command), ['web search'])
+    assert.deepEqual(help.commands[0].required, ['query', 'pageSize', 'max', 'page'])
+    output = ''; assert.equal(await run(['web', '--help', '--json'], io), 0)
+    assert.deepEqual(JSON.parse(output).commands.map((row: {command: string}) => row.command).sort(), ['web fetch', 'web search'])
+    output = ''; assert.equal(await run(['job', 'wait', '--help', '--json'], io), 0)
+    help = JSON.parse(output); assert.equal(help.commands[0].operation, 'job.status'); assert.equal(help.commands[0].command, 'job wait'); assert.equal(help.aliases['job wait'].wait, true)
+    output = ''; assert.equal(await run(['unknown', '--help', '--json'], io), 2)
+    assert.equal(JSON.parse(output).code, 'INVALID_INPUT')
+    output = ''; assert.equal(await run(['toString', '--help', '--json'], io), 2)
+    output = ''; assert.equal(await run(['--version'], io), 0); assert.match(output, /^plowshare-cli \d+\.\d+\.\d+\n$/)
+    output = ''; assert.equal(await run(['--version', '--json'], io), 0); assert.equal(JSON.parse(output).status, 'version')
+    assert.equal(reads, 0)
+})

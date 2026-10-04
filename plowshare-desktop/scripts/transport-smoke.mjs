@@ -23,9 +23,8 @@ try {
     fixture.completeLatest('Transport acceptance finished.');
     await page.waitForFunction(async () => (await window.plowshare.request({ action: 'bootstrap' })).state.jobs.some(job => job.status === 'finished' && job.text.includes('Transport acceptance finished.')));
     const libraryOpening = app.waitForEvent('window');
-    await page.locator('#library-open').click();
+    await page.locator('#memories-open').click();
     const library = await libraryOpening;
-    await library.locator('#library-memories').click();
     await library.locator('[data-memory]').first().click();
     await library.waitForFunction(async () => !!(await window.plowshare.request({ action: 'bootstrap' })).state.library.memory.value);
     const activityOpening = app.waitForEvent('window');

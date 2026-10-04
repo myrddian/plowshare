@@ -9,21 +9,21 @@ import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
  */
 final class WordsTokenizer implements Tokenizer {
 
-    @Override
-    public TokenCount count(String text) {
-        String words = text.strip();
-        int count = words.isEmpty() ? 0 : words.split("\\s+").length;
-        int blankLines = text.split("\n\n", -1).length - 1;
-        return TokenCount.estimated(count + blankLines, "a word or a blank line each, for a test");
-    }
+  @Override
+  public TokenCount count(String text) {
+    String words = text.strip();
+    int count = words.isEmpty() ? 0 : words.split("\\s+").length;
+    int blankLines = text.split("\n\n", -1).length - 1;
+    return TokenCount.estimated(count + blankLines, "a word or a blank line each, for a test");
+  }
 
-    @Override
-    public String describe() {
-        return "a word or a blank line each, for a test";
-    }
+  @Override
+  public String describe() {
+    return "a word or a blank line each, for a test";
+  }
 
-    /** {@code count} words, each {@code w}, a space apart. */
-    static String words(int count) {
-        return "w ".repeat(count).strip();
-    }
+  /** {@code count} words, each {@code w}, a space apart. */
+  static String words(int count) {
+    return "w ".repeat(count).strip();
+  }
 }

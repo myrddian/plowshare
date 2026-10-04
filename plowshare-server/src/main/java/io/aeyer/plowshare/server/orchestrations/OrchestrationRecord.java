@@ -12,11 +12,10 @@ import java.util.List;
  * @param definitionName the definition's own name, not this run's id
  * @param tier where the definition was read from, pinned at start
  * @param definitionHash {@code sha256:<hex>} of the definition's text at the moment this run began
- * @param definitionSource the definition file's text, pinned at start so the engine can re-parse
- *     it after a restart without re-resolving a tier that may have changed or, for a laptop
- *     session, gone — V49
- * @param definitionOrigin where the definition file was read from, pinned alongside its text —
- *     V49
+ * @param definitionSource the definition file's text, pinned at start so the engine can re-parse it
+ *     after a restart without re-resolving a tier that may have changed or, for a laptop session,
+ *     gone — V49
+ * @param definitionOrigin where the definition file was read from, pinned alongside its text — V49
  * @param stages the definition's stages, pinned at start so an edited definition cannot strand a
  *     run already under way
  * @param maxReturns how many times a later stage may send the conductor back
@@ -53,36 +52,36 @@ import java.util.List;
  * @param endedAt when this run reached a terminal state, or {@code null} while still live
  */
 public record OrchestrationRecord(
-        String id,
-        String definitionName,
-        OrchestrationDefinition.Tier tier,
-        String definitionHash,
-        String definitionSource,
-        String definitionOrigin,
-        List<StageRules.Stage> stages,
-        int maxReturns,
-        int returnsUsed,
-        String project,
-        String conductorConversation,
-        String callerConversation,
-        String callerAgent,
-        String callerHandle,
-        String callerSession,
-        String parent,
-        int depth,
-        String waitingFor,
-        OrchestrationState state,
-        String pendingCap,
-        String result,
-        String failure,
-        int restarts,
-        int nudges,
-        boolean endedInProse,
-        Instant resultDeliveredAt,
-        Instant createdAt,
-        Instant endedAt) {
+    String id,
+    String definitionName,
+    OrchestrationDefinition.Tier tier,
+    String definitionHash,
+    String definitionSource,
+    String definitionOrigin,
+    List<StageRules.Stage> stages,
+    int maxReturns,
+    int returnsUsed,
+    String project,
+    String conductorConversation,
+    String callerConversation,
+    String callerAgent,
+    String callerHandle,
+    String callerSession,
+    String parent,
+    int depth,
+    String waitingFor,
+    OrchestrationState state,
+    String pendingCap,
+    String result,
+    String failure,
+    int restarts,
+    int nudges,
+    boolean endedInProse,
+    Instant resultDeliveredAt,
+    Instant createdAt,
+    Instant endedAt) {
 
-    public OrchestrationRecord {
-        stages = List.copyOf(stages);
-    }
+  public OrchestrationRecord {
+    stages = List.copyOf(stages);
+  }
 }

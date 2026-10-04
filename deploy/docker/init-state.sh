@@ -8,7 +8,7 @@ test "$(id -u)" = 1000 || {
     exit 1
 }
 umask 077
-mkdir -p "$state/data" "$state/config" "$state/secrets"
+mkdir -p "$state/data" "$state/workspaces" "$state/config" "$state/secrets"
 for name in database-password admin-password; do
     if [ ! -e "$state/secrets/$name" ]; then
         # noclobber also protects against concurrent initializers.
@@ -23,4 +23,4 @@ done
 if [ ! -e "$state/config/models.env" ]; then
     (set -C; printf '%s\n' '# Set provider endpoints and API keys here; this file stays outside Git.' > "$state/config/models.env")
 fi
-echo "Prepared $state. Initial admin password is in secrets/admin-password; it must be changed at first login."
+echo "Prepared $state. Use the temporary admin password in the server startup output with plowshare-cli setup. secrets/admin-password is retained for optional environment provisioning."

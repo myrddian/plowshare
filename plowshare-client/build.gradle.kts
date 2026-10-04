@@ -8,7 +8,7 @@ val logbackVersion: String by project
 val pdfboxVersion: String by project
 
 // The client is an ephemeral stdio process: it speaks JSON-RPC on stdin/stdout
-// and HTTP to the server, and that is the whole of its I/O. No JDBC driver, no
+// and WebSocket to the server (plus multipart image upload), and that is the whole of its I/O. No JDBC driver, no
 // embedding library — anything durable or inferential belongs to the server.
 //
 // PDFBox is the one library here that is not about talking to something. It is
@@ -19,6 +19,7 @@ val pdfboxVersion: String by project
 // unchanged rather than excepted. `files.Conversions` carries the argument.
 dependencies {
     api(project(":plowshare-protocol"))
+    api(project(":plowshare-sdk"))
 
     implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
     implementation("com.fasterxml.jackson.core:jackson-databind:$jacksonVersion")

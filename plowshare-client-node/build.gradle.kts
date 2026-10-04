@@ -1,6 +1,6 @@
 val pnpmInstall by tasks.registering(Exec::class) {
     workingDir = projectDir
-    inputs.files("package.json", "pnpm-lock.yaml").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml").withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file("node_modules/.modules.yaml")
     commandLine("pnpm", "install", "--frozen-lockfile")
 }
@@ -9,7 +9,7 @@ fun Exec.nodeSources() {
     workingDir = projectDir
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild")
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files("package.json", "pnpm-lock.yaml", "tsconfig.json")
+    inputs.files("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("plowshare-client-ts/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(rootProject.file("plowshare-client-ts/package.json"),

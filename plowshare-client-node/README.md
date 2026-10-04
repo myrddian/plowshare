@@ -1,7 +1,29 @@
-# Plowshare Node platform
+# Plowshare Node SDK and platform
+
+The package root exports the standalone WebSocket SDK. It requires Node 22.12+
+and sends caller-supplied bearer credentials in the upgrade header.
+
+```ts
+import { connectPlowshare, requirePayload } from 'plowshare-client-node'
+const client = await connectPlowshare({ origin, token })
+try {
+    const reply = await client.request('project.list', {})
+    const projects = requirePayload(reply)
+} finally { client.close() }
+```
+
+Requests preserve the full raw envelope, correlate replies and have a 30-second
+default deadline (`timeoutMs` overrides it). `ConnectionFault.delivery` distinguishes
+not submitted, unknown and invalid response. Pass `onPush` for notifications.
+There is no automatic reconnect, application HTTP fallback or mutation replay.
+The root SDK does not persist/refresh credentials or lend a directory. Build a
+local npm archive with `pnpm pack`. The published dependency metadata uses the
+core package version; the local pnpm workspace override keeps repository development
+linked. See [the shared SDK contract](../docs/sdks.md).
+
 
 Filesystem and process adapters extracted from the TUI. This package depends
-only on the neutral `plowshare-client-ts` runtime and Node built-ins; it imports
+on the neutral `plowshare-client-ts` runtime, Node built-ins and the `ws` transport; it imports
 no terminal, React or Electron code. The TUI re-exports these helpers, retaining
 its existing tests and attended command default.
 

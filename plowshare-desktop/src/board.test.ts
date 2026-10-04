@@ -118,3 +118,63 @@ test('demo members open their own recorded actions in the trajectory', async () 
   assert.equal(s.history['demo-swarm-spec_writer'].entries[1].calls![0].name, 'board_post');
   client.reset();
 });
+
+test('person posts validate the displayed project/topic and retain a stable request ID across acknowledgment failure', async () => {
+  const s=sample();s.handle='person';const row=s.board.topics.value![0], project=row.topic.project;
+  s.projects.push({name:project});const calls:{type:string;payload:any}[]=[];let refuse=true;
+  const client=new BoardClient(()=>s,async(type,payload)=>{
+    calls.push({type,payload});if(type==='board.topics')return ok({topics:[row],more:false,offset:0});
+    assert.equal(type,'board.post');if(refuse)return {code:'BAD_REQUEST',said:'Lost acknowledgment'};
+    const p=payload as any;return ok({requestId:p.requestId,message:{...s.board.details['demo-board'].value!.messages[0],authorKind:'person',author:'person',topic:p.topic,body:p.body}});
+  },()=>{});
+  const key='00000000-0000-0000-0000-000000000089';
+  await assert.rejects(client.post(project,row.topic.id,'hello',key),/Choose an open topic/);
+  await client.postingTopics(project);await assert.rejects(client.post('foreign',row.topic.id,'hello',key),/Choose an open topic/);
+  await assert.rejects(client.post(project,row.topic.id,'hello','bad'),/request identity/);
+  await assert.rejects(client.post(project,row.topic.id,'hello',key),/Lost acknowledgment/);
+  assert.equal(calls.filter(row=>row.type==='board.post').length,1);assert.match(s.board.posting!.error!,/retained/);
+  refuse=false;await client.post(project,row.topic.id,'hello',key);
+  assert.deepEqual(calls.filter(row=>row.type==='board.post').map(row=>row.payload.requestId),[key,key]);
+  assert.equal(s.board.posting!.notice,'Posted to the board.');client.reset();
+});
+
+test('member retry validates the selection, sends one WS request, and reconciles uncertain acknowledgments', async () => {
+  const s = sample(), detail = s.board.details['demo-board'].value!, project = detail.topic.project;
+  s.handle = 'person'; s.projects.push({name: project});
+  const seat = detail.seats.find(row => row.seat.occupant !== '@opener')!;
+  seat.state = 'failed'; seat.seat.failedEnding = 'TURN_CAP';
+  const calls: {type: string; payload: any}[] = [];
+  let malformed = true;
+  const client = new BoardClient(() => s, async (type, payload) => {
+    calls.push({type,payload}); assert.equal(type, 'board.retry');
+    if (malformed) return ok({});
+    const p = payload as any;
+    return ok({requestId: p.requestId, member: p.member, maxTurns: p.maxTurns, message: {...detail.messages[0], topic: p.topic, authorKind: 'person', author: 'person', mentions: [p.member]}});
+  }, () => {});
+  const key = '00000000-0000-0000-0000-000000000090';
+  await assert.rejects(client.retry('foreign', detail.topic.id, seat.seat.occupant, key, 40), /Connect/);
+  await assert.rejects(client.retry(project, detail.topic.id, '@opener', key, 40), /failed member/);
+  await assert.rejects(client.retry(project, detail.topic.id, seat.seat.occupant, key, 0), /positive whole/);
+  await assert.rejects(client.retry(project, detail.topic.id, seat.seat.occupant, 'bad', 40), /identity/);
+  assert.equal(calls.length, 0);
+  await assert.rejects(client.retry(project, detail.topic.id, seat.seat.occupant, key, 40), /did not confirm/);
+  assert.equal(calls.length, 1); assert.match(s.board.retrying!.error!, /identity is retained/);
+  // The server may have already queued it; reconciliation must work with the original ID.
+  seat.state = 'ready'; seat.seat.failedEnding = null; malformed = false;
+  // Reload may lose the cached seat entirely (for example, after the topic closes).
+  client.reset(); delete s.board.details[detail.topic.id]; s.board.swarm.value = undefined; s.projects = [];
+  await client.retry(project, detail.topic.id, seat.seat.occupant, key, 40, true);
+  assert.deepEqual(calls[0], calls[1]); assert.match(s.board.retrying!.notice!, /existing conversation/);
+  assert.equal(s.board.retrying!.busy, false); client.reset();
+});
+test('member retries prevent overlapping submissions and reject mismatched receipts', async () => {
+  const s = sample(), detail = s.board.details['demo-board'].value!, seat = detail.seats[0], project = detail.topic.project;
+  s.handle = 'person'; s.projects.push({name:project}); seat.seat.occupant = 'researcher'; seat.state = 'failed'; seat.seat.failedEnding = 'UNAVAILABLE';
+  let complete!: (v: Outcome) => void;
+  const client = new BoardClient(() => s, () => new Promise(resolve => {complete = resolve;}), () => {});
+  const key = '00000000-0000-0000-0000-000000000091';
+  const pending = client.retry(project, detail.topic.id, 'researcher', key, 24);
+  await assert.rejects(client.retry(project, detail.topic.id, 'researcher', key, 24), /wait/);
+  complete(ok({requestId:key, member:'critic', maxTurns:24, message:{...detail.messages[0],author:'person',authorKind:'person',mentions:['critic']}}));
+  await assert.rejects(pending, /did not confirm/); assert.equal(s.board.retrying!.busy, false); client.reset();
+});

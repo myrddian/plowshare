@@ -37,6 +37,9 @@ plowshare.yml
 .gradle-home/
 __pycache__/
 *.pyc
+*.egg-info/
+/plowshare-sdk-dotnet/**/bin/
+/plowshare-sdk-dotnet/**/obj/
 
 # Local, untracked deployment overrides. Spring reads ./config/ with higher
 # precedence than the packaged application.yml, and the working directory is
@@ -47,6 +50,19 @@ __pycache__/
 # Subagent-driven-development scratch: ledgers, briefs, review packages. The
 # git history is the record; this directory is working state for one plan run.
 .superpowers/
+/attachments/
+/generated_images/
+/node_modules/
+/build_network_lease_plan.mjs
+/network-plan-output/Current-DHCP.png
+/.pnpm-store/v11/index.db
+/network-plan-output/inspection.txt
+/network-plan-output/IPAllocation-Reconciled.xlsx
+/network-plan-output/IPAllocation-Reconciled.xlsx.inspect.ndjson
+/LICENSE
+/network-plan-output/Live-Relevant.png
+/network-plan-output/Pi-hole-Ready.png
+/network-plan-output/Reservation-Plan.png
 
 # JavaScript dependencies and local package caches
 node_modules/

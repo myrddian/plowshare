@@ -1,3 +1,5 @@
+import { parseCommand } from 'plowshare-client-ts/operations/commands'
+import type { Request as MessageRequest } from 'plowshare-client-ts/operations/direct'
 import { usageCommand, type UsageCommand } from './usage.ts'
 import { informationCommand } from './information.ts'
 import type { InformationCommand } from './information.ts'
@@ -804,6 +806,7 @@ export type Progress =
  * answer.
  */
 export type Typed =
+    | { readonly kind: 'messaging'; readonly command: MessageRequest }
     | { readonly kind: 'usage-report'; readonly command: UsageCommand }
     | { readonly kind: 'information'; readonly command: InformationCommand }
     | { readonly kind: 'retrieval'; readonly command: RetrievalCommand }
@@ -904,6 +907,8 @@ export type Typed =
      * old, too new or too broken to answer anything else.
      */
     | { readonly kind: 'help' }
+    /** Refresh the selected agent's human command catalog without starting work. */
+    | { readonly kind: 'command-catalog'; readonly only: 'skill' | 'all'; readonly ask: Ask }
     /** Make this directory a project, and root it. The name is optional. */
     | { readonly kind: 'here'; readonly name?: string }
     /** Move to a project that already exists, by the name a person gave it. */
@@ -1190,10 +1195,26 @@ export function whoAnswers(rows: readonly Agent[], named?: string): Chosen {
  * @param project the home a listing is asked for, when one is named. Carried
  *     rather than read from anywhere, because this module knows no environment
  */
+const ADMIN_USAGE = 'Use /admin status|accounts|account create|account update|account reset|sessions|session revoke|audit|pricing list|pricing set|service accounts|service account create|service account update|service tokens|service token create|service token rotate|service token revoke. Service token creation needs handle, name and scopes [{project,role}]; expiresInDays defaults to 30 (1–365). Account operations and session reads take a JSON payload with handle; audit accepts handle, before and limit. Pricing set needs billingRoute, model, expectedVersion from pricing list, mode and decimal-string rates in a JSON payload.'
+
+/** Server management keeps /project NAME as local navigation. */
+export function serverCommand(line: string, project?: string) {
+    const text = line.trim()
+    if (text === '/admin') return {kind:'usage' as const,said:ADMIN_USAGE}
+    if (!/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(text)) return { kind: 'unhandled' as const }
+    return parseCommand(text.slice(1), project)
+}
+
 export function typed(line: string, project?: string, waiting: readonly string[] = [], usageContext: {conversation?: string;agent?: string} = {}): Typed {
     const text = line.trim()
+    if (text === '/admin') return {kind:'retrieval-error',text:ADMIN_USAGE}
+    // Qualified server commands travel unchanged through the ordinary conversation transport.
+    if (/^\/(skill|orchestration):[^\s]+(?:\s|$)/u.test(text)) return { kind: 'utterance', text: line }
     if (text === HELP_COMMAND) {
         return { kind: 'help' }
+    }
+    if (text === '/commands' || text === '/skills') {
+        return { kind: 'command-catalog', only: text === '/skills' ? 'skill' : 'all', ask: listingAgents(project) }
     }
     if (text === THEME_COMMAND) {
         return { kind: 'theme' }
@@ -1226,6 +1247,11 @@ export function typed(line: string, project?: string, waiting: readonly string[]
     // `/project` with a stray `s` glued to the front of its argument.
     const [word = '', ...rest] = text.split(/\s+/)
     const argument = rest.length === 0 ? '' : text.slice(word.length).trim()
+    if (word === '/message') {
+        const parsed = parseCommand(text.slice(1), project)
+        if (parsed.kind === 'request' && parsed.request.type.startsWith('message.')) return { kind: 'messaging', command: parsed.request }
+        return { kind: 'retrieval-error', text: parsed.kind === 'usage' ? parsed.said : 'Use /message instances|instance|open|default|stop|archive|deliveries|delivery|cancel with a JSON payload or address.' }
+    }
     // Direct operation grammar is shared by headless adapters and interpreted at the view edge.
     if (text.startsWith('/memory navigate ') && !text.slice('/memory navigate '.length).trim().startsWith('{')) {
         try { return { kind: 'retrieval', command: retrievalCommand(retrievalWords(text.slice(1)), project) } }
@@ -1342,7 +1368,7 @@ export function typed(line: string, project?: string, waiting: readonly string[]
  * A `caps:` setting `/cap` writes — `environment.ts`'s `CAP_KEYS`, spelled here rather than
  * imported, since this file is the parser's and the binding is the file's.
  */
-export type CapKey = 'steps' | 'budget' | 'auto-continue' | 'time' | 'failed-checks'
+export type CapKey = 'steps' | 'budget' | 'auto-continue' | 'time' | 'failed-checks' | 'auto-increase'
 
 /** `/cap`, `/cap steps N`, `/cap budget N`, `/cap auto N`, `/cap time N`, `/cap checks N`. */
 function capping(argument: string): Typed {
@@ -1350,6 +1376,8 @@ function capping(argument: string): Typed {
         return { kind: 'cap' }
     }
     const [what, amount, ...rest] = argument.split(/\s+/)
+    if (what === 'auto-increase' && rest.length === 0 && (amount === 'on' || amount === 'off'))
+        return { kind: 'capSet', key: 'auto-increase', value: amount === 'on' ? 1 : 0 }
     const key: CapKey | undefined = what === 'steps' ? 'steps' : what === 'budget' ? 'budget'
         : what === 'auto' ? 'auto-continue' : what === 'time' ? 'time'
             : what === 'checks' ? 'failed-checks' : undefined
@@ -1575,13 +1603,13 @@ export interface Completion {
  *     is handed
  * @param names the served names, from {@link completable} over the roster
  */
-export function completing(line: string, names: readonly string[]): Completion {
+export function completing(line: string, names: readonly string[], commands: readonly string[] = []): Completion {
     const word = /\S*$/.exec(line)?.[0] ?? ''
     if (word === '') {
         return { word, matches: [] }
     }
     const commanding = word.startsWith('/') && line.trimStart() === word
-    const candidates = commanding ? COMMANDS : names
+    const candidates = commanding ? [...COMMANDS, ...commands] : names
     return { word, matches: candidates.filter((each) => each.startsWith(word)) }
 }
 

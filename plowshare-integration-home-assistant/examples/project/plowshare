@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "home-assistant",
+  "caps": {
+    "steps": 40,
+    "budget": 200,
+    "autoIncrease": false
+  },
+  "commands": {
+    "local": {"mode": "off"},
+    "server": {"mode": "off"}
+  },
+  "skills": {
+    "house-evidence": {"agentVisible": true}
+  }
+}

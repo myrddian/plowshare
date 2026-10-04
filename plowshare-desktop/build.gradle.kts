@@ -38,14 +38,16 @@ val desktopTypecheck by tasks.registering(Exec::class) {
 val desktopTest by tasks.registering(Exec::class) {
     group = "verification"
     desktopSources()
-    commandLine("node", "--experimental-strip-types", "--test", "src/profile.test.ts", "src/client.test.ts", "src/job-store.test.ts", "src/operator.test.ts", "src/caps.test.ts", "src/activity.test.ts", "src/library.test.ts", "src/sync.test.ts", "src/schedules.test.ts", "src/runs.test.ts", "src/workspace.test.ts", "src/project-config.test.ts", "src/connection-config.test.ts", "src/files.test.ts", "src/board.test.ts", "src/renderer/markdown.test.ts")
+    commandLine("node", "--experimental-strip-types", "--test", "src/personal.test.ts", "src/profile.test.ts", "src/client.test.ts", "src/job-store.test.ts", "src/operator.test.ts", "src/caps.test.ts", "src/activity.test.ts", "src/library.test.ts", "src/manual.test.ts", "src/sync.test.ts", "src/schedules.test.ts", "src/runs.test.ts", "src/workspace.test.ts", "src/project-config.test.ts", "src/connection-config.test.ts", "src/files.test.ts", "src/board.test.ts", "src/renderer/markdown.test.ts")
 }
 val desktopBuild by tasks.registering(Exec::class) {
     group = "build"
     desktopSources()
     inputs.dir("scripts").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("assets/icons").withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.files("build/main.cjs", "build/preload.cjs")
     outputs.dir("build/renderer")
+    outputs.dir("build/icons")
     dependsOn(desktopTypecheck)
     commandLine("node", "scripts/build.mjs")
 }

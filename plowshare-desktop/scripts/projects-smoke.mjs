@@ -123,7 +123,7 @@ try {
   await expect(page.locator('#file-access-description')).toContainText(folders[0]);
   await page.locator('#file-access-deny').click();
   assert.equal(fixture.liveFileClaims.length, 0);
-  await page.locator('#files-open').click(); await page.locator('#files-close').click();
+  await page.locator('#files-open').click(); await page.locator('#inspector-close').click();
   await page.locator('#file-access-allow').click();
   await expect.poll(() => fixture.liveFileClaims.length).toBe(1);
   await page.locator('#files-open').click();
@@ -134,7 +134,7 @@ try {
   await expect(page.locator('#files-reopen')).toHaveText('Connect recorded folder');
   await page.locator('#files-reopen').click();
   await expect.poll(() => fixture.liveFileClaims.length).toBe(1);
-  await page.locator('#files-close').click();
+  await page.locator('#inspector-close').click();
   for (const project of ['Remote project', 'Server project']) {
     await page.locator(`[data-project="${project}"]`).click();
     await expect(page.locator('#files-label')).toHaveText('Connect files');
@@ -148,7 +148,7 @@ try {
       catch (error) { return String(error); }
     }, project);
     assert.match(refusal, /another machine or the server/);
-    await page.locator('#files-close').click();
+    await page.locator('#inspector-close').click();
   }
   assert.deepEqual(fixture.liveFileClaims.map(row => row.project), ['Research']);
   const recovered = JSON.parse(await readFile(join(config, 'desktop-projects.json'), 'utf8'));

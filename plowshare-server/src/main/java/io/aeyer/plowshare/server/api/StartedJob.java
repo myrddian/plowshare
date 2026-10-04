@@ -8,8 +8,18 @@ package io.aeyer.plowshare.server.api;
  * @param revision retained report/source revision when relevant
  * @param conversation newly opened or reused conversation, when relevant
  */
-public record StartedJob(String id, String agent, String revision,
-        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String conversation) {
-    public StartedJob(String id, String agent, String revision) { this(id, agent, revision, null); }
-    public StartedJob(String id, String agent) { this(id, agent, null); }
+public record StartedJob(
+    String id,
+    String agent,
+    String revision,
+    @com.fasterxml.jackson.annotation.JsonInclude(
+            com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        String conversation) {
+  public StartedJob(String id, String agent, String revision) {
+    this(id, agent, revision, null);
+  }
+
+  public StartedJob(String id, String agent) {
+    this(id, agent, null);
+  }
 }

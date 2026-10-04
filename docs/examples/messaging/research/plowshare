@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "research",
+  "routing": {
+    "sendTo": ["notes"],
+    "acceptFrom": [],
+    "routeFiles": ["routes/internal.json"]
+  }
+}

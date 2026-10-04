@@ -1,3 +1,4 @@
+import { installPaneResize } from './pane-resize.ts';
 import { memberAction, memberActions, memberKey, SWARM_PAGE, swarmMembers, type SwarmMember } from 'plowshare-client-ts/operations/swarm';
 import type { DesktopState, Request } from '../shared.ts';
 import type { BoardView, TopicSummary, SeatView } from '../board-shared.ts';
@@ -7,7 +8,9 @@ import { copyButton, installCopyControls } from './copy.ts';
 
 mountIcons(); installCopyControls();
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => document.querySelector(selector)!;
+installPaneResize({ container: $('#board-panel'), pane: $('#board-browser'), other: $('#board-detail'), key: 'board', label: 'Resize board browser', property: '--board-width', minimum: 240 });
 let state: DesktopState;
+let initialized = false;
 let view: BoardView = 'board', requested = '', stamp = '', localError = '', selectedMember = '';
 let members: SwarmMember[] = [];
 const date = (v: string) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? v : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); };
@@ -18,12 +21,13 @@ async function action(request: Request) {
   catch (error) { localError = error instanceof Error ? error.message : String(error); render(); }
 }
 function update(next: DesktopState) {
-  const nextView = next.board.view ?? view;
-  if (nextView !== view) { $<HTMLInputElement>('#board-search').value = ''; stamp = ''; }
-  state = next; view = nextView; render();
+  state = next; if (initialized && next.board.view === view) render();
 }
-function seatsHtml(seats: SeatView[]) {
-  return `<div class="board-seats">${seats.map(s => `<button class="board-seat" data-conversation="${esc(s.seat.conversation)}" title="Inspect ${esc(s.seat.occupant)} trajectory"><strong>${esc(s.seat.occupant === '@opener' ? 'Opener' : s.seat.occupant)} ${icon('external')}</strong><span class="seat-state ${['running','ready','owed','failed','blocked','held'].includes(s.state) ? s.state : ''}">${icon(s.state === 'passed' ? 'check' : 'activity')}${esc(s.state)}${s.position ? ` · queue ${s.position}` : ''}</span>${s.waitedMillis !== null ? `<small>Waiting ${wait(s.waitedMillis)}${s.overdue ? ' · overdue' : ''}</small>` : ''}${s.seat.failedEnding ? `<small>Ending: ${esc(s.seat.failedEnding)}</small>` : ''}${s.reason ? `<small>${esc(s.reason)}</small>` : ''}${s.job ? `<small>Job ${esc(s.job)}</small>` : ''}${s.seat.silentWakes ? `<small>${s.seat.silentWakes} silent wakes</small>` : ''}</button>`).join('')}</div>`;
+function retryButton(s: SeatView, project?: string) {
+  return s.state === 'failed' && s.seat.failedEnding && s.seat.occupant !== '@opener' && project ? `<button class="secondary-button member-retry" data-retry-member="${esc(s.seat.occupant)}" data-retry-topic="${esc(s.seat.topic)}" data-retry-project="${esc(project)}" ${!state.connected ? 'disabled' : ''}>Retry member…</button>` : '';
+}
+function seatsHtml(seats: SeatView[], project: string) {
+  return `<div class="board-seats">${seats.map(s => `<div class="board-seat-row"><button class="board-seat" data-conversation="${esc(s.seat.conversation)}" title="Inspect ${esc(s.seat.occupant)} trajectory"><strong>${esc(s.seat.occupant === '@opener' ? 'Opener' : s.seat.occupant)} ${icon('external')}</strong><span class="seat-state ${['running','ready','owed','failed','blocked','held'].includes(s.state) ? s.state : ''}">${icon(s.state === 'passed' ? 'check' : 'activity')}${esc(s.state)}${s.position ? ` · queue ${s.position}` : ''}</span>${s.waitedMillis !== null ? `<small>Waiting ${wait(s.waitedMillis)}${s.overdue ? ' · overdue' : ''}</small>` : ''}${s.seat.failedEnding ? `<small>Ending: ${esc(s.seat.failedEnding)}</small>` : ''}${s.reason ? `<small>${esc(s.reason)}</small>` : ''}${s.job ? `<small>Job ${esc(s.job)}</small>` : ''}${s.seat.silentWakes ? `<small>${s.seat.silentWakes} silent wakes</small>` : ''}</button>${retryButton(s, project)}</div>`).join('')}</div>`;
 }
 function rowsInTree(rows: TopicSummary[]) {
   const byParent = new Map<string | null, TopicSummary[]>(), ids = new Set(rows.map(r => r.topic.id));
@@ -34,8 +38,16 @@ function rowsInTree(rows: TopicSummary[]) {
   return out;
 }
 function render() {
+  if (!initialized) return;
+  $('#board-actions').hidden = view !== 'board';
+  $<HTMLButtonElement>('#board-create-open').disabled = !state.connected;
+  renderOpening();
+  $<HTMLButtonElement>('#board-post-open').disabled = !state.connected;
+  renderPosting();
+  renderRetry();
   if (!state) return;
   const b = state.board, reading = view === 'board' ? b.topics : b.swarm;
+  $('#board-title-icon').innerHTML = icon(view === 'swarm' ? 'swarm' : 'layers');
   $('#board-title').textContent = view === 'swarm' ? 'Swarm members' : 'Project board';
   $('#board-description').textContent = view === 'swarm' ? 'See what each member is doing and inspect its trajectory' : 'Inspect the conversation behind the work';
   $('#board-panel').classList.toggle('swarm-view', view === 'swarm');
@@ -107,6 +119,7 @@ function renderMembers(query: string, project: string) {
   const s = selected.seat, actions = memberActions(selected.activity?.value);
   content.innerHTML = `<header><div class="eyebrow">${esc(s.state)} · ${esc(selected.topic?.topic.project ?? s.seat.topic)}</div><h2>${esc(s.seat.occupant)}</h2><p class="board-subtitle">${esc(selected.topic?.topic.title ?? s.seat.topic)}</p></header>
     <button class="swarm-trajectory" data-conversation="${esc(s.seat.conversation)}">${icon('route')}Inspect trajectory</button>
+    ${retryButton(s, selected.topic?.topic.project)}
     ${s.reason ? `<p>${esc(s.reason)}</p>` : ''}${s.seat.failedEnding ? `<p class="error-banner">${esc(s.seat.failedEnding)}</p>` : ''}
     <h3>Recent recorded actions</h3>${selected.activity?.error ? `<p class="error-banner">${esc(selected.activity.error)} · previous actions may be out of date.</p>` : ''}
     <ol class="swarm-actions">${actions.map(a => `<li><small>Entry ${a.ordinal}</small><p>${esc(a.text)}</p></li>`).join('') || `<li>${esc(memberAction(selected))}</li>`}</ol>
@@ -125,7 +138,7 @@ function renderDetail() {
   while (parent && !seen.has(parent)) { seen.add(parent); const p = topics.find(t => t.id === parent) ?? b.details[parent]?.value?.topic; ancestors.unshift({ id: parent, title: p?.title ?? parent }); parent = p?.parent ?? null; }
   content.innerHTML = `<nav class="board-breadcrumb" aria-label="Topic ancestors">${ancestors.map(p => `<button data-topic="${esc(p.id)}">${esc(p.title)}</button> / `).join('')}<span>${esc(d.topic.title)}</span></nav><header><div class="eyebrow">${esc(d.topic.project)} · ${esc(d.topic.label)} · ${esc(d.topic.state)}</div><h2>${esc(d.topic.title)}</h2><p class="board-subtitle">Opened by ${esc(d.topic.opener)} · ${esc(date(d.topic.openedAt))} · ${esc(d.topic.id)}${d.topic.closedAt ? ` · closed ${esc(date(d.topic.closedAt))}` : ''}</p></header>${reading?.error ? `<p class="error-banner">${esc(reading.error)}</p>` : ''}
     <div class="board-budget"><meter min="0" max="${Math.max(1,budget)}" value="${spent}"></meter><strong>${spent} / ${budget} model calls spent</strong><small>${root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}</small></div>
-    <h3>${icon('activity')}Seats</h3>${d.seats.length ? seatsHtml(d.seats) : '<p class="board-subtitle">No agent seats on this topic.</p>'}
+    <h3>${icon('activity')}Seats</h3>${d.seats.length ? seatsHtml(d.seats, d.topic.project) : '<p class="board-subtitle">No agent seats on this topic.</p>'}
     ${d.topic.resolution ? `<section class="board-resolution"><div class="eyebrow">Resolution</div>${prose(d.topic.resolution)}</section>` : ''}
     <h3>${icon('message')}Messages · ${d.messages.length}</h3>${d.messages.map(m => {
       const reply = m.replyTo ? d.messages.find(p => p.id === m.replyTo) : undefined, decision = d.decisions.find(c => c.request === m.id);
@@ -157,4 +170,170 @@ document.addEventListener('click', event => {
   if (url) { event.preventDefault(); void action({ action: 'open-link', url }); }
 });
 window.plowshare.subscribe(update);
-void window.plowshare.request({ action: 'bootstrap' }).then(reply => { view = reply.boardView ?? 'board'; update(reply.state); });
+void window.plowshare.request({ action: 'bootstrap' }).then(reply => { view = reply.boardView ?? 'board'; initialized = true; update(reply.state); });
+
+window.addEventListener('workspace-refresh', () => $('#board-refresh').click());
+
+const postDialog = $<HTMLDialogElement>('#board-post-dialog');
+const postProject = $<HTMLSelectElement>('#post-project'), postTopic = $<HTMLSelectElement>('#post-topic'), postBody = $<HTMLTextAreaElement>('#post-body');
+let postIdentity = '', postTopicsStamp = '', restoredPostKey = '', postError = '';
+const postStorageKey = () => `plowshare.desktop.board-post.v1:${JSON.stringify([state.base,state.handle])}`;
+function persistPost() {
+  try { localStorage.setItem(postStorageKey(), JSON.stringify({ requestId: postIdentity, project: postProject.value, topic: postTopic.value, body: postBody.value })); } catch { /* Keep the request identity in memory. */ }
+}
+function renderPosting() {
+  if (!postDialog?.open || !state) return;
+  const posting = state.board.posting, project = postProject.value;
+  const options = '<option value="">Choose project</option>' + state.projects.map(row => `<option value="${esc(row.name)}">${esc(row.name)}</option>`).join('');
+  if (postProject.innerHTML !== options) { postProject.innerHTML=options; postProject.value=project; }
+  const rows = posting?.project === project ? posting.topics.filter(row => row.topic.state !== 'closed') : [];
+  const signature = JSON.stringify([project,rows]);
+  if (signature !== postTopicsStamp) {
+    postTopicsStamp=signature; const selected=postTopic.value || postTopic.dataset.draft || '';
+    postTopic.innerHTML='<option value="">Choose an open topic</option>' + rows.map(row => `<option value="${esc(row.topic.id)}">${esc(row.topic.title)}</option>`).join('');
+    postTopic.value=rows.some(row => row.topic.id===selected) ? selected : rows[0]?.topic.id ?? '';
+  }
+  const busy = !!posting?.busy;
+  postProject.disabled=busy; postTopic.disabled=busy || !!posting?.loading; postBody.disabled=busy;
+  $<HTMLButtonElement>('#post-submit').disabled=busy || !state.connected || !!posting?.loading || !postProject.value || !postTopic.value || !postBody.value.trim();
+  $<HTMLButtonElement>('#board-post-close').disabled=busy;
+  $('#post-topics-more').hidden=!posting?.more; $<HTMLButtonElement>('#post-topics-more').disabled=busy || !!posting?.loading;
+  $('#post-error').hidden=!(posting?.error || postError); $('#post-error').textContent=posting?.error || postError;
+  $('#post-notice').textContent=posting?.notice ?? (posting?.loading ? 'Loading topics…' : rows.length ? '' : 'No open topics loaded for this project.');
+}
+$('#board-post-open').addEventListener('click', () => {
+  postDialog.showModal(); renderPosting();
+  if (restoredPostKey !== postStorageKey()) {
+    restoredPostKey=postStorageKey(); postIdentity=''; postBody.value=''; postProject.value=state.board.project ?? state.projects[0]?.name ?? '';
+    try { const saved=JSON.parse(localStorage.getItem(postStorageKey()) ?? '{}');
+      if(typeof saved.body==='string' && typeof saved.project==='string' && state.projects.some(row => row.name===saved.project)) { postBody.value=saved.body; postProject.value=saved.project; postTopic.dataset.draft=typeof saved.topic==='string'?saved.topic:''; postIdentity=typeof saved.requestId==='string'?saved.requestId:''; }
+    } catch { /* Begin a new draft. */ }
+  }
+  if(postProject.value) void action({action:'board-post-topics',project:postProject.value}); renderPosting();
+});
+postProject.addEventListener('change', () => { postIdentity=''; postTopicsStamp=''; postTopic.dataset.draft=''; persistPost(); if(postProject.value)void action({action:'board-post-topics',project:postProject.value}); renderPosting(); });
+postTopic.addEventListener('change', () => { postIdentity=''; persistPost(); renderPosting(); });
+postBody.addEventListener('input', () => { postIdentity=''; persistPost(); renderPosting(); });
+$('#post-topics-more').addEventListener('click', () => void action({action:'board-post-topics',project:postProject.value,more:true}));
+$('#board-post-close').addEventListener('click', () => postDialog.close());
+postDialog.addEventListener('cancel', event => { if(state.board.posting?.busy)event.preventDefault(); });
+$('#board-post-form').addEventListener('submit', async event => {
+  event.preventDefault(); if($<HTMLButtonElement>('#post-submit').disabled)return;
+  postError=''; postIdentity ||= crypto.randomUUID(); persistPost();
+  const key=postStorageKey();
+  try {
+    await window.plowshare.request({action:'board-post',project:postProject.value,topic:postTopic.value,body:postBody.value,requestId:postIdentity});
+    if(key===postStorageKey() && state.board.posting?.notice) { localStorage.removeItem(key); postIdentity=''; postBody.value=''; }
+  } catch (error) { postError=error instanceof Error?error.message:String(error); }
+  renderPosting();
+});
+
+const createDialog = $<HTMLDialogElement>('#board-create-dialog');
+const createProject = $<HTMLSelectElement>('#create-project'), createTitle = $<HTMLInputElement>('#create-title'), createLabel = $<HTMLInputElement>('#create-label'), createBody = $<HTMLTextAreaElement>('#create-body'), createBudget = $<HTMLInputElement>('#create-budget');
+let createIdentity = '', restoredCreateKey = '', createError = '';
+const createStorageKey = () => `plowshare.desktop.board-create.v1:${JSON.stringify([state.base,state.handle])}`;
+function persistCreate() {
+  try { localStorage.setItem(createStorageKey(), JSON.stringify({ requestId:createIdentity, project:createProject.value, title:createTitle.value, label:createLabel.value, body:createBody.value, budget:createBudget.value })); } catch { /* The current draft still stays in memory. */ }
+}
+function renderOpening() {
+  if (!createDialog?.open || !state) return;
+  const opening = state.board.opening, project = createProject.value;
+  const options = '<option value="">Choose project</option>' + state.projects.map(row => `<option value="${esc(row.name)}">${esc(row.name)}</option>`).join('');
+  if (createProject.innerHTML !== options) { createProject.innerHTML=options; createProject.value=project; }
+  const busy = !!opening?.busy;
+  for (const field of [createProject,createTitle,createLabel,createBody,createBudget]) field.disabled=busy;
+  $<HTMLButtonElement>('#board-create-close').disabled=busy;
+  $<HTMLButtonElement>('#create-submit').disabled=busy || !state.connected || !createProject.value || !createTitle.value.trim() || !createLabel.value.trim() || !createBody.value.trim() || !createBudget.validity.valid;
+  $('#create-error').hidden=!(opening?.error || createError); $('#create-error').textContent=opening?.error || createError;
+  $('#create-notice').textContent=busy ? 'Creating topic…' : '';
+}
+$('#board-create-open').addEventListener('click', () => {
+  createDialog.showModal(); renderOpening();
+  if (restoredCreateKey !== createStorageKey()) {
+    restoredCreateKey=createStorageKey(); createIdentity=''; createProject.value=state.board.project ?? state.projects[0]?.name ?? ''; createTitle.value=''; createBody.value=''; createLabel.value='Discussion'; createBudget.value='';
+    try {
+      const saved=JSON.parse(localStorage.getItem(createStorageKey()) ?? '{}');
+      if (typeof saved.project==='string' && state.projects.some(row => row.name===saved.project)) {
+        createProject.value=saved.project;
+        for (const [field,name] of [[createTitle,'title'],[createLabel,'label'],[createBody,'body'],[createBudget,'budget']] as const) if (typeof saved[name]==='string') field.value=saved[name];
+        createIdentity=typeof saved.requestId==='string' ? saved.requestId : '';
+      }
+    } catch { /* Begin a new draft. */ }
+  }
+  renderOpening(); createTitle.focus();
+});
+for (const field of [createProject,createTitle,createLabel,createBody,createBudget]) field.addEventListener('input', () => { createIdentity=''; createError=''; persistCreate(); renderOpening(); });
+$('#board-create-close').addEventListener('click', () => createDialog.close());
+createDialog.addEventListener('cancel', event => { if(state.board.opening?.busy)event.preventDefault(); });
+$('#board-create-form').addEventListener('submit', async event => {
+  event.preventDefault(); if($<HTMLButtonElement>('#create-submit').disabled)return;
+  createError=''; createIdentity ||= crypto.randomUUID(); persistCreate(); const key=createStorageKey();
+  try {
+    const reply=await window.plowshare.request({action:'board-create',project:createProject.value,title:createTitle.value,label:createLabel.value,body:createBody.value,requestId:createIdentity,...(createBudget.value ? {maxModelCalls:Number(createBudget.value)} : {})});
+    if(key===createStorageKey() && reply.state.board.opening?.notice) { localStorage.removeItem(key); createIdentity=''; createTitle.value=''; createBody.value=''; $<HTMLInputElement>('#board-search').value=''; $<HTMLSelectElement>('#board-state').value='all'; createDialog.close(); render(); }
+  } catch(error) { createError=error instanceof Error ? error.message : String(error); }
+  renderOpening();
+});
+
+const retryDialog = $<HTMLDialogElement>('#board-retry-dialog');
+const retryLimit = $<HTMLInputElement>('#retry-limit');
+let retryDraft: { project: string; topic: string; member: string; requestId: string; maxTurns: number } | undefined;
+let retryError = '';
+const retryStorageKey = () => `plowshare.desktop.board-retry.v1:${JSON.stringify([state.base, state.handle])}`;
+function storedRetry() {
+  try {
+    const value = JSON.parse(localStorage.getItem(retryStorageKey()) ?? 'null');
+    if (value && ['project','topic','member','requestId'].every(k => typeof value[k] === 'string') && Number.isSafeInteger(value.maxTurns) && value.maxTurns > 0) return value as NonNullable<typeof retryDraft>;
+  } catch { /* Keep the request in memory when storage is unavailable. */ }
+  return undefined;
+}
+function saveRetry() { try { localStorage.setItem(retryStorageKey(), JSON.stringify(retryDraft)); } catch { /* Keep the identity in memory. */ } }
+function renderRetry() {
+  const pending = storedRetry();
+  $('#board-retry-pending').hidden = !pending;
+  $<HTMLButtonElement>('#board-retry-pending').disabled = !state.connected || !!state.board.retrying?.busy;
+  if (!retryDialog.open || !retryDraft) return;
+  const result = state.board.retrying?.requestId === retryDraft.requestId ? state.board.retrying : undefined;
+  const busy = !!result?.busy;
+  $('#retry-description').textContent = `Continue ${retryDraft.member} on its existing conversation. This retry uses the topic’s remaining shared model call allowance; it does not add budget.`;
+  retryLimit.disabled = busy || !!pending;
+  $<HTMLButtonElement>('#retry-submit').disabled = busy || !state.connected;
+  $('#retry-submit').textContent = busy ? 'Queuing…' : 'Retry member';
+  $<HTMLButtonElement>('#board-retry-close').disabled = busy;
+  $('#retry-error').hidden = !(retryError || result?.error);
+  $('#retry-error').textContent = retryError || result?.error || '';
+  $('#retry-notice').textContent = result?.notice ?? '';
+}
+function openRetry(draft: NonNullable<typeof retryDraft>) {
+  retryDraft = draft; retryError = ''; retryLimit.value = String(draft.maxTurns);
+  retryDialog.showModal(); renderRetry(); retryLimit.focus();
+}
+document.addEventListener('click', event => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>('[data-retry-member]');
+  if (!button || !state.connected || state.board.retrying?.busy) return;
+  const pending = storedRetry();
+  if (pending) { openRetry(pending); return; }
+  openRetry({project: button.dataset.retryProject!, topic: button.dataset.retryTopic!, member: button.dataset.retryMember!, requestId: crypto.randomUUID(), maxTurns: 24});
+});
+$('#board-retry-pending').addEventListener('click', () => { const pending = storedRetry(); if (pending) openRetry(pending); });
+$('#board-retry-close').addEventListener('click', () => retryDialog.close());
+retryDialog.addEventListener('cancel', event => { if (state.board.retrying?.busy) event.preventDefault(); });
+retryLimit.addEventListener('input', () => {
+  if (!retryDraft) return;
+  // A submitted request keeps its payload until the server confirms it.
+  if (storedRetry()) { retryLimit.value = String(retryDraft.maxTurns); return; }
+  retryDraft = {...retryDraft, requestId: crypto.randomUUID(), maxTurns: Number(retryLimit.value)};
+});
+$('#board-retry-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!retryDraft || state.board.retrying?.busy) return;
+  const key = retryStorageKey(), reconcile = !!storedRetry(); retryError = ''; saveRetry();
+  try {
+    const reply = await window.plowshare.request({action: 'board-retry', ...retryDraft, reconcile});
+    update(reply.state);
+    if (key === retryStorageKey() && reply.state.board.retrying?.notice) { localStorage.removeItem(key); retryDraft = undefined; retryDialog.close(); render(); }
+  } catch (error) {
+    const result = state.board.retrying;
+    if (key === retryStorageKey() && (result?.refused || result?.requestId !== retryDraft?.requestId)) localStorage.removeItem(key);
+    retryError = error instanceof Error ? error.message : String(error); renderRetry();
+  }
+});

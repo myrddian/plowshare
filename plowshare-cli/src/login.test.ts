@@ -16,6 +16,8 @@ const replies = JSON.parse(await readFile(new URL('../../test-support/contracts/
 async function fixture(flagged = false) {
     let generation = 0, current = 'refresh-0', logins = 0, refreshes = 0, logout = false, failTicket = false, failLogout = false
     const paths: string[] = []
+    let registrations = 0, ladderWrites = 0, ladder = 'duckduckgo'
+    const providerUrls: string[] = []
     const server = createServer(async (req, res) => {
         paths.push(req.url!)
         if (req.url === '/v1/auth/login') {
@@ -33,6 +35,14 @@ async function fixture(flagged = false) {
         } else if (req.url === '/v1/auth/ticket') {
             if (failTicket) { res.writeHead(503).end(); return }
             res.writeHead(200).end(JSON.stringify({ ticket: 'ticket' }))
+        } else if (req.url === '/v1/search/providers') {
+            let raw = ''; for await (const chunk of req) raw += chunk
+            providerUrls.push(JSON.parse(raw).baseUrl); registrations++; res.writeHead(200).end('{}')
+        } else if (req.url === '/v1/config') {
+            res.writeHead(200).end(JSON.stringify([{ key: 'plowshare.search.ladder', value: ladder }]))
+        } else if (req.url === '/v1/config/plowshare.search.ladder') {
+            ladderWrites++; ladder = ''; for await (const chunk of req) ladder += chunk
+            res.writeHead(204).end()
         } else if (req.url === '/v1/auth/logout') { if (failLogout) { res.writeHead(503).end(); return }; logout = true; res.writeHead(204).end() }
         else res.writeHead(404).end()
     })
@@ -43,7 +53,7 @@ async function fixture(flagged = false) {
     }))
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    return { base, paths, counts: () => ({ logins, refreshes }), fail: (value: boolean) => { failTicket = value },
+    return { base, paths, registrations: () => registrations, search: () => ({ providerUrls, ladderWrites, ladder }), counts: () => ({ logins, refreshes }), fail: (value: boolean) => { failTicket = value },
         failLogout: (value: boolean) => { failLogout = value },
         door: { base, fetch: (url: string, init: Parameters<typeof fetch>[1]) => fetch(url, init) },
         async close() { for (const socket of sockets.clients) socket.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } }
@@ -152,4 +162,75 @@ test('shared-login discovery returns only server/account metadata and skips inva
         assert.equal((await savedLoginServers(directory)).length, 2)
         assert.equal(fake.counts().refreshes, 0)
     } finally { await fake.close(); await rm(directory, { recursive: true, force: true }) }
+})
+
+test('setup consumes the temporary login and saves only the first administrator session', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'plowshare-setup-'))
+    const requests: { path: string; body: Record<string, string> }[] = []
+    let completed = false, output = ''
+    const server = createServer(async (req, res) => {
+        let raw = ''; for await (const chunk of req) raw += chunk
+        const body = JSON.parse(raw) as Record<string, string>
+        requests.push({ path: req.url!, body })
+        if (req.url === '/v1/auth/login') {
+            const bootstrap = body['handle'] === 'admin'
+            res.writeHead(200, { 'Content-Type': 'application/json', 'X-Plowshare-Setup-Required': String(bootstrap) })
+                .end(JSON.stringify({ access: bootstrap ? 'temporary-access' : 'owner-access', refresh: bootstrap ? null : 'owner-refresh', mustChangePassword: bootstrap }))
+        } else if (req.url === '/v1/auth/setup' && req.headers.authorization === 'Bearer temporary-access') {
+            completed = true; res.writeHead(204).end()
+        } else res.writeHead(404).end()
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    try {
+        const code = await run(['setup', '--url', base], {
+            env: { PLOWSHARE_CONFIG_DIR: directory }, stdout: text => { output += text }, stderr: text => { output += text }, stdin: async () => '',
+            login: async () => ({ handle: 'admin', password: 'temporary-secret' }),
+            setup: async () => ({ handle: 'owner', password: 'chosen-owner-password' }),
+        })
+        assert.equal(code, 0, output); assert.equal(completed, true)
+        assert.deepEqual(requests.map(row => row.path), ['/v1/auth/login', '/v1/auth/setup', '/v1/auth/login'])
+        assert.equal(requests[1]!.body['temporaryPassword'], 'temporary-secret')
+        const files = await readdir(join(directory, 'credentials'))
+        const saved = await readFile(join(directory, 'credentials', files[0]!), 'utf8')
+        assert.equal(JSON.parse(saved).handle, 'owner')
+        for (const value of ['temporary-secret', 'chosen-owner-password', 'temporary-access']) {
+            assert.ok(!output.includes(value)); assert.ok(!saved.includes(value))
+        }
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }) }
+})
+
+test('search registration uses the saved administrator session with one operational HTTP mutation', async () => {
+    const fake = await fixture(), directory = await mkdtemp(join(tmpdir(), 'plowshare-register-'))
+    try {
+        assert.equal(await run(['login', '--url', fake.base], { env: { PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_HANDLE: 'operator', PLOWSHARE_PASSWORD: 'initial-secret' }, stdout: () => {}, stderr: () => {}, stdin: async () => '' }), 0)
+        const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
+            const process = spawn(globalThis.process.execPath, [new URL('../../deploy/docker/register-search.mjs', import.meta.url).pathname], { env: { ...globalThis.process.env, PLOWSHARE_URL: fake.base, PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_TOKEN: '' } })
+            let out = '', err = ''; process.stdout.on('data', chunk => { out += chunk }); process.stderr.on('data', chunk => { err += chunk }); process.once('error', reject); process.once('exit', code => resolve({ code, out, err }))
+        })
+        assert.equal(result.code, 0, result.err)
+        assert.equal(fake.registrations(), 1)
+        assert.ok(!result.out.includes('access-')); assert.ok(!result.out.includes('refresh-'))
+    } finally { await fake.close(); await rm(directory, { recursive: true, force: true }) }
+})
+
+
+test('local search helper preserves existing rungs and does not repeat an existing ladder mutation', async () => {
+    const fake = await fixture(), directory = await mkdtemp(join(tmpdir(), 'plowshare-local-search-'))
+    try {
+        await new Credentials(fake.base, join(directory, 'credentials')).login(fake.door, 'owner', 'private-password');
+        const invoke = () => new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
+            const proc = spawn(process.execPath, [new URL('../../deploy/docker/register-search.mjs', import.meta.url).pathname, '--enable-ladder'], {
+                env: { ...process.env, PLOWSHARE_URL: fake.base, PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_TOKEN: '', PLOWSHARE_SEARCH_PROVIDER_URL: 'http://127.0.0.1:8100' },
+            });
+            let out = '', err = ''; proc.stdout.on('data', chunk => { out += chunk }); proc.stderr.on('data', chunk => { err += chunk });
+            proc.once('error', reject); proc.once('exit', code => resolve({ code, out, err }));
+        });
+        for (let i = 0; i < 2; i++) {
+            const result = await invoke(); assert.equal(result.code, 0, result.err);
+            assert.ok(!result.out.includes('access-')); assert.ok(!result.out.includes('refresh-'));
+        }
+        assert.deepEqual(fake.search(), { providerUrls: ['http://127.0.0.1:8100', 'http://127.0.0.1:8100'], ladderWrites: 1, ladder: 'duckduckgo,searxng' });
+        assert.deepEqual(fake.counts(), { logins: 1, refreshes: 2 });
+    } finally { await fake.close(); await rm(directory, { recursive: true, force: true }); }
 })

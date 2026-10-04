@@ -87,6 +87,7 @@ function command(s, tool, args, pending) {
 }
 function model(s, task, schema, data, pending) {
   s.analysis={schema,pending,attempts:0};
+  data=workingContext(s,data,pending);
   measureContext(s,data);
   return command(s, 'agent_run', {agent: 'research_analyst', task:
     task + '\nReturn exactly this JSON shape: ' + schema + '\nORIGINAL QUESTION: ' + s.question
@@ -170,15 +171,97 @@ function pool(s, wave = null) {
     return {id:e.evidence, revision:e.revision, title:e.title,
     url:e.url, wave:e.wave, objectives:e.objectives, frequency:e.frequency, quote:e.quote,start:e.start,end:e.end,
     relevance:scores.length?Math.max(...scores):null,ranking_status:scores.length?'ranked':'not_checked',
-    coverage:e.coverage || 'one retained leading text window; additional text was not inspected'};
+    coverage:e.coverage || 'one retained leading text window; additional text was not inspected',
+    ...(e.summaryContext?{context:e.summaryContext}:{})};
   }).sort((a,b)=>(b.relevance ?? -1)-(a.relevance ?? -1));
+}
+// Working context is a projection: the durable evidence pool and its identities never change.
+const PASSAGE_TARGET=24, EVIDENCE_CHARACTER_TARGET=48000;
+function deduplicatedEvidence(evidence) {
+  const groups=new Map();
+  for(const passage of evidence) {
+    // Exact text equality, including whitespace. Different source locations remain visible.
+    const key=passage.quote;
+    let group=groups.get(key);
+    if(!group) {group={...passage,aliases:[],sources:[]};groups.set(key,group);}
+    group.aliases.push(passage.id);
+    group.sources.push({id:passage.id,revision:passage.revision,url:passage.url,title:passage.title,
+      start:passage.start,end:passage.end,wave:passage.wave,frequency:passage.frequency,
+      ...(passage.context?{context:passage.context}:{})});
+    group.objectives=[...new Set([...group.objectives,...passage.objectives])];
+    if(passage.relevance!==null && (group.relevance===null || passage.relevance>group.relevance)) {
+      group.relevance=passage.relevance;group.ranking_status=passage.ranking_status;
+    }
+  }
+  return [...groups.values()];
+}
+function workingContext(s,data,pending) {
+  if(pending.kind==='ranking') return data; // Already deduplicated and batched by retain().
+  const field=Array.isArray(data.evidence)?'evidence':Array.isArray(data.retained_evidence)?'retained_evidence':null;
+  if(!field) return data;
+  const groups=deduplicatedEvidence(data[field]), required=new Set();
+  // Include references anywhere in the finding, review history or Author prose.
+  function references(value) {
+    if(typeof value==='string') {
+      if(UUID.test(value)) required.add(value);
+      for(const match of value.matchAll(/\[evidence:([^\]]+)\]/g)) required.add(match[1]);
+    } else if(Array.isArray(value)) value.forEach(references);
+    else if(value && typeof value==='object') Object.values(value).forEach(references);
+  }
+  for(const [key,value] of Object.entries(data)) if(key!==field && key!=='ranking') references(value);
+  const objective=data.objective?.id;
+  if(objective) groups.sort((a,b)=>{
+    function score(group) {
+      const scores=s.ranking.filter(r=>group.aliases.includes(r.evidence) && r.objective===objective).map(r=>r.score);
+      return scores.length?Math.max(...scores):-1;
+    }
+    return score(b)-score(a);
+  });
+  const selected=[], chosen=new Set();let characters=0;
+  function add(group,mandatory=false) {
+    if(!group || chosen.has(group.id)) return false;
+    if(!mandatory && (selected.length>=PASSAGE_TARGET || characters+group.quote.length>EVIDENCE_CHARACTER_TARGET)) return false;
+    selected.push(group);chosen.add(group.id);characters+=group.quote.length;return true;
+  }
+  groups.filter(group=>group.aliases.some(id=>required.has(id))).forEach(group=>add(group,true));
+  // Balance objectives and source documents before filling by relevance. Frequency is not a vote.
+  const objectives=objective?[objective]:s.objectives.map(o=>o.id);
+  const documents=new Set(selected.map(e=>e.revision));
+  for(let round=0;round<PASSAGE_TARGET;round++) {
+    let added=false;
+    for(const id of objectives) {
+      const candidates=groups.filter(e=>!chosen.has(e.id) && e.objectives.includes(id));
+      const group=candidates.find(e=>!documents.has(e.revision) && characters+e.quote.length<=EVIDENCE_CHARACTER_TARGET)
+        || candidates.find(e=>characters+e.quote.length<=EVIDENCE_CHARACTER_TARGET);
+      if(add(group)) {documents.add(group.revision);added=true;}
+    }
+    if(!added) break;
+  }
+  for(const group of groups) add(group);
+  const omitted=groups.filter(group=>!chosen.has(group.id));
+  const packet={...data,[field]:selected,evidence_selection:{retained_passages:data[field].length,
+    unique_passages:groups.length,supplied_passages:selected.length,omitted_passages:omitted.length,
+    passage_target:PASSAGE_TARGET,quote_character_target:EVIDENCE_CHARACTER_TARGET,
+    supplied_quote_characters:characters,required_citations_preserved:true,
+    target_exceeded:selected.length>PASSAGE_TARGET || characters>EVIDENCE_CHARACTER_TARGET,
+    policy:'Exact duplicate text appears once; aliases and source locations remain usable. Selection targets never discard cited evidence. Omitted evidence remains retained; absence here is not absence of evidence.'}};
+  // Reuse summaries already produced by Anchor's cascade. These are navigation context,
+  // never substitute quotations, evidence IDs, or proof that the source was verified.
+  packet.summary_context=omitted.filter(e=>e.context).slice(0,12).map(e=>({revision:e.revision,
+    title:e.title,url:e.url,context:e.context,role:'generated navigation context; not citable evidence'}));
+  if(omitted.length) review(s,'context.'+pending.kind,'selected',packet.evidence_selection);
+  return packet;
 }
 // Relevance is advisory metadata, not evidence validity. Keep incomplete rankings
 // without manufacturing scores or dropping exact retained passages.
 function acceptRanking(s,out,wave,reason=null) {
   const passages=pool(s,wave), allowed=new Set(passages.map(e=>e.id));
   const objectives=new Set(s.objectives.map(o=>o.id)), accepted=new Map(), omitted=[];
-  const rows=Array.isArray(out?.ranking)?out.ranking:[];
+  const rows=Array.isArray(out?.ranking)?out.ranking.flatMap(row=>{
+    const id=typeof row?.evidence==='string'?row.evidence.trim():null;
+    const group=s.rankingQueue?.slice(0,s.rankingBatchSize || PASSAGE_TARGET).find(e=>e.aliases.includes(id));
+    return group?group.aliases.map(evidence=>({...row,evidence})): [row];
+  }):[];
   let duplicates=0,metadataAdjusted=0;
   for(const [index,row] of rows.entries()) {
     const evidence=typeof row?.evidence==='string'?row.evidence.trim():null;
@@ -202,6 +285,17 @@ function acceptRanking(s,out,wave,reason=null) {
   // Supplemental ranking may focus only on new passages. Earlier valid scores
   // remain available unless a new valid row replaces that evidence/objective pair.
   s.ranking=[...s.ranking.filter(r=>r.wave!==wave || !accepted.has(r.evidence+':'+r.objective)),...accepted.values()];
+  if(s.rankingQueue) {
+    s.rankingQueue.splice(0,s.rankingBatchSize || PASSAGE_TARGET);
+    delete s.rankingBatchSize;
+    if(s.rankingQueue.length) {
+      review(s,wave?'red.ranking.batch':'evidence.ranking.batch',reason?'not_checked':'recorded',
+        {accepted:accepted.size,omitted,remaining_unique_passages:s.rankingQueue.length,...(reason?{reason}:{})});
+      if(omitted.length || reason) s.failures.push('Ranking batch had '+omitted.length+' invalid row(s). '+(reason || 'Other ranking batches continue.'));
+      s.subphase='read_sources';return;
+    }
+    delete s.rankingQueue;
+  }
   const unranked=passages.filter(e=>!s.ranking.some(r=>r.evidence===e.id)).map(e=>e.id);
   const diagnostic={wave,received:rows.length,accepted:accepted.size,duplicates,metadata_adjusted:metadataAdjusted,
     omitted_count:omitted.length,omitted:omitted.slice(0,20),unranked_count:unranked.length,unranked:unranked.slice(0,100),
@@ -478,38 +572,35 @@ function accept(s, input) {
           acquisition:source.revision?'existing_document':'selected',extraction:'not_checked',inspection:'not_checked',evidence:null,
           objectives:source.objectives,selection_rationale:source.selection_rationale,selection_rationales:source.selection_rationales});
       }
-      s.cursor=0;s.subphase='enqueue_sources';review(s,p.wave?'red.selection':'evidence.selection','recorded',out);break;
+      s.cursor=0;s.sourceFence=null;s.subphase='enqueue_sources';review(s,p.wave?'red.selection':'evidence.selection','recorded',out);break;
     }
     case 'enqueue_acquire': {
       const source=s.selected[s.cursor];source.ticket=text(out.id,'acquisition ticket');
       auditSource(s,source,{acquisition_ticket:source.ticket,acquisition:out.state || 'queued'});s.cursor++;break;
     }
-    case 'acquire': {
-      const source=s.selected[s.cursor];source.ticket=text(out.id,'acquisition ticket');
-      auditSource(s,source,{acquisition_ticket:source.ticket,acquisition:out.state || 'queued'});break;
-    }
-    case 'acquisition': {
-      const source=s.selected[s.cursor];
-      auditSource(s,source,{acquisition:out.state,attempt:out.attempt || null,error:out.error || null,
-        revision:out.revision_id || source.revision || null});
-      if(out.state==='blocked') fail('Acquisition refused by a stage hook: '+(out.error || source.url));
-      if(out.state==='failed' || out.state==='cancelled') {s.failures.push('Acquisition '+source.url+': '+out.state);s.cursor++;}
-      else if(out.state==='succeeded') {if(!UUID.test(out.revision_id)) fail('Acquisition completed without a revision');source.revision=out.revision_id;source.polls=0;}
-      else {source.polls=(source.polls||0)+1;s.wait=true;if(source.polls>600) fail('Acquisition is still pending; inspect its durable ticket '+source.ticket);}
-      break;
-    }
-    case 'status': {
-      const source=s.selected[s.cursor];
-      const steps=list(out.steps,'processing steps').filter(v=>v.generation===out.generation);
-      const extraction=steps.find(v=>v.stage==='extract');
-      auditSource(s,source,{revision:source.revision,retained_url:out.source_uri || source.url || null,
-        extraction:extraction?extraction.state:'missing'});
-      if(!extraction) {s.failures.push('No retained extraction for '+source.title);s.cursor++;}
-      else if(extraction.state==='ready') {source.readable=true;source.url=source.url || out.source_uri;source.polls=0;}
-      else if(['failed','blocked','cancelled','skipped'].includes(extraction.state)) {
-        if(extraction.state==='blocked') fail('Source extraction refused by hook');
-        s.failures.push('Extraction '+source.title+': '+extraction.state);s.cursor++;
-      } else {source.polls=(source.polls||0)+1;s.wait=true;if(source.polls>600) fail('Extraction is still pending for '+source.revision);}
+    case 'source_fence': {
+      s.sourceFence=out;
+      for(const source of s.selected) {
+        const row=rows(out.outcomes).find(row=>source.ticket?row.acquisition===source.ticket:row.revision===source.revision);
+        if(!row) fail('Readiness fence omitted a selected source reference');
+        source.fence_state=row.state;
+        auditSource(s,source,{readiness:row.state,acquisition:row.acquisition_state || s.fetchAudit[source.auditIndex].acquisition,
+          revision:row.revision || source.revision || null,extraction:row.extraction_state || 'not_checked',
+          generation:row.generation || null,attempt:row.attempt ?? null,error:row.error || null,
+          retained_url:row.source_uri || source.url || null});
+        if(row.state==='ready') {
+          if(!UUID.test(row.revision)) fail('Readiness fence returned no retained revision');
+          source.revision=row.revision;source.readable=true;source.url=source.url || row.source_uri;
+        } else if(row.state!=='pending' && !source.readinessWarning) {
+          source.readinessWarning='Source '+source.title+' ('+(source.ticket || source.revision)+'): '+row.state+(row.error?': '+row.error:'');
+          s.failures.push(source.readinessWarning);
+          auditSource(s,source,{warning:source.readinessWarning});
+        }
+      }
+      // One terminal outcome for every unique reference, not merely X events.
+      // Pending work never becomes unavailable because a wall-clock wait expired.
+      const complete=s.selected.every(source=>['ready','unavailable','failed','blocked','cancelled','skipped'].includes(source.fence_state));
+      if(out.complete!==complete) fail('Readiness fence completion disagrees with source outcomes');
       break;
     }
     case 'source_search': {
@@ -651,6 +742,7 @@ function accept(s, input) {
       }
       review(s,'synthesis','written',out);s.cursor++;break;
     }
+    case 'report_audit': if(!UUID.test(out.revision)) fail('Audit write returned no revision');s.reportAudit=out;break;
     case 'report': if(!UUID.test(out.revision)) fail('Report write returned no revision');s.report=out;s.cursor++;break;
     default: fail('Unknown pending command '+p.kind);
   }
@@ -687,8 +779,20 @@ function enqueue(s,wave,input) {
   const source=s.selected[s.cursor];
   return command(s,'information_write',{operation:'acquire',url:source.url,name:source.title,requestId:input.requestId},{kind:'enqueue_acquire'});
 }
+function rankingEvidence(s,wave) {
+  s.rankingQueue=s.rankingQueue || deduplicatedEvidence(pool(s,wave));
+  const batch=[];let characters=0;
+  for(const passage of s.rankingQueue) {
+    if(batch.length>=PASSAGE_TARGET || (batch.length && characters+passage.quote.length>EVIDENCE_CHARACTER_TARGET)) break;
+    batch.push(passage);characters+=passage.quote.length;
+  }
+  s.rankingBatchSize=batch.length;
+  return batch;
+}
 function retain(s,wave,input) {
-  if(s.wait) {s.wait=false;s.pending={kind:'wait'};return {state:s,command:{waitMs:1000}};}
+  if(s.selected.length && !s.sourceFence?.complete)
+    return command(s,'information_read',{operation:'await',sources:s.selected.map(source=>source.ticket?{acquisition:source.ticket}:{revision:source.revision}),waitMs:30000},{kind:'source_fence'});
+  while(s.cursor<s.selected.length && s.selected[s.cursor].fence_state!=='ready') s.cursor++;
   if(s.cursor>=s.selected.length) {
     const retained=pool(s,wave), thin=s.objectives.some(o=>new Set(retained.filter(e=>e.objectives.includes(o.id)).map(e=>e.revision)).size<2);
     const failed=s.selected.some(source=>!source.evidence);
@@ -697,18 +801,13 @@ function retain(s,wave,input) {
     if(!pool(s,wave).length && wave===0) fail('Research has no retained evidence. Discovery snippets cannot substitute for sources.');
     return model(s,'Rank retained evidence against the ORIGINAL question. Aim to cover every supplied passage, including explicit low relevance for unrelated passages. Return per-objective relevance scores and explain whether each passage actually supplies the expected evidence. Missing rankings remain not checked, not proof of low relevance. Do not equate repeated discovery with corroboration.',
       '{"ranking":[{"evidence":"exact evidence UUID","objective":"o1","score":0.9,"rationale":"why it answers the original question"}]}',
-      {objectives:s.objectives,evidence:pool(s,wave)}, {kind:'ranking',wave});
+      {objectives:s.objectives,evidence:rankingEvidence(s,wave)}, {kind:'ranking',wave});
   }
   const source=s.selected[s.cursor];
-  if(!source.revision) {
-    if(!source.ticket) return command(s,'information_write',{operation:'acquire',url:source.url,name:source.title,requestId:input.requestId},{kind:'acquire'});
-    return command(s,'information_read',{operation:'acquisition',acquisition:source.ticket},{kind:'acquisition'});
-  }
-  if(!source.readable) return command(s,'information_read',{operation:'status',revision:source.revision},{kind:'status'});
   if(!source.quote && source.windows && source.windows.length) {
-    const window=source.windows.shift();source.quote=window.text;source.start=window.start;source.end=window.end;
+    const window=source.windows.shift();source.quote=window.text;source.start=window.start;source.end=window.end;source.summaryContext=window.context || null;
   }
-  if(!source.quote && source.window) {source.quote=source.window.text;source.start=source.window.start;source.end=source.window.end;source.coverage='a semantically retrieved passage matched exactly to retained text';}
+  if(!source.quote && source.window) {source.quote=source.window.text;source.start=source.window.start;source.end=source.window.end;source.summaryContext=source.window.context || null;source.coverage='a semantically retrieved passage matched exactly to retained text';}
   if(!source.quote && !source.fallbackHead) return command(s,'information_read',{operation:'search',query:s.question,revision:source.revision,limit:3},{kind:'source_search'});
   if(!source.quote) return command(s,'information_read',{operation:'read',revision:source.revision,offset:0,limit:4000},{kind:'read'});
   return command(s,'information_write',{operation:'evidence',revision:source.revision,start:source.start,end:source.end,quote:source.quote,locator:'extracted-text:utf16',requestId:input.requestId},{kind:'evidence'});
@@ -724,7 +823,7 @@ function expand(s) {
     {...data,expansion:s.expansion},{kind:'editor'});
 }
 function assemble(s) {
-  let report='# '+s.question+'\n\n## Executive summary\n\n'+s.synthesis.executive_summary+'\n\n## Research question and scope\n\n'+s.scope+'\n\n## Methodology\n\n'+s.synthesis.methodology;
+  let report='# '+s.question.replace(/[\r\n]+/g,' ').trim().slice(0,512)+'\n\n## Executive summary\n\n'+s.synthesis.executive_summary+'\n\n## Research question and scope\n\n'+s.scope+'\n\n## Methodology\n\n'+s.synthesis.methodology;
   for(const objective of s.objectives) {
     report+='\n\n## '+objective.id+': '+objective.objective+'\n\nIntent: '+objective.intent+'\n\nExpected evidence: '+objective.expected_evidence;
     report+='\n\nCoverage: '+s.coverage.find(v=>v.objective===objective.id).assessment;
@@ -736,20 +835,44 @@ function assemble(s) {
       report+='\n\nChallenge: '+red.challenge+'\n\nRebuttal/concession: '+rebuttal.response;
     }
   }
-  report+='\n\n## Analytical context measurements\n\n```json\n'+JSON.stringify(s.contextCost,null,2)+'\n```\n\nCharacters measure serialized analytical task data; provider tokens, document-processing usage and time must be read from the authenticated usage ledger.';
+
   report+='\n\n## Limitations and uncertainty\n\n'+s.synthesis.limitations+'\n\nSources were inspected as bounded retained text windows. Discovery snippets were never evidence.';
   if(s.failures.length) report+='\n\nRetrieval and assessment warnings:\n'+s.failures.map(v=>'- '+v).join('\n');
   if(s.scopeChanges.length) report+='\n\nScope observations (the original question was preserved):\n'+s.scopeChanges.map(v=>'- '+v).join('\n');
   report+='\n\n## Open questions\n\n'+s.synthesis.open_questions+'\n\n## Conclusion\n\n'+s.synthesis.conclusion;
   s.citedEvidence=ids([...report.matchAll(/\[evidence:([^\]]+)\]/g)].map(m=>m[1]),evidenceIds(s),'report citation');
+  // Render references in code, after validation, so the model cannot renumber or invent links.
+  const passages=pool(s), references=new Map(), sourceNumbers=new Map(), cited=[];
+  function sourceUrl(value) {
+    return typeof value==='string' && /^https?:\/\/[^\s]+$/i.test(value)
+      ? value.replace(/[<>\s()\\]/g,character=>'%'+character.charCodeAt(0).toString(16).toUpperCase()):null;
+  }
+  for(const id of s.citedEvidence) {
+    const passage=passages.find(e=>e.id===id);
+    const key=JSON.stringify([passage.revision,passage.start,passage.end,passage.quote]);
+    if(!sourceNumbers.has(key)) {sourceNumbers.set(key,cited.length+1);cited.push({...passage,evidence_ids:[]});}
+    const number=sourceNumbers.get(key);cited[number-1].evidence_ids.push(id);references.set(id,number);
+  }
+  report=report.replace(/\[evidence:([^\]]+)\]/g,(_,id)=>{
+    const number=references.get(id),url=sourceUrl(cited[number-1].url);
+    return url?'[['+number+']('+url+')]':'['+number+']';
+  });
   report+='\n\n## Cited sources and provenance';
-  for(const e of pool(s).filter(e=>s.citedEvidence.includes(e.id))) report+='\n\n[evidence:'+e.id+'] '+e.title+' — '+(e.url || 'project document')+'\nRevision: '+e.revision+'; UTF-16 range: '+e.start+'–'+e.end+'; wave: '+e.wave+'; '+e.coverage+'.';
-  const audit=s.fetchAudit.map(row=>({...row,evidence_cited:s.citedEvidence.includes(row.evidence),
-    windows:(row.windows || []).map(window=>({...window,evidence_cited:s.citedEvidence.includes(window.evidence)})),
-    document_cited:s.sources.some(source=>source.revision===row.revision && s.citedEvidence.includes(source.evidence))}));
-  report+='\n\n## Fetch and document audit\n\nAll selected documents from both retrieval waves are listed below, including retained but uncited sources and failed acquisitions. Existing documents were reused rather than fetched. Search hits not selected for acquisition remain discovery metadata in the run journal. Successful acquisitions stay in the scoped catalogue regardless of citation use.\n\n```json\n'
-    +JSON.stringify(audit,null,2)+'\n```';
+  for(const [index,e] of cited.entries()) {
+    const title=(e.title || 'Retained document').replace(/[\r\n]+/g,' ').replace(/([\\`*_\[\]])/g,'\\$1');
+    const url=sourceUrl(e.url);
+    report+='\n\n**['+(index+1)+']** '+(url?'['+title+']('+url+')':title+' — project document')
+      +'\n\nEvidence records: '+e.evidence_ids.map(id=>'`'+id+'`').join(', ')
+      +'; revision: `'+e.revision+'`; UTF-16 range: '+e.start+'–'+e.end+'; '+e.coverage+'.';
+  }
+  report+='\n\n## Research audit\n\nThe complete fetch and document audit, including uncited sources, failed acquisitions and analytical context measurements, is retained separately as information revision `'+s.reportAudit.revision+'`. Read it with information_read (operation: read, revision: '+s.reportAudit.revision+'), using offset and limit to page through it. Discovery results and original responses remain in the run journal.';
   return report;
+}
+function reportAudit(s) {
+  return JSON.stringify({original_request:s.question,context_measurement_units:'Serialized UTF-16 characters, not provider tokens. Provider usage is in the authenticated usage ledger.',context_measurements:s.contextCost,documents:s.fetchAudit.map(row=>({...row,
+    evidence_cited:s.citedEvidence.includes(row.evidence),
+    windows:(row.windows || []).map(window=>({...window,evidence_cited:s.citedEvidence.includes(window.evidence)})),
+    document_cited:s.sources.some(source=>source.revision===row.revision && s.citedEvidence.includes(source.evidence))}))},null,2);
 }
 function reportReviews(s) {
   // Keep full reviews in journal state, but bound duplicated report metadata.
@@ -784,7 +907,7 @@ export function step(input) {
       objectives:[],catalogue:[],queries:[],counterQueries:[],decompositions:[],candidates:[],selected:[],sources:[],ranking:[],findings:[],coverage:[],reviews:[],failures:[],scopeChanges:[],fetchAudit:[],expansion:null};
   }
   const accepted=acceptOrRepair(s,input);if(accepted.repair) return accepted.repair;s=accepted.state;
-  if(s.stage>=manifest.stages.length) return command(s,'orchestration_finish',{result:'Detailed research draft retained as revision '+s.report.revision+'.\n\n'+s.reportText},{kind:'finished'});
+  if(s.stage>=manifest.stages.length) return command(s,'orchestration_finish',{result:'Research completed: '+s.objectives.length+' objectives and '+s.findings.length+' findings. The full report with source links is retained as information revision '+s.report.revision+'. Read it with information_read '+JSON.stringify({operation:'read',revision:s.report.revision,offset:0,limit:8192})+'; continue from each returned end until total. The separate audit is information revision '+(s.reportAudit?.revision || 'not separately retained')+'. Original responses remain in the run journal.'},{kind:'finished'});
   const stage=manifest.stages[s.stage].id;
   const todo=input.todos.find(t=>t.stageId===stage);if(!todo) fail('Missing seeded stage '+stage);
   if(!s.entered) return command(s,'todo_write',{ops:[{op:'update',id:todo.id,status:'in_progress'}]},{kind:'enter'});
@@ -849,6 +972,12 @@ export function step(input) {
       '{"executive_summary":"substantive executive summary","methodology":"what was actually done","limitations":"uncertainty and coverage limits","open_questions":"unresolved questions","conclusion":"evidence-grounded conclusion"}',
       {objectives:s.objectives,scope:s.scope,findings:s.findings,coverage:s.coverage,evidence:pool(s),failures:s.failures,scope_changes:s.scopeChanges},{kind:'synthesis'});break;
     case 'report': if(!s.cursor) {
+      if(!s.reportAudit) {
+        // Establish cited evidence before recording the audit; assemble renders all validated citations.
+        const draft={...s,reportAudit:{revision:'pending'}};assemble(draft);s.citedEvidence=draft.citedEvidence;
+        next=command(s,'information_write',{operation:'report',requestId:input.requestId,name:'research-'+input.run+'-audit.json',text:reportAudit(s),inputs:[...new Set(s.fetchAudit.map(row=>row.revision).filter(id=>UUID.test(id)))]},{kind:'report_audit'});
+        break;
+      }
       s.reportText=assemble(s);
       next=command(s,'information_write',{operation:'report',requestId:input.requestId,name:s.reportName || 'research-'+input.run+'.md',text:s.reportText,
         ...(s.feedbackRevision?{feedback:s.feedbackRevision}:{}),

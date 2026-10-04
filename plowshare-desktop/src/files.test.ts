@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, mkdir, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FilePresence } from './files.ts';
+import { FilePresence, identifyFolder } from './files.ts';
 import type { FilePresenceState } from './files-shared.ts';
 import type { Arrival, Socket } from 'plowshare-client-ts/binding/connection';
 import type { FileRequest, FileReply } from 'plowshare-client-ts/binding/files';
@@ -39,7 +39,7 @@ test('presence serves real files, fences paths and withdraws without losing the 
   try {
     assert.equal(await presence.choose(root, 'Research'), 'Research');
     assert.equal(state.status, 'ready');
-    assert.equal(await readFile(join(root, '.plowshare/project'), 'utf8'), 'Research\n');
+    assert.deepEqual(JSON.parse(await readFile(join(root, '.plowshare/project'), 'utf8')), {version:1,name:'Research'});
     assert.deepEqual((await channel.request({ id: 'read', op: 'read', path: 'notes.md' })).span?.lines, ['Original notes']);
     assert.equal((await channel.request({ id: 'edit', op: 'edit', path: 'notes.md', replacing: 'Original', content: 'Updated' })).result?.kind, 'edited');
     assert.equal(await readFile(join(root, 'notes.md'), 'utf8'), 'Updated notes\n');
@@ -169,4 +169,28 @@ test('withdrawing presence aborts local commands and refuses subsequent requests
   const outcome = await command;
   assert.equal(outcome.outcome, 'ok'); assert.equal(outcome.exitCode, null);
   assert.equal((await answer({ id: 'after', op: 'roots' })).outcome, 'refused');
+}));
+
+
+test('choosing a checkout subdirectory uses its nearest project marker', async () => temporary(async root => {
+  await mkdir(join(root, '.plowshare'));
+  await writeFile(join(root, '.plowshare/project'), 'Home Assistant\n');
+  const nested = join(root, 'src/integration'); await mkdir(nested, {recursive:true});
+  assert.deepEqual(await identifyFolder(nested), {root, project:'Home Assistant'});
+  await assert.rejects(identifyFolder(nested, 'Different'), /belongs to Home Assistant/);
+}));
+
+
+test('a root manifest attaches privately without creating .plowshare and keeps its friendly name', async () => temporary(async root => {
+  const text = JSON.stringify({version:1,name:'Integration',routing:{sendTo:['notifications'],routeFiles:['routes/internal.json']},integration:{enabled:true}}); await writeFile(join(root,'plowshare'),text);
+  const key='client:scope:'+Buffer.from('Integration').toString('base64url');
+  const frames:string[]=[]; let state:FilePresenceState={status:'off'};
+  const connection={ask:async(type:string)=>{frames.push(type);return {code:'OK' as const,payload:type==='project.list'?[]:{name:key,displayName:'Integration',workspace:root,machine:'test',lent:[],exclusions:[],members:[],type:'DISJOINT'}}},close(){}};
+  const presence=new FilePresence(async claim=>{const channel=new Channel();setTimeout(()=>channel.listeners.get('message')?.({data:JSON.stringify({ready:true,project:claim.project})}),1);return channel;},value=>{state=value;},()=>{},connection);
+  try {
+    assert.equal(await presence.choose(root),key);assert.equal(state.status,'ready');
+    assert.deepEqual(frames,['project.list','project.attach']);
+    assert.equal(await readFile(join(root,'plowshare'),'utf8'),text);
+    await assert.rejects(readFile(join(root,'.plowshare/project')),{code:'ENOENT'});
+  } finally {await presence.close();}
 }));

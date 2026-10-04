@@ -1,3 +1,5 @@
+import { OUTGOING_OPERATIONS, isOutgoingOperation, outgoingReply } from './outgoing.ts'
+import { MESSAGING_OPERATIONS, isMessagingOperation, messagingReply } from './messaging.ts'
 import { USAGE_FRAMES, usageReply } from './usage.ts'
 import { INFORMATION_FRAMES, informationReply, isInformationFrame } from './information-replies.ts'
 import { acceptedJobOf, jobStatusOf } from '../binding/job-view.ts'
@@ -144,7 +146,7 @@ export function parseDirect(line: string, project?: string): Parsed {
 
 export const JOB_SUBMISSIONS: readonly Operation[] = ['memory.digest', 'agent.curate', 'agent.run', 'conversation.resume', 'document.ask']
 
-export const VALIDATED_OPERATIONS: readonly Operation[] = [...USAGE_FRAMES.filter(type=>type!=='usage.subscribe'&&type!=='usage.unsubscribe'), ...INFORMATION_FRAMES, ...RETRIEVAL_OPERATIONS, ...ADMINISTRATIVE_OPERATIONS, ...CONVERSATION_OPERATIONS, ...INSPECTION_OPERATIONS, ...JOB_SUBMISSIONS, 'job.status', 'job.cancel', 'orchestration.record', 'orchestration.start', 'orchestration.receipt']
+export const VALIDATED_OPERATIONS: readonly Operation[] = [...OUTGOING_OPERATIONS, ...MESSAGING_OPERATIONS, ...USAGE_FRAMES.filter(type=>type!=='usage.subscribe'&&type!=='usage.unsubscribe'), ...INFORMATION_FRAMES, ...RETRIEVAL_OPERATIONS, ...ADMINISTRATIVE_OPERATIONS, ...CONVERSATION_OPERATIONS, ...INSPECTION_OPERATIONS, ...JOB_SUBMISSIONS, 'job.status', 'job.cancel', 'orchestration.record', 'orchestration.start', 'orchestration.receipt']
 
 export const WAIT_OPERATIONS: readonly Operation[] = [...JOB_SUBMISSIONS, 'information.ask', 'job.status', 'job.cancel', 'approval.answer', 'orchestration.start', 'orchestration.status', 'orchestration.receipt']
 
@@ -165,6 +167,26 @@ export async function dispatch(transport: Transport, asked: Request): Promise<Re
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
     const body = fields(outcome.payload)
+    if (isOutgoingOperation(asked.type)) {
+        const expected = asked.type === 'outgoing.send' ? 'ACCEPTED' : 'OK'
+        if (outcome.code !== expected) return { kind: ['OK','CREATED','ACCEPTED','NO_CONTENT'].includes(outcome.code) ? 'invalid-response' : 'refused', outcome }
+        if (!outgoingReply(asked.type,outcome)) return { kind: 'invalid-response', outcome }
+        if (asked.type === 'outgoing.send' && (body?.['requestId'] !== asked.payload.requestId || body['peer'] !== asked.payload.peer)) return { kind: 'invalid-response', outcome }
+        if ((asked.type === 'outgoing.status' || asked.type === 'outgoing.cancel') && body?.['id'] !== asked.payload.id) return { kind: 'invalid-response', outcome }
+        if (asked.type === 'outgoing.send') return { kind: 'accepted', outcome }
+        if (asked.type === 'outgoing.peers') return { kind: 'completed', outcome }
+        const state = body?.['state']
+        return { kind: state === 'COMPLETED' || state === 'CANCELED' ? 'completed'
+            : state === 'FAILED' || state === 'REJECTED' ? 'refused'
+            : ['QUEUED','DISPATCHED','WORKING'].includes(String(state)) ? 'running' : 'incomplete', outcome }
+    }
+    if (isMessagingOperation(asked.type)) {
+        if (outcome.code !== 'OK') return { kind: 'refused', outcome }
+        if (!messagingReply(asked.type, outcome)) return { kind: 'invalid-response', outcome }
+        const expected = 'instance' in asked.payload ? asked.payload.instance : 'message' in asked.payload ? asked.payload.message : undefined
+        if (expected && asked.type !== 'message.deliveries' && body?.[asked.type.startsWith('message.instance') ? 'id' : 'message'] !== expected) return { kind: 'invalid-response', outcome }
+        return { kind: 'completed', outcome }
+    }
     if ((USAGE_FRAMES as readonly string[]).includes(asked.type)) {
         if (outcome.code !== 'OK') return {kind:'refused',outcome}
         return usageReply(asked.type,outcome.payload) ? {kind:'completed',outcome} : {kind:'invalid-response',outcome}
@@ -180,9 +202,19 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
         if (outcome.code !== 'OK' && outcome.code !== 'ACCEPTED') return { kind: 'refused', outcome }
         if (informationReply(asked.type, outcome) === undefined) return { kind: 'invalid-response', outcome }
         const payload = fields(asked.payload)!
+        if (asked.type === 'information.await' && Array.isArray(payload['sources'])) {
+            const identity = (row: Record<string,unknown>): string => typeof row['acquisition'] === 'string' ? 'acquisition:'+row['acquisition'] : 'revision:'+row['revision']
+            const expected = new Set(payload['sources'].map(row => identity(row as Record<string,unknown>)))
+            const outcomes = body?.['outcomes'] as Record<string,unknown>[]
+            if (expected.size !== outcomes.length || outcomes.some(row => !expected.has(identity(row)))) return {kind:'invalid-response',outcome}
+        }
+        if (asked.type === 'information.symbols') {
+            const symbols = body?.['symbols'] as readonly Record<string,unknown>[]
+            if (body?.['query'] !== payload['query'] || (typeof payload['revision'] === 'string' && symbols.some(row => row['revision'] !== payload['revision']))) return {kind:'invalid-response',outcome}
+        }
         const identity = asked.type === 'information.status' ? payload['acquisition'] ?? payload['revision'] : asked.type === 'information.evidence.read' ? payload['evidence'] : payload['revision']
-        const returned = ['information.read','information.ask'].includes(asked.type) ? body?.['revision'] : body?.['id']
-        if (['information.read','information.ask','information.status','information.evidence.read'].includes(asked.type) && typeof identity === 'string' && returned !== identity) return { kind: 'invalid-response', outcome }
+        const returned = ['information.read','information.ask','information.outline'].includes(asked.type) ? body?.['revision'] : body?.['id']
+        if (['information.read','information.ask','information.outline','information.status','information.evidence.read'].includes(asked.type) && typeof identity === 'string' && returned !== identity) return { kind: 'invalid-response', outcome }
         return outcome.code === 'ACCEPTED' ? { kind: 'accepted', outcome, ...(asked.type === 'information.ask' ? { job: body!['job'] as string } : {}) } : { kind: 'completed', outcome }
     }
     if (outcome.code === 'ACCEPTED') {

@@ -11,22 +11,32 @@ import java.time.Instant;
  * @param locked written only by an orchestration; a model cannot drop, move or rename it
  * @param stageId the orchestration stage this item is, or {@code null}
  */
-public record TodoItem(String id, String conversation, String parent, int position, String text,
-        TodoStatus status, String summary, boolean locked, String stageId, Instant updatedAt) {
+public record TodoItem(
+    String id,
+    String conversation,
+    String parent,
+    int position,
+    String text,
+    TodoStatus status,
+    String summary,
+    boolean locked,
+    String stageId,
+    Instant updatedAt) {
 
-    public TodoItem withStatus(TodoStatus to, Instant at) {
-        return new TodoItem(id, conversation, parent, position, text, to, summary, locked, stageId, at);
-    }
+  public TodoItem withStatus(TodoStatus to, Instant at) {
+    return new TodoItem(id, conversation, parent, position, text, to, summary, locked, stageId, at);
+  }
 
-    public TodoItem withText(String to, Instant at) {
-        return new TodoItem(id, conversation, parent, position, to, status, summary, locked, stageId, at);
-    }
+  public TodoItem withText(String to, Instant at) {
+    return new TodoItem(
+        id, conversation, parent, position, to, status, summary, locked, stageId, at);
+  }
 
-    public TodoItem withSummary(String to, Instant at) {
-        return new TodoItem(id, conversation, parent, position, text, status, to, locked, stageId, at);
-    }
+  public TodoItem withSummary(String to, Instant at) {
+    return new TodoItem(id, conversation, parent, position, text, status, to, locked, stageId, at);
+  }
 
-    public TodoItem withPosition(int to, Instant at) {
-        return new TodoItem(id, conversation, parent, to, text, status, summary, locked, stageId, at);
-    }
+  public TodoItem withPosition(int to, Instant at) {
+    return new TodoItem(id, conversation, parent, to, text, status, summary, locked, stageId, at);
+  }
 }

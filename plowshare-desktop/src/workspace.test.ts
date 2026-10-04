@@ -1,4 +1,7 @@
-import { agentWire, conversationWire, projectWire, entryPageWire } from './wire-fixtures.ts';
+import {mkdtemp,realpath,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import { agentWire, conversationWire, projectWire, entryPageWire, entryWire } from './wire-fixtures.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DesktopWorkspace } from './workspace.ts';
@@ -7,22 +10,32 @@ import type { JobStore, SavedJob } from './job-store.ts';
 import type { ProjectStore } from './project-config.ts';
 import type { ConnectionStore, SavedConnection } from './connection-config.ts';
 
-function fixture(connectionStore?: ConnectionStore, jobStore?: JobStore) {
+function fixture(connectionStore?: ConnectionStore, jobStore?: JobStore, files = false) {
+  const catalogs = new Map<string, NonNullable<ReturnType<typeof agentWire>['commands']>>();
   const sessions: { id: string; closed: boolean; calls: { type: string; payload: any }[]; drop: () => void }[] = [];
   let peerWait = Promise.resolve();
   const create = async (_push: (value: unknown) => void, lost: () => void): Promise<Connected> => {
     await peerWait;
     const row = { id: `session-${sessions.length}`, closed: false, calls: [] as { type: string; payload: any }[], drop: lost };
     sessions.push(row);
-    return { session: row.id, spawn: create, connection: {
+    const local: any[] = [];
+    return { session: row.id, spawn: create, ...(files ? {openFiles:async(claim:any)=>{
+      const listeners=new Map<string,(event:any)=>void>();
+      setTimeout(()=>listeners.get('message')?.({data:JSON.stringify({ready:true,project:claim.project})}),1);
+      return {addEventListener(type:string,fn:(event:any)=>void){listeners.set(type,fn);},send(){},close(){queueMicrotask(()=>listeners.get('close')?.({code:1000}));}};
+    }}:{}), connection: {
       close() { row.closed = true; },
       async ask(type, payload) {
         row.calls.push({ type, payload });
-        if (type === 'project.list') return { code: 'OK', payload: [projectWire('Research'), projectWire('Writing')] };
+        if (type === 'project.list') return { code: 'OK', payload: [projectWire('Research'), projectWire('Writing'),...local] };
+        if(type==='project.attach'){const value=payload as any;const key='client:'+row.id+':'+Buffer.from(value.name).toString('base64url');const project={...projectWire(key),workspace:value.workspace,machine:value.machine,type:'DISJOINT',displayName:value.name};local.push(project);return {code:'OK',payload:project};}
         if (type === 'conversation.list') { const project = (payload as any)?.project; return { code: 'OK', payload: [conversationWire(project ? `${project}-chat` : 'global-chat', { project: project ?? null })] }; }
-        if (type === 'agent.list') return { code: 'OK', payload: [agentWire({ preferred: false })] };
+        if (type === 'agent.list') return { code: 'OK', payload: [agentWire({ preferred: false, commands: catalogs.get((payload as any)?.project ?? '') ?? [] })] };
         if (type === 'approval.list') return { code: 'OK', payload: { approvals: [] } };
-        if (type === 'conversation.trajectory') return { code: 'OK', payload: entryPageWire() };
+        if (type === 'conversation.trajectory') {
+          const id = (payload as any).conversation;
+          return { code: 'OK', payload: entryPageWire(id === 'Research-chat' ? [entryWire(1,'answer','Delegating',{toolCalls:[{id:'delegate',name:'agent_run',arguments:'{}',length:2,cut:false,salient:null,opened:{agent:'analyst',conversation:'Research-delegate'}}]})] : [], id === 'Research-chat' ? 1 : 0) };
+        }
         if (type === 'inbox.list') return { code: 'OK', payload: { items: [], unread: 0 } };
         if (type === 'orchestration.list') return { code: 'OK', payload: { orchestrations: [] } };
         return { code: 'OK' };
@@ -30,11 +43,31 @@ function fixture(connectionStore?: ConnectionStore, jobStore?: JobStore) {
     } };
   };
   const connector: Connector = async (_base, handle, _password, push, closed) => ({ ...await create(push, closed), handle: handle || 'alice' });
-  const store: ProjectStore = { async list() { return []; }, async put() {}, async remove() {} };
+  const store: ProjectStore = { async list() { return []; }, async put(value) {savedWrites.push(value);}, async remove() {} };
+  const savedWrites:any[]=[];
   const workspace = new DesktopWorkspace(() => {}, store, connector, connectionStore, jobStore);
-  return { workspace, sessions, delayPeer() { let release!: () => void; peerWait = new Promise(resolve => { release = resolve; }); return () => { release(); peerWait = Promise.resolve(); }; } };
+  return { workspace, savedWrites, sessions, catalogs, delayPeer() { let release!: () => void; peerWait = new Promise(resolve => { release = resolve; }); return () => { release(); peerWait = Promise.resolve(); }; } };
 }
 const connect = (workspace: DesktopWorkspace, handle = 'alice') => workspace.dispatch({ action: 'connect', base: 'http://localhost:8080', handle, password: 'fixture-password' });
+
+test('lazily loaded project sessions retain independent human command catalogs during refresh', async () => {
+  const { workspace, sessions, catalogs } = fixture();
+  const skill = (name: string) => ({ command: `/skill:${name}`, aliases: [], kind: 'skill' as const, name, description: name, argumentHint: 'Work', executor: 'interlocutor', mode: 'NEW' as const, tier: 'SESSION', hash: name, agentVisible: false });
+  catalogs.set('Research', [skill('research')]); catalogs.set('Writing', [skill('write')]);
+  try {
+    await connect(workspace);
+    await Promise.all(['Research', 'Writing'].map(project => workspace.dispatch({ action: 'scope', project })));
+    assert.deepEqual(workspace.state.agents.Research[0].commands?.map(row => row.command), ['/skill:research']);
+    assert.deepEqual(workspace.state.agents.Writing[0].commands?.map(row => row.command), ['/skill:write']);
+    const owners = ['Research', 'Writing'].map(project => sessions.find(row => row.calls.some(call => call.type === 'agent.list' && call.payload.project === project))!);
+    assert.notEqual(owners[0].id, owners[1].id);
+    assert.ok(owners.every(row => !row.closed));
+    catalogs.set('Writing', [skill('revise')]);
+    await workspace.dispatch({ action: 'refresh' });
+    assert.equal(workspace.state.agents.Research[0].commands?.[0].command, '/skill:research');
+    assert.equal(workspace.state.agents.Writing[0].commands?.[0].command, '/skill:revise');
+  } finally { await workspace.shutdown(); }
+});
 
 test('project clients own independent sessions and conversation views', async () => {
   const { workspace, sessions } = fixture();
@@ -51,6 +84,18 @@ test('project clients own independent sessions and conversation views', async ()
     }
     await assert.rejects(workspace.dispatch({ action: 'scope', project: 'Unknown project' }), /available project/);
     assert.equal(sessions.length, 3);
+  } finally { await workspace.shutdown(); }
+});
+test('a delegated project trajectory stays on its parent session without requiring a top-level chat listing', async () => {
+  const {workspace,sessions} = fixture();
+  try {
+    await connect(workspace); await workspace.dispatch({action:'scope',project:'Research'});
+    await workspace.followView('parent','Research-chat');
+    await workspace.followView('delegate','Research-delegate');
+    const owner = sessions.find(session => session.calls.some(call => call.type === 'conversation.list' && call.payload.project === 'Research'))!;
+    assert.ok(owner.calls.some(call => call.type === 'conversation.trajectory' && call.payload.conversation === 'Research-delegate'));
+    assert.equal(sessions[0].calls.some(call => call.type === 'conversation.trajectory' && call.payload.conversation === 'Research-delegate'),false);
+    assert.equal(workspace.state.conversations.some(row => row.id === 'Research-delegate'),false);
   } finally { await workspace.shutdown(); }
 });
 
@@ -186,4 +231,22 @@ test('job recovery keeps receipts for unavailable projects instead of deleting t
   assert.match(f.workspace.state.jobRecoveryError!,/retained/);
   assert.deepEqual(saved,[retained]);
   assert.equal(f.sessions.some(session=>session.calls.some(call=>call.type==='agent.run')),false);
+});
+
+
+test('manifest folders use their own project connection and are not persisted for other clients', async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'workspace-disjoint-'))), {workspace,sessions,savedWrites}=fixture(undefined,undefined,true);
+  try {
+    const manifest=JSON.stringify({version:1,name:'Integration',routing:{sendTo:['notifications'],routeFiles:['routes/internal.json']},integration:{enabled:true}});await writeFile(join(root,'plowshare'),manifest);await connect(workspace);
+    const reply=await workspace.rootDirectory(root);
+    assert.ok(reply.rootProject?.startsWith('client:'));
+    assert.equal(workspace.state.projects.find(row=>row.name===reply.rootProject)?.displayName,'Integration');
+    const owner=sessions.find(row=>row.calls.some(call=>call.type==='project.attach'))!;
+    assert.notEqual(owner.id,sessions[0]!.id);
+    assert.ok(owner.calls.some(call=>call.type==='conversation.list'&&call.payload.project===reply.rootProject));
+    assert.equal(savedWrites.length,0);
+    const again=await workspace.rootDirectory(root);assert.equal(again.rootProject,reply.rootProject);assert.equal(sessions.length,2);
+    assert.equal(await readFile(join(root,'plowshare'),'utf8'),manifest);
+    await assert.rejects(readFile(join(root,'.plowshare/project')),{code:'ENOENT'});
+  } finally {await workspace.shutdown();await rm(root,{recursive:true,force:true});}
 });

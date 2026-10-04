@@ -7,12 +7,12 @@ package io.aeyer.plowshare.server.approvals;
  */
 public interface ApprovalEvents {
 
-    ApprovalEvents NONE = new ApprovalEvents() { };
+  ApprovalEvents NONE = new ApprovalEvents() {};
 
-    default void asked(RunApproval approval) {
-    }
+  default void asked(RunApproval approval) {}
 
-    /** @param approval the approval as the answer left it: {@code allowed} or {@code denied} */
-    default void answered(RunApproval approval) {
-    }
+  /**
+   * @param approval the approval as the answer left it: {@code allowed} or {@code denied}
+   */
+  default void answered(RunApproval approval) {}
 }

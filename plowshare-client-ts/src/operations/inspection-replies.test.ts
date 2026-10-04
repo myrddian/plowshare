@@ -25,8 +25,8 @@ describe('shared Board, Swarm, union and job inspection replies', () => {
     it('accounts for every one-shot command and never claims bound sync/subscription validation', () => {
         const exposed = new Set<string>([...Object.values(CLI_OPERATIONS), ...Object.values(MEMORY_OPERATIONS), ...JOB_SUBMISSIONS, 'conversation.search','job.status','job.cancel'])
         expect([...VALIDATED_OPERATIONS].sort()).toEqual([...exposed].sort())
-        expect(exposed.size).toBe(130)
-        expectTypeOf<keyof Replies>().toEqualTypeOf<Exclude<Operation, keyof BoundPayloads>>()
+        expect(exposed.size).toBe(174)
+        expectTypeOf<keyof Replies>().toEqualTypeOf<Exclude<Operation, Exclude<keyof BoundPayloads, 'incoming.catalog' | 'incoming.receive' | 'incoming.status' | 'incoming.cancel'>>>()
         expect(Object.keys(fixtures).sort()).toEqual([...INSPECTION_OPERATIONS].sort())
     })
     it.each(INSPECTION_OPERATIONS)('%s retains complete raw snapshots after one WS request', async type => {

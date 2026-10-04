@@ -7,21 +7,23 @@ package io.aeyer.plowshare.server.orchestrations;
  */
 public interface InboxPort {
 
-    void notify(String handle, String kind, String text);
+  void notify(String handle, String kind, String text);
 
-    /**
-     * A notice asking the person something: {@code about} names the question, so {@link #settle}
-     * can take the notice out of the inbox once it is settled (V68). Null is news. By default the
-     * notice is written without it, for a seam that settles nothing.
-     */
-    default void notify(String handle, String kind, String text, String about) {
-        notify(handle, kind, text);
-    }
+  /**
+   * A notice asking the person something: {@code about} names the question, so {@link #settle} can
+   * take the notice out of the inbox once it is settled (V68). Null is news. By default the notice
+   * is written without it, for a seam that settles nothing.
+   */
+  default void notify(String handle, String kind, String text, String about) {
+    notify(handle, kind, text);
+  }
 
-    default void notifyFromLog(String handle,String kind,String text,String about,String source) { notify(handle,kind,text,about); }
+  default void notifyFromLog(String handle, String kind, String text, String about, String source) {
+    notify(handle, kind, text, about);
+  }
 
-    /** The question {@code about} names is settled; its notices leave the inbox. Nothing by
-     *  default. */
-    default void settle(String about) {
-    }
+  /**
+   * The question {@code about} names is settled; its notices leave the inbox. Nothing by default.
+   */
+  default void settle(String about) {}
 }

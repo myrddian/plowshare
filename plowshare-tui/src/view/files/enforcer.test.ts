@@ -83,10 +83,10 @@ describe('the fence', () => {
         expect(allows(root, join(root, '.plowshare', 'agents', 'x.md'), 'reading')).toBe(false)
     })
 
-    it('lets the harness read the definitions, and nothing else hidden', () => {
+    it('lets the harness read definitions and project metadata, and nothing else hidden', () => {
         expect(allows(root, join(root, '.plowshare', 'bots', 'default'), 'definitions')).toBe(true)
         expect(allows(root, join(root, '.plowshare', 'agents', 'x.md'), 'definitions')).toBe(true)
-        expect(allows(root, join(root, '.plowshare', 'project'), 'definitions')).toBe(false)
+        expect(allows(root, join(root, '.plowshare', 'project'), 'definitions')).toBe(true)
         expect(allows(root, join(root, '.plowshare', 'bots', 'deep', 'x.md'), 'definitions')).toBe(false)
         expect(allows(root, join(root, '.git', 'config'), 'definitions')).toBe(false)
         expect(allows(root, join(root, '.plowshare', 'bots', 'default'), 'writing')).toBe(false)
@@ -103,6 +103,14 @@ describe('the fence', () => {
 })
 
 describe('the six ops', () => {
+    it('keeps the root manifest out of agent mutations while preserving the CLI executable', async () => {
+        const manifest=join(root,'plowshare')
+        expect((await asking('write',{path:'plowshare',content:'{"version":1,"name":"house"}'})).outcome).toBe('refused')
+        await writeFile(manifest,'{"version":1,"name":"house"}')
+        expect((await asking('delete',{path:'plowshare'})).outcome).toBe('refused')
+        await writeFile(manifest,'#!/bin/sh\necho test\n')
+        expect((await asking('write',{path:'plowshare',content:'#!/bin/sh\necho changed\n'})).outcome).toBe('ok')
+    })
     it('names its one root', async () => {
         expect((await asking('roots')).paths).toEqual([root])
     })
@@ -726,6 +734,16 @@ describe.skipIf(process.platform === 'win32')('a run', () => {
         return asking('run', { path: root, inherit: ['PATH'], timeoutMillis: 10_000, outputBytes: 1024, ...more })
     }
 
+    it('takes command consent from the JSON project and ignores a local server section', async () => {
+        const manifest=join(root,'.plowshare/project')
+        await writeFile(manifest,JSON.stringify({version:1,name:'house',commands:{local:{mode:'open'}}}))
+        expect(await running({argv:['true']})).toMatchObject({outcome:'ok',exitCode:0})
+        await writeFile(manifest,JSON.stringify({version:1,name:'house',commands:{local:{mode:'off'},server:{mode:'open'}}}))
+        expect(await running({argv:['true']})).toMatchObject({outcome:'refused'})
+        await writeFile(manifest,JSON.stringify({version:1,name:'house',commands:{local:{mode:'yes'}}}))
+        expect(await running({argv:['true']})).toMatchObject({outcome:'refused'})
+    })
+
     it('runs in the directory named when this machine\'s own file opts in', async () => {
         await environment(OPTED_IN)
 
@@ -845,7 +863,7 @@ describe.skipIf(process.platform === 'win32')('a run', () => {
             .toEqual(['local:', '  mode: open'])
         expect((await asking('read', { path: '.plowshare/environment.yml' })).outcome).toBe('refused')
         expect((await asking('read', { path: '.plowshare/project', purpose: 'definitions' })).outcome)
-            .toBe('refused')
+            .toBe('ok')
         expect((await asking('read', { path: '.git/config', purpose: 'definitions' })).outcome).toBe('refused')
         expect((await asking('write', {
             path: '.plowshare/environment.yml', content: 'local:\n  mode: off\n', purpose: 'definitions',

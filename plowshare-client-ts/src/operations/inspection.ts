@@ -579,15 +579,18 @@ export function flagAt(fields: Record<string, unknown>, name: string): boolean {
 
 
 /**
- * A conversation's load: what its newest measured prompt cost, out of how much
+ * A conversation's load: the newest completed turn's peak prompt, out of how much
  * its model accepts.
  */
 export interface Load {
     /**
-     * The newest measured prompt, by the model's own count. Absent before any
+     * The newest turn's peak measured prompt, by the model's own count. This is
+     * historical, not a count of the next folded projection. Absent before any
      * turn reached a model call — which is not a prompt of nothing.
      */
     readonly sent?: number
+    /** Which completed turn supplied the peak, when the server reported it. */
+    readonly sentAtTurn?: number
 
     /**
      * How long a prompt the agent's model accepts: the ceiling compaction folds
@@ -615,8 +618,10 @@ export function loadOf(answer: Answer): Load | undefined {
     const prefix = fieldsOf(body['prefix'])
     const sent = countAt(body, 'sent')
     const limit = countAt(prefix, 'contextLength')
+    const sentAtTurn = countAt(body, 'sentAtTurn')
     return {
         ...(sent === undefined ? {} : { sent }),
+        ...(sent === undefined || sentAtTurn === undefined ? {} : { sentAtTurn }),
         ...(limit === undefined ? {} : { limit }),
         ...modelIn(prefix),
     }

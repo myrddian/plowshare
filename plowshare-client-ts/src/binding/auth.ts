@@ -132,6 +132,7 @@ export interface Tokens {
 export interface Session {
     readonly tokens: Tokens
     readonly mustChangePassword: boolean
+    readonly setupRequired?: boolean
 }
 
 /** What `GET /v1/auth/session` answers: the two questions a client has on
@@ -339,6 +340,7 @@ export async function signIn(door: Door, handle: string, password: string): Prom
         // absence is made here, once, where the shape stops being JSON.
         tokens: typeof renewal === 'string' ? { access, refresh: renewal } : { access },
         mustChangePassword,
+        ...(answer.headers.get("X-Plowshare-Setup-Required") === "true" ? { setupRequired: true } : {}),
     }
 }
 
@@ -583,6 +585,20 @@ export async function openSocket(door: SocketDoor, tokens: Tokens, rotated?: (to
     return { connection, tokens: renewed }
 }
 
+/** Machine credentials do not refresh or enter the interactive password-change flow. */
+export async function openServiceSocket(door: SocketDoor, credential: string): Promise<Opened> {
+    const socketBase = schemed(door.base)
+    if (!credential.startsWith('pss_') || credential.length <= 4) throw new Error('Supply a Plowshare service credential')
+    const tokens: Tokens = { access: credential }
+    const pass = await ticket(door, tokens)
+    const socket = await door.open(eventsUrl(socketBase, pass, door.session))
+    const connection = connect({socket,
+        ...(door.onPush === undefined ? {} : {onPush: door.onPush}),
+        ...(door.onClose === undefined ? {} : {onClose: door.onClose}),
+    })
+    return {connection,tokens}
+}
+
 /**
  * `ws://…/v1/events?ticket=…` — one of the two URLs in this client that carry a
  * credential. The other is `/v1/files`, built by `filesUrl` below from a ticket
@@ -758,4 +774,14 @@ function stringIn(body: Record<string, unknown>, field: string, path: string): s
         throw new Error(`${path} answered without a "${field}" this client can use`)
     }
     return value
+}
+
+/** Consume a setup-only login. Credentials stay in request bodies and never in URLs. */
+export async function finishSetup(door: Door, access: string, temporaryPassword: string, handle: string, password: string): Promise<void> {
+    const answer = await door.fetch(`${door.base}/v1/auth/setup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${access}` },
+        body: JSON.stringify({ temporaryPassword, handle, password }),
+    })
+    if (answer.status === 400) throw new Error('Choose a handle of 1–64 letters, numbers, dots, underscores or hyphens, and a unique password of at least 12 characters.')
+    if (answer.status !== 204) throw new Error(`Setup did not complete (${answer.status}). Sign in explicitly to check the server before trying again.`)
 }

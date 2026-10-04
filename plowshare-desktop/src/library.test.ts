@@ -8,6 +8,21 @@ import { inspectionConversation } from './shared.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import type { Request as WsRequest } from 'plowshare-client-ts/operations/direct';
 const source=JSON.parse(readFileSync(new URL('../../test-support/contracts/ws-retrieval-fixtures.json',import.meta.url),'utf8')).replies;
+
+test('Help navigation clears project scope and resolves chapters in the reader without eager work', async () => {
+  const f = fixture();
+  await f.client.open('manual', 'repo');
+  assert.equal(f.state.library!.project, null);
+  assert.equal(f.state.library!.manual!.chapter, '00-index');
+  const sequence = f.state.library!.manual!.sequence;
+  await f.client.open('manual', null, undefined, '12-hooks');
+  assert.equal(f.state.library!.manual!.chapter, '12-hooks');
+  assert.ok(f.state.library!.manual!.sequence > sequence);
+  await assert.rejects(f.client.open('manual', null, undefined, '../index'), /valid manual chapter/);
+  assert.equal(f.calls.length, 0);
+  await f.client.open('sources');
+  assert.equal(f.state.library!.manual, undefined);
+});
 function fixture(){const replies=structuredClone(source);replies['proposal.list'][0]={...replies['proposal.list'][0],project:null,state:'pending',resolvedAt:null,resolvedBy:null,resolution:null};replies['proposal.resolve'].proposal={...replies['proposal.list'][0],state:'accepted',resolvedAt:'2026-10-02T10:00:00Z',resolvedBy:'fixture',resolution:'accepted'};
  const state=demoState();state.mode='live';state.connected=true;state.handle='fixture';state.projects=[{name:'repo'}];const calls:WsRequest[]=[];let reply:(ask:WsRequest)=>Outcome|Promise<Outcome>=ask=>{const payload=structuredClone(replies[ask.type]);if(payload&&'query' in payload)payload.query=(ask.payload as any).query;if(payload&&'question' in payload)payload.question=(ask.payload as any).question;return {code:'OK',payload};};const client=new LibraryClient(()=>state,async ask=>{calls.push(ask);return reply(ask);},()=>{});return {state,client,calls,replies,setReply:(fn:typeof reply)=>{reply=fn;}};}
 test('document semantic search uses the server vector mode while conversation search stays semantic',async()=>{const f=fixture();await f.client.search('documents','question','semantic');assert.equal((f.calls.at(-1)!.payload as any).mode,'vector');assert.equal(f.state.library!.search.value!.mode,'semantic');await f.client.search('conversation','question','semantic');assert.equal((f.calls.at(-1)!.payload as any).mode,'semantic');});
@@ -29,3 +44,39 @@ test('a replacement semantic snapshot and foreign citations cannot replace displ
 test('memory invalidation ignores use counts changed by its own preflight read',async()=>{const f=fixture();await f.client.open('memories');await f.client.memory('memory_fixture');const m=f.state.library!.memory.value!;f.setReply(a=>({code:'OK',payload:a.type==='memory.read'?{...m,uses:m.uses+1,lastUsed:'2026-10-02T11:00:00Z'}:f.replies[a.type]}));await f.client.maintain('invalidate',memoryIdentity(m),'obsolete');assert.equal(f.calls.filter(a=>a.type==='memory.invalidate').length,1);assert.match(f.state.library!.notice!,/confirmed/);});
 
 test('unsettled successful mutation replies remain uncertain and are not replayed',async()=>{const f=fixture();await f.client.open('memories');await f.client.memory('memory_fixture');f.setReply(a=>({code:'OK',payload:a.type==='memory.invalidate'?f.replies['memory.read']:f.replies[a.type]}));await assert.rejects(f.client.maintain('invalidate',memoryIdentity(f.state.library!.memory.value!),'obsolete'),/not confirmed/);assert.equal(f.calls.filter(a=>a.type==='memory.invalidate').length,1);assert.match(f.state.library!.error!,/not be replayed/);assert.equal(f.state.library!.notice,undefined);});
+
+test('document reader pages saved text and rejects foreign or malformed text ranges',async()=>{
+ const f=fixture();await f.client.documents('');const id=f.replies['document.list'].documents[0].documentId;
+ const original='A'.repeat(8192)+'Second page';
+ f.setReply(ask=>{if(ask.type!=='information.read')return {code:'OK',payload:f.replies[ask.type]};const offset=(ask.payload as any).offset;const value=original.slice(offset,offset+8192);return {code:'OK',payload:{revision:id,start:offset,end:offset+value.length,total:original.length,text:value}};});
+ await f.client.document(id);assert.equal(f.state.library!.reader!.value!.text.length,8192);
+ assert.deepEqual((f.calls.at(-1)!.payload as any).scope,{kind:'personal',includeShared:true});
+ await f.client.sourceText(id,8192);assert.equal(f.state.library!.reader!.value!.text,'Second page');
+ const previous=structuredClone(f.state.library!.reader!.value);
+ f.setReply(()=>({code:'OK',payload:{...previous,revision:'bbbbbbbb-0000-0000-0000-000000000002'}}));await f.client.sourceText(id,0);
+ assert.deepEqual(f.state.library!.reader!.value,previous);assert.match(f.state.library!.reader!.error!,/different source|incomplete/);
+ f.setReply(()=>({code:'OK',payload:{...previous,start:0,end:100}}));await f.client.sourceText(id,0);
+ assert.deepEqual(f.state.library!.reader!.value,previous);assert.match(f.state.library!.reader!.error!,/invalid text range|incomplete/);
+ await assert.rejects(f.client.sourceText('foreign',0),/displayed document/);
+ await assert.rejects(f.client.sourceText(id,500),/next or previous/);
+});
+
+test('document reader discards delayed text after connection reset',async()=>{
+ const f=fixture();await f.client.documents('');const id=f.replies['document.list'].documents[0].documentId;
+ let finish!:(reply:Outcome)=>void;
+ f.setReply(ask=>ask.type==='information.read'?new Promise(resolve=>{finish=resolve;}):{code:'OK',payload:f.replies[ask.type]});
+ const reading=f.client.document(id);await new Promise(resolve=>setImmediate(resolve));f.client.reset();
+ finish({code:'OK',payload:{revision:id,start:0,end:4,total:4,text:'Late'}});await reading;
+ assert.equal(f.state.library!.reader!.value,undefined);assert.equal(f.state.library!.reader!.loading,false);
+});
+
+
+test('retained report handoff keeps project scope and can reopen the same revision',async()=>{
+ const f=fixture(),id='00000000-0000-0000-0000-000000000099';
+ await f.client.open('sources',null,id);assert.equal(f.state.library!.report!.revision,id);
+ const sequence=f.state.library!.report!.sequence;
+ await f.client.open('sources',null,id);assert.ok(f.state.library!.report!.sequence>sequence);
+ await assert.rejects(f.client.open('sources',null,'foreign'),/retained report/);
+ assert.equal(f.state.library!.report!.revision,id);
+ await f.client.open('sources');assert.equal(f.state.library!.report,undefined);
+});

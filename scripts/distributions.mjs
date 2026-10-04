@@ -94,12 +94,13 @@ if (kind === 'clients') {
   const application = join(stage, 'desktop-app');
   await mkdir(join(application, 'build'), { recursive: true });
   // Explicit allowlist: never copy profiles, config, credentials or dependency caches.
-  for (const path of ['main.cjs', 'preload.cjs', 'renderer']) await cp(join(root, 'plowshare-desktop/build', path), join(application, 'build', path), { recursive: true });
+  for (const path of ['main.cjs', 'preload.cjs', 'renderer', 'icons']) await cp(join(root, 'plowshare-desktop/build', path), join(application, 'build', path), { recursive: true });
   await json(join(application, 'package.json'), { name: 'plowshare-desktop', productName: 'Plowshare', version, main: 'build/main.cjs', description: 'Plowshare remote agent workspace' });
   await writeFile(join(application, 'THIRD-PARTY-NOTICES.txt'), notices);
   const electronVersion = JSON.parse(await readFile(join(root, 'plowshare-desktop/package.json'), 'utf8')).devDependencies.electron;
   const { packager } = requireDesktop('@electron/packager');
   const [packaged] = await packager({ dir: application, out: join(stage, 'native'), name: 'Plowshare', appBundleId: 'io.aeyer.plowshare', platform: 'darwin', arch: 'arm64', electronVersion, asar: true, prune: false, overwrite: true,
+    icon: join(root, 'plowshare-desktop/assets/icons/plowshare.icns'),
     osxSign: { identity: '-', identityValidation: false, timestamp: 'none', preAutoEntitlements: false, preEmbedProvisioningProfile: false,
       optionsForFile: () => ({ entitlements: join(root, 'scripts/distribution-entitlements.plist'), hardenedRuntime: true }) } });
   const desktop = join(stage, `plowshare-desktop-${version}-darwin-arm64`);

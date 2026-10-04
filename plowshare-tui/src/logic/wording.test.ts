@@ -96,22 +96,22 @@ describe('the status line', () => {
 
     it('shows the load as used over window and a percentage', () => {
         expect(describeStanding({ ...at, sent: 16_234, limit: 120_000 })).toEqual({
-            triplet: 'coder:127.0.0.1:8080', load: '16.2K/120K 14%', filled: 16_234 / 120_000,
+            triplet: 'coder:127.0.0.1:8080', load: 'peak 16.2K/120K 14%', filled: 16_234 / 120_000,
         })
-        expect(describeStanding({ ...at, sent: 950, limit: 64_000 }).load).toBe('950/64K 1%')
+        expect(describeStanding({ ...at, sent: 950, limit: 64_000 }).load).toBe('peak 950/64K 1%')
         expect(describeStanding({ ...at, sent: 1_234_567, limit: 2_000_000 }).load)
-            .toBe('1.2M/2M 62%')
+            .toBe('peak 1.2M/2M 62%')
     })
 
     it('says a dash before anything is measured, never a zero', () => {
         expect(describeStanding({ ...at, limit: 120_000 }).load).toBe('—/120K')
         expect(describeStanding({ ...at, limit: 120_000 }).filled).toBe(0)
-        expect(describeStanding({ ...at, sent: 40, limit: 120_000 }).load).toBe('40/120K 1%')
+        expect(describeStanding({ ...at, sent: 40, limit: 120_000 }).load).toBe('peak 40/120K 1%')
     })
 
     it('shows what was sent alone when the window is unknown', () => {
         expect(describeStanding({ ...at, sent: 16_234 })).toEqual({
-            triplet: 'coder:127.0.0.1:8080', load: '16.2K',
+            triplet: 'coder:127.0.0.1:8080', load: 'peak 16.2K',
         })
     })
 
@@ -120,7 +120,7 @@ describe('the status line', () => {
         expect(describeStanding({ ...at, sent: 70_000, limit: 100_000 }).pressure).toBe('filling')
         expect(describeStanding({ ...at, sent: 90_000, limit: 100_000 }).pressure).toBe('full')
         expect(describeStanding({ ...at, sent: 130_000, limit: 100_000 }).load)
-            .toBe('130K/100K 130%')
+            .toBe('peak 130K/100K 130%')
     })
 })
 
@@ -328,7 +328,7 @@ describe('the orchestration listings', () => {
     })
 
     it('names the global tier when there is no project, and says when there are none', () => {
-        expect(describeOrchestrations([], undefined)[0]).toContain('the global tier')
+        expect(describeOrchestrations([], undefined)[0]).toContain('global resources')
         expect(describeOrchestrations([], 'plowshare')[0]).toContain('no orchestrations')
     })
 

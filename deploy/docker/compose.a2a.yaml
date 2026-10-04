@@ -1,0 +1,43 @@
+# Add one general-purpose receiving agent to an existing Plowshare deployment.
+name: plowshare
+services:
+  server:
+    volumes:
+      - ${PLOWSHARE_A2A_WORKSPACE_HOST:-${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/workspaces/a2a}:/workspaces/a2a
+  a2a-receiver:
+    image: ${PLOWSHARE_A2A_IMAGE:-plowshare/a2a:${PLOWSHARE_VERSION:-0.1.0}}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/a2a.Dockerfile
+      args:
+        SOURCE_REVISION: ${PLOWSHARE_SOURCE_REVISION:-unknown}
+    environment:
+      PLOWSHARE_HANDLE: ${PLOWSHARE_A2A_HANDLE:?Set the existing account handle for A2A.}
+      PLOWSHARE_PASSWORD_FILE: /run/secrets/a2a-account-password
+      A2A_CALLER_TOKEN_FILE: /run/secrets/a2a-caller-token
+      PLOWSHARE_A2A_PORT: "8093"
+    secrets:
+      - a2a-account-password
+      - a2a-caller-token
+    volumes:
+      - ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/config/a2a.json:/etc/plowshare/a2a.json:ro
+    ports:
+      - ${PLOWSHARE_A2A_LISTEN_ADDRESS:-127.0.0.1}:${PLOWSHARE_A2A_PUBLISHED_PORT:-8093}:8093
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 768m
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+secrets:
+  a2a-account-password:
+    file: ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/secrets/a2a-account-password
+  a2a-caller-token:
+    file: ${PLOWSHARE_STATE_ROOT:-/srv/plowshare}/secrets/a2a-caller-token

@@ -408,7 +408,16 @@ export function createProjects(options: ProjectsOptions): Screen {
             body.replaceChildren(nothing(NO_PROJECTS))
             return
         }
-        body.replaceChildren(...projects.map(draw))
+        const personal = projects.filter(project => project.kind === 'personal');
+        const ordinary = projects.filter(project => project.kind !== 'personal');
+        const personalRows = personal.map(() => {
+            const element = document.createElement('section');
+            element.className = 'project';
+            const title = document.createElement('h2'); title.textContent = 'Personal';
+            const note = document.createElement('p'); note.textContent = 'Your account space: In, Out, Resources, Archive, Planning and Bots. Mounted at ~/.plowshare/personal by the desktop or TUI.';
+            element.append(title, note); return element;
+        });
+        body.replaceChildren(...personalRows, ...ordinary.map(draw))
     }
 
     return {

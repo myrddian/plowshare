@@ -1,5 +1,4 @@
 import { _electron as electron, expect } from 'playwright/test';
-import executablePath from 'electron';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,7 +12,13 @@ delete env.ELECTRON_RUN_AS_NODE;
 const fixture = await protocolFixture();
 let app;
 try {
-  app = await electron.launch({ executablePath, args: [resolve('.')], env });
+  const packaged = process.env.PLOWSHARE_PACKAGED_EXECUTABLE;
+  const executablePath = packaged ?? (await import('electron')).default;
+  app = await electron.launch({ executablePath, args: packaged ? [] : [resolve('.')], env });
+  if (packaged) {
+    assert.equal(await app.evaluate(({ app }) => app.getName()), 'Plowshare');
+    assert.equal(await app.evaluate(() => process.execPath), packaged);
+  }
   const page = await app.firstWindow();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // Capture only fixture writes; never read or replace the user's clipboard.
@@ -24,6 +29,14 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await expect(page.locator('#chat-title')).toHaveText('The peaceful atom');
+  await expect(page.locator('.brand .app-icon')).toBeVisible();
+  await expect(page.locator('.brand strong')).toHaveText('Plowshare');
+  await expect(page.locator('.titlebar .breadcrumb')).toBeVisible();
+  for (const id of ['navigation-open', 'refresh', 'inspector-toggle', 'connection-button']) await expect(page.locator(`.titlebar #${id}`)).toBeVisible();
+  await expect(page.locator('.workspace-top, .workspace-footer')).toHaveCount(0);
+  await page.waitForFunction(() => document.querySelector('.app-icon')?.naturalWidth > 0);
+  await expect(page.locator('.titlebar-name')).toHaveCount(0);
+  await expect(page.locator('.message.answer .message-label').first()).toContainText('Assistant');
   await expect(page.locator('#run-indicator')).toBeHidden();
   await expect(page.locator('#run-pace')).toBeHidden();
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
@@ -33,7 +46,7 @@ try {
   await expect(page.locator('.markdown-body h3')).toHaveText('Three reading threads');
   await expect(page.locator('.markdown-body table')).toHaveCount(1);
   await expect(page.locator('.markdown-body pre code')).toContainText('Proposal → Experiment → Evidence');
-  await expect(page.locator('#context-label')).toContainText('Sample · 15.2k / 131.1k · 11%');
+  await expect(page.locator('#context-label')).toContainText('Sample · Last turn peak · 15.2k / 131.1k · 11%');
   const code = page.locator('.markdown-code').first();
   const codeText = await code.locator('pre code').textContent();
   await code.hover();
@@ -123,6 +136,7 @@ try {
   await assert.rejects(trajectory.evaluate(() => window.plowshare.request({ action: 'history', conversation: 'demo-desktop' })), /only read their own conversation/);
   assert.equal(await trajectory.evaluate(() => typeof window.require), 'undefined');
   await trajectory.screenshot({ path: 'build/smoke/trajectory.png' });
+  await page.locator('#title-caption').click();
   await page.locator('#trajectory-open').click();
   assert.equal((await app.windows()).length, 2, 'Opening again reuses the same trajectory window.');
   await trajectory.locator('#trajectory-search').fill('document_search');
@@ -136,6 +150,7 @@ try {
   await trajectory.locator('#trajectory-follow').click();
   await expect(trajectory.locator('#trajectory-detail-heading')).toContainText('Assistant');
 
+  await page.locator('#title-caption').click();
   const shortDraftHeight = await page.locator('#draft').evaluate(node => node.getBoundingClientRect().height);
   await page.locator('#draft').fill('A long draft line\n'.repeat(50));
   const longDraftHeight = await page.locator('#draft').evaluate(node => node.getBoundingClientRect().height);
@@ -181,11 +196,13 @@ try {
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-dialog')).not.toBeVisible();
   await expect(page.locator('#connection-label')).toHaveText('Connected');
-  await page.locator('#information-button').click();
-  const library=page.locator('.information-dialog');
-  await expect(library).toBeVisible();
+  const sourceOpening=app.waitForEvent('window');await page.locator('#library-open').click();
+  const sourcePage=await sourceOpening;sourcePage.on('pageerror',error=>errors.push(error.message));
+  await sourcePage.locator('#library-documents').click();await sourcePage.locator('#document-sources > summary').click();
+  const library=sourcePage.locator('#document-source-panel');
+  await expect(library).toBeVisible();await library.locator('[data-add-open]').click();await expect(library.locator('[data-add-dialog]')).toBeVisible();await expect(library.locator('[data-add] [name="name"]')).toBeFocused();await library.locator('[data-add-close]').click();await expect(library.locator('[data-add-dialog]')).not.toBeVisible();
   await library.locator('.information-row').click();
-  await expect(library.locator('[data-passage]')).toContainText('A retained claim.');
+  await expect(library.locator('[data-passage]')).toContainText('A retained claim.');await sourcePage.screenshot({path:'build/smoke/library-sources.png'});
   assert.equal(await library.locator('img').count(),0,'Retained source HTML is displayed as text.');
   await library.locator('[data-passage]').evaluate(node=>{node.focus();node.setSelectionRange(0,16);});
   await library.locator('[data-record-evidence]').click();
@@ -194,27 +211,28 @@ try {
   assert.equal(evidenceFrame.payload.start,0);assert.equal(evidenceFrame.payload.end,16);
   assert.equal(evidenceFrame.payload.quote,'A retained claim');assert.ok(evidenceFrame.payload.requestId);
   await library.locator('[data-ask] input').fill('What does it establish?');
-  await library.locator('[data-ask] button').click();
-  await expect(library.locator('[data-answer]')).toContainText('Grounded answer from retained evidence.',{timeout:12000});
-  await page.screenshot({path:'build/smoke/information-library.png'});
-  await library.getByText('Manage this revision',{exact:true}).click();
+  await library.locator('[data-refresh]').click();await expect(library.locator('[data-ask] input')).toHaveValue('What does it establish?');
+  await library.locator('[data-ask] input').press('Enter');await library.locator('[data-ask]').dispatchEvent('submit');
+  await expect(library.locator('[data-answer]')).toContainText('Grounded answer from retained evidence.',{timeout:12000});assert.equal(fixture.frames.filter(frame=>frame.type==='information.ask').length,1);await expect(library.locator('[data-ask] input')).toHaveValue('What does it establish?');
+  await sourcePage.screenshot({path:'build/smoke/information-library.png'});
+  await library.getByText('Manage source',{exact:true}).click();
   await library.locator('[data-control="share"]').click();
   await expect(library.locator('[data-error]')).toContainText('A source was withdrawn.');
   await library.locator('[data-scope]').selectOption('shared');
-  await expect(library.locator('[data-list]')).toContainText('No information');
+  await expect(library.locator('[data-list]')).toContainText('No sources');
   await expect(library.locator('[data-detail]')).not.toContainText('Grounded answer');
-  await library.locator('[data-close]').click();
+  await sourcePage.close();
   await expect(page.locator('#chat-title')).toHaveText('Fixture conversation');
   await expect(page.locator('#transcript')).toContainText('Loaded through the real TypeScript WebSocket binding.');
-  await expect(page.locator('#context-label')).toHaveText('15.2k / 131.1k · 11%');
+  await expect(page.locator('#context-label')).toHaveText('Last turn peak · 15.2k / 131.1k · 11%');
   await expect(page.locator('#inbox-count')).toHaveText('25');
   await expect(page.locator('#runs-count')).toHaveText('1');
   assert.equal(fixture.frames.some(frame => frame.type === 'inbox.read'), false, 'Startup count reads cannot mark unseen deliveries.');
   const activityWindow = app.waitForEvent('window');
   await page.locator('#inbox-open').click();
-  const activityPage = await activityWindow;
+  let activityPage = await activityWindow; const inboxPage=activityPage;
   activityPage.on('pageerror', error => errors.push(error.message));
-  await expect(activityPage.locator('#activity-title')).toHaveText('Inbox');
+  await expect(activityPage.locator('#activity-title')).toHaveText('Mailbox');
   await expect(activityPage.locator('#inbox-filter')).toHaveValue('unread');
   await expect(activityPage.locator('#inbox-type')).toHaveValue('');
   await activityPage.locator('#inbox-type').selectOption('run');
@@ -299,7 +317,7 @@ try {
   fixture.addInboxNotice();
   await expect(page.locator('#inbox-count')).toHaveText('25');
   await expect(activityPage.locator('#activity-list')).toContainText('An inbox notice from another session.');
-  await page.locator('#runs-open').click();
+  const runOpening=app.waitForEvent('window');await page.locator('#runs-open').click();activityPage=await runOpening;activityPage.on('pageerror',error=>errors.push(error.message));
   await expect(activityPage.locator('#activity-title')).toHaveText('Runs');
   await expect(activityPage.locator('#inbox-filter-control')).toBeHidden();
   await expect(activityPage.locator('[data-item="fixture-old-root"]')).toBeVisible();
@@ -312,7 +330,7 @@ try {
   await activityPage.locator('[data-run="fixture-child-1"]').click();
   await expect(activityPage.locator('#activity-detail')).toContainText('A completed child result.');
   await activityPage.locator('[data-run="fixture-old-root"]').click();
-  await expect(activityPage.locator('#activity-detail')).toContainText('Continue the research?');
+  await expect(activityPage.locator('#activity-detail')).toContainText('Which sources should we read next?');
   fixture.changeRun('fixture-old-root', 'running');
   await expect(activityPage.locator('#activity-detail>header')).toContainText('running');
   fixture.setRefuseRuns(true);
@@ -322,10 +340,11 @@ try {
   fixture.setRefuseRuns(false);
   await activityPage.locator('#activity-refresh').click();
   await expect(activityPage.locator('#activity-error')).toBeHidden();
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(view => view.webContents.getURL().endsWith('/activity.html')).setSize(900, 700));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 700));
   assert.equal(await activityPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await activityPage.screenshot({ path: 'build/smoke/activity-compact.png' });
-  await activityPage.close();
+  await activityPage.close();await inboxPage.close();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
   assert.equal(fixture.frames.some(frame => frame.type === 'orchestration.cancel'), false);
   await expect.poll(() => fixture.frames.filter(frame => frame.type === 'conversation.follow').at(-1)?.payload.conversations).toEqual(['fixture-first']);
   const subscribedWindow = app.waitForEvent('window');
@@ -365,13 +384,13 @@ try {
   await expect(page.locator('#context-meter')).toBeHidden();
   fixture.setContext({ sent: 124000, prefix: { model: 'fixture-model', contextLength: 131072 } });
   await page.locator('#refresh').click();
-  await expect(page.locator('#conversation-alerts')).toContainText('Context near limit');
-  await expect(page.locator('#context-label')).toHaveText('124k / 131.1k · 94%');
+  await expect(page.locator('#conversation-alerts')).toContainText('Last turn approached limit');
+  await expect(page.locator('#context-label')).toHaveText('Last turn peak · 124k / 131.1k · 94%');
   assert.equal(await page.locator('[data-context-details="identity"]').evaluate(node => node.open), true, 'Context refreshes preserve open details.');
   await page.screenshot({ path: 'build/smoke/context-alert.png' });
   fixture.setContext({ sent: 15240, prefix: { model: 'fixture-model', contextLength: 131072 } });
   await page.locator('#refresh').click();
-  await expect(page.locator('#conversation-alerts')).not.toContainText('Context near limit');
+  await expect(page.locator('#conversation-alerts')).not.toContainText('Last turn approached limit');
 
   assert.equal(await page.locator('#transcript img').count(), 0, 'Model output must not become executable markup.');
   assert.equal(await page.evaluate(() => window.fixtureInjection), undefined);
@@ -399,6 +418,7 @@ try {
   const completedTrajectory = await completedTrajectoryOpened;
   await expect(completedTrajectory.locator('#trajectory-run')).toBeVisible();
   await expect(completedTrajectory.locator('#trajectory-detail-heading')).toContainText('Live response');
+  await page.locator('#title-caption').click();
   fixture.completeLatest(orchestrationAnswer, { toolCalls: 0, reasoningTokens: 20, reasoningEstimated: true,
     completionTokens: 72, firstTokenMillis: 431, tokensPerSecond: 34.4 });
   await expect(page.locator('#composer-status')).toHaveText('Ready');
@@ -417,7 +437,7 @@ try {
   await expect(page.locator('#run-pace .pace-stat')).toHaveCount(5);
   await page.screenshot({ path: 'build/smoke/answered.png' });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 700));
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Pace statistics must fit compact windows.');
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), { message: 'Pace statistics must fit compact windows after the native resize settles.' }).toBe(true);
   assert.equal(await page.locator('#composer').evaluate(node => node.getBoundingClientRect().bottom <= window.innerHeight), true);
   await page.screenshot({ path: 'build/smoke/pace-compact.png' });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
@@ -541,7 +561,7 @@ try {
   await page.locator('#inbox-open').click();
   const reconnectActivity = await reconnectActivityWindow;
   reconnectActivity.on('pageerror', error => errors.push(error.message));
-  await expect(reconnectActivity.locator('#activity-title')).toHaveText('Inbox');
+  await expect(reconnectActivity.locator('#activity-title')).toHaveText('Mailbox');
   fixture.disconnect();
   await expect(page.locator('#connection-label')).toContainText('Connection lost');
   await expect(reconnectActivity.locator('#activity-error')).toContainText('Reconnect');
@@ -566,6 +586,7 @@ try {
   await expect(page.locator('#inbox-count')).toHaveText('26');
   await expect.poll(() => fixture.frames.filter(frame => frame.type === 'conversation.follow').at(-1)?.payload.conversations).toContain('fixture-first');
   await expect(liveTrajectory.locator('#trajectory-rows')).toContainText('A result delivered while disconnected.');
+  await page.locator('#conversations [data-conversation="fixture-first"]').click();
   fixture.completeJob(jobId);
   await expect(page.locator('#transcript')).toContainText('A result delivered while disconnected.');
   const longAnswer = '# Practical steps\n\n' + 'Long explanation.\n'.repeat(6000)
@@ -593,14 +614,16 @@ try {
   await expect.poll(() => reconnectActivity.isClosed()).toBe(true);
   await page.locator('[data-project="Research"]').click();
   await page.locator('#conversations [data-conversation="demo-research"]').click();
-  await page.locator('#tab-context').click();
+  await expect(page.locator('#tab-context, #tab-memory, #tab-usage')).toHaveCount(0);
   await page.locator('.markdown-body table').scrollIntoViewIfNeeded();
   await page.screenshot({ path: 'build/smoke/desktop.png' });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 700));
   await expect(page.locator('#chat')).toBeVisible();
   assert.equal(await page.locator('#composer').evaluate(node => node.getBoundingClientRect().bottom <= window.innerHeight), true, 'Composer must fit inside the native window.');
   assert.equal(await page.locator('.chat-header').evaluate(node => node.getBoundingClientRect().height >= 60), true, 'The title and controls must not collapse in a compact window.');
-  assert.equal(await page.locator('.workspace-footer').evaluate(node => node.getBoundingClientRect().bottom <= window.innerHeight), true, 'Footer must fit inside the native window.');
+  for (const id of ['navigation-open', 'refresh', 'inspector-toggle', 'connection-button']) {
+    assert.equal(await page.locator(`#${id}`).evaluate(node => { const bounds = node.getBoundingClientRect(); return bounds.top >= 0 && bounds.bottom <= 52 && bounds.right <= innerWidth; }), true, 'Window controls must fit the titlebar in compact windows.');
+  }
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.locator('#transcript').evaluate(node => { node.scrollTop = 0; });
   await expect(page.locator('#jump-latest')).toBeVisible();
@@ -636,7 +659,7 @@ try {
   await page.screenshot({ path: 'build/smoke/focus.png' });
   await page.keyboard.press('Control+k');
   await page.screenshot({ path: 'build/smoke/navigator.png' });
-  console.log('Electron smoke passed: isolated renderers, Markdown/context, native trajectory and account Activity windows, clean recorded-step timelines, separate live progress, collapsed copyable job diagnostics, completion follow and stopped outcomes, inbox badges/explicit receipts/refusals/read history/older pages/status and type filters, old active roots, child navigation, structured question inspection, guarded activity permissions, multi-view subscriptions, ordinal catch-up, later results, reconnect without replay, responsive layout, draft/navigation/copy controls, phase animation, canonical completion and scoped run pace and scoped information library/evidence/answers/refusals.');
+  console.log('Electron smoke passed: isolated renderers, Markdown/context, embedded trajectory and account Activity pages, clean recorded-step timelines, separate live progress, collapsed copyable job diagnostics, completion follow and stopped outcomes, inbox badges/explicit receipts/refusals/read history/older pages/status and type filters, old active roots, child navigation, structured question inspection, guarded activity permissions, multi-view subscriptions, ordinal catch-up, later results, reconnect without replay, responsive layout, draft/navigation/copy controls, phase animation, canonical completion and scoped run pace and scoped information library/evidence/answers/refusals.');
   console.log('Screenshots: build/smoke/{desktop,trajectory,compact,context-alert,context-drawer,empty,focus,navigator,copy-controls,thinking,answered,pace-compact,subscription-warning,inbox,inbox-read-history,inbox-filter,inbox-type-filter,runs,activity-compact}.png');
 } finally {
   await app?.close(); await fixture.close(); await rm(profile, { recursive: true, force: true });

@@ -3,13 +3,15 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Board &amp; Swarm · Plowshare</title>
+  <title>Board &amp; Swarm</title>
   <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="desktop.css"><link rel="stylesheet" href="board.css"><script src="board.js" defer></script>
 </head>
-<body class="board-window">
-  <header class="titlebar"><div class="window-space"></div><span class="titlebar-name">PLOWSHARE</span><span class="board-window-name">Board &amp; Swarm</span><span id="board-connection"></span></header>
+<body class="board-window embedded-view">
+  <header class="titlebar"><div class="window-space"></div><span class="board-window-name">Board &amp; Swarm</span><span id="board-connection"></span></header>
   <main class="board-workspace">
-    <header class="board-toolbar"><div><h1><span data-icon="layers"></span><span id="board-title">Project board</span></h1><p id="board-description">Inspect the conversation behind the work</p></div><div class="board-controls"><div role="tablist" aria-label="Board inspection"><button id="view-board" role="tab" aria-controls="board-panel" aria-selected="true">Board</button><button id="view-swarm" role="tab" aria-controls="board-panel" aria-selected="false">Swarm</button></div><button id="board-refresh"><span data-icon="refresh"></span>Refresh</button></div></header>
+    <header class="board-toolbar"><div><h1><span id="board-title-icon" data-icon="layers"></span><span id="board-title">Project board</span></h1><p id="board-description">Inspect the conversation behind the work</p></div><div class="board-controls"><div id="board-tabs" role="tablist" aria-label="Board inspection" hidden><button id="view-board" role="tab" aria-controls="board-panel" aria-selected="true">Board</button><button id="view-swarm" role="tab" aria-controls="board-panel" aria-selected="false">Swarm</button></div><button id="board-refresh"><span data-icon="refresh"></span>Refresh</button></div></header>
+    <div id="board-actions" class="board-actions" hidden><button id="board-create-open" class="secondary-button">New topic</button><button id="board-post-open" class="primary-button board-post-open">Post to board</button></div>
+    <button id="board-retry-pending" class="secondary-button" hidden>Check pending member retry…</button>
     <div id="board-error" class="error-banner" role="alert" hidden></div>
     <div id="swarm-summary" class="swarm-summary" hidden></div>
     <div id="board-panel" class="board-columns" role="tabpanel" aria-labelledby="view-board">
@@ -19,7 +21,35 @@
       </section>
       <section id="board-detail" class="board-detail" tabindex="0" aria-label="Topic inspection"></section>
     </div>
-    <footer class="board-footer"><span id="board-updated">Loading…</span><span>Inspection only · agent read positions stay unchanged</span></footer>
+    <footer class="board-footer"><span id="board-updated">Loading…</span><span>Agent read positions stay unchanged</span></footer>
   </main>
+  <dialog id="board-post-dialog" aria-labelledby="board-post-title"><form id="board-post-form">
+    <header class="dialog-header"><h2 id="board-post-title">Post to board</h2><button id="board-post-close" type="button">Close</button></header>
+    <p>Your message is posted as you, to the selected project topic.</p>
+    <label>Project<select id="post-project" required></select></label>
+    <label>Topic<select id="post-topic" required></select></label><button id="post-topics-more" type="button" hidden>Load more topics</button>
+    <label>Message<textarea id="post-body" maxlength="16000" rows="6" required></textarea></label>
+    <p id="post-error" role="alert" hidden></p><p id="post-notice" role="status"></p>
+    <button id="post-submit" class="primary-button" type="submit">Post message</button>
+  </form></dialog>
+  <dialog id="board-create-dialog" aria-labelledby="board-create-title"><form id="board-create-form">
+    <header class="dialog-header"><h2 id="board-create-title">New topic</h2><button id="board-create-close" type="button">Close</button></header>
+    <p>Open a topic as yourself. The project’s configured swarm receives your opening message and starts work within its model call limit.</p>
+    <label>Project<select id="create-project" required></select></label>
+    <label>Title<input id="create-title" maxlength="120" required placeholder="What should the swarm work on?"></label>
+    <label>Label<input id="create-label" maxlength="60" required value="Discussion"></label>
+    <label>Opening message<textarea id="create-body" maxlength="16000" rows="5" required></textarea></label>
+    <label>Model call limit (optional)<input id="create-budget" type="number" min="2" max="2147483647" step="1" placeholder="Use the project’s configured limit"></label>
+    <p id="create-error" role="alert" hidden></p><p id="create-notice" role="status"></p>
+    <button id="create-submit" class="primary-button" type="submit">Create topic</button>
+  </form></dialog>
+  <dialog id="board-retry-dialog" aria-labelledby="board-retry-title"><form id="board-retry-form">
+    <header class="dialog-header"><h2 id="board-retry-title">Retry swarm member</h2><button id="board-retry-close" type="button">Close</button></header>
+    <p id="retry-description"></p>
+    <label>Step limit for this retry<input id="retry-limit" type="number" min="1" max="2147483647" step="1" value="24" required></label>
+    <p>A step is one model response and any tool calls it requests. The topic’s remaining model call allowance may stop work earlier.</p>
+    <p id="retry-error" role="alert" hidden></p><p id="retry-notice" role="status"></p>
+    <button id="retry-submit" class="primary-button" type="submit">Retry member</button>
+  </form></dialog>
 </body>
 </html>

@@ -96,6 +96,9 @@ describe('complete administrative WS replies', () => {
             ['ApprovalView', 'server/ws/ApprovalFrames', 'View', ['scope','prefix','answeredAt','commands','judged']],
             ['ApprovalListed', 'server/ws/ApprovalFrames', 'Listed', [], { View: 'ApprovalView' }],
             ['ApprovalAnswered', 'server/ws/ApprovalFrames', 'Answered', ['job','note']], ['ApprovalRevoked', 'server/ws/ApprovalFrames', 'Revoked', []],
+            ['BoardRetried', 'server/ws/BoardPostingFrames', 'RetryReceipt', []],
+            ['BoardPosted', 'server/ws/BoardPostingFrames', 'Receipt', []],
+            ['BoardOpened', 'server/ws/BoardPostingFrames', 'OpenReceipt', []],
             ['BoardTopic', 'server/board/BoardTopic', 'BoardTopic', ['parent','originConversation','resolution','potTotal','potSpent','reserve','quietNotifiedAt','closedAt']],
             ['BufferPurgeReport', 'server/buffers/Buffers', 'BufferPurgeReport', []], ['SweepReport', 'server/archive/Retention', 'SweepReport', []],
             ['ProviderFacts', 'protocol/search/ProviderFacts', 'ProviderFacts', ['description'], { Verb: 'string', CostClass: 'string', NetworkTier: 'string' }],
@@ -108,7 +111,7 @@ describe('complete administrative WS replies', () => {
             ['ChildView', 'server/ws/OrchestrationFrames', 'ChildView', []], ['MessageView', 'server/ws/OrchestrationFrames', 'MessageView', ['deliveredAt','capKind'], { JsonNode: 'JsonValue' }],
             ['Definitions', 'server/ws/OrchestrationFrames', 'Definitions', []], ['OrchestrationListed', 'server/ws/OrchestrationFrames', 'Listed', []],
             ['OrchestrationStatus', 'server/ws/OrchestrationFrames', 'Status', []], ['OrchestrationAnswered', 'server/ws/OrchestrationFrames', 'Answered', []], ['OrchestrationCancelled', 'server/ws/OrchestrationFrames', 'Cancelled', []],
-            ['SettingView', 'server/ws/CapsFrames', 'SettingView', ['value']], ['CapsView', 'server/ws/CapsFrames', 'CapsView', ['said']],
+            ['SettingView', 'server/ws/CapsFrames', 'SettingView', ['value']], ['BooleanSettingView', 'server/ws/CapsFrames', 'BooleanSettingView', ['value']], ['CapsView', 'server/ws/CapsFrames', 'CapsView', ['said']],
             ['ScheduleRecord', 'server/events/ScheduleRecord', 'ScheduleRecord', []], ['ScheduleNames', 'server/events/ScheduleProposal', 'Names', []],
             ['ScheduleProposal', 'server/events/ScheduleProposal', 'ScheduleProposal', ['project','conversation'], { Names: 'ScheduleNames' }],
             ['TriggerRecord', 'server/events/TriggerRecord', 'TriggerRecord', ['project','conversation','maxModelCalls','maxTurns']],
@@ -125,7 +128,7 @@ describe('complete administrative WS replies', () => {
                 function mapped(raw: string): string {
                     const list = /^(?:List|Set)<(.+)>$/.exec(raw)
                     if (list) { const inner = mapped(list[1]!); return `readonly ${inner.startsWith('readonly ') ? '(' + inner + ')' : inner}[]` }
-                    return ({ String: 'string', Instant: 'string', int: 'number', Integer: 'number', long: 'number', boolean: 'boolean', ...renamed } as Record<string, string>)[raw] ?? raw
+                    return ({ String: 'string', Instant: 'string', int: 'number', Integer: 'number', long: 'number', boolean: 'boolean', Boolean: 'boolean', ...renamed } as Record<string, string>)[raw] ?? raw
                 }
                 return [key!, mapped(wireType!) + (nullable.includes(key!) ? ' | null' : '')]
             })

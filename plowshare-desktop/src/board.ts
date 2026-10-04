@@ -2,11 +2,12 @@ import { SWARM_PAGE, swarmMembers, readingSwarmActivity, swarmActivityOf } from 
 import type { DesktopState } from './shared.ts';
 import type { BoardView, TopicSummary, Reading } from './board-shared.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
+import type { BoardInspection } from 'plowshare-client-ts/operations/board';
 
 export { topicsOf, detailOf, swarmOf } from 'plowshare-client-ts/operations/board';
-import { topicsOf, detailOf, swarmOf } from 'plowshare-client-ts/operations/board';
+import { topicsOf, detailOf, swarmOf, isBoardMessage, isBoardTopic } from 'plowshare-client-ts/operations/board';
 
-/** Lazy inspection: no polling after its native window closes, no mutations or read receipts. */
+/** Lazy inspection, plus explicitly submitted person posts with durable request identities. */
 export class BoardClient {
   private epoch = 0;
   private pages = 1;
@@ -18,9 +19,93 @@ export class BoardClient {
   constructor(state: () => DesktopState, ask: (type: string, payload: unknown) => Promise<Outcome>, emit: () => void) {
     this.state = state; this.ask = ask; this.emit = emit;
   }
+  async postingTopics(project: string, more = false) {
+    if (!this.state().connected || !this.state().projects.some(row => row.name === project)) throw new Error('Choose an available project and connect before posting.');
+    const board = this.state().board;
+    if (board.posting?.busy || board.posting?.loading) throw new Error('Wait for the current board request.');
+    const previous = board.posting?.project === project ? board.posting : undefined;
+    if (more && !previous?.more) throw new Error('Choose the current topic list before loading more.');
+    const epoch = this.epoch, offset = more ? previous!.topics.length : 0;
+    const posting: NonNullable<BoardInspection['posting']> = { project, topics: more ? previous!.topics : [], more: false, loading: true };
+    board.posting = posting;
+    this.emit();
+    try {
+      const answer = await this.ask('board.topics', { project, offset, limit: 200 });
+      if (answer.code !== 'OK') throw new Error(answer.said ?? 'The topic list was refused.');
+      const page = topicsOf(answer.payload);
+      if (page.offset !== offset || page.topics.some(row => row.topic.project !== project)) throw new Error('The topic list names a different project or page.');
+      if (epoch === this.epoch) { posting.topics = [...posting.topics, ...page.topics]; posting.more = page.more; }
+    } catch (error) { if (epoch === this.epoch) posting.error = error instanceof Error ? error.message : String(error); }
+    finally { if (epoch === this.epoch) { posting.loading = false; this.emit(); } }
+  }
+  async post(project: string, topic: string, body: string, requestId: string) {
+    const state = this.state(), posting = state.board.posting;
+    if (!state.connected || !posting || posting.project !== project || posting.busy || posting.loading || !posting.topics.some(row => row.topic.id === topic && row.topic.project === project && row.topic.state !== 'closed')) throw new Error('Choose an open topic from the selected project.');
+    if (typeof body !== 'string' || !body.trim() || body.length > 16000 || typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new Error('Enter a message and valid request identity.');
+    const epoch = this.epoch; posting.busy = true; delete posting.error; delete posting.notice; this.emit();
+    try {
+      const answer = await this.ask('board.post', { project, topic, body, requestId });
+      if (answer.code !== 'OK') throw new Error(answer.said ?? 'The board post was not confirmed.');
+      const receipt = answer.payload as { requestId?: string; message?: unknown };
+      if (receipt?.requestId !== requestId || !isBoardMessage(receipt.message) || receipt.message.topic !== topic || receipt.message.body !== body || receipt.message.author !== state.handle || receipt.message.authorKind !== 'person') throw new Error('The server did not confirm this person’s post.');
+      if (epoch === this.epoch) { posting.notice = 'Posted to the board.'; this.emit(); await this.refresh(); }
+    } catch (error) { if (epoch === this.epoch) { posting.error = `${error instanceof Error ? error.message : String(error)} Your draft and request identity are retained. No post is retried automatically.`; this.emit(); } throw error; }
+    finally { if (epoch === this.epoch) { posting.busy = false; this.emit(); } }
+  }
+  async retry(project: string, topic: string, member: string, requestId: string, maxTurns: number, reconcile = false) {
+    const state = this.state(), board = state.board, previous = board.retrying;
+    if (!state.connected || (!reconcile && !state.projects.some(row => row.name === project)) || previous?.busy) throw new Error('Connect and wait for the current member retry.');
+    if (!Number.isSafeInteger(maxTurns) || maxTurns < 1 || maxTurns > 2147483647 || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId)) throw new Error('Choose a positive whole step limit and valid request identity.');
+    const detail = board.details[topic]?.value;
+    const chosen = detail?.topic ?? board.swarm.value?.topics.find(row => row.topic.id === topic)?.topic;
+    const seat = (detail?.seats ?? board.swarm.value?.seats ?? []).find(row => row.seat.topic === topic && row.seat.occupant === member);
+    const recovering = previous?.requestId === requestId && previous.project === project && previous.topic === topic && previous.member === member && previous.maxTurns === maxTurns;
+    // A retained request may already have succeeded and disappeared from active snapshots.
+    // The server rechecks ownership/membership and returns the original durable receipt.
+    if (!recovering && !reconcile && (!chosen || chosen.project !== project || !seat || member === '@opener')) throw new Error('Choose a failed member on an open topic. Refresh to see its current state.');
+    const epoch = this.epoch;
+    const retrying = board.retrying = { project, topic, member, requestId, maxTurns, busy: true } as NonNullable<BoardInspection['retrying']>;
+    this.emit();
+    try {
+      const answer = await this.ask('board.retry', { project, topic, member, requestId, maxTurns });
+      if (answer.code !== 'OK') { retrying.refused = ['BAD_REQUEST','NOT_FOUND','CONFLICT','VALIDATION_FAILED'].includes(answer.code); throw new Error(answer.said ?? 'The member retry was not confirmed.'); }
+      const receipt = answer.payload as { requestId?: string; member?: string; maxTurns?: number; message?: unknown };
+      if (receipt?.requestId !== requestId || receipt.member !== member || receipt.maxTurns !== maxTurns || !isBoardMessage(receipt.message) || receipt.message.topic !== topic || receipt.message.authorKind !== 'person' || receipt.message.author !== state.handle || !receipt.message.mentions.includes(member)) throw new Error('The server did not confirm this member retry.');
+      if (epoch === this.epoch) { retrying.notice = 'Member retry queued in its existing conversation.'; this.emit(); await this.refresh(); }
+    } catch (error) {
+      if (epoch === this.epoch) { retrying.error = `${error instanceof Error ? error.message : String(error)} Your request identity is retained. Retry explicitly to check the same request.`; this.emit(); }
+      throw error;
+    } finally { if (epoch === this.epoch) { retrying.busy = false; this.emit(); } }
+  }
+  async create(project: string, title: string, label: string, body: string, requestId: string, maxModelCalls?: number) {
+    const state = this.state(), board = state.board;
+    if (!state.connected || !state.projects.some(row => row.name === project) || board.opening?.busy) throw new Error('Choose an available project and connect before creating a topic.');
+    if (![title, label, body].every(value => typeof value === 'string' && value.trim()) || body.length > 16000 || typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new Error('Enter a title, label, opening message and valid request identity.');
+    if (maxModelCalls !== undefined && (!Number.isSafeInteger(maxModelCalls) || maxModelCalls < 2 || maxModelCalls > 2147483647)) throw new Error('The model call limit must be a whole number of at least two.');
+    const epoch = this.epoch, opening = board.opening = { busy: true } as NonNullable<BoardInspection['opening']>;
+    this.emit();
+    try {
+      const answer = await this.ask('board.open', { project, title, label, body, requestId, ...(maxModelCalls === undefined ? {} : { maxModelCalls }) });
+      if (answer.code !== 'OK') throw new Error(answer.said ?? 'Topic creation was not confirmed.');
+      const receipt = answer.payload as { requestId?: string; topic?: unknown; message?: unknown };
+      if (receipt?.requestId !== requestId || !isBoardTopic(receipt.topic) || receipt.topic.project !== project || receipt.topic.account !== state.handle || receipt.topic.openerKind !== 'person' || receipt.topic.opener !== state.handle || !isBoardMessage(receipt.message) || receipt.message.topic !== receipt.topic.id || receipt.message.body !== body || receipt.message.authorKind !== 'person' || receipt.message.author !== state.handle) throw new Error('The server did not confirm this person’s topic.');
+      if (epoch === this.epoch) {
+        opening.notice = 'Topic created.';
+        board.project = project; board.selected = receipt.topic.id; this.pages = 1;
+        if (board.posting?.project === project) board.posting = undefined;
+        this.emit(); await this.refresh();
+      }
+    } catch (error) {
+      if (epoch === this.epoch) { opening.error = `${error instanceof Error ? error.message : String(error)} Your draft and request identity are retained.`; this.emit(); }
+      throw error;
+    } finally { if (epoch === this.epoch) { opening.busy = false; this.emit(); } }
+  }
   reset() {
     this.epoch++; clearInterval(this.timer); this.timer = undefined; this.flights.clear();
     const b = this.state().board; b.topics.loading = false; b.swarm.loading = false;
+    if (b.opening) b.opening.busy = false;
+    if (b.retrying) b.retrying.busy = false;
+    if (b.posting) { b.posting.loading = false; b.posting.busy = false; }
     for (const detail of Object.values(b.details)) detail.loading = false;
     for (const reading of Object.values(b.activity ?? {})) reading.loading = false;
   }

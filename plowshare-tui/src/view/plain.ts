@@ -66,6 +66,7 @@ export function plain(options: Plain): Surface {
     let look: Look | true = options.look ?? true
     /** The names Tab may finish. Empty until the roster has been handed over. */
     let declared: readonly string[] = []
+    let commands: readonly string[] = []
     /** What a press of Ctrl-C means, once somebody has said. */
     let interrupted: (() => void) | undefined
     /**
@@ -97,7 +98,7 @@ export function plain(options: Plain): Surface {
         output,
         prompt: options.mark ?? '> ',
         completer(line: string): [string[], string] {
-            const { word, matches } = completing(line, declared)
+            const { word, matches } = completing(line, declared, commands)
             return [[...matches], word]
         },
     })
@@ -272,8 +273,9 @@ export function plain(options: Plain): Surface {
             })
         },
 
-        completing(names: readonly string[]): void {
+        completing(names: readonly string[], _details?: Readonly<Record<string, string>>, offers: readonly { readonly name: string; readonly detail: string }[] = []): void {
             declared = names
+            commands = offers.map(offer => offer.name)
         },
 
         onInterrupt(listener: () => void): void {

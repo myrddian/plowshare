@@ -18,45 +18,54 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class BoardResolvesSchemaTest {
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("pgvector/pgvector:pg16");
+  @Container
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16");
 
-    private static JdbcTemplate jdbc;
+  private static JdbcTemplate jdbc;
 
-    @BeforeAll
-    static void migrate() {
-        var source = new DriverManagerDataSource(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-        Flyway.configure().dataSource(source).load().migrate();
-        jdbc = new JdbcTemplate(source);
-    }
+  @BeforeAll
+  static void migrate() {
+    var source =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    Flyway.configure().dataSource(source).load().migrate();
+    jdbc = new JdbcTemplate(source);
+  }
 
-    @BeforeEach
-    void fresh() {
-        jdbc.execute("TRUNCATE TABLE firings, board_seats, board_messages, board_topics,"
-                + " user_inbox, admins CASCADE");
-        jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
-    }
+  @BeforeEach
+  void fresh() {
+    jdbc.execute(
+        "TRUNCATE TABLE firings, board_seats, board_messages, board_topics,"
+            + " user_inbox, admins CASCADE");
+    jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
+  }
 
-    private static void topic(String id, String title) {
-        jdbc.update("INSERT INTO board_topics (id, project, root, depth, title, label, account,"
-                + " opener_kind, opener, state, pot_total, pot_spent, reserve, opened_at)"
-                + " VALUES (?, 'payments', ?, 0, ?, 'BAD SPEC', 'enzo', 'person', 'enzo',"
-                + " 'open', 20, 0, 2, now())", id, id, title);
-    }
+  private static void topic(String id, String title) {
+    jdbc.update(
+        "INSERT INTO board_topics (id, project, root, depth, title, label, account,"
+            + " opener_kind, opener, state, pot_total, pot_spent, reserve, opened_at)"
+            + " VALUES (?, 'payments', ?, 0, ?, 'BAD SPEC', 'enzo', 'person', 'enzo',"
+            + " 'open', 20, 0, 2, now())",
+        id,
+        id,
+        title);
+  }
 
-    @Test
-    void a_title_is_one_line_for_every_writer() {
-        assertThrows(DataIntegrityViolationException.class, () -> topic("bdt_1", "two\nlines"));
-        assertThrows(DataIntegrityViolationException.class, () -> topic("bdt_2", "cr\rhere"));
-        assertDoesNotThrow(() -> topic("bdt_3", "one line"));
-    }
+  @Test
+  void a_title_is_one_line_for_every_writer() {
+    assertThrows(DataIntegrityViolationException.class, () -> topic("bdt_1", "two\nlines"));
+    assertThrows(DataIntegrityViolationException.class, () -> topic("bdt_2", "cr\rhere"));
+    assertDoesNotThrow(() -> topic("bdt_3", "one line"));
+  }
 
-    @Test
-    void a_resolution_is_marked_delivered_only_once_it_exists() {
-        topic("bdt_1", "sync");
-        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+  @Test
+  void a_resolution_is_marked_delivered_only_once_it_exists() {
+    topic("bdt_1", "sync");
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
                 "UPDATE board_topics SET resolution_delivered_at = now() WHERE id = 'bdt_1'"));
-    }
+  }
 }

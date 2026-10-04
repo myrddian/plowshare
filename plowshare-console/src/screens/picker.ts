@@ -86,7 +86,7 @@ const GLOBAL: Tier = { name: GLOBAL_TIER, project: '', query: '' }
 /** A project, as a row of the same tree. */
 function named(project: ProjectView): Tier {
     return {
-        name: project.name,
+        name: project.kind === 'personal' ? 'Personal' : project.name,
         project: project.name,
         query: `project=${encodeURIComponent(project.name)}&`,
     }
@@ -177,12 +177,10 @@ export function createPicker(options: PickerOptions): Picker {
             return
         }
         tree.replaceChildren()
-        // The global tier first, always, and never conditional on there being
-        // any projects: it is where a conversation opened without one lands,
-        // which on most deployments is all of them. Measured on 2026-09-08
-        // against a real server: 49 of 49 active conversations sat here, and a
-        // picker built only from `GET /v1/projects` could reach none of them.
-        for (const tier of [GLOBAL, ...projects.map(named)]) {
+        const personal = projects.filter(row => row.kind === 'personal');
+        const ordinary = projects.filter(row => row.kind !== 'personal');
+        // Personal is separate from the project tree. Legacy servers retain their history tier.
+        for (const tier of [...(personal.length ? personal.map(named) : [GLOBAL]), ...ordinary.map(named)]) {
             const node = el('div', 'project-node')
             node.dataset['project'] = tier.project
             const host = el('div', 'conversations')

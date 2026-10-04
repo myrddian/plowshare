@@ -90,6 +90,8 @@ management:
 # moved into a pool, say — stops the boot by name rather than being discarded in
 # silence while the server talks to some other host.
 plowshare:
+  projects:
+    workspace-directory: ${PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY:workspaces}
   llm:
     # One embedding model for the whole archive. Changing it is a re-embed of
     # every row, not a setting — vectors are comparable only within one model's
@@ -194,6 +196,17 @@ plowshare:
     # and the first fold both say which tier answered, so nobody has to guess
     # which case they are in.
     default-context-length: ${LLM_DEFAULT_CONTEXT_LENGTH:64000}
+
+    # Global wall-clock chat prompt budget, across every pool and both blocking
+    # and streaming calls. Leave absent to retain the existing per-pool limits.
+    # Environment override: PLOWSHARE_LLM_PROMPTTIMEOUT.
+    # prompt-timeout: 120s
+    # Folds use max(prompt-timeout, fold-timeout); with no global prompt override,
+    # compare against the folding pool's max-stream-duration. A lower fold value
+    # emits a prominent boot warning and the larger general value wins.
+    # Leave absent to use the existing streaming limits without a fold override.
+    # Environment override: PLOWSHARE_LLM_FOLDTIMEOUT.
+    # fold-timeout: 10m
     # WHAT A CLASS NAME MEANS, FOR THE WHOLE SERVER. One class, one wire model.
     #
     # This was per pool until 2026-09-07, and per pool a class could mean two
@@ -431,6 +444,11 @@ plowshare:
         # spellings of a dotted key bind — measured on Spring Boot 3.3.5 — and
         # the bracketed one is shown because it is explicit about where the key
         # ends.
+        # Optional working-context cap for slower hardware. The effective ceiling
+        # is min(model capacity, this maximum); a larger maximum never raises it.
+        # When capacity is unknown, this caps default-context-length instead.
+        # max-context-lengths:
+        #   "[mlx-community/gemma-4-e4b-it]": 64000
         # context-lengths:
         #   "[qwen3.5-9b]": 128000
         # The prompt size, in tokens, at which a fold of a conversation on this
@@ -491,9 +509,8 @@ plowshare:
         # across still means what it meant. Writing the unit works everywhere
         # and always wins; prefer it. See PoolProperties for the whole account.
         #
-        # chat-timeout bounds the three model calls that still block — the
-        # compaction summariser, the scribe and the schedule reader — and
-        # nothing else. Every turn an
+        # chat-timeout bounds the model calls that still block — the scribe
+        # and the schedule reader. Compaction and every turn an
         # agent takes is streamed, because a model that thinks for 96 seconds
         # blows a 60-second wait on an answer that arrives all at once. Raising
         # this will not help a turn; see PoolProperties#chatTimeout.
@@ -659,13 +676,10 @@ plowshare:
         # serves one completion model and LlmConfig refuses a lane sized to
         # zero, so the key is absent rather than set to 0.
         chat: 8
-        # SWARM SLOTS -- spec 2026-09-29 §5. How many of the eight the swarm scheduler
-        # may fill with board work at once; the other three are never taken by swarm
-        # work. They are not held for a person: people's turns share them with every
-        # other run that is not scheduled.
-        # Below `chat`, or the boot refuses it. Absent means none: `studio` has one
-        # chat slot, so it can take no swarm work and says nothing.
-        swarm: 5
+        # SWARM SLOTS -- omitted defaults to half of `chat`, rounded down: four
+        # of these eight slots. Other runs share the remaining capacity.
+        # Set `swarm: N` to override (0 disables swarm work); a positive ceiling
+        # must stay below `chat`. A one-chat-slot pool defaults to no swarm work.
         submit-timeout: 30s
 
       # ---- REFUSAL FALLBACK: an example, commented ----------------------------
@@ -1046,6 +1060,13 @@ plowshare:
     # How often due schedules are looked for. LIVE -- see EventsProperties. A fire
     # time is honoured to within this. ISO-8601, as every live duration is.
     tick-interval: ${PLOWSHARE_EVENTS_TICK_INTERVAL:PT15S}
+  messaging:
+    personal:
+      # Personal is identified by persisted account ownership, not its display label.
+      # These defaults permit messages with any project the account can access.
+      # Disable a direction to require explicit two-sided manifest routing instead.
+      send-to-any-project: ${PLOWSHARE_PERSONAL_SEND_TO_ANY_PROJECT:true}
+      accept-from-any-project: ${PLOWSHARE_PERSONAL_ACCEPT_FROM_ANY_PROJECT:true}
   swarm:
     # Re-owe unread addressed messages and deliver pending resolutions after restart.
     recover-at-boot: ${PLOWSHARE_SWARM_RECOVER_AT_BOOT:true}
@@ -1184,6 +1205,11 @@ plowshare:
   # a configuration left this way is visible in the log an operator reads and
   # not only in a file nobody re-opens.
   #
+  # The default server entrypoint enables plowshare.auth.first-run-setup. An
+  # empty database receives a temporary setup-only admin account, then the CLI
+  # creates the first administrator. Startup operator tokens are not issued in
+  # that mode. The token description below applies to explicit legacy opt-out.
+  #
   # THAT WINDOW IS CLOSED, and this paragraph is the sweep. It said turning the
   # gate off was the only way to use this server, because between the commit
   # that added the filter and the commit that added POST /v1/auth nothing could
@@ -1238,7 +1264,8 @@ plowshare:
     # a side effect if written naively, so it is set only by
     # PlowshareServerApplication.main, which a test context never calls. This
     # key's "off" value is the empty string below, which is safe to read in
-    # every context including a test's: AdminSeed treats a blank admin-handle
+    # every context including a test's. With first-run-setup enabled a blank
+    # handle selects temporary account setup; otherwise AdminSeed treats it
     # as "no admin has been asked for yet" and does nothing at all — no
     # lookup, no password check, no boot refusal. See AuthProperties
     # .getAdminHandle() for the full account, and for what happens once an

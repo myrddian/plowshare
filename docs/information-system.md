@@ -28,6 +28,113 @@ from general memory/digest export, and their model tools cannot write findings t
 the shared board. This is a document dependency policy, not universal data-loss
 prevention for every explicitly authorized file/command extension.
 
+## Faceted navigation and tags
+
+`information.list`, `information.facets`, `information.search` and
+`information.rank` accept an optional `filter` object. Its fields intersect:
+`kind` (`source` or `report`), `tags` (all selected user tags), `autoTag` (all
+selected generated tags), `tagGroup` (a category of related tags), `author` (the resource owner's account handle),
+`documentAuthor` (identified person, issuing organisation, or owner account fallback),
+`when` (a UTC saved-revision year or `YYYY-MM`), `subtype` (format or code
+language) and `search` (lexical search over the retained text, name, title and
+tags). Corpus and scope remain separate selections. `kind` does not replace
+`document_type`/`document_subtype` or a code symbol's declaration kind.
+
+```json
+{"scope":{"kind":"personal"},"filter":{"tags":["my project"],"autoTag":["postgresql"],"when":"2026-10"}}
+```
+
+`information.facets` returns `total`, `facets` and `hasMore`. Each facet contains
+`{value,count}` entries within the selected intersection, limited to its 100 most
+frequent values. Counts describe retained revisions, including readable drafts
+in the catalogue, rather than unique resources. Filters apply in SQL before
+paging, retrieval limits, ranking and coverage. Values and counts use live
+permissions and cannot reveal excluded, withdrawn or unreadable information.
+The desktop source/report Library exposes these choices and removable selected
+filters. Search/rank retain their existing published-report retrieval policy.
+
+User `tags` belong to the resource and therefore survive new revisions. Only its
+owner can replace them through `information.tags`, supplying `revision`, a stable
+`requestId`, and a string array `tags` (an empty array clears them). This human
+control is unavailable to model tools. Lists/status return `tags` and `autoTag`
+as separate arrays. Tags are trimmed, lowercased, deduplicated and bounded to
+32 tags of 64 printable characters each.
+
+The tool-free `information_tagger` model worker fills revision-specific `autoTag`
+from a bounded excerpt of the retained extraction. Generated tags are navigation
+suggestions, not evidence. The `autoTag` processing step uses the existing
+captured allowance, owned logs, hooks, paid-response checkpoints and generation
+fences. It can run after extraction/derivation even if embeddings or summaries
+fail; it never edits user tags. Inspect its state with `information.status`,
+retry failures with `information.retry`, or explicitly regenerate with
+`information.rebuild` and `stage: "autoTag"`. Rebuilding tags preserves summaries
+and embeddings. Automatic processing calls the tagging model only when both user
+`tags` and revision `autoTag` are empty. A document tagged by its owner skips this
+automatic pass; an explicit metadata rebuild remains available regardless of user
+tags. Eligibility is checked again after hooks and before charging a model call.
+
+On worker startup and every 60 seconds, a sweep queues up to 100 older untagged
+revisions with retained readable text and completed extraction/derivation. This
+includes previously skipped tagging steps and retained workspace code snapshots.
+The sweep uses each revision's remaining captured processing allowance, without
+raising it. Excluded, withdrawn, deleted, unreadable, unprepared and ownerless
+revisions are not queued, and failed/blocked/cancelled work requires an explicit
+retry. The sweep only queues work; the leased worker reads the retained extraction
+and calls the model. It does not fetch the original URL again or rewrite user tags.
+Pending work is not queued twice. `auto_tag_generated` records successful attempts
+even when the model finds no topical tags, preventing endless paid rescans of an
+empty result. Clearing user tags makes an unprocessed revision eligible on the
+next sweep. New admissions still queue applicable processing normally.
+
+`documentAuthor` is separate from ownership (`author`). The same `autoTag` model
+pass identifies an explicit personal byline first, then a clearly identified
+issuing organisation. Unknown, conflicting or questionable attribution falls back
+to the resource owner's account. Attribution requires a bounded, exact quote from
+the retained content containing the displayed name; model candidates marked
+uncertain, unsupported by the content, or based only on a name/URL are discarded.
+An exact quote establishes source support, not independent verification of authorship.
+Lists/status include `documentAuthor` and `documentAuthorSource` (`person`,
+`organisation` or `account`). Ownerless legacy resources may have no fallback name.
+The `documentAuthor` facet uses the same resolved value before counts, paging and
+retrieval. Blocked/uncommitted attribution is hidden and uses the account fallback.
+Attribution is revision-specific, is cleared along with its supporting quote on
+deletion, and is regenerated with `stage: "autoTag"`. Existing untagged sources use
+the account fallback until their automatic sweep finishes; manually tagged sources
+use that fallback until an explicit metadata rebuild if no attribution was stored.
+
+Tag groups are a lightweight many-to-many map: a category contains existing tags,
+and a tag can belong to more than one category. For example, `postgresql` and
+`sqlite` can belong to `databases`, while `postgresql` also belongs to `software`.
+Membership is assigned per document; the selected collection combines these edges
+for browsing. Categories are navigation suggestions and carry no evidence status.
+
+New automatic tags and their groups share one `information_tagger` response.
+Existing tagged documents use the private, tool-free `information_tag_grouper`
+worker, which only classifies the supplied tags. On startup and every 60 seconds,
+a sweep queues at most 100 eligible revisions with missing or stale grouping,
+using their remaining captured allowance and current permissions. Successful
+empty results are recorded to prevent repeat paid calls. Failed or blocked work
+requires explicit retry. Tag edits hide stale model groups until reclassification.
+Grouping can be rebuilt independently with `stage: "tagGroups"`; report finalisation
+still requires the original five content-processing steps.
+
+Lists/status expose `tagGroups` as `{category: [tag, ...]}` and `tagGroupsSource`
+(`automatic` or `manual`). Owners override membership through
+`information.tags.groups` with `revision`, stable `requestId` and `groups`.
+An object replaces model categories; `{}` intentionally removes all groups.
+`groups: null` releases the override and resumes automatic grouping. Overrides
+belong to the resource and survive new revisions. Removed tags disappear from
+memberships; owners cannot introduce new tags through group editing. Categories
+are bounded to 16 names of 64 printable characters, with at most 32 existing tags
+per category. Model tools cannot write overrides.
+
+`information.facets` also returns `tagGraph: {edges: [{group,tag,count}],hasMore}`,
+limited to 1,000 relationships. Counts represent readable revisions in the same
+filtered selection as the facets. The graph hides excluded, withdrawn, unreadable
+and stale relationships, and records contributing document dependencies for model
+reads. Library offers category filtering, related-tag cards and owner group editing
+with a control to return to automatic grouping.
+
 ## Retention and lifecycle
 
 A source name identifies a resource in its personal or project namespace. Content
@@ -37,8 +144,8 @@ create new evidence. The original bytes, extraction and content hash survive fet
 cache expiry and later revisions. Legacy sources missing original bytes explicitly
 lack that capability; they are never reconstructed from truncated passages.
 
-Processing has five durable steps: `extract`, `derive`, `embed`, `summarise` and
-`summary_embed`. Status includes current generation, attempt, lease outcomes,
+Processing has seven durable steps: `extract`, `derive`, `embed`, `summarise`,
+`summary_embed`, `autoTag` and `tagGroups`. Status includes current generation, attempt, lease outcomes,
 configuration identity, failure, allowance/spending and committed unit counts.
 Readiness is per capability. Stored text or lexical passages can remain usable
 while embeddings or summaries are incomplete. `compatible: false` means a ready
@@ -48,7 +155,7 @@ same vector width. Actual counts are not estimated completion percentages.
 
 `information.retry` resumes missing/failed work using the captured allowance;
 `information.allowance` raises/changes the owner's allowance without moving below
-spending. `information.rebuild` accepts `embed`, `summarise` or `summary_embed`.
+spending. `information.rebuild` accepts `embed`, `summarise`, `summary_embed`, `autoTag` or `tagGroups`.
 Embedding rebuild keeps paid summaries; summary rebuild clears downstream summary
 vectors. Source refresh/replacement creates a new revision. Extraction/structure
 changes also require a new revision, preserving old evidence coordinates.
@@ -65,7 +172,10 @@ all inputs, exact evidence citations and optional objectives/findings/reviews/sc
 changes. Findings retain `holds`, `weakened`, `refuted` or `not_checked` judgments;
 reference validation does not prove factual support. Producer log and orchestration
 definition hash come from the actual run. Models cannot forge them or finalise/share.
-Drafts are absent from ordinary discovery. Explicit owner finalisation keeps the
+Readable drafts and final reports appear in the scoped catalogue and desktop Reports
+collection, with `report_status` distinguishing their state. Superseded reports stay
+out of ordinary discovery. Reading a draft does not finalise it or change its
+visibility; all input permissions still apply. Explicit owner finalisation keeps the
 revision UUID and supersedes earlier final revisions of the same report resource.
 Feedback uses `record.report` with the same name and a parent report in `feedback`;
 its content/objectives form a new immutable revision.
@@ -187,3 +297,27 @@ The shipped research workflow now uses the [scripted Aletheia driver](scripted-r
 objective decomposition, two evidence waves, author/editor expansion, rebuttal,
 adjudication and detailed retained reports. OSINT entities/relations, automatic
 monitoring and live factual-quality benchmarking remain separate work.
+
+## Readiness fence
+
+`information.await` accepts scoped `sources`, each containing exactly one revision
+UUID or acquisition-ticket UUID, and optional `waitMs` (0..30000). Duplicate
+references count once. The reply gives `expected`, `settled`, `ready`, `pending`,
+`complete` and per-reference `outcomes`. A fetch success alone is not readiness:
+its current revision must be readable and its current-generation extraction ready.
+Failed, blocked, cancelled, skipped or unavailable sources settle without readable
+text. Downstream summary/embedding work does not delay the text-readiness fence.
+
+An observation deadline returns incomplete progress, not a timeout failure. Observe
+the same references again until all have outcomes. Durable catalogue/acquisition
+states are authoritative, so missed or duplicate push notifications cannot change
+the count. The operation only observes; it never acquires, retries, cancels or
+changes a source. Agents access it as `information_read` operation `await` in their
+server-bound namespace. Script journals retain the fence's references and outcomes,
+and an interrupted observation can be resumed safely.
+
+Research reports keep `research-<run>.md` as their collision-safe resource name.
+Their first Markdown heading uses the research question and supplies the display title
+when text extraction completes. Feedback retains the same resource name and creates a
+new revision. Runs offers **Read retained report** for the main report revision, with
+the run's project scope; reading leaves the report as a draft until explicitly finalised.

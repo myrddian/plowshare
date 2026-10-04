@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -67,12 +67,13 @@ async function fixture(script: (frame: Frame) => Outcome | Promise<Outcome>, rea
         if (url.pathname === '/v1/files') {
             file = socket; claims.push(url)
             assert.equal(url.searchParams.get('session'), eventSession)
-            assert.equal(url.searchParams.get('project'), 'repo')
+            const claimedProject = url.searchParams.get('project')!
+            assert.equal(claimedProject, (frames.find(row=>row.type==='project.attach') ? 'client:scope:cmVwbw' : 'repo'))
             assert.equal(url.searchParams.get('ready'), '1')
             assert.equal(url.searchParams.get('source'), '1')
             socket.on('message', bytes => { const reply = JSON.parse(bytes.toString()) as FileReply; replies.get(reply.id)?.(reply); replies.delete(reply.id) })
             socket.on('close', () => { fileClosed = true })
-            if (ready) setTimeout(() => socket.send(JSON.stringify({ ready: true, project: 'repo' })), 20)
+            if (ready) setTimeout(() => socket.send(JSON.stringify({ ready: true, project: claimedProject })), 20)
             else setTimeout(() => socket.close(1003, 'refused'), 20)
         } else {
             assert.equal(url.pathname, '/v1/events')
@@ -104,8 +105,8 @@ async function fixture(script: (frame: Frame) => Outcome | Promise<Outcome>, rea
         },
     }
 }
-function cli(base: string, root: string, args: string[]) {
-    const child = spawn(process.execPath, [main, '--json', '--url', base, '--project', 'repo', '--root', root, ...args], {
+function cli(base: string, root: string, args: string[], infer = false) {
+    const child = spawn(process.execPath, [main, '--json', '--url', base, ...(infer ? [] : ['--project', 'repo']), '--root', root, ...args], {
         env: { ...process.env, PLOWSHARE_HANDLE: 'fixture', PLOWSHARE_PASSWORD: 'password-secret', PLOWSHARE_PROJECT: '' }, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     let observed: ((records: Record<string, unknown>[]) => void) | undefined
@@ -273,4 +274,41 @@ test('sync status, hidden and conflicts use WS; malformed status and refusals do
         assert.doesNotMatch(result.stdout, /"status":"completed"/)
         assert.equal(fake.gitRequests.length, 0)
     } finally { await fake.close(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+test('a root in a checkout infers the project and nearest marker directory', {timeout:10000}, async () => {
+    const root = await directory(), fake = await fixture(() => ({code:'OK'}))
+    try {
+        await mkdir(join(root, '.plowshare'))
+        await writeFile(join(root, '.plowshare/project'), 'repo\n')
+        const nested = join(root, 'src/integration'); await mkdir(nested, {recursive:true})
+        const child = cli(fake.base, nested, ['client','root'], true)
+        await child.serving()
+        assert.equal(fake.claims[0]?.searchParams.get('root'), root)
+        child.child.kill('SIGINT')
+        assert.equal((await child.done).code, 5)
+        assert.equal(fake.frames.length, 0)
+    } finally {await fake.close(); await rm(root,{recursive:true,force:true})}
+})
+
+
+test('root manifests stay private and never create local metadata or export files', {timeout:10000}, async () => {
+    const root=await directory(), key='client:scope:cmVwbw'
+    const fake=await fixture(frame=>{
+        if(frame.type==='project.list') return {code:'OK',payload:[]}
+        if(frame.type==='project.attach') return {code:'OK',payload:{name:key,displayName:'repo',workspace:root,machine:'test',lent:[],exclusions:[],members:[],type:'DISJOINT'}}
+        assert.equal(frame.type,'memory.index');assert.equal(frame.payload['project'],key)
+        return {code:'OK',payload:[]}
+    })
+    try {
+        const manifest=JSON.stringify({version:1,name:'repo',routing:{sendTo:['notifications'],routeFiles:['routes/internal.json']},integration:{enabled:true}});await writeFile(join(root,'plowshare'),manifest)
+        const result=await cli(fake.base,root,['memory','index'],true).done
+        assert.equal(result.code,0,result.stdout+result.stderr)
+        assert.deepEqual(fake.frames.map(row=>row.type),['project.list','project.attach','memory.index'])
+        assert.equal(await readFile(join(root,'plowshare'),'utf8'),manifest)
+        await assert.rejects(readFile(join(root,'.plowshare/project')),{code:'ENOENT'})
+        await assert.rejects(readFile(join(root,'.git/config')),{code:'ENOENT'})
+        assert.equal(fake.gitRequests.length,0)
+    } finally {await fake.close();await rm(root,{recursive:true,force:true})}
 })

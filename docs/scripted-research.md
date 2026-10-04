@@ -110,7 +110,7 @@ This constructs tool arguments; it is not code to execute inside the research
 worker. `feedback_revision` is an accessible report revision UUID, not a run handle,
 resource UUID, evidence UUID or URL. The script checks its report kind, reads it in
 32,768-unit pages and stops above 131,072 units of prior-report text. The finished
-result includes the new retained draft revision and report text. Finalisation and
+result includes the new retained draft revision and explicit paged `information_read` arguments. The full report is retained once, rather than duplicated into the caller conversation. Finalisation and
 sharing belong to the owner's existing information controls.
 
 Treat `holds` as a recorded adjudication, not a guarantee of truth. If a run fails,
@@ -286,11 +286,11 @@ Every command returns the entire next JSON state. On the next invocation,
 | --- | --- |
 | `question`, `context`, `scope`, `topicAnchors` | Original question/background and explicit derived scope. |
 | `feedbackRevision`, `feedback`, `feedbackOffset`, `feedbackLoaded`, `previousReport`, `reportName` | Bounded feedback read and same-resource report naming. |
-| `stage`, `entered`, `cursor`, `subphase`, `pending`, `queryPart`, `wait` | Stage index and exact continuation. `cursor` is reused for the active list, not a global progress percentage. |
+| `stage`, `entered`, `cursor`, `subphase`, `pending`, `queryPart`, `sourceFence` | Stage index and exact continuation. `cursor` is reused for the active list, not a global progress percentage. |
 | `objectives`, `originalPlan`, `acceptedPlan`, `objectiveApproved`, `objectiveFeedback`, `objectiveReviewNote` | Current objectives, initial proposal, user-accepted plan and the pending objective decision/corrections. Reviews retain the delivered answer and author. |
 | `decompositions`, `queries`, `discardedQueries`, `queryReview`, `queryCoverage`, `supplementalQueries`, `critiqueIteration`, `counterQueries` | Query plans, retained/dropped decisions, one supplemental plan-critique cycle and fresh challenge queries. |
 | `catalogue`, `candidates` | Catalogue metadata and discovered sources. Rejected candidates remain journaled, even when no fetch occurred. |
-| `selected` | Current selection's choices, ticket/readiness/polling fields, pending passage windows and stable `auditIndex`. Replaced for supplemental selection or the next wave. `selectionRounds` bounds selection to two batches per retrieval cycle; the plan critique may open one additional cycle in wave 0. |
+| `selected` | Current selection's choices, ticket/readiness fields, pending passage windows and stable `auditIndex`. Replaced for supplemental selection or the next wave. `selectionRounds` bounds selection to two batches per retrieval cycle; the plan critique may open one additional cycle in wave 0. |
 | `fetchAudit` | Selected-source records spanning both waves; survives replacement of `selected`. |
 | `sources` | Sources with successfully recorded exact evidence, including quote/coordinates/evidence UUID/wave. Failed acquisitions are in the audit, not invented evidence. |
 | `ranking`, `coverage`, `plan`, `scopeChanges` | Original-intent rankings, objective coverage and scope/gap observations. |
@@ -308,7 +308,7 @@ Every command returns the entire next JSON state. On the next invocation,
 | `pool`, `evidenceIds`, `ids`, `perFinding` | Supply retained evidence, normalize reference formatting, reject unknown references locally and mark missing/invalid finding reviews not checked. |
 | `auditSource` | Update by saved audit index; JSON does not preserve shared object identity. |
 | `expand`, `paragraphs`, `validateProse`, `unavailableExpansion` | Expand each adjudicated point, validate inline evidence identities and localize incomplete author/editor output. |
-| `objectiveLabel`, `assemble`, `reportReviews` | Consistent persisted objective labels, complete sections, citation allowlist, audit appendix and bounded report review previews. |
+| `objectiveLabel`, `assemble`, `reportReviews` | Consistent persisted objective labels, complete sections, citation allowlist, separate audit revision and bounded report review previews. |
 
 ## Analytical worker response shapes
 
@@ -358,6 +358,7 @@ the [information guide](information-system.md).
 | `search` | `{query:query,page_size:3,max:3}` | JSON page `hits[]` with URL/title/snippet, or a refusal. Discovery only. |
 | `information_write` | `{operation:'acquire',url:sourceUrl,name:title,requestId:input.requestId}` | Ticket `id` and current `state`; not a ready body. |
 | `information_read` | `{operation:'acquisition',acquisition:ticketId}` | `state`, `revision_id` on success, observed `attempt`/`error`. Success state is `succeeded`. |
+| `information_read` | `{operation:'await',sources:[{revision:revisionId},{acquisition:ticketId}],waitMs:30000}` | Readiness fence counts and one current outcome per unique reference. Incomplete waits stay pending. |
 | `information_read` | `{operation:'status',revision:revisionId}` | `generation`, `source_uri`, `steps[]`; check the current generation's `extract` stage. |
 | `information_read` | `{operation:'search',query:question,revision:revisionId,limit:3}` | Exact source windows within one revision when an indexed passage can be located. |
 | `information_read` | `{operation:'read',revision:revisionId,offset:0,limit:4000}` | `{revision,start,end,total,text}` for a leading-window fallback. |
@@ -371,12 +372,24 @@ a per-revision search and retains up to three distinct exact matches, then recor
 a bounded leading 4,000-unit source window when
 necessary and discloses it.
 
-Selected URLs are queued before reading. Polls use 1,000 ms host waits and stop
-after more than 600 pending acquisition/extraction observations per source; command
-caps can be reached earlier. Failed/cancelled tickets and failed/skipped extraction
-are recorded and skipped. Blocked acquisition/extraction fails with its hook reason
-for inspection; it does not auto-retry or automatically become the same continuation
-as a conductor tool-hook pause.
+Selected URLs are queued before reading. The conductor then calls the native
+`information_read` operation `await` with the complete selected set of revision or
+acquisition references. The readiness fence deduplicates references and returns
+`expected`, `settled`, `ready`, `pending`, `complete` and identity-bound `outcomes`.
+It releases only when every reference has a durable outcome: readable current-
+generation extraction, failed/blocked/cancelled/skipped processing, or an unavailable
+source. A successful fetch ticket is still pending until its revision is readable.
+Summary and embedding readiness are not required to inspect exact source text.
+
+Each native observation waits up to 30 seconds; an incomplete response keeps the
+fence pending and the same references are observed again. Expiry of an observation
+is not a document failure or a reason to skip it. Selected references and progress
+snapshots survive in the command journal. A readiness observation interrupted before
+its receipt can safely resume; acquisition, processing and model calls are not
+repeated. General command caps still apply and retain the journal for continuation.
+Terminal source problems become audited local gaps and the other readable sources
+continue. A blocked source remains unreadable; no hook or authorization is bypassed.
+Conductor tool-hook refusals retain their existing pause/refusal behavior.
 
 Information successes are JSON, but permission/argument refusals may be prose.
 The decoder stops instead of interpreting a refusal as no results. Retrieval
@@ -412,14 +425,36 @@ Actual root producer and definition hash are server-derived, not script argument
 
 The report contains executive summary, question/scope, methodology, every objective
 and final expanded finding, limitations, open questions, conclusion, cited-source
-provenance and the fetch/document audit. Each finding retains its claim, verdict,
+provenance and a reference to a separate fetch/document audit. Each finding retains its claim, verdict,
 rationale, support, counter-evidence, Red challenge and Blue response. The synthesis
 worker provides framing; `assemble` preserves all findings in code.
 
 The analytical body is scanned for `[evidence:UUID]` before adding the bibliography.
 Only known referenced IDs enter `citedEvidence`; support/counter-evidence lines
 count as references too. An unknown evidence ID stops report assembly. Listing
-unused source metadata in the audit does not manufacture references.
+unused source metadata in the audit does not manufacture references. Assembly then
+renders internal handles as numbered citations: public sources link directly to
+HTTP(S) URLs, while project documents have numbered bibliography entries. Each
+entry shows the source title and retains evidence IDs, immutable revision and exact
+passage coordinates. Repeated citations of the same revision/range/text share one
+number; separate passages remain distinguishable. Report metadata still uses the
+validated evidence UUIDs, independent of presentation numbering.
+
+The audit is a separate information revision named `research-<run>-audit.json`,
+with `documents` (the complete fetch audit) and `context_measurements`. Read either
+revision with `information_read` using `operation: "read"`, `revision`, `offset: 0`,
+and `limit: 8192`; continue from each returned `end` until `total`. Audit storage
+uses a separate journalled command and retains all source outcomes and coordinates.
+The report keeps all analytical prose and source links, without machine JSON appendices.
+
+Agent `orchestration_status` replies are compact previews with explicit lengths,
+truncation indicators and omitted-history counts. For full results from any run,
+including older runs, call it with `result_offset: 0` and `result_limit: 8192`, then
+continue from `end` until `total`. Result pages enforce the same account/child
+access as status. Authenticated WebSocket run inspection and durable history retain
+the complete result and message records. Completion deliveries over 8192 UTF-16
+characters likewise send a labelled preview and explicit result-page coordinates;
+this also protects callers receiving results from older pinned scripts.
 
 | Audit field | Interpretation |
 | --- | --- |
@@ -530,23 +565,36 @@ or information mutation is automatically rerun to repair model formatting.
 
 Reports include `contextCost`: analytical task count, serialized input characters,
 evidence characters and repeatedly supplied evidence characters. These measure task
-data rather than provider tokens. Finding expansion now receives the current objective,
-challenge and rebuttal; every retained evidence window, including the entire adverse
-wave, remains supplied. It does not truncate evidence quotes or change provenance.
+data rather than provider tokens.
 
-The deterministic two-objective fixture compared identical research tasks and outputs:
+Each analytical call receives a working evidence projection. Exact duplicate text,
+including whitespace, appears once across retrieval waves; all evidence ID aliases
+and original source locations remain attached. Identical text from multiple documents
+is not evidence of independent corroboration. The durable evidence pool, source audit
+and citation validity are unchanged.
 
-| Measure | Full context | Current context |
-| --- | ---: | ---: |
-| Serialized analytical data | 53,127 characters | 49,229 characters |
-| Approximate data tokens at four characters/token | 13,282 | 12,308 |
-| Analytical tasks | 20 | 20 |
-| Final findings / citations | 2 / 2 | 2 / 2 |
-| One observed sandbox fixture execution | 200 ms | 187 ms |
+The default working target is 24 unique passages and 48,000 quotation characters.
+Selection balances objectives and different source documents before filling by
+relevance. Discovery frequency does not give a passage extra votes. Ranking runs in
+batches targeting at most 24 unique passages and 48,000 quotation characters so that
+the entire pool can still be assessed without cutting passages;
+a score for identical text is applied to its evidence aliases within that wave.
+Missing scores remain `not_checked`.
 
-Character savings were 7.3%; evidence characters and repeated evidence characters
-were identical. Findings, citations, refutations and command counts were unchanged.
-Fixture time and token estimates are not live provider latency or billed tokens.
+Finding, review and Author citations take priority over these selection targets:
+all explicitly referenced supporting and counter-evidence is included, even when it
+exceeds a target. Exact quotes are never shortened to meet a character target.
+Packets disclose retained, unique, supplied and omitted counts and target overflow;
+omitted context is still available in the retained evidence pool, not missing research.
+
+`information_read search` also exposes the existing Anchor paragraph, section,
+chapter and document summaries alongside the exact source window. These are labeled
+generated navigation context, not verbatim quotations or citable evidence. Research
+reuses summaries already available without waiting for their completion or starting
+extra model work. Selected passages retain their available summary context; up to
+12 omitted passages with summaries may provide broader navigation context. Neither
+summaries nor source links substitute for checking whether the quoted passage
+supports the claim.
 
 For a real comparison, use the same request and evidence corpus in an isolated project,
 record its start/end timestamps, and wait for all selected sources' processing to settle.

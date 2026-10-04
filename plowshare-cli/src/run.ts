@@ -1,8 +1,10 @@
+import { discover } from 'plowshare-client-node/marker'
+import { createRequire } from 'node:module'
 import { Credentials, CredentialError, credentialDirectory } from 'plowshare-client-node/credentials'
 import { ConnectionFault } from 'plowshare-client-ts/binding/connection'
 import { discovery, commandHelp, effectiveScope, isMutation } from 'plowshare-client-ts/operations/discovery'
 import { parseCommand, commandProblem, withSession } from 'plowshare-client-ts/operations/commands'
-import { changePassword, MustChangePassword, PasswordRefused, SignInRefused } from 'plowshare-client-ts/binding/auth'
+import { finishSetup, changePassword, MustChangePassword, PasswordRefused, SignInRefused } from 'plowshare-client-ts/binding/auth'
 import type { Session } from 'plowshare-client-node/session'
 import { syncer, type Syncer } from 'plowshare-client-node/sync/syncer'
 import { syncAction } from 'plowshare-client-ts/operations/union'
@@ -17,6 +19,7 @@ export interface IO {
     readonly stdout: (text: string) => void
     readonly stderr: (text: string) => void
     readonly stdin: (signal: AbortSignal) => Promise<string>
+    readonly setup?: (signal: AbortSignal) => Promise<{ handle: string; password: string }>
     readonly newPassword?: (signal: AbortSignal) => Promise<string>
     readonly login?: (signal: AbortSignal) => Promise<{ handle: string; password: string }>
     readonly signal?: AbortSignal
@@ -85,19 +88,28 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         return exit
     }
     try {
-        const opts = options(args, io.env)
+        let opts = options(args, io.env)
         json = opts.json
-        if (opts.help) {
-            io.stdout(json ? JSON.stringify({ status: 'help', ...discovery() }) + '\n' : HELP + '\n\nCommands and required fields:\n' + commandHelp() + '\n')
+        if (opts.version) {
+            const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
+            io.stdout(json ? JSON.stringify({ status: 'version', name: 'plowshare-cli', version }) + '\n' : `plowshare-cli ${version}\n`)
             return 0
         }
-        timer = setTimeout(() => { deadline = true; control.abort() }, opts.command === 'login' && !args.includes('--timeout-ms') ? 300_000 : opts.timeoutMs)
-        if (opts.command === 'login' || opts.command === 'logout') {
+        if (opts.help) {
+            const help = discovery(opts.command)
+            if (!help.commands.length && !help.platformCommands.length) throw new Usage('Unknown help target; see --help')
+            io.stdout(json ? JSON.stringify({ status: 'help', ...help }) + '\n' : opts.command
+                ? `Usage: plowshare-cli [options] ${opts.command}\n\n${commandHelp(opts.command) || help.platformCommands.join('\n')}\n\nUse --help for global options.\n`
+                : HELP + '\n\nCommands and required fields:\n' + commandHelp() + '\n')
+            return 0
+        }
+        timer = setTimeout(() => { deadline = true; control.abort() }, ['login', 'setup'].includes(opts.command) && !args.includes('--timeout-ms') ? 300_000 : opts.timeoutMs)
+        if (['login', 'logout', 'setup'].includes(opts.command)) {
             if (opts.newConversation || opts.standalone) throw new Usage('--new-conversation and --standalone apply to agent run')
             if (opts.validate) throw new Usage('--validate applies to ordinary operation payloads; login/logout do not take it')
             const store = new Credentials(opts.base, credentialDirectory(io.env), control.signal)
             const door = { base: opts.base, fetch: (url: string, init: Parameters<typeof fetch>[1]) => fetch(url, { ...init, signal: control.signal, redirect: 'error' as const }) }
-            if (opts.command === 'login') {
+            if (opts.command !== 'logout') {
                 let handle = io.env['PLOWSHARE_HANDLE'], password = io.env['PLOWSHARE_PASSWORD']
                 if (!handle && !password) {
                     if (io.login === undefined) throw new Usage('Login needs a terminal, or PLOWSHARE_HANDLE and PLOWSHARE_PASSWORD.')
@@ -105,6 +117,16 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
                 }
                 if (!handle?.trim() || !password) throw new Usage('Provide both login handle and password.')
                 let signed = await store.login(door, handle, password)
+                if (signed.setupRequired) {
+                    if (opts.command !== 'setup') throw new Usage('This is the temporary setup account. Run plowshare-cli setup --url ' + opts.base + '.')
+                    let nextHandle = io.env['PLOWSHARE_NEW_HANDLE'], nextPassword = io.env['PLOWSHARE_NEW_PASSWORD']
+                    if (!nextHandle && !nextPassword && io.setup) {
+                        const entered = await io.setup(control.signal); nextHandle = entered.handle; nextPassword = entered.password
+                    }
+                    if (!nextHandle || !nextPassword) throw new Usage('Provide the first administrator handle and password.')
+                    await finishSetup(door, signed.tokens.access, password, nextHandle, nextPassword)
+                    signed = await store.login(door, nextHandle, nextPassword)
+                } else if (opts.command === 'setup') throw new Usage('Server setup is already complete. Use login with your administrator account.')
                 if (signed.mustChangePassword) {
                     if (io.newPassword === undefined) throw new MustChangePassword()
                     const next = await io.newPassword(control.signal)
@@ -113,7 +135,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
                     if (signed.mustChangePassword) throw new MustChangePassword()
                 }
             } else await store.logout(door)
-            io.stdout(json ? JSON.stringify({ operation: opts.command, status: 'completed' }) + '\n' : (opts.command === 'login' ? 'Signed in. Local clients can now use the saved session.' : 'Signed out.') + '\n')
+            io.stdout(json ? JSON.stringify({ operation: opts.command, status: 'completed' }) + '\n' : (opts.command !== 'logout' ? 'Signed in. Local clients can now use the saved session.' : 'Signed out.') + '\n')
             return 0
         }
         let command = opts.command
@@ -130,7 +152,13 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         if ((presence || sync !== undefined) && (opts.wait || opts.inputPayload)) throw new Usage('client root and sync do not take --wait, --watch or --payload')
         let directory: string | undefined
         if (opts.root !== undefined) {
-            try { directory = await canonicalRoot(opts.root) } catch { throw new Usage('--root must be an absolute, existing directory on this machine') }
+            try {
+                directory = await canonicalRoot(opts.root)
+                const found = await discover(directory)
+                if (found && opts.project && found.project !== opts.project) throw new Usage('The checkout marker belongs to a different project')
+                if (!opts.project && !args.includes('--global') && found) { opts = { ...opts, project: found.project }; directory = found.root }
+                if (!opts.project) throw new Usage('--root needs --project, a local marker, or a root plowshare manifest')
+            } catch (error) { if (error instanceof Usage) throw error; throw new Usage('--root must be an existing directory with a readable project marker') }
         }
         let follow: ReturnType<typeof followCommand>
         try { follow = followCommand(command) } catch { throw new Usage('conversation follow needs one conversation id') }
@@ -153,7 +181,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         mutation = isMutation(parsed.request.type)
         const body = parsed.request.payload as Record<string, unknown>
         requestId = typeof body['requestId'] === 'string' ? body['requestId'] : undefined
-        for (const [key, type] of Object.entries({ revision: 'revision-uuid', acquisition: 'acquisition-uuid', evidence: 'evidence-uuid', conversation: 'conversation', root: 'orchestration-root' })) {
+        for (const [key, type] of Object.entries({ revision: 'revision-uuid', acquisition: 'acquisition-uuid', evidence: 'evidence-uuid', conversation: 'conversation', root: 'orchestration-root', instance: 'message-instance', message: 'message' })) {
             if (typeof body[key] === 'string') identifiers[key] = { type, id: body[key] }
         }
         if (parsed.request.type === 'job.status' || parsed.request.type === 'job.cancel') job = parsed.request.payload.job
@@ -198,8 +226,15 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         if (directory !== undefined) {
             const claim = (await connection.root(opts.project!, directory)).current
             control.signal.throwIfAborted()
+            if (claim.project !== opts.project) {
+                const payload = parsed.request.payload as Record<string, unknown>
+                parsed = {kind:'request',request:request(parsed.request.type, {...payload, ...(payload['project'] === opts.project ? {project:claim.project}: {})} as never)}
+                opts = {...opts,project:claim.project}
+                scope = effectiveScope(parsed.request)
+            }
             rooted = true
             if (presence || sync !== undefined) record('rooted', { project: claim.project, root: claim.root, commandDefault: 'off' })
+            if ((opts.sync || sync !== undefined) && claim.project.startsWith('client:')) throw new Usage('Client-only DISJOINT projects cannot be synced or exported')
             if (opts.sync || sync !== undefined) {
                 syncing = syncer({ claim, handle: connection.handle, base: opts.base, asker: connection, bearer: () => connection!.bearer(), strict: true, signal: control.signal,
                     tell: (trouble, lines) => {

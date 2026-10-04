@@ -12,9 +12,9 @@ import java.util.Objects;
  */
 public record StageDone(StageShown stage, String summary, List<String> check) {
 
-    public StageDone {
-        Objects.requireNonNull(stage, "stage");
-        Objects.requireNonNull(summary, "summary");
-        check = check == null ? null : List.copyOf(check);
-    }
+  public StageDone {
+    Objects.requireNonNull(stage, "stage");
+    Objects.requireNonNull(summary, "summary");
+    check = check == null ? null : List.copyOf(check);
+  }
 }

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "routes": [
+    {"name": "review-note", "project": "notes", "agent": "note_reviewer"}
+  ]
+}

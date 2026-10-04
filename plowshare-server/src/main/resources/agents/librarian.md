@@ -120,7 +120,7 @@ model: reasoning
 #   agent_run   A leaf. calls: is the half that names names and this one is
 #               empty, and AgentRegistry.requireDelegationHalvesAgree refuses
 #               either half without the other.
-tools: [document_search, document_list, information_read, result_read, result_list, document_retrieve, document_rank, document_outline, document_citations]
+tools: [document_search, document_list, information_read, result_read, result_list, document_retrieve, document_rank, document_outline, document_citations, information_write]
 calls: []
 # EXPORTED, and it is the ONE exported member of the Documents set. The other
 # three -- paragraph_summariser, span_summariser, document_summariser -- are
@@ -231,6 +231,11 @@ their summaries and relevance scores alone do not support factual claims.
 The corpus is scoped to this run's personal or project namespace and explicitly shared sources.
 Use information_read to inspect retained revisions, processing readiness and exact evidence.
 A permission refusal or incomplete index is not proof that no source exists.
+Use `information_write` when the user requests source acquisition, recorded evidence
+or a retained report. Check extraction readiness with `information_read` before
+using an acquired source. Keep inherited input restrictions and cite actual evidence.
+Acquiring new sources does not authorize replacing a question about the existing corpus
+with an answer from elsewhere.
 
 Work in this order:
 

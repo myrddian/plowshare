@@ -171,3 +171,36 @@ test('a zero receipt never marks the displayed item read', async t => {
   assert.deepEqual(f.state.activity.inbox.read, []); assert.equal(f.state.activity.inbox.unread, 1);
   assert.equal(f.calls.filter(ask => ask.type === 'inbox.read').length, 1);
 });
+
+test('asking runs load questions without opening Activity, with at most four status reads', async () => {
+  const f = fixture(); let active = 0, peak = 0;
+  const asking = Array.from({ length: 7 }, (_, i) => run(`question-${i}`, 'asking'));
+  f.respond(async ask => {
+    if (ask.type === 'inbox.list') return { code: 'OK', payload: { items: [], unread: 0 } };
+    if (ask.type === 'orchestration.list') return { code: 'OK', payload: { orchestrations: asking } };
+    const id = (ask.payload as { id: string }).id;
+    active++; peak = Math.max(peak, active); await tick(); active--;
+    return { code: 'OK', payload: statusWire(id) };
+  });
+  await f.client.refresh();
+  assert.equal(f.state.activity.view, undefined); assert.equal(Object.keys(f.state.activity.details).length, 7);
+  assert.equal(peak, 4); assert.equal(f.calls.filter(ask => ask.type === 'orchestration.status').length, 7);
+  assert.equal(f.state.activity.details['question-0'].wire?.messages[0].text, 'Which sources?');
+  assert.equal(f.calls.some(ask => ask.type === 'orchestration.answer'), false);
+});
+test('question read failures retain loaded questions and account switches discard late reads', async () => {
+  const f = fixture(); let fail = false;
+  f.respond(ask => ask.type === 'inbox.list' ? { code: 'OK', payload: { items: [], unread: 0 } }
+    : ask.type === 'orchestration.list' ? { code: 'OK', payload: { orchestrations: [run('question', 'asking')] } }
+    : fail ? { code: 'BAD_REQUEST', said: 'Status unavailable' } : { code: 'OK', payload: statusWire('question') });
+  await f.client.refresh(); fail = true; await f.client.refresh();
+  assert.equal(f.state.activity.details.question.wire?.messages[0].text, 'Which sources?');
+  assert.match(f.state.activity.details.question.error!, /Status unavailable/);
+  let release!: (reply: Outcome) => void;
+  f.respond(ask => ask.type === 'inbox.list' ? { code: 'OK', payload: { items: [], unread: 0 } }
+    : ask.type === 'orchestration.list' ? { code: 'OK', payload: { orchestrations: [run('question', 'asking')] } }
+    : new Promise(resolve => { release = resolve; }));
+  const refreshing = f.client.refresh(); await tick(); f.replace();
+  release({ code: 'OK', payload: statusWire('question') }); await refreshing;
+  assert.deepEqual(f.state.activity.details, {});
+});

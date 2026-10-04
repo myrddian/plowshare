@@ -15,11 +15,18 @@ import java.util.Objects;
  *     full and the line is not all of it — a question, an answer, a stall, a run's or a phase's
  *     ending (V64) — or {@code null}
  */
-public record RecordRow(int ordinal, Instant at, String run, String actor, RecordKind kind,
-        String text, String detail, String body) {
+public record RecordRow(
+    int ordinal,
+    Instant at,
+    String run,
+    String actor,
+    RecordKind kind,
+    String text,
+    String detail,
+    String body) {
 
-    public RecordRow {
-        Objects.requireNonNull(kind, "kind");
-        Objects.requireNonNull(text, "text");
-    }
+  public RecordRow {
+    Objects.requireNonNull(kind, "kind");
+    Objects.requireNonNull(text, "text");
+  }
 }

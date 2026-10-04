@@ -11,7 +11,7 @@ import java.util.Objects;
  */
 public record StageStart(StageShown stage, Boolean returning, Integer returnsLeft) {
 
-    public StageStart {
-        Objects.requireNonNull(stage, "stage");
-    }
+  public StageStart {
+    Objects.requireNonNull(stage, "stage");
+  }
 }

@@ -18,24 +18,25 @@ import java.util.Objects;
  */
 public final class EventFireHandler implements FrameHandler {
 
-    record Body(String event, Map<String, Object> data) {}
+  record Body(String event, Map<String, Object> data) {}
 
-    private final Intake intake;
-    private final FiringStore firings;
+  private final Intake intake;
+  private final FiringStore firings;
 
-    public EventFireHandler(Intake intake, FiringStore firings) {
-        this.intake = Objects.requireNonNull(intake, "intake");
-        this.firings = Objects.requireNonNull(firings, "firings");
-    }
+  public EventFireHandler(Intake intake, FiringStore firings) {
+    this.intake = Objects.requireNonNull(intake, "intake");
+    this.firings = Objects.requireNonNull(firings, "firings");
+  }
 
-    @Override
-    public Outcome handle(Map<String, Object> payload, Asking asking) {
-        asking.requireHandle(FrameTypes.EVENT_FIRE);
-        String event = Payloads.required(payload, "event", FrameTypes.EVENT_FIRE,
-                "the event name triggers listen for");
-        Body body = Payloads.as(payload, Body.class, FrameTypes.EVENT_FIRE);
-        List<FiringRecord> created = intake.emit(event, body.data() == null ? Map.of() : body.data());
-        // Re-read: emit answers each firing as it arrived, before dispatch moved it.
-        return Outcome.ok(created.stream().map(f -> firings.find(f.id()).orElse(f)).toList());
-    }
+  @Override
+  public Outcome handle(Map<String, Object> payload, Asking asking) {
+    asking.requireHandle(FrameTypes.EVENT_FIRE);
+    String event =
+        Payloads.required(
+            payload, "event", FrameTypes.EVENT_FIRE, "the event name triggers listen for");
+    Body body = Payloads.as(payload, Body.class, FrameTypes.EVENT_FIRE);
+    List<FiringRecord> created = intake.emit(event, body.data() == null ? Map.of() : body.data());
+    // Re-read: emit answers each firing as it arrived, before dispatch moved it.
+    return Outcome.ok(created.stream().map(f -> firings.find(f.id()).orElse(f)).toList());
+  }
 }

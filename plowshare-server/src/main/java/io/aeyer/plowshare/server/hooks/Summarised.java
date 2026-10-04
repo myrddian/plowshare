@@ -15,7 +15,7 @@ import java.util.Objects;
  */
 public record Summarised(int through, int entries, int estimatedTokens, String summary) {
 
-    public Summarised {
-        Objects.requireNonNull(summary, "summary");
-    }
+  public Summarised {
+    Objects.requireNonNull(summary, "summary");
+  }
 }

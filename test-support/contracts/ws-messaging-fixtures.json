@@ -1,0 +1,173 @@
+{
+  "message.instance": {
+    "code": "OK",
+    "payload": {
+      "id": "ins_reviewer",
+      "project": "p",
+      "agent": "reviewer",
+      "conversation": "cnv_reviewer",
+      "lifetime": "persistent",
+      "defaultInstance": true,
+      "active": true,
+      "archived": false,
+      "state": "awaiting",
+      "pending": 1,
+      "job": null,
+      "createdAt": "2026-10-03T00:00:00Z"
+    }
+  },
+  "message.instance.open": {
+    "code": "OK",
+    "payload": {
+      "id": "ins_reviewer",
+      "project": "p",
+      "agent": "reviewer",
+      "conversation": "cnv_reviewer",
+      "lifetime": "persistent",
+      "defaultInstance": true,
+      "active": true,
+      "archived": false,
+      "state": "awaiting",
+      "pending": 1,
+      "job": null,
+      "createdAt": "2026-10-03T00:00:00Z"
+    }
+  },
+  "message.instance.default": {
+    "code": "OK",
+    "payload": {
+      "id": "ins_reviewer",
+      "project": "p",
+      "agent": "reviewer",
+      "conversation": "cnv_reviewer",
+      "lifetime": "persistent",
+      "defaultInstance": true,
+      "active": true,
+      "archived": false,
+      "state": "awaiting",
+      "pending": 1,
+      "job": null,
+      "createdAt": "2026-10-03T00:00:00Z"
+    }
+  },
+  "message.instance.stop": {
+    "code": "OK",
+    "payload": {
+      "id": "ins_reviewer",
+      "project": "p",
+      "agent": "reviewer",
+      "conversation": "cnv_reviewer",
+      "lifetime": "persistent",
+      "defaultInstance": false,
+      "active": false,
+      "archived": false,
+      "state": "stopped",
+      "pending": 0,
+      "job": null,
+      "createdAt": "2026-10-03T00:00:00Z"
+    }
+  },
+  "message.instance.archive": {
+    "code": "OK",
+    "payload": {
+      "id": "ins_reviewer",
+      "project": "p",
+      "agent": "reviewer",
+      "conversation": "cnv_reviewer",
+      "lifetime": "persistent",
+      "defaultInstance": false,
+      "active": false,
+      "archived": true,
+      "state": "archived",
+      "pending": 0,
+      "job": null,
+      "createdAt": "2026-10-03T00:00:00Z"
+    }
+  },
+  "message.instances": {
+    "code": "OK",
+    "payload": {
+      "instances": [
+        {
+          "id": "ins_reviewer",
+          "project": "p",
+          "agent": "reviewer",
+          "conversation": "cnv_reviewer",
+          "lifetime": "persistent",
+          "defaultInstance": true,
+          "active": true,
+          "archived": false,
+          "state": "awaiting",
+          "pending": 1,
+          "job": null,
+          "createdAt": "2026-10-03T00:00:00Z"
+        }
+      ],
+      "more": false,
+      "offset": 0
+    }
+  },
+  "message.deliveries": {
+    "code": "OK",
+    "payload": {
+      "deliveries": [
+        {
+          "message": "bdm_request",
+          "sender": "ins_sender",
+          "recipient": "ins_reviewer",
+          "replyTo": null,
+          "replyExpected": true,
+          "finalReply": false,
+          "generated": false,
+          "state": "awaiting",
+          "ending": null,
+          "reply": null,
+          "job": null,
+          "deadlineAt": "2026-10-03T01:00:00Z",
+          "postedAt": "2026-10-03T00:00:00Z",
+          "body": "Please review this."
+        }
+      ],
+      "more": false,
+      "offset": 0
+    }
+  },
+  "message.delivery": {
+    "code": "OK",
+    "payload": {
+      "message": "bdm_request",
+      "sender": "ins_sender",
+      "recipient": "ins_reviewer",
+      "replyTo": null,
+      "replyExpected": true,
+      "finalReply": false,
+      "generated": false,
+      "state": "awaiting",
+      "ending": null,
+      "reply": null,
+      "job": null,
+      "deadlineAt": "2026-10-03T01:00:00Z",
+      "postedAt": "2026-10-03T00:00:00Z",
+      "body": "Please review this."
+    }
+  },
+  "message.cancel": {
+    "code": "OK",
+    "payload": {
+      "message": "bdm_request",
+      "sender": "ins_sender",
+      "recipient": "ins_reviewer",
+      "replyTo": null,
+      "replyExpected": true,
+      "finalReply": false,
+      "generated": false,
+      "state": "cancelled",
+      "ending": "CANCELLED",
+      "reply": "bdm_final",
+      "job": null,
+      "deadlineAt": "2026-10-03T01:00:00Z",
+      "postedAt": "2026-10-03T00:00:00Z",
+      "body": "Please review this."
+    }
+  }
+}

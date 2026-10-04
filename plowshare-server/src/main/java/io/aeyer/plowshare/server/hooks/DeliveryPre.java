@@ -9,15 +9,15 @@ import java.util.List;
  */
 public record DeliveryPre(List<String> notes, List<HookRecord> records) {
 
-    public static final DeliveryPre NOTHING = new DeliveryPre(List.of(), List.of());
+  public static final DeliveryPre NOTHING = new DeliveryPre(List.of(), List.of());
 
-    public DeliveryPre {
-        notes = List.copyOf(notes);
-        records = List.copyOf(records);
-    }
+  public DeliveryPre {
+    notes = List.copyOf(notes);
+    records = List.copyOf(records);
+  }
 
-    /** The text as it is to be delivered: the original, then each note after a blank line. */
-    public String applyTo(String text) {
-        return notes.isEmpty() ? text : text + "\n\n" + String.join("\n\n", notes);
-    }
+  /** The text as it is to be delivered: the original, then each note after a blank line. */
+  public String applyTo(String text) {
+    return notes.isEmpty() ? text : text + "\n\n" + String.join("\n\n", notes);
+  }
 }

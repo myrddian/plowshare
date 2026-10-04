@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.agents.Scheduling;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * The turn loop's {@link Scheduling}, answered by a {@link SwarmScheduler}. Which runs are
@@ -13,51 +14,65 @@ import java.util.function.Function;
  */
 public final class SwarmScheduling implements Scheduling {
 
-    private final SwarmScheduler scheduler;
-    private final SwarmScheduler.Pools pools;
-    private final Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf;
+  private final SwarmScheduler scheduler;
+  private final SwarmScheduler.Pools pools;
+  private final Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf;
+  private final Predicate<RunExtras.Context> ordinaryModels;
 
-    public SwarmScheduling(
-            SwarmScheduler scheduler,
-            Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf) {
-        this(scheduler, shareOf, null);
+  public SwarmScheduling(
+      SwarmScheduler scheduler,
+      Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf) {
+    this(scheduler, shareOf, null);
+  }
+
+  public SwarmScheduling(
+      SwarmScheduler scheduler,
+      Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf,
+      SwarmScheduler.Pools pools) {
+    this(scheduler, shareOf, pools, context -> false);
+  }
+
+  /** Messaging participants may also use ordinary models for fallbacks and delegates. */
+  public SwarmScheduling(
+      SwarmScheduler scheduler,
+      Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf,
+      SwarmScheduler.Pools pools,
+      Predicate<RunExtras.Context> ordinaryModels) {
+    this.ordinaryModels = Objects.requireNonNull(ordinaryModels, "ordinaryModels");
+    this.pools = pools;
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.shareOf = Objects.requireNonNull(shareOf, "shareOf");
+  }
+
+  @Override
+  public Turn forRun(RunExtras.Context context) {
+    Optional<SwarmScheduler.Share> share = shareOf.apply(context);
+    if (share.isEmpty()) {
+      return Turn.ALWAYS;
     }
-
-    public SwarmScheduling(SwarmScheduler scheduler,
-            Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf,
-            SwarmScheduler.Pools pools) {
-        this.pools = pools;
-        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-        this.shareOf = Objects.requireNonNull(shareOf, "shareOf");
-    }
-
-    @Override
-    public Turn forRun(RunExtras.Context context) {
-        Optional<SwarmScheduler.Share> share = shareOf.apply(context);
-        if (share.isEmpty()) {
-            return Turn.ALWAYS;
+    SwarmScheduler.Turns turns = scheduler.enter(share.get());
+    boolean ordinary = ordinaryModels.test(context);
+    return (specifier, cancelled) -> {
+      if (pools != null && pools.serving(specifier).isEmpty()) {
+        if (ordinary) return Slot.ANY;
+        throw new IllegalStateException(
+            "no pool with swarm slots serves delegated model '" + specifier + "'");
+      }
+      SwarmScheduler.Grant grant = turns.await(specifier, cancelled);
+      if (grant == null) {
+        return null;
+      }
+      return new Slot() {
+        @Override
+        public String pool() {
+          return grant.pool();
         }
-        SwarmScheduler.Turns turns = scheduler.enter(share.get());
-        return (specifier, cancelled) -> {
-            if (pools != null && pools.serving(specifier).isEmpty()) {
-                throw new IllegalStateException("no pool with swarm slots serves delegated model '"
-                        + specifier + "'");
-            }
-            SwarmScheduler.Grant grant = turns.await(specifier, cancelled);
-            if (grant == null) {
-                return null;
-            }
-            return new Slot() {
-                @Override
-                public String pool() {
-                    return grant.pool();
-                }
 
-                @Override
-                public void release() {
-                    grant.release();
-                }
-            };
-        };
-    }
+        @Override
+        public void release() {
+          grant.release();
+        }
+      };
+    };
+  }
 }

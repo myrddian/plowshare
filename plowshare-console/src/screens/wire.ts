@@ -66,6 +66,7 @@ export const GLOBAL_TIER = 'global'
  *   rather than guessing.
  */
 export interface ProjectView {
+    readonly kind?: 'project' | 'personal'
     readonly name: string
     readonly workspace: string
     readonly lent: readonly string[] | null | undefined

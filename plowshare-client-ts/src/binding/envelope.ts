@@ -143,6 +143,7 @@ export function outcomeIn(payload: unknown): Outcome {
             `the server answered with a code this build does not know: ${String(code)}`)
     }
     const said = body['said']
+    if (said !== undefined && said !== null && typeof said !== 'string') throw new Error('a response carried an unreadable sentence')
     const carried = body['payload']
     return {
         code,

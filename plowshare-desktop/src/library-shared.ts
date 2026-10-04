@@ -1,15 +1,19 @@
+import type { InformationWindow } from 'plowshare-client-ts/operations/information-replies';
 import type { RetrievalReplies, DocumentDetailResponse, ChunkDetailResponse, MemoryRecord, CitationsResponse, DocumentStanceResponse } from 'plowshare-client-ts/operations/retrieval';
-export type LibraryView = 'documents' | 'memories' | 'search';
+export type LibraryView = 'sources' | 'documents' | 'memories' | 'search' | 'manual';
 export type SearchKind = 'conversation' | 'documents' | 'retrieve' | 'rank' | 'recall' | 'navigate';
 export interface Reading<T> { value?: T; loading?: boolean; stale?: boolean; error?: string }
 export interface LibraryState {
   view: LibraryView;
+  report?: { revision: string; sequence: number };
+  manual?: { chapter: string; sequence: number };
   project: string | null;
   selected?: 'document' | 'memory' | 'chunk';
   documents: Reading<RetrievalReplies['document.list']> & { query: string };
   memories: Reading<RetrievalReplies['memory.index']>;
   proposals: Reading<RetrievalReplies['proposal.list']>;
   document: Reading<DocumentDetailResponse> & { id?: string };
+  reader?: Reading<InformationWindow> & { id: string };
   chunk: Reading<ChunkDetailResponse> & { id?: string };
   memory: Reading<MemoryRecord> & { id?: string };
   citations: Reading<CitationsResponse>;

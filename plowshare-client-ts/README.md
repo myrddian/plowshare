@@ -1,4 +1,23 @@
-# Shared TypeScript client
+# Shared TypeScript client and SDK
+
+The public package root exports `Plowshare`, typed `Payloads`, `Reply`,
+`requirePayload`, `OPERATIONS` and `JobLifecycle`. Inject an already-open socket
+and, when needed, a platform deadline scheduler. For a ready-to-connect Node
+transport use [plowshare-client-node](../plowshare-client-node/README.md).
+
+```ts
+import { Plowshare, requirePayload } from 'plowshare-client-ts'
+const client = new Plowshare({ socket, session })
+const reply = await client.request('project.list', {})
+const projects = requirePayload(reply)
+```
+
+The SDK retains the entire raw envelope alongside the checked outcome. It exposes
+all registered operations through typed request payloads, with narrower
+convenience methods for runs, jobs, conversations and outgoing work. Build a local
+npm archive with `pnpm pack`; existing subpath exports remain available. See
+[the shared SDK contract](../docs/sdks.md) for packaging and verification.
+
 
 The shared core owns the neutral WebSocket connection, request envelopes,
 authentication/bootstrap interfaces, file-channel wire types and job identity
@@ -103,10 +122,10 @@ requests cancellation. The [headless CLI](../plowshare-cli/README.md) now consum
 this same catalog and parser, plus `operations/catalog` and
 `operations/commands` for 82 one-shot WS operations including administrative families and union reads.
 `Payloads` additionally includes ten operations for persistent observers/rooted
-filesystem adapters, covering all 129 registered WS request types. CLI `job watch`,
+filesystem adapters, covering the registered WS request types. CLI `job watch`,
 `--watch` and `conversation follow` now use two of these subscriptions through
 `operations/observation`, `operations/union` and the Node platform supply eight rooted sync mutations,
-bringing CLI coverage to all 129 registered WS operations. The shared helpers bound
+bringing CLI coverage to the registered WS operations. The shared helpers bound
 early progress and filter actual job/conversation identities; the frontend owns
 socket lifetime, output and durable status polling.
 `operations/administration` owns these payload shapes and named adapter boundaries. `parseCommand` preserves the narrower

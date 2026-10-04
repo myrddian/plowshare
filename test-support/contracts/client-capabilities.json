@@ -10,17 +10,27 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 142,
+    "registeredRequestFrames": 193,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 140,
-    "headlessCliOneShotFrames": 130,
+    "headlessCliRequestFrames": 184,
+    "headlessCliOneShotFrames": 174,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 142,
+    "typedRequestFrames": 193,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
     "typescriptMcpServerTools": 34
+  },
+  "javaSdk": {
+    "module": "plowshare-sdk",
+    "protocol": "plowshare-v1",
+    "transport": "persistent authenticated websocket",
+    "typedFacade": "plowshare-sdk/src/main/java/io/aeyer/plowshare/sdk/WsServerClient.java",
+    "rawSurface": "all registered request frames; complete outcome JSON retained",
+    "legacyEntryPoints": "Java CLI and MCP use the SDK; HttpServerClient is compatibility only",
+    "httpException": "multipart image upload; authentication and file presence are platform concerns",
+    "outboundA2a": "plowshare-a2a; A2A 1.0 JSON-RPC SendMessage/GetTask/CancelTask, configured peers, durable outbox"
   },
   "boundaries": {
     "authority": "Java server owns durable state, retrieval and execution",
@@ -1439,8 +1449,14 @@
           "information.upload",
           "information.acquire",
           "information.list",
+          "information.facets",
+          "information.tags",
+          "information.tags.groups",
           "information.status",
+          "information.await",
           "information.read",
+          "information.outline",
+          "information.symbols",
           "information.search",
           "information.rank",
           "information.ask",
@@ -1494,7 +1510,7 @@
       },
       "internalAgent": {
         "adapter": "registered-information_read-and-information_write",
-        "grant": "librarian read; research conductor read/write; root account and home pinned by server",
+        "grant": "Farnsworth, Aristoxenus, Daedalus, Interlocutor, Librarian and research conductor read/write; root account and home pinned by server",
         "reason": "external capability wrapper; internal runtime binds information_read and information_write with root authority"
       },
       "work": [
@@ -2028,6 +2044,361 @@
   ],
   "websocketInventory": [
     {
+      "frame": "admin.account.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.account.reset",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.account.update",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.accounts",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.audit",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.pricing.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/PricingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/pricing-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.pricing.set",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/PricingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/pricing-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.account.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.account.update",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.accounts",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.token.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.token.revoke",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.token.rotate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.service.tokens",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServiceAccountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.session.revoke",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.sessions",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/server-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "admin.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AdminFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "agent.curate",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AgentFrames.java",
       "typescriptBuilders": [
@@ -2040,7 +2411,8 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/client.ts",
-        "plowshare-desktop/src/operator.ts"
+        "plowshare-desktop/src/operator.ts",
+        "plowshare-desktop/src/renderer/operator.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -2086,7 +2458,9 @@
         }
       ],
       "desktopConsumer": true,
-      "desktopSourceReferences": [],
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -2233,6 +2607,63 @@
           "constant": "BOARD_MESSAGES"
         }
       ],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/board.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "board.open",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/BoardPostingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/board.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "board.post",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/BoardPostingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/board.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "board.retry",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/BoardPostingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/board.ts"
@@ -2390,6 +2821,25 @@
       "desktopSourceReferences": [
         "plowshare-desktop/src/client.ts",
         "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "conversation.context.snapshot",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ContextCountFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -2562,7 +3012,8 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/client.ts",
-        "plowshare-desktop/src/operator.ts"
+        "plowshare-desktop/src/operator.ts",
+        "plowshare-desktop/src/renderer/operator.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -2972,6 +3423,74 @@
       "legacyMcpTools": []
     },
     {
+      "frame": "incoming.cancel",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/IncomingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent inbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "incoming.catalog",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/IncomingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent inbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "incoming.receive",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/IncomingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent inbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "incoming.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/IncomingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent inbound adapter",
+      "legacyMcpTools": []
+    },
+    {
       "frame": "information.acquire",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
@@ -3030,6 +3549,25 @@
     },
     {
       "frame": "information.ask",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.await",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -3125,6 +3663,25 @@
     },
     {
       "frame": "information.exclude",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.facets",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -3295,6 +3852,25 @@
       ]
     },
     {
+      "frame": "information.outline",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
       "frame": "information.rank",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
@@ -3323,8 +3899,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/library.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -3505,6 +4083,63 @@
     },
     {
       "frame": "information.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.symbols",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.tags",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.tags.groups",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -3755,7 +4390,8 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/client.ts",
-        "plowshare-desktop/src/operator.ts"
+        "plowshare-desktop/src/operator.ts",
+        "plowshare-desktop/src/renderer/operator.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -3912,6 +4548,175 @@
       "legacyMcpTools": [
         "memory_write"
       ]
+    },
+    {
+      "frame": "message.cancel",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.deliveries",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.delivery",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instance",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instance.archive",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instance.default",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instance.open",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instance.stop",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.instances",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MessageFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/operator.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
     },
     {
       "frame": "orchestration.answer",
@@ -4116,8 +4921,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -4146,6 +4953,183 @@
       "desktopSourceReferences": [
         "plowshare-desktop/src/activity.ts",
         "plowshare-desktop/src/runs.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.advertise",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent outbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.cancel",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.claim",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent outbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.peers",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.report",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/administration.ts",
+          "function": "request (bound platform adapter)"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": false,
+      "typedPayload": true,
+      "headlessCliBoundary": "persistent outbound adapter",
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.send",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "outgoing.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/OutgoingFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "project.access",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProjectFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/project-access.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "project.attach",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ClientProjectFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "project.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServerProjectFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -4245,8 +5229,13 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/project-access.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -4262,8 +5251,34 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/project-access.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "project.member.role",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProjectFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "plowshare-client-ts/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/project-access.ts",
+        "plowshare-desktop/src/renderer/service-admin.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5398,18 +6413,25 @@
             "OrchestrationAnswered",
             "OrchestrationCancelled",
             "SettingView",
+            "BooleanSettingView",
             "CapsView",
             "ScheduleRecord",
             "ScheduleNames",
             "ScheduleProposal",
             "TriggerRecord",
-            "FiringRecord"
+            "FiringRecord",
+            "BoardOpened",
+            "BoardRetried",
+            "BoardPosted"
           ],
           "operations": [
             "approval.list",
             "approval.answer",
             "approval.revoke",
             "board.topup",
+            "board.open",
+            "board.retry",
+            "board.post",
             "buffer.purge",
             "retention.sweep",
             "provider.list",
@@ -5442,6 +6464,9 @@
           "wireDtos": [
             "ConversationView",
             "ProjectView",
+            "ProjectGrant",
+            "ProjectGrantChange",
+            "ProjectAccess",
             "ProjectMembers",
             "AgentView",
             "DefinedAgent",
@@ -5459,7 +6484,22 @@
             "Prefix",
             "ContextView",
             "ProjectionMessage",
-            "ProjectionView"
+            "ProjectionView",
+            "ServerAccount",
+            "AccountCredential",
+            "ServerSession",
+            "AdminAudit",
+            "AdminAuditPage",
+            "SessionsRevoked",
+            "ServiceAccount",
+            "ServiceScope",
+            "ServiceToken",
+            "ServiceCredential",
+            "PricingRates",
+            "PricingTier",
+            "PricingCard",
+            "PricingEntry",
+            "AdminStatus"
           ],
           "operations": [
             "conversation.open",
@@ -5474,13 +6514,34 @@
             "conversation.projection",
             "agent.list",
             "agent.define",
+            "admin.pricing.list",
+            "admin.pricing.set",
+            "admin.status",
+            "admin.accounts",
+            "admin.account.create",
+            "admin.account.update",
+            "admin.account.reset",
+            "admin.sessions",
+            "admin.session.revoke",
+            "admin.audit",
+            "admin.service.accounts",
+            "admin.service.account.create",
+            "admin.service.account.update",
+            "admin.service.tokens",
+            "admin.service.token.create",
+            "admin.service.token.rotate",
+            "admin.service.token.revoke",
             "project.list",
+            "project.attach",
+            "project.create",
             "project.define",
             "project.lend",
             "project.unlend",
             "project.workspace",
             "project.move",
             "project.forget",
+            "project.access",
+            "project.member.role",
             "project.member.add",
             "project.member.remove"
           ],
@@ -5519,21 +6580,37 @@
           "source": "plowshare-client-ts/src/operations/information-replies.ts",
           "wireDtos": [
             "InformationRow",
+            "InformationFacetValue",
+            "InformationFacetValues",
+            "InformationFacetMore",
+            "InformationTagEdge",
+            "InformationTagGraph",
+            "InformationFacetCounts",
             "InformationAdmission",
             "InformationTicket",
             "InformationQuestion",
             "InformationWindow",
+            "CodeSymbol",
+            "CodeOutline",
+            "CodeSymbolMatches",
             "InformationEvidence",
             "InformationEvents",
             "InformationMigrationInventory",
-            "InformationMigrationInspection"
+            "InformationMigrationInspection",
+            "InformationFence"
           ],
           "operations": [
+            "information.await",
             "information.upload",
             "information.acquire",
+            "information.facets",
+            "information.tags.groups",
+            "information.tags",
             "information.list",
             "information.status",
             "information.read",
+            "information.outline",
+            "information.symbols",
             "information.search",
             "information.rank",
             "information.ask",
@@ -5565,11 +6642,50 @@
             "information.acquisitions"
           ],
           "fixtures": "test-support/contracts/ws-information-fixtures.json"
+        },
+        "messaging": {
+          "source": "plowshare-client-ts/src/operations/messaging.ts",
+          "wireDtos": [
+            "MessageInstance",
+            "MessageDelivery",
+            "MessagingPayloads",
+            "MessageInstances",
+            "MessageDeliveries"
+          ],
+          "operations": [
+            "message.instances",
+            "message.instance",
+            "message.instance.open",
+            "message.instance.default",
+            "message.instance.stop",
+            "message.instance.archive",
+            "message.deliveries",
+            "message.delivery",
+            "message.cancel"
+          ],
+          "fixtures": "test-support/contracts/ws-messaging-fixtures.json"
         }
       },
       "oneShotContracts": {
         "source": "plowshare-client-ts/src/operations/replies.ts",
         "operations": [
+          "admin.account.create",
+          "admin.account.reset",
+          "admin.account.update",
+          "admin.accounts",
+          "admin.audit",
+          "admin.pricing.list",
+          "admin.pricing.set",
+          "admin.service.account.create",
+          "admin.service.account.update",
+          "admin.service.accounts",
+          "admin.service.token.create",
+          "admin.service.token.revoke",
+          "admin.service.token.rotate",
+          "admin.service.tokens",
+          "admin.session.revoke",
+          "admin.sessions",
+          "admin.status",
           "agent.curate",
           "agent.define",
           "agent.list",
@@ -5578,6 +6694,9 @@
           "approval.list",
           "approval.revoke",
           "board.messages",
+          "board.open",
+          "board.post",
+          "board.retry",
           "board.topics",
           "board.topup",
           "buffer.purge",
@@ -5585,6 +6704,7 @@
           "conversation.compactions",
           "conversation.context",
           "conversation.context.count",
+          "conversation.context.snapshot",
           "conversation.latest",
           "conversation.lifecycle",
           "conversation.list",
@@ -5611,11 +6731,13 @@
           "information.acquisitions",
           "information.allowance",
           "information.ask",
+          "information.await",
           "information.delete",
           "information.events",
           "information.evidence.read",
           "information.evidence.record",
           "information.exclude",
+          "information.facets",
           "information.finalise",
           "information.inventory",
           "information.link",
@@ -5624,6 +6746,7 @@
           "information.migration.inspect",
           "information.migration.list",
           "information.migration.release",
+          "information.outline",
           "information.rank",
           "information.read",
           "information.rebuild",
@@ -5636,6 +6759,9 @@
           "information.search",
           "information.share",
           "information.status",
+          "information.symbols",
+          "information.tags",
+          "information.tags.groups",
           "information.unexclude",
           "information.unlink",
           "information.unshare",
@@ -5653,6 +6779,15 @@
           "memory.recall",
           "memory.reembed",
           "memory.write",
+          "message.cancel",
+          "message.deliveries",
+          "message.delivery",
+          "message.instance",
+          "message.instance.archive",
+          "message.instance.default",
+          "message.instance.open",
+          "message.instance.stop",
+          "message.instances",
           "orchestration.answer",
           "orchestration.cancel",
           "orchestration.caps",
@@ -5662,12 +6797,20 @@
           "orchestration.record",
           "orchestration.start",
           "orchestration.status",
+          "outgoing.cancel",
+          "outgoing.peers",
+          "outgoing.send",
+          "outgoing.status",
+          "project.access",
+          "project.attach",
+          "project.create",
           "project.define",
           "project.forget",
           "project.lend",
           "project.list",
           "project.member.add",
           "project.member.remove",
+          "project.member.role",
           "project.move",
           "project.unlend",
           "project.workspace",
@@ -5701,7 +6844,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 130,
+        "count": 174,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -5713,10 +6856,17 @@
     ],
     "operations": {
       "source": "plowshare-client-ts/src/operations",
-      "status": "48 existing request builders extracted; 142 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 193 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "140 WS operations: 130 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits",
+      "headlessCli": "184 WS operations: 174 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
+        "incoming.catalog": "persistent inbound adapter",
+        "incoming.receive": "persistent inbound adapter",
+        "incoming.status": "persistent inbound adapter",
+        "incoming.cancel": "persistent inbound adapter",
+        "outgoing.advertise": "persistent outbound adapter",
+        "outgoing.claim": "persistent outbound adapter",
+        "outgoing.report": "persistent outbound adapter",
         "usage.subscribe": "usage-view-snapshot-subscription",
         "usage.unsubscribe": "usage-view-snapshot-subscription",
         "job.stream": "persistent-observer",
@@ -5800,9 +6950,10 @@
     ],
     "composition": "one DesktopClient per project with independent event/file session and existing job lifecycle; account client for global conversations and Inbox/Runs/Board; aggregate display and route requests/follows by owner",
     "authentication": "single account token owner; serialize refresh/ticket/channel opens; retain rotation even on socket-open failure; no extra password sign-ins",
+    "botIdentity": "optional authored display-name and resolved definition origin; desktop consolidates identity, resolved grants, timestamped offered tools, withheld permissions and local folder state",
     "definitionRefresh": "WS agent.list re-reads the asking caller's rooted-session definitions via DefinitionResolver.refreshForCaller; preserves other sessions and sessionless cache entries; server directory stamps alone cannot detect client edits",
     "configuration": "~/.config/plowshare/desktop-projects.json; XDG_CONFIG_HOME supported; server/account/project/path/machine/enabled mappings, atomic 0600 writes, no credentials; corrupt config reported and preserved",
-    "restoration": "enabled local mappings after login; paused projects remain paused; missing/moved/other-machine paths remain unavailable; project selection or explicit action recovers canonical same-machine server paths when no local mapping exists; same-session bot discovery after attachment; Refresh reloads rosters; saved mappings survive server project-list refusal; quit waits for in-flight authentication",
+    "restoration": "enabled local mappings after login; paused projects remain paused; missing/moved/other-machine paths remain unavailable; project selection attaches only approved enabled local mappings; explicit folder approval recovers canonical same-machine server paths when no local mapping exists; same-session bot discovery after attachment; Refresh reloads rosters; saved mappings survive server project-list refusal; quit waits for in-flight authentication",
     "tests": [
       "plowshare-desktop/src/workspace.test.ts",
       "plowshare-desktop/src/project-config.test.ts",
@@ -5843,8 +6994,14 @@
       "information.upload",
       "information.acquire",
       "information.list",
+      "information.facets",
+      "information.tags",
+      "information.tags.groups",
       "information.status",
+      "information.await",
       "information.read",
+      "information.outline",
+      "information.symbols",
       "information.search",
       "information.rank",
       "information.ask",
@@ -5875,6 +7032,8 @@
       "information.inventory",
       "information.acquisitions"
     ],
+    "reports": "run-unique resource names, research-question display titles after extraction, feedback revisions preserve identity; Runs opens the exact retained main report revision in its project scope without finalising",
+    "handoffTest": "plowshare-desktop/scripts/report-handoff-smoke.mjs",
     "desktop": "plowshare-desktop/src/renderer/information.ts",
     "console": "plowshare-console/src/screens/information.ts",
     "tests": "real authenticated WebSocket, PostgreSQL lifecycle, adapter and native Electron fixtures; no live research quality claim"
@@ -6034,10 +7193,11 @@
         ],
         "sources": [
           "plowshare-tui/src/logic/caps.ts",
-          "plowshare-tui/src/view/main.ts"
+          "plowshare-tui/src/view/main.ts",
+          "plowshare-client-node/src/settings.ts"
         ],
-        "existingTui": "local .plowshare/environment.yml changes before continuation answer, then effective settings read/applied; failed write sends no answer",
-        "desktopStatus": "implemented; reviewed local environment.yml change then orchestration.caps reload, preserving saved/unconfirmed status on failure"
+        "existingTui": "local project JSON or legacy environment.yml changes before continuation answer, then effective settings read/applied; failed write sends no answer",
+        "desktopStatus": "implemented; reviewed local project settings change then orchestration.caps reload, preserving saved/unconfirmed status on failure"
       },
       {
         "id": "scheduled-event-work",

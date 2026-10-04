@@ -1187,7 +1187,9 @@ describe('/help, which is the first thing anybody types and was refused', () => 
             expect(said).toContain(command)
         }
         expect(COMMANDS).toContain(HELP_COMMAND)
-        expect(COMMANDS).toHaveLength(35)
+        expect(COMMANDS).toContain('/commands')
+        expect(COMMANDS).toContain('/skills')
+        expect(COMMANDS).toHaveLength(39)
     })
 
     it('says what a line that is not a command is', () => {
@@ -1682,7 +1684,7 @@ describe('what is said about where a person is', () => {
 
     it('names the global tier when there is no project', () => {
         expect(describeMovedTo(undefined, 'aristoxenus', false))
-            .toBe('now in the global tier, talking to aristoxenus')
+            .toBe('now in global resources, talking to aristoxenus')
         expect(describeMovedTo('ledger', 'sophron', true)).toContain('a different bot')
     })
 
@@ -1991,7 +1993,7 @@ describe('conversation.context, which is how full a conversation is', () => {
             },
         })
 
-        expect(load).toEqual({ sent: 16_234, limit: 120_000, model: 'coder' })
+        expect(load).toEqual({ sent: 16_234, sentAtTurn: 4, limit: 120_000, model: 'coder' })
     })
 
     it('says nothing it was not told: no turn measured, no prefix, an old server', () => {
@@ -3174,5 +3176,48 @@ describe('first-class orchestration authoring command', () => {
         expect(typed('/design-orchestration --revise source_review')).toEqual({ kind: 'usage', command: '/design-orchestration' })
         expect(typed('/design-orchestrationx hello').kind).toBe('unknown')
         expect(COMMANDS).toContain('/design-orchestration')
+    })
+})
+
+describe('persistent message commands', () => {
+    it('binds project listings and keeps instance addresses in their own scope', () => {
+        expect(typed('/message instances', 'payments')).toEqual({ kind:'messaging', command:{type:'message.instances',payload:{project:'payments'}} })
+        expect(typed('/message stop ins_one', 'payments')).toEqual({ kind:'messaging', command:{type:'message.instance.stop',payload:{instance:'ins_one'}} })
+        expect(typed('/message cancel bdm_one', 'payments')).toEqual({ kind:'messaging', command:{type:'message.cancel',payload:{message:'bdm_one'}} })
+        expect(typed('/message open {"agent":"reviewer"}', 'payments').kind).toBe('retrieval-error')
+        expect(typed('/message deliveries {"instance":"ins_one","limit":50}', 'payments')).toMatchObject({kind:'messaging',command:{type:'message.deliveries'}})
+    })
+})
+
+
+describe('server project management commands', () => {
+    it('routes creation and role inspection while preserving project navigation', async () => {
+        const { serverCommand } = await import('./session.ts')
+        expect(serverCommand('/project create {"name":"HA","workspace":"/srv/ha","type":"DISJOINT","writePaths":["generated","reports"]}')).toMatchObject({kind:'request',request:{type:'project.create',payload:{name:'HA',type:'DISJOINT',writePaths:['generated','reports']}}})
+        expect(serverCommand('/admin account update {"handle":"sam","enabled":false}')).toMatchObject({kind:'request',request:{type:'admin.account.update',payload:{handle:'sam',enabled:false}}})
+        expect(serverCommand('/admin session revoke {"handle":"sam"}')).toMatchObject({kind:'request',request:{type:'admin.session.revoke'}})
+        expect(serverCommand('/admin pricing list','HA')).toMatchObject({kind:'request',request:{type:'admin.pricing.list',payload:{}}})
+        expect(serverCommand('/admin pricing set {"billingRoute":"hosted","model":"deployment","expectedVersion":"boot:","mode":"TOKEN","currency":"USD","rates":{"input":"0.40","output":"1.60"}}','HA')).toMatchObject({kind:'request',request:{type:'admin.pricing.set',payload:{billingRoute:'hosted',rates:{input:'0.40',output:'1.60'}}}})
+        expect(serverCommand('/admin status')).toMatchObject({kind:'request',request:{type:'admin.status'}})
+        expect(serverCommand('/project member-add {"project":"HA","handle":"operator"}')).toMatchObject({kind:'request',request:{type:'project.member.add'}})
+        expect(serverCommand('/project HA')).toEqual({kind:'unhandled'})
+        expect(typed('/project HA')).toEqual({kind:'project',name:'HA'})
+        expect(serverCommand('/project create {"name":"HA","type":"DISJOINT"}').kind).toBe('usage')
+        expect(serverCommand('/project create {"name":"HA","writePaths":["../outside"]}').kind).toBe('usage')
+    })
+})
+
+it('sets the project automatic execution override with an explicit on or off', () => {
+    expect(typed('/cap auto-increase on')).toEqual({kind:'capSet',key:'auto-increase',value:1})
+    expect(typed('/cap auto-increase off')).toEqual({kind:'capSet',key:'auto-increase',value:0})
+    expect(typed('/cap auto-increase yes')).toEqual({kind:'usage',command:CAP_COMMAND})
+})
+
+
+describe('project access commands', () => {
+    it('uses current project and preserves role assignments on the socket', async () => {
+        const { serverCommand } = await import('./session.ts')
+        expect(serverCommand('/project access', 'HA')).toMatchObject({kind:'request',request:{type:'project.access',payload:{project:'HA'}}})
+        expect(serverCommand('/project member-role {"handle":"user","role":"VIEWER"}', 'HA')).toMatchObject({kind:'request',request:{type:'project.member.role',payload:{project:'HA',handle:'user',role:'VIEWER'}}})
     })
 })

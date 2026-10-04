@@ -1,0 +1,15 @@
+skills:
+  personal-capture:
+    agentVisible: true
+  personal-process-inbox:
+    agentVisible: true
+  personal-recall:
+    agentVisible: true
+  personal-plan:
+    agentVisible: true
+  personal-express:
+    agentVisible: true
+  personal-review:
+    agentVisible: true
+  personal-maintain-knowledge:
+    agentVisible: true

@@ -1,14 +1,16 @@
 import { UsageClient, runUsage } from '../logic/usage.ts'
+import { serverCommand } from '../logic/session.ts'
 import { listingConversations } from 'plowshare-client-ts/operations/session'
 import { AUTHORING, authoringReady, authoringRequest } from 'plowshare-client-ts/operations/authoring'
 import { InformationClient } from '../logic/information.ts'
+import { personalDirectory } from 'plowshare-client-node/personal'
 import { Credentials, credentialDirectory } from 'plowshare-client-node/credentials'
 import { inspectBoard } from './board.ts'
 import { retrieve, describeRetrieval } from '../logic/retrieval.ts'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { isSea } from 'node:sea'
@@ -71,7 +73,7 @@ import {
     describeAlways, describeAlwaysNeedsAProject, describeCaps, describeCapSet, describeCapNeedsAProject,
     describeCapOutOfRange,
     describeCost, describeCut, describeDrop, describeEnding,
-    describeFailure, describeHarness, describeHelp, describeSettled,
+    describeFailure, describeHarness, describeHelp, describeCommandCatalog, describeSettled,
     describeInbox, describeLeaving, describeNew, describeNoTrajectory, describeNothingRunning, describeTrajectoryUnreadable,
     describeProgress, describeProjects,
     describeSeam, describeSilence, describeSpokenIn, describeUnknownCommand,
@@ -102,11 +104,12 @@ import type { Block } from '../logic/markdown.ts'
 import { appended, entered, phaseAfter, traced } from '../logic/screen.ts'
 import type { Live, Moved, Phase } from '../logic/screen.ts'
 import type { Voice } from '../logic/screen.ts'
-import { DEFINITIONS_DIRECTORY, ENVIRONMENT_FILE, enforcing } from './files/enforcer.ts'
-import { ASK, capRange, OPEN, Unreadable, withCaps, withLocalMode } from 'plowshare-client-ts/binding/environment'
+import { enforcing } from './files/enforcer.ts'
+import { ASK, capRange, OPEN } from 'plowshare-client-ts/binding/environment'
+import { readCapsFile, saveCapsFile, localModePreview, saveSettingsFile } from 'plowshare-client-node/settings'
 import { alwaysAutoContinue, capsOf, DIALOG_KEYS, dialogKeyOfLine, pickingAbout, pickingOn, readingCaps } from '../logic/caps.ts'
 import type { DialogKey, DialogOption, Picking } from '../logic/caps.ts'
-import { discover, mark, markedName, namedAfter, thisMachine, within } from './files/marker.ts'
+import { discover, resolveMarked, clientProject, mark, markedName, namedAfter, thisMachine, within } from './files/marker.ts'
 import { rooter, sameClaim } from './files/rooter.ts'
 import { plain } from './plain.ts'
 import { terminal } from './terminal/mounting.ts'
@@ -869,6 +872,10 @@ export async function converse(talking: Talking): Promise<void> {
 
     let session = talking.credentials === undefined ? await signIn(talking.door, talking.handle, talking.password)
         : talking.password ? await talking.credentials.login(talking.door, talking.handle, talking.password) : await talking.credentials.session()
+    if (session.setupRequired) {
+        show('trouble', 'Finish first-run setup with plowshare-cli setup --url ' + talking.door.base + ', then reconnect with your administrator account or the saved session.')
+        return
+    }
     if (session.mustChangePassword) {
         // THE FLAG USED TO END THE SESSION HERE, WHICH MADE THIS CLIENT
         // UNUSABLE ON A FRESH SERVER.
@@ -3459,12 +3466,11 @@ export async function converse(talking: Talking): Promise<void> {
         // roster sign-in already has rather than asking for one of its own: Tab
         // is pressed at typing speed, and a completer that made a round trip
         // would stall a prompt mid-word for a reason nothing on screen
-        // explains. The cost is that a definition arriving under a running
-        // client is not completable until the next one — which is the right way
-        // round, since everything offered is then a name this server really
-        // declared, and `/bots` re-asks for anybody who needs the fresh list.
+        // explains. `/commands` and `/skills` refresh this catalog explicitly;
+        // until then, completion uses only names the server has declared.
         surface.completing(completable(rows), Object.fromEntries(
-            rows.filter((row) => row.served).map((row) => [row.name, row.description])))
+            rows.filter((row) => row.served).map((row) => [row.name, row.description])),
+            (chosen.agent.commands ?? []).map(command => ({ name: command.command, detail: `${command.description} · ${command.mode ?? (command.kind === 'skill' ? 'specify --mode=INHERITED|SUMMARISED|NEW|DIRECT' : 'orchestration')} · ${command.executor}` })))
         if (!starting) {
             const changed = place !== undefined && place.who.name !== chosen.agent.name
             show('client', describeMovedTo(target.project, chosen.agent.name, changed))
@@ -3524,6 +3530,7 @@ export async function converse(talking: Talking): Promise<void> {
      * as trouble lines and conflicts on the status line.
      */
     const syncing = async (claim: Claim): Promise<void> => {
+        if (clientProject(claim.project)) { await unsyncing(); return }
         await unsyncing()
         const made: Syncer = syncer({
             claim,
@@ -3579,6 +3586,7 @@ export async function converse(talking: Talking): Promise<void> {
     }
     /** `/sync …`: only a project rooted on this machine has a syncer to ask. */
     const syncRun = async (action: SyncAction): Promise<void> => {
+        if (place?.project && clientProject(place.project)) { show('trouble', 'Client-only DISJOINT projects cannot be synced or exported'); return }
         if (sync === undefined) {
             show('trouble', 'sync needs a project rooted on this machine — /here roots this directory')
             return
@@ -3587,8 +3595,8 @@ export async function converse(talking: Talking): Promise<void> {
     }
 
     /**
-     * `/always`: set the rooted project's `local: mode:` to `open`, or with `off` to `ask`, in
-     * its own `.plowshare/environment.yml` — the file both the server and this client read on
+     * `/always`: set the rooted project's local command mode to `open`, or with `off` to `ask`, in
+     * its JSON manifest or legacy `.plowshare/environment.yml` — both server and client read it on
      * every run, so the setting stays in the one place anyone would look for it.
      *
      * <p><b>Turned on, it also allows what was already waiting</b> — once, each local approval
@@ -3601,29 +3609,15 @@ export async function converse(talking: Talking): Promise<void> {
             show('client', describeAlwaysNeedsAProject())
             return
         }
-        const file = join(claim.root, DEFINITIONS_DIRECTORY, ENVIRONMENT_FILE)
-        let before: string | undefined
+        let file: string
         try {
-            before = await readFile(file, 'utf8')
+            const before = await readCapsFile(claim.root)
+            file = before.file
+            await saveSettingsFile(claim.root, before, localModePreview(before, on ? OPEN : ASK))
         } catch (trouble) {
-            if ((trouble as NodeJS.ErrnoException).code !== 'ENOENT') {
-                show('trouble', `${file} could not be read (${String(trouble)}), so it was left as it is`)
-                return
-            }
-        }
-        let written: string
-        try {
-            written = withLocalMode(before, on ? OPEN : ASK)
-        } catch (trouble) {
-            if (!(trouble instanceof Unreadable)) {
-                throw trouble
-            }
-            show('trouble', `${file} does not parse (${trouble.message}); fix it first —`
-                + ' it was left as it is')
+            show('trouble', `Project command configuration could not be updated (${String(trouble)})`)
             return
         }
-        await mkdir(dirname(file), { recursive: true })
-        await writeFile(file, written)
         let allowed = 0
         if (on) {
             const mine = listingMyApprovals()
@@ -3658,8 +3652,8 @@ export async function converse(talking: Talking): Promise<void> {
     }
 
     /**
-     * `/cap steps|budget|auto|time|checks N` and `/always caps`: `caps:` in the rooted project's own
-     * `.plowshare/environment.yml`, as `/always` writes `local:` — then the server reads it again
+     * `/cap steps|budget|auto|time|checks N` and `/always caps`: caps in the rooted project's
+     * JSON manifest or legacy `.plowshare/environment.yml` — then the server reads it again
      * and applies it to the runs already going.
      *
      * @returns whether the file now says it — the dialog's `a` sends its `yes` only then
@@ -3677,34 +3671,13 @@ export async function converse(talking: Talking): Promise<void> {
             show('trouble', describeCapOutOfRange(key, value, least, most))
             return false
         }
-        const file = join(claim.root, DEFINITIONS_DIRECTORY, ENVIRONMENT_FILE)
-        let before: string | undefined
+        let file: string
         try {
-            before = await readFile(file, 'utf8')
+            const before = await readCapsFile(claim.root)
+            file = before.file
+            await saveCapsFile(claim.root, before, key, value)
         } catch (trouble) {
-            if ((trouble as NodeJS.ErrnoException).code !== 'ENOENT') {
-                show('trouble', `${file} could not be read (${String(trouble)}), so it was left as it is`)
-                return false
-            }
-        }
-        let written: string
-        try {
-            written = withCaps(before, key, value)
-        } catch (trouble) {
-            if (!(trouble instanceof Unreadable)) {
-                throw trouble
-            }
-            show('trouble', `${file} does not parse (${trouble.message}); fix it first — it was left as it is`)
-            return false
-        }
-        // A FILE THAT CANNOT BE WRITTEN IS A LINE, NOT AN END: read-only, or a disk that is full,
-        // thrown out of here would take the whole session with it — from a dialog's `a` as much
-        // as from `/cap`.
-        try {
-            await mkdir(dirname(file), { recursive: true })
-            await writeFile(file, written)
-        } catch (trouble) {
-            show('trouble', `${file} could not be written (${String(trouble)}), so it says what it said`)
+            show('trouble', `Project cap configuration could not be written (${String(trouble)})`)
             return false
         }
         show('client', describeCapSet(file, key, value, capsOf(await settled(readingCaps(claim.project)))))
@@ -3715,6 +3688,13 @@ export async function converse(talking: Talking): Promise<void> {
     const rootHere = async (named: string | undefined): Promise<void> => {
         if (directory === undefined) {
             show('client', describeNoDirectory())
+            return
+        }
+        const detected = await discover(directory)
+        if (detected?.kind === 'DISJOINT') {
+            if (named && named !== detected.project) { show('trouble', 'The manifest belongs to a different project'); return }
+            const found = await resolveMarked(detected, connection, machine)
+            await enter({project:found.project,claim:{project:found.project,root:found.root,machine}},false)
             return
         }
         const root = directory
@@ -3799,7 +3779,8 @@ export async function converse(talking: Talking): Promise<void> {
             return
         }
         directory = target
-        const found = await discover(target)
+        const detected = await discover(target)
+        const found = detected ? await resolveMarked(detected, connection, machine) : undefined
         const held = rooting.current()
         // STILL ROOTING IT, AND STANDING IN IT, is the only time a `/cd` inside
         // the held root changes nothing. After a remote `/project` the tier is
@@ -3892,21 +3873,37 @@ export async function converse(talking: Talking): Promise<void> {
         // on the way up is the project, and with none the server is asked
         // whether it already knows this directory — offered, never rooted.
         if (talking.project === undefined && directory !== undefined) {
-            const found = await discover(directory)
+            const detected = await discover(directory)
+            const found = detected ? await resolveMarked(detected, connection, machine) : undefined
             if (found !== undefined) {
                 start = { project: found.project, claim: { project: found.project, machine, root: found.root } }
             } else {
                 const listed = listingProjects()
                 const rows = projects(await connection.ask(listed.type, listed.payload)) ?? []
+                const personal = rows.find(row => row.kind === 'personal')
+                if (personal) {
+                    try {
+                        const root = await personalDirectory(talking.door.base, loginHandle, personal.name)
+                        start = { project: personal.name, claim: { project: personal.name, machine, root } }
+                    } catch (error) {
+                        start = { project: personal.name }
+                        show('trouble', `Personal files could not be mounted: ${String(error)}`)
+                    }
+                }
                 const standing = directory
                 const known = rows.find((row) => row.machine === machine && row.workspace === standing)
                 show('client', known === undefined ? describeUnrooted() : describeOffered(known.name, standing))
             }
         }
+        if (start.project === undefined && directory === undefined) {
+            const listed = listingProjects()
+            const personal = (projects(await connection.ask(listed.type, listed.payload)) ?? []).find(row => row.kind === 'personal')
+            if (personal) start = { project: personal.name }
+        }
         let arrived = await enter(start, true)
         if (arrived === 'root-refused') {
             // RULING 10: files refused is not talking refused.
-            arrived = await enter({}, true)
+            arrived = await enter(start.project?.startsWith('personal:') ? { project: start.project } : {}, true)
         } else if (arrived === 'entered' && start.claim !== undefined) {
             show('client', describeRooted(start.claim.project, start.claim.root))
         }
@@ -4001,7 +3998,9 @@ export async function converse(talking: Talking): Promise<void> {
             // look or a cancel, never an answer in words, and guessing it as the one thing
             // waiting would hand a conductor a reply nobody meant for it.
             const answerable = waiting.filter((run) => run.kind !== 'stalled').map((run) => run.id)
-            const direct = text.trim().startsWith('/') ? parseDirect(text.trim().slice(1), now.project)
+            const management = serverCommand(text, now.project)
+            const direct = management.kind !== 'unhandled' ? management
+                : text.trim().startsWith('/') ? parseDirect(text.trim().slice(1), now.project)
                 : { kind: 'unhandled' as const }
             if (direct.kind === 'usage') {
                 show('trouble', direct.said)
@@ -4018,13 +4017,29 @@ export async function converse(talking: Talking): Promise<void> {
                 }
                 continue
             }
-            const line = typed(text, now.project, answerable, {...(now.conversation?{conversation:now.conversation}:{}),agent:now.who.name})
+            const line = typed(asked, now.project, answerable, {...(now.conversation?{conversation:now.conversation}:{}),agent:now.who.name})
             if (line.kind === 'projects') {
                 await list(line.ask, projects, describeProjects)
                 continue
             }
             if (line.kind === 'conversations') {
                 await list(line.ask, conversations, describeConversations)
+                continue
+            }
+            if (line.kind === 'command-catalog') {
+                const listed = await settled(line.ask)
+                const rows = agents(listed)
+                if (rows === undefined) {
+                    show('trouble', refusal(listed))
+                    continue
+                }
+                const selected = rows.find(row => row.name === now.who.name && row.served)
+                surface.completing(completable(rows), Object.fromEntries(
+                    rows.filter(row => row.served).map(row => [row.name, row.description])),
+                    (selected?.commands ?? []).map(command => ({ name: command.command, detail: `${command.description} · ${command.mode ?? (command.kind === 'skill' ? 'specify --mode=INHERITED|SUMMARISED|NEW|DIRECT' : 'orchestration')} · ${command.executor}` })))
+                place = { ...now, who: selected ?? { ...now.who, commands: [] } }
+                if (selected) showPlain('client', describeCommandCatalog(selected, line.only))
+                else show('trouble', `The selected agent ${now.who.name} is unavailable; no commands are offered.`)
                 continue
             }
             // THE TWO ROSTERS, WHICH ARE ONE FRAME AND TWO SCREENS. Asked
@@ -4298,6 +4313,14 @@ export async function converse(talking: Talking): Promise<void> {
                 show('trouble', line.text)
                 continue
             }
+            if (line.kind === 'messaging') {
+                try {
+                    const result = await dispatch(connection, line.command)
+                    if (result.kind !== 'completed') throw new Error(result.outcome.said || 'The message control response was refused or incomplete.')
+                    show('client', JSON.stringify(result.outcome.payload, null, 2))
+                } catch (failure) { show('trouble', failure instanceof Error ? failure.message : String(failure)) }
+                continue
+            }
             if (line.kind === 'usage-report') {
                 try {show('client',await runUsage(new UsageClient(connection),line.command))}
                 catch(failure){show('trouble',failure instanceof Error?failure.message:String(failure))}
@@ -4323,7 +4346,7 @@ export async function converse(talking: Talking): Promise<void> {
                 // Answered here, with no round trip, which is what makes it
                 // the one command that works against a server too old, too new
                 // or too broken to answer anything else.
-                show('client', toListing(describeHelp()))
+                show('client', toListing([...describeHelp(), ...(now.who.commands ?? []).map(command => `${command.command} ${command.argumentHint} — ${command.description}${command.kind === 'skill' && command.mode === null ? ' (specify --mode=INHERITED|SUMMARISED|NEW|DIRECT)' : ''}`)]))
                 continue
             }
             if (line.kind === 'theme') {

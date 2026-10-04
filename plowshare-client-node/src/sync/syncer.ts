@@ -70,6 +70,7 @@ export function noticingWrites(answer: Answering & { close?(): void }, wrote: ()
 }
 
 export function syncer(options: SyncerOptions): Syncer {
+    if (options.claim.project.startsWith('client:')) throw new Error('Client-only DISJOINT projects cannot be synced or exported')
     const { claim, asker } = options
     const paths = shadowPaths(claim.root)
     const shadow: Shadow = { paths, git: shadowGit(paths, options.bearer, options.signal), author: `${options.handle}@${claim.machine}` }

@@ -69,3 +69,12 @@ describe('withCaps, which /cap writes with', () => {
         expect(() => withCaps(undefined, 'failed-checks', 101)).toThrow(Unreadable)
     })
 })
+
+it('auto-increase has a strict boolean grammar and preserves other policy when edited', () => {
+    const before = 'local:\n  mode: ask\ncaps:\n  budget: 20\n'
+    const enabled = withCaps(before, 'auto-increase', 1)
+    expect(parseEnvironment(enabled).caps).toEqual({budget:20, autoIncrease:true})
+    expect(parseEnvironment(withCaps(enabled, 'auto-increase', 0)).caps?.autoIncrease).toBe(false)
+    for (const bad of ['yes', '1', 'null', 'True']) expect(() => parseEnvironment(`caps:\n  auto-increase: ${bad}\n`)).toThrow(Unreadable)
+    expect(() => withCaps(enabled, 'auto-increase', 2)).toThrow()
+})

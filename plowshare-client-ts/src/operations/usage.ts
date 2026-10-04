@@ -46,12 +46,17 @@ export interface UsagePayloads {
     'usage.unsubscribe': {
         subscription: string;
     };
+    'conversation.context.snapshot': {
+        conversation: string;
+        agent: string;
+        measure?: boolean;
+    };
     'conversation.context.count': {
         conversation: string;
         agent: string;
     };
 }
-export const USAGE_FRAMES = [...USAGE_REPORTS, 'usage.calls', 'usage.subscribe', 'usage.unsubscribe', 'conversation.context.count'] as const;
+export const USAGE_FRAMES = [...USAGE_REPORTS, 'usage.calls', 'usage.subscribe', 'usage.unsubscribe', 'conversation.context.count', 'conversation.context.snapshot'] as const;
 export interface UsageTotals extends Record<string, unknown> {
     calls: string;
     attempts: string;
@@ -143,6 +148,7 @@ export function usageReply(type: string, value: unknown): boolean {
             && (v.cursor === null || typeof v.cursor === 'string') && (Array.isArray(v.calls) && v.calls.every(item => { const r = usageFields(item); return !!r && typeof r.call_id === 'string' && typeof r.wire_model === 'string' && typeof r.operation === 'string' && typeof r.lifecycle === 'string' && typeof r.attempts_truncated === 'boolean' && Array.isArray(r.attempts) && r.attempts.every(usageAttempt); })
             || typeof v.call === 'string' && Array.isArray(v.attempts) && v.attempts.every(usageAttempt));
     }
+    if (type === 'conversation.context.snapshot') return contextSnapshot(value) !== undefined;
     if (type === 'conversation.context.count') {
         const c = usageFields(v.count);
         return typeof v.conversation === 'string' && typeof v.agent === 'string' && v.projection === 'next' && !!c
@@ -162,7 +168,7 @@ export class UsageClient {
         if (!usageReply(type, answer.payload))
             throw new Error('Usage response is incomplete or unreadable. Previous measurements are retained.');
         const expected = usageFields(payload), received = usageFields(answer.payload);
-        if (type === 'conversation.context.count' && (expected?.conversation !== received?.conversation || expected?.agent !== received?.agent))
+        if ((type === 'conversation.context.count' || type === 'conversation.context.snapshot') && (expected?.conversation !== received?.conversation || expected?.agent !== received?.agent))
             throw new Error('Context count belongs to another selection.');
         if (USAGE_REPORTS.includes(type as UsageReportType) && !usageMatches(answer.payload as UsageReport, type as UsageReportType, payload as UsageFilter))
             throw new Error('Usage snapshot belongs to another selection.');
@@ -300,6 +306,7 @@ export interface UsageAttempts {
     readonly health: UsageHealth;
 }
 export interface UsageReplies {
+    'conversation.context.snapshot': ContextSnapshot;
     'usage.conversation': UsageReport;
     'usage.project': UsageReport;
     'usage.agent': UsageReport;
@@ -310,3 +317,35 @@ export interface UsageReplies {
     'usage.calls': UsageAudit | UsageAttempts;
 }
 export const USAGE_OPERATIONS = [...USAGE_REPORTS, 'usage.calls'] as const;
+
+export interface ProjectionMessage {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    parts: readonly ({type: 'text'; text: string} | {type: 'image'; uid: string; omitted: true})[];
+    tool_calls: readonly {id: string; name: string; arguments: string}[];
+    tool_call_id: string | null;
+}
+export interface ContextSnapshot {
+    conversation: string;
+    agent: string;
+    projection: 'next';
+    captured_at: string;
+    model: string;
+    sampling: Readonly<Record<string, unknown>>;
+    messages: readonly ProjectionMessage[];
+    tools: readonly {name: string; description: string; parameters: Readonly<Record<string, unknown>>}[];
+    count: {basis: 'MEASURED' | 'ESTIMATED' | 'UNKNOWN'; tokens: string | null; gaps: readonly string[]} | null;
+}
+/** Refuse incomplete or foreign snapshots before displaying model-facing content. */
+export function contextSnapshot(value: unknown): ContextSnapshot | undefined {
+    const v = usageFields(value), c = usageFields(v?.count);
+    if (!v || typeof v.conversation !== 'string' || typeof v.agent !== 'string' || v.projection !== 'next'
+        || typeof v.captured_at !== 'string' || !Number.isFinite(Date.parse(v.captured_at)) || typeof v.model !== 'string' || !usageFields(v.sampling)
+        || !Array.isArray(v.messages) || !v.messages.every(item => { const m = usageFields(item); return !!m
+            && ['system','user','assistant','tool'].includes(String(m.role)) && (m.tool_call_id === null || typeof m.tool_call_id === 'string')
+            && Array.isArray(m.parts) && m.parts.every(item => {const p = usageFields(item); return !!p && (p.type === 'text' && typeof p.text === 'string' || p.type === 'image' && typeof p.uid === 'string' && p.omitted === true);})
+            && Array.isArray(m.tool_calls) && m.tool_calls.every(item => {const t = usageFields(item); return !!t && ['id','name','arguments'].every(k => typeof t[k] === 'string');}); })
+        || !Array.isArray(v.tools) || !v.tools.every(item => {const t = usageFields(item);return !!t && typeof t.name === 'string' && typeof t.description === 'string' && !!usageFields(t.parameters);})
+        || !(v.count === null || !!c && ['MEASURED','ESTIMATED','UNKNOWN'].includes(String(c.basis)) && (c.tokens === null || integer(c.tokens)) && Array.isArray(c.gaps) && c.gaps.every(g => typeof g === 'string')))
+        return undefined;
+    return v as unknown as ContextSnapshot;
+}

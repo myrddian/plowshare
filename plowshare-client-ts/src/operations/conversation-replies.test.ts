@@ -81,12 +81,41 @@ describe('complete conversation, agent and project WS replies', () => {
         const outcome: Outcome = { code: 'OK', payload: { id: 'other', lifecycle: 'archived' } }
         expect((await dispatch({ async ask() { return outcome } }, request('conversation.lifecycle', { conversation: 'c', lifecycle: 'archived' }))).kind).toBe('invalid-response')
     })
+    it('accepts optional server command metadata and rejects malformed entries', () => {
+        const rows = fixtures['agent.list'].payload as Record<string, unknown>[]
+        const command = { command: '/skill:review', aliases: ['/review'], kind: 'skill', name: 'review',
+            description: 'Review code', argumentHint: 'The work to review', executor: 'interlocutor',
+            mode: 'NEW', tier: 'PROJECT', hash: 'sha256:example' }
+        const reply: Outcome = { code: 'OK', payload: [{ ...rows[0], skills: ['review'], commands: [command] }] }
+        expect(conversationReply('agent.list', reply)).toBeDefined()
+        expect(conversationReply('agent.list', { ...reply, payload: [{ ...rows[0], commands: [{ ...command, agentVisible: true }] }] })).toBeDefined()
+        for (const broken of [{ ...command, executor: undefined }, { ...command, mode: ['NEW'] },
+            { ...command, kind: 'guess' }, { ...command, aliases: [7] }, { ...command, agentVisible: 'true' }]) {
+            expect(conversationReply('agent.list', { ...reply, payload: [{ ...rows[0], commands: [broken] }] })).toBeUndefined()
+        }
+    })
     it('mirrors each Java record, including nested context, entry and token contracts', () => {
         const source = ts.createSourceFile('conversation-replies.ts', readFileSync(new URL('./conversation-replies.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
         const authorities: readonly [string, string, string, readonly string[], Record<string, string>?][] = [
+            ['ServiceAccount','auth/ServiceAccounts','Account',[]],
+            ['ServiceScope','auth/ServiceAccounts','Scope',[]],
+            ['ServiceToken','auth/ServiceAccounts','Token',['revokedAt'],{Scope:'ServiceScope'}],
+            ['ServiceCredential','auth/ServiceAccounts','Credential',[],{Token:'ServiceToken'}],
+            ['PricingRates','llm/accounting/PricingAdministration','Rates',['input','output','cacheRead','cacheWrite']],
+            ['PricingTier','llm/accounting/PricingAdministration','Tier',[],{Rates:'PricingRates'}],
+            ['PricingCard','llm/accounting/PricingAdministration','Card',['currency','rates','requestFee','validFrom','validUntil'],{Rates:'PricingRates',Tier:'PricingTier','RateCard.Mode':'PricingMode'}],
+            ['PricingEntry','llm/accounting/PricingAdministration','Entry',['card','updatedAt'],{Card:'PricingCard'}],
+            ['AdminStatus','ws/AdminFrames','Status',[]],
+            ['ServerAccount','auth/ServerAdministration','Account',[]],
+            ['AccountCredential','auth/ServerAdministration','Credential',[],{Account:'ServerAccount'}],
+            ['ServerSession','auth/ServerAdministration','Session',[]],
+            ['AdminAudit','auth/ServerAdministration','Audit',['enabled','serverAdmin']],
+            ['AdminAuditPage','auth/ServerAdministration','AuditPage',[],{Audit:'AdminAudit'}],
+            ['SessionsRevoked','auth/ServerAdministration','Revoked',[]],
             ['ConversationView','api/ConversationView','ConversationView',['project','maxModelCalls','modelCallsSpent','maxTurns','title']],
-            ['ProjectView','api/ProjectView','ProjectView',['machine']], ['ProjectMembers','ws/ProjectMemberHandler','Changed',[]],
-            ['AgentView','api/AgentView','AgentView',['model']], ['DefinedAgent','api/DefinedAgent','DefinedAgent',[]], ['LifecycleView','api/LifecycleView','LifecycleView',[]],
+            ['ProjectView','api/ProjectView','ProjectView',['machine','role'],{'io.aeyer.plowshare.server.archive.ProjectRole':'ProjectRole'}], ['ProjectMembers','ws/ProjectMemberHandler','Changed',[]],
+            ['ProjectGrant','archive/ProjectMembers','Grant',[]], ['ProjectGrantChange','archive/ProjectMembers','GrantChange',['role'],{'java.time.OffsetDateTime':'string'}], ['ProjectAccess','archive/ProjectMembers','Access',[],{Grant:'ProjectGrant',GrantChange:'ProjectGrantChange'}],
+            ['AgentView','api/AgentView','AgentView',['model','displayName','origin'],{ 'io.aeyer.plowshare.server.agents.CommandCatalog.Entry': 'CommandEntry' }], ['DefinedAgent','api/DefinedAgent','DefinedAgent',[]], ['LifecycleView','api/LifecycleView','LifecycleView',[]],
             ['TurnView','api/TurnView','TurnView',['promptTokens']], ['CompactionView','api/CompactionView','CompactionView',[]],
             ['OpenedView','api/EntryView','OpenedView',[]], ['AskedView','api/EntryView','AskedView',['salient','opened']],
             ['EntryView','api/EntryView','EntryView',['excerpt','ejectedAt','supersededBy','toolCallId','handle','recordedAt','tookMillis','dispatch','wireModel','completion','speaker','speakerName','outcome']],
@@ -103,7 +132,7 @@ describe('complete conversation, agent and project WS replies', () => {
                 function mapped(raw: string): string {
                     const list = /^List<(.+)>$/.exec(raw)
                     if (list) return `readonly ${mapped(list[1]!)}[]`
-                    return ({ String: 'string', Instant: 'string', int: 'number', Integer: 'number', Long: 'number', Double: 'number', boolean: 'boolean', Boolean: 'boolean', ...renamed } as Record<string,string>)[raw] ?? raw
+                    return ({ String: 'string', Instant: 'string', OffsetDateTime: 'string', UUID: 'string', long: 'number', int: 'number', Integer: 'number', Long: 'number', Double: 'number', boolean: 'boolean', Boolean: 'boolean', ...renamed } as Record<string,string>)[raw] ?? raw
                 }
                 return [key!, mapped(wireType!) + (nullable.includes(key!) ? ' | null' : '')]
             })
@@ -111,7 +140,9 @@ describe('complete conversation, agent and project WS replies', () => {
             expect(dto, type).toBeDefined()
             expect(dto.members.map(member => {
                 const field = member as ts.PropertySignature
-                expect(field.questionToken, type).toBeUndefined()
+                const extension = (type === 'AgentView' && ['skills', 'commands', 'displayName', 'origin'].includes(field.name.getText(source))) || (type === 'ProjectView' && ['role', 'kind', 'type', 'readOnly', 'writePaths', 'displayName', 'routingIdentity'].includes(field.name.getText(source)))
+                if (extension) expect(field.questionToken, type).toBeDefined()
+                else expect(field.questionToken, type).toBeUndefined()
                 return [field.name.getText(source),field.type!.getText(source)]
             }), type).toEqual(fields)
         }

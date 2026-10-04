@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { answeredOf, backPageOf, projects, approvalsOf, entriesOf, conversations, agents } from './views.ts'
 
 describe('shared client response readers', () => {
+    it('keeps Personal display and routing identities distinct', () => {
+        const reply = {code:'OK',payload:[{name:'personal:656e7a6f',kind:'personal',displayName:'Personal',routingIdentity:'Personal:enzo'}]}
+        expect(projects(reply)).toEqual(reply.payload)
+    })
     it('distinguishes an empty listing from an unreadable reply', () => {
         for (const read of [projects, conversations, agents]) {
             expect(read({ code: 'OK', payload: [] })).toEqual([])

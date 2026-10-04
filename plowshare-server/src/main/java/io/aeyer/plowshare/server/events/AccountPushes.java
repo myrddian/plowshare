@@ -4,7 +4,7 @@ package io.aeyer.plowshare.server.events;
 @FunctionalInterface
 public interface AccountPushes {
 
-    AccountPushes NONE = (handle, body) -> { };
+  AccountPushes NONE = (handle, body) -> {};
 
-    void push(String handle, Object body);
+  void push(String handle, Object body);
 }

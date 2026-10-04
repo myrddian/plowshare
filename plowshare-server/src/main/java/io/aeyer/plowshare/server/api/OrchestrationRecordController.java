@@ -19,22 +19,22 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class OrchestrationRecordController {
 
-    private final RecordReads reads;
+  private final RecordReads reads;
 
-    public OrchestrationRecordController(RecordReads reads) {
-        this.reads = Objects.requireNonNull(reads, "reads");
-    }
+  public OrchestrationRecordController(RecordReads reads) {
+    this.reads = Objects.requireNonNull(reads, "reads");
+  }
 
-    @GetMapping("/v1/orchestrations/{id}/record")
-    public ResponseEntity<RecordPageView> record(
-            @PathVariable String id,
-            @RequestParam(required = false) Integer after,
-            @RequestParam(required = false) Integer before,
-            @RequestParam(required = false) Boolean tail,
-            @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false) List<String> kinds,
-            @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
-        return ResponseEntity.ok(RecordPageView.of(
-                reads.read(handle, id, after, before, tail, limit, kinds)));
-    }
+  @GetMapping("/v1/orchestrations/{id}/record")
+  public ResponseEntity<RecordPageView> record(
+      @PathVariable String id,
+      @RequestParam(required = false) Integer after,
+      @RequestParam(required = false) Integer before,
+      @RequestParam(required = false) Boolean tail,
+      @RequestParam(required = false) Integer limit,
+      @RequestParam(required = false) List<String> kinds,
+      @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
+    return ResponseEntity.ok(
+        RecordPageView.of(reads.read(handle, id, after, before, tail, limit, kinds)));
+  }
 }

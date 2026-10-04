@@ -1,0 +1,10 @@
+**
+!plowshare-a2a/
+!plowshare-a2a/build/
+!plowshare-a2a/build/install/
+!plowshare-a2a/build/install/plowshare-a2a/
+!plowshare-a2a/build/install/plowshare-a2a/lib/
+!plowshare-a2a/build/install/plowshare-a2a/lib/*.jar
+!deploy/
+!deploy/docker/
+!deploy/docker/a2a-entrypoint.sh

@@ -1742,12 +1742,14 @@ function scripted(lines: readonly string[], pressing?: Pressing): Surface & {
     readonly states: (Working | undefined)[]
     /** The names this client offered Tab, which is what a completer completes. */
     readonly offered: string[]
+    readonly commandOffers: string[][]
 } {
     const queue = [...lines]
     const said: string[] = []
     const shown: Entry[] = []
     const states: (Working | undefined)[] = []
     const offered: string[] = []
+    const commandOffers: string[][] = []
     let interrupt: (() => void) | undefined
     let pressed = false
     /** The flat stream, and the press that a line landing may provoke. */
@@ -1776,6 +1778,7 @@ function scripted(lines: readonly string[], pressing?: Pressing): Surface & {
         shown,
         states,
         offered,
+        commandOffers,
         show(entry: Entry): void {
             shown.push(entry)
             const body = toTerminal(entry.body)
@@ -1799,8 +1802,9 @@ function scripted(lines: readonly string[], pressing?: Pressing): Surface & {
         },
         unread: () => {},
         waiting: () => {},
-        completing(names: readonly string[]): void {
+        completing(names: readonly string[], _details?: Readonly<Record<string, string>>, commands: readonly { readonly name: string; readonly detail: string }[] = []): void {
             offered.push(...names)
+            commandOffers.push(commands.map(command => command.name))
         },
         onInterrupt(listener: () => void): void {
             interrupt = listener
@@ -1895,6 +1899,15 @@ function talkingTo(fake: Fake, surface: Surface): Parameters<typeof converse>[0]
 }
 
 describe('the whole stack, over a real socket, against a scripted Plowshare', () => {
+    it('discovers Personal as its runnable default and carries it into every conversation request', async () => {
+        const fake = await scriptedPlowshare(['answer-first']);
+        const personal = 'personal:736f6d656f6e65';
+        fake.script('project.list', { code: 'OK', payload: [{ name: personal, kind: 'personal', workspace: '/personal', machine: null, lent: [], exclusions: [], members: ['someone'] }] });
+        const prompt = scripted(['Make a plan']);
+        await converse(talkingTo(fake, prompt));
+        expect(fake.heard.frames.find(frame => frame.type === 'agent.list')?.payload).toMatchObject({ project: personal });
+        expect(fake.heard.frames.find(frame => frame.type === 'conversation.open')?.payload).toMatchObject({ project: personal });
+    });
     it('runs all direct memory verbs and conversation search over WS without an agent turn', async () => {
         const fake = await scriptedPlowshare([])
         const retrieval = (JSON.parse(await readFile(new URL('../../../test-support/contracts/ws-retrieval-fixtures.json', import.meta.url), 'utf8')) as { replies: Record<string, unknown> }).replies
@@ -1985,7 +1998,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // roster's model and nothing else; after the turn, the measured load.
         expect(standings[0]).toEqual({ triplet: `close_reader:${server}:reasoning` })
         expect(standings.at(-1)).toEqual({
-            triplet: `close_reader:${server}:reasoning`, load: '16.2K/120K 14%',
+            triplet: `close_reader:${server}:reasoning`, load: 'peak 16.2K/120K 14%',
             filled: 16_234 / 120_000,
             pace: [
                 { kind: 'tools', text: '1' },
@@ -2029,11 +2042,11 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // this fake pushes nothing about the log, which is what a turn whose
         // push was lost looks like, and that turn's end reads the reach instead.
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list',
+            'inbox.list', 'project.list', 'agent.list',
             'conversation.open', 'conversation.follow', 'agent.run', 'job.status',
             'conversation.trajectory', 'agent.run', 'job.status', 'conversation.trajectory',
         ])
-        expect(fake.heard.frames[4]?.payload).toEqual({
+        expect(fake.heard.frames[5]?.payload).toEqual({
             agent: 'close_reader', conversation: 'c-1', task: 'how many modules?',
             // The run names the session this client is listening on. Without it
             // the server publishes every event to a session nobody holds and
@@ -2375,7 +2388,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // Third frame of the session: after the quiet inbox count and the
         // roster, so sign-in's own ordering -- who answers, then what is
         // kept -- is unchanged.
-        expect(fake.heard.frames[2]?.type).toBe('job.stream')
+        expect(fake.heard.frames[3]?.type).toBe('job.stream')
     })
 
     it('asks for nothing when nobody said to', async () => {
@@ -2521,7 +2534,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
 
         // And not one frame was sent but the quiet inbox count and the roster,
         // which opens nothing.
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
 
         // The banner is the affordance: a person can see nothing is kept yet.
         expect(prompt.said.join('\n')).toContain('nothing is kept until you speak')
@@ -2546,12 +2559,12 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // The two frames, and nothing else on the wire but the quiet inbox
         // count and the sign-in roster.
         expect(fake.heard.frames.map((frame) => frame.type))
-            .toEqual(['inbox.list', 'agent.list', 'project.list', 'conversation.list'])
+            .toEqual(['inbox.list', 'project.list', 'agent.list', 'project.list', 'conversation.list'])
         // An absent project is the global tier, which is what `RequestedHome`
         // reads an absent field as. A payload of nulls would say something this
         // client was never asked.
-        expect(fake.heard.frames[2]?.payload).toEqual({})
         expect(fake.heard.frames[3]?.payload).toEqual({})
+        expect(fake.heard.frames[4]?.payload).toEqual({})
 
         // WHAT A PERSON SEES. The projects by the name they chose, and the
         // conversations by title with the id beside it.
@@ -2616,7 +2629,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // NOTHING BUT THE ROSTER AND THE QUIET INBOX COUNT. Not
         // `conversation.open`, not `agent.run`, and the line the person had
         // already typed was never sent either.
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
 
         // And what they get instead: the name they gave, and the names that
         // would have worked.
@@ -2675,13 +2688,13 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // its log is read — so nothing written in between goes unannounced — and
         // one read back from the log's end fills the screen.
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.latest', 'conversation.follow',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.latest', 'conversation.follow',
             'conversation.trajectory', 'agent.run', 'job.status', 'conversation.trajectory',
         ])
-        expect(fake.heard.frames[2]?.payload).toEqual({ agent: 'aristoxenus' })
-        expect(fake.heard.frames[3]?.payload).toEqual({ conversation: CONTINUING })
-        expect(fake.heard.frames[4]?.payload).toEqual(tailOf(CONTINUING))
-        expect(fake.heard.frames[5]?.payload).toEqual({
+        expect(fake.heard.frames[3]?.payload).toEqual({ agent: 'aristoxenus' })
+        expect(fake.heard.frames[4]?.payload).toEqual({ conversation: CONTINUING })
+        expect(fake.heard.frames[5]?.payload).toEqual(tailOf(CONTINUING))
+        expect(fake.heard.frames[6]?.payload).toEqual({
             agent: 'aristoxenus', conversation: CONTINUING, task: 'and now?',
             session: LISTENING_AS,
         })
@@ -2732,7 +2745,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
             // The quiet inbox count, two reads and nothing opened, because
             // nobody spoke.
             expect(fake.heard.frames.map((frame) => frame.type))
-                .toEqual(['inbox.list', 'agent.list', 'conversation.latest'])
+                .toEqual(['inbox.list', 'project.list', 'agent.list', 'conversation.latest'])
             const said = prompt.said.join('\n')
             expect(said).toContain('nothing is kept until you speak')
             expect(said).not.toContain('continuing')
@@ -2753,7 +2766,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         await converse(talkingTo(fake, prompt))
 
         expect(fake.heard.frames.map((frame) => frame.type))
-            .toEqual(['inbox.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
+            .toEqual(['inbox.list', 'project.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
                 'job.status', 'conversation.trajectory'])
         expect(prompt.said.join('\n')).toContain('nothing is kept until you speak')
     })
@@ -2773,8 +2786,8 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         const prompt = scripted(['how many modules?'])
         await converse(withNoAgentNamed(talkingTo(fake, prompt)))
 
-        expect(fake.heard.frames.map((frame) => frame.type).slice(0, 3))
-            .toEqual(['inbox.list', 'agent.list', 'conversation.latest'])
+        expect(fake.heard.frames.map((frame) => frame.type).slice(0, 4))
+            .toEqual(['inbox.list', 'project.list', 'agent.list', 'conversation.latest'])
         const said = prompt.said.join('\n')
         expect(said).toContain('talking to aristoxenus, the first bot served here')
         expect(said).not.toContain('PLOWSHARE_AGENT')
@@ -2810,9 +2823,9 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         expect(second.said.join('\n')).toContain('expected a boolean')
         expect(first.said.join('\n')).not.toContain('hermippus')
         // Neither opened anything, which is the half that used to cost a row.
-        expect(bare.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(bare.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         expect(broken.heard.frames.map((frame) => frame.type))
-            .toEqual(['inbox.list', 'agent.list'])
+            .toEqual(['inbox.list', 'project.list', 'agent.list'])
     })
 
     it('talks to the first agent served when the tier serves no bot', async () => {
@@ -2835,12 +2848,77 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
 
         // ANSWERED HERE, so nothing went out for it but the quiet inbox count
         // and the roster.
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         for (const command of [
             '/help', '/bots', '/agents', '/projects', '/conversations', '/inbox',
         ]) {
             expect(said).toContain(command)
         }
+    })
+
+    it('offers model-hidden skills to the human and sends explicit invocations unchanged over WS', async () => {
+        const hidden = { command: '/skill:review', aliases: [], kind: 'skill', name: 'review', description: 'Review the change', argumentHint: 'Work to review', executor: 'interlocutor', mode: null, tier: 'PERSONAL', hash: 'hidden-review', agentVisible: false }
+        const workflow = { ...hidden, command: '/orchestration:research', kind: 'orchestration', name: 'research', description: 'Research the topic' }
+        const selected = { ...(EVERY_AGENT[1] as Record<string, unknown>), commands: [hidden, workflow] }
+        const other = { ...(EVERY_AGENT[0] as Record<string, unknown>), commands: [{ ...hidden, command: '/skill:other', name: 'other' }] }
+        const fake = await scriptedPlowshare(['answer-first'], [selected, other])
+        const invocation = ' /skill:review --mode=SUMMARISED Review\nthis exact change '
+        const prompt = scripted(['/skills', '/commands', '/help', invocation])
+        await converse(talkingTo(fake, prompt))
+        expect(prompt.commandOffers).toEqual(Array.from({ length: 3 }, () => ['/skill:review', '/orchestration:research']))
+        expect(prompt.said.join('\n')).toContain('specify --mode=INHERITED|SUMMARISED|NEW|DIRECT')
+        expect(prompt.said.join('\n')).not.toContain('/skill:other')
+        const skillListing = prompt.said.slice(prompt.said.indexOf('/skills') + 1, prompt.said.indexOf('/commands')).join('\n')
+        expect(skillListing).toContain('/skill:review')
+        expect(skillListing).not.toContain('/orchestration:research')
+        expect(fake.heard.frames.filter(frame => frame.type === 'agent.run').map(frame => (frame.payload as { task: string }).task)).toEqual([invocation])
+        expect(fake.heard.frames.some(frame => frame.type === 'orchestration.start')).toBe(false)
+    })
+
+    it('refreshes completion and help from the selected agent without leaking another agent catalog', async () => {
+        const command = (name: string) => ({ command: `/skill:${name}`, aliases: [], kind: 'skill', name, description: name, argumentHint: 'Work', executor: 'interlocutor', mode: 'NEW', tier: 'PROJECT', hash: name, agentVisible: false })
+        const fake = await scriptedPlowshare([])
+        let reads = 0
+        fake.script('agent.list', () => ({ code: 'OK', payload: [
+            { name: 'close_reader', commands: [command(++reads === 1 ? 'before' : 'after')] },
+            { name: 'other', commands: [command('other')] },
+        ] }))
+        const prompt = scripted(['/commands', '/help'])
+        await converse(talkingTo(fake, prompt))
+        expect(prompt.commandOffers).toEqual([['/skill:before'], ['/skill:after']])
+        const help = prompt.said.slice(prompt.said.indexOf('/help')).join('\n')
+        expect(help).toContain('/skill:after')
+        expect(help).not.toContain('/skill:before')
+        expect(help).not.toContain('/skill:other')
+        expect(fake.heard.frames.some(frame => ['agent.run', 'conversation.open'].includes(frame.type))).toBe(false)
+    })
+
+    it('uses the selected project catalog after switching projects', async () => {
+        const fake = await scriptedPlowshare([])
+        fake.script('agent.list', payload => {
+            const project = (payload as { project: string }).project
+            return { code: 'OK', payload: [{ name: 'close_reader', commands: [{ command: `/skill:${project}`, aliases: [], kind: 'skill', name: project, description: project, argumentHint: 'Work', executor: 'interlocutor', mode: 'NEW', tier: 'PROJECT', hash: project, agentVisible: false }] }] }
+        })
+        const prompt = scripted(['/commands', '/project notes', '/commands', '/help'])
+        await converse({ ...talkingTo(fake, prompt), project: 'plowshare' })
+        expect(prompt.commandOffers).toEqual([['/skill:plowshare'], ['/skill:plowshare'], ['/skill:notes'], ['/skill:notes']])
+        const help = prompt.said.slice(prompt.said.indexOf('/help')).join('\n')
+        expect(help).toContain('/skill:notes')
+        expect(help).not.toContain('/skill:plowshare')
+        expect(fake.heard.frames.filter(frame => frame.type === 'agent.list').map(frame => (frame.payload as { project: string }).project)).toEqual(['plowshare', 'plowshare', 'notes', 'notes'])
+        expect(fake.heard.frames.some(frame => frame.type === 'agent.run')).toBe(false)
+    })
+
+    it('clears completion when the selected agent becomes unavailable', async () => {
+        const fake = await scriptedPlowshare([])
+        let reads = 0
+        fake.script('agent.list', () => ({ code: 'OK', payload: ++reads === 1 ? [{ name: 'close_reader', commands: [{ command: '/skill:review', aliases: [], kind: 'skill', name: 'review', description: 'Review', argumentHint: 'Work', executor: 'interlocutor', mode: 'NEW', tier: 'PROJECT', hash: 'review', agentVisible: false }] }] : [] }))
+        const prompt = scripted(['/commands', '/help'])
+        await converse(talkingTo(fake, prompt))
+        expect(prompt.commandOffers).toEqual([['/skill:review'], []])
+        expect(prompt.said.join('\n')).toContain('selected agent close_reader is unavailable')
+        expect(prompt.said.slice(prompt.said.indexOf('/help')).join('\n')).not.toContain('/skill:review')
+        expect(fake.heard.frames.some(frame => frame.type === 'agent.run')).toBe(false)
     })
 
     it('continues one Daedalus conversation so a focused correction has its history', async () => {
@@ -2853,17 +2931,17 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         await converse(talkingTo(fake, prompt))
 
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.latest', 'conversation.open',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.latest', 'conversation.open',
             'agent.run', 'job.status', 'agent.run', 'job.status',
         ])
-        expect(fake.heard.frames[2]?.payload).toEqual({ agent: 'daedalus' })
-        expect(fake.heard.frames[3]?.payload).toEqual({})
-        expect(fake.heard.frames[4]?.payload).toEqual({
+        expect(fake.heard.frames[3]?.payload).toEqual({ agent: 'daedalus' })
+        expect(fake.heard.frames[4]?.payload).toEqual({})
+        expect(fake.heard.frames[5]?.payload).toEqual({
             agent: 'daedalus', conversation: 'c-1',
             task: "Diagnose conversation cnv_target. The operator's current question is the controlling scope: Why did it keep searching yesterday? Read the persisted trajectory around that scope; do not substitute an earlier unrelated problem. This request supersedes any prior diagnostic scope in this Daedalus conversation.",
             session: LISTENING_AS,
         })
-        expect(fake.heard.frames[6]?.payload).toEqual({
+        expect(fake.heard.frames[7]?.payload).toEqual({
             agent: 'daedalus', conversation: 'c-1',
             task: "Diagnose conversation cnv_target. The operator's current question is the controlling scope: Ignore that; focus on the later build failure. Read the persisted trajectory around that scope; do not substitute an earlier unrelated problem. This request supersedes any prior diagnostic scope in this Daedalus conversation.",
             session: LISTENING_AS,
@@ -2899,7 +2977,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         const prompt = scripted(['/diagnose'])
         await converse(talkingTo(fake, prompt))
 
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         expect(prompt.said.join('\n')).toContain('/diagnose <conversation-id>')
     })
 
@@ -2916,7 +2994,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         const prompt = scripted([])
         await converse(talkingTo(fake, prompt))
 
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         expect(prompt.shown.some((entry) => entry.voice === 'trouble')).toBe(false)
         expect(prompt.said.join('\n')).not.toContain('inbox.list')
         expect(prompt.said.join('\n')).not.toMatch(/unread/)
@@ -2942,7 +3020,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         const said = prompt.said.join('\n')
 
         expect(fake.heard.frames.map((frame) => frame.type))
-            .toEqual(['inbox.list', 'agent.list', 'inbox.list', 'inbox.read'])
+            .toEqual(['inbox.list', 'project.list', 'agent.list', 'inbox.list', 'inbox.read'])
         expect(said).toContain('2026-09-13T09:02:00Z · ANSWERED')
         expect(said).toContain('three PRs')
         expect(said).toContain('could not mark inb_1 read')
@@ -2994,7 +3072,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
             // change under a running client, so each command asks rather than
             // showing what sign-in saw.
             expect(fake.heard.frames.map((frame) => frame.type))
-                .toEqual(['inbox.list', 'agent.list', 'agent.list', 'agent.list'])
+                .toEqual(['inbox.list', 'project.list', 'agent.list', 'agent.list', 'agent.list'])
             expect(fake.heard.frames.map((frame) => frame.type))
                 .not.toContain('conversation.open')
 
@@ -3034,7 +3112,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
 
         // NOT SENT AS AN UTTERANCE. A mistyped command costs a model call and
         // comes back as an agent's puzzled answer, which is the worse reply.
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         expect(prompt.said.join('\n')).toContain('/porjects')
         expect(prompt.said.join('\n')).toContain('/help')
     })
@@ -3057,10 +3135,10 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // in the scrollback: a client that said "asked it to stop" and sent
         // nothing would pass a test that read what a person was told.
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
             'job.cancel', 'job.status', 'conversation.trajectory',
         ])
-        expect(fake.heard.frames[5]?.payload).toEqual({ job: 'job-1' })
+        expect(fake.heard.frames[6]?.payload).toEqual({ job: 'job-1' })
 
         const said = prompt.said.join('\n')
         expect(said).toContain('asked job-1 to stop')
@@ -3143,7 +3221,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // The cancel went out; no ending ever came, so no `job.status` was ever
         // asked and the turn never completed.
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
             'job.cancel',
         ])
         expect(fake.heard.wrote).not.toContain('job.status answer')
@@ -3168,7 +3246,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         // Nothing was cancelled, because there was nothing to cancel: a client
         // that sent `job.cancel` with no run would be naming a handle it does
         // not have.
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         const said = prompt.said.join('\n')
         expect(said).toContain('nothing is running')
         expect(said).toContain('Ctrl-D')
@@ -3195,7 +3273,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
         const prompt = scripted([])
         await converse(talkingTo(fake, prompt))
 
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list'])
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list'])
         expect(prompt.offered).toEqual(['aristoxenus', 'close_reader'])
         // NEVER THE DEFINITION THIS SERVER READ AND REFUSED. It is a name the
         // server declared and a name that cannot answer, and a completion reads
@@ -3253,15 +3331,15 @@ describe('a run that stops to ask a person before a command runs', () => {
         const said = prompt.said.join('\n')
 
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
             'job.status', 'conversation.trajectory', 'approval.list', 'approval.answer', 'job.status',
             'conversation.trajectory',
         ])
-        expect(fake.heard.frames[7]?.payload).toEqual({ conversation: 'c-1' })
-        expect(fake.heard.frames[8]?.payload).toEqual({
+        expect(fake.heard.frames[8]?.payload).toEqual({ conversation: 'c-1' })
+        expect(fake.heard.frames[9]?.payload).toEqual({
             id: 'apr_1', decision: 'project', prefix: ['./gradlew', 'test', '--tests'],
         })
-        expect(fake.heard.frames[9]?.payload).toEqual({ job: 'job-9' })
+        expect(fake.heard.frames[10]?.payload).toEqual({ job: 'job-9' })
         expect(said).toContain('this run stopped to ask you before running a command')
         expect(said).toContain('./gradlew test --tests Foo')
         expect(said).toContain('because tests reach the network')
@@ -3294,10 +3372,10 @@ describe('a run that stops to ask a person before a command runs', () => {
         const said = prompt.said.join('\n')
 
         expect(fake.heard.frames.map((frame) => frame.type)).toEqual([
-            'inbox.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
+            'inbox.list', 'project.list', 'agent.list', 'conversation.open', 'conversation.follow', 'agent.run',
             'job.status', 'conversation.trajectory', 'approval.list', 'approval.answer',
         ])
-        expect(fake.heard.frames[8]?.payload).toEqual({ id: 'apr_1', decision: 'conversation' })
+        expect(fake.heard.frames[9]?.payload).toEqual({ id: 'apr_1', decision: 'conversation' })
         // The keys were drawn in the surface's own region, twice — the `x`
         // answered nothing — and never put in the transcript.
         expect(drawn).toHaveLength(2)
@@ -3324,8 +3402,8 @@ describe('a run that stops to ask a person before a command runs', () => {
         await converse(talkingTo(fake, prompt))
         const said = prompt.said.join('\n')
 
-        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'agent.list', 'approval.revoke'])
-        expect(fake.heard.frames[2]?.payload).toEqual({ id: 'apr_1' })
+        expect(fake.heard.frames.map((frame) => frame.type)).toEqual(['inbox.list', 'project.list', 'agent.list', 'approval.revoke'])
+        expect(fake.heard.frames[3]?.payload).toEqual({ id: 'apr_1' })
         expect(said).toContain('apr_1 revoked')
         expect(said).toContain('approvals belong to a project')
     })
@@ -3566,7 +3644,7 @@ describe('where a person is, and how they move', () => {
         await converse(withNoAgentNamed(rootedTalk(fake, surface, here)))
 
         expect(fake.heard.files.map((claim) => claim.project)).toEqual(['ledger'])
-        expect(await readFile(join(here, '.plowshare', 'project'), 'utf8')).toBe('ledger\n')
+        expect(JSON.parse(await readFile(join(here, '.plowshare', 'project'), 'utf8'))).toEqual({version:1,name:'ledger'})
         expect(surface.said.join('\n')).toContain('now in ledger, talking to sophron')
     })
 
@@ -3597,7 +3675,7 @@ describe('where a person is, and how they move', () => {
         await converse(withNoAgentNamed({ ...rootedTalk(fake, surface, here) }))
 
         expect(surface.said).toContain('ledger serves no bot and no agent, and nothing global answers for it.')
-        expect(surface.said.join('\n')).toContain('staying in the global tier with aristoxenus.')
+        expect(surface.said.join('\n')).toContain('staying in global resources with aristoxenus.')
         await expect(readFile(join(here, '.plowshare', 'project'), 'utf8')).rejects.toThrow()
         // Asked, refused, released: the channel opened for the attempt is closed again.
         expect(fake.heard.files.map((claim) => claim.project)).toEqual(['ledger'])
@@ -3768,7 +3846,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         const said = prompt.said.join('\n')
 
         expect(typesOf(fake)).toEqual(
-            ['inbox.list', 'agent.list', 'schedule.read', 'schedule.define', 'trigger.define'])
+            ['inbox.list', 'project.list', 'agent.list', 'schedule.read', 'schedule.define', 'trigger.define'])
         expect(payloadOf(fake, 'schedule.read')).toEqual({
             text: 'every weekday at 9am have the interlocutor summarise what changed',
             zone: 'Australia/Sydney',
@@ -3806,7 +3884,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         const prompt = scripted([SENTENCE, 'n'])
         await converse(inSydney(fake, prompt))
 
-        expect(typesOf(fake)).toEqual(['inbox.list', 'agent.list', 'schedule.read'])
+        expect(typesOf(fake)).toEqual(['inbox.list', 'project.list', 'agent.list', 'schedule.read'])
         expect(prompt.said).toContain('not saved')
     })
 
@@ -3818,7 +3896,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         const said = prompt.said.join('\n')
 
         expect(typesOf(fake)).toEqual(
-            ['inbox.list', 'agent.list', 'schedule.read', 'schedule.read'])
+            ['inbox.list', 'project.list', 'agent.list', 'schedule.read', 'schedule.read'])
         expect(said).toContain('type it again')
         expect(said).not.toContain('no schedules')
     })
@@ -3832,7 +3910,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         await converse(inSydney(fake, prompt))
         const said = prompt.said.join('\n')
 
-        expect(typesOf(fake)).toEqual(['inbox.list', 'agent.list', 'schedule.read',
+        expect(typesOf(fake)).toEqual(['inbox.list', 'project.list', 'agent.list', 'schedule.read',
             'schedule.define', 'trigger.define', 'schedule.forget'])
         expect(payloadOf(fake, 'schedule.forget')).toEqual({ schedule: 'summarise-a1' })
         expect(said).toContain('interlocutor cannot run in the global tier')
@@ -3849,7 +3927,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         await converse(inSydney(fake, prompt))
         const said = prompt.said.join('\n')
 
-        expect(typesOf(fake)).toEqual(['inbox.list', 'agent.list', 'schedule.read'])
+        expect(typesOf(fake)).toEqual(['inbox.list', 'project.list', 'agent.list', 'schedule.read'])
         expect(said).toContain('that sentence does not say when')
         expect(said).not.toContain('save? [y/n]')
         // The next line was a command of its own, and ran.
@@ -3861,7 +3939,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         const prompt = scripted([SENTENCE])
         await converse(inSydney(fake, prompt))
 
-        expect(typesOf(fake)).toEqual(['inbox.list', 'agent.list', 'schedule.read'])
+        expect(typesOf(fake)).toEqual(['inbox.list', 'project.list', 'agent.list', 'schedule.read'])
         expect(prompt.said.join('\n')).toContain('save? [y/n]')
         expect(prompt.said.join('\n')).not.toContain('not saved')
     })
@@ -3877,7 +3955,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
 
         expect(prompt.said).toContain(
             'the model that reads schedules is not answering right now; nothing was saved')
-        expect(typesOf(fake)).toEqual(['inbox.list', 'agent.list', 'schedule.read'])
+        expect(typesOf(fake)).toEqual(['inbox.list', 'project.list', 'agent.list', 'schedule.read'])
     })
 
     describe('managing a schedule and the triggers listening to it', () => {
@@ -3909,7 +3987,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
         }
 
         const managed = (fake: Fake): { type: string; payload: unknown }[] => fake.heard.frames
-            .filter((frame) => !['inbox.list', 'agent.list', 'schedule.list', 'trigger.list']
+            .filter((frame) => !['inbox.list', 'project.list', 'agent.list', 'schedule.list', 'trigger.list']
                 .includes(frame.type))
 
         it('pauses the schedule and its trigger, and resumes both', async () => {
@@ -6364,7 +6442,12 @@ describe('the runs panel, over a real socket', () => {
 
     it('reads only its own tree on a line recorded, its status only for a milestone, and lists only for a run newly live', async () => {
         const fake = await scriptedPlowshare([])
-        fake.script('orchestration.list', { code: 'OK', payload: { orchestrations: [liveRun()] } })
+        // The waiting check asks for asking runs. Returning a running run there
+        // causes an unrelated status read to race this panel's request counts.
+        fake.script('orchestration.list', (payload) => {
+            const { state } = payload as { state?: string }
+            return { code: 'OK', payload: { orchestrations: state === undefined || state === 'running' ? [liveRun()] : [] } }
+        })
         fake.script('orchestration.status', liveStatus())
         let rows = [recordRow(1, 'run_started', 'started: build it')]
         fake.script('orchestration.record', recordOf(() => rows))
@@ -7266,3 +7349,89 @@ describe('automatic session recovery', () => {
         expect(fake.heard.frames.some(row=>row.type==='conversation.open'||row.type==='agent.run')).toBe(false);
     });
 });
+
+
+describe('server project administration', () => {
+    it('creates a restricted DISJOINT project once without opening a conversation', async () => {
+        const fake = await scriptedPlowshare([])
+        fake.script('project.create', {code:'OK',payload:{name:'Integration',workspace:'/srv/integration',lent:[],exclusions:[],machine:null,members:['fixture'],type:'DISJOINT',readOnly:false,writePaths:['generated','reports']}})
+        fake.script('admin.status', {code:'OK',payload:{handle:'fixture',serverAdmin:true}})
+        const prompt = scripted(['/admin status', '/project create {"name":"Integration","workspace":"/srv/integration","type":"DISJOINT","writePaths":["generated","reports"]}'])
+        await converse(talkingTo(fake,prompt))
+        expect(fake.heard.frames.filter(row=>row.type==='project.create')).toEqual([expect.objectContaining({payload:{name:'Integration',workspace:'/srv/integration',type:'DISJOINT',writePaths:['generated','reports']}})])
+        expect(fake.heard.frames.some(row=>row.type==='conversation.open'||row.type==='agent.run')).toBe(false)
+        expect(prompt.said.join('\n')).toContain('project.create: completed')
+    })
+})
+
+describe('client-only DISJOINT discovery', () => {
+    it('discovers a formal root manifest and serves it without marking or exporting it', async () => {
+        const root=await realpath(await mkdtemp(join(tmpdir(),'tui-disjoint-')))
+        const key='client:scope:'+Buffer.from('Integration').toString('base64url')
+        const fake=await scriptedPlowshare([]), prompt=scripted(['/projects'])
+        fake.script('project.list', {code:'OK',payload:[]})
+        fake.script('project.attach',{code:'OK',payload:{name:key,displayName:'Integration',workspace:root,machine:'test',lent:[],exclusions:[],members:[],type:'DISJOINT'}})
+        try {
+            const manifest=JSON.stringify({version:1,name:'Integration',routing:{sendTo:['notifications'],routeFiles:['routes/internal.json']},integration:{enabled:true}});await writeFile(join(root,'plowshare'),manifest)
+            await converse({...talkingTo(fake,prompt),here:root})
+            expect(fake.heard.frames.filter(row=>row.type==='project.attach')).toHaveLength(1)
+            expect(fake.heard.frames.some(row=>row.type==='union.enable'||row.type==='project.define')).toBe(false)
+            expect(await readFile(join(root,'plowshare'),'utf8')).toBe(manifest)
+            await expect(readFile(join(root,'.plowshare/project'))).rejects.toMatchObject({code:'ENOENT'})
+        } finally {await rm(root,{recursive:true,force:true})}
+    })
+})
+
+
+describe('server account administration', () => {
+    it('runs account, session and audit commands over WS without starting agent work', async () => {
+        const fake = await scriptedPlowshare([])
+        const fixtures = JSON.parse(readFileSync(new URL('../../../test-support/contracts/ws-conversation-fixtures.json',import.meta.url),'utf8'))
+        const commands = ['admin accounts','admin account create {"handle":"member"}','admin account update {"handle":"member","enabled":false}', 'admin account reset {"handle":"member"}', 'admin sessions {"handle":"member"}', 'admin session revoke {"handle":"member"}', 'admin audit {"limit":25}']
+        for(const type of ['admin.accounts','admin.account.create','admin.account.update','admin.account.reset','admin.sessions','admin.session.revoke','admin.audit']) fake.script(type,fixtures[type])
+        const prompt=scripted(commands.map(command=>'/'+command)); await converse(talkingTo(fake,prompt))
+        for(const type of ['admin.accounts','admin.account.create','admin.account.update','admin.account.reset','admin.sessions','admin.session.revoke','admin.audit']) expect(fake.heard.frames.filter(row=>row.type===type)).toHaveLength(1)
+        expect(fake.heard.frames.some(row=>row.type==='conversation.open'||row.type==='agent.run')).toBe(false)
+        expect(prompt.said.join('\n')).toContain('admin.account.create: completed')
+    })
+})
+
+
+describe('project access management', () => {
+    it('sends manager commands through the TUI with the selected project', async () => {
+        const fake = await scriptedPlowshare([])
+        const access = {code:'OK',payload:{project:'ledger',role:'MANAGER',permissions:['read','work','manage'],members:[{handle:'member',role:'VIEWER'}],history:[]}}
+        fake.script('project.access', access)
+        fake.script('project.member.role', access)
+        const prompt = scripted(['/project access', '/project member-role {"handle":"member","role":"VIEWER"}'])
+        await converse({...talkingTo(fake, prompt), project:'ledger'})
+        for (const type of ['project.access','project.member.role']) {
+            const frames=fake.heard.frames.filter(row=>row.type===type)
+            expect(frames).toHaveLength(1)
+            expect(frames[0]).toMatchObject({payload:{project:'ledger'}})
+        }
+        expect(fake.heard.frames.find(row=>row.type==='project.member.role')).toMatchObject({payload:{role:'VIEWER'}})
+        expect(prompt.said.join('\n')).toContain('project.access: completed')
+    })
+})
+
+
+describe('service account administration', () => {
+    it('manages machine identities and scoped credentials over WS without starting an agent', async () => {
+        const fake = await scriptedPlowshare([])
+        const fixtures = JSON.parse(readFileSync(new URL('../../../test-support/contracts/ws-conversation-fixtures.json',import.meta.url),'utf8'))
+        const cases = [
+            ['admin.service.accounts',{}], ['admin.service.account.create',{handle:'ha-integration'}],
+            ['admin.service.account.update',{handle:'ha-integration',enabled:false}], ['admin.service.tokens',{handle:'ha-integration'}],
+            ['admin.service.token.create',{handle:'ha-integration',name:'production',scopes:[{project:'automation',role:'CONTRIBUTOR'}]}],
+            ['admin.service.token.rotate',{handle:'ha-integration',id:'00000000-0000-0000-0000-000000000001'}],
+            ['admin.service.token.revoke',{handle:'ha-integration',id:'00000000-0000-0000-0000-000000000001'}],
+        ] as const
+        for(const [type] of cases) fake.script(type,fixtures[type])
+        const prompt=scripted(cases.map(([type,payload])=>'/'+type.replaceAll('.',' ')+' '+JSON.stringify(payload)))
+        await converse(talkingTo(fake,prompt))
+        for(const [type] of cases) expect(fake.heard.frames.filter(row=>row.type===type)).toHaveLength(1)
+        expect(fake.heard.frames.some(row=>row.type==='conversation.open'||row.type==='agent.run')).toBe(false)
+        expect(prompt.said.join('\n')).toContain('pss_fixture-only')
+    })
+})

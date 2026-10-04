@@ -50,9 +50,13 @@ try {
   await page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'fixture', password: 'fixture-password' }), fixture.base);
   assert.equal(fixture.liveFileClaims.length, 0);
   await page.locator('[data-project="2ndbrain"]').click();
+  await expect(page.locator('#file-access-prompt')).toBeVisible();
+  assert.equal(fixture.liveFileClaims.length, 0, 'Recorded folder discovery waits for explicit approval');
+  await expect(page.locator('#file-access-description')).toContainText(root);
+  await page.locator('#file-access-allow').click();
   await expect(page.locator('#files-label')).toHaveText('Files connected');
   await expect(page.locator('#agent')).toHaveValue('cathy');
-  await expect(page.locator('#draft')).toHaveAttribute('placeholder', 'Message cathy…');
+  await expect(page.locator('#draft')).toHaveAttribute('placeholder', 'Ask anything…');
   assert.equal(fixture.liveFileClaims[0].project, '2ndbrain');
   assert.ok(definitionReads.some(row => row.name === 'cathy'));
   assert.ok(definitionReads.every(row => row.project === '2ndbrain' && row.session === fixture.liveFileClaims[0].session));
@@ -72,19 +76,26 @@ try {
   await expect(page.locator('#agent option')).toHaveCount(1);
   await expect(page.locator('#agent')).toHaveValue('fixture-bot');
   await page.locator('[data-project="2ndbrain"]').click();
-  await page.locator('#files-open').click(); await page.locator('#files-withdraw').click(); await page.locator('#files-close').click();
+  await page.locator('#files-open').click(); await page.locator('#files-withdraw').click(); await page.locator('#inspector-close').click();
   await page.locator('[data-project=""]').click(); await page.locator('[data-project="2ndbrain"]').click();
   assert.equal(fixture.liveFileClaims.length, 0, 'Navigation must not undo an explicit pause');
-  await page.locator('#files-open').click(); await page.locator('#files-reopen').click(); await page.locator('#files-close').click();
+  await page.locator('#files-open').click(); await page.locator('#files-reopen').click(); await page.locator('#inspector-close').click();
   await expect(page.locator('#agent')).toHaveValue('sophie');
   await app.close(); app = undefined;
-  // No saved folder mapping, but a remembered project selection on restart.
+  // Losing the saved folder mapping offers the recorded location for approval on restart.
   await rm(join(config, 'desktop-projects.json'));
   page = await launch();
+  await expect.poll(async () => (await page.evaluate(() => window.plowshare.request({ action: 'bootstrap' }))).state.connected).toBe(true);
+  assert.equal(fixture.liveFileClaims.length, 0, 'Restart does not approve a lost mapping');
+  await page.locator('[data-project="2ndbrain"]').click();
+  await expect(page.locator('#file-access-prompt')).toBeVisible();
+  assert.equal(fixture.liveFileClaims.length, 0, 'Recorded folder discovery waits for explicit approval');
+  await expect(page.locator('#file-access-description')).toContainText(root);
+  await page.locator('#file-access-allow').click();
   await expect(page.locator('#files-label')).toHaveText('Files connected');
   await expect(page.locator('#agent')).toHaveValue('sophie');
   assert.equal(fixture.loginCount(), 1);
-  console.log('Bots smoke passed: real project-local definitions over the same session, automatic attachment, Cathy default, bot refresh, global isolation, explicit pause and restart recovery.');
+  console.log('Bots smoke passed: real project-local definitions over the same session, explicit folder approval, Cathy default, bot refresh, global isolation, explicit pause and approved restart recovery.');
 } finally {
   await app?.close(); await fixture.close(); await rm(temporary, { recursive: true, force: true });
 }

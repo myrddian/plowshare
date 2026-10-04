@@ -149,9 +149,10 @@ export function terminal(options: Terminal): Surface {
     let look: Look = options.look ?? DEFAULT_LOOK
     let declared: readonly string[] = []
     let details: Readonly<Record<string, string>> = {}
+    let serverCommands: readonly { readonly name: string; readonly detail: string }[] = []
     /** What the command menu offers, rebuilt from the latest roster. */
     const vocabulary = (): Vocabulary => ({
-        commands: COMMANDS.map((name) => ({ name, detail: describeCommand(name) })),
+        commands: [...COMMANDS.map((name) => ({ name, detail: describeCommand(name) })), ...serverCommands],
         names: declared.map((name) => {
             const detail = details[name]
             return detail === undefined || detail === '' ? { name } : { name, detail }
@@ -462,9 +463,10 @@ export function terminal(options: Terminal): Surface {
             redraw()
         },
 
-        completing(names: readonly string[], described?: Readonly<Record<string, string>>): void {
+        completing(names: readonly string[], described?: Readonly<Record<string, string>>, commands: readonly { readonly name: string; readonly detail: string }[] = []): void {
             declared = names
             details = described ?? {}
+            serverCommands = commands
             redraw()
         },
 

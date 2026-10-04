@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    `maven-publish`
 }
 
 val jacksonVersion: String by project
@@ -16,3 +17,6 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.fasterxml.jackson.core:jackson-databind:$jacksonVersion")
 }
+
+java { withSourcesJar(); withJavadocJar() }
+publishing { publications { create<MavenPublication>("protocol") { from(components["java"]) } } }

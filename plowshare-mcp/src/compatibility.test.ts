@@ -66,3 +66,13 @@ test('information preserves scoped receipts and refuses human publication and mi
     for (const operation of ['share','finalise','delete','migration.adopt']) await assert.rejects(call(backend,'information',{operation,payload}),/unsupported model information operation/)
     assert.equal(calls.length,1)
 })
+
+
+test('information facets forwards the requested project scope and filter exactly once', async () => {
+    const calls: unknown[] = []
+    const facets = {tags:[{tag:'a2a',count:2}],authors:[],groups:[]}
+    const backend: Backend = {invoke: async (type,payload) => {calls.push([type,payload]);return facets},runSession:()=>null,root:async()=>{throw new Error('unexpected root')}}
+    const payload = {scope:{kind:'project',project:'research',includeShared:false},kind:'source',filter:{tags:['a2a']}}
+    assert.equal(await call(backend,'information',{operation:'facets',payload}),JSON.stringify(facets))
+    assert.deepEqual(calls,[['information.facets',payload]])
+})

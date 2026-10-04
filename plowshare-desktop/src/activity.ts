@@ -155,6 +155,16 @@ export class ActivityClient {
         runs.items = [...new Map([...recent, ...live].map(run => [run.id, run])).values()]
           .sort((a, b) => Number(LIVE_STATES.includes(b.state)) - Number(LIVE_STATES.includes(a.state)) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
         runs.loaded = true; runs.limited = answers.slice(1).some(answer => runsOf(answer)!.length >= 200); delete runs.error;
+        this.emit();
+        // Questions must reach chat even when no Activity window is open. Keep the
+        // existing paged list authoritative and bound simultaneous status reads.
+        const asking = runs.items.filter(run => run.state === 'asking').map(run => run.id);
+        let cursor = 0;
+        await Promise.all(Array.from({ length: Math.min(4, asking.length) }, async () => {
+          while (epoch === this.epoch && this.live() && cursor < asking.length) {
+            await this.detail(asking[cursor++]);
+          }
+        }));
       } catch (error) { if (epoch === this.epoch) runs.error = problem(error); }
       finally { if (epoch === this.epoch) { runs.loading = false; this.emit(); } }
     });
@@ -185,7 +195,10 @@ export class ActivityClient {
       if (this.view === 'inbox' && this.marking.size === 0) void this.inbox();
     }
     const changed = changedOf(value), recorded = recordedOf(value);
-    if (changed) void this.runs();
+    if (changed) {
+      void this.runs();
+      if (this.state().activity.details[changed.id]?.wire?.orchestration.state === 'asking') void this.detail(changed.id);
+    }
     if ((this.view === 'runs' || this.view === 'builder') && this.selected && (changed || recorded)) {
       const detail = this.state().activity.details[this.selected]?.value;
       if (recorded?.root === this.selected || changed?.id === this.selected || detail?.children.some(child => child.id === changed?.id)) void this.detail(this.selected);

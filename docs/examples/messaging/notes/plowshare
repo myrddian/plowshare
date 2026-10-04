@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "notes",
+  "routing": {
+    "acceptFrom": ["research"],
+    "sendTo": []
+  }
+}

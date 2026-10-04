@@ -12,13 +12,13 @@ import { Credentials, savedOrLogin } from 'plowshare-client-node/credentials';
 import { fieldsOf } from 'plowshare-client-ts/operations/response';
 import { acceptedJobOf, jobStatusOf } from 'plowshare-client-ts/binding/job-view';
 import { randomUUID } from 'node:crypto';
-import { openSocket, openFiles, SignInRefused } from 'plowshare-client-ts/binding/auth';
+import { finishSetup, signIn, openSocket, openFiles, SignInRefused } from 'plowshare-client-ts/binding/auth';
 import type { Connection } from 'plowshare-client-ts/binding/connection';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import { JobLifecycle } from 'plowshare-client-ts/jobs';
 import type { Ticket } from 'plowshare-client-ts/jobs';
 import {
-  listingProjects, listingConversations, listingAgents, opening, speaking, streaming, checking,
+  listingProjects, listingConversations, listingAgents, opening, speaking, streaming, checking, continuing,
   cancelling, followingLogs, readingTrace, measuring, readingLogTail, readingLogBefore, listingMyApprovals, answeringApproval,
 } from 'plowshare-client-ts/operations/session';
 import {
@@ -67,7 +67,7 @@ function blank(base: string, handle: string): DesktopState {
   return { mode: 'live', connected: false, connection: 'Disconnected', base, handle,
     files: { status: 'off' }, projects: [], agents: {}, conversations: [], history: {}, jobs: [], approvals: [], contexts: {}, board: emptyBoard(), activity: emptyActivity() };
 }
-export interface Connected { connection: Connection; session: string; handle?: string; openFiles?: FileOpener; bearer?: () => Promise<string>; spawn?: (push: (value: unknown) => void, closed: () => void) => Promise<Connected> }
+export interface Connected { connection: Connection; session: string; handle?: string; serverAdmin?: boolean; openFiles?: FileOpener; bearer?: () => Promise<string>; spawn?: (push: (value: unknown) => void, closed: () => void) => Promise<Connected> }
 export type Connector = (base: string, handle: string, password: string,
   push: (value: unknown) => void, closed: () => void) => Promise<Connected>;
 
@@ -82,7 +82,8 @@ export const serverConnector: Connector = async (base, handle, password, push, c
     if (error instanceof SignInRefused) throw new Error('Sign-in failed. Check your handle and password.');
     throw error;
   });
-  if (signed.mustChangePassword) throw new Error('Change the initial password through the TUI or web console before connecting the test desktop.');
+  if (signed.setupRequired) throw new Error('Finish first-run setup with plowshare-cli setup, or use the first administrator form below.');
+  if (signed.mustChangePassword) throw new Error('Change the initial password through plowshare-cli login or the TUI before connecting.');
   const open: Parameters<typeof openSocket>[0]['open'] = (url) => new Promise((resolve, reject) => {
       const socket = new WebSocket(url);
       const timer = setTimeout(() => { socket.close(); reject(new Error('The server WebSocket did not open within 15 seconds.')); }, 15_000);
@@ -100,7 +101,9 @@ export const serverConnector: Connector = async (base, handle, password, push, c
   const spawn = async (incoming: (value: unknown) => void, gone: () => void): Promise<Connected> => {
     const session = randomUUID();
     const result = await serial(() => openSocket({ ...door, renew: () => store.renew(door), session, onPush: incoming, onClose: gone, open }, tokens, rotated => { tokens = rotated; }));
-    return { connection: result.connection, session, handle: (await store.session()).handle, spawn,
+    const authority = await result.connection.ask('admin.status', {}).catch(error => { result.connection.close(); throw error; });
+    const serverAdmin = authority.code === 'OK' && fieldsOf(authority.payload)['serverAdmin'] === true;
+    return { connection: result.connection, session, handle: (await store.session()).handle, serverAdmin, spawn,
       bearer: () => serial(async () => { tokens = await store.renew(door); return tokens.access; }),
       openFiles: claim => serial(async () => {
       const files = await openFiles({ ...door, renew: () => store.renew(door), session, open }, tokens, claim, rotated => { tokens = rotated; });
@@ -181,6 +184,7 @@ export class DesktopClient {
     const name = await files.choose(directory, project);
     if (this.files !== files) throw new Error('The connection changed while choosing files.');
     await this.readProjects();
+    if (this.state.projects.find(row => row.name === name)?.kind === 'personal') await this.sync.ready();
     await this.loadScope(name);
     this.emit();
     return { state: structuredClone(this.state), rootProject: name };
@@ -217,6 +221,17 @@ export class DesktopClient {
       login.handle = saved.handle;
     }
     return login;
+  }
+  async initializeAdministrator(request: Extract<Request, { action: 'server-setup' }>) {
+    const base = validatedBase(request.base);
+    const door = { base, fetch: (url: string, init: Parameters<typeof fetch>[1]) => fetch(url, { ...init, signal: AbortSignal.timeout(30_000), redirect: 'error' as const }) };
+    const temporary = text(request.temporaryPassword, 'temporary password', 4096);
+    const signed = await signIn(door, 'admin', temporary);
+    if (!signed.setupRequired) throw new Error('Setup is already complete. Sign in with your administrator account.');
+    const handle = text(request.handle, 'administrator handle', 64), password = text(request.password, 'administrator password', 4096);
+    await finishSetup(door, signed.tokens.access, temporary, handle, password);
+    await new Credentials(base).login(door, handle, password);
+    return { base, handle };
   }
   private readonly usageClient = new UsageClient({ask: (type,payload) => this.ask(type,payload)});
   readonly usage = new UsageWatch(this.usageClient, usage => { this.state.usage=usage;this.emit(); });
@@ -343,6 +358,7 @@ export class DesktopClient {
         if (request.text !== undefined && (typeof request.text !== 'string' || request.text.length > 524288)) throw new Error('The merged text is too large.');
         await this.sync.resolve(request.how, text(request.identity, 'conflict identity'), request.text); break;
       case 'operator-prepare': await this.operator.prepare(request.kind, request.project); break;
+      case 'operator-messages': await this.operator.messages(request.identity, request.instance, request.offset); break;
       case 'operator-preview': this.operator.preview(request.identity, request.input); break;
       case 'operator-apply': await this.operator.apply(request.identity); break;
       case 'bootstrap': break;
@@ -350,6 +366,38 @@ export class DesktopClient {
       case 'disconnect':
         this.dispose(); this.disconnected(); this.state.connection = 'Disconnected · server jobs are not cancelled';
         this.emit(); await this.fileClosing; break;
+      case 'server-setup': {
+        const login = await this.initializeAdministrator(request);
+        return this.dispatch({ action: 'connect', ...login, password: '' });
+      }
+      case 'project-access': {
+        if (!this.state.connected) throw new Error('Connect to the server first.');
+        if (!['project.access','project.member.add','project.member.remove','project.member.role'].includes(request.operation)) throw new Error('Unknown project access operation.');
+        const result = ok(await this.send({type: request.operation,payload:{project:text(request.project,'project name',512),...(request.handle ? {handle:request.handle}:{}),...(request.role ? {role:request.role}:{})}}));
+        if (request.operation !== 'project.access') { await this.readProjects(); this.emit(); }
+        return {state:structuredClone(this.state),administration:result.payload};
+      }
+      case 'server-admin': {
+        const operations = ['admin.pricing.list','admin.pricing.set','admin.accounts','admin.account.create','admin.account.update','admin.account.reset','admin.sessions','admin.session.revoke','admin.audit','admin.service.accounts','admin.service.account.create','admin.service.account.update','admin.service.tokens','admin.service.token.create','admin.service.token.rotate','admin.service.token.revoke'];
+        if (!operations.includes(request.operation)) throw new Error('Unknown server administration operation.');
+        if (!this.state.connected) throw new Error('Connect as a server administrator first.');
+        const status = ok(await this.send({ type: 'admin.status', payload: {} })).payload as { serverAdmin: boolean };
+        this.state.serverAdmin = status.serverAdmin;
+        this.emit();
+        if (!status.serverAdmin) throw new Error('Only a server administrator may manage accounts.');
+        const result = ok(await this.send({ type: request.operation, payload: request.payload ?? {} }));
+        return { state: structuredClone(this.state), administration: result.payload };
+      }
+      case 'server-project-create': {
+        if (!this.state.connected || !this.state.serverAdmin) throw new Error('Connect as a server administrator to add a server project.');
+        const type = request.type ?? 'MANAGED';
+        if (type !== 'MANAGED' && type !== 'DISJOINT') throw new Error('Choose MANAGED or DISJOINT.');
+        if (request.writePaths !== undefined && (!Array.isArray(request.writePaths) || request.writePaths.some(path => typeof path !== 'string'))) throw new Error('Writable areas must be a list of relative paths.');
+        ok(await this.send({ type: 'project.create', payload: { name: text(request.name, 'project name', 512), type,
+          ...(request.workspace?.trim() ? { workspace: text(request.workspace, 'server directory', 4096) } : {}),
+          ...(request.writePaths === undefined ? {} : { writePaths: request.writePaths }) } }));
+        await this.readProjects(); this.emit(); break;
+      }
       case 'connect': {
         const { base, handle, password } = await this.login(request);
         const previous = this.state;
@@ -374,13 +422,15 @@ export class DesktopClient {
             if (generation === this.generation) {
               this.state.files = value;
               if (value.status === 'ready' && value.project && value.root && value.machine) {
-                this.sync.attach({ project: value.project, root: value.root, machine: value.machine }, base, opened.handle ?? handle, opened.bearer);
+                if (value.project.startsWith('client:')) this.sync.stop();
+                else this.sync.attach({ project: value.project, root: value.root, machine: value.machine }, base, opened.handle ?? handle, opened.bearer);
               } else this.sync.stop();
               this.emit();
             }
-          }, () => this.sync.changedFiles());
+          }, () => this.sync.changedFiles(), opened.connection);
           this.state.handle = opened.handle ?? handle;
           this.state.connected = true; this.state.connection = 'Connected';
+          this.state.serverAdmin = opened.serverAdmin === true;
           ok(await this.send(streaming(true)));
           await this.readProjects();
           await this.loadScope(this.options.project);
@@ -402,6 +452,10 @@ export class DesktopClient {
       case 'files-withdraw':
         if (!this.files) throw new Error('Connect to the server before managing files.');
         await this.files.withdraw(); break;
+      case 'board-post-topics': await this.board.postingTopics(request.project, request.more); break;
+      case 'board-create': await this.board.create(request.project, request.title, request.label, request.body, request.requestId, request.maxModelCalls); break;
+      case 'board-retry': await this.board.retry(request.project, request.topic, request.member, request.requestId, request.maxTurns, request.reconcile); break;
+      case 'board-post': await this.board.post(request.project, request.topic, request.body, request.requestId); break;
       case 'board-view': await this.board.open(request.view, projectOf(request)); break;
       case 'board-refresh': await this.board.refresh(); break;
       case 'board-more': await this.board.more(); break;
@@ -420,12 +474,14 @@ export class DesktopClient {
         if (this.state.activity.view === 'definitions' && this.state.connected) await this.runs.definitions(this.state.activity.definitions?.project);
         if (this.state.activity.view === 'schedules' && this.state.connected) await this.schedules.refresh();
         break;
+      case 'question-refresh': await this.activity.refresh(); break;
       case 'inbox-read': await this.activity.mark(text(request.id, 'inbox item', 512)); break;
       case 'inbox-more': await this.activity.older(); break;
       case 'run-detail': await this.activity.select(text(request.id, 'run', 512)); break;
-      case 'library-view': await this.library.open(request.view, request.project); break;
+      case 'library-view': await this.library.open(request.view, request.project, request.revision, request.chapter); break;
       case 'library-refresh': await this.library.refresh(); break;
       case 'library-documents': await this.library.documents(request.query, request.more); break;
+      case 'library-source-text': await this.library.sourceText(request.id,request.offset); break;
       case 'library-document': await this.library.document(request.id); break;
       case 'library-memory': await this.library.memory(request.id); break;
       case 'library-chunk': await this.library.chunk(request.id); break;
@@ -458,7 +514,9 @@ export class DesktopClient {
       }
       case 'history': await this.history(text(request.conversation, 'conversation', 512), request.before); break;
       case 'select': await this.followView('chat', request.conversation); break;
+      case 'context-snapshot': await this.snapshot(text(request.conversation, 'conversation', 512), text(request.agent, 'agent', 512), request.measure === true); break;
       case 'context': await this.measure(text(request.conversation, 'conversation', 512), text(request.agent, 'agent', 512)); break;
+      case 'workflow-start': notice = await this.startWorkflow(request); break;
       case 'run': await this.run(text(request.conversation, 'conversation', 512), text(request.agent, 'agent', 512), text(request.text, 'message')); break;
       case 'cancel': {
         const id = text(request.job, 'job', 512);
@@ -614,6 +672,17 @@ export class DesktopClient {
     if (!served) throw new Error('The server returned an unreadable agent listing.');
     if (read === this.agentReads.get(key)) this.state.agents[key] = served;
   }
+  async botConversations(project: string): Promise<Record<string, string>> {
+    const latest: Record<string, string> = {};
+    for (const bot of (this.state.agents[project] ?? []).filter(row => row.bot)) {
+      const answer = ok(await this.send(continuing(bot.name, project)));
+      if (answer.payload == null) continue;
+      const conversation = opened(answer);
+      if (!conversation || !this.state.conversations.some(row => row.id === conversation.id && row.project === project)) continue;
+      latest[bot.name] = conversation.id;
+    }
+    return latest;
+  }
   private async history(id: string, before?: number) {
     if (this.state.mode === 'demo') return;
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0)) throw new Error('Invalid history cursor.');
@@ -652,6 +721,24 @@ export class DesktopClient {
     this.historyReads.set(id, read);
     try { await read; } finally { if (this.historyReads.get(id) === read) this.historyReads.delete(id); }
   }
+  private async snapshot(conversation: string, agent: string, measure: boolean) {
+    if (this.state.mode === 'demo') return;
+    const key = contextKey(conversation, agent), readKey = `snapshot:${key}`;
+    const sequence = (this.contextReads.get(readKey) ?? 0) + 1;
+    this.contextReads.set(readKey, sequence);
+    const generation = this.generation;
+    this.state.contextSnapshots ??= {};
+    this.state.contextSnapshots[key] = { value: this.state.contextSnapshots[key]?.value, loading: true };
+    this.emit();
+    try {
+      const value = await this.usageClient.call('conversation.context.snapshot', {conversation, agent, measure}) as import('plowshare-client-ts/operations/usage').ContextSnapshot;
+      if (generation !== this.generation || sequence !== this.contextReads.get(readKey)) return;
+      this.state.contextSnapshots[key] = {value};
+    } catch (reason) {
+      if (generation === this.generation && sequence === this.contextReads.get(readKey))
+        this.state.contextSnapshots[key] = {value: this.state.contextSnapshots[key]?.value, error: reason instanceof Error ? reason.message : String(reason)};
+    }
+  }
   private async measure(conversation: string, agent: string) {
     if (this.state.mode === 'demo') return;
     const key = contextKey(conversation, agent);
@@ -672,6 +759,29 @@ export class DesktopClient {
     }
   }
   async authoringTurn(id: string, agent: string, task: string) { return this.run(id, agent, task, true); }
+  private workflowStarts = new Set<string>();
+  private async startWorkflow(input: Extract<Request, { action: 'workflow-start' }>) {
+    if (!this.state.connected || this.state.mode !== 'live') throw new Error('Connect before starting a workflow.');
+    const conversation = this.state.conversations.find(row => row.id === input.conversation);
+    if (!conversation) throw new Error('Open a conversation first.');
+    const agent = this.state.agents[homeKey(conversation.project)]?.find(row => row.name === input.agent && row.served && row.bot);
+    if (!agent?.commands?.some(command => command.kind === 'orchestration' && command.name === input.definition)) throw new Error('Choose a workflow granted to this agent.');
+    text(input.text, 'workflow request');
+    if (typeof input.requestId !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(input.requestId)) throw new Error('Retain a valid workflow request ID.');
+    if (this.workflowStarts.has(input.requestId)) throw new Error('This workflow launch is already in progress.');
+    this.workflowStarts.add(input.requestId);
+    try {
+      const answer = ok(await this.send({ type: 'orchestration.start', payload: {
+        agent: input.agent, definition: input.definition, request: input.text, requestId: input.requestId,
+        ...(conversation.project ? { project: conversation.project } : {}),
+      } }), 'ACCEPTED');
+      const receipt = answer.payload as { id?: string; requestId?: string } | undefined;
+      if (!receipt?.id || receipt.requestId !== input.requestId) throw new Error('The server did not confirm this workflow receipt. Retry with the retained request ID.');
+      return `Started ${input.definition} (${receipt.id}). Follow its progress and questions in Runs.`;
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)} The request ID is retained; retrying this launch recovers the same run.`);
+    } finally { this.workflowStarts.delete(input.requestId); }
+  }
   private async run(id: string, agent: string, task: string, authoring = false) {
     const conversation = this.state.conversations.find(row => row.id === id);
     if (!conversation) throw new Error('Open a conversation first.');

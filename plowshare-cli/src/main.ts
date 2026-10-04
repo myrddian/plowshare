@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { promptLogin, promptNewPassword } from './login.js'
+import { promptLogin, promptNewPassword, promptSetup } from './login.js'
 import { run } from './run.js'
 
 const interrupt = new AbortController()
@@ -9,6 +9,7 @@ process.once('SIGTERM', stop)
 process.exitCode = await run(process.argv.slice(2), {
     env: process.env,
     login: promptLogin,
+    setup: promptSetup,
     newPassword: promptNewPassword,
     stdout: text => { process.stdout.write(text) },
     stderr: text => { process.stderr.write(text) },

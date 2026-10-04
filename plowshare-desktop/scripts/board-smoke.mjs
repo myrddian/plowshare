@@ -8,13 +8,13 @@ import { protocolFixture } from './protocol-fixture.mjs';
 const profile = await mkdtemp(join(tmpdir(), 'plowshare-board-smoke-'));
 const env = { ...process.env, PLOWSHARE_DESKTOP_CONFIG: join(profile, 'config'), PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'), PLOWSHARE_DESKTOP_PROFILE: profile }; delete env.ELECTRON_RUN_AS_NODE;
 await mkdir('build/smoke', { recursive: true });
-const fixture = await protocolFixture(); let app;
+const fixture = await protocolFixture({boardProject:'Empty workspace'}); let app;
 try {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
   const page = await app.firstWindow(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.locator('[data-project="Plowshare"]').click();
-  const opened = app.waitForEvent('window'); await page.locator('#board-open').click(); const board = await opened;
+  const opened = app.waitForEvent('window'); await page.locator('#board-open').click(); let board = await opened;
   board.on('pageerror', error => errors.push(error.message));
   await expect(board.locator('#board-detail h2')).toHaveText('How should device sync work?');
   await expect(board.locator('.board-message')).toHaveCount(3);
@@ -24,7 +24,7 @@ try {
   await expect(board.locator('#board-detail h2')).toHaveText('Compare conflict strategies');
   await board.locator('.board-breadcrumb [data-topic="demo-board"]').click();
   await expect(board.locator('#board-detail h2')).toHaveText('How should device sync work?');
-  await board.locator('#view-swarm').click(); await expect(board.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
+  const demoSwarmOpening=app.waitForEvent('window');await page.locator('#swarm-open').click();board=await demoSwarmOpening; await expect(board.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
   await expect(board.locator('.swarm-member')).toHaveCount(3);
   await expect(board.locator('.topic-row')).toHaveCount(0);
   await expect(board.locator('#board-title')).toHaveText('Swarm members');
@@ -34,17 +34,17 @@ try {
     const actorOpened = app.waitForEvent('window');
     await board.locator('.swarm-member').nth(at).click(); const actor = await actorOpened;
     await expect(actor.locator('#trajectory-rows')).toContainText(tool);
-    await actor.evaluate(() => window.close());
+    await actor.close();
   }
 
   await assert.rejects(board.evaluate(() => window.plowshare.request({ action: 'run', conversation: 'demo-desktop', agent: 'plowshare', text: 'Forbidden' })), /only inspect/);
   await assert.rejects(board.evaluate(() => window.plowshare.request({ action: 'board-trajectory', conversation: 'demo-global' })), /displayed/);
-  await board.evaluate(() => window.close());
+  await board.close();
 
   await page.locator('#connection-button').click(); await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture'); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected');
-  const liveOpened = app.waitForEvent('window'); await page.locator('#board-open').click(); const live = await liveOpened;
+  const liveOpened = app.waitForEvent('window'); await page.locator('#board-open').click(); let live = await liveOpened; const liveBoard=live;
   live.on('pageerror', error => errors.push(error.message));
   await expect(live.locator('#board-detail h2')).toHaveText('How should device sync work?');
   fixture.appendBoardMessage(); await expect(live.locator('#board-detail')).toContainText('A fresh swarm update from another session.', { timeout: 10000 });
@@ -54,7 +54,7 @@ try {
   await assert.rejects(trajectory.evaluate(() => window.plowshare.request({ action: 'board-inspection', view: 'swarm' })), /only read/);
   fixture.appendTurn('fixture-board-seat', 'A later board seat result.');
   await expect(trajectory.locator('#trajectory-rows')).toContainText('A later board seat result.');
-  await live.locator('#view-swarm').click(); await expect(live.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
+  const liveSwarmOpening=app.waitForEvent('window');await page.locator('#swarm-open').click();live=await liveSwarmOpening; await expect(live.locator('#swarm-summary')).toContainText('1 / 3 swarm slots');
   await expect(live.locator('.swarm-member')).toHaveCount(3);
   await expect(live.locator('.topic-row')).toHaveCount(0);
   await expect(live.locator('.swarm-member').nth(1)).toContainText('reasoning · waiting 12s');
@@ -66,6 +66,23 @@ try {
   await expect(live.locator('#board-error')).toContainText('temporarily unavailable');
   await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
   fixture.setRefuseBoard(false); await live.locator('#board-refresh').click(); await expect(live.locator('#board-error')).toBeHidden();
+  fixture.failBoardMember('researcher'); await live.locator('#board-refresh').click();
+  await live.locator('[data-member]').filter({hasText:'researcher'}).click();
+  await live.locator('[data-retry-member="researcher"]').click();
+  await expect(live.locator('#board-retry-dialog')).toBeVisible();
+  await expect(live.locator('#retry-description')).toContainText('existing conversation');
+  await live.locator('#retry-limit').fill('40'); fixture.loseRetryAcknowledgment();
+  await live.locator('#retry-submit').click();
+  await expect(live.locator('#retry-error')).toContainText('unreadable');
+  await expect(live.locator('#board-retry-pending')).toBeVisible();
+  const retryRequests = () => fixture.frames.filter(f=>f.type==='board.retry');
+  assert.equal(retryRequests().length,1); assert.equal(retryRequests()[0].payload.maxTurns,40);
+  await live.locator('#board-retry-close').click();
+  await live.reload(); await live.locator('#board-retry-pending').click();
+  await expect(live.locator('#retry-limit')).toHaveValue('40');
+  await live.locator('#retry-submit').click(); await expect(live.locator('#board-retry-dialog')).not.toBeVisible();
+  assert.equal(retryRequests().length,2); assert.deepEqual(retryRequests()[0].payload,retryRequests()[1].payload);
+  await expect(live.locator('#board-retry-pending')).toBeHidden();
   await live.screenshot({ path: 'build/smoke/swarm-live.png' });
   await live.setViewportSize({ width: 920, height: 680 });
   assert.equal(await live.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -74,7 +91,7 @@ try {
   await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
   await page.locator('#connection-button').click(); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected'); await expect(live.locator('#board-error')).toBeHidden();
-  await live.evaluate(() => window.close());
+  await live.close(); await liveBoard.close();
   const reads = fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length;
   await new Promise(resolve => setTimeout(resolve, 4500));
   assert.equal(fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length, reads, 'Closing the inspector stops its reads.');
@@ -84,5 +101,5 @@ try {
   await expect.poll(() => ending.isClosed()).toBe(true); await expect.poll(() => trajectory.isClosed()).toBe(true);
   assert.equal(fixture.frames.filter(f => ['board.post','board.open','board.topup','agent.run','inbox.read'].includes(f.type)).length, 0);
   assert.deepEqual(errors, []);
-  console.log('Board smoke passed: topic tree, threaded messages, child/parent navigation, live swarm updates, seat trajectory follow, isolation, failures, reconnect, account reset, compact layout and polling lifetime.');
+  console.log('Board smoke passed: topic tree, threaded messages, child/parent navigation, live swarm updates, seat trajectory follow, editable retry limit, lost acknowledgment recovery across reload without duplicate wakes, isolation, failures, reconnect, account reset, compact layout and polling lifetime.');
 } finally { await app?.close(); await fixture.close(); await rm(profile, { recursive: true, force: true }); }

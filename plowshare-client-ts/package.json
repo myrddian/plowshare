@@ -1,13 +1,17 @@
 {
   "name": "plowshare-client-ts",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "packageManager": "pnpm@10.34.5",
   "engines": {
     "node": ">=22.12"
   },
   "exports": {
+    ".": {
+      "types": "./build/operations/sdk.d.ts",
+      "import": "./build/operations/sdk.js"
+    },
     "./binding/*": {
       "types": "./build/binding/*.d.ts",
       "import": "./build/binding/*.js"
@@ -34,7 +38,8 @@
     "build": "tsc -b --force",
     "typecheck": "tsc -b --force",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=build/vitest/junit.xml"
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=build/vitest/junit.xml",
+    "prepack": "pnpm build"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
@@ -45,5 +50,6 @@
     "ignoredBuiltDependencies": [
       "esbuild"
     ]
-  }
+  },
+  "description": "Plowshare WebSocket SDK for JavaScript and TypeScript"
 }

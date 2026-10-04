@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "plowshare": "https://plowshare.example.invalid",
+  "tokenEnv": "PLOWSHARE_TOKEN",
+  "journal": "private-journal",
+  "bindings": {
+    "house": {
+      "adapter": "home-assistant",
+      "project": "home-assistant",
+      "peer": "ha-house",
+      "configuration": {
+        "endpoint": "https://home-assistant.example.invalid",
+        "tokenEnv": "HA_TOKEN",
+        "entities": {
+          "office.temperature": {"entity": "sensor.example_office_temperature", "attributes": []},
+          "office.occupancy": {"entity": "binary_sensor.example_office_occupancy", "attributes": []},
+          "office.climate": {"entity": "climate.example_office", "attributes": ["temperature", "current_temperature", "hvac_action"]}
+        },
+        "subscriptions": ["office.temperature"],
+        "actions": {
+          "send_report": {
+            "service": "notify.example_phone",
+            "targets": [],
+            "parameters": {"message": {"type": "string", "maxLength": 4096}},
+            "required": ["message"]
+          },
+          "evening_scene": {
+            "service": "scene.turn_on",
+            "targets": ["scene.example_evening"],
+            "parameters": {},
+            "required": []
+          }
+        }
+      },
+      "routes": {
+        "office_heat": {
+          "entity": "office.temperature",
+          "above": 28,
+          "unit": "°C",
+          "cooldownSeconds": 900,
+          "definition": "investigate_office_heat",
+          "agent": "house_coordinator",
+          "request": "Investigate why the office is hot using selected HA evidence. Explain missing evidence and uncertainty.",
+          "completionAction": "send_report"
+        }
+      }
+    }
+  }
+}

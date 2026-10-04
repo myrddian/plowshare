@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plowshare project manifest version 1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "name"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "$ref": "#/$defs/name"
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "acceptFrom": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/name"
+          }
+        },
+        "sendTo": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/name"
+          }
+        },
+        "routeFiles": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/routeFile"
+          }
+        }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "autoContinue": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "time": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080
+        },
+        "failedChecks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "autoIncrease": {
+          "type": "boolean"
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "$ref": "#/$defs/commandPolicy"
+        },
+        "server": {
+          "$ref": "#/$defs/commandPolicy"
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "maxProperties": 512,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentVisible"
+        ],
+        "properties": {
+          "agentVisible": {
+            "type": "boolean"
+          }
+        }
+      },
+      "propertyNames": {
+        "pattern": "^[\\p{L}\\p{Nd}]+(?:-[\\p{L}\\p{Nd}]+)*$"
+      }
+    },
+    "defaultBot": {
+      "type": "string",
+      "pattern": "^[\\p{L}\\p{Nd}]+(?:-[\\p{L}\\p{Nd}]+)*$"
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?![\\s\\S]*[\\r\\n\\u0000])\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "routeFile": {
+      "allOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![\\s\\S]*[\\r\\n\\u0000])\\S(?:[\\s\\S]*\\S)?$"
+        },
+        {
+          "pattern": "^[^/\\\\:]+(?:/[^/\\\\:]+)*$"
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.{1,2}(/|$)"
+          }
+        }
+      ]
+    },
+    "commandPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "off",
+            "gated",
+            "ask",
+            "open"
+          ]
+        },
+        "shells": {
+          "type": "boolean"
+        },
+        "inherit": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^\\r\\n\\u0000]*$"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^[0-9]{1,6}[sm]$",
+          "description": "Command timeout from 1s through 60m."
+        },
+        "output": {
+          "type": "string",
+          "pattern": "^[0-9]{1,9}(KiB|MiB)$",
+          "description": "Output limit from 1KiB through 8MiB."
+        },
+        "isolation": {
+          "enum": [
+            "none"
+          ]
+        }
+      }
+    }
+  }
+}

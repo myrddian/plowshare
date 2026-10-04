@@ -9,6 +9,76 @@ Requirements: Docker Engine, Compose 2.30 or newer, and a deployment user with
 UID 1000 (the UID used by both Java images). `bootstrap-host.sh USER` prepares a
 new Debian 12/13 host. See [distribution instructions](../../docs/distributions.md).
 
+## A2A general-purpose receiver
+
+Add `compose.a2a.yaml` to run the separate A2A adapter beside the server. This
+requires a receiver-capable server, including migration V108. Select one existing
+project and one exported agent. `interlocutor` is the shipped general-purpose
+entry point: its grants determine the skills, workflows and specialists it can
+use. The public Agent Card advertises its granted skills and workflows; ordinary
+messages are handled by that agent within the configured project.
+
+Create a project whose workspace is reachable **inside the server container**.
+The overlay mounts a private host workspace at `/workspaces/a2a` in the server.
+Create `${PLOWSHARE_STATE_ROOT}/workspaces/a2a` owned by UID 1000 before starting,
+or set `PLOWSHARE_A2A_WORKSPACE_HOST` to an existing dedicated directory. Keep
+workspaces outside the server-owned data/config trees, which file tools exclude.
+Define `/workspaces/a2a` as the project workspace. Do not use the host's
+`/srv/plowshare/...` path as a container workspace. Grant account membership and configure agents/skills through
+the normal Plowshare tools. See [receiving and command semantics](../../docs/a2a-receiving.md).
+
+Store the following in `/srv/plowshare/config/a2a.json`, mode 0600, with your own
+project and external address:
+
+```json
+{
+  "plowshare": "http://server:8091",
+  "project": "a2a",
+  "receive": {
+    "bind": "0.0.0.0",
+    "port": 8093,
+    "publicUrl": "https://agent.example.invalid/rpc",
+    "agent": "interlocutor",
+    "waitMs": 30000,
+    "clients": { "remote": { "bearerEnv": "A2A_CALLER_TOKEN" } }
+  }
+}
+```
+
+Put the existing account's current password in
+`/srv/plowshare/secrets/a2a-account-password` and a newly generated, separate caller
+bearer in `/srv/plowshare/secrets/a2a-caller-token`. Keep both mode 0600, owned by
+UID 1000. Complete the existing account's first password change before using it;
+the operator bootstrap token has no account and cannot receive A2A messages.
+Clients get the caller token; the adapter's account password stays on the host.
+The adapter logs in on each container start and uses the returned token for WS.
+Rotating a mounted secret requires recreating/restarting the adapter.
+
+Set `PLOWSHARE_A2A_HANDLE` in the private deployment environment. The listener
+defaults to publishing on host loopback; set `PLOWSHARE_A2A_LISTEN_ADDRESS` and
+`PLOWSHARE_A2A_PUBLISHED_PORT` for your intended network access. Use your TLS proxy
+for external access. Forward `/rpc`, `/.well-known/agent-card.json`, `Authorization`,
+`A2A-Version`, and `A2A-Extensions`. The configured public URL must match the
+address used by clients, including its port.
+
+Build `:plowshare-a2a:installDist`, then the `a2a.Dockerfile` image, or use
+`build-images.sh`. Set `PLOWSHARE_A2A_IMAGE` to a verified immutable image for a
+release deployment. Add this overlay to the Compose files already in use:
+
+```sh
+docker compose --env-file /srv/plowshare/deployment/deployment.env \
+  -f deploy/docker/compose.yaml -f deploy/docker/compose.search.yaml \
+  -f deploy/docker/compose.a2a.yaml config --quiet
+```
+
+Keep your existing immutable server/search image overlay in the deployment
+command too. Use `up -d --no-deps a2a-receiver` after the receiver-capable server
+is healthy; this does not replace other services. The sidecar reads only its
+configuration and credentials. Tasks and contexts persist in Plowshare's database.
+After startup, validate discovery and an authenticated message round trip with
+an independent client, such as Google ADK; a healthy container alone is not proof
+of agent execution. The initial protocol subset is text, polling and cancellation.
+
 ## Build
 
 From a checkout with Java 21, Node 22.12+, pnpm 10.34.5 and Docker:
@@ -18,15 +88,16 @@ sh deploy/docker/build-images.sh
 ```
 
 This is also the container build entry point for a CI runner. It builds the
-console into the server jar, builds the adapter jar, then creates two native
-images with an embedded Java 21 runtime. Dockerfile-specific context allowlists
+console into the server jar, builds the search adapter jar and A2A distribution,
+then creates three native images with an embedded Java 21 runtime. Dockerfile-specific context allowlists
 include only the jar and launcher files; deployment configuration, keys, project
 data and source files are excluded. The JRE and PostgreSQL images are pinned by
 OCI digest. Application images carry the source revision as an OCI label.
 Release builds should use a clean checkout.
 
 When building directly on a Docker host without Java/Node, copy the two compiled
-jars into their normal `build/libs` paths and the `deploy/docker` directory,
+jars into their normal `build/libs` paths, the A2A distribution into
+`plowshare-a2a/build/install/plowshare-a2a`, and the `deploy/docker` directory,
 preserving their checkout-relative layout. Set `PLOWSHARE_SOURCE_REVISION` to the
 revision that produced those jars, then use `docker compose ... build` below.
 There is no Gradle, Node or Java installation required on the runtime host.
@@ -58,23 +129,30 @@ State stays on plain host disk:
 
 | Host path | Contents |
 | --- | --- |
-| `/srv/plowshare/data` | Projects, agents, synced files, images, exports and operator token |
+| `/srv/plowshare/data` | Projects, agents, synced files, images and exports |
 | `/srv/plowshare/postgres` | PostgreSQL database files, initialized by PostgreSQL |
 | `/srv/plowshare/config` | External provider environment and Spring overlay |
 | `/srv/plowshare/secrets` | Database and initial admin passwords |
 | `/srv/plowshare/deployment` | Compose/Docker build files and deployment environment |
 
-`init-state.sh` generates unique passwords only when absent. Re-running it
-preserves them. The default account handle is `admin`; its initial password is
-stored in `/srv/plowshare/secrets/admin-password` and must be changed at first
-login. Set `PLOWSHARE_ADMIN_HANDLE` before first boot to choose another handle.
-The existing server seeding logic preserves the account across restarts;
-editing the seed file later does not reset its password. Clients then save
-their normal login tokens. No shared default password is shipped.
+`init-state.sh` generates unique database and optional provisioning passwords
+only when absent. Re-running it preserves them. Leave `PLOWSHARE_ADMIN_HANDLE`
+blank for first-run setup: the server prints a temporary `admin` account and a
+random password. Run `plowshare-cli setup --url <server-origin>` to create the
+first administrator. The temporary account only permits setup; pending setup
+gets a new password after a restart. Completed setup never resets the administrator.
+
+An explicitly configured `PLOWSHARE_ADMIN_HANDLE` retains environment provisioning
+using `/srv/plowshare/secrets/admin-password`, with mandatory first-login password
+rotation. Container health uses the status-only `/ready` probe, available after
+startup runners finish and while the database is reachable; it does not need an
+operator token. Clients save their normal account sessions.
 
 The server has a 3 GiB JVM heap and 5 GiB container limit; PostgreSQL has a 3 GiB
 limit, and the adapter has a 768 MiB limit. These are ceilings, not reserved
-allocations. Log files are bounded. Database and project directories survive
+allocations. Log files are bounded. Managed server workspaces are mounted separately from private server data at
+`/var/lib/plowshare-workspaces` (`workspaces/` under the deployment state root).
+Include that directory in backups. Database and project directories survive
 container replacement. Back up the database with `pg_dump` and the file/config
 trees together; for a consistent complete backup, stop the server first and
 restart it after the backup. A live copy of PostgreSQL's raw files is not a
@@ -122,11 +200,13 @@ After the server and adapter are healthy, register the adapter:
 PLOWSHARE_URL=http://127.0.0.1:8091 sh deploy/docker/register-search.sh
 ```
 
-This uses the existing operator registration bootstrap, reads the token from
-the persistent token file, and registers `http://searxng-provider:8086` on the
-private Compose network. Re-registering updates the existing provider row.
-Normal search calls from clients and models remain on their existing WS/tool
-surfaces. Never publish or paste the operator token or console URL from logs.
+Build the CLI and complete `plowshare-cli setup` (or `login`) for the same
+server first. Registration uses that administrator's saved session, renewing it
+through the shared private credential store, and registers
+`http://searxng-provider:8086` on the private Compose network. This operational
+registration remains HTTP because it has no WebSocket contract; it does not
+fall back or replay a failed mutation. Re-registering updates the provider row.
+Normal search calls stay on their existing WS/tool surfaces.
 
 To run without search, select only `compose.yaml` and leave
 `PLOWSHARE_SEARCH_LADDER` empty. `compose.search.yaml` also supports deploying

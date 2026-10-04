@@ -16,7 +16,19 @@ val graalPolyglotVersion: String by project
 val swc4jVersion: String by project
 
 dependencies {
+    testImplementation(project(":plowshare-a2a"))
     implementation(project(":plowshare-protocol"))
+
+    // Syntax-only code navigation on the server's Java 21 runtime. These JNI
+    // artifacts bundle macOS/Linux arm64 and x86_64 libraries (also Windows).
+    // Grammar versions are independent of the binding version; setLanguage
+    // verifies their ABI. No compiler, project build or language server runs.
+    implementation("io.github.bonede:tree-sitter:0.26.6")
+    implementation("io.github.bonede:tree-sitter-java:0.23.5")
+    implementation("io.github.bonede:tree-sitter-javascript:0.25.0")
+    implementation("io.github.bonede:tree-sitter-typescript:0.23.2")
+    implementation("io.github.bonede:tree-sitter-tsx:0.23.2")
+    implementation("io.github.bonede:tree-sitter-python:0.25.0")
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     // The file channel, and the server half only. A closed socket is an *event*,

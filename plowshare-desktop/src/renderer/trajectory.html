@@ -4,17 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Trajectory · Plowshare</title>
+  <title>Trajectory</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="desktop.css">
   <script src="trajectory.js" defer></script>
 </head>
-<body class="trajectory-window">
-  <header class="titlebar"><div class="window-space"></div><span class="titlebar-name">PLOWSHARE</span><span class="trajectory-title" id="trajectory-title">Trajectory</span><span class="trajectory-connection" id="trajectory-connection"></span></header>
+<body class="trajectory-window embedded-view">
+  <header class="titlebar"><div class="window-space"></div><span class="trajectory-title" id="trajectory-title">Trajectory</span><span class="trajectory-connection" id="trajectory-connection"></span></header>
   <main class="trajectory-workspace">
     <header class="trajectory-toolbar"><div><h1><span data-icon="route"></span>Trajectory</h1><p id="trajectory-summary">Loading conversation…</p></div><div class="trajectory-actions"><button id="trajectory-reload"><span data-icon="refresh"></span>Refresh</button><button id="trajectory-follow" aria-pressed="true"><span data-icon="follow"></span>Following</button></div></header>
     <div id="trajectory-error" class="error-banner" role="alert" hidden></div>
     <div id="trajectory-approvals" class="approval-bar" hidden></div>
+    <div id="trajectory-scope" class="trajectory-scope-note" hidden></div>
     <div id="trajectory-strip" class="trajectory-strip" aria-label="Execution overview"></div>
     <div class="trajectory-columns">
       <section class="trajectory-log" aria-label="Trajectory steps">

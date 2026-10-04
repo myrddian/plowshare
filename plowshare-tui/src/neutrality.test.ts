@@ -374,11 +374,12 @@ function reachesOutOf(home: string): string[] {
  * overlap is two guards agreeing rather than one being redundant.
  */
 // Package exceptions are the extracted pure request/response and union helpers.
+// Messaging uses commands for neutral parsing and direct for request types.
 // Transport and dispatch remain in view/, and core has its own AST neutrality guard.
 function reachingPackages(home: string): string[] {
     return sourcesUnder(home).flatMap((file) => importsOf(file)
         .filter((specifier) => !specifier.startsWith('.') && !(home === LOGIC && (
-            ['session', 'response', 'union', 'views', 'activity', 'records', 'inspection', 'pace', 'board', 'board-demo', 'clean', 'markdown', 'swarm', 'tints', 'trajectory', 'information', 'usage', 'usage-command', 'usage-presentation', 'reference-cost'].some(name => specifier === `plowshare-client-ts/operations/${name}`)
+            ['session', 'commands', 'direct', 'response', 'union', 'views', 'project-label', 'activity', 'records', 'inspection', 'pace', 'board', 'board-demo', 'clean', 'markdown', 'swarm', 'tints', 'trajectory', 'information', 'usage', 'usage-command', 'usage-presentation', 'reference-cost'].some(name => specifier === `plowshare-client-ts/operations/${name}`)
             || specifier === 'plowshare-client-ts/binding/job-view')))
         .map((specifier) => `${relative(SRC, file)} imports the package "${specifier}"`))
 }

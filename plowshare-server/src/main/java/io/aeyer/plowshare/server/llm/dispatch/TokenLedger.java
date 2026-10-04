@@ -11,5 +11,5 @@ package io.aeyer.plowshare.server.llm.dispatch;
  */
 public interface TokenLedger {
 
-    void record(LedgerEntry entry);
+  void record(LedgerEntry entry);
 }

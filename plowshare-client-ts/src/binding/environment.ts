@@ -32,7 +32,7 @@ export const SERVER = 'server'
 /** The top-level section the person's caps live in — spec 2026-09-29 §2. */
 export const CAPS = 'caps'
 /** `caps:`'s settings, in the order the refusal names them. */
-export const CAP_KEYS = ['steps', 'budget', 'auto-continue', 'time', 'failed-checks'] as const
+export const CAP_KEYS = ['steps', 'budget', 'auto-continue', 'time', 'failed-checks', 'auto-increase'] as const
 
 /** The longest `time` cap, in minutes: a week — `EnvironmentFile.MOST_TIME_MINUTES`. */
 export const MOST_TIME_MINUTES = 7 * 24 * 60
@@ -47,8 +47,8 @@ export const MOST_FAILED_CHECKS = 100
  */
 export function capRange(key: typeof CAP_KEYS[number]): { readonly least: number, readonly most: number } {
     return {
-        least: key === 'auto-continue' ? 0 : 1,
-        most: key === 'steps' ? 10_000 : key === 'budget' ? 1_000_000
+        least: key === 'auto-continue' || key === 'auto-increase' ? 0 : 1,
+        most: key === 'auto-increase' ? 1 : key === 'steps' ? 10_000 : key === 'budget' ? 1_000_000
             : key === 'time' ? MOST_TIME_MINUTES : key === 'failed-checks' ? MOST_FAILED_CHECKS : 100,
     }
 }
@@ -114,6 +114,7 @@ export interface Caps {
     readonly autoContinue?: number
     readonly time?: number
     readonly failedChecks?: number
+    readonly autoIncrease?: boolean
 }
 
 /** A file, parsed. A section the file does not have is null. */
@@ -240,12 +241,19 @@ export function parseEnvironment(source: string): Parsed {
         env = undefined
         const [key, value] = pair(body, number)
         if (currentName === CAPS) {
-            if (!(CAP_KEYS as readonly string[]).includes(key)) {
+            if (key !== 'auto-increase' && !(CAP_KEYS as readonly string[]).includes(key)) {
                 throw new Unreadable(number, `'${key}' is not a caps setting; the caps settings are `
                     + CAP_KEYS.join(', '))
             }
             if (current.has(key)) {
                 throw new Unreadable(number, `'${key}' appears twice`)
+            }
+            if (key === 'auto-increase') {
+                const flag = scalar(value, number)
+                if (flag !== 'true' && flag !== 'false')
+                    throw new Unreadable(number, `auto-increase is true or false, not '${flag}'`)
+                current.set(key, flag === 'true')
+                continue
             }
             const { least, most } = capRange(key as typeof CAP_KEYS[number])
             current.set(key, whole(scalar(value, number), least, most, key, number))
@@ -346,6 +354,7 @@ function capsOf(keys: Map<string, Value> | undefined): Caps | null {
         ...(typeof auto === 'number' ? { autoContinue: auto } : {}),
         ...(typeof time === 'number' ? { time } : {}),
         ...(typeof failedChecks === 'number' ? { failedChecks } : {}),
+        ...(typeof keys.get('auto-increase') === 'boolean' ? { autoIncrease: keys.get('auto-increase') as boolean } : {}),
     }
 }
 
@@ -535,7 +544,8 @@ export function withLocalMode(source: string | undefined, mode: string): string 
  * `/cap` and `/always caps` make. A file that does not parse is refused, not rewritten.
  */
 export function withCaps(source: string | undefined, key: typeof CAP_KEYS[number], value: number): string {
-    const line = `  ${key}: ${value}`
+    if (key === 'auto-increase' && value !== 0 && value !== 1) throw new Error('auto-increase must be enabled or disabled')
+    const line = `  ${key}: ${key === 'auto-increase' ? value === 1 : value}`
     if (source === undefined) {
         const written = `caps:\n${line}\n`
         parseEnvironment(written)

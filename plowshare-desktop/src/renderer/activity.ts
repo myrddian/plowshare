@@ -1,6 +1,9 @@
+import { retainedReport } from '../retained-report.ts';
+import { installPaneResize } from './pane-resize.ts';
+import { runTrajectories, stagesPanel, unassignedQuestions } from './run-navigation.ts';
 import { builderPanel, builderForm } from './authoring.ts';
 import { scheduledPanel, rememberSchedule, scheduledAction } from './schedule-controls.ts';
-import { questionControls, rememberQuestion, questionAction, recordControls } from './run-controls.ts';
+import { questionControls, rememberQuestion, questionAction, cancelControl } from './run-controls.ts';
 import type { ActivityView, DesktopState, Request } from '../shared.ts';
 import { icon, mountIcons } from './icons.ts';
 import { escapeHtml as esc, markdownHtml } from './markdown.ts';
@@ -9,11 +12,14 @@ import { installApprovalControls, noticeApproval } from './approvals.ts';
 
 mountIcons(); installCopyControls();
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => document.querySelector(selector)!;
+installPaneResize({ container: $('#activity-panel'), pane: $('.activity-list-column'), other: $('.activity-detail'), key: 'activity', label: 'Resize activity list', property: '--activity-width', minimum: 240 });
 let state: DesktopState;
 const approvalControls = installApprovalControls(document, () => state, async command => {
   const reply = await window.plowshare.request(command); update(reply.state); return reply;
 }, render);
 let view: ActivityView = 'inbox';
+let pageGroup = 'inbox', initialized = false;
+const groupOf = (tab: ActivityView) => tab === 'definitions' || tab === 'builder' ? 'studio' : tab;
 let inboxId = '', runId = '', requestedRun = '', detailStamp = '', localError = '';
 let launchConversation = '', pendingLaunch = false, outputsStamp = '';
 let marking = false, typeStamp = '', definitionId = '', projectStamp = '', scheduledId = '';
@@ -32,22 +38,24 @@ async function action(request: Request) {
 function update(next: DesktopState) {
   if (state) { rememberQuestion(state, runId, $('#activity-detail')); rememberSchedule($('#activity-detail')); }
   state = next;
-  if (next.activity.view && view !== next.activity.view) { view = next.activity.view; if ((view === 'runs' || view === 'builder')) requestedRun = ''; $<HTMLInputElement>('#activity-search').value = ''; detailStamp = ''; }
+  if (initialized && next.activity.view && groupOf(next.activity.view) === pageGroup && view !== next.activity.view) { view = next.activity.view; if ((view === 'runs' || view === 'builder')) requestedRun = ''; $<HTMLInputElement>('#activity-search').value = ''; detailStamp = ''; }
   render();
 }
 function render() {
-  if (!state) return;
+  if (!state || !initialized) return;
   const activity = state.activity, inbox = activity.inbox, runs = activity.runs;
   $('#activity-connection').textContent = state.mode === 'demo' ? 'Offline demo · sample activity' : `${state.connection} · ${state.handle}`;
-  $('#activity-title').textContent = view === 'inbox' ? 'Inbox' : view === 'runs' ? 'Runs' : view === 'definitions' ? 'Definitions' : view === 'builder' ? 'Orchestration builder' : 'Scheduled work';
+  $('#activity-title').textContent = view === 'inbox' ? 'Mailbox' : view === 'runs' ? 'Runs' : view === 'definitions' ? 'Definitions' : view === 'builder' ? 'Orchestration builder' : 'Scheduled work';
   $('#activity-icon').innerHTML = icon(view === 'inbox' ? 'inbox' : 'route');
   $('#activity-caption').textContent = view === 'inbox' ? 'Results and notices across your account' : view === 'runs' ? 'Background orchestrations across your account' : view === 'definitions' ? 'Available orchestration definitions and stages' : view === 'builder' ? 'Interview, draft, validate and review an agent-driven procedure' : 'Schedules, triggers and recent firings across your account';
   $('#activity-unread').textContent = inbox.unread === undefined ? '—' : String(inbox.unread);
+  $('.activity-tabs').hidden = pageGroup !== 'studio';
   for (const tab of tabs) {
     const button = $<HTMLButtonElement>(`#activity-${tab}`);
+    button.hidden = pageGroup !== 'studio' || !['definitions','builder'].includes(tab);
     button.setAttribute('aria-selected', String(tab === view)); button.tabIndex = tab === view ? 0 : -1;
   }
-  $('#activity-panel').setAttribute('aria-labelledby', `activity-${view}`);
+  $('#activity-panel').setAttribute('aria-labelledby', pageGroup === 'studio' ? `activity-${view}` : 'activity-title');
   const errors = [localError, view === 'inbox' ? inbox.error : view === 'runs' ? runs.error : view === 'definitions' ? activity.definitions?.error : activity.schedules?.error, state.mode === 'live' && !state.connected ? 'Reconnect in the main window to update activity. Shown information may be out of date.' : ''].filter(Boolean);
   $('#activity-error').hidden = !errors.length; $('#activity-error').textContent = errors.join(' ');
   $('#builder-form').hidden = view !== 'builder';
@@ -80,7 +88,7 @@ function render() {
   if (view === 'inbox') {
     if (!shownInbox.some(item => item.id === inboxId)) { inboxId = shownInbox[0]?.id ?? ''; $('#activity-detail').scrollTop = 0; }
     $('#activity-list').innerHTML = shownInbox.map(item => `<button class="activity-row" data-item="${esc(item.id)}" aria-current="${item.id === inboxId}">${icon(inbox.read.includes(item.id) ? 'check' : 'inbox')}<span><strong>${esc(kindLabel(item.kind))}${item.ending ? ` · ${esc(item.ending)}` : ''}</strong><small>${esc(preview(item.answer))}</small><time>${esc(date(item.arrivedAt))} · ${inbox.read.includes(item.id) ? 'Read' : 'Unread'}</time></span></button>`).join('');
-    $('#activity-list-note').textContent = inbox.loading ? 'Updating inbox…' : `${shownInbox.length} shown · ${inbox.items.length} loaded. The counter shows unread only.${inbox.more ? ' Load older items for more history.' : ''}`;
+    $('#activity-list-note').textContent = inbox.loading ? 'Updating mailbox…' : `${shownInbox.length} shown · ${inbox.items.length} loaded. The counter shows unread only.${inbox.more ? ' Load older items for more history.' : ''}`;
   } else if (view === 'runs' || view === 'builder') {
     if (view === 'builder' && !shownRuns.some(row => row.id === runId)) { runId = ''; requestedRun = ''; }
     if (!runId && shownRuns.length && !(view === 'builder' && pendingLaunch)) { runId = shownRuns[0].id; requestedRun = ''; }
@@ -115,37 +123,44 @@ function render() {
 function renderDetail() {
   const activity = state.activity;
   const item = activity.inbox.items.find(item => item.id === inboxId), detail = activity.details[runId];
-  const stamp = JSON.stringify([view, view === 'inbox' ? [item, activity.inbox.read.includes(inboxId), marking] : [runId, detail, activity.records?.[runId], activity.decisions?.[runId]], view === 'builder' ? state.history[detail?.wire?.orchestration.conductorConversation ?? ''] : undefined, activity.definitions, definitionId, activity.schedules, scheduledId, state.connected, state.mode, state.approvals, state.answeringApprovals, approvalControls.revision]);
+  // Navigation needs edges and outcomes, never another serialization of paid tool payloads.
+  const historyStamp = Object.entries(state.history).map(([id, history]) => [id, history.through, history.oldest, history.entries.map(entry => [entry.ordinal, entry.state, entry.outcome, entry.calls?.map(call => [call.id, call.opened])])]);
+  const jobStamp = state.jobs.map(job => [job.id, job.conversation, job.status, job.ending]);
+  const stamp = JSON.stringify([view, view === 'inbox' ? [item, activity.inbox.read.includes(inboxId), marking] : [runId, detail, activity.records?.[runId], activity.navigation?.[runId], activity.decisions?.[runId], historyStamp, jobStamp], view === 'builder' ? state.history[detail?.wire?.orchestration.conductorConversation ?? ''] : undefined, activity.definitions, definitionId, activity.schedules, scheduledId, state.connected, state.mode, state.approvals, state.answeringApprovals, approvalControls.revision]);
   if (stamp === detailStamp) return; detailStamp = stamp;
   const content = $('#activity-detail'); const scroll = content.scrollTop;
+  const expanded = new Map([...content.querySelectorAll<HTMLDetailsElement>('details[data-persist]')].map(row => [row.dataset.persist, row.open]));
   if (view === 'inbox') {
     const approval = item && noticeApproval(state, item);
-    content.innerHTML = item ? `<header><div class="eyebrow">${esc(item.kind)}${item.ending ? ` · ${esc(item.ending)}` : ''}</div><h2>${icon('inbox')}Inbox item</h2><p>${esc(date(item.arrivedAt))}</p></header>${prose(item.answer)}<div class="activity-receipt"><button id="inbox-mark" ${marking || activity.inbox.read.includes(item.id) || (state.mode === 'live' && !state.connected) ? 'disabled' : ''}>${icon('check')}${activity.inbox.read.includes(item.id) ? 'Marked read' : marking ? 'Marking…' : 'Mark read'}</button><span>Reading here does not mark it automatically.</span></div>` : `<div class="activity-empty">${icon('inbox')}<h2>Your inbox</h2><p>Results and notices appear here, including work started from another client.</p></div>`;
+    content.innerHTML = item ? `<header><div class="eyebrow">${esc(item.kind)}${item.ending ? ` · ${esc(item.ending)}` : ''}</div><h2>${icon('inbox')}Mailbox item</h2><p>${esc(date(item.arrivedAt))}</p></header>${prose(item.answer)}<div class="activity-receipt"><button id="inbox-mark" ${marking || activity.inbox.read.includes(item.id) || (state.mode === 'live' && !state.connected) ? 'disabled' : ''}>${icon('check')}${activity.inbox.read.includes(item.id) ? 'Marked read' : marking ? 'Marking…' : 'Mark read'}</button><span>Reading here does not mark it automatically.</span></div>` : `<div class="activity-empty">${icon('inbox')}<h2>Your mailbox</h2><p>Results and notices appear here, including work started from another client.</p></div>`;
     if (approval) content.querySelector('.activity-receipt')?.insertAdjacentHTML('beforebegin', approvalControls.prompt(approval));
   } else if (view === 'schedules') { content.innerHTML = scheduledPanel(state, scheduledId);
   } else if (view === 'definitions') {
     const definition = activity.definitions?.items.find(row => row.name === definitionId);
     content.innerHTML = definition ? `<header><h2>${esc(definition.name)}</h2><p>${esc(definition.tier ?? '')} · ${definition.served ? 'Available' : 'Withheld'}</p></header>${definition.description ? prose(definition.description) : ''}${definition.withheld ? `<p class="activity-warning">${esc(definition.withheld)}</p>` : ''}<section><h3>Stages</h3>${definition.stages.map(stage => `<article class="activity-message"><h4>${esc(stage.id)}</h4>${prose(stage.doneWhen)}${stage.mayReturnTo.length ? `<p>May return to: ${esc(stage.mayReturnTo.join(', '))}</p>` : ''}</article>`).join('')}</section><section><h3>Triggers</h3><p>${esc(definition.triggers.join(', ') || 'None')}</p></section>` : '<p class="activity-empty">Choose a definition.</p>';
   } else if (detail?.value) {
-    const { run, stages, messages, children } = detail.value;
-    content.innerHTML = `${view === 'builder' ? builderPanel(state, runId) : ''}<header><div class="eyebrow">${esc(run.project || 'Global')} · ${esc(run.tier)} · ${esc(run.state)}${detail.loading ? ' · updating' : ''}</div><h2>${icon('route')}${esc(run.definition || run.id)}</h2><p class="activity-id">${esc(run.id)}</p></header>${detail.error ? `<p class="error-banner">${esc(detail.error)}</p>` : ''}
+    const { run, children } = detail.value;
+    content.innerHTML = `${view === 'builder' ? builderPanel(state, runId) : ''}<header class="run-detail-header"><div><div class="eyebrow">${esc(run.project || 'Global')} · ${esc(run.tier)} · ${esc(run.state)}${detail.loading ? ' · updating' : ''}</div><h2>${icon('route')}${esc(run.definition || run.id)}</h2><p class="activity-id">${esc(run.id)}</p></div>${cancelControl(state, runId)}</header>${questionControls(state, runId, { question: false })}${detail.error ? `<p class="error-banner">${esc(detail.error)}</p>` : ''}
       ${run.parent ? `<p class="activity-relation">Child run · depth ${run.depth} · <button data-run="${esc(run.parent)}">${icon('layers')}Parent ${esc(run.parent)}</button></p>` : ''}
       ${run.stalledSince ? `<p class="activity-warning">${icon('alert')}Marked stalled ${esc(date(run.stalledSince))}</p>` : ''}
       ${run.pendingCap ? `<p class="activity-warning">${icon('alert')}Waiting on a ${esc(capLabel(run.pendingCap))}</p>` : ''}
       ${run.waitingFor ? `<p class="activity-relation">Waiting on ${esc(run.waitingFor)}</p>` : ''}
-      ${run.result ? `<section><h3>Result</h3>${prose(run.result)}</section>` : ''}${run.failure ? `<section><h3>Why it stopped</h3>${prose(run.failure)}</section>` : ''}
-      ${stages.length ? `<section><h3>${icon('layers')}Stages</h3><ul class="activity-stages">${stages.map(stage => `<li>${icon(stage.status === 'done' ? 'check' : 'activity')}<div><strong>${esc(stage.text)}</strong><small>${esc(stage.status)}${stage.stage ? ` · ${esc(stage.stage)}` : ''}</small>${stage.summary ? `<p>${esc(stage.summary)}</p>` : ''}</div></li>`).join('')}</ul></section>` : ''}
+      ${run.result ? `<section><h3>Result</h3>${retainedReport(run.result) ? `<button data-report-revision="${esc(retainedReport(run.result))}" data-report-project="${esc(run.project || '')}" class="primary-button">Read retained report</button>` : ''}${prose(run.result)}</section>` : ''}${run.failure ? `<section><h3>Why it stopped</h3>${prose(run.failure)}</section>` : ''}
+      ${detail.wire?.orchestration.conductorConversation ? runTrajectories(state, detail.wire.orchestration.conductorConversation) : ''}
+      ${stagesPanel(state, runId)}
       ${children.length ? `<section><h3>Child runs</h3><div class="activity-children">${children.map(child => `<button data-run="${esc(child.id)}">${icon('layers')}<span>${esc(child.id)} · ${esc(child.state)}</span>${icon('external')}</button>`).join('')}</div></section>` : ''}
-      ${messages.length ? `<section><h3>Questions and answers</h3>${messages.map(message => `<article class="activity-message"><div class="eyebrow">${esc(message.kind)} · ${esc(message.author)}</div>${prose(message.text)}${message.structure ? `<div class="activity-options">${prose(message.structure.lead)}${message.structure.questions.map(question => `<h4>${esc(question.header)}</h4>${prose(question.question)}<ul>${question.options.map(option => `<li><strong>${esc(option.label)}</strong> ${esc(option.description)}${option.preview ? `<pre>${esc(option.preview)}</pre>` : ''}</li>`).join('')}</ul>`).join('')}${message.structure.draft ? `<h4>Draft · ${esc(message.structure.draft.name)}</h4><p>${esc(message.structure.draft.path)}</p>${prose(message.structure.draft.text)}` : ''}</div>` : ''}</article>`).join('')}</section>` : ''}
-      ${questionControls(state, runId)}${recordControls(state, runId)}`;
+      ${unassignedQuestions(state, runId)}`;
   } else content.innerHTML = `<div class="activity-empty">${icon('route')}<h2>${detail?.loading ? 'Loading run…' : 'Choose a run'}</h2><p>${esc(detail?.error || 'Inspect stages, child runs and results here.')}</p></div>`;
+  content.querySelectorAll<HTMLDetailsElement>('details[data-persist]').forEach(row => { if (expanded.has(row.dataset.persist)) row.open = expanded.get(row.dataset.persist)!; });
   content.scrollTop = scroll;
 }
 async function selectRun(id: string) { await action({ action: 'run-detail', id }); if (state.connected && runId === id && (state.activity.view === 'runs' || state.activity.view === 'builder')) await action({ action: 'run-record', id }); }
 async function tab(next: ActivityView) { view = next; if (view === 'runs' || view === 'builder') { requestedRun = ''; runId = ''; } detailStamp = ''; $<HTMLInputElement>('#activity-search').value = ''; await action({ action: 'activity-view', view }); }
-for (const next of tabs) {
+for (const next of ['definitions', 'builder'] as ActivityView[]) {
   $(`#activity-${next}`).addEventListener('click', () => void tab(next));
-  $(`#activity-${next}`).addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight'].includes((event as KeyboardEvent).key)) { event.preventDefault(); const other = tabs[(tabs.indexOf(next) + ((event as KeyboardEvent).key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; $(`#activity-${other}`).focus(); void tab(other); } });
+  $(`#activity-${next}`).addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const target = next === 'definitions' ? 'builder' : 'definitions'; $(`#activity-${target}`).focus(); void tab(target); }
+  });
 }
 $('#activity-search').addEventListener('input', render);
 $('#inbox-filter').addEventListener('change', () => { detailStamp = ''; render(); });
@@ -164,12 +179,16 @@ document.addEventListener('click', event => {
   const scheduled = view === 'schedules' ? scheduledAction(state, scheduledId, target) : undefined; if (scheduled) void action(scheduled);
   const decision = questionAction(state, runId, target);
   if (decision === 'render') { detailStamp = ''; renderDetail(); } else if (decision) void action(decision);
+  const stage = target.closest<HTMLElement>('[data-run-stage]')?.dataset.runStage;
+  if (stage) void action({ action: 'run-stage-trajectory', id: runId, stage });
+  const delegate = target.closest<HTMLElement>('[data-delegate-step]');
+  if (delegate?.dataset.delegateParent && delegate.dataset.delegateStep) void action({ action: 'delegate-trajectory', conversation: delegate.dataset.delegateParent, step: delegate.dataset.delegateStep });
   const actor = target.closest<HTMLElement>('[data-run-actor]')?.dataset.runActor;
   if (actor === 'caller' || actor === 'conductor') void action({ action: 'run-trajectory', id: runId, actor });
-  if (target.closest('#run-record-refresh')) void action({ action: 'run-record', id: runId });
-  if (target.closest('#run-record-older')) { const oldest = state.activity.records?.[runId]?.oldest; if (oldest) void action({ action: 'run-record', id: runId, before: oldest }); }
   const link = target.closest<HTMLElement>('[data-web-link]')?.dataset.webLink;
   if (link) { event.preventDefault(); void action({ action: 'open-link', url: link }); }
+  const report = target.closest<HTMLElement>('[data-report-revision]');
+  if (report?.dataset.reportRevision) void action({ action: 'library', view: 'sources', project: report.dataset.reportProject || null, revision: report.dataset.reportRevision });
   const child = target.closest<HTMLElement>('[data-run]')?.dataset.run;
   if (child) { runId = child; requestedRun = child; detailStamp = ''; $('#activity-detail').scrollTop = 0; void selectRun(child); render(); }
   if (target.closest('#inbox-mark') && !marking) {
@@ -179,12 +198,13 @@ document.addEventListener('click', event => {
 });
 $('#definitions-project').addEventListener('change', () => void action({ action: 'run-definitions', project: $<HTMLSelectElement>('#definitions-project').value || undefined }));
 $('#activity-detail').addEventListener('input', () => { rememberQuestion(state, runId, $('#activity-detail')); rememberSchedule($('#activity-detail')); });
-$('#activity-detail').addEventListener('change', event => { const select = (event.target as HTMLElement).closest<HTMLSelectElement>('#run-record-filter'); if (select) void action({ action: 'run-record', id: runId, kinds: select.value ? select.value.split(',') : [] }); });
 window.plowshare.subscribe(update);
-void window.plowshare.request({ action: 'bootstrap' }).then(reply => { view = reply.view ?? 'inbox'; update(reply.state); });
+void window.plowshare.request({ action: 'bootstrap' }).then(reply => { view = reply.view ?? 'inbox'; pageGroup = groupOf(view); initialized = true; update(reply.state); });
 
 $('#builder-prepare').addEventListener('click', () => void action({ action: 'builder-prepare', project: $<HTMLSelectElement>('#builder-project').value }));
 $('#builder-project').addEventListener('change', () => { builderForm(state); });
 $('#builder-agent').addEventListener('change', () => { builderForm(state); });
 $('#builder-start').addEventListener('click', () => void action({ action: 'builder-start', project: $<HTMLSelectElement>('#builder-project').value, agent: $<HTMLSelectElement>('#builder-agent').value, intent: $<HTMLTextAreaElement>('#builder-intent').value, revision: $<HTMLSelectElement>('#builder-revision').value || undefined }));
 $('#builder-caller').addEventListener('click', () => { if (state.authoring?.conversation) void action({ action: 'builder-trajectory', conversation: state.authoring.conversation }); });
+
+window.addEventListener('workspace-refresh', () => $('#activity-refresh').click());

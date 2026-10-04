@@ -18,5 +18,4 @@ if [[ ! -f "$DESKTOP_ROOT/node_modules/plowshare-client-ts/build/binding/auth.js
   exit 1
 fi
 cd "$DESKTOP_ROOT"
-node scripts/build.mjs
-exec node node_modules/electron/cli.js . "$@"
+exec node scripts/start.mjs "$@"

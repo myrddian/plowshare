@@ -10,8 +10,11 @@ lesson. A fold enters the digest archive even when the learner extracts nothing.
 - CLI: `plowshare memory digest [--project NAME]` starts a job; inspect it with the existing job tools.
 - MCP: `memory_navigate(question, project?)` and `memory_digest(project?)`.
 - Console: Memory → **navigate history** or **build digests**.
-- HTTP: `POST /v1/memories/navigate` with `{ "question": "…", "project": "…" }`,
-  or `POST /v1/memories/digest` with `{ "project": "…" }`. Omit project for global.
+- WebSocket: `memory.navigate` with `{ "question": "…", "project": "…" }`,
+  or `memory.digest` with `{ "project": "…" }`. Omit project for global.
+  Current clients use these operations. The legacy HTTP endpoints under
+  `/v1/memories/navigate` and `/v1/memories/digest` remain compatibility surfaces;
+  clients do not silently fall back to them after a socket failure.
 
 The interlocutor's internal `memory_navigate` tool accepts only a question. Its
 run supplies the home; it searches that project before global. Navigation returns

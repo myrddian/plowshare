@@ -377,6 +377,7 @@
         "value": null,
         "source": "default"
       },
+      "autoIncrease": {"value": null, "source": "definition"},
       "autoContinue": {
         "value": null,
         "source": "default"
@@ -573,5 +574,98 @@
   },
   "trigger.forget": {
     "code": "NO_CONTENT"
+  },
+  "board.post": {
+    "code": "OK",
+    "payload": {
+      "requestId": "00000000-0000-0000-0000-000000000089",
+      "message": {
+        "id": "msg",
+        "topic": "root",
+        "replyTo": null,
+        "authorKind": "human",
+        "author": "enzo",
+        "conversation": null,
+        "entry": null,
+        "kind": "document",
+        "title": "Proposal",
+        "body": "full\nsource",
+        "alert": false,
+        "mentions": [
+          "worker"
+        ],
+        "postedAt": "2026-10-02T00:00:00Z"
+      }
+    }
+  },
+  "board.open": {
+    "code": "OK",
+    "payload": {
+      "requestId": "00000000-0000-0000-0000-000000000089",
+      "topic": {
+        "id": "root",
+        "project": "p",
+        "parent": null,
+        "root": "root",
+        "depth": 0,
+        "title": "Title",
+        "label": "label",
+        "account": "enzo",
+        "openerKind": "person",
+        "opener": "enzo",
+        "originConversation": null,
+        "state": "open",
+        "resolution": null,
+        "potTotal": 100,
+        "potSpent": 40,
+        "reserve": 10,
+        "quietNotifiedAt": "2026-10-02T00:00:00Z",
+        "openedAt": "2026-10-02T00:00:00Z",
+        "closedAt": null,
+        "future": {
+          "preserved": true
+        }
+      },
+      "message": {
+        "id": "msg",
+        "topic": "root",
+        "replyTo": null,
+        "authorKind": "person",
+        "author": "enzo",
+        "conversation": null,
+        "entry": null,
+        "kind": "post",
+        "title": null,
+        "body": "full\nsource",
+        "alert": false,
+        "mentions": [],
+        "postedAt": "2026-10-02T00:00:00Z"
+      }
+    }
+  },
+  "board.retry": {
+    "code": "OK",
+    "payload": {
+      "requestId": "00000000-0000-0000-0000-000000000089",
+      "message": {
+        "id": "msg",
+        "topic": "root",
+        "replyTo": null,
+        "authorKind": "human",
+        "author": "enzo",
+        "conversation": null,
+        "entry": null,
+        "kind": "document",
+        "title": "Proposal",
+        "body": "full\nsource",
+        "alert": false,
+        "mentions": [
+          "researcher"
+        ],
+        "postedAt": "2026-10-02T00:00:00Z"
+      },
+      "member": "researcher",
+      "maxTurns": 24
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "plowshare-client-node",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "packageManager": "pnpm@10.34.5",
   "engines": {
@@ -15,16 +15,23 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm build"
   },
   "dependencies": {
-    "plowshare-client-ts": "link:../plowshare-client-ts"
+    "plowshare-client-ts": "0.1.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/ws": "^8.18.1"
   },
   "exports": {
+    ".": {
+      "types": "./build/sdk.d.ts",
+      "import": "./build/sdk.js"
+    },
     "./sync/*": {
       "types": "./build/sync/*.d.ts",
       "import": "./build/sync/*.js"
@@ -49,9 +56,18 @@
       "types": "./build/credentials.d.ts",
       "import": "./build/credentials.js"
     },
+    "./settings": {
+      "types": "./build/settings.d.ts",
+      "import": "./build/settings.js"
+    },
     "./marker": {
       "types": "./build/marker.d.ts",
       "import": "./build/marker.js"
+    },
+    "./personal": {
+      "types": "./build/personal.d.ts",
+      "import": "./build/personal.js"
     }
-  }
+  },
+  "description": "Plowshare WebSocket SDK and optional Node platform adapters"
 }

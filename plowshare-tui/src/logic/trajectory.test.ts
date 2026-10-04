@@ -32,7 +32,7 @@ describe('entries turned into steps', () => {
         expect(steps[1]).toMatchObject({ kind: 'call', pending: false, unanswered: true })
     })
 
-    it('hides what a fold superseded, draws the fold, and hangs a hook on the call it followed', () => {
+    it('keeps what a model fold superseded, draws the fold, and hangs a hook on the call it followed', () => {
         const steps = stepsOf([
             row(1, 'utterance', { text: 'old', supersededBy: 5 }),
             asking(2, 'c1'),
@@ -40,8 +40,8 @@ describe('entries turned into steps', () => {
             row(4, 'hook', { text: 'tool.post: redacted' }),
             row(5, 'summary', { text: 'earlier: the tests were run' }),
         ])
-        expect(steps.map((step) => step.kind)).toEqual(['answer', 'call', 'fold'])
-        expect(steps[1]?.kind === 'call' ? steps[1].hooks.map((hook) => hook.ordinal) : []).toEqual([4])
+        expect(steps.map((step) => step.kind)).toEqual(['person', 'answer', 'call', 'fold'])
+        expect(steps[2]?.kind === 'call' ? steps[2].hooks.map((hook) => hook.ordinal) : []).toEqual([4])
     })
 
     it('keeps a result whose call is on an earlier page as a row of its own', () => {

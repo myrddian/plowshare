@@ -76,7 +76,7 @@ export interface Surface {
      * @param details a few words about each name, for a surface that shows them
      *     beside the name — the `@` menu does; Tab does not
      */
-    completing(names: readonly string[], details?: Readonly<Record<string, string>>): void
+    completing(names: readonly string[], details?: Readonly<Record<string, string>>, commands?: readonly { readonly name: string; readonly detail: string }[]): void
 
     /**
      * What Ctrl-C does, which is the caller's to decide and not a surface's.

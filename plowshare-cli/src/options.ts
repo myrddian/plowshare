@@ -1,6 +1,7 @@
 import { isPayloadCommand } from 'plowshare-client-ts/operations/commands'
 
-export const HELP = `Usage: plowshare-cli [options] login|logout
+export const HELP = `First-run setup: plowshare-cli setup --url <server-origin>
+Usage: plowshare-cli [options] setup|login|logout
        plowshare-cli [options] memory <verb> [JSON payload or text]
        plowshare-cli [options] search <text or JSON payload>
        plowshare-cli [options] job status|poll|result|wait|cancel <job-id>
@@ -27,8 +28,24 @@ Approval: list, answer, revoke. Orchestration: definitions, list, status, answer
 Schedule: list, define, read, pause, forget. Trigger: list, define, pause, forget.
 Event: fire. Firing: list. Provider: list, deregister. Board: topup.
 Buffer: purge. Retention: sweep. Union: status, conflicts (reads only).
-Web: search, fetch. Project: list, define, lend, unlend, workspace, move, forget,
-     member-add, member-remove (paths refer to the server's disk).
+Web: search, fetch. Project: create, list, define, lend, unlend, workspace, move, forget,
+     access, member-add, member-role, member-remove (paths refer to the server's disk).
+A server-side project scopes work in the Plowshare agent framework: agents,
+skills, conversations, memory, information and any server workspace files.
+SDK integrations submit agentic or information tasks within that scope.
+project create provisions MANAGED server files, or registers DISJOINT files without
+client sync. writePaths names relative writable areas; DISJOINT defaults to [].
+admin accounts lists server accounts; admin account create/update/reset manages accounts.
+admin sessions lists active logins; admin session revoke signs an account out everywhere.
+admin service accounts lists machine identities; admin service account create/update manages them.
+admin service tokens lists token metadata; admin service token create/rotate/revoke manages scoped credentials.
+Token create needs handle, name and scopes [{project,role}]; expiresInDays defaults to 30 (1–365).
+admin audit lists durable operator history. These commands require a server administrator.
+project define registers an existing server workspace (administrator required).
+project access inspects your role and grants; project Managers may add/remove members
+and assign VIEWER, CONTRIBUTOR or MANAGER using project member-role.
+Personal remains private to its account; roles never widen writable workspace areas.
+--project selects that framework project for work; --root explicitly serves local files.
 Single-id reads and document queries accept text; other payloads are JSON.
 web search requires query, pageSize, max and page; fetch accepts a URL.
 
@@ -38,7 +55,7 @@ Options (before or after the command; -- ends option parsing):
   --validate             validate input offline; show operation and effective scope
   --json                 JSON result on stdout (observers/root/sync emit NDJSON)
   --url ORIGIN           server origin (PLOWSHARE_URL or http://127.0.0.1:8091)
-  --project NAME         explicit tier (PLOWSHARE_PROJECT otherwise)
+  --project NAME         server framework project (PLOWSHARE_PROJECT otherwise)
   --global               override the environment tier with global
   --payload -            read the command's JSON payload from stdin
   --wait                 wait for an accepted job or job status/cancel
@@ -47,10 +64,12 @@ Options (before or after the command; -- ends option parsing):
   --sync                 reconnect an enabled union while rooted; never enables it
   --poll-ms N            status polling interval (default 1000)
   --timeout-ms N         whole invocation deadline (default 30000)
-  --help                 show this help without signing in
+  --help                 show command or group help without signing in
+  --version              show the installed CLI version without signing in
 
 Authentication: run login once; clients share saved tokens per server.
-Only login prompts. PLOWSHARE_HANDLE/PLOWSHARE_PASSWORD remain ephemeral overrides.
+For service automation, PLOWSHARE_TOKEN supplies an ephemeral pss_ bearer; no login or refresh.
+Setup and login prompt. PLOWSHARE_HANDLE/PLOWSHARE_PASSWORD remain ephemeral overrides.
 JSON project:null selects global; omitted budgets and paging stay server-owned.
 Exit: 0 completed, 1 refused/failed, 2 usage/auth, 3 accepted/running/cancelling,
       4 incomplete/cancelled/awaiting, 5 unknown/transport/deadline/protocol.
@@ -59,6 +78,7 @@ Disconnect, timeout or Ctrl-C never replays or cancels a server mutation.`
 export interface Options {
     readonly json: boolean
     readonly help: boolean
+    readonly version?: boolean
     readonly validate: boolean
     readonly newConversation: boolean
     readonly standalone: boolean
@@ -77,7 +97,7 @@ export class Usage extends Error {}
 
 export function options(args: readonly string[], env: Readonly<Record<string, string | undefined>>): Options {
     let json = false, help = false, validate = false, wait = false, watch = false, inputPayload = false
-    let newConversation = false, standalone = false
+    let newConversation = false, standalone = false, version = false
     let root: string | undefined, sync = false
     let url = env['PLOWSHARE_URL'] ?? 'http://127.0.0.1:8091'
     let project = env['PLOWSHARE_PROJECT'] || undefined
@@ -105,6 +125,7 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
             case '--validate': validate = true; break
             case '--json': json = true; break
             case '--help': case '-h': help = true; break
+            case '--version': version = true; break
             case '--wait': wait = true; break
             case '--watch': watch = true; wait = true; break
             case '--root': root = value(flag); break
@@ -124,7 +145,7 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
             default: throw new Usage('unknown option; see --help')
         }
     }
-    if (help) return { json, help, validate, newConversation, standalone, base: '', command: '', inputPayload: false, wait: false, watch: false, pollMs, timeoutMs, sync: false }
+    if (help || version) return { json, help, version, validate, newConversation, standalone, base: '', command: parts.join(' ').trim(), inputPayload: false, wait: false, watch: false, pollMs, timeoutMs, sync: false }
     if (newConversation && standalone) throw new Usage('choose --new-conversation or --standalone')
     if (project !== undefined && project.trim() === '') throw new Usage('project must be a nonblank name; use --global explicitly')
     let base: string
@@ -145,7 +166,6 @@ export function options(args: readonly string[], env: Readonly<Record<string, st
     if (inputPayload && !isPayloadCommand(command)) {
         throw new Usage('--payload - replaces the entire payload; do not also supply an argument')
     }
-    if (root !== undefined && project === undefined) throw new Usage('--root requires a named --project or PLOWSHARE_PROJECT')
     if (sync && root === undefined) throw new Usage('--sync requires --root')
     if ((command === 'client root' || command.startsWith('sync ')) && root === undefined) throw new Usage('client root and sync require --root and a named project')
     return { json, help, validate, newConversation, standalone, base, ...(project === undefined ? {} : { project }), ...(root === undefined ? {} : { root }), sync, command, inputPayload, wait, watch, pollMs, timeoutMs }

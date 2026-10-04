@@ -33,6 +33,7 @@ export interface Caps {
     readonly autoContinue: CapSetting
     readonly time: CapSetting
     readonly failedChecks: CapSetting
+    readonly autoIncrease?: { readonly value?: boolean; readonly source: string }
     readonly applied: number
     readonly said?: string
 }
@@ -100,6 +101,7 @@ export function capsOf(answer: Answer): Caps | undefined {
         time: settingOf(body['time']),
         failedChecks: body['failedChecks'] === undefined
             ? { value: DEFAULT_FAILED_CHECKS, source: 'default' } : settingOf(body['failedChecks']),
+        ...(body['autoIncrease'] === undefined ? {} : { autoIncrease: booleanSettingOf(body['autoIncrease']) }),
         applied: countAt(body, 'applied') ?? 0,
         ...(said === undefined ? {} : { said }),
     }
@@ -174,4 +176,10 @@ export function capKeyOfLine(line: string): CapKey | undefined {
         case '': return 'later'
         default: return undefined
     }
+}
+
+function booleanSettingOf(raw: unknown): { readonly value?: boolean; readonly source: string } {
+    const body = fieldsOf(raw)
+    return { source: body === undefined ? 'definition' : textAt(body, 'source') ?? 'definition',
+        ...(body !== undefined && typeof body['value'] === 'boolean' ? { value: body['value'] as boolean } : {}) }
 }

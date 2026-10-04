@@ -1,0 +1,36 @@
+import { _electron as electron, expect } from 'playwright/test';
+import assert from 'node:assert/strict';
+import executablePath from 'electron';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { protocolFixture } from './protocol-fixture.mjs';
+const profile=await mkdtemp(join(tmpdir(),'plowshare-screens-')),fixture=await protocolFixture({boardProject:'Empty workspace'});
+const env={...process.env,PLOWSHARE_DESKTOP_PROFILE:profile,PLOWSHARE_DESKTOP_CONFIG:join(profile,'config'),PLOWSHARE_CONFIG_DIR:join(profile,'credentials')};delete env.ELECTRON_RUN_AS_NODE;
+let app;
+try {
+  app=await electron.launch({executablePath,args:[resolve('.')],env});const main=await app.firstWindow(),errors=[];main.on('pageerror',e=>errors.push(e.message));
+  await main.evaluate(base=>window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+  let opening=app.waitForEvent('window');await main.locator('#library-open').click();const library=await opening;library.on('pageerror',e=>errors.push(e.message));
+  const reports=library.locator('#library-source-panel');await expect(reports.locator('.information-row')).toContainText('Generated research report');await expect(reports.locator('[data-add-open]')).toBeHidden();await expect(library.locator('#library-memories')).toBeHidden();
+  assert.equal(fixture.frames.filter(f=>f.type==='information.list').at(-1).payload.kind,'report');
+  await expect(reports.locator('.information-row')).toContainText('draft');
+  await reports.locator('.information-row').click();
+  await expect(reports.locator('[data-passage]')).toContainText('A retained claim.');
+  assert.equal(fixture.frames.some(f=>['information.finalise','information.share'].includes(f.type)),false,'Reading a draft report never publishes it');
+  const reads=fixture.frames.filter(f=>f.type==='information.list').length;await main.locator('#refresh').click();await expect.poll(()=>fixture.frames.filter(f=>f.type==='information.list').length).toBeGreaterThan(reads);
+  await library.locator('#library-documents').click();await library.locator('#document-sources > summary').click();await expect(library.locator('#document-source-panel .information-row')).toContainText('Retained research source');assert.equal(fixture.frames.filter(f=>f.type==='information.list').at(-1).payload.kind,'source');
+  opening=app.waitForEvent('window');await main.locator('#board-open').click();const postingPage=await opening;postingPage.on('pageerror',e=>errors.push(e.message));
+  await expect(postingPage.locator('#board-tabs')).toBeHidden();await postingPage.locator('#board-post-open').click();await postingPage.locator('#post-project').selectOption('Empty workspace');await expect(postingPage.locator('#post-topic option')).toHaveCount(3);await postingPage.locator('#post-topic').selectOption('demo-board');await postingPage.locator('#post-body').fill('A person’s update to this topic.');
+  assert.equal(fixture.frames.filter(f=>f.type==='board.post').length,0,'Opening and drafting never posts.');
+  fixture.setRefusePost(true);await postingPage.locator('#post-submit').click();await expect(postingPage.locator('#post-error')).toContainText('retained');await expect(postingPage.locator('#post-body')).toHaveValue('A person’s update to this topic.');const key=fixture.frames.filter(f=>f.type==='board.post')[0].payload.requestId;
+  await postingPage.reload();await postingPage.locator('#board-post-open').click();await expect(postingPage.locator('#post-body')).toHaveValue('A person’s update to this topic.');await expect(postingPage.locator('#post-topic')).toHaveValue('demo-board');fixture.setRefusePost(false);await postingPage.locator('#post-submit').click();await expect(postingPage.locator('#post-notice')).toHaveText('Posted to the board.');await expect(postingPage.locator('#post-body')).toHaveValue('');
+  assert.deepEqual(fixture.frames.filter(f=>f.type==='board.post').map(f=>f.payload.requestId),[key,key]);
+  await postingPage.locator('#board-post-close').click();opening=app.waitForEvent('window');await main.locator('#swarm-open').click();const swarm=await opening;await expect(swarm.locator('#board-post-open')).toBeHidden();await assert.rejects(swarm.evaluate(key=>window.plowshare.request({action:'board-post',project:'Empty workspace',topic:'demo-board',body:'forbidden',requestId:key}),key),/Open Board/);
+  await main.locator('#board-open').click();await postingPage.locator('#board-post-open').click();await postingPage.locator('#post-body').fill('A draft awaiting submission');await mkdir('build/smoke',{recursive:true});await postingPage.screenshot({path:'build/smoke/board-post.png'});
+  await postingPage.locator('#board-post-close').click();const expandedY=(await main.locator('#inbox-open').boundingBox()).y;await main.locator('#projects-toggle').click();
+  await expect(main.locator('#sidebar-projects')).toBeHidden();const inboxY=(await main.locator('#inbox-open').boundingBox()).y,heading=await main.locator('#projects-toggle').boundingBox();assert.ok(inboxY<expandedY-80,'Account navigation moves up with the collapsed project list.');assert.ok(inboxY-heading.y-heading.height<85,'Navigation sits directly beneath Projects.');
+  await main.reload();await expect(main.locator('#sidebar')).toHaveClass(/projects-collapsed/);await expect(main.locator('#sidebar-projects')).toBeHidden();assert.equal((await main.locator('#inbox-open').boundingBox()).y,inboxY);await main.screenshot({path:'build/smoke/projects-collapsed.png'});
+  assert.deepEqual([...new Set(fixture.httpPaths)].sort(),['/v1/auth/login','/v1/auth/refresh','/v1/auth/ticket']);assert.deepEqual(errors,[]);
+  console.log('PASS: Reports only, sources under Documents, main-row refresh, Board project/topic post, no automatic mutation, retained draft/request after reload and guarded roles.');
+} finally {await app?.close();await fixture.close();await rm(profile,{recursive:true,force:true});}

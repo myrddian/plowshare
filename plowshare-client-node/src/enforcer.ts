@@ -61,8 +61,10 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Answering } from 'plowshare-client-ts/binding/channel'
-import { ASK, DEFAULT_SIDE, OFF, Unreadable, isShell, parseEnvironment, sideOff, sideWith } from 'plowshare-client-ts/binding/environment'
+import { ASK, DEFAULT_SIDE, OFF, isShell, parseEnvironment, sideOff, sideWith } from 'plowshare-client-ts/binding/environment'
 import type { Side } from 'plowshare-client-ts/binding/environment'
+import { readProjectManifest } from './marker.js'
+import { projectSettings } from 'plowshare-client-ts/binding/project-settings'
 import {
     ABSOLUTE_PATTERN, CANCEL, DEFINITIONS, DELETE, DELETED, DESTINATION_EXISTS, DIRECTORY, EDIT, EXISTS, FAILED,
     GLOB, GREP, HIDDEN, HOOKS, INTERNAL, LINK, MISSING, MOVE, MOVED, NOT_REGULAR, NOT_TEXT, NOT_UTF8, NO_FILE,
@@ -80,7 +82,7 @@ export const MAX_GLOB_MATCHES = 10_000
 export const DEFINITIONS_DIRECTORY = '.plowshare'
 /** How many dangling links `canonical` follows before it stops, as the kernel's own ELOOP bound does. */
 const MAX_LINK_HOPS = 40
-const READABLE_DEFINITIONS: readonly string[] = ['agents', 'bots']
+const READABLE_DEFINITIONS: readonly string[] = ['agents', 'bots', 'orchestrations']
 /** The one directory under `.plowshare` the hooks mark reads, one level deep. */
 const HOOKS_DIRECTORY = 'hooks'
 /** The one file directly under `.plowshare` the harness may read. */
@@ -292,10 +294,18 @@ export function allows(root: string, candidate: string, purpose: Purpose): boole
             && !(below[2] ?? '.').startsWith('.')
     }
     // THE FENCE IS THE MODEL'S. Only the harness's marked request gets past it,
-    // and only into the two definition directories, one level deep.
+    // and only into declared definition locations and opaque skill packages.
     if (purpose === 'definitions' && below.length === 2
-        && below[0] === DEFINITIONS_DIRECTORY && below[1] === ENVIRONMENT_FILE) {
+        && below[0] === DEFINITIONS_DIRECTORY && [ENVIRONMENT_FILE, 'skills.yml', 'plowshare', 'project'].includes(below[1] ?? '')) {
         return true
+    }
+    if (purpose === 'definitions' && below[0] === DEFINITIONS_DIRECTORY
+        && !below.slice(1).some(name => name.startsWith('.'))) {
+        // Package files remain opaque to the client. Only the harness can read them.
+        if (below[1] === 'skills' && below.length >= 4) return true
+        if (below.length === 2 && ['AGENTS.md', 'AGENT.md'].includes(below[1] ?? '')) return true
+        if (below.length === 4 && below[1] === 'agents'
+            && ['AGENTS.md', 'AGENT.md'].includes(below[3] ?? '')) return true
     }
     return purpose === 'definitions'
         && below.length === 3
@@ -357,7 +367,26 @@ async function permitted(
     if (named === undefined) {
         throw ruled(op, NO_PATH, undefined)
     }
-    const candidate = await canonical(isAbsolute(named) ? named : resolve(root, named))
+    const declared = isAbsolute(named) ? named : resolve(root, named)
+    if (purpose === 'definitions' && ['plowshare', '.plowshare/plowshare', '.plowshare/project'].includes(relative(root, declared).split(sep).join('/'))) {
+        let at = root
+        for (const part of relative(root, declared).split(sep)) {
+            at = join(at, part)
+            const meta = await lstat(at).catch(error => { if (codeOf(error) === 'ENOENT') return undefined; throw error })
+            if (meta?.isSymbolicLink()) throw ruled(op, LINK, named)
+        }
+    }
+    const candidate = await canonical(declared)
+    if (purpose === 'writing' && candidate === join(root,'plowshare')) {
+        let executable = false
+        try {
+            if (!(await lstat(candidate)).isFile()) throw ruled(op,HIDDEN,named)
+            const input = await open(candidate,'r')
+            try { const head = Buffer.alloc(2); await input.read(head,0,2,0); executable = head.toString() === '#!' }
+            finally { await input.close() }
+        } catch { /* An absent or unreadable reserved project file is not an agent write target. */ }
+        if (!executable) throw ruled(op,HIDDEN,named)
+    }
     if (!allows(root, candidate, purpose)) {
         if (candidate === root) {
             throw ruled(op, DIRECTORY, named)
@@ -472,7 +501,7 @@ async function lines(
 /**
  * Whether the walk goes into the directory at `path` (names below the root) for
  * this purpose: never into a hidden one, except the harness into `.plowshare`
- * and its two definition directories.
+ * and its definition directories.
  */
 function descends(path: readonly string[], purpose: Purpose): boolean {
     const name = path[path.length - 1] ?? ''
@@ -568,7 +597,9 @@ async function files(
                 if (descends(path, purpose)) {
                     await walk(full, path)
                 }
-            } else if (entry.isFile() && allows(root, full, purpose)) {
+            } else if (entry.isFile() && allows(root, full, purpose)
+                    && !(purpose === 'definitions' && path.length === 2 && path[0] === DEFINITIONS_DIRECTORY
+                        && ['plowshare','project'].includes(path[1] ?? ''))) {
                 found.push(full)
             }
         }
@@ -862,22 +893,14 @@ async function move(root: string, request: FileRequest): Promise<FileResult> {
  * from every model and has no reason to keep it from this client itself.
  */
 async function ownSide(root: string, defaults: Side): Promise<{ side: Side; unreadable?: string }> {
-    let text
     try {
-        text = await readFile(join(root, DEFINITIONS_DIRECTORY, ENVIRONMENT_FILE), 'utf8')
+        const text = await readFile(join(root, DEFINITIONS_DIRECTORY, ENVIRONMENT_FILE), 'utf8')
+            .catch(error => { if (codeOf(error) === 'ENOENT') return undefined; throw error })
+        const legacy = text === undefined ? defaults : sideWith(defaults, parseEnvironment(text).local)
+        const manifest = await readProjectManifest(root)
+        return { side: sideWith(legacy, manifest === undefined ? undefined : projectSettings(manifest).commands?.local) }
     } catch (trouble) {
-        if (codeOf(trouble) === 'ENOENT') {
-            return { side: defaults }
-        }
         return { side: sideOff(defaults), unreadable: messageOf(trouble) }
-    }
-    try {
-        return { side: sideWith(defaults, parseEnvironment(text).local) }
-    } catch (trouble) {
-        if (trouble instanceof Unreadable) {
-            return { side: sideOff(defaults), unreadable: trouble.message }
-        }
-        throw trouble
     }
 }
 

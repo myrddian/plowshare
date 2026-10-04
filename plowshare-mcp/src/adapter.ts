@@ -31,7 +31,7 @@ export async function call(backend: Backend, name: string, args: Data): Promise<
     switch (name) {
         case 'information': {
             const operation = args['operation']
-            const model = ['upload','acquire','list','status','read','search','rank','ask','evidence.record','evidence.read','record.report','events','inventory','acquisitions']
+            const model = ['upload','acquire','list','facets','status','read','search','rank','ask','evidence.record','evidence.read','record.report','events','inventory','acquisitions']
             if (typeof operation !== 'string' || !model.includes(operation)) throw new Error('unsupported model information operation')
             const payload = args['payload']
             if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('payload must be an object')

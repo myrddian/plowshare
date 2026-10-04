@@ -8,14 +8,14 @@ import io.aeyer.plowshare.server.agents.Speaker;
  */
 public interface CallerVoice {
 
-    boolean isSpeaking(String conversation);
+  boolean isSpeaking(String conversation);
 
-    /**
-     * Starts a turn in the caller's conversation, spoken by {@code callerAgent}.
-     *
-     * @param speaker who the utterance is from — {@code orchestration <id>}
-     * @throws io.aeyer.plowshare.server.agents.Turn.Refused as {@code Turn.speak} does, and for an
-     *     agent that no longer resolves
-     */
-    void speak(String conversation, String callerAgent, String utterance, Speaker speaker);
+  /**
+   * Starts a turn in the caller's conversation, spoken by {@code callerAgent}.
+   *
+   * @param speaker who the utterance is from — {@code orchestration <id>}
+   * @throws io.aeyer.plowshare.server.agents.Turn.Refused as {@code Turn.speak} does, and for an
+   *     agent that no longer resolves
+   */
+  void speak(String conversation, String callerAgent, String utterance, Speaker speaker);
 }

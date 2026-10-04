@@ -4,6 +4,9 @@ import { runStatusOf } from 'plowshare-client-ts/operations/inspection';
 import type { DefinitionView, OrchestrationStatus } from 'plowshare-client-ts/operations/administrative-replies';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import type { Choice } from 'plowshare-client-ts/operations/session';
+import { orchestrationCallId } from './run-navigation.ts';
+import type { Entry } from 'plowshare-client-ts/operations/client-views';
+import { stepsOf, stepKey } from 'plowshare-client-ts/operations/trajectory';
 import { runQuestion, type DesktopState } from './shared.ts';
 
 const problem = (error: unknown) => error instanceof Error ? error.message : 'Could not read orchestration information.';
@@ -13,16 +16,25 @@ export class RunClient {
   private reads = new Map<string, number>();
   private selected?: string;
   private pending = new Set<string>();
+  private navigationReads = new Map<string, Promise<void>>();
+  private navigationDirty = new Set<string>();
+  private navigationViews = new Set<string>();
   private state: () => DesktopState;
   private send: (ask: { type: string; payload: unknown }) => Promise<Outcome>;
   private emit: () => void;
   constructor(state: () => DesktopState, send: RunClient['send'], emit: () => void) { this.state = state; this.send = send; this.emit = emit; }
   pause() { this.selected = undefined; }
+  followNavigation(id: string, following: boolean) {
+    if (following) { this.known(id); this.navigationViews.add(id); }
+    else this.navigationViews.delete(id);
+  }
   reset() {
     this.epoch++; this.reads.clear(); this.pending.clear(); this.selected = undefined;
+    this.navigationReads.clear(); this.navigationDirty.clear();
     const activity = this.state().activity;
     if (activity.definitions) activity.definitions.loading = false;
     for (const page of Object.values(activity.records ?? {})) page.loading = false;
+    for (const page of Object.values(activity.navigation ?? {})) page.loading = false;
     for (const decision of Object.values(activity.decisions ?? {})) decision.busy = false;
   }
   private live() { if (!this.state().connected || this.state().mode !== 'live') throw new Error('Connect before managing orchestrations.'); }
@@ -68,12 +80,61 @@ export class RunClient {
     } catch (error) { if (epoch === this.epoch && revision === this.reads.get(id)) { records[id].error = problem(error); records[id].loading = false; } }
     finally { if (epoch === this.epoch && revision === this.reads.get(id)) this.emit(); }
   }
+  /** Small transition-only pages keep navigation complete even when tool history is long
+   * or the run record has a filter. Failed reads preserve the previous navigation snapshot. */
+  async navigation(id: string): Promise<void> {
+    this.live(); this.known(id);
+    const existing = this.navigationReads.get(id); if (existing) return existing;
+    this.navigationDirty.delete(id);
+    const epoch = this.epoch, navigation = this.state().activity.navigation ??= {};
+    navigation[id] = { ...navigation[id], rows: navigation[id]?.rows ?? [], loading: true }; this.emit();
+    const work = (async () => {
+      try {
+        const rows: RecordView[] = []; let before: number | undefined, root: string | undefined;
+        for (;;) {
+          const answer = await this.checked(request('orchestration.record', { root: id, limit: 100, kinds: ['stage_moved'], ...(before === undefined ? { tail: true } : { before }) }));
+          if (epoch !== this.epoch) return;
+          const page = recordReply(answer.payload)!;
+          if (root !== undefined && page.root !== root) throw new Error('Stage history now names another tree.');
+          root = page.root; rows.push(...page.rows);
+          if (!page.more) break;
+          if (page.oldest === null || (before !== undefined && page.oldest >= before)) throw new Error('Stage history did not advance to an earlier page.');
+          before = page.oldest;
+        }
+        navigation[id] = { rows: rows.sort((a,b) => a.ordinal - b.ordinal) };
+      } catch (error) { if (epoch === this.epoch) navigation[id] = { rows: navigation[id]?.rows ?? [], error: problem(error) }; }
+      finally { if (epoch === this.epoch) this.emit(); }
+    })();
+    this.navigationReads.set(id, work);
+    try { await work; } finally {
+      if (this.navigationReads.get(id) === work) {
+        this.navigationReads.delete(id);
+        if (epoch === this.epoch && this.navigationDirty.delete(id)) void this.navigation(id).catch(() => {});
+      }
+    }
+  }
   private async status(id: string): Promise<OrchestrationStatus> {
     const epoch = this.epoch;
     const answer = await this.checked(request('orchestration.status', { id }));
     if (epoch !== this.epoch) throw new Error('The connection changed while reading the run.');
     const wire = answer.payload as OrchestrationStatus, value = runStatusOf(answer)!;
     this.state().activity.details[id] = { value, wire }; this.emit(); return wire;
+  }
+  /** Resolve a recorded spawn without replaying the tool. Server status supplies
+   * the conductor and must confirm that this inspected conversation is its caller. */
+  async spawnedConversation(parent: string, key: string, entries: readonly Entry[] = this.state().history[parent]?.entries ?? []): Promise<string> {
+    const step = stepsOf(entries).find(step => stepKey(step) === key);
+    if (step?.kind !== 'call') throw new Error('Choose a recorded delegation in this trajectory.');
+    if (step.opened?.conversation) return step.opened.conversation;
+    const id = orchestrationCallId(step);
+    if (!id) throw new Error('Choose a recorded delegation in this trajectory.');
+    this.live(); const epoch = this.epoch;
+    const answer = await this.checked(request('orchestration.status', { id }));
+    if (epoch !== this.epoch) throw new Error('The connection changed while reading the run.');
+    const wire = answer.payload as OrchestrationStatus, value = runStatusOf(answer)!;
+    if (value.run.id !== id || wire.orchestration.callerConversation !== parent || !wire.orchestration.conductorConversation) throw new Error('This run does not belong to the selected call.');
+    this.state().activity.details[id] = { value, wire }; this.emit();
+    return wire.orchestration.conductorConversation;
   }
   async answer(id: string, question: string, answer?: string, choices?: readonly Choice[]) {
     this.live(); this.known(id);
@@ -129,6 +190,12 @@ export class RunClient {
   }
   push(value: unknown) {
     const push = value as { kind?: string; root?: string; settled?: number } | null;
+    if (push?.kind === 'orchestration.recorded') for (const id of Object.keys(this.state().activity.navigation ?? {})) {
+      if ((id === this.selected || this.navigationViews.has(id)) && this.state().activity.records?.[id]?.root === push.root) {
+        if (this.navigationReads.has(id)) this.navigationDirty.add(id);
+        else void this.navigation(id).catch(() => {});
+      }
+    }
     if (!this.selected || push?.kind !== 'orchestration.recorded' || this.state().activity.records?.[this.selected]?.root !== push.root) return;
     const id = this.selected, ordinal = push.settled;
     void this.record(id).then(() => {

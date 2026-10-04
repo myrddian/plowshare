@@ -16,3 +16,17 @@ describe('authenticated usage ledger reads', () => {
         expect(resultOf(asked, { code: 'BAD_REQUEST', said: 'unavailable' }).kind).toBe('refused')
     })
 })
+
+
+describe('constructed context snapshots', () => {
+    const payload = {conversation:'conversation',agent:'agent',projection:'next',captured_at:'2026-10-03T00:00:00Z',model:'fixture',sampling:{},messages:[{role:'system',parts:[{type:'text',text:'Exact system block'}],tool_calls:[],tool_call_id:null}],tools:[],count:null};
+    const asked = {type:'conversation.context.snapshot',payload:{conversation:'conversation',agent:'agent'}} as ReturnType<typeof request>;
+    it('retains a complete projection and refuses partial content', () => {
+        expect(resultOf(asked,{code:'OK',payload})).toEqual({kind:'completed',outcome:{code:'OK',payload}});
+        for (const key of Object.keys(payload)) {
+            const incomplete = {...payload} as Record<string, unknown>; delete incomplete[key];
+            expect(resultOf(asked,{code:'OK',payload:incomplete}).kind).toBe('invalid-response');
+        }
+        expect(resultOf(asked,{code:'OK',payload:{...payload,messages:[{role:'tool',parts:[]} ]}}).kind).toBe('invalid-response');
+    });
+});

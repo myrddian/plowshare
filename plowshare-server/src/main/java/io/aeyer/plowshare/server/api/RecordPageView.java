@@ -10,12 +10,24 @@ import java.util.List;
  * once the page is full — the rows and one past them, {@link RecordPage#total()}'s reason — so a
  * client pages by {@code more} and {@code oldest}, and never by it.
  */
-public record RecordPageView(String root, List<RecordView> rows, int total, int limit,
-        int through, Integer oldest, Boolean more) {
+public record RecordPageView(
+    String root,
+    List<RecordView> rows,
+    int total,
+    int limit,
+    int through,
+    Integer oldest,
+    Boolean more) {
 
-    public static RecordPageView of(RecordReads.Read read) {
-        RecordPage page = read.page();
-        return new RecordPageView(read.root(), page.rows().stream().map(RecordView::of).toList(),
-                page.total(), read.limit(), page.through(), page.oldest(), page.more());
-    }
+  public static RecordPageView of(RecordReads.Read read) {
+    RecordPage page = read.page();
+    return new RecordPageView(
+        read.root(),
+        page.rows().stream().map(RecordView::of).toList(),
+        page.total(),
+        read.limit(),
+        page.through(),
+        page.oldest(),
+        page.more());
+  }
 }

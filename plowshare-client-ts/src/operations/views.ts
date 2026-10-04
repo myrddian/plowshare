@@ -1,3 +1,4 @@
+import { commandEntry, type CommandEntry } from './conversation-replies.ts'
 // Shared domain readers. Unknown fields are tolerated; frontend rendering stays outside this module.
 import { OK, bodyOf, countAt, fieldsOf, textAt, type Answer } from './response.ts'
 import { CONVERSATION_APPENDED } from './session.ts'
@@ -45,6 +46,13 @@ export interface Conversation {
  */
 export interface Project {
     readonly name: string
+    readonly kind?: 'project' | 'personal'
+    readonly type?: string
+    readonly role?: 'VIEWER' | 'CONTRIBUTOR' | 'MANAGER'
+    readonly readOnly?: boolean
+    readonly displayName?: string
+    readonly routingIdentity?: string
+    readonly writePaths?: readonly string[]
 
     /** Where the files are on the machine that holds them. Never resolved here. */
     readonly workspace?: string
@@ -71,6 +79,8 @@ export interface Project {
  * be read as implying more than.
  */
 export interface Agent {
+    readonly displayName?: string
+    readonly origin?: string
     /** What `PLOWSHARE_AGENT` takes, and what `agent.run` names. */
     readonly name: string
 
@@ -164,6 +174,8 @@ export interface Agent {
 
     /** The orchestrations it may start. Empty from a server too old to say. */
     readonly orchestrations: readonly string[]
+    readonly skills?: readonly string[]
+    readonly commands?: readonly CommandEntry[]
 }
 
 
@@ -339,8 +351,15 @@ export function projects(answer: Answer): Project[] | undefined {
             const machine = textAt(fields, 'machine')
             return {
                 name,
+                ...(typeof fields['type'] === 'string' ? { type: fields['type'] } : {}),
+                ...(['VIEWER','CONTRIBUTOR','MANAGER'].includes(String(fields['role'])) ? {role: fields['role'] as 'VIEWER'|'CONTRIBUTOR'|'MANAGER'} : {}),
+                ...(typeof fields['readOnly'] === 'boolean' ? { readOnly: fields['readOnly'] } : {}),
+                ...(typeof fields['displayName'] === 'string' ? { displayName: fields['displayName'] } : {}),
+                ...(typeof fields['routingIdentity'] === 'string' ? { routingIdentity: fields['routingIdentity'] } : {}),
+                ...(Array.isArray(fields['writePaths']) && fields['writePaths'].every(path => typeof path === 'string') ? { writePaths: fields['writePaths'] as readonly string[] } : {}),
                 ...(workspace === undefined ? {} : { workspace }),
                 ...(machine === undefined ? {} : { machine }),
+                ...(fields['kind'] === 'personal' ? { kind: 'personal' as 'personal' | 'project' } : {}),
             }
         })
         .filter((row): row is Project => row !== undefined)
@@ -410,6 +429,8 @@ function agentIn(fields: Record<string, unknown>): Agent | undefined {
     }
     return {
         name,
+        ...(textAt(fields, 'displayName') ? { displayName: textAt(fields, 'displayName')! } : {}),
+        ...(textAt(fields, 'origin') ? { origin: textAt(fields, 'origin')! } : {}),
         bot: flagAt(fields, 'bot'),
         served: flagAt(fields, 'served'),
         withheld: sentencesAt(fields, 'withheld'),
@@ -420,6 +441,8 @@ function agentIn(fields: Record<string, unknown>): Agent | undefined {
         calls: sentencesAt(fields, 'calls'),
         scopes: sentencesAt(fields, 'scopes'),
         orchestrations: sentencesAt(fields, 'orchestrations'),
+        ...(Array.isArray(fields['skills']) ? { skills: sentencesAt(fields, 'skills') } : {}),
+        ...(Array.isArray(fields['commands']) ? { commands: fields['commands'].filter(commandEntry) as CommandEntry[] } : {}),
     }
 }
 

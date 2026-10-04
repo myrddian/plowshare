@@ -79,8 +79,8 @@ export function stepKey(step: Step): string {
 }
 
 /**
- * The steps of these rows, in log order. A superseded row is left out — its fold stands for
- * it — and a result is folded into the call it answers. A result whose call is not among the
+ * The steps of these rows, in log order. Model compaction never removes human history:
+ * superseded entries remain inspectable. A result is paired with the call it answers. A result whose call is not among the
  * rows (it is on an earlier page) stays a row of its own rather than being dropped.
  */
 export function stepsOf(entries: readonly Entry[]): Step[] {
@@ -89,9 +89,6 @@ export function stepsOf(entries: readonly Entry[]): Step[] {
     const open = new Map<string, number>()
     let lastSettled: number | undefined
     for (const entry of ordered) {
-        if (entry.supersededBy !== undefined) {
-            continue
-        }
         const base = { ordinal: entry.ordinal, turn: entry.turnOrdinal, entry }
         switch (entry.kind) {
             case 'utterance':
@@ -101,6 +98,7 @@ export function stepsOf(entries: readonly Entry[]): Step[] {
                 steps.push({ kind: 'reasoning', ...base })
                 break
             case 'summary':
+            case 'turn_summary':
                 steps.push({ kind: 'fold', ...base })
                 break
             case 'answer':

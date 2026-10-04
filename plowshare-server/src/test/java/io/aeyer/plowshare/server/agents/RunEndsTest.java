@@ -14,34 +14,36 @@ import org.junit.jupiter.api.Test;
 
 class RunEndsTest {
 
-    @Test
-    void every_run_that_ends_is_reported_with_its_id_and_name() throws Exception {
-        JobStore jobs = new JobStore(new JobRuntime(mock(LlmDispatcher.class), List.of()));
-        CountDownLatch ended = new CountDownLatch(1);
-        AtomicReference<String> seen = new AtomicReference<>();
-        jobs.onRunEnded((id, agent, home) -> {
-            seen.set(id + "/" + agent);
-            ended.countDown();
+  @Test
+  void every_run_that_ends_is_reported_with_its_id_and_name() throws Exception {
+    JobStore jobs = new JobStore(new JobRuntime(mock(LlmDispatcher.class), List.of()));
+    CountDownLatch ended = new CountDownLatch(1);
+    AtomicReference<String> seen = new AtomicReference<>();
+    jobs.onRunEnded(
+        (id, agent, home) -> {
+          seen.set(id + "/" + agent);
+          ended.countDown();
         });
 
-        String id = jobs.submit("ingest", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
+    String id = jobs.submit("ingest", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
 
-        assertTrue(ended.await(5, TimeUnit.SECONDS), "the run end was reported");
-        assertEquals(id + "/ingest", seen.get());
-    }
+    assertTrue(ended.await(5, TimeUnit.SECONDS), "the run end was reported");
+    assertEquals(id + "/ingest", seen.get());
+  }
 
-    @Test
-    void a_listener_that_throws_does_not_break_the_store() throws Exception {
-        JobStore jobs = new JobStore(new JobRuntime(mock(LlmDispatcher.class), List.of()));
-        CountDownLatch second = new CountDownLatch(1);
-        jobs.onRunEnded((id, agent, home) -> {
-            if (second.getCount() == 1 && agent.equals("first")) {
-                throw new IllegalStateException("boom");
-            }
-            second.countDown();
+  @Test
+  void a_listener_that_throws_does_not_break_the_store() throws Exception {
+    JobStore jobs = new JobStore(new JobRuntime(mock(LlmDispatcher.class), List.of()));
+    CountDownLatch second = new CountDownLatch(1);
+    jobs.onRunEnded(
+        (id, agent, home) -> {
+          if (second.getCount() == 1 && agent.equals("first")) {
+            throw new IllegalStateException("boom");
+          }
+          second.countDown();
         });
-        jobs.submit("first", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
-        jobs.submit("second", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
-        assertTrue(second.await(5, TimeUnit.SECONDS));
-    }
+    jobs.submit("first", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
+    jobs.submit("second", cancelled -> new Outcome(Ending.ANSWERED, "ok", 0, 0, ""));
+    assertTrue(second.await(5, TimeUnit.SECONDS));
+  }
 }

@@ -1,0 +1,99 @@
+{
+  "id": "bb956c1f-5d8b-5db3-bf57-eed60b547544",
+  "resource_id": "3ee7dc9a-ea4e-5c0f-bb3a-37b3c25f46c6",
+  "ordinal": 1,
+  "title": "Synthetic title 321",
+  "media_type": "text/html; charset=UTF-8",
+  "source_uri": "https://fixture.example.invalid/source/5d56ada8d5b9a06c",
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "text_hash": null,
+  "byte_size": 189868,
+  "created_at": "2000-01-01T00:00:00+00:00",
+  "availability": "active",
+  "excluded": false,
+  "generation": 1,
+  "converter": null,
+  "allowance_total": 1000,
+  "allowance_spent": 0,
+  "source_name": "Synthetic title 321",
+  "kind": "source",
+  "can_manage": true,
+  "steps": [
+    {
+      "stage": "derive",
+      "state": "pending",
+      "attempt": 0,
+      "error": null,
+      "generation": 1,
+      "fingerprint": null,
+      "started_at": null,
+      "finished_at": null,
+      "compatible": false
+    },
+    {
+      "stage": "embed",
+      "state": "pending",
+      "attempt": 0,
+      "error": null,
+      "generation": 1,
+      "fingerprint": null,
+      "started_at": null,
+      "finished_at": null,
+      "compatible": false
+    },
+    {
+      "stage": "extract",
+      "state": "pending",
+      "attempt": 0,
+      "error": null,
+      "generation": 1,
+      "fingerprint": null,
+      "started_at": null,
+      "finished_at": null,
+      "compatible": false
+    },
+    {
+      "stage": "summarise",
+      "state": "pending",
+      "attempt": 0,
+      "error": null,
+      "generation": 1,
+      "fingerprint": null,
+      "started_at": null,
+      "finished_at": null,
+      "compatible": false
+    },
+    {
+      "stage": "summary_embed",
+      "state": "pending",
+      "attempt": 0,
+      "error": null,
+      "generation": 1,
+      "fingerprint": null,
+      "started_at": null,
+      "finished_at": null,
+      "compatible": false
+    }
+  ],
+  "progress": {
+    "passage_vectors": {
+      "total": 0,
+      "completed": 0
+    },
+    "stored_summary_entities": {
+      "total": 0,
+      "completed": 0
+    }
+  },
+  "events": [
+    {
+      "sequence": 10175,
+      "generation": 1,
+      "stage": "intake",
+      "action": "retained",
+      "detail": "",
+      "recorded_at": "2000-01-01T00:00:00+00:00"
+    }
+  ],
+  "inputs": []
+}

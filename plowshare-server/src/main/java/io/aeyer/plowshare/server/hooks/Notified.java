@@ -9,18 +9,18 @@ import java.util.Objects;
  */
 public record Notified(List<Notice> notices, List<HookRecord> records) {
 
-    public static final Notified NOTHING = new Notified(List.of(), List.of());
+  public static final Notified NOTHING = new Notified(List.of(), List.of());
 
-    /** One {@code { notify }}, and which hook asked. */
-    public record Notice(String hook, String text) {
-        public Notice {
-            Objects.requireNonNull(hook, "hook");
-            Objects.requireNonNull(text, "text");
-        }
+  /** One {@code { notify }}, and which hook asked. */
+  public record Notice(String hook, String text) {
+    public Notice {
+      Objects.requireNonNull(hook, "hook");
+      Objects.requireNonNull(text, "text");
     }
+  }
 
-    public Notified {
-        notices = List.copyOf(notices);
-        records = List.copyOf(records);
-    }
+  public Notified {
+    notices = List.copyOf(notices);
+    records = List.copyOf(records);
+  }
 }

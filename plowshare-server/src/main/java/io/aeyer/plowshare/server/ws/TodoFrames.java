@@ -6,20 +6,22 @@ import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
 
-/** Conversation todo lists. {@code todos.changed} is a push, not a request type this area routes. */
+/**
+ * Conversation todo lists. {@code todos.changed} is a push, not a request type this area routes.
+ */
 @Component
 public class TodoFrames implements FrameArea {
 
-    private final TodoLists todos;
-    private final Conversations conversations;
+  private final TodoLists todos;
+  private final Conversations conversations;
 
-    public TodoFrames(TodoLists todos, Conversations conversations) {
-        this.todos = Objects.requireNonNull(todos, "todos");
-        this.conversations = Objects.requireNonNull(conversations, "conversations");
-    }
+  public TodoFrames(TodoLists todos, Conversations conversations) {
+    this.todos = Objects.requireNonNull(todos, "todos");
+    this.conversations = Objects.requireNonNull(conversations, "conversations");
+  }
 
-    @Override
-    public Map<String, FrameHandler> frames() {
-        return Map.of(FrameTypes.TODOS_READ, new TodosReadHandler(todos, conversations));
-    }
+  @Override
+  public Map<String, FrameHandler> frames() {
+    return Map.of(FrameTypes.TODOS_READ, new TodosReadHandler(todos, conversations));
+  }
 }

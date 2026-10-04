@@ -73,185 +73,273 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class BoardEndToEndTest {
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("pgvector/pgvector:pg16");
+  @Container
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16");
 
-    private static DriverManagerDataSource source;
+  private static DriverManagerDataSource source;
 
-    @BeforeAll
-    static void migrate() {
-        source = new DriverManagerDataSource(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-        Flyway.configure().dataSource(source).load().migrate();
+  @BeforeAll
+  static void migrate() {
+    source =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    Flyway.configure().dataSource(source).load().migrate();
+  }
+
+  /** Answers every call "noted." and counts them. */
+  private static final class Answering implements LlmTransport {
+    final AtomicInteger calls = new AtomicInteger();
+
+    @Override
+    public String poolName() {
+      return "spark";
     }
 
-    /** Answers every call "noted." and counts them. */
-    private static final class Answering implements LlmTransport {
-        final AtomicInteger calls = new AtomicInteger();
-
-        @Override
-        public String poolName() {
-            return "spark";
-        }
-
-        @Override
-        public Completion complete(String wireModel, List<ChatMessage> messages,
-                Sampling sampling, List<ToolSchema> tools) {
-            calls.incrementAndGet();
-            return new Completion("noted.", "stop", TokenUsage.UNKNOWN, List.of());
-        }
-
-        @Override
-        public Completion stream(String wireModel, List<ChatMessage> messages,
-                Sampling sampling, List<ToolSchema> tools, Deltas sink,
-                BooleanSupplier abandoned) {
-            return complete(wireModel, messages, sampling, tools);
-        }
-
-        @Override
-        public Embeddings embed(String wireModel, List<String> input) {
-            throw new UnsupportedOperationException("the board does not embed");
-        }
-
-        @Override
-        public void close() {
-        }
+    @Override
+    public Completion complete(
+        String wireModel, List<ChatMessage> messages, Sampling sampling, List<ToolSchema> tools) {
+      calls.incrementAndGet();
+      return new Completion("noted.", "stop", TokenUsage.UNKNOWN, List.of());
     }
 
-    /** No trigger fires here; a trigger firing reaching this would be a wiring mistake. */
-    private static final Dispatcher.Runner NO_TRIGGERS = new Dispatcher.Runner() {
+    @Override
+    public Completion stream(
+        String wireModel,
+        List<ChatMessage> messages,
+        Sampling sampling,
+        List<ToolSchema> tools,
+        Deltas sink,
+        BooleanSupplier abandoned) {
+      return complete(wireModel, messages, sampling, tools);
+    }
+
+    @Override
+    public Embeddings embed(String wireModel, List<String> input) {
+      throw new UnsupportedOperationException("the board does not embed");
+    }
+
+    @Override
+    public void close() {}
+  }
+
+  /** No trigger fires here; a trigger firing reaching this would be a wiring mistake. */
+  private static final Dispatcher.Runner NO_TRIGGERS =
+      new Dispatcher.Runner() {
         @Override
         public boolean busy(TriggerRecord trigger) {
-            return false;
+          return false;
         }
 
         @Override
-        public String start(TriggerRecord trigger, String utterance,
-                BiConsumer<String, Outcome> ended) {
-            throw new IllegalStateException("no trigger belongs in this test");
+        public String start(
+            TriggerRecord trigger, String utterance, BiConsumer<String, Outcome> ended) {
+          throw new IllegalStateException("no trigger belongs in this test");
         }
-    };
+      };
 
-    @TempDir Path agents;
+  @TempDir Path agents;
 
-    private JobStore jobs;
+  private JobStore jobs;
 
-    @AfterEach
-    void stop() {
-        if (jobs != null) {
-            jobs.close();
-        }
+  @AfterEach
+  void stop() {
+    if (jobs != null) {
+      jobs.close();
     }
+  }
 
-    @Test
-    void a_topic_wakes_its_members_through_the_scheduler_and_a_mention_wakes_one_again()
-            throws Exception {
-        BoardFixture fixture = new BoardFixture(source);
-        BoardStore boardStore = fixture.store;
+  @Test
+  void a_topic_wakes_its_members_through_the_scheduler_and_a_mention_wakes_one_again()
+      throws Exception {
+    BoardFixture fixture = new BoardFixture(source);
+    BoardStore boardStore = fixture.store;
 
-        Answering transport = new Answering();
-        LlmPool spark = new LlmPool("spark", List.of("model-fast"), Map.of("fast", "model-fast"),
-                4, 1, Duration.ofSeconds(5), transport, Set.of(), 2);
-        LlmDispatcher llm = new LlmDispatcher(List.of(spark), new NoOpTokenLedger());
-        JobRuntime runtime = new JobRuntime(llm, List.of());
-        jobs = new JobStore(runtime);
-        Compaction compaction = new Compaction(llm, BoardEndToEndTest::folder,
-                new TurnStore(fixture.jdbc), new CompactionStore(fixture.jdbc),
-                new EntryStore(fixture.jdbc), 1_000_000);
-        Turn turn = new Turn(jobs, fixture.conversations, new TurnStore(fixture.jdbc),
-                compaction);
+    Answering transport = new Answering();
+    LlmPool spark =
+        new LlmPool(
+            "spark",
+            List.of("model-fast"),
+            Map.of("fast", "model-fast"),
+            4,
+            1,
+            Duration.ofSeconds(5),
+            transport,
+            Set.of(),
+            2);
+    LlmDispatcher llm = new LlmDispatcher(List.of(spark), new NoOpTokenLedger());
+    JobRuntime runtime = new JobRuntime(llm, List.of());
+    jobs = new JobStore(runtime);
+    Compaction compaction =
+        new Compaction(
+            llm,
+            BoardEndToEndTest::folder,
+            new TurnStore(fixture.jdbc),
+            new CompactionStore(fixture.jdbc),
+            new EntryStore(fixture.jdbc),
+            1_000_000);
+    Turn turn = new Turn(jobs, fixture.conversations, new TurnStore(fixture.jdbc), compaction);
 
-        SwarmScheduler scheduler = new SwarmScheduler(new DispatcherPools(llm), () -> 4,
-                () -> Duration.ofMinutes(10), Clock.systemUTC(), Duration.ofMillis(10));
-        // Counted, because nothing else here could tell a scheduled seat run from an unscheduled
-        // one: JobRuntime logs a share that could not be decided and runs the turn anyway, and a
-        // run that was never scheduled leaves the pool's use at zero just as a released one does.
-        // Every seat that runs here is a member's — the topic is a person's, so it has no opener
-        // seat, whose runs shareOf leaves unscheduled — so each run counted is a member's.
-        Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf =
-                BoardConfig.shareOf(boardStore);
-        AtomicInteger scheduled = new AtomicInteger();
-        runtime.useScheduling(new SwarmScheduling(scheduler, context -> {
-            Optional<SwarmScheduler.Share> share = shareOf.apply(context);
-            share.ifPresent(found -> scheduled.incrementAndGet());
-            return share;
-        }));
+    SwarmScheduler scheduler =
+        new SwarmScheduler(
+            new DispatcherPools(llm),
+            () -> 4,
+            () -> Duration.ofMinutes(10),
+            Clock.systemUTC(),
+            Duration.ofMillis(10));
+    // Counted, because nothing else here could tell a scheduled seat run from an unscheduled
+    // one: JobRuntime logs a share that could not be decided and runs the turn anyway, and a
+    // run that was never scheduled leaves the pool's use at zero just as a released one does.
+    // Every seat that runs here is a member's — the topic is a person's, so it has no opener
+    // seat, whose runs shareOf leaves unscheduled — so each run counted is a member's.
+    Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf =
+        BoardConfig.shareOf(boardStore);
+    AtomicInteger scheduled = new AtomicInteger();
+    runtime.useScheduling(
+        new SwarmScheduling(
+            scheduler,
+            context -> {
+              Optional<SwarmScheduler.Share> share = shareOf.apply(context);
+              share.ifPresent(found -> scheduled.incrementAndGet());
+              return share;
+            }));
 
-        Dispatcher dispatcher = new Dispatcher(fixture.firings, new TriggerStore(fixture.jdbc),
-                NO_TRIGGERS, new Inbox(new InboxStore(fixture.jdbc), AccountPushes.NONE,
-                        Instant::now), Instant::now);
-        turn.whenFree(conversation -> dispatcher.drain("conversation:" + conversation));
+    Dispatcher dispatcher =
+        new Dispatcher(
+            fixture.firings,
+            new TriggerStore(fixture.jdbc),
+            NO_TRIGGERS,
+            new Inbox(new InboxStore(fixture.jdbc), AccountPushes.NONE, Instant::now),
+            Instant::now);
+    turn.whenFree(conversation -> dispatcher.drain("conversation:" + conversation));
 
-        for (String name : List.of("researcher", "critic")) {
-            Files.writeString(agents.resolve(name + ".md"), "---\nname: " + name
-                    + "\ndescription: " + name + "\nmodel: fast\ntools: []\n"
-                    + "max-turns: 4\nmax-model-calls: 8\n---\nYou help.\n");
-        }
-        AgentRegistry registry = AgentRegistry.of(agents, Set.of());
-        Board board = new Board(boardStore, project -> BoardFixture.TWO, fixture.conversations,
-                fixture.firings, dispatcher::drain, fixture.work, () -> 10, fixture.clock);
-        BoardPot pot = new BoardPot(boardStore);
-        SeatRunner seats = new SeatRunner(boardStore, board, pot, new SeatRunner.Voice() {
-            @Override
-            public boolean isSpeaking(String conversation) {
+    for (String name : List.of("researcher", "critic")) {
+      Files.writeString(
+          agents.resolve(name + ".md"),
+          "---\nname: "
+              + name
+              + "\ndescription: "
+              + name
+              + "\nmodel: fast\ntools: []\n"
+              + "max-turns: 4\nmax-model-calls: 8\n---\nYou help.\n");
+    }
+    AgentRegistry registry = AgentRegistry.of(agents, Set.of());
+    Board board =
+        new Board(
+            boardStore,
+            project -> BoardFixture.TWO,
+            fixture.conversations,
+            fixture.firings,
+            dispatcher::drain,
+            fixture.work,
+            () -> 10,
+            fixture.clock);
+    BoardPot pot = new BoardPot(boardStore);
+    SeatRunner seats =
+        new SeatRunner(
+            boardStore,
+            board,
+            pot,
+            new SeatRunner.Voice() {
+              @Override
+              public boolean isSpeaking(String conversation) {
                 return turn.isSpeaking(conversation);
-            }
+              }
 
-            @Override
-            public String speakToSeat(String conversation, AgentDefinition member,
-                    String utterance, Budget lease, TurnCap wakeCap, Speaker speaker,
-                    Consumer<Outcome> ended) {
-                return turn.speakToSeat(conversation, member, utterance, lease, wakeCap, speaker,
-                        ended);
-            }
-        }, (agent, home) -> registry.get(agent), () -> 12, fixture.clock,
-                dispatcher::drain, new DispatcherPools(llm));
-        dispatcher.useWakes(seats);
+              @Override
+              public String speakToSeat(
+                  String conversation,
+                  AgentDefinition member,
+                  String utterance,
+                  Budget lease,
+                  TurnCap wakeCap,
+                  Speaker speaker,
+                  Consumer<Outcome> ended) {
+                return turn.speakToSeat(
+                    conversation, member, utterance, lease, wakeCap, speaker, ended);
+              }
+            },
+            (agent, home) -> registry.get(agent),
+            () -> 12,
+            fixture.clock,
+            dispatcher::drain,
+            new DispatcherPools(llm));
+    dispatcher.useWakes(seats);
 
-        Board.Opened opened = board.open(new Board.Open(Home.of("payments"), "sync",
-                "BAD SPEC / NEED INFO", "What does sync mean?", "enzo", BoardTopic.BY_PERSON,
-                "enzo", null, null));
+    Board.Opened opened =
+        board.open(
+            new Board.Open(
+                Home.of("payments"),
+                "sync",
+                "BAD SPEC / NEED INFO",
+                "What does sync mean?",
+                "enzo",
+                BoardTopic.BY_PERSON,
+                "enzo",
+                null,
+                null));
 
-        awaitAllWakesFinished(fixture, opened.topic().id());
-        assertEquals(2, transport.calls.get(), "each member answers its first wake once");
-        assertEquals(2, boardStore.topic(opened.topic().id()).orElseThrow().potSpent());
-        for (String member : List.of("researcher", "critic")) {
-            assertEquals(1, boardStore.seat(opened.topic().id(), member).orElseThrow()
-                    .silentWakes(), member + " said nothing and it was not counted");
-        }
-        assertEquals(2, scheduled.get(), "each seat run was scheduled as its seat's share");
-        assertEquals(0, scheduler.snapshot().pools().get(0).used());
-        assertEquals(0, pot.leased(opened.topic().id()));
-
-        board.post(new Board.Post(opened.topic().id(), BoardMessage.BY_PERSON, "enzo", null,
-                null, BoardMessage.POST, null, "@critic, anything to add?", null,
-                List.of("critic"), false));
-        awaitAllWakesFinished(fixture, opened.topic().id());
-        assertEquals(3, transport.calls.get(), "a mention woke someone besides the one named");
-        assertEquals(2, boardStore.seat(opened.topic().id(), "critic").orElseThrow()
-                .silentWakes());
-        assertEquals(3, scheduled.get());
+    awaitAllWakesFinished(fixture, opened.topic().id());
+    assertEquals(2, transport.calls.get(), "each member answers its first wake once");
+    assertEquals(2, boardStore.topic(opened.topic().id()).orElseThrow().potSpent());
+    for (String member : List.of("researcher", "critic")) {
+      assertEquals(
+          1,
+          boardStore.seat(opened.topic().id(), member).orElseThrow().silentWakes(),
+          member + " said nothing and it was not counted");
     }
+    assertEquals(2, scheduled.get(), "each seat run was scheduled as its seat's share");
+    assertEquals(0, scheduler.snapshot().pools().get(0).used());
+    assertEquals(0, pot.leased(opened.topic().id()));
 
-    private static AgentDefinition folder() {
-        return new AgentDefinition(Compaction.FOLDER, "a fixture folder", "fast",
-                List.of(), List.of(), List.of(), 1, 1,
-                "You summarise a span of a recorded conversation.");
-    }
+    board.post(
+        new Board.Post(
+            opened.topic().id(),
+            BoardMessage.BY_PERSON,
+            "enzo",
+            null,
+            null,
+            BoardMessage.POST,
+            null,
+            "@critic, anything to add?",
+            null,
+            List.of("critic"),
+            false));
+    awaitAllWakesFinished(fixture, opened.topic().id());
+    assertEquals(3, transport.calls.get(), "a mention woke someone besides the one named");
+    assertEquals(2, boardStore.seat(opened.topic().id(), "critic").orElseThrow().silentWakes());
+    assertEquals(3, scheduled.get());
+  }
 
-    private static void awaitAllWakesFinished(BoardFixture fixture, String topic)
-            throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-        while (true) {
-            Integer open = fixture.jdbc.queryForObject("SELECT count(*) FROM firings WHERE"
-                    + " topic = ? AND (status = 'queued' OR (status = 'started'"
-                    + " AND finished_at IS NULL))", Integer.class, topic);
-            if (open != null && open == 0) {
-                return;
-            }
-            assertTrue(System.nanoTime() < deadline, "wakes still open: " + open);
-            Thread.sleep(25);
-        }
+  private static AgentDefinition folder() {
+    return new AgentDefinition(
+        Compaction.FOLDER,
+        "a fixture folder",
+        "fast",
+        List.of(),
+        List.of(),
+        List.of(),
+        1,
+        1,
+        "You summarise a span of a recorded conversation.");
+  }
+
+  private static void awaitAllWakesFinished(BoardFixture fixture, String topic)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+    while (true) {
+      Integer open =
+          fixture.jdbc.queryForObject(
+              "SELECT count(*) FROM firings WHERE"
+                  + " topic = ? AND (status = 'queued' OR (status = 'started'"
+                  + " AND finished_at IS NULL))",
+              Integer.class,
+              topic);
+      if (open != null && open == 0) {
+        return;
+      }
+      assertTrue(System.nanoTime() < deadline, "wakes still open: " + open);
+      Thread.sleep(25);
     }
+  }
 }

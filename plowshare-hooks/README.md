@@ -1,5 +1,12 @@
 # @plowshare/hooks
 
+For a complete authoring walkthrough, placement map, all callback events and a
+named-event trigger example, read the [manual hook guide](../docs/manual/12-hooks.md).
+Run and in-turn hooks compose harness → Personal → project → pinned local.
+Standalone log and information-service callbacks use their project/local chains;
+the manual distinguishes those seams. The current origin list also includes
+`board` for participant work.
+
 Types for Plowshare hooks. A hook is a single TypeScript file that exports a `Hook` instance as its default export. It can act at fourteen stages. Five are inside a run: `prompt.pre`, `prompt.post`, `tool.pre`, `tool.post` and `step.post`. Nine are on the log, which is any run's record: `log.open`, `log.close`, `stage.pre`, `stage.post`, `approval.pre`, `approval.post`, `fold.post`, `delivery.pre` and `delivery.post`. The server fires all fourteen. `stage.pre` and `stage.post` fire when an orchestration's conductor moves a stage, after the harness's own checks; `approval.pre` before a person is asked to allow a command (it can refuse the command or add to the question, never approve it); `approval.post` after a person answered or revoked; `fold.post` once a long log's folder has written its summary and before the fold is saved: it sees that summary, and its `{ keep }` follows it word for word. A log stage may name `origins: [...]` (`turn`, `delegation`, `submission`, `event`, `curator`, `memory`, `orchestration`) and fires for every origin when it names none. It never takes `tools:`.
 
 Hooks are deployed to the server at `projects/<id>/hooks/` on the Plowshare server, as `.ts` or `.js` files. A project's hooks are loaded lazily, the first time one of its stages fires, and reloaded on the next fire after any file in the directory changes — no restart. Files run in filename order. The hook's name (logged and recorded) is its required declared `name`, which must be unique within the directory; two files declaring the same name is a load error, not an override. A person can also keep hooks beside their own code; see "Your own hooks" below.

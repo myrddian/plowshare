@@ -1,3 +1,4 @@
+import { projectLabel } from 'plowshare-client-ts/operations/project-label'
 import { describeElapsed, describePace, tokens } from 'plowshare-client-ts/operations/pace'
 export { describeElapsed, describePace } from 'plowshare-client-ts/operations/pace'
 import type { PacePart } from 'plowshare-client-ts/operations/pace'
@@ -513,8 +514,8 @@ export const CANCEL_COMMAND = '/cancel'
  * What a person types to let this project's runs start commands on this machine without
  * asking, and — with `off` — to have them ask again.
  *
- * <b>It edits the file, and the file is still the setting.</b> `.plowshare/environment.yml`'s
- * `local: mode:` is what both the server and this client read on every run; a project that
+ * <b>It edits the file, and the file is still the setting.</b> The JSON manifest or legacy `.plowshare/environment.yml`'s
+ * local command mode is what both the server and this client read on every run; a project that
  * never had one asks. This writes `open` or `ask` into it, so the setting is where anyone
  * would look for it, survives the session, and is taken back by the same command.
  */
@@ -526,7 +527,7 @@ export const ALWAYS_COMMAND = '/always'
  * one.
  *
  * <b>It edits the file, and the file is still the setting</b> — {@link ALWAYS_COMMAND}'s model:
- * `.plowshare/environment.yml`'s `caps:` is what the server reads on every turn, so this writes
+ * The JSON manifest or legacy `.plowshare/environment.yml`'s caps are what the server reads on every turn, so this writes
  * there rather than holding a number this client would forget on exit, and then tells the server
  * to read the file again and apply it to the runs already going.
  */
@@ -638,8 +639,8 @@ export const SEARCH_COMMAND = '/search'
 export const JOB_COMMAND = '/job'
 
 export const COMMANDS: readonly string[] = [
-    MEMORY_COMMAND, SEARCH_COMMAND, JOB_COMMAND, USAGE_COMMAND,
-    '/design-orchestration', HELP_COMMAND, BOTS_COMMAND, AGENTS_COMMAND, ORCHESTRATIONS_COMMAND, RUNS_COMMAND, WATCH_COMMAND, BOARD_COMMAND, SWARM_COMMAND,
+    '/admin', '/message', MEMORY_COMMAND, SEARCH_COMMAND, JOB_COMMAND, USAGE_COMMAND,
+    '/design-orchestration', HELP_COMMAND, '/commands', '/skills', BOTS_COMMAND, AGENTS_COMMAND, ORCHESTRATIONS_COMMAND, RUNS_COMMAND, WATCH_COMMAND, BOARD_COMMAND, SWARM_COMMAND,
     ANSWER_COMMAND, CANCEL_COMMAND, ALWAYS_COMMAND, CAP_COMMAND,
     PROJECTS_COMMAND, CONVERSATIONS_COMMAND, '/conversation', '/memory',
     INBOX_COMMAND, SCHEDULE_COMMAND, FIRE_COMMAND, FIRINGS_COMMAND, APPROVALS_COMMAND,
@@ -671,10 +672,13 @@ export function describeHelp(): string[] {
  */
 export function describeArguments(command: string): string {
     switch (command) {
+        case '/admin': return ' status|accounts|account|sessions|session|audit|pricing|service [JSON]'
         case USAGE_COMMAND:
             return ' [models|conversation|project|agent|run|orchestration|pools|calls] [target] [--days N] [--direct] [--reference PRESET] [--json]'
         case '/design-orchestration':
             return ' [--revise name] <intent>'
+        case '/message':
+            return ' instances|instance|open|default|stop|archive|deliveries|delivery|cancel [JSON or address]'
         case MEMORY_COMMAND:
             return ' index|read|recall|write|navigate|digest|curate|proposals|resolve|reconsider|invalidate|reembed [JSON payload]'
         case SEARCH_COMMAND:
@@ -701,7 +705,7 @@ export function describeArguments(command: string): string {
         case DIAGNOSE_COMMAND:
             return ' [conversation-id] [-- question]'
         case PROJECT_COMMAND:
-            return ' <name>'
+            return ' <name> | create|define|member-add|member-remove <JSON>'
         case CD_COMMAND:
             return ' <path>'
         case SCHEDULE_COMMAND:
@@ -730,8 +734,11 @@ export function describeArguments(command: string): string {
  */
 export function describeCommand(command: string): string {
     switch (command) {
+        case '/admin': return 'manage server users, service accounts, scoped tokens, model pricing, roles, password recovery, sessions and audit history'
         case USAGE_COMMAND:
             return 'recorded tokens, booked cost and separate reference comparison from the server'
+        case '/message':
+            return 'manage persistent message instances and inspect deliveries over WS'
         case MEMORY_COMMAND:
             return 'direct memory access over WS'
         case SEARCH_COMMAND:
@@ -740,6 +747,10 @@ export function describeCommand(command: string): string {
             return 'inspect or request cancellation of an accepted job'
         case HELP_COMMAND:
             return 'this'
+        case '/commands':
+            return 'refresh the commands the selected agent can run'
+        case '/skills':
+            return 'refresh the skills the selected agent can run, including those hidden from the model'
         case BOTS_COMMAND:
             return 'who there is to talk to'
         case AGENTS_COMMAND:
@@ -762,6 +773,7 @@ export function describeCommand(command: string): string {
             return "this project's caps: steps per turn, model calls per run, caps passed"
                 + ' without asking, minutes per run, failed checks before asking;'
                 + ` ${CAP_COMMAND} steps N, budget N, auto N, time N, checks N set one`
+                + '; auto-increase on|off renews steps and budget'
         case PROJECTS_COMMAND:
             return 'the projects this server holds'
         case CONVERSATIONS_COMMAND:
@@ -792,7 +804,7 @@ export function describeCommand(command: string): string {
         case HERE_COMMAND:
             return 'make this directory a project and lend it its files'
         case PROJECT_COMMAND:
-            return 'move to another project'
+            return 'move to another project, or create and administer a server project with a JSON payload'
         case CD_COMMAND:
             return 'stand somewhere else, and root the project found there'
         case SYNC_COMMAND:
@@ -935,7 +947,15 @@ export function describeBots(rows: readonly Agent[]): string[] {
     const said = bots.length === 0
         ? [`there are no bots on this server — ${AGENTS_COMMAND} is what it does serve`]
         : bots.map((row) => rosterLine(row))
-    return [...said, ...unreadable(rows)]
+    return [...said, ...bots.flatMap(row => (row.commands ?? []).map(command => `  ${command.command} — ${command.description}`)), ...unreadable(rows)]
+}
+
+/** Model discovery flags never filter the human's granted command catalog. */
+export function describeCommandCatalog(agent: Agent, only: 'skill' | 'all' = 'all'): string[] {
+    const entries = (agent.commands ?? []).filter(command => only === 'all' || command.kind === only)
+    const heading = `${entries.length} ${only === 'skill' ? 'skills' : 'commands'} available to ${agent.name}`
+    const lines = entries.map(command => `${command.command} ${command.argumentHint} — ${command.description} · ${command.executor}${command.kind === 'skill' && command.mode === null ? ' (specify --mode=INHERITED|SUMMARISED|NEW|DIRECT)' : command.mode ? ` · ${command.mode}` : ''}`)
+    return [heading, ...(agent.commands === undefined ? ['Command discovery is unavailable; update the server.'] : lines), ...agent.withheld]
 }
 
 /**
@@ -1131,7 +1151,8 @@ function talkingTo(chosen: Extract<Chosen, { readonly kind: 'answering' }>): str
 
 /** The global tier, said as a place, or the project a person is already in. */
 function tier(project: string | undefined): string {
-    return project ?? 'the global tier'
+    if (project) project = projectLabel(project)
+    return project?.startsWith('personal:') ? 'Personal' : project ?? 'global resources'
 }
 
 /**
@@ -1172,7 +1193,7 @@ export function describeUsage(command: string): string {
                 + ' to continue three caps without asking'
         case CAP_COMMAND:
             return `${CAP_COMMAND} takes nothing, to show the caps, or steps N, budget N, auto N,`
-                + ' time N (minutes) or checks N'
+                + ' time N (minutes), checks N or auto-increase on|off'
         default:
             // `/schedule pause`, `/schedule resume`, `/schedule forget`: one name each.
             return `${command} <name> needs exactly one schedule name — ${SCHEDULE_COMMAND} list lists them`
@@ -1181,6 +1202,7 @@ export function describeUsage(command: string): string {
 
 /** `/here` succeeded: this directory is now rooted at the named project. */
 export function describeRooted(project: string, root: string): string {
+    project = projectLabel(project)
     return `rooting ${project} at ${root} — runs in it read these files`
 }
 
@@ -1273,6 +1295,7 @@ export function describeNoSuchProject(name: string): string {
 
 /** `/project` named the tier a person is already in. */
 export function describeAlreadyIn(project: string): string {
+    project = projectLabel(project)
     return `already in ${project}`
 }
 
@@ -1301,6 +1324,7 @@ export function describeNoDirectory(): string {
 
 /** The server would not let this client root a project it asked to root. */
 export function describeRootRefused(project: string, reason: string | undefined): string {
+    project = projectLabel(project)
     return reason === undefined
         ? `the server would not let this client root ${project}`
         : `the server would not let this client root ${project}: ${reason}`
@@ -1308,6 +1332,7 @@ export function describeRootRefused(project: string, reason: string | undefined)
 
 /** A rooting this client held was lost — the file channel it ran over closed. */
 export function describeRootLost(project: string, reason: string | undefined): string {
+    project = projectLabel(project)
     return reason === undefined
         ? `no longer rooting ${project} — the file channel closed`
         : `no longer rooting ${project} — the file channel closed: ${reason}`
@@ -1341,7 +1366,7 @@ export function describeProjects(rows: readonly Project[]): string[] {
     if (rows.length === 0) {
         return ['no projects have been defined on this server']
     }
-    return rows.map((row) => row.name)
+    return rows.map((row) => row.kind === 'personal' ? `Personal · ${row.name}` : row.type === 'DISJOINT' ? `${row.displayName ?? row.name} · DISJOINT · no sync` : row.name)
 }
 
 /**
@@ -1660,7 +1685,7 @@ function loaded(state: {
         .join(':')
     const { sent, limit } = state
     if (limit === undefined || limit <= 0) {
-        return sent === undefined ? { triplet } : { triplet, load: tokens(sent) }
+        return sent === undefined ? { triplet } : { triplet, load: `peak ${tokens(sent)}` }
     }
     if (sent === undefined) {
         return { triplet, load: `—/${tokens(limit)}`, filled: 0 }
@@ -1670,7 +1695,7 @@ function loaded(state: {
     const pressure = percent >= FULL_AT ? 'full' : percent >= FILLING_AT ? 'filling' : undefined
     return {
         triplet,
-        load: `${tokens(sent)}/${tokens(limit)} ${percent}%`,
+        load: `peak ${tokens(sent)}/${tokens(limit)} ${percent}%`,
         filled: Math.min(1, sent / limit),
         ...(pressure === undefined ? {} : { pressure }),
     }
@@ -2391,7 +2416,7 @@ export function describeAlways(project: string, file: string, on: boolean, allow
 
 /** `/always` where there is no project rooted on this machine to write the file in. */
 export function describeAlwaysNeedsAProject(): string {
-    return `${ALWAYS_COMMAND} sets a project's own .plowshare/environment.yml, and there is no`
+    return `${ALWAYS_COMMAND} sets the project's own command policy, and there is no`
         + ' project rooted on this machine — /here roots this directory'
 }
 
@@ -2414,6 +2439,7 @@ export function describeCaps(caps: Caps): string {
         + ` · ${one('budget', caps.budget, 'max-model-calls')}`
         + ` · ${caps.autoContinue.value === undefined ? 'auto-continue off'
             : one('auto-continue', caps.autoContinue, '')}`
+        + (caps.autoIncrease?.value === undefined ? '' : ` · automatic increases ${caps.autoIncrease.value ? 'on' : 'off'} (${caps.autoIncrease.source})`)
         + ` · ${time}${checks}${applied}`
         + (caps.said === undefined ? '' : `; ${caps.said}`)
 }
@@ -2431,7 +2457,7 @@ export function describeCapOutOfRange(key: string, value: number, least: number,
 
 /** `/cap` where there is no project rooted on this machine to write the file in. */
 export function describeCapNeedsAProject(): string {
-    return `${CAP_COMMAND} sets a project's own .plowshare/environment.yml, and there is no`
+    return `${CAP_COMMAND} sets the project's own caps, and there is no`
         + ' project rooted on this machine — /here roots this directory'
 }
 

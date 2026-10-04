@@ -1,4 +1,4 @@
-import type { UsageReportType, UsageFilter, UsageViewState } from 'plowshare-client-ts/operations/usage';
+import type { UsageReportType, UsageFilter, UsageViewState, ContextSnapshot } from 'plowshare-client-ts/operations/usage';
 import type { OperatorKind, OperatorView } from './operator-shared.ts';
 import type { InformationOperation, InformationScope } from 'plowshare-client-ts/operations/information';
 import type { LogSearchResponse } from 'plowshare-client-ts/operations/retrieval';
@@ -6,11 +6,24 @@ import type { LibraryState, LibraryView, SearchKind } from './library-shared.ts'
 import type { DefinitionView, OrchestrationStatus, ScheduleRecord, TriggerRecord, FiringRecord, ScheduleProposal } from 'plowshare-client-ts/operations/administrative-replies';
 import type { RecordView } from 'plowshare-client-ts/operations/records';
 import type { Choice } from 'plowshare-client-ts/operations/session';
+import type { StageScope } from './run-navigation.ts';
 import type { FilePresenceState } from './files-shared.ts';
 import type { SyncState } from './sync-shared.ts';
 import type { BoardInspection, BoardView } from './board-shared.ts';
 import type { Agent, Approval, Conversation, Entry, Project, Load, Allowance, Pace, InboxItem, Run, RunStatus } from 'plowshare-client-ts/operations/client-views';
 export type { Agent, Approval, Conversation, Entry, Project };
+
+export type ProjectAccessOperation = 'project.access'|'project.member.add'|'project.member.remove'|'project.member.role';
+export type ServerAdminOperation = 'admin.pricing.list' | 'admin.pricing.set' | 'admin.accounts' | 'admin.account.create' | 'admin.account.update' | 'admin.account.reset' | 'admin.sessions' | 'admin.session.revoke' | 'admin.audit' | 'admin.service.accounts' | 'admin.service.account.create' | 'admin.service.account.update' | 'admin.service.tokens' | 'admin.service.token.create' | 'admin.service.token.rotate' | 'admin.service.token.revoke';
+
+export interface WorkspaceRoute {
+  kind: 'chat' | 'trajectory' | 'activity' | 'library' | 'board' | 'memories' | 'manage' | 'usage';
+  label: string;
+  project?: string;
+  conversation?: string;
+  title?: string;
+}
+export interface WorkspaceMessage { route?: WorkspaceRoute; shortcut?: string }
 
 export interface Job {
   id: string;
@@ -47,12 +60,17 @@ export interface DesktopState {
   base: string;
   handle: string;
   projects: Project[];
+  serverAdmin?: boolean;
+  personal?: { project: string; root?: string; section?: 'In' | 'Out' | 'Resources' | 'Archive' | 'Planning' | 'Bots';
+    path?: string; entries?: { name: string; path: string; directory: boolean }[]; text?: string; note?: string; error?: string;
+    botLatest?: Record<string, string>; botsError?: string };
   agents: Record<string, Agent[]>;
   conversations: Conversation[];
   history: Record<string, History>;
   jobs: Job[];
   approvals: Approval[];
   answeringApprovals?: string[];
+  contextSnapshots?: Record<string, { value?: ContextSnapshot; loading?: boolean; error?: string }>;
   contexts: Record<string, ContextReading>;
   board: BoardInspection;
   files: FilePresenceState;
@@ -78,6 +96,7 @@ export interface AccountActivity {
   details: Record<string, { value?: RunStatus; wire?: OrchestrationStatus; loading?: boolean; error?: string }>;
   definitions?: { project?: string; items: readonly DefinitionView[]; loading?: boolean; error?: string };
   records?: Record<string, { root: string; rows: readonly RecordView[]; through: number; oldest: number | null; more: boolean; kinds?: readonly string[]; loading?: boolean; error?: string }>;
+  navigation?: Record<string, { rows: readonly RecordView[]; loading?: boolean; error?: string }>;
   schedules?: { schedules: readonly ScheduleRecord[]; triggers: readonly TriggerRecord[]; firings: readonly FiringRecord[]; proposal?: ScheduleProposal; loading?: boolean; previewing?: boolean; busy?: boolean; error?: string; previewError?: string; notice?: string };
   decisions?: Record<string, { busy?: boolean; error?: string; notice?: string }>;
 
@@ -89,15 +108,24 @@ export interface ContextReading extends Load {
   sample?: boolean;
 }
 export type Request =
+  | { action: 'usage' }
+  | { action: 'context-snapshot'; conversation: string; agent: string; measure?: boolean }
   | { action: 'usage-open'; type: UsageReportType; filter: UsageFilter }
   | { action: 'usage-read'; type: UsageReportType | 'usage.calls' | 'conversation.context.count'; payload: unknown }
   | { action: 'usage-close' }
   | { action: 'operator-prepare'; kind: OperatorKind; project?: string }
+  | { action: 'operator-messages'; identity: string; instance: string; offset?: number }
   | { action: 'operator-preview'; identity: string; input: Record<string, unknown> }
   | { action: 'operator-apply'; identity: string }
   | { action: 'information'; operation: InformationOperation; scope: InformationScope; payload?: Record<string, unknown> }
   | { action: 'bootstrap' | 'demo' | 'disconnect' | 'refresh' | 'approvals-refresh' }
+  | { action: 'project-access'; operation: ProjectAccessOperation; project: string; handle?: string; role?: 'VIEWER'|'CONTRIBUTOR'|'MANAGER' }
+  | { action: 'server-admin'; operation: ServerAdminOperation; payload?: Record<string, unknown> }
+  | { action: 'server-project-create'; name: string; workspace?: string; type?: 'MANAGED' | 'DISJOINT'; writePaths?: string[] }
+  | { action: 'server-setup'; base: string; temporaryPassword: string; handle: string; password: string }
   | { action: 'connect'; base: string; handle: string; password: string }
+  | { action: 'personal-section'; section: 'In' | 'Out' | 'Resources' | 'Archive' | 'Planning' | 'Bots'; path?: string }
+  | { action: 'personal-bots' }
   | { action: 'files-choose'; project?: string }
   | { action: 'files-withdraw'; project?: string }
   | { action: 'sync-refresh'; project: string }
@@ -109,11 +137,19 @@ export type Request =
   | { action: 'history'; conversation: string; before?: number }
   | { action: 'select'; conversation?: string }
   | { action: 'trajectory'; conversation: string }
-  | { action: 'library'; view: LibraryView; project?: string | null }
-  | { action: 'library-view'; view: LibraryView; project: string | null }
+  | { action: 'board-post-topics'; project: string; more?: boolean }
+  | { action: 'board-create'; project: string; title: string; label: string; body: string; requestId: string; maxModelCalls?: number }
+  | { action: 'board-retry'; project: string; topic: string; member: string; requestId: string; maxTurns: number; reconcile?: boolean }
+  | { action: 'board-post'; project: string; topic: string; body: string; requestId: string }
+  | { action: 'workspace-chat'; manage?: boolean }
+  | { action: 'workspace-layout'; x: number; y: number; width: number; height: number; visible: boolean }
+  | { action: 'workspace-refresh' }
+  | { action: 'library'; view: LibraryView; project?: string | null; revision?: string; chapter?: string }
+  | { action: 'library-view'; view: LibraryView; project: string | null; revision?: string; chapter?: string }
   | { action: 'library-refresh' | 'library-citations' }
   | { action: 'library-documents'; query: string; more?: boolean }
   | { action: 'library-document' | 'library-memory' | 'library-chunk' | 'library-conversation'; id: string }
+  | { action: 'library-source-text'; id: string; offset: number }
   | { action: 'library-stance'; claim: string }
   | { action: 'library-search'; kind: SearchKind; query: string; mode: 'lexical' | 'semantic' | 'hybrid'; more?: boolean }
   | { action: 'library-maintain'; kind: 'invalidate' | 'resolve' | 'reembed' | 'reconsider'; identity: string; reason: string; accept?: boolean }
@@ -124,6 +160,7 @@ export type Request =
   | { action: 'activity'; view: ActivityView }
   | { action: 'activity-view'; view: ActivityView }
   | { action: 'activity-refresh' }
+  | { action: 'question-refresh' }
   | { action: 'inbox-read'; id: string }
   | { action: 'inbox-more' }
   | { action: 'run-detail'; id: string }
@@ -137,6 +174,8 @@ export type Request =
   | { action: 'run-answer'; id: string; question: string; answer?: string; choices?: Choice[] }
   | { action: 'run-cancel'; id: string }
   | { action: 'run-trajectory'; id: string; actor: 'conductor' | 'caller' }
+  | { action: 'run-stage-trajectory'; id: string; stage: string }
+  | { action: 'delegate-trajectory'; conversation: string; step: string }
   | { action: 'board-inspection' | 'board-view'; view: BoardView; project?: string }
   | { action: 'board-refresh' | 'board-more' }
   | { action: 'board-topic'; topic: string }
@@ -144,13 +183,15 @@ export type Request =
   | { action: 'context'; conversation: string; agent: string }
   | { action: 'open-link'; url: string }
   | { action: 'copy-text'; text: string }
+  | { action: 'workflow-start'; conversation: string; agent: string; definition: string; text: string; requestId: string }
   | { action: 'run'; conversation: string; agent: string; text: string }
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' };
-export interface Reply { usage?: unknown; information?: unknown; state: DesktopState; conversation?: string; notice?: string; rootProject?: string; view?: ActivityView; boardView?: BoardView }
+export interface Reply { administration?: unknown; usage?: unknown; information?: unknown; state: DesktopState; conversation?: string; stageScope?: StageScope; notice?: string; rootProject?: string; view?: ActivityView; boardView?: BoardView; route?: WorkspaceRoute; libraryScreen?: 'library' | 'memories' }
 export interface DesktopApi {
   request(request: Request): Promise<Reply>;
   subscribe(listener: (state: DesktopState) => void): () => void;
+  subscribeWorkspace?(listener: (message: WorkspaceMessage) => void): () => void;
 }
 export const homeKey = (project?: string) => project ?? '';
 export const contextKey = (conversation: string, agent: string) => JSON.stringify([conversation, agent]);
@@ -161,8 +202,12 @@ declare global { interface Window { plowshare: DesktopApi } }
 
 /** Only account-owned run detail makes an orchestration conversation inspectable. */
 export function inspectionConversation(state: DesktopState, id: string): boolean {
-  return state.conversations.some(row => row.id === id) || (state.library?.search.value?.kind === 'conversation' && (state.library.search.value.reply as LogSearchResponse).hits.some(hit => hit.conversationId === id)) || Object.values(state.activity.details).some(detail =>
-    detail.wire?.orchestration.conductorConversation === id || detail.wire?.orchestration.callerConversation === id);
+  const known = new Set(state.conversations.map(row => row.id));
+  if (state.library?.search.value?.kind === 'conversation') for (const hit of (state.library.search.value.reply as LogSearchResponse).hits) known.add(hit.conversationId);
+  for (const detail of Object.values(state.activity.details)) for (const conversation of [detail.wire?.orchestration.conductorConversation, detail.wire?.orchestration.callerConversation]) if (conversation) known.add(conversation);
+  // Only traverse histories reachable from an account-owned inspection surface.
+  for (const parent of known) for (const entry of state.history[parent]?.entries ?? []) for (const call of entry.calls ?? []) if (call.opened?.conversation) known.add(call.opened.conversation);
+  return known.has(id);
 }
 export function runQuestion(value: OrchestrationStatus): string {
   const latest = [...value.messages].reverse().find(message => message.kind === 'question');

@@ -18,6 +18,9 @@
   "references": [
     {
       "path": "../binding"
+    },
+    {
+      "path": "../jobs"
     }
   ]
 }
