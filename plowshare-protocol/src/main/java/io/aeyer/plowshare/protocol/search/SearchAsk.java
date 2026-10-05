@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.protocol.search;
 
+import io.aeyer.plowshare.protocol.WebContractValues;
 import java.util.List;
 
 /**
@@ -16,15 +17,14 @@ import java.util.List;
 public record SearchAsk(String requestId, String query, int max, List<String> ignoredDomains) {
 
   public SearchAsk {
-    if (requestId == null || requestId.isBlank()) {
-      throw new IllegalArgumentException("requestId must not be blank");
-    }
-    if (query == null || query.isBlank()) {
-      throw new IllegalArgumentException("query must not be blank");
-    }
+    requestId = SearchValues.identity(requestId, "requestId", 1024);
+    query = WebContractValues.text(query, "query", 32768, true);
     if (max < 1) {
       throw new IllegalArgumentException("max must be at least 1, was " + max);
     }
     ignoredDomains = ignoredDomains == null ? List.of() : List.copyOf(ignoredDomains);
+    if (ignoredDomains.size() > 10000)
+      throw new IllegalArgumentException("too many ignored domains");
+    for (String domain : ignoredDomains) SearchValues.domain(domain);
   }
 }

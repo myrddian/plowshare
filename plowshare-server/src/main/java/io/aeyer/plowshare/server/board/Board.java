@@ -1,7 +1,5 @@
 package io.aeyer.plowshare.server.board;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.archive.ConversationStore;
@@ -34,7 +32,6 @@ import org.slf4j.LoggerFactory;
 public final class Board {
 
   private static final Logger log = LoggerFactory.getLogger(Board.class);
-  private static final ObjectMapper JSON = new ObjectMapper();
 
   /** A board refusal: the message is a sentence for whoever asked. */
   public static final class Refused extends io.aeyer.plowshare.server.faults.CallerFault {
@@ -508,16 +505,11 @@ public final class Board {
       if (queuedCap == null) {
         var pending = firings.oldestWaiting(target).filter(f -> topic.id().equals(f.topic()));
         if (pending.isPresent()) {
-          try {
-            var requested = JSON.readTree(pending.get().data()).path("maxTurns");
-            if (requested.isIntegralNumber()
-                && requested.canConvertToInt()
-                && requested.intValue() > 0) {
-              queuedCap = requested.intValue();
-            }
-          } catch (JsonProcessingException invalid) {
-            throw new IllegalStateException("the queued board wake has unreadable data", invalid);
-          }
+          Integer requested =
+              ((io.aeyer.plowshare.server.events.EventPayload.Seat) pending.get().data())
+                  .wake()
+                  .maxTurns();
+          if (requested != null) queuedCap = Math.max(queuedCap == null ? 0 : queuedCap, requested);
         }
       }
       FiringRecord firing =
@@ -609,17 +601,10 @@ public final class Board {
     }
   }
 
-  private static String data(WakeRules.Wake wake, BoardMessage message, Integer maxTurns) {
-    try {
-      Map<String, Object> data = new java.util.LinkedHashMap<>();
-      data.put("reason", wake.reason().wire());
-      data.put("message", message.id());
-      data.put("by", message.author());
-      if (maxTurns != null) data.put("maxTurns", maxTurns);
-      return JSON.writeValueAsString(data);
-    } catch (JsonProcessingException impossible) {
-      throw new IllegalStateException(impossible);
-    }
+  private static io.aeyer.plowshare.server.events.EventPayload data(
+      WakeRules.Wake wake, BoardMessage message, Integer maxTurns) {
+    return new io.aeyer.plowshare.server.events.EventPayload.Seat(
+        new SeatWake(wake.reason().wire(), message.id(), message.author(), maxTurns));
   }
 
   /**

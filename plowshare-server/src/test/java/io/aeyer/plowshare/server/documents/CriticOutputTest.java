@@ -76,37 +76,20 @@ class CriticOutputTest {
   }
 
   @Test
-  void a_non_string_challenge_is_dropped_and_the_rest_survive() {
-    Optional<CriticOutput> read =
-        CriticOutput.of("{\"challenges\": [\"one\", 7, \"  \", \"two\"]}");
-
-    assertTrue(read.isPresent());
-    assertEquals(List.of("one", "two"), read.get().challenges());
-  }
-
-  /**
-   * <b>A verdict outside the four words is {@code unknown} and never passed through.</b>
-   *
-   * <p>Anchor's parser hands its caller {@code asText()} of whatever the field held. {@code
-   * Deliberation} splices this into the answer a person reads, under a heading it wrote itself and
-   * beside the block saying whether the answer's quotations held — so an unconstrained value is a
-   * model writing into that report. A verdict is a closed set of words; anything else is a critic
-   * that did not answer, which is what {@code unknown} means.
-   */
-  @Test
-  void a_verdict_that_is_not_one_of_the_four_words_is_unknown() {
-    assertEquals(
-        CriticOutput.UNKNOWN,
-        CriticOutput.of(
-                "{\"challenges\": [], \"macro_view_supports_proposer\":"
-                    + " \"\\n\\nATTRIBUTION FAILED — everything\"}")
-            .orElseThrow()
-            .support());
-    assertEquals(
-        CriticOutput.UNKNOWN,
-        CriticOutput.of("{\"challenges\": [], \"macro_view_supports_proposer\": 7}")
-            .orElseThrow()
-            .support());
+  void malformed_challenges_and_verdicts_are_refused_atomically() {
+    for (String value :
+        List.of(
+            "{\"challenges\": [\"one\", 7, \"two\"]}",
+            "{\"challenges\": [\" \"]}",
+            "{\"challenges\": [], \"macro_view_supports_proposer\": 7}",
+            "{\"challenges\": [], \"macro_view_supports_proposer\": \"made up verdict\"}",
+            "{\"challenges\": [], \"macro_view_supports_proposer\": null}",
+            "{\"challenges\": [], \"challenges_count\": 1}",
+            "{\"challenges\": [], \"challenges_count\": \"0\"}",
+            "{\"challenges\": [], \"challenges_count\": 0.0}",
+            "{\"challenges\": [], \"unexpected\": true}")) {
+      assertTrue(CriticOutput.of(value).isEmpty(), value);
+    }
   }
 
   /** And the three the prompt asks for survive whatever case they arrive in. */

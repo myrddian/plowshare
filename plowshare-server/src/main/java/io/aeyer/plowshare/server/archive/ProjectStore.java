@@ -113,7 +113,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * key and not {@code AgentsProperties}', which is evidence the old sentence's premise never
  * generalised past the one path it happened to name.
  */
-public final class ProjectStore {
+public final class ProjectStore implements ProjectWorkspaces {
 
   /*
    * `lent` sits between `workspace` and `exclusions` because that is the order
@@ -431,7 +431,7 @@ public final class ProjectStore {
 
   public void rootOn(String name, String machine, String root, String handle) {
     if (ClientProjects.privateProject(name)) {
-      if (!new ProjectMembers(jdbc).isMember(name, handle))
+      if (!new JdbcProjectMembers(jdbc).isMember(name, handle))
         throw new ArchiveRefusedException("This account may not attach this client project");
       asserted(machine, "machine");
       asserted(root, "root");
@@ -447,7 +447,7 @@ public final class ProjectStore {
     }
     Optional<ProjectRecord> recorded = find(name);
     if (recorded.filter(ProjectRecord::serverProject).isPresent()) {
-      if (!new ProjectMembers(jdbc).mayUse(name, handle))
+      if (!new JdbcProjectMembers(jdbc).mayUse(name, handle))
         throw new ArchiveRefusedException("This account may not attach this project");
       asserted(machine, "machine");
       asserted(root, "root");
@@ -1154,12 +1154,12 @@ public final class ProjectStore {
   }
 
   public String roleFor(String project, String handle) {
-    return new ProjectMembers(jdbc).role(project, handle).map(Enum::name).orElse(null);
+    return new JdbcProjectMembers(jdbc).role(project, handle).map(Enum::name).orElse(null);
   }
 
   public List<ProjectRecord> allFor(String handle) {
     if (io.aeyer.plowshare.server.auth.ServiceCredentials.principal(handle)) {
-      var grants = new ProjectMembers(jdbc);
+      var grants = new JdbcProjectMembers(jdbc);
       return all().stream().filter(row -> grants.mayUse(row.name(), handle)).toList();
     }
     return ArchiveUnavailableException.translating(

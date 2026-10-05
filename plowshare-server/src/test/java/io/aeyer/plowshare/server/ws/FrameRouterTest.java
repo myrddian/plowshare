@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.client.Capabilities;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
@@ -205,39 +204,7 @@ class FrameRouterTest {
         () -> new FrameRouter(Map.of("conversationTurns", harmless)));
   }
 
-  // -- the surface is declared: spec §3.7, held where both halves are visible -
-
-  /**
-   * Every frame type this server knows is declared in {@code client.Capabilities}, which is spec
-   * §3.7's whole claim: "a frame type with no declaration fails the build, and an endpoint with no
-   * frame equivalent shows as a declared gap".
-   *
-   * <p><b>"The build" and not "the boot", and this method is the reason.</b> §3.7 was amended after
-   * the dispatcher landed, for the argument the next heading gives; the other half of the sentence
-   * does still fail the boot, in {@code Capability}'s compact constructor. Quoting the original
-   * here would make this test the evidence for a claim it disproves.
-   *
-   * <h2>Why this is a test and not a line in {@link FrameRoutingConfig}</h2>
-   *
-   * <p>{@code toolsAreDeclared} is called from {@code PlowshareClient.tools} and {@code
-   * commandsAreDeclared} from {@code cli.Commands}' static initialiser — <b>both in {@code
-   * plowshare-client}, the module that owns the register</b>. This surface is assembled in {@code
-   * plowshare-server}, and that module's {@code src/main} cannot see the client at all: {@code
-   * plowshare-server/build.gradle.kts} takes the client as a {@code testImplementation} only,
-   * deliberately, "so the compiler still enforces that the server knows nothing about MCP". A call
-   * to {@code Capabilities.framesAreDeclared} in {@code FrameRoutingConfig} would not compile, and
-   * buying one would put the MCP SDK on this server's runtime class path to do it.
-   *
-   * <p>So this check lands exactly where {@code screens}' did, and for the same reason {@code
-   * Capabilities.screens()}' javadoc gives: the enforcement lives on the side that can see the
-   * surface. For the console that was {@code parity.test.ts}; for the socket it is here, the one
-   * source set in this repository where the real routing table and the real register can be in one
-   * JVM.
-   *
-   * <p><b>Read from {@link FrameTypes} and not from the routing map</b>, which is the stronger of
-   * the two directions available: a constant added there and left unrouted is still a type this
-   * server has named, and is exactly what the breadth plan will be adding fifty of.
-   */
+  /** All server requests must be advertised by the generated TypeScript/native SDK catalog. */
   @Test
   void every_frame_type_this_server_knows_is_declared_in_capabilities() throws Exception {
     List<String> known = new ArrayList<>();
@@ -254,7 +221,10 @@ class FrameRouterTest {
         "the response-only type is in the set this check is handed, which is why"
             + " framesAreDeclared has to exclude it: "
             + known);
-    Capabilities.framesAreDeclared(known);
+    assertTrue(
+        declaredFrames()
+            .containsAll(
+                known.stream().filter(value -> !value.equals(FrameTypes.REFUSED)).toList()));
   }
 
   /**
@@ -266,7 +236,7 @@ class FrameRouterTest {
   void every_routed_frame_type_is_declared_in_capabilities() {
     FrameRouter routing = FrameAreas.router();
 
-    Capabilities.framesAreDeclared(routing.types());
+    assertTrue(declaredFrames().containsAll(routing.types()));
     // The one way this check could pass while hiding a real gap:
     // framesAreDeclared filters the response-only type, so an area that
     // registered a handler for it would be routable and undeclared at once,
@@ -281,28 +251,10 @@ class FrameRouterTest {
             + routing.types());
   }
 
-  /**
-   * The routed set and the declared set are the same set, in both directions.
-   *
-   * <p>{@link Capabilities#framesAreDeclared} is one-directional by construction: it reports a
-   * routed type nobody declared and is silent about a declared type nobody routes. That second
-   * direction is a real way to drift — a typo inside one of {@code ALL}'s {@code List.of(…)}
-   * literals, or a type dropped from an area while its entry keeps naming it — and it fails nothing
-   * anywhere else. The register would go on promising a frame no client can send, and the promise
-   * is what a front end is written against.
-   *
-   * <p>Cheap to assert here for the reason the method above gives at length: this is the one source
-   * set where the real routing table and the real register are in the same JVM. The two sets are
-   * equal today, so this pins that rather than establishing it.
-   *
-   * <p>The message says which direction broke, because the two are fixed in opposite places — an
-   * undeclared type needs a row in {@code Capabilities}, an unrouted one needs either a handler or
-   * its declaration removed.
-   */
   @Test
   void nothing_is_declared_that_no_area_routes() {
     Set<String> routed = new TreeSet<>(FrameAreas.router().types());
-    Set<String> declared = new TreeSet<>(Capabilities.frames());
+    Set<String> declared = new TreeSet<>(declaredFrames());
 
     Set<String> unrouted = new TreeSet<>(declared);
     unrouted.removeAll(routed);
@@ -323,13 +275,23 @@ class FrameRouterTest {
             + " framesAreDeclared already reports.");
   }
 
-  /**
-   * The one literal this arrangement has to duplicate across the module boundary. {@code
-   * Capabilities} cannot import {@link FrameTypes} — the dependency runs the other way — so it
-   * spells the response-only type out itself, and this is what keeps the two spellings in step.
-   */
   @Test
   void the_register_spells_the_response_only_type_the_same_way_this_server_does() {
-    assertEquals(FrameTypes.REFUSED, Capabilities.RESPONSE_ONLY_REFUSED);
+    assertFalse(declaredFrames().contains(FrameTypes.REFUSED));
+  }
+
+  private static Set<String> declaredFrames() {
+    try {
+      var catalog =
+          new com.fasterxml.jackson.databind.ObjectMapper()
+              .readTree(
+                  java.nio.file.Path.of("../test-support/contracts/sdk-protocol.json").toFile());
+      var frames = new TreeSet<String>();
+      catalog.path("operations").forEach(frame -> frames.add(frame.textValue()));
+      assertFalse(frames.isEmpty(), "generated SDK operation catalog is empty");
+      return frames;
+    } catch (java.io.IOException failure) {
+      throw new java.io.UncheckedIOException(failure);
+    }
   }
 }

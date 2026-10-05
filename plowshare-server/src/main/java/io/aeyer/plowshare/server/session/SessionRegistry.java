@@ -136,8 +136,8 @@ import org.slf4j.LoggerFactory;
  *       ConversationEndToEndTest.an_unauthenticated_session_attaches_neither_role}. So the party
  *       who can grow this map is the operator, and the operator growing it a million times is the
  *       intended rate above rather than an adversary. Reachability is still the other bound: {@code
- *       application.yml} binds {@code ${PLOWSHARE_BIND:127.0.0.1}}, and an operator who opens
- *       either that or {@code plowshare.auth.enabled} takes this back. <b>Neither is a reaper</b>;
+ *       application.yml} binds {@code ${PLOWSHARE_BIND}}, and an operator who opens either that or
+ *       {@code plowshare.auth.enabled} takes this back. <b>Neither is a reaper</b>;
  *   <li><b>and the number is not a memory question anyway.</b> An idle timeout is a statement about
  *       how long a human may shut a laptop and still expect to reattach, which is exactly the
  *       reconnection question the design spec lists as open;
@@ -153,7 +153,7 @@ import org.slf4j.LoggerFactory;
  * instrument that could measure a real reattachment gap. {@link Session#lastSeen()} is stamped and
  * tested from today so that whatever eventually reads it reads a true value.
  */
-public final class SessionRegistry {
+public final class SessionRegistry implements SessionOwners {
 
   private static final Logger log = LoggerFactory.getLogger(SessionRegistry.class);
 

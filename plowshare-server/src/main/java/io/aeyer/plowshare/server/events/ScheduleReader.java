@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.events;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Callers;
@@ -275,9 +274,9 @@ public final class ScheduleReader implements UsageAware {
           away);
     }
 
-    JsonNode answer;
+    io.aeyer.plowshare.server.agents.ModelAnswers.Schedule answer;
     try {
-      answer = ModelJson.object(said);
+      answer = io.aeyer.plowshare.server.agents.ModelAnswers.schedule(said);
     } catch (ModelJson.Unreadable why) {
       throw refused(
           said,
@@ -287,7 +286,7 @@ public final class ScheduleReader implements UsageAware {
               + "). Nothing was proposed; try"
               + " rephrasing it.");
     }
-    String unreadable = text(answer, "unreadable");
+    String unreadable = answer.unreadable();
     if (!unreadable.isEmpty()) {
       throw refused(
           said,
@@ -296,7 +295,7 @@ public final class ScheduleReader implements UsageAware {
               + ". Nothing was proposed.");
     }
 
-    String cron = text(answer, "cron");
+    String cron = answer.cron();
     if (cron.isEmpty()) {
       // Not CronSchedule's own refusal, which quotes "0 0 9 * * *" as an example: that
       // reads as though the person's own sentence had been echoed back wrong, when what
@@ -320,8 +319,8 @@ public final class ScheduleReader implements UsageAware {
     }
     // Where the result goes is the model's to say (and ours to bound) before the agent is,
     // because a blank agent is chosen here against that home.
-    boolean into = answer.path("intoConversation").asBoolean(false) && here != null;
-    String agent = text(answer, "agent");
+    boolean into = answer.intoConversation() && here != null;
+    String agent = answer.agent();
     if (agent.isEmpty()) {
       agent = serverBot(said, into ? here : inbox, into ? hereAgents : inboxAgents);
     }
@@ -334,7 +333,7 @@ public final class ScheduleReader implements UsageAware {
               + offered.keySet()
               + ". Nothing was proposed.");
     }
-    String task = text(answer, "task");
+    String task = answer.task();
     if (task.isEmpty()) {
       throw refused(
           said,
@@ -343,7 +342,7 @@ public final class ScheduleReader implements UsageAware {
               + agent
               + "' is to do.");
     }
-    String when = text(answer, "when");
+    String when = answer.when();
 
     // Into the conversation only when the sentence asked AND the request carried one; any
     // other reading goes to the inbox, under the request's own project (decided above).
@@ -552,12 +551,6 @@ public final class ScheduleReader implements UsageAware {
                 .map(name -> "This tier's default bot: " + name)
                 .orElse("This tier has no default bot."));
     return message.toString();
-  }
-
-  /** The field as stripped text, or empty when it is absent or not a string. */
-  private static String text(JsonNode answer, String field) {
-    JsonNode node = answer.path(field);
-    return node.isTextual() ? node.asText().strip() : "";
   }
 
   /**

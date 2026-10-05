@@ -21,6 +21,9 @@ public final class FiringListHandler implements FrameHandler {
     Body body = Payloads.as(payload, Body.class, FrameTypes.FIRING_LIST);
     int offset = body.offset() == null ? 0 : Math.max(0, body.offset());
     int limit = body.limit() == null ? 50 : Math.min(200, Math.max(1, body.limit()));
-    return Outcome.ok(firings.list(body.trigger(), body.status(), offset, limit));
+    return Outcome.ok(
+        firings.list(body.trigger(), body.status(), offset, limit).stream()
+            .map(FiringView::of)
+            .toList());
   }
 }

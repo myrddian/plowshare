@@ -32,6 +32,21 @@ The eventual run may answer, stop incomplete, await input, reach a cap, be refus
 be cancelled, lose a dependency or encounter unavailable inference. Preserve the
 actual outcome and any partial result.
 
+Streaming model calls open a fresh connection for each attempt, including the
+first, to avoid stale pooled sockets. This adds connection establishment overhead
+to each call. Calls can recover once from a known connection failure before the
+request body starts sending. Recovery opens another fresh connection and records a
+separate upstream attempt under the same call, within the original deadline.
+HTTP refusals, timeouts, cancellation and failures after body transmission starts
+are not automatically retried: delivery may already have occurred. A final
+transport failure identifies the HTTP phase, attempt number and cause type.
+
+For a scripted delegation failure, inspect the parent's `SUB_AGENT_FAILED` detail
+and the child's conversation. Job status retains the completed work counts;
+failed trajectory entries and the orchestration record retain the dependency reason.
+The agent's name identifies the failed delegation; concurrent use of that agent
+does not itself constitute a failure.
+
 Approval, continuation, budget top-up and retry are explicit actions on existing
 work. They are not synonyms for starting a new task. Use the current pending
 identity and current effective state so an old UI selection cannot answer a newer

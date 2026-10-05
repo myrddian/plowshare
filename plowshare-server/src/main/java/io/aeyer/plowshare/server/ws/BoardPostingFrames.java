@@ -1,20 +1,18 @@
 package io.aeyer.plowshare.server.ws;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.board.Board;
 import io.aeyer.plowshare.server.board.BoardMessage;
+import io.aeyer.plowshare.server.board.BoardPostRepository;
 import io.aeyer.plowshare.server.board.BoardStore;
 import io.aeyer.plowshare.server.board.BoardTopic;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /** Account-owned person posts. Repeated request IDs never post or wake twice. */
@@ -24,15 +22,19 @@ public class BoardPostingFrames implements FrameArea {
   private final BoardStore store;
   private final ProjectMembers members;
   private final UnitOfWork work;
-  private final JdbcTemplate jdbc;
+  private final BoardPostRepository receipts;
 
   public BoardPostingFrames(
-      Board board, BoardStore store, ProjectMembers members, UnitOfWork work, JdbcTemplate jdbc) {
+      Board board,
+      BoardStore store,
+      ProjectMembers members,
+      UnitOfWork work,
+      BoardPostRepository receipts) {
     this.board = board;
     this.store = store;
     this.members = members;
     this.work = work;
-    this.jdbc = jdbc;
+    this.receipts = receipts;
   }
 
   public record Receipt(String requestId, BoardMessage message) {}
@@ -76,25 +78,7 @@ public class BoardPostingFrames implements FrameArea {
       throw new CallerFault("maxTurns must be a positive whole number of model steps.");
     }
     int maxTurns = ((Number) raw).intValue();
-    String identity;
-    try {
-      identity =
-          new ObjectMapper()
-              .writeValueAsString(
-                  Map.of(
-                      "action",
-                      "retry",
-                      "project",
-                      project,
-                      "topic",
-                      topic,
-                      "member",
-                      member,
-                      "maxTurns",
-                      maxTurns));
-    } catch (JsonProcessingException invalid) {
-      throw new IllegalStateException(invalid);
-    }
+    var identity = new BoardPostRepository.Retry(project, topic, member, maxTurns);
     return work.inTransaction(
         () -> {
           if (!members.mayWork(project, account))
@@ -106,31 +90,13 @@ public class BoardPostingFrames implements FrameArea {
                   () ->
                       new CallerFault(
                           "Choose a topic owned by this account in the selected project."));
-          jdbc.queryForObject(
-              "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
-              Boolean.class,
-              account + ":" + request);
-          var receipts =
-              jdbc.queryForList(
-                  "SELECT message_id,payload=CAST(? AS jsonb) AS matches FROM board_post_receipts WHERE account=? AND request_id=?",
-                  identity,
-                  account,
-                  request);
-          if (!receipts.isEmpty()) {
-            if (!Boolean.TRUE.equals(receipts.getFirst().get("matches")))
-              throw new CallerFault(
-                  "This requestId was already used for a different board action.");
-            var message =
-                store.message(receipts.getFirst().get("message_id").toString()).orElseThrow();
+          var prior = receipts.lockAndRead(account, request, identity);
+          if (prior.isPresent()) {
+            var message = store.message(prior.orElseThrow()).orElseThrow();
             return Outcome.ok(new RetryReceipt(request.toString(), member, maxTurns, message));
           }
           var retried = board.retry(topic, member, account, maxTurns);
-          jdbc.update(
-              "INSERT INTO board_post_receipts(account,request_id,payload,message_id) VALUES(?,?,CAST(? AS jsonb),?)",
-              account,
-              request,
-              identity,
-              retried.message().id());
+          receipts.save(account, request, identity, retried.message().id());
           return Outcome.ok(
               new RetryReceipt(request.toString(), member, maxTurns, retried.message()));
         });
@@ -164,39 +130,15 @@ public class BoardPostingFrames implements FrameArea {
         throw new CallerFault("maxModelCalls must be a whole number of at least two.");
       budget = ((Number) rawBudget).intValue();
     }
-    String identity;
-    var values = new java.util.LinkedHashMap<String, Object>();
-    values.put("project", project);
-    values.put("title", title);
-    values.put("label", label);
-    values.put("body", body);
-    values.put("maxModelCalls", budget);
-    try {
-      identity = new ObjectMapper().writeValueAsString(values);
-    } catch (JsonProcessingException invalid) {
-      throw new IllegalStateException(invalid);
-    }
+    var identity = new BoardPostRepository.Open(project, title, label, body, budget);
     Integer requestedBudget = budget;
     return work.inTransaction(
         () -> {
           if (!members.mayWork(project, account))
             throw new CallerFault("This account is not a member of the selected project.");
-          jdbc.queryForObject(
-              "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
-              Boolean.class,
-              account + ":" + request);
-          var receipts =
-              jdbc.queryForList(
-                  "SELECT message_id,payload=CAST(? AS jsonb) AS matches FROM board_post_receipts WHERE account=? AND request_id=?",
-                  identity,
-                  account,
-                  request);
-          if (!receipts.isEmpty()) {
-            if (!Boolean.TRUE.equals(receipts.getFirst().get("matches")))
-              throw new CallerFault(
-                  "This requestId was already used for a different board action.");
-            var message =
-                store.message(receipts.getFirst().get("message_id").toString()).orElseThrow();
+          var prior = receipts.lockAndRead(account, request, identity);
+          if (prior.isPresent()) {
+            var message = store.message(prior.orElseThrow()).orElseThrow();
             return Outcome.ok(
                 new OpenReceipt(
                     request.toString(), store.topic(message.topic()).orElseThrow(), message));
@@ -213,12 +155,7 @@ public class BoardPostingFrames implements FrameArea {
                       account,
                       null,
                       requestedBudget));
-          jdbc.update(
-              "INSERT INTO board_post_receipts(account,request_id,payload,message_id) VALUES(?,?,CAST(? AS jsonb),?)",
-              account,
-              request,
-              identity,
-              opened.opening().id());
+          receipts.save(account, request, identity, opened.opening().id());
           return Outcome.ok(new OpenReceipt(request.toString(), opened.topic(), opened.opening()));
         });
   }
@@ -240,14 +177,7 @@ public class BoardPostingFrames implements FrameArea {
     } catch (IllegalArgumentException invalid) {
       throw new CallerFault("board.post needs requestId as a UUID");
     }
-    String identity;
-    try {
-      identity =
-          new ObjectMapper()
-              .writeValueAsString(Map.of("project", project, "topic", topic, "body", body));
-    } catch (JsonProcessingException invalid) {
-      throw new IllegalStateException(invalid);
-    }
+    var identity = new BoardPostRepository.Post(project, topic, body);
     return work.inTransaction(
         () -> {
           var selected =
@@ -260,23 +190,10 @@ public class BoardPostingFrames implements FrameArea {
                               "Choose a topic owned by this account in the selected project."));
           if (!members.mayWork(project, account))
             throw new CallerFault("This account is not a member of the selected project.");
-          jdbc.queryForObject(
-              "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
-              Boolean.class,
-              account + ":" + request);
-          var receipts =
-              jdbc.queryForList(
-                  "SELECT message_id,payload=CAST(? AS jsonb) AS matches FROM board_post_receipts WHERE account=? AND request_id=?",
-                  identity,
-                  account,
-                  request);
-          if (!receipts.isEmpty()) {
-            if (!Boolean.TRUE.equals(receipts.getFirst().get("matches")))
-              throw new CallerFault("This requestId was already used for a different board post.");
+          var prior = receipts.lockAndRead(account, request, identity);
+          if (prior.isPresent()) {
             return Outcome.ok(
-                new Receipt(
-                    request.toString(),
-                    store.message(receipts.getFirst().get("message_id").toString()).orElseThrow()));
+                new Receipt(request.toString(), store.message(prior.orElseThrow()).orElseThrow()));
           }
           var posted =
               board.post(
@@ -292,12 +209,7 @@ public class BoardPostingFrames implements FrameArea {
                       null,
                       List.of(),
                       false));
-          jdbc.update(
-              "INSERT INTO board_post_receipts(account,request_id,payload,message_id) VALUES(?,?,CAST(? AS jsonb),?)",
-              account,
-              request,
-              identity,
-              posted.message().id());
+          receipts.save(account, request, identity, posted.message().id());
           return Outcome.ok(new Receipt(request.toString(), posted.message()));
         });
   }

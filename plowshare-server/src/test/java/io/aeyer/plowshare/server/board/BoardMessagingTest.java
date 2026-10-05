@@ -118,7 +118,7 @@ class BoardMessagingTest {
     voice = new FakeVoice();
     messages =
         new BoardMessaging(
-            fixture.jdbc,
+            new JdbcBoardMessagingRepository(fixture.jdbc),
             fixture.store,
             fixture.conversations,
             fixture.firings,
@@ -177,13 +177,15 @@ class BoardMessagingTest {
         context,
         body,
         command,
-        java.util.Map.of(
-            "messageId",
+        new io.aeyer.plowshare.protocol.Incoming.Source(
             request.toString(),
-            "role",
             "ROLE_USER",
-            "parts",
-            List.of(java.util.Map.of("text", body))));
+            null,
+            context,
+            List.of(new io.aeyer.plowshare.protocol.Incoming.TextPart(body)),
+            command == null ? null : new io.aeyer.plowshare.protocol.Incoming.Metadata(command),
+            null,
+            null));
   }
 
   private FiringRecord incomingWake(String message) {
@@ -268,10 +270,7 @@ class BoardMessagingTest {
             .receive(
                 "enzo",
                 incoming(
-                    java.util.UUID.fromString((String) accepted.source().get("messageId")),
-                    null,
-                    "Review",
-                    null))
+                    java.util.UUID.fromString(accepted.source().messageId()), null, "Review", null))
             .source());
     assertEquals(
         "CANCELED", messages.cancelExternal("enzo", "payments", "remote", accepted.id()).state());
@@ -316,7 +315,8 @@ class BoardMessagingTest {
               null);
       messages.useRouting(
           new ProjectMessageRouting(
-              routeProjects, new io.aeyer.plowshare.server.archive.ProjectMembers(fixture.jdbc)));
+              routeProjects,
+              new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)));
     }
     routeProjects.define(project, root, List.of(), "enzo");
     return root;
@@ -346,13 +346,20 @@ class BoardMessagingTest {
     var data =
         new io.aeyer.plowshare.server.data.DataLayout(definitions.resolve("personal-data"))
             .initialise();
-    personalSpaces = new io.aeyer.plowshare.server.personal.PersonalSpaces(fixture.jdbc, data);
+    personalSpaces =
+        new io.aeyer.plowshare.server.personal.PersonalSpaces(
+            new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(fixture.jdbc),
+            new io.aeyer.plowshare.server.archive.ArchiveConfig()
+                .unitOfWork(
+                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                        fixture.jdbc.getDataSource())),
+            data);
     personalSpaces.ensure("enzo");
     personalSettings = new MessagingProperties();
     messages.useRouting(
         new ProjectMessageRouting(
             routeProjects,
-            new io.aeyer.plowshare.server.archive.ProjectMembers(fixture.jdbc),
+            new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc),
             personalSettings,
             personalSpaces));
   }
@@ -768,7 +775,7 @@ class BoardMessagingTest {
     messages.makeDefault(audit.path("to").asText(), "enzo");
     messages =
         new BoardMessaging(
-            fixture.jdbc,
+            new JdbcBoardMessagingRepository(fixture.jdbc),
             fixture.store,
             fixture.conversations,
             fixture.firings,
@@ -780,7 +787,7 @@ class BoardMessagingTest {
             fixture.clock);
     messages.useRouting(
         new ProjectMessageRouting(
-            routeProjects, new io.aeyer.plowshare.server.archive.ProjectMembers(fixture.jdbc)));
+            routeProjects, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)));
     JsonNode later = send(caller, "{\"route\":\"review\",\"body\":\"Later\"}", "retained-later");
     assertEquals(first.path("to"), later.path("to"));
     assertEquals(first.path("to_conversation"), later.path("to_conversation"));
@@ -1043,7 +1050,7 @@ class BoardMessagingTest {
     messageRoutes(List.of(retainedRoute("review")));
     JsonNode first = send(caller, "{\"route\":\"review\",\"body\":\"Enzo\"}", "enzo-route");
     fixture.jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('other', 'h')");
-    var members = new io.aeyer.plowshare.server.archive.ProjectMembers(fixture.jdbc);
+    var members = new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc);
     members.add("payments", "other");
     members.add("notifications", "other");
     String otherConversation =
@@ -1102,7 +1109,8 @@ class BoardMessagingTest {
         "DELETE FROM project_members WHERE project_id = (SELECT id FROM projects WHERE name = 'notifications') AND handle = 'enzo'");
     String args = "{\"to_project\":\"notifications\",\"to\":\"reviewer\",\"body\":\"Review\"}";
     assertTrue(messages.tool(caller).run(args, caller.home()).contains("not permitted"));
-    new io.aeyer.plowshare.server.archive.ProjectMembers(fixture.jdbc).add("notifications", "enzo");
+    new io.aeyer.plowshare.server.archive.JdbcProjectMembers(fixture.jdbc)
+        .add("notifications", "enzo");
     JsonNode receipt = send(caller, args, "permitted");
     fixture.jdbc.update("INSERT INTO admins(handle,password_hash) VALUES ('other','h')");
     String foreign =
@@ -1286,7 +1294,9 @@ class BoardMessagingTest {
     assertTrue(messages.continueApproved(approval, "Allowed, run it again."));
     assertTrue(messages.continueApproved(approval, "Allowed, run it again."));
     FiringRecord continued = fixture.firings.oldestWaiting(first.target()).orElseThrow();
-    assertTrue(continued.data().contains("message_approval"));
+    assertTrue(
+        ((io.aeyer.plowshare.server.events.EventPayload.Message) continued.data()).wake().approval()
+            != null);
     messages.start(continued, (conversation, outcome) -> {});
     voice.calls.getLast().ended().accept(outcome(Outcome.Ending.ANSWERED, "Approved work done"));
     assertEquals(2, voice.calls.size());
@@ -1322,7 +1332,9 @@ class BoardMessagingTest {
     fixture.firings.startedAs(initial.id(), "job_initial");
     fixture.firings.finish(initial.id(), fixture.clock.get());
     FiringRecord continued = fixture.firings.oldestWaiting(initial.target()).orElseThrow();
-    assertTrue(continued.data().contains("message_approval"));
+    assertTrue(
+        ((io.aeyer.plowshare.server.events.EventPayload.Message) continued.data()).wake().approval()
+            != null);
     assertFalse(messages.busy(continued));
     messages.start(continued, (conversation, outcome) -> {});
     voice.calls.getLast().ended().accept(outcome(Outcome.Ending.ANSWERED, "Done without command"));
@@ -1367,7 +1379,11 @@ class BoardMessagingTest {
     fixture.firings.startedAs(continuation.id(), "job_delegate");
     fixture.firings.finish(continuation.id(), fixture.clock.get());
     FiringRecord report = fixture.firings.oldestWaiting(initial.target()).orElseThrow();
-    assertTrue(report.data().contains("delegate_result"));
+    assertTrue(
+        ((io.aeyer.plowshare.server.events.EventPayload.Message) report.data())
+                .wake()
+                .continuation()
+            == MessageWake.Continuation.DELEGATE_RESULT);
     messages.start(report, (conversation, outcome) -> {});
     assertTrue(voice.calls.getLast().utterance().contains("Delegate's findings"));
     voice
@@ -1605,7 +1621,7 @@ class BoardMessagingTest {
     AgentTool read =
         new AgentTool() {
           public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
-            return new io.aeyer.plowshare.server.llm.dispatch.ToolSchema(
+            return io.aeyer.plowshare.server.llm.dispatch.ToolSchema.from(
                 "conversation_trajectory", "test", java.util.Map.of());
           }
 
@@ -1860,7 +1876,7 @@ class BoardMessagingTest {
       AgentTool underlying =
           new AgentTool() {
             public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
-              return new io.aeyer.plowshare.server.llm.dispatch.ToolSchema(
+              return io.aeyer.plowshare.server.llm.dispatch.ToolSchema.from(
                   name, "test", java.util.Map.of());
             }
 
@@ -2047,7 +2063,7 @@ class BoardMessagingTest {
       var dispatcher =
           new io.aeyer.plowshare.server.events.Dispatcher(
               fixture.firings,
-              new io.aeyer.plowshare.server.events.TriggerStore(fixture.jdbc),
+              new io.aeyer.plowshare.server.events.JdbcTriggerStore(fixture.jdbc),
               new io.aeyer.plowshare.server.events.Dispatcher.Runner() {
                 public boolean busy(io.aeyer.plowshare.server.events.TriggerRecord trigger) {
                   return false;
@@ -2061,13 +2077,13 @@ class BoardMessagingTest {
                 }
               },
               new io.aeyer.plowshare.server.events.Inbox(
-                  new io.aeyer.plowshare.server.events.InboxStore(fixture.jdbc),
+                  new io.aeyer.plowshare.server.events.JdbcInboxStore(fixture.jdbc),
                   io.aeyer.plowshare.server.events.AccountPushes.NONE,
                   fixture.clock),
               fixture.clock);
       messages =
           new BoardMessaging(
-              fixture.jdbc,
+              new JdbcBoardMessagingRepository(fixture.jdbc),
               fixture.store,
               fixture.conversations,
               fixture.firings,
@@ -2215,5 +2231,27 @@ class BoardMessagingTest {
     } finally {
       jobs.close();
     }
+  }
+
+  @Test
+  void scheduledMessagingReusesRoutesAndDeduplicatesTheSameFiring() {
+    var work =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            1,
+            "0 0 9 * * *",
+            "UTC",
+            false,
+            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
+                "skill", "reviewer", "review", "Exact arguments", null),
+            new io.aeyer.plowshare.protocol.ScheduledWork.Target(
+                "message", null, null, "reviewer", null),
+            null);
+    var first = messages.receiveScheduled("enzo", "payments", "schedule-one", "firing-one", work);
+    var repeated =
+        messages.receiveScheduled("enzo", "payments", "schedule-one", "firing-one", work);
+    var next = messages.receiveScheduled("enzo", "payments", "schedule-one", "firing-two", work);
+    assertEquals(first.id(), repeated.id());
+    assertNotEquals(first.id(), next.id());
+    assertEquals(first.context(), next.context());
   }
 }

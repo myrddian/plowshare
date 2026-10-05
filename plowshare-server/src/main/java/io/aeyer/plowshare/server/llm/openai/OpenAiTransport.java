@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -546,11 +547,12 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
   /**
    * {@inheritDoc}
    *
-   * <p><b>One shot: a stream is never retried.</b> {@link #executeWithRetry} is deliberately not on
-   * this path. A second attempt would replay the answer from its first token to a sink that has
-   * already been handed a prefix of it, and a sink has no way to tell a replay from a continuation
-   * — it would append the whole answer to the part of the answer it already wrote. The blocking
-   * path retries a dropped socket because nobody has seen anything yet; here somebody may have.
+   * <p>Each streaming attempt opens a fresh connection, avoiding a stale pooled socket being
+   * discovered only after the POST body has been sent. A known connection failure before that body
+   * starts gets one separately accounted attempt. Once delivery may have started, the stream is
+   * never replayed: the endpoint may already be generating and the sink may already have received a
+   * prefix. Both attempts share the original deadline; {@link #executeWithRetry} is deliberately
+   * not on this path.
    *
    * <p><b>The sink runs on the calling thread</b>, which is the contract {@link
    * LlmTransport#stream} states and the thing a direct port of Anchor's {@code completeStreaming}
@@ -712,23 +714,94 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
     if (abandoned.getAsBoolean()) {
       throw new CallerAbandonedException(props.getName());
     }
-    InferenceObserver.Attempt attempt = observer.attempt();
-    try {
-      Completion completion =
-          consumeStream(
-              observedRequest(request, observer),
-              observedHttp(withTimeout(streamingHttp, timeout), observer),
-              sink,
-              abandoned,
-              apiKey,
-              attempt,
-              timeout);
-      attempt.succeeded(completion.usage(), completion.finishReason());
-      return completion;
-    } catch (RuntimeException | Error failure) {
-      attempt.failed(failure);
-      throw failure;
+    return recoverStreamConnection(request, sink, abandoned, apiKey, observer, timeout);
+  }
+
+  /**
+   * One explicitly accounted recovery on a fresh connection, only before a body may have been
+   * delivered. Both attempts share the original deadline and dispatcher. Each pool is private to
+   * its attempt; closing it must never evict another run's connections or stop its stream.
+   */
+  private Completion recoverStreamConnection(
+      Request request,
+      Deltas sink,
+      BooleanSupplier abandoned,
+      String apiKey,
+      InferenceObserver observer,
+      Duration timeout) {
+    Duration budget = timeout == null ? props.getMaxStreamDuration() : timeout;
+    String budgetKey = timeout == null ? "max-stream-duration" : "prompt-timeout/fold-timeout";
+    long deadline = System.nanoTime() + budget.toNanos();
+    LlmTransportException first = null;
+    for (int number = 1; number <= 2; number++) {
+      if (abandoned.getAsBoolean()) throw new CallerAbandonedException(props.getName());
+      if (deadline - System.nanoTime() <= 0)
+        throw new LlmTransportException(
+            prefix() + "streaming chat failed: " + overran(budget, budgetKey), first);
+      StreamConnectionAttempt connection = new StreamConnectionAttempt();
+      // Prevent the first POST from finding a stale reused socket after delivery has started.
+      // No idle sockets are retained, even if cancellation releases one after this scope.
+      ConnectionPool fresh = new ConnectionPool(0, 1, TimeUnit.SECONDS);
+      OkHttpClient.Builder client =
+          observedHttp(withTimeout(streamingHttp, timeout), observer)
+              .newBuilder()
+              .addNetworkInterceptor(connection::exchange)
+              .connectionPool(fresh);
+      InferenceObserver.Attempt attempt = observer.attempt();
+      try {
+        if (abandoned.getAsBoolean()) throw new CallerAbandonedException(props.getName());
+        if (deadline - System.nanoTime() <= 0)
+          throw new LlmTransportException(
+              prefix() + "streaming chat failed: " + overran(budget, budgetKey), first);
+        Completion completion =
+            consumeStream(
+                connection.request(request),
+                client.build(),
+                sink,
+                abandoned,
+                apiKey,
+                attempt,
+                budget,
+                budgetKey,
+                deadline);
+        attempt.succeeded(completion.usage(), completion.finishReason());
+        return completion;
+      } catch (LlmTransportException failure) {
+        attempt.failed(failure);
+        LlmTransportException described = streamFailure(failure, connection, number);
+        if (number == 2 || !connection.recoverable(failure)) {
+          if (first != null) described.addSuppressed(first);
+          throw described;
+        }
+        first = described;
+        log.warn(
+            "pool '{}': streaming connection failed in {}; opening a fresh connection as attempt 2",
+            props.getName(),
+            connection.phase());
+      } catch (RuntimeException | Error failure) {
+        attempt.failed(failure);
+        throw failure;
+      } finally {
+        fresh.evictAll();
+      }
     }
+    throw new IllegalStateException("stream recovery exhausted without an outcome");
+  }
+
+  private static LlmTransportException streamFailure(
+      LlmTransportException failure, StreamConnectionAttempt connection, int number) {
+    String cause =
+        failure.getCause() == null ? "none" : failure.getCause().getClass().getSimpleName();
+    return new LlmTransportException(
+        failure.getMessage()
+            + " (HTTP phase: "
+            + connection.phase()
+            + "; attempt: "
+            + number
+            + "; cause: "
+            + cause
+            + ")",
+        failure);
   }
 
   @Override
@@ -750,13 +823,12 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       BooleanSupplier abandoned,
       String apiKey,
       InferenceObserver.Attempt attempt,
-      Duration timeout) {
+      Duration budget,
+      String budgetKey,
+      long deadline) {
     // Wall clock, fixed before the call starts, and the only total bound a
     // stream has. nanoTime and not currentTimeMillis, so a clock step cannot
     // extend or collapse it.
-    Duration budget = timeout == null ? props.getMaxStreamDuration() : timeout;
-    String budgetKey = timeout == null ? "max-stream-duration" : "prompt-timeout/fold-timeout";
-    long deadline = System.nanoTime() + budget.toNanos();
 
     // Each element is a String delta, a Failure, DONE_MARKER or CLOSED_MARKER.
     BlockingQueue<Object> events = new LinkedBlockingQueue<>();
@@ -966,11 +1038,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
           }
         };
 
-    // Held rather than re-read from the field. The spec defers a fix in which
-    // this class rebuilds its OkHttp client on a connection failure; a
-    // rebuild kills in-flight *asynchronous* calls, and SSE is the only
-    // asynchronous thing here. Written this way, that later change cannot
-    // tear down a live stream.
+    // This attempt owns its client reference, connection pool and source. It shares the dispatcher
+    // without cancelling another live stream when this source closes or recovery starts.
     EventSource source = EventSources.createFactory(http).newEventSource(request, listener);
 
     StringBuilder content = new StringBuilder();
@@ -1379,44 +1448,79 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
           poolName(), model, "counter_invalid_configuration");
     }
-    return promptCounter.count(
-        poolName(),
-        model,
-        bodies,
-        owner,
-        settings,
-        List.of(
-            props.getBaseUrl(),
-            props.getApiKey(),
-            props.getChatTemplateKwargs(),
-            props.getApiAuth()),
-        (body, remaining) -> {
-          byte[] encoded = mapper.writeValueAsBytes(body);
-          if (encoded.length > 1024 * 1024) throw new java.io.IOException("counter request bound");
-          var client =
-              chatHttp
-                  .newBuilder()
-                  .retryOnConnectionFailure(false)
-                  .followRedirects(false)
-                  .followSslRedirects(false)
-                  .connectTimeout(remaining)
-                  .readTimeout(remaining)
-                  .writeTimeout(remaining)
-                  .callTimeout(remaining)
-                  .build();
-          var posted =
-              authorized(HttpUrl.get(settings.getUrl()), props.getApiKey())
-                  .post(RequestBody.create(encoded, MediaType.get("application/json")))
-                  .build();
-          try (Response response = client.newCall(posted).execute()) {
-            if (!response.isSuccessful() || response.body() == null)
-              throw new java.io.IOException("counter refused");
-            byte[] bytes = response.body().byteStream().readNBytes(4 * 1024 * 1024 + 1);
-            if (bytes.length > 4 * 1024 * 1024)
-              throw new java.io.IOException("counter response bound");
-            return mapper.readTree(bytes);
-          }
-        });
+    try {
+      List<String> inputDigests = new ArrayList<>();
+      for (var body : bodies) inputDigests.add(counterDigest(mapper.writeValueAsBytes(body)));
+      String configurationDigest =
+          counterDigest(
+              mapper.writeValueAsBytes(
+                  List.of(
+                      settings.fingerprint(),
+                      props.getBaseUrl(),
+                      props.getApiKey(),
+                      props.getChatTemplateKwargs(),
+                      props.getApiAuth())));
+      return promptCounter.count(
+          poolName(),
+          model,
+          new io.aeyer.plowshare.server.llm.counting.VllmPromptCounter.Inputs(
+              inputDigests, configurationDigest),
+          owner,
+          settings,
+          (input, remaining) -> {
+            byte[] encoded = mapper.writeValueAsBytes(bodies.get(input));
+            if (encoded.length > 1024 * 1024)
+              throw new java.io.IOException("counter request bound");
+            var client =
+                chatHttp
+                    .newBuilder()
+                    .retryOnConnectionFailure(false)
+                    .followRedirects(false)
+                    .followSslRedirects(false)
+                    .connectTimeout(remaining)
+                    .readTimeout(remaining)
+                    .writeTimeout(remaining)
+                    .callTimeout(remaining)
+                    .build();
+            var posted =
+                authorized(HttpUrl.get(settings.getUrl()), props.getApiKey())
+                    .post(RequestBody.create(encoded, MediaType.get("application/json")))
+                    .build();
+            try (Response response = client.newCall(posted).execute()) {
+              if (!response.isSuccessful() || response.body() == null)
+                throw new java.io.IOException("counter refused");
+              byte[] bytes = response.body().byteStream().readNBytes(4 * 1024 * 1024 + 1);
+              if (bytes.length > 4 * 1024 * 1024)
+                throw new java.io.IOException("counter response bound");
+              JsonNode reply = mapper.readTree(bytes);
+              if (reply == null
+                  || !reply.isObject()
+                  || !reply.path("count").isIntegralNumber()
+                  || !reply.path("count").canConvertToLong()
+                  || reply.path("count").longValue() < 0
+                  || reply.has("model") && !reply.get("model").isTextual())
+                throw new java.io.IOException("counter_invalid_response");
+              return new io.aeyer.plowshare.server.llm.counting.VllmPromptCounter.Observation(
+                  reply.get("count").longValue(),
+                  reply.has("model") ? reply.get("model").textValue() : null);
+            }
+          });
+    } catch (java.io.IOException invalidEncoding) {
+      return io.aeyer.plowshare.server.llm.counting.PromptCount.unknown(
+          poolName(), model, "counter_invalid_request");
+    }
+  }
+
+  /**
+   * Inputs stay in this provider boundary; only their cache identity and validated counts leave.
+   */
+  private static String counterDigest(byte[] value) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value));
+    } catch (java.security.NoSuchAlgorithmException unavailable) {
+      throw new IllegalStateException("SHA-256 unavailable", unavailable);
+    }
   }
 
   private Map<String, Object> chatBody(
@@ -1975,10 +2079,10 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    *
    * @param path an absolute path on the host, beginning with {@code /}
    */
-  public JsonNode metadata(String path) {
+  public io.aeyer.plowshare.server.llm.LoadedModels metadata(String path) {
     String apiKey = apiKeySnapshot();
     Request request = authorized(beside(path), apiKey).get().build();
-    return read(executeWithRetry(embeddingHttp, request, "metadata", apiKey));
+    return LoadedModelsCodec.read(executeWithRetry(embeddingHttp, request, "metadata", apiKey));
   }
 
   /**
@@ -2003,7 +2107,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
               + PoolProperties.withoutUserInfo(baseUrl)
               + "'. It needs a scheme — set"
               + " plowshare.llm.pools[...].base-url to something like"
-              + " http://localhost:1234/v1");
+              + " an explicit HTTP(S) provider origin and API path");
     }
     return parsed.newBuilder().encodedPath(path).query(null).fragment(null).build();
   }
@@ -2039,7 +2143,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
               + PoolProperties.withoutUserInfo(baseUrl)
               + "'. It needs a scheme — set"
               + " plowshare.llm.pools[...].base-url to something like"
-              + " http://localhost:1234/v1");
+              + " an explicit HTTP(S) provider origin and API path");
     }
     return parsed;
   }

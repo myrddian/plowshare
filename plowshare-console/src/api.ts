@@ -21,7 +21,7 @@
  */
 
 /** `POST /v1/auth/refresh`: rotates both cookies, 204, no body. */
-export const REFRESH_PATH = '/v1/auth/refresh'
+export const REFRESH_PATH = '/v1/auth/refresh';
 
 /**
  * What the person is told when the session is gone and cannot be recovered.
@@ -34,10 +34,10 @@ export const REFRESH_PATH = '/v1/auth/refresh'
  * the passwords that would let them.
  */
 export const SIGNED_OUT =
-    'This console is no longer signed in. Reload this page and sign in again on the screen it'
-    + ' lands on. If nobody knows a password yet, reopen the bootstrap URL the server printed'
-    + ' when it started — the line beginning "Plowshare console:" — and restart the server if'
-    + ' that token has already been spent; it is single-use.'
+  'This console is no longer signed in. Reload this page and sign in again on the screen it' +
+  ' lands on. If nobody knows a password yet, reopen the bootstrap URL the server printed' +
+  ' when it started — the line beginning "Plowshare console:" — and restart the server if' +
+  ' that token has already been spent; it is single-use.';
 
 /**
  * A response the server refused, carried with the status that says how.
@@ -59,29 +59,29 @@ export const SIGNED_OUT =
  * assert.
  */
 export class ApiError extends Error {
-    readonly status: number
+  readonly status: number;
 
-    /**
-     * The server's own sentence about this refusal, or `null` if it sent none.
-     *
-     * When it is a string it is also the {@link Error#message}; the duplication
-     * is deliberate, so that a screen with nothing clever to do keeps working
-     * off `message` alone.
-     */
-    readonly said: string | null
+  /**
+   * The server's own sentence about this refusal, or `null` if it sent none.
+   *
+   * When it is a string it is also the {@link Error#message}; the duplication
+   * is deliberate, so that a screen with nothing clever to do keeps working
+   * off `message` alone.
+   */
+  readonly said: string | null;
 
-    /**
-     * @param said the server's sentence, or `null`. Defaulted rather than
-     *     required because the two {@link SIGNED_OUT} throws above and every
-     *     test fake in this codebase construct an error this console wrote
-     *     itself, which is the `null` case and should not have to say so.
-     */
-    constructor(message: string, status: number, said: string | null = null) {
-        super(message)
-        this.name = 'ApiError'
-        this.status = status
-        this.said = said
-    }
+  /**
+   * @param said the server's sentence, or `null`. Defaulted rather than
+   *     required because the two {@link SIGNED_OUT} throws above and every
+   *     test fake in this codebase construct an error this console wrote
+   *     itself, which is the `null` case and should not have to say so.
+   */
+  constructor(message: string, status: number, said: string | null = null) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.said = said;
+  }
 }
 
 /**
@@ -98,7 +98,7 @@ export class ApiError extends Error {
  * on -- gets a genuinely new refresh rather than the stale answer to the last
  * one.
  */
-let refreshInFlight: Promise<boolean> | null = null
+let refreshInFlight: Promise<boolean> | null = null;
 
 /**
  * Rotate the cookie pair, at most once concurrently.
@@ -108,18 +108,18 @@ let refreshInFlight: Promise<boolean> | null = null
  *     leave the caller with the same single option, which is to stop.
  */
 function refreshOnce(): Promise<boolean> {
-    if (refreshInFlight === null) {
-        refreshInFlight = fetch(REFRESH_PATH, {
-            method: 'POST',
-            credentials: 'same-origin',
-        })
-            .then((response) => response.status === 204)
-            .catch(() => false)
-            .finally(() => {
-                refreshInFlight = null
-            })
-    }
-    return refreshInFlight
+  if (refreshInFlight === null) {
+    refreshInFlight = fetch(REFRESH_PATH, {
+      method: 'POST',
+      credentials: 'same-origin',
+    })
+      .then((response) => response.status === 204)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
 }
 
 /**
@@ -141,34 +141,36 @@ function refreshOnce(): Promise<boolean> {
  * @param init anything `fetch` takes; `credentials` is set here and a caller's
  *     value for it is deliberately overwritten rather than merged
  */
-export async function request(path: string, init: RequestInit = {}): Promise<Response> {
-    const send = (): Promise<Response> => fetch(path, { ...init, credentials: 'same-origin' })
+export async function request(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const send = (): Promise<Response> =>
+    fetch(path, { ...init, credentials: 'same-origin' });
 
-    const first = await send()
-    if (first.status !== 401) {
-        return first
-    }
-    if (!(await refreshOnce())) {
-        throw new ApiError(SIGNED_OUT, 401)
-    }
-    const retried = await send()
-    if (retried.status === 401) {
-        throw new ApiError(SIGNED_OUT, 401)
-    }
-    return retried
+  const first = await send();
+  if (first.status !== 401) {
+    return first;
+  }
+  if (!(await refreshOnce())) {
+    throw new ApiError(SIGNED_OUT, 401);
+  }
+  const retried = await send();
+  if (retried.status === 401) {
+    throw new ApiError(SIGNED_OUT, 401);
+  }
+  return retried;
 }
 
 /**
  * `GET path`, parsed as JSON.
  *
- * The return type is the caller's assertion and not a checked fact -- nothing
- * here validates the shape the server sent. That is deliberate at this layer:
- * the transport's job is the credential and the retry, and a screen that
- * renders a field the server stopped sending should show a missing field rather
- * than have this function throw over the whole page.
+ * This low-level HTTP boundary returns unknown. Authentication, runtime config
+ * and uploads own explicit decoders; application screens use the checked
+ * WebSocket transport in transport.ts.
  */
-export async function get<T>(path: string): Promise<T> {
-    return body<T>(await ok(await request(path), path))
+export async function get(path: string): Promise<unknown> {
+  return body(await ok(await request(path), path));
 }
 
 /**
@@ -178,15 +180,16 @@ export async function get<T>(path: string): Promise<T> {
  * back as `undefined`, because there is nothing to parse. A caller expecting
  * nothing should type the call as `post<void>`.
  */
-export async function post<T>(path: string, payload?: unknown): Promise<T> {
-    const init: RequestInit = payload === undefined
-        ? { method: 'POST' }
-        : {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        }
-    return body<T>(await ok(await request(path, init), path))
+export async function post(path: string, payload?: unknown): Promise<unknown> {
+  const init: RequestInit =
+    payload === undefined
+      ? { method: 'POST' }
+      : {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        };
+  return body(await ok(await request(path, init), path));
 }
 
 /**
@@ -202,16 +205,21 @@ export async function post<T>(path: string, payload?: unknown): Promise<T> {
  * There is no body-less form, because there is no body-less caller: a state to
  * move to is the whole of the request.
  */
-export async function put<T>(path: string, payload: unknown): Promise<T> {
-    return body<T>(await ok(await request(path, {
+export async function put(path: string, payload: unknown): Promise<unknown> {
+  return body(
+    await ok(
+      await request(path, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-    }), path))
+      }),
+      path,
+    ),
+  );
 }
 
 /** The one code whose `detail` is written by no one and may hold anything. */
-const UNWRITTEN = 'internal_error'
+const UNWRITTEN = 'internal_error';
 
 /**
  * The response, or an {@link ApiError} carrying what the server said about it.
@@ -267,10 +275,10 @@ const UNWRITTEN = 'internal_error'
  * body through.
  */
 async function ok(response: Response, path: string): Promise<Response> {
-    if (response.ok) {
-        return response
-    }
-    throw await refused(response, path)
+  if (response.ok) {
+    return response;
+  }
+  throw await refused(response, path);
 }
 
 /**
@@ -288,9 +296,16 @@ async function ok(response: Response, path: string): Promise<Response> {
  * has a `Response` this server refused and wants the same sentence out of it
  * that any other screen would get.
  */
-export async function refused(response: Response, path: string): Promise<ApiError> {
-    const said = await refusal(response)
-    return new ApiError(said ?? `${path} answered ${response.status}`, response.status, said)
+export async function refused(
+  response: Response,
+  path: string,
+): Promise<ApiError> {
+  const said = await refusal(response);
+  return new ApiError(
+    said ?? `${path} answered ${response.status}`,
+    response.status,
+    said,
+  );
 }
 
 /**
@@ -319,28 +334,30 @@ export async function refused(response: Response, path: string): Promise<ApiErro
  * throwing path, so there is no later reader to starve.
  */
 async function refusal(response: Response): Promise<string | null> {
-    let sent: unknown
-    try {
-        sent = await response.json()
-    } catch {
-        return null
-    }
-    if (typeof sent !== 'object' || sent === null) {
-        return null
-    }
-    const said = sent as { readonly error?: unknown; readonly detail?: unknown }
-    if (typeof said.error !== 'string' || said.error === UNWRITTEN) {
-        return null
-    }
-    return typeof said.detail === 'string' && said.detail !== '' ? said.detail : null
+  let sent: unknown;
+  try {
+    sent = await response.json();
+  } catch {
+    return null;
+  }
+  if (typeof sent !== 'object' || sent === null) {
+    return null;
+  }
+  const said = sent as { readonly error?: unknown; readonly detail?: unknown };
+  if (typeof said.error !== 'string' || said.error === UNWRITTEN) {
+    return null;
+  }
+  return typeof said.detail === 'string' && said.detail !== ''
+    ? said.detail
+    : null;
 }
 
 /** The body as JSON, or `undefined` for the 204s this API answers with. */
-async function body<T>(response: Response): Promise<T> {
-    if (response.status === 204) {
-        return undefined as T
-    }
-    return (await response.json()) as T
+async function body(response: Response): Promise<unknown> {
+  if (response.status === 204) {
+    return undefined;
+  }
+  return await response.json();
 }
 
 /**
@@ -349,4 +366,4 @@ async function body<T>(response: Response): Promise<T> {
  * A named export as well as the members, so that a test can replace the whole
  * of it in one line and a screen can import exactly the verb it uses.
  */
-export const api = { request, get, post, put }
+export const api = { request, get, post, put };

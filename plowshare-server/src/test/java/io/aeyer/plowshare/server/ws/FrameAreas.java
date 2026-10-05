@@ -88,7 +88,11 @@ final class FrameAreas {
         services[at] =
             parameter.isPrimitive()
                 ? Array.get(Array.newInstance(parameter, 1), 0)
-                : parameter == String.class ? "." : mock(parameter);
+                : parameter == String.class
+                    ? java.nio.file.Path.of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .toString()
+                    : mock(parameter);
       }
       try {
         areas.add((FrameArea) only.newInstance(services));

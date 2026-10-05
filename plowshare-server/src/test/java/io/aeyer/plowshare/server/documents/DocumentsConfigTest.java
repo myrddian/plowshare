@@ -42,7 +42,9 @@ class DocumentsConfigTest {
           .withBean(LlmProperties.class, DocumentsConfigTest::llm)
           .withBean(
               Tokenizer.class,
-              () -> new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN))
+              () ->
+                  new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+                      RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN))
           .withBean(
               UnitOfWork.class,
               () ->

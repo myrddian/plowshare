@@ -94,7 +94,7 @@ They are alternatives, not merged settings. A generated name-only
 in `.plowshare/plowshare` or replace the authoritative `.plowshare/project` with
 that JSON. A legacy plain name cannot declare routing.
 
-The complete example files live in [the messaging examples](../examples/messaging/).
+The complete example files live in [the messaging examples](../examples/messaging).
 Their root-level `plowshare` files are portable content examples: deploy them into
 the selected marker location rather than assuming root-level precedence everywhere.
 Preserve existing caps, command settings and other configuration when adding routing.

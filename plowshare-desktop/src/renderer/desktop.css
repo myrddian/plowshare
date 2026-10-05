@@ -550,9 +550,11 @@
 .run-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
 .run-detail-header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
 .run-detail-header>div { min-width:0; }
-.run-cancel-button { display:inline-flex; align-items:center; gap:7px; flex-shrink:0; padding:9px 13px; border:1px solid #ce845f; border-radius:6px; background:#633e2d; color:#ffe1ca; font-size:12px; font-weight:600; }
+.run-cancel-button,.run-resume-button { display:inline-flex; align-items:center; gap:7px; flex-shrink:0; padding:9px 13px; border:1px solid #ce845f; border-radius:6px; background:#633e2d; color:#ffe1ca; font-size:12px; font-weight:600; }
+.run-resume-button { border-color:var(--accent); background:var(--accent); color:#17140d; }
+.run-resume-button:hover:not(:disabled) { filter:brightness(1.1); }
 .run-cancel-button:hover:not(:disabled) { background:#805239; border-color:#ecaa7a; }
-.run-cancel-button:disabled { opacity:.5; cursor:default; }
+.run-cancel-button:disabled,.run-resume-button:disabled { opacity:.5; cursor:default; }
 .run-notice { color: #91bd99; }
 
 /* Sync review stays in the project folder dialog, with bounded text panes. */

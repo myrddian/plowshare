@@ -3,8 +3,6 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -43,24 +41,47 @@ public final class StructuredQuestions {
   /** One option: what it is called, what choosing it means, and what to show beside it. */
   public record Option(String label, String description, String preview) {
     public Option {
-      Objects.requireNonNull(label, "label");
-      Objects.requireNonNull(description, "description");
+      try {
+        var checked =
+            new io.aeyer.plowshare.protocol.Orchestration.Option(label, description, preview);
+        label = checked.label();
+        description = checked.description();
+        preview = checked.preview();
+      } catch (IllegalArgumentException invalid) {
+        throw new Refused(invalid.getMessage());
+      }
     }
   }
 
   /** One question: its chip, its sentence, whether several options may be chosen, its options. */
   public record Question(String header, String question, boolean multi, List<Option> options) {
     public Question {
-      Objects.requireNonNull(header, "header");
-      Objects.requireNonNull(question, "question");
-      options = List.copyOf(Objects.requireNonNull(options, "options"));
+      try {
+        var checked =
+            new io.aeyer.plowshare.protocol.Orchestration.Question(
+                header,
+                question,
+                multi,
+                options.stream()
+                    .map(
+                        option ->
+                            new io.aeyer.plowshare.protocol.Orchestration.Option(
+                                option.label(), option.description(), option.preview()))
+                    .toList());
+        header = checked.header();
+        question = checked.question();
+        options = List.copyOf(options);
+      } catch (IllegalArgumentException invalid) {
+        throw new Refused(invalid.getMessage());
+      }
     }
   }
 
   /** A question as asked: the lead-in the conductor wrote, and its questions. */
   public record Asked(String lead, List<Question> questions) {
     public Asked {
-      Objects.requireNonNull(lead, "lead");
+      if (lead == null || lead.length() > 65536 || lead.indexOf('\0') >= 0)
+        throw new Refused("Question lead must be bounded NUL-free text.");
       questions = List.copyOf(Objects.requireNonNull(questions, "questions"));
     }
   }
@@ -109,8 +130,9 @@ public final class StructuredQuestions {
     if (node == null || !node.isObject()) {
       throw new Refused(where + " is not an object with header, question and options.");
     }
+    allowFields(node, Set.of("header", "question", "multi", "options"), where);
     String header = text(node, "header", where, MOST_HEADER);
-    String question = text(node, "question", where, Integer.MAX_VALUE);
+    String question = text(node, "question", where, 1048576);
     JsonNode multi = node.get("multi");
     if (multi != null && !multi.isNull() && !multi.isBoolean()) {
       throw new Refused(where + "'s 'multi' is true or false; it was " + multi + ".");
@@ -151,6 +173,7 @@ public final class StructuredQuestions {
     if (node == null || !node.isObject()) {
       throw new Refused(where + " is not an object with label and description.");
     }
+    allowFields(node, Set.of("label", "description", "preview"), where);
     String label = text(node, "label", where, MOST_LABEL);
     String description = text(node, "description", where, MOST_DESCRIPTION);
     JsonNode preview = node.get("preview");
@@ -170,6 +193,16 @@ public final class StructuredQuestions {
               + ".");
     }
     return new Option(label, description, preview.asText());
+  }
+
+  private static void allowFields(JsonNode value, Set<String> fields, String where) {
+    value
+        .fieldNames()
+        .forEachRemaining(
+            field -> {
+              if (!fields.contains(field))
+                throw new Refused(where + " has an unsupported field: " + field);
+            });
   }
 
   private static String text(JsonNode node, String field, String where, int most) {
@@ -211,26 +244,50 @@ public final class StructuredQuestions {
   }
 
   /** What {@code orchestration_messages.structure} holds for a question. */
-  public static String structure(Asked asked) {
-    ObjectNode root = JSON.createObjectNode();
-    root.put("lead", asked.lead());
-    ArrayNode questions = root.putArray("questions");
-    for (Question question : asked.questions()) {
-      ObjectNode node = questions.addObject();
-      node.put("header", question.header());
-      node.put("question", question.question());
-      node.put("multi", question.multi());
-      ArrayNode options = node.putArray("options");
-      for (Option option : question.options()) {
-        ObjectNode each = options.addObject();
-        each.put("label", option.label());
-        each.put("description", option.description());
-        if (option.preview() != null) {
-          each.put("preview", option.preview());
-        }
-      }
-    }
-    return root.toString();
+  public static io.aeyer.plowshare.protocol.Orchestration.Structure structure(Asked asked) {
+    return new io.aeyer.plowshare.protocol.Orchestration.Structure(
+        asked.lead(),
+        asked.questions().stream()
+            .map(
+                question ->
+                    new io.aeyer.plowshare.protocol.Orchestration.Question(
+                        question.header(),
+                        question.question(),
+                        question.multi(),
+                        question.options().stream()
+                            .map(
+                                option ->
+                                    new io.aeyer.plowshare.protocol.Orchestration.Option(
+                                        option.label(), option.description(), option.preview()))
+                            .toList()))
+            .toList(),
+        null,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /** Read an already validated durable question; the repository owns its JSON conversion. */
+  public static Asked parse(io.aeyer.plowshare.protocol.Orchestration.Structure structure) {
+    if (structure == null || structure.questions() == null)
+      throw new IllegalStateException("message is not a structured question");
+    return new Asked(
+        structure.lead(),
+        structure.questions().stream()
+            .map(
+                question ->
+                    new Question(
+                        question.header(),
+                        question.question(),
+                        question.multi(),
+                        question.options().stream()
+                            .map(
+                                option ->
+                                    new Option(
+                                        option.label(), option.description(), option.preview()))
+                            .toList()))
+            .toList());
   }
 
   /**

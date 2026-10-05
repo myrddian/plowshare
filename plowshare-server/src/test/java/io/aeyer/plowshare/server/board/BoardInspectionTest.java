@@ -148,7 +148,12 @@ class BoardInspectionTest {
     var firing = f.firings.oldestWaiting("conversation:" + seat.conversation()).orElseThrow();
     f.firings.claimStart(firing.id(), f.clock.get());
     f.firings.startedAs(firing.id(), "job-inspect");
-    f.firings.owe(topic.id(), "conversation:" + seat.conversation(), "{}", f.clock.get());
+    f.firings.owe(
+        topic.id(),
+        "conversation:" + seat.conversation(),
+        new io.aeyer.plowshare.server.events.EventPayload.Seat(
+            new SeatWake(null, null, null, null)),
+        f.clock.get());
     var swarm = (BoardInspectionFrames.Swarm) read(FrameTypes.SWARM_STATUS, Map.of(), "enzo");
     assertEquals(
         "running",

@@ -1,0 +1,56 @@
+# Copy outside Git and set every required MODEL_*/CODE_*/PROSE_* value.
+# Launch with bin/plowshare --config /absolute/path/application-dual-embeddings.yml.
+# Both embedding declarations are required; prefixes may explicitly be empty.
+# This complete pool list replaces the packaged pool list. URLs and served names
+# are deployment inputs. Chat/reasoning may share a model; all three models below
+# must be served by the configured endpoint. See docs/embedding-evolution.md.
+plowshare:
+  embeddings:
+    enabled: true
+    paused: false
+    code:
+      tokenizer:
+        file: ${CODE_EMBEDDING_TOKENIZER_FILE}
+        sha256: ${CODE_EMBEDDING_TOKENIZER_SHA256}
+      model-id: ${CODE_EMBEDDING_MODEL}
+      model-revision: ${CODE_EMBEDDING_REVISION}
+      dimensions: ${CODE_EMBEDDING_DIMENSIONS}
+      query-prefix: ${CODE_EMBEDDING_QUERY_PREFIX}
+      document-prefix: ${CODE_EMBEDDING_DOCUMENT_PREFIX}
+      pooling: ${CODE_EMBEDDING_POOLING}
+      normalization: ${CODE_EMBEDDING_NORMALIZATION}
+      reduction: ${CODE_EMBEDDING_REDUCTION}
+      max-input-tokens: ${CODE_EMBEDDING_MAX_INPUT_TOKENS}
+      search-mode: ${CODE_EMBEDDING_SEARCH_MODE}
+      distance: ${CODE_EMBEDDING_DISTANCE}
+    prose:
+      tokenizer:
+        file: ${PROSE_EMBEDDING_TOKENIZER_FILE}
+        sha256: ${PROSE_EMBEDDING_TOKENIZER_SHA256}
+      model-id: ${PROSE_EMBEDDING_MODEL}
+      model-revision: ${PROSE_EMBEDDING_REVISION}
+      dimensions: ${PROSE_EMBEDDING_DIMENSIONS}
+      query-prefix: ${PROSE_EMBEDDING_QUERY_PREFIX}
+      document-prefix: ${PROSE_EMBEDDING_DOCUMENT_PREFIX}
+      pooling: ${PROSE_EMBEDDING_POOLING}
+      normalization: ${PROSE_EMBEDDING_NORMALIZATION}
+      reduction: ${PROSE_EMBEDDING_REDUCTION}
+      max-input-tokens: ${PROSE_EMBEDDING_MAX_INPUT_TOKENS}
+      search-mode: ${PROSE_EMBEDDING_SEARCH_MODE}
+      distance: ${PROSE_EMBEDDING_DISTANCE}
+  llm:
+    classes:
+      fast: ${MODEL_CHAT_ID}
+      reasoning: ${MODEL_CHAT_ID}
+    pools:
+      - name: inference
+        provider: ${MODEL_PROVIDER:openai}
+        base-url: ${MODEL_ENDPOINT_URL}
+        api-key: ${MODEL_API_KEY:}
+        models:
+          - ${MODEL_CHAT_ID}
+          - ${CODE_EMBEDDING_MODEL}
+          - ${PROSE_EMBEDDING_MODEL}
+        chat: ${MODEL_CHAT_SLOTS:2}
+        embedding: ${MODEL_EMBEDDING_SLOTS:2}
+        swarm: ${MODEL_SWARM_SLOTS:0}

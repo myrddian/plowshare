@@ -10,5 +10,5 @@ public interface SessionPushes {
 
   SessionPushes NONE = (session, body) -> {};
 
-  void tell(String session, Object body);
+  void tell(String session, io.aeyer.plowshare.protocol.ConversationGrowth body);
 }

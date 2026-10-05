@@ -49,7 +49,7 @@ class ProjectMembersTest {
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('alice', 'hash', TRUE), ('bob', 'hash', TRUE)");
     ProjectIds.toWrite(jdbc, Home.of("ledger"));
-    members = new ProjectMembers(jdbc);
+    members = new JdbcProjectMembers(jdbc);
   }
 
   @Test

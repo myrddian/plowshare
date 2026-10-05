@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.Provenance;
 import io.aeyer.plowshare.protocol.Verdict;
 import io.aeyer.plowshare.protocol.VerdictKind;
 import io.aeyer.plowshare.protocol.WriteResult;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -74,6 +75,12 @@ import org.slf4j.LoggerFactory;
  * only thing a model still does is turn text into a vector.
  */
 public class Archive implements UsageAware {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -378,6 +385,16 @@ public class Archive implements UsageAware {
     if (limit <= 0) {
       return new Recall(List.of(), 0);
     }
+    if (dualEmbeddings != null) {
+      if (query.query() == null)
+        throw new IllegalArgumentException("dual retrieval needs a captured embedding space");
+      return dualEmbeddings.read(
+          query.query().profile(),
+          () -> {
+            Found found = search(query.query(), home, limit);
+            return new Recall(countUses(found.memories(), now.get()), found.unsearchable());
+          });
+    }
     return unitOfWork.inTransaction(
         () -> {
           Found found = search(query.vector(), home, limit);
@@ -393,7 +410,11 @@ public class Archive implements UsageAware {
    * can check, which is what {@link #applyVerdict(MemoryProposal, Verdict, Home, Precomputed)} does
    * before it stores one.
    *
-   * <p>The array is not copied on the way in or out. Its one producer is {@link
+   * <p>In dual mode the captured query also carries the exact prose space and source-independent
+   * read policy. It is reused only for reads: writes repair both slots from committed source text
+   * with their document prefixes, which may differ from this query's prefix.
+   *
+   * <p>The legacy array is not copied on the way in or out. Its one producer is {@link
    * #embedding(String)}, which builds it and hands it over, and no caller keeps a reference to
    * mutate — a defensive copy per write would be a cost with no failure behind it, which is the
    * justification this project declines elsewhere.
@@ -402,14 +423,18 @@ public class Archive implements UsageAware {
    * Nothing compares two of these, and nothing should: the question worth asking is whether the
    * <em>text</em> matches, and that is asked directly.
    */
-  public record Precomputed(float[] vector, String text) {}
+  public record Precomputed(float[] vector, String text, EmbeddingQuery query) {
+    public Precomputed(float[] vector, String text) {
+      this(vector, text, null);
+    }
+  }
 
   /**
    * Turn text into a vector, once, keeping the text beside it.
    *
-   * <p>The single place the write path's model call is made from — {@link #recall(String, Home,
-   * int)} goes through here and so does {@code Scribe}, which is what lets the scribe hand the
-   * archive back a vector the archive would otherwise have computed again.
+   * <p>In legacy mode this is the single place the write path's model call is made from — {@link
+   * #recall(String, Home, int)} goes through here and so does {@code Scribe}, which is what lets
+   * the scribe hand the archive back a vector the archive would otherwise have computed again.
    *
    * @throws io.aeyer.plowshare.server.llm.EmbeddingException if the endpoint could not answer. Not
    *     swallowed: this is the read path's rule, and the write path's own swallow lives in {@link
@@ -428,6 +453,10 @@ public class Archive implements UsageAware {
     // default pool of ten stop the server for everyone, reads included.
     // Nothing has been read from the database yet, so there is nothing for
     // this call to be consistent with.
+    if (dualEmbeddings != null) {
+      var query = dualEmbeddings.query(dualEmbeddings.active(EmbeddingSlot.PROSE), text, owner);
+      return new Precomputed(query.values(), text, query);
+    }
     return new Precomputed(
         EmbeddingClient.owned(
             embeddings,
@@ -478,6 +507,19 @@ public class Archive implements UsageAware {
     if (limit <= 0) {
       return new Survey(List.of(), 0);
     }
+    if (dualEmbeddings != null) {
+      EmbeddingQuery query = embedding(question, owner).query();
+      return dualEmbeddings.read(
+          query.profile(),
+          () -> {
+            Found found = search(query, home, limit);
+            return new Survey(
+                found.memories().stream()
+                    .map(m -> new TocEntry(m.id(), m.summary(), m.scope(), false))
+                    .toList(),
+                found.unsearchable());
+          });
+    }
     float[] query =
         EmbeddingClient.owned(
             embeddings,
@@ -514,6 +556,16 @@ public class Archive implements UsageAware {
    * agree with each other, which is the same reason {@code unsearchable} is counted alongside the
    * searches rather than afterwards.
    */
+  private Found search(EmbeddingQuery query, Home home, int limit) {
+    var hits = new ArrayList<>(store.searchByVector(query, home, limit));
+    int missing = store.countUnsearchable(query.profile(), home);
+    if (!home.isGlobal()) {
+      hits.addAll(store.searchByVector(query, Home.global(), limit));
+      missing += store.countUnsearchable(query.profile(), Home.global());
+    }
+    return new Found(List.copyOf(hits.subList(0, Math.min(limit, hits.size()))), missing);
+  }
+
   private Found search(float[] query, Home home, int limit) {
     if (home.isGlobal()) {
       return new Found(
@@ -1240,6 +1292,11 @@ public class Archive implements UsageAware {
 
   private boolean embed(Memory memory, Precomputed precomputed, UsageAttribution owner) {
     try {
+      if (dualEmbeddings != null)
+        return dualEmbeddings.repair(
+            EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, memory.id()),
+            owner);
+
       store.saveEmbedding(
           memory.id(),
           precomputed != null

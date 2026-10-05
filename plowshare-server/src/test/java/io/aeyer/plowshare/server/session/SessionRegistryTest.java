@@ -70,11 +70,11 @@ class SessionRegistryTest {
    * A session id shaped like the design says a real one is.
    *
    * <p><b>Nothing mints one yet</b>, and that is worth saying rather than implying: {@code
-   * ChannelClient} takes the id from whoever builds it and {@code FileChannelTest} passes plain
-   * words like {@code "closing"}, so the only place UUIDs are stated is the design spec, and the
-   * client that will actually mint one is later in this slice. A UUID here so the fixture is shaped
-   * like the intended thing; the registry itself requires nothing of the shape beyond not being
-   * blank, which is what keeps those existing tests and any future client both valid.
+   * SocketPeer} takes the id from whoever builds it and {@code FileChannelTest} passes plain words
+   * like {@code "closing"}, so the only place UUIDs are stated is the design spec, and the client
+   * that will actually mint one is later in this slice. A UUID here so the fixture is shaped like
+   * the intended thing; the registry itself requires nothing of the shape beyond not being blank,
+   * which is what keeps those existing tests and any future client both valid.
    */
   private static final String ID = "0d5c6b4e-5f2a-4f0b-9a2e-1c8f3d7b6a41";
 

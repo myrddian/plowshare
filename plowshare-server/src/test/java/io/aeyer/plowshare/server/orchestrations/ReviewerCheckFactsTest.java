@@ -148,8 +148,10 @@ class ReviewerCheckFactsTest {
             run -> {},
             conversation -> {},
             2,
-            org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
-    checks = new OrchestrationChecks(jdbc);
+            org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+            new JdbcOrchestrationRecovery(jdbc, work),
+            new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc));
+    checks = new JdbcOrchestrationChecks(jdbc);
     engine.useChecks(
         checks, (run, argv, side, cwd) -> Optional.empty(), id -> Optional.<RunApproval>empty());
     keeper =

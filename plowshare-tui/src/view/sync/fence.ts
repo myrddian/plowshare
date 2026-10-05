@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/fence'
+export * from 'plowshare-client-node/sync/fence';

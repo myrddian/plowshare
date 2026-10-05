@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.orchestrations;
 
+import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import java.time.Instant;
 
 /**
@@ -30,7 +31,7 @@ public record OrchestrationMessage(
     Instant createdAt,
     Instant deliveredAt,
     String capKind,
-    String structure) {
+    Structure structure) {
 
   /** A message with no structure — every message written before V70, and every plain one. */
   public OrchestrationMessage(

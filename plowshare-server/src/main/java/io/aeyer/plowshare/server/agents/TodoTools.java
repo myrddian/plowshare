@@ -39,14 +39,14 @@ public final class TodoTools {
   // agent
   // first declared these, and which would miss the prompt cache on every restart besides.
   private static final ToolSchema READ_SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           READ_NAME,
           "Read this conversation's todo list: each item's id, status ([ ] pending, [>] in"
               + " progress, [x] done, [-] dropped), text and summary, as a tree.",
           ToolArguments.object(new LinkedHashMap<>(), List.of()));
 
   private static final ToolSchema WRITE_SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           WRITE_NAME,
           "Change this conversation's todo list with a batch of operations, applied all or none."
               + " add: {op:add, text, parent?}. update: {op:update, id, status?, text?, summary?}."

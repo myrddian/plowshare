@@ -21,6 +21,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.events.InboxItem;
 import io.aeyer.plowshare.server.events.InboxStore;
+import io.aeyer.plowshare.server.events.JdbcInboxStore;
 import io.aeyer.plowshare.server.hooks.ApprovalAnswer;
 import io.aeyer.plowshare.server.hooks.Deadline;
 import io.aeyer.plowshare.server.hooks.DeliveryPre;
@@ -94,7 +95,7 @@ class HookedLogStagesTest {
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);
     entries = new EntryStore(jdbc);
-    inbox = new InboxStore(jdbc);
+    inbox = new JdbcInboxStore(jdbc);
   }
 
   private HookedLogStages over(Hooks hooks) {

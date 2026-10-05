@@ -640,7 +640,7 @@ class LocalHooksEndToEndTest {
 
     @Override
     public ToolSchema schema() {
-      return new ToolSchema(
+      return ToolSchema.from(
           "probe_write", "a probe", Map.of("type", "object", "properties", Map.of()));
     }
 

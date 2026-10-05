@@ -52,7 +52,7 @@ class UsageAttributionTest {
     assertEquals(false, json.toString().contains("alice"));
     var question =
         new io.aeyer.plowshare.server.agents.CallValidator.Question(
-            "held", new ToolSchema("read", "read", Map.of()), "task", owner);
+            "held", ToolSchema.from("read", "read", Map.of()), "task", owner);
     assertEquals(false, AccountingFixtures.MAPPER.valueToTree(question).has("usage"));
     var side = owner.forOperation(Operation.REVIEW, "validator");
     assertEquals(owner.runs(), side.runs());
@@ -80,7 +80,7 @@ class UsageAttributionTest {
         List.of(
             original.withBudget(Duration.ofSeconds(2)),
             original.withSampling(Sampling.NONE),
-            original.withTools(List.of(new ToolSchema("search", "search", Map.of()))),
+            original.withTools(List.of(ToolSchema.from("search", "search", Map.of()))),
             original.withToolChoice(ToolChoice.REQUIRED),
             original.withMessages(List.of(ChatMessage.user("next question"))));
     for (ChatRequest copy : copies) {

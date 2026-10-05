@@ -3,7 +3,7 @@ package io.aeyer.plowshare.server.information;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.aeyer.plowshare.server.archive.ArchiveConfig;
-import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import java.time.Clock;
 import java.util.UUID;
@@ -41,10 +41,10 @@ class InformationCollectionsTest {
     jdbc.execute("TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     catalogue =
-        new InformationCatalogue(
+        io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
             jdbc,
             new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source)),
-            new InformationAccess(new ProjectMembers(jdbc)),
+            new InformationAccess(new JdbcProjectMembers(jdbc)),
             Clock.systemUTC());
   }
 
@@ -72,15 +72,21 @@ class InformationCollectionsTest {
     UUID report = revision("report", "final"), draft = revision("report", "draft");
     revision("report", "superseded");
     for (int i = 0; i < 105; i++) revision("source", null);
-    var first = catalogue.list(own, 1, 0, "report");
-    var second = catalogue.list(own, 1, 1, "report");
+    var first =
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+            catalogue.list(own, 1, 0, "report"));
+    var second =
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+            catalogue.list(own, 1, 1, "report"));
     assertEquals(1, first.size());
     assertEquals(1, second.size());
     assertEquals(
         java.util.Set.of(report, draft),
         java.util.Set.of(first.getFirst().get("id"), second.getFirst().get("id")));
     var draftRow =
-        catalogue.list(own, 100, 0, "report").stream()
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 100, 0, "report"))
+            .stream()
             .filter(row -> draft.equals(row.get("id")))
             .findFirst()
             .orElseThrow();
@@ -100,26 +106,48 @@ class InformationCollectionsTest {
             "SELECT count(*) FROM information_document_policies WHERE document_id=?",
             Integer.class,
             draft));
-    assertTrue(catalogue.list(own, 1, 2, "report").isEmpty());
-    assertEquals(100, catalogue.list(own, 100, 0, "source").size());
-    assertEquals(5, catalogue.list(own, 100, 100, "source").size());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 1, 2, "report"))
+            .isEmpty());
+    assertEquals(
+        100,
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 100, 0, "source"))
+            .size());
+    assertEquals(
+        5,
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 100, 100, "source"))
+            .size());
     var other = new InformationContext("other", InformationContext.Selection.personal());
-    assertTrue(catalogue.list(other, 100, 0, "report").isEmpty());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(other, 100, 0, "report"))
+            .isEmpty());
     assertThrows(
         io.aeyer.plowshare.server.faults.NotFoundFault.class, () -> catalogue.text(other, draft));
     assertTrue(
-        catalogue
-            .list(
-                new InformationContext("reader", InformationContext.Selection.shared()),
-                100,
-                0,
-                "report")
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(
+                    new InformationContext("reader", InformationContext.Selection.shared()),
+                    100,
+                    0,
+                    "report"))
             .isEmpty());
-    assertThrows(CallerFault.class, () -> catalogue.list(own, 10, 0, "report' OR true --"));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 10, 0, "report' OR true --")));
     jdbc.update("UPDATE information_revisions SET excluded=true WHERE id=?", report);
     assertEquals(
         java.util.List.of(draft),
-        catalogue.list(own, 10, 0, "report").stream().map(row -> row.get("id")).toList());
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 10, 0, "report"))
+            .stream()
+            .map(row -> row.get("id"))
+            .toList());
   }
 
   @Test
@@ -129,11 +157,21 @@ class InformationCollectionsTest {
         "INSERT INTO information_inputs(derived_revision,input_revision) VALUES(?,?)",
         draft,
         input);
-    assertEquals(1, catalogue.list(own, 10, 0, "report").size());
+    assertEquals(
+        1,
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 10, 0, "report"))
+            .size());
     jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", input);
-    assertTrue(catalogue.list(own, 10, 0, "report").isEmpty());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 10, 0, "report"))
+            .isEmpty());
     jdbc.update("UPDATE information_revisions SET availability='active' WHERE id=?", input);
     jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", draft);
-    assertTrue(catalogue.list(own, 10, 0, "report").isEmpty());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(own, 10, 0, "report"))
+            .isEmpty());
   }
 }

@@ -6,12 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.client.HttpServerClient;
-import io.aeyer.plowshare.client.ServerClient;
-import io.aeyer.plowshare.client.SessionClient;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.sdk.ServerClient;
 import io.aeyer.plowshare.server.PlowshareServerApplication;
 import io.aeyer.plowshare.server.agents.FileTools;
 import io.aeyer.plowshare.server.agents.Outcome;
@@ -28,6 +25,9 @@ import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.testpeer.ControllerPeer;
+import io.aeyer.plowshare.testpeer.SessionPeer;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
@@ -69,7 +69,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * conversation is opened by {@code POST /v1/conversations} over HTTP. Each utterance is an HTTP
  * POST carrying the conversation id and the session id, and it runs through {@code
  * AgentController}, {@code Turn}, {@code JobStore}, {@code JobRuntime}, {@code Compaction}, {@code
- * TurnStore} and {@code CompactionStore}. The session is a real {@link SessionClient} holding two
+ * TurnStore} and {@code CompactionStore}. The session is a real {@link SessionPeer} holding two
  * real WebSockets, and the first turn reads a file <b>this server's own filesystem never held</b>,
  * so the file channel is load-bearing rather than merely open. The agent is the shipped {@code
  * interlocutor.md} — the same definition the REPL names — read from {@code
@@ -170,6 +170,13 @@ class ConversationEndToEndTest {
 
   @DynamicPropertySource
   static void wiring(DynamicPropertyRegistry registry) {
+    registry.add(
+        "plowshare.projects.workspace-directory",
+        () ->
+            java.nio.file.Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "plowshare-test-workspaces-" + java.util.UUID.randomUUID())
+                .toString());
     registry.add("plowshare.data.dir", () -> tmp.resolve("server-data").toString());
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
@@ -234,12 +241,8 @@ class ConversationEndToEndTest {
   /**
    * The agent every turn here is spoken to.
    *
-   * <p>The same string {@code INTERLOCUTOR} holds, and <b>a second copy of it rather than a
-   * reference</b>: that constant is package-private in {@code io.aeyer.plowshare.client.cli} and
-   * this test is not in that package. So the two can drift, and what stops the drift mattering is
-   * not this line — it is that {@code AgentRegistry} keys a definition by the {@code name:} in its
-   * front matter and answers an unknown one with a 400 naming the agents that exist. A rename of
-   * the shipped file fails here loudly, on the first turn.
+   * <p>The fixture names the shipped definition directly. AgentRegistry reads its frontmatter; a
+   * removed or renamed definition fails on the first submitted turn.
    */
   private static final String INTERLOCUTOR = "interlocutor";
 
@@ -257,7 +260,7 @@ class ConversationEndToEndTest {
    * A live access token for the test that is running.
    *
    * <p>This class is where the CLI's transport of it is measured end to end: {@link #attach()}
-   * opens <b>two WebSocket upgrades</b> through {@code SessionClient}, both of which are now behind
+   * opens <b>two WebSocket upgrades</b> through {@code SessionPeer}, both of which are now behind
    * the filter, and both of which carry this value as an {@code Authorization} header put on by
    * okhttp. The failure when it is not sent is not subtle — {@code attach} refuses with "the
    * file-provider role was refused at v1/files ... (401)".
@@ -301,8 +304,8 @@ class ConversationEndToEndTest {
 
   @Test
   void a_conversation_over_a_session_outgrows_its_context_and_the_seam_survives() throws Exception {
-    SessionClient session = attach();
-    ServerClient server = new HttpServerClient("http://localhost:" + port, access);
+    SessionPeer session = attach();
+    ServerClient server = new ControllerPeer("http://localhost:" + port, access);
     ServerClient.Conversation conversation = server.openConversation("ledger-test", ALLOWANCE);
 
     // The first turn reaches the operator's disk, so the session on this path
@@ -473,8 +476,8 @@ class ConversationEndToEndTest {
    */
   @Test
   void the_events_of_a_turn_reach_the_terminal_and_carry_nothing_that_was_said() throws Exception {
-    SessionClient session = attach();
-    ServerClient server = new HttpServerClient("http://localhost:" + port, access);
+    SessionPeer session = attach();
+    ServerClient server = new ControllerPeer("http://localhost:" + port, access);
     ServerClient.Conversation conversation = server.openConversation("ledger-test", ALLOWANCE);
     MODEL.readsAFileOnce(onTheLaptop.resolve("Ledger.java"));
 
@@ -526,8 +529,8 @@ class ConversationEndToEndTest {
    */
   @Test
   void a_conversation_with_nothing_left_refuses_the_next_turn_by_name() throws Exception {
-    SessionClient session = attach();
-    ServerClient server = new HttpServerClient("http://localhost:" + port, access);
+    SessionPeer session = attach();
+    ServerClient server = new ControllerPeer("http://localhost:" + port, access);
     // Two calls: one turn's worth on this script, and then nothing.
     ServerClient.Conversation conversation = server.openConversation(null, 1);
 
@@ -573,14 +576,14 @@ class ConversationEndToEndTest {
    *
    * <p>{@code attach} refuses both roles rather than one, and both are asserted: a client left
    * holding the listener and not the provider would submit runs whose files nothing could answer,
-   * which is the smaller-capability-by-accident {@code SessionClient} exists to refuse.
+   * which is the smaller-capability-by-accident {@code SessionPeer} exists to refuse.
    */
   @Test
   void an_unauthenticated_session_attaches_neither_role() {
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(onTheLaptop));
-    SessionClient anonymous =
-        new SessionClient(new HttpServerClient("http://localhost:" + port), workspace);
+    SessionPeer anonymous =
+        new SessionPeer(new ControllerPeer("http://localhost:" + port), workspace);
     opened.add(anonymous);
 
     IOException refused = assertThrows(IOException.class, () -> anonymous.attach(PATIENCE));
@@ -602,15 +605,15 @@ class ConversationEndToEndTest {
 
   // --- fixtures --------------------------------------------------------------------
 
-  private SessionClient attach() throws Exception {
-    Workspace workspace = new Workspace();
+  private SessionPeer attach() throws Exception {
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(onTheLaptop));
-    SessionClient session =
-        new SessionClient(
-            new HttpServerClient("http://localhost:" + port, access),
+    SessionPeer session =
+        new SessionPeer(
+            new ControllerPeer("http://localhost:" + port, access),
             workspace,
             access,
-            io.aeyer.plowshare.client.files.Rooting.of(onTheLaptop, "ledger-test"));
+            io.aeyer.plowshare.testpeer.TestRooting.of(onTheLaptop, "ledger-test"));
     opened.add(session);
     session.attach(PATIENCE);
     assertTrue(
@@ -619,7 +622,7 @@ class ConversationEndToEndTest {
     return session;
   }
 
-  private static ServerClient.JobStatus awaitOutcome(SessionClient session, String job)
+  private static ServerClient.JobStatus awaitOutcome(SessionPeer session, String job)
       throws Exception {
     for (long waited = 0; waited < PATIENCE.toMillis(); waited += 10) {
       ServerClient.JobStatus status = session.job(job);
@@ -631,7 +634,7 @@ class ConversationEndToEndTest {
     throw new AssertionError("job " + job + " never finished");
   }
 
-  private static List<JobEvent> awaitEnded(SessionClient session, String job) throws Exception {
+  private static List<JobEvent> awaitEnded(SessionPeer session, String job) throws Exception {
     List<JobEvent> events = new ArrayList<>();
     for (long waited = 0; waited < PATIENCE.toMillis(); waited += 10) {
       JobEvent event = session.nextEvent(Duration.ofMillis(10));

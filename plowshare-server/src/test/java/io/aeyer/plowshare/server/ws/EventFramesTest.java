@@ -267,11 +267,27 @@ class EventFramesTest {
 
   @Test
   void firing_an_event_goes_through_the_same_intake_as_a_tick() {
-    when(intake.emit(eq("daily"), eq(Map.of("n", 1)))).thenReturn(List.of());
+    when(intake.emit(
+            eq("daily"), eq(new io.aeyer.plowshare.server.events.EventPayload.Text("manual"))))
+        .thenReturn(List.of());
     Outcome outcome =
-        route(FrameTypes.EVENT_FIRE, "{\"event\":\"daily\",\"data\":{\"n\":1}}", SIGNED_IN);
+        route(
+            FrameTypes.EVENT_FIRE,
+            "{\"event\":\"daily\",\"data\":{\"text\":\"manual\"}}",
+            SIGNED_IN);
     assertEquals(Code.OK, outcome.code());
-    verify(intake).emit("daily", Map.of("n", 1));
+    verify(intake).emit("daily", new io.aeyer.plowshare.server.events.EventPayload.Text("manual"));
+  }
+
+  @Test
+  void unsupported_manual_object_is_refused_before_intake_or_persistence() {
+    Outcome outcome =
+        route(
+            FrameTypes.EVENT_FIRE,
+            "{\"event\":\"daily\",\"data\":{\"privilege\":\"admin\"}}",
+            SIGNED_IN);
+    assertEquals(Code.BAD_REQUEST, outcome.code());
+    org.mockito.Mockito.verifyNoInteractions(intake, firings);
   }
 
   @Test
@@ -279,7 +295,7 @@ class EventFramesTest {
     Outcome outcome =
         route(
             FrameTypes.EVENT_FIRE,
-            "{\"event\":\"daily\",\"data\":{\"n\":1}}",
+            "{\"event\":\"daily\",\"data\":{\"text\":\"manual\"}}",
             new Asking("session-1"));
     assertEquals(Code.BAD_REQUEST, outcome.code());
     verify(intake, never()).emit(any(), any());

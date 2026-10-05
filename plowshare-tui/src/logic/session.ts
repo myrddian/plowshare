@@ -1,52 +1,154 @@
-import { parseCommand } from 'plowshare-client-ts/operations/commands'
-import type { Request as MessageRequest } from 'plowshare-client-ts/operations/direct'
-import { usageCommand, type UsageCommand } from './usage.ts'
-import { informationCommand } from './information.ts'
-import type { InformationCommand } from './information.ts'
-import { inboxPageOf, flagAt } from 'plowshare-client-ts/operations/inspection'
-export { runsOf, runStatusOf, unreadOf, changedOf, loadOf, inboxPageOf, reached } from 'plowshare-client-ts/operations/inspection'
-import type { Run, Structure, Message, RunStatus } from 'plowshare-client-ts/operations/inspection'
-export type { Run, RunStage, QuestionOption, Question, Draft, Structure, Message, Child, RunStatus, Allowance, Ended, Pace, Load, InboxItem, InboxPage } from 'plowshare-client-ts/operations/inspection'
-import type { Agent, Approval, Entry } from 'plowshare-client-ts/operations/views'
-export { projects, conversations, agents, opened, continued, approvalsOf, answeredOf, revokedOf, entriesOf, backPageOf, logThrough, logTotal, streamed, appendedOf } from 'plowshare-client-ts/operations/views'
-export type { Conversation, Project, Agent, Approval, Answered, Entry, Opened, Asked, BackPage, Delta, Appended } from 'plowshare-client-ts/operations/views'
-import { OK, bodyOf, countAt, fieldsOf, textAt } from 'plowshare-client-ts/operations/response'
-import type { Answer } from 'plowshare-client-ts/operations/response'
-export { OK, bodyOf, countAt, fieldsOf, textAt } from 'plowshare-client-ts/operations/response'
-export type { Answer } from 'plowshare-client-ts/operations/response'
+import { errorMessage } from 'plowshare-client-ts/binding/values';
+import { isList } from 'plowshare-client-ts/binding/values';
+export { savingSchedule } from 'plowshare-client-ts/operations/session';
+import { parseCommand } from 'plowshare-client-ts/operations/commands';
+import type { Request as MessageRequest } from 'plowshare-client-ts/operations/direct';
+import { usageCommand, type UsageCommand } from './usage.ts';
+import { informationCommand } from './information.ts';
+import type { InformationCommand } from './information.ts';
+import { flagAt } from 'plowshare-client-ts/operations/inspection';
+export {
+  inboxPageOf,
+  runsOf,
+  runStatusOf,
+  unreadOf,
+  changedOf,
+  loadOf,
+  reached,
+} from 'plowshare-client-ts/operations/inspection';
+import type {
+  Run,
+  Structure,
+  Message,
+  RunStatus,
+} from 'plowshare-client-ts/operations/inspection';
+export type {
+  Run,
+  RunStage,
+  QuestionOption,
+  Question,
+  Draft,
+  Structure,
+  Message,
+  Child,
+  RunStatus,
+  Allowance,
+  Ended,
+  Pace,
+  Load,
+  InboxItem,
+  InboxPage,
+} from 'plowshare-client-ts/operations/inspection';
+import type {
+  Agent,
+  Approval,
+  Entry,
+} from 'plowshare-client-ts/operations/views';
+export {
+  projects,
+  conversations,
+  agents,
+  opened,
+  continued,
+  approvalsOf,
+  answeredOf,
+  revokedOf,
+  entriesOf,
+  backPageOf,
+  logThrough,
+  logTotal,
+  streamed,
+  appendedOf,
+} from 'plowshare-client-ts/operations/views';
+export type {
+  Conversation,
+  Project,
+  Agent,
+  Approval,
+  Answered,
+  Entry,
+  Opened,
+  Asked,
+  BackPage,
+  Delta,
+  Appended,
+} from 'plowshare-client-ts/operations/views';
 import {
-    AGENT_RUN,
-    listingInbox,
-    type Decision,
-    answeringApproval,
-    revokingApproval,
-    listingDefinitions,
-    listingRuns,
-    readingRun,
-    answeringRun,
-    cancellingRun,
-    type Proposal,
-    listingFirings,
-    type Ask,
-    speaking,
-    listingProjects,
-    listingConversations,
-    listingAgents,
-} from 'plowshare-client-ts/operations/session'
-export * from 'plowshare-client-ts/operations/session'
-import { retrievalCommand, retrievalWords } from './retrieval.ts'
-import type { RetrievalCommand } from './retrieval.ts'
-import { parse } from './markdown.ts'
-import type { Block } from './markdown.ts'
+  OK,
+  bodyOf,
+  countAt,
+  fieldsOf,
+  textAt,
+} from 'plowshare-client-ts/operations/response';
+import type { Answer } from 'plowshare-client-ts/operations/response';
+export {
+  OK,
+  bodyOf,
+  countAt,
+  fieldsOf,
+  textAt,
+} from 'plowshare-client-ts/operations/response';
+export type { ApplicationAnswer as Answer } from 'plowshare-client-ts/operations/response';
 import {
-    MEMORY_COMMAND, SEARCH_COMMAND, JOB_COMMAND, BOARD_COMMAND, SWARM_COMMAND,
-    AGENTS_COMMAND, ALWAYS_COMMAND, ANSWER_COMMAND, APPROVALS_COMMAND, BOTS_COMMAND, CANCEL_COMMAND,
-    CAP_COMMAND, CD_COMMAND, COMMANDS, CONVERSATIONS_COMMAND, FIRE_COMMAND,
-    DIAGNOSE_COMMAND, EARLIER_COMMAND, FIRINGS_COMMAND, HELP_COMMAND, HERE_COMMAND, INBOX_COMMAND, LOG_COMMAND,
-    ORCHESTRATIONS_COMMAND, PROJECT_COMMAND,
-    PROJECTS_COMMAND, RUNS_COMMAND, WATCH_COMMAND, SCHEDULE_COMMAND, SYNC_COMMAND, THEME_COMMAND, TRAJECTORY_COMMAND, refusal,
-} from './wording.ts'
-import { type SyncAction, syncAction } from './union.ts'
+  AGENT_RUN,
+  listingInbox,
+  type Decision,
+  answeringApproval,
+  revokingApproval,
+  listingDefinitions,
+  listingRuns,
+  readingRun,
+  answeringRun,
+  cancellingRun,
+  type Proposal,
+  listingFirings,
+  type Ask,
+  speaking,
+  listingProjects,
+  listingConversations,
+  listingAgents,
+} from 'plowshare-client-ts/operations/session';
+export * from 'plowshare-client-ts/operations/session';
+import { retrievalCommand, retrievalWords } from './retrieval.ts';
+import type { RetrievalCommand } from './retrieval.ts';
+import { parse } from './markdown.ts';
+import type { Block } from './markdown.ts';
+import {
+  MEMORY_COMMAND,
+  SEARCH_COMMAND,
+  JOB_COMMAND,
+  BOARD_COMMAND,
+  SWARM_COMMAND,
+  AGENTS_COMMAND,
+  ALWAYS_COMMAND,
+  ANSWER_COMMAND,
+  APPROVALS_COMMAND,
+  BOTS_COMMAND,
+  CANCEL_COMMAND,
+  CAP_COMMAND,
+  CD_COMMAND,
+  COMMANDS,
+  CONVERSATIONS_COMMAND,
+  FIRE_COMMAND,
+  DIAGNOSE_COMMAND,
+  EARLIER_COMMAND,
+  FIRINGS_COMMAND,
+  HELP_COMMAND,
+  HERE_COMMAND,
+  INBOX_COMMAND,
+  LOG_COMMAND,
+  ORCHESTRATIONS_COMMAND,
+  PROJECT_COMMAND,
+  PROJECTS_COMMAND,
+  RUNS_COMMAND,
+  WATCH_COMMAND,
+  SCHEDULE_COMMAND,
+  SYNC_COMMAND,
+  THEME_COMMAND,
+  TRAJECTORY_COMMAND,
+  refusal,
+} from './wording.ts';
+import { type SyncAction, syncAction } from './union.ts';
 
 /*
  * ASKING A PERSON BEFORE A COMMAND RUNS. Spec 2026-09-15, §4.
@@ -58,7 +160,7 @@ import { type SyncAction, syncAction } from './union.ts'
  */
 
 /** How a turn that stopped to ask a person ends. {@link listingAsked} finds what it asked. */
-export const AWAITING = 'AWAITING'
+export const AWAITING = 'AWAITING';
 
 /*
  * THE OTHER TWO FRAMES, WHICH CHANGE SOMETHING. Spec 2026-09-13, §7.
@@ -79,7 +181,7 @@ export const AWAITING = 'AWAITING'
  */
 
 /** How every run id starts: {@code OrchestrationStore.PREFIX}. */
-export const RUN_ID_PREFIX = 'orc_'
+export const RUN_ID_PREFIX = 'orc_';
 
 /**
  * What a run's state became, off an `orchestration.answer` or `.cancel` answer,
@@ -90,27 +192,28 @@ export const RUN_ID_PREFIX = 'orc_'
  * components, and a second reader here would be a second thing to keep in step
  * with a single wire shape. `mirrors-the-server` pins both.
  */
-export function settledRun(answer: Answer): { readonly id: string, readonly state: string }
-        | undefined {
-    const body = bodyOf(answer, OK)
-    if (body === undefined) {
-        return undefined
-    }
-    const fields = fieldsOf(body)
-    const id = textAt(fields, 'id')
-    // The state and not just the id: "answered, and it is running again" and
-    // "answered, and it is waiting on a child" are different things to be told,
-    // and the id alone cannot say which.
-    const state = textAt(fields, 'state')
-    return id === undefined || state === undefined ? undefined : { id, state }
+export function settledRun(
+  answer: Answer,
+): { readonly id: string; readonly state: string } | undefined {
+  const body = bodyOf(answer, OK);
+  if (body === undefined) {
+    return undefined;
+  }
+  const fields = fieldsOf(body);
+  const id = textAt(fields, 'id');
+  // The state and not just the id: "answered, and it is running again" and
+  // "answered, and it is waiting on a child" are different things to be told,
+  // and the id alone cannot say which.
+  const state = textAt(fields, 'state');
+  return id === undefined || state === undefined ? undefined : { id, state };
 }
 
 /** One stage of a definition, as a person reads it — never evaluated here. */
 export interface Stage {
-    readonly id: string
+  readonly id: string;
 
-    /** What the definition says finishes it. Absent where it says nothing. */
-    readonly doneWhen?: string
+  /** What the definition says finishes it. Absent where it says nothing. */
+  readonly doneWhen?: string;
 }
 
 /**
@@ -122,24 +225,24 @@ export interface Stage {
  * several things it declared. Empty for a definition that was read.
  */
 export interface Definition {
-    readonly name: string
+  readonly name: string;
 
-    /** What it does, in the definition's own words. Empty for a refused file. */
-    readonly description: string
+  /** What it does, in the definition's own words. Empty for a refused file. */
+  readonly description: string;
 
-    /** `global` or `project`. Empty for a refused file, which has no tier. */
-    readonly tier: string
+  /** `global` or `project`. Empty for a refused file, which has no tier. */
+  readonly tier: string;
 
-    /** Empty for a refused file, whose stages never took effect. */
-    readonly stages: readonly Stage[]
+  /** Empty for a refused file, whose stages never took effect. */
+  readonly stages: readonly Stage[];
 
-    /** The sentences that say when this one is the thing to start. */
-    readonly triggers: readonly string[]
+  /** The sentences that say when this one is the thing to start. */
+  readonly triggers: readonly string[];
 
-    readonly served: boolean
+  readonly served: boolean;
 
-    /** Why this file is not served, in the server's own sentence. Empty when it is. */
-    readonly withheld: string
+  /** Why this file is not served, in the server's own sentence. Empty when it is. */
+  readonly withheld: string;
 }
 
 /**
@@ -152,25 +255,25 @@ export interface Definition {
  * no question in words; `pendingCap` says which cap that is.
  */
 export interface Waiting {
-    readonly id: string
-    readonly definition: string
-    readonly question?: string
-    /** The question's options, when it has them — read with the question, from its status. */
-    readonly structure?: Structure
-    readonly pendingCap?: string
-    /**
-     * `approval` for a command waiting to be allowed, whose `definition` is the agent
-     * that asked and whose `question` says the command; `stalled` for a run that has
-     * gone quiet, which takes a look or a cancel rather than an answer; absent for an
-     * ordinary run waiting on a question.
-     */
-    readonly kind?: 'approval' | 'stalled'
-    /** The run that started it. Absent for a root, and for an approval or a stall. */
-    readonly parent?: string
-    /** The agent that started it, which has a root's question too. See {@link Run.callerAgent}. */
-    readonly callerAgent?: string
-    /** For an `approval`: the row whole, which its dialog is answered from. */
-    readonly approval?: Approval
+  readonly id: string;
+  readonly definition: string;
+  readonly question?: string;
+  /** The question's options, when it has them — read with the question, from its status. */
+  readonly structure?: Structure;
+  readonly pendingCap?: string;
+  /**
+   * `approval` for a command waiting to be allowed, whose `definition` is the agent
+   * that asked and whose `question` says the command; `stalled` for a run that has
+   * gone quiet, which takes a look or a cancel rather than an answer; absent for an
+   * ordinary run waiting on a question.
+   */
+  readonly kind?: 'approval' | 'stalled';
+  /** The run that started it. Absent for a root, and for an approval or a stall. */
+  readonly parent?: string;
+  /** The agent that started it, which has a root's question too. See {@link Run.callerAgent}. */
+  readonly callerAgent?: string;
+  /** For an `approval`: the row whole, which its dialog is answered from. */
+  readonly approval?: Approval;
 }
 
 /**
@@ -180,16 +283,22 @@ export interface Waiting {
  *
  * @param here the conversation on screen, if any
  */
-export function approvalsWaiting(approvals: readonly Approval[], here?: string): Waiting[] {
-    return approvals
-        .filter((approval) => approval.state === 'asked' && approval.conversation !== here)
-        .map((approval) => ({
-            id: approval.id,
-            definition: approval.agent,
-            kind: 'approval',
-            question: approvalAsks(approval),
-            approval,
-        }))
+export function approvalsWaiting(
+  approvals: readonly Approval[],
+  here?: string,
+): Waiting[] {
+  return approvals
+    .filter(
+      (approval) =>
+        approval.state === 'asked' && approval.conversation !== here,
+    )
+    .map((approval) => ({
+      id: approval.id,
+      definition: approval.agent,
+      kind: 'approval',
+      question: approvalAsks(approval),
+      approval,
+    }));
 }
 
 /**
@@ -197,14 +306,14 @@ export function approvalsWaiting(approvals: readonly Approval[], here?: string):
  * acceptance commands, each of which the lines that show a set whole name.
  */
 export function approvalAsks(approval: Approval): string {
-    return approval.commands === undefined
-        ? `run \`${approval.command.join(' ')}\` in ${approval.cwd} (${approval.side})`
-        : `run ${countOf(approval.commands.length, 'acceptance command')} at its acceptance stage,`
-            + ` in ${approval.cwd} (${approval.side})`
+  return approval.commands === undefined
+    ? `run \`${approval.command.join(' ')}\` in ${approval.cwd} (${approval.side})`
+    : `run ${countOf(approval.commands.length, 'acceptance command')} at its acceptance stage,` +
+        ` in ${approval.cwd} (${approval.side})`;
 }
 
 function countOf(n: number, noun: string): string {
-    return `${n} ${noun}${n === 1 ? '' : 's'}`
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
 /**
@@ -214,7 +323,9 @@ function countOf(n: number, noun: string): string {
  * the messages keep both; the one it is waiting on is the last.
  */
 function latestQuestion(status: RunStatus): Message | undefined {
-    return [...status.messages].reverse().find((message) => message.kind === 'question')
+  return [...status.messages]
+    .reverse()
+    .find((message) => message.kind === 'question');
 }
 
 /**
@@ -224,7 +335,7 @@ function latestQuestion(status: RunStatus): Message | undefined {
  * the messages keep both; the one it is waiting on is the last.
  */
 export function questionOf(status: RunStatus): string | undefined {
-    return latestQuestion(status)?.text
+  return latestQuestion(status)?.text;
 }
 
 /**
@@ -234,21 +345,21 @@ export function questionOf(status: RunStatus): string | undefined {
  * with options is answered in words.
  */
 export function structureOf(status: RunStatus): Structure | undefined {
-    return latestQuestion(status)?.structure
+  return latestQuestion(status)?.structure;
 }
 
 /**
  * The `pendingCap` of a run asking the person whether it goes on after it ended
  * three turns in a row without progress — a question only a person may answer.
  */
-export const STUCK = 'stuck'
+export const STUCK = 'stuck';
 
 /**
  * The `pendingCap` the retired acceptance verifier asked the person with (V65): whether spec.md's
  * acceptance commands stood as written. Nothing asks it any more (spec 2026-10-01); a run that
  * still holds one is the person's alone, and `accept` or their words answer it.
  */
-export const UNCOVERED = 'uncovered'
+export const UNCOVERED = 'uncovered';
 
 /**
  * The `pendingCap` of a run whose acceptance checker could not resolve concerns with its conductor
@@ -256,7 +367,7 @@ export const UNCOVERED = 'uncovered'
  * Only a person may answer it: `accept` accepts the conductor's reasons; `c1: <words>` per line
  * answers each, and any other words are the person's direction for all of them.
  */
-export const CONCERNS = 'concerns'
+export const CONCERNS = 'concerns';
 
 /**
  * The `pendingCap` of a run whose acceptance commands all passed and that has `check:` lines — or
@@ -264,7 +375,7 @@ export const CONCERNS = 'concerns'
  * product starts and what to check. Only a person may answer it: `accept` accepts the product, and
  * any other answer is their notes, which send the run back.
  */
-export const PRODUCT_CHECK = 'product_check'
+export const PRODUCT_CHECK = 'product_check';
 
 /**
  * The `pendingCap` of a run asking the person whether it goes on after its check — or its
@@ -272,36 +383,50 @@ export const PRODUCT_CHECK = 'product_check'
  * failure's output. A question only a person may answer, and never auto-continued: `go on` lets it
  * try again with the count started over, `stop` stops it.
  */
-export const CHECK_FAILURES = 'check_failures'
+export const CHECK_FAILURES = 'check_failures';
 
 /** The `pendingCap` of a run past its project's time cap (V69) — a cap, asked of both. */
-export const TIME_CAP = 'time_cap'
+export const TIME_CAP = 'time_cap';
 
 /**
  * The `pendingCap` of a run asking the person whether to install the orchestration it drafted
  * (V71) — a question only a person may answer, with options: `Install` or `Don't install`.
  */
-export const INSTALL = 'install'
+export const INSTALL = 'install';
 
 /** The `pendingCap`s of the questions only a person may answer: the server refuses a model's. */
-export const PERSON_ONLY_KINDS: readonly string[] = [STUCK, UNCOVERED, CHECK_FAILURES, INSTALL,
-    CONCERNS, PRODUCT_CHECK]
+export const PERSON_ONLY_KINDS: readonly string[] = [
+  STUCK,
+  UNCOVERED,
+  CHECK_FAILURES,
+  INSTALL,
+  CONCERNS,
+  PRODUCT_CHECK,
+];
 
 /** The `pendingCap`s of a person-only question a person accepts or answers in words: `y` is `accept`. */
-export const ACCEPT_KINDS: readonly string[] = [UNCOVERED, CONCERNS, PRODUCT_CHECK]
+export const ACCEPT_KINDS: readonly string[] = [
+  UNCOVERED,
+  CONCERNS,
+  PRODUCT_CHECK,
+];
 
 /**
  * What `/always caps` and the dialog's `a` set `auto-continue` to. Here, and not in `caps.ts`,
  * which re-exports it: `caps.ts` reads its answers with this file's helpers, and this file
  * importing it back made the two a cycle at load.
  */
-export const ALWAYS_CAPS = 3
+export const ALWAYS_CAPS = 3;
 
 /**
  * The `pendingCap`s of a run asking to have a cap raised — the question its parent model and the
  * person both get, the first answer settling it (spec 2026-09-29 §2).
  */
-export const CAP_KINDS: readonly string[] = ['turn_cap', 'call_budget', TIME_CAP]
+export const CAP_KINDS: readonly string[] = [
+  'turn_cap',
+  'call_budget',
+  TIME_CAP,
+];
 
 /**
  * Which dialog a question waiting on the person is put to them in, or nothing for one that waits
@@ -326,36 +451,39 @@ export const CAP_KINDS: readonly string[] = ['turn_cap', 'call_budget', TIME_CAP
  *
  * <p>Never a stall, which takes a look or a cancel and never an answer in words.
  */
-export type DialogKind = 'cap' | 'stuck' | 'accept' | 'checks' | 'question' | 'approval'
+export type DialogKind =
+  'cap' | 'stuck' | 'accept' | 'checks' | 'question' | 'approval';
 
 export function dialogKindOf(run: Waiting): DialogKind | undefined {
-    // A COMMAND WAITING TO BE ALLOWED IN ONE OF THE PERSON'S RUNS: answered with the approval
-    // prompt's own keys (`approval.ts`), in the dialog, rather than by typing `/answer <id> once`.
-    // Measured 2026-09-29: "NONE of these requests are reaching a modal".
-    if (run.kind === 'approval') {
-        return run.approval === undefined ? undefined : 'approval'
-    }
-    if (run.kind !== undefined) {
-        return undefined
-    }
-    if (CAP_KINDS.includes(run.pendingCap ?? '')) {
-        return 'cap'
-    }
-    if (run.pendingCap === STUCK) {
-        return 'stuck'
-    }
-    if (ACCEPT_KINDS.includes(run.pendingCap ?? '')) {
-        return 'accept'
-    }
-    if (run.pendingCap === CHECK_FAILURES) {
-        return 'checks'
-    }
-    // AN INSTALL IS A QUESTION WITH OPTIONS, a phase's or a root's alike: only the person may
-    // answer it, so it is theirs to see wherever in the tree it was asked.
-    if (run.pendingCap === INSTALL) {
-        return 'question'
-    }
-    return run.pendingCap === undefined && run.parent === undefined ? 'question' : undefined
+  // A COMMAND WAITING TO BE ALLOWED IN ONE OF THE PERSON'S RUNS: answered with the approval
+  // prompt's own keys (`approval.ts`), in the dialog, rather than by typing `/answer <id> once`.
+  // Measured 2026-09-29: "NONE of these requests are reaching a modal".
+  if (run.kind === 'approval') {
+    return run.approval === undefined ? undefined : 'approval';
+  }
+  if (run.kind !== undefined) {
+    return undefined;
+  }
+  if (CAP_KINDS.includes(run.pendingCap ?? '')) {
+    return 'cap';
+  }
+  if (run.pendingCap === STUCK) {
+    return 'stuck';
+  }
+  if (ACCEPT_KINDS.includes(run.pendingCap ?? '')) {
+    return 'accept';
+  }
+  if (run.pendingCap === CHECK_FAILURES) {
+    return 'checks';
+  }
+  // AN INSTALL IS A QUESTION WITH OPTIONS, a phase's or a root's alike: only the person may
+  // answer it, so it is theirs to see wherever in the tree it was asked.
+  if (run.pendingCap === INSTALL) {
+    return 'question';
+  }
+  return run.pendingCap === undefined && run.parent === undefined
+    ? 'question'
+    : undefined;
 }
 
 /**
@@ -386,34 +514,39 @@ export function dialogKindOf(run: Waiting): DialogKind | undefined {
  * settles it — so the person's copy has to be somewhere they can answer it.
  */
 export function waitingAfter(
-    before: readonly Waiting[],
-    asking: readonly Run[],
-    stale: ReadonlySet<string> = new Set(),
-): { readonly now: Waiting[], readonly unread: string[] } {
-    const now: Waiting[] = []
-    const unread: string[] = []
-    for (const run of asking) {
-        // A child's own question is its conductor's — except one only the person may answer
-        // (`stuck`, `uncovered`), and a cap, which is asked of both at once (spec 2026-09-29 §2).
-        if (run.parent !== undefined && !PERSON_ONLY_KINDS.includes(run.pendingCap ?? '')
-                && !CAP_KINDS.includes(run.pendingCap ?? '')) {
-            continue
-        }
-        const known = before.find((was) => was.id === run.id)
-        if (known !== undefined && !stale.has(run.id)) {
-            now.push(known)
-            continue
-        }
-        now.push({
-            id: run.id,
-            definition: run.definition,
-            ...(run.pendingCap === undefined ? {} : { pendingCap: run.pendingCap }),
-            ...(run.parent === undefined ? {} : { parent: run.parent }),
-            ...(run.callerAgent === undefined ? {} : { callerAgent: run.callerAgent }),
-        })
-        unread.push(run.id)
+  before: readonly Waiting[],
+  asking: readonly Run[],
+  stale: ReadonlySet<string> = new Set(),
+): { readonly now: Waiting[]; readonly unread: string[] } {
+  const now: Waiting[] = [];
+  const unread: string[] = [];
+  for (const run of asking) {
+    // A child's own question is its conductor's — except one only the person may answer
+    // (`stuck`, `uncovered`), and a cap, which is asked of both at once (spec 2026-09-29 §2).
+    if (
+      run.parent !== undefined &&
+      !PERSON_ONLY_KINDS.includes(run.pendingCap ?? '') &&
+      !CAP_KINDS.includes(run.pendingCap ?? '')
+    ) {
+      continue;
     }
-    return { now, unread }
+    const known = before.find((was) => was.id === run.id);
+    if (known !== undefined && !stale.has(run.id)) {
+      now.push(known);
+      continue;
+    }
+    now.push({
+      id: run.id,
+      definition: run.definition,
+      ...(run.pendingCap === undefined ? {} : { pendingCap: run.pendingCap }),
+      ...(run.parent === undefined ? {} : { parent: run.parent }),
+      ...(run.callerAgent === undefined
+        ? {}
+        : { callerAgent: run.callerAgent }),
+    });
+    unread.push(run.id);
+  }
+  return { now, unread };
 }
 
 /**
@@ -426,9 +559,13 @@ export function waitingAfter(
  * as it is, and nobody but a person can cancel a tree that has gone silent.
  */
 export function stalledWaiting(runs: readonly Run[]): Waiting[] {
-    return runs
-        .filter((run) => run.stalledSince !== undefined)
-        .map((run) => ({ id: run.id, definition: run.definition, kind: 'stalled' }))
+  return runs
+    .filter((run) => run.stalledSince !== undefined)
+    .map((run) => ({
+      id: run.id,
+      definition: run.definition,
+      kind: 'stalled',
+    }));
 }
 
 /**
@@ -445,83 +582,90 @@ export function stalledWaiting(runs: readonly Run[]): Waiting[] {
  * definition takes nothing from the others.
  */
 export function definitionsOf(answer: Answer): Definition[] | undefined {
-    const rows = bodyOf(answer, OK)?.['definitions']
-    if (!Array.isArray(rows)) {
-        return undefined
-    }
-    return rows
-        .map((row) => definitionIn(fieldsOf(row)))
-        .filter((row): row is Definition => row !== undefined)
+  const rows = bodyOf(answer, OK)?.['definitions'];
+  if (!isList(rows)) {
+    return undefined;
+  }
+  return rows
+    .map((row) => definitionIn(fieldsOf(row)))
+    .filter((row): row is Definition => row !== undefined);
 }
 
 /** One `DefinitionView`, in the fields a person is shown. */
 function definitionIn(fields: Record<string, unknown>): Definition | undefined {
-    const name = textAt(fields, 'name')
-    if (name === undefined) {
-        return undefined
-    }
-    const stages = fields['stages']
-    return {
-        name,
-        description: textAt(fields, 'description') ?? '',
-        tier: textAt(fields, 'tier') ?? '',
-        stages: Array.isArray(stages)
-            ? stages.map((stage) => stageIn(fieldsOf(stage)))
-                .filter((stage): stage is Stage => stage !== undefined)
-            : [],
-        triggers: sentencesAt(fields, 'triggers'),
-        served: flagAt(fields, 'served'),
-        withheld: textAt(fields, 'withheld') ?? '',
-    }
+  const name = textAt(fields, 'name');
+  if (name === undefined) {
+    return undefined;
+  }
+  const stages = fields['stages'];
+  return {
+    name,
+    description: textAt(fields, 'description') ?? '',
+    tier: textAt(fields, 'tier') ?? '',
+    stages: isList(stages)
+      ? stages
+          .map((stage) => stageIn(fieldsOf(stage)))
+          .filter((stage): stage is Stage => stage !== undefined)
+      : [],
+    triggers: sentencesAt(fields, 'triggers'),
+    served: flagAt(fields, 'served'),
+    withheld: textAt(fields, 'withheld') ?? '',
+  };
 }
 
 /** One `StageView`: its id, and its done-when where it has one. */
 function stageIn(fields: Record<string, unknown>): Stage | undefined {
-    const id = textAt(fields, 'id')
-    if (id === undefined) {
-        return undefined
-    }
-    const doneWhen = textAt(fields, 'doneWhen')
-    return { id, ...(doneWhen === undefined || doneWhen === '' ? {} : { doneWhen }) }
+  const id = textAt(fields, 'id');
+  if (id === undefined) {
+    return undefined;
+  }
+  const doneWhen = textAt(fields, 'doneWhen');
+  return {
+    id,
+    ...(doneWhen === undefined || doneWhen === '' ? {} : { doneWhen }),
+  };
 }
 
 /** One `ScheduleRecord`, in the fields a listing and a lookup read. */
 export interface Schedule {
-    readonly name: string
-    readonly cron: string
-    readonly zone: string
-    /** The event this schedule emits, which is how a trigger is joined to it. */
-    readonly emits: string
-    readonly paused: boolean
-    /** Absent when the server has none to say. */
-    readonly nextFireAt?: string
+  readonly name: string;
+  readonly cron: string;
+  readonly zone: string;
+  /** The event this schedule emits, which is how a trigger is joined to it. */
+  readonly emits: string;
+  readonly paused: boolean;
+  /** Absent when the server has none to say. */
+  readonly nextFireAt?: string;
 }
 
 /** One `TriggerRecord`, in the fields a listing and a lookup read. */
 export interface Trigger {
-    readonly name: string
-    readonly event: string
-    readonly agent: string
-    readonly task: string
-    readonly paused: boolean
-    readonly project?: string
-    readonly conversation?: string
+  readonly name: string;
+  readonly event: string;
+  readonly agent: string;
+  readonly task: string;
+  readonly paused: boolean;
+  readonly project?: string;
+  readonly conversation?: string;
 }
 
 /** One `FiringRecord`, in the fields a listing reads. */
 export interface Firing {
-    readonly id: string
-    readonly event: string
-    readonly status: string
-    readonly arrivedAt: string
-    /** Absent when nobody was listening. */
-    readonly trigger?: string
-    readonly reason?: string
+  readonly id: string;
+  readonly event: string;
+  readonly status: string;
+  readonly arrivedAt: string;
+  /** Absent when nobody was listening. */
+  readonly trigger?: string;
+  readonly reason?: string;
 }
 
 /** The triggers listening to this schedule: the ones whose event it emits. */
-export function listeningTo(schedule: Schedule, triggers: readonly Trigger[]): Trigger[] {
-    return triggers.filter((trigger) => trigger.event === schedule.emits)
+export function listeningTo(
+  schedule: Schedule,
+  triggers: readonly Trigger[],
+): Trigger[] {
+  return triggers.filter((trigger) => trigger.event === schedule.emits);
 }
 
 /**
@@ -530,8 +674,8 @@ export function listeningTo(schedule: Schedule, triggers: readonly Trigger[]): T
  * thing somebody typed as consent.
  */
 export function answeredYes(line: string): boolean {
-    const said = line.trim().toLowerCase()
-    return said === 'y' || said === 'yes'
+  const said = line.trim().toLowerCase();
+  return said === 'y' || said === 'yes';
 }
 
 /**
@@ -539,30 +683,34 @@ export function answeredYes(line: string): boolean {
  * or null, and `[false]` for anything else — which a validating reader refuses.
  */
 function maybeTextAt(
-        fields: Record<string, unknown>, name: string): readonly [boolean, string?] {
-    const found = fields[name]
-    if (found === undefined || found === null) {
-        return [true]
-    }
-    return typeof found === 'string' ? [true, found] : [false]
+  fields: Record<string, unknown>,
+  name: string,
+): readonly [boolean, string?] {
+  const found = fields[name];
+  if (found === undefined || found === null) {
+    return [true];
+  }
+  return typeof found === 'string' ? [true, found] : [false];
 }
 
 /** Every row of an `OK` list, each read by `read`, or nothing if any row fails. */
 function everyRow<Row>(
-        answer: Answer, read: (fields: Record<string, unknown>) => Row | undefined): Row[] | undefined {
-    const rows = rowsOf(answer)
-    if (rows === undefined) {
-        return undefined
+  answer: Answer,
+  read: (fields: Record<string, unknown>) => Row | undefined,
+): Row[] | undefined {
+  const rows = rowsOf(answer);
+  if (rows === undefined) {
+    return undefined;
+  }
+  const found: Row[] = [];
+  for (const row of rows) {
+    const one = read(fieldsOf(row));
+    if (one === undefined) {
+      return undefined;
     }
-    const found: Row[] = []
-    for (const row of rows) {
-        const one = read(fieldsOf(row))
-        if (one === undefined) {
-            return undefined
-        }
-        found.push(one)
-    }
-    return found
+    found.push(one);
+  }
+  return found;
 }
 
 /**
@@ -575,80 +723,116 @@ function everyRow<Row>(
  * names none is refused too: its trigger could not be defined.
  */
 export function proposalOf(answer: Answer): Proposal | undefined {
-    const body = bodyOf(answer, OK)
-    if (body === undefined) {
-        return undefined
-    }
-    const cron = textAt(body, 'cron')
-    const zone = textAt(body, 'zone')
-    const when = textAt(body, 'when')
-    const agent = textAt(body, 'agent')
-    const task = textAt(body, 'task')
-    const into = body['intoConversation']
-    const [projectOk, project] = maybeTextAt(body, 'project')
-    const [conversationOk, conversation] = maybeTextAt(body, 'conversation')
-    const fires = body['nextFires']
-    const names = fieldsOf(body['names'])
-    const schedule = textAt(names, 'schedule')
-    const trigger = textAt(names, 'trigger')
-    const event = textAt(names, 'event')
-    if (cron === undefined || zone === undefined || when === undefined || agent === undefined
-            || task === undefined || typeof into !== 'boolean' || !projectOk || !conversationOk
-            || !Array.isArray(fires) || !fires.every((fire) => typeof fire === 'string')
-            || schedule === undefined || trigger === undefined || event === undefined
-            || (into && conversation === undefined)) {
-        return undefined
-    }
-    return {
-        cron, zone, when, agent, task, intoConversation: into,
-        ...(project === undefined ? {} : { project }),
-        ...(conversation === undefined ? {} : { conversation }),
-        nextFires: fires as string[],
-        names: { schedule, trigger, event },
-    }
+  const body = bodyOf(answer, OK);
+  if (body === undefined) {
+    return undefined;
+  }
+  const cron = textAt(body, 'cron');
+  const zone = textAt(body, 'zone');
+  const when = textAt(body, 'when');
+  const agent = textAt(body, 'agent');
+  const task = textAt(body, 'task');
+  const into = body['intoConversation'];
+  const [projectOk, project] = maybeTextAt(body, 'project');
+  const [conversationOk, conversation] = maybeTextAt(body, 'conversation');
+  const fires = body['nextFires'];
+  const names = fieldsOf(body['names']);
+  const schedule = textAt(names, 'schedule');
+  const trigger = textAt(names, 'trigger');
+  const event = textAt(names, 'event');
+  if (
+    cron === undefined ||
+    zone === undefined ||
+    when === undefined ||
+    agent === undefined ||
+    task === undefined ||
+    typeof into !== 'boolean' ||
+    !projectOk ||
+    !conversationOk ||
+    !isList(fires) ||
+    !fires.every((fire) => typeof fire === 'string') ||
+    schedule === undefined ||
+    trigger === undefined ||
+    event === undefined ||
+    (into && conversation === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    cron,
+    zone,
+    when,
+    agent,
+    task,
+    intoConversation: into,
+    ...(project === undefined ? {} : { project }),
+    ...(conversation === undefined ? {} : { conversation }),
+    nextFires: fires,
+    names: { schedule, trigger, event },
+  };
 }
 
 /** The schedules a `schedule.list` answer named, or nothing if any row is unreadable. */
 export function schedulesOf(answer: Answer): Schedule[] | undefined {
-    return everyRow(answer, (fields) => {
-        const name = textAt(fields, 'name')
-        const cron = textAt(fields, 'cron')
-        const zone = textAt(fields, 'zone')
-        const emits = textAt(fields, 'emits')
-        const paused = fields['paused']
-        const [nextOk, nextFireAt] = maybeTextAt(fields, 'nextFireAt')
-        if (name === undefined || cron === undefined || zone === undefined
-                || emits === undefined || typeof paused !== 'boolean' || !nextOk) {
-            return undefined
-        }
-        return {
-            name, cron, zone, emits, paused,
-            ...(nextFireAt === undefined ? {} : { nextFireAt }),
-        }
-    })
+  return everyRow(answer, (fields) => {
+    const name = textAt(fields, 'name');
+    const cron = textAt(fields, 'cron');
+    const zone = textAt(fields, 'zone');
+    const emits = textAt(fields, 'emits');
+    const paused = fields['paused'];
+    const [nextOk, nextFireAt] = maybeTextAt(fields, 'nextFireAt');
+    if (
+      name === undefined ||
+      cron === undefined ||
+      zone === undefined ||
+      emits === undefined ||
+      typeof paused !== 'boolean' ||
+      !nextOk
+    ) {
+      return undefined;
+    }
+    return {
+      name,
+      cron,
+      zone,
+      emits,
+      paused,
+      ...(nextFireAt === undefined ? {} : { nextFireAt }),
+    };
+  });
 }
 
 /** The triggers a `trigger.list` answer named, or nothing if any row is unreadable. */
 export function triggersOf(answer: Answer): Trigger[] | undefined {
-    return everyRow(answer, (fields) => {
-        const name = textAt(fields, 'name')
-        const event = textAt(fields, 'event')
-        const agent = textAt(fields, 'agent')
-        const task = textAt(fields, 'task')
-        const paused = fields['paused']
-        const [projectOk, project] = maybeTextAt(fields, 'project')
-        const [conversationOk, conversation] = maybeTextAt(fields, 'conversation')
-        if (name === undefined || event === undefined || agent === undefined
-                || task === undefined || typeof paused !== 'boolean' || !projectOk
-                || !conversationOk) {
-            return undefined
-        }
-        return {
-            name, event, agent, task, paused,
-            ...(project === undefined ? {} : { project }),
-            ...(conversation === undefined ? {} : { conversation }),
-        }
-    })
+  return everyRow(answer, (fields) => {
+    const name = textAt(fields, 'name');
+    const event = textAt(fields, 'event');
+    const agent = textAt(fields, 'agent');
+    const task = textAt(fields, 'task');
+    const paused = fields['paused'];
+    const [projectOk, project] = maybeTextAt(fields, 'project');
+    const [conversationOk, conversation] = maybeTextAt(fields, 'conversation');
+    if (
+      name === undefined ||
+      event === undefined ||
+      agent === undefined ||
+      task === undefined ||
+      typeof paused !== 'boolean' ||
+      !projectOk ||
+      !conversationOk
+    ) {
+      return undefined;
+    }
+    return {
+      name,
+      event,
+      agent,
+      task,
+      paused,
+      ...(project === undefined ? {} : { project }),
+      ...(conversation === undefined ? {} : { conversation }),
+    };
+  });
 }
 
 /**
@@ -656,23 +840,32 @@ export function triggersOf(answer: Answer): Trigger[] | undefined {
  * row is unreadable. Both answer with `FiringRecord`s.
  */
 export function firingsOf(answer: Answer): Firing[] | undefined {
-    return everyRow(answer, (fields) => {
-        const id = textAt(fields, 'id')
-        const event = textAt(fields, 'event')
-        const status = textAt(fields, 'status')
-        const arrivedAt = textAt(fields, 'arrivedAt')
-        const [triggerOk, trigger] = maybeTextAt(fields, 'trigger')
-        const [reasonOk, reason] = maybeTextAt(fields, 'reason')
-        if (id === undefined || event === undefined || status === undefined
-                || arrivedAt === undefined || !triggerOk || !reasonOk) {
-            return undefined
-        }
-        return {
-            id, event, status, arrivedAt,
-            ...(trigger === undefined ? {} : { trigger }),
-            ...(reason === undefined ? {} : { reason }),
-        }
-    })
+  return everyRow(answer, (fields) => {
+    const id = textAt(fields, 'id');
+    const event = textAt(fields, 'event');
+    const status = textAt(fields, 'status');
+    const arrivedAt = textAt(fields, 'arrivedAt');
+    const [triggerOk, trigger] = maybeTextAt(fields, 'trigger');
+    const [reasonOk, reason] = maybeTextAt(fields, 'reason');
+    if (
+      id === undefined ||
+      event === undefined ||
+      status === undefined ||
+      arrivedAt === undefined ||
+      !triggerOk ||
+      !reasonOk
+    ) {
+      return undefined;
+    }
+    return {
+      id,
+      event,
+      status,
+      arrivedAt,
+      ...(trigger === undefined ? {} : { trigger }),
+      ...(reason === undefined ? {} : { reason }),
+    };
+  });
 }
 
 /**
@@ -689,9 +882,10 @@ export function firingsOf(answer: Answer): Firing[] | undefined {
  * @param waiting the ids of the runs the last check found waiting
  */
 export function rechecks(
-        changed: { readonly id: string, readonly state: string },
-        waiting: readonly string[]): boolean {
-    return changed.state === 'asking' || waiting.includes(changed.id)
+  changed: { readonly id: string; readonly state: string },
+  waiting: readonly string[],
+): boolean {
+  return changed.state === 'asking' || waiting.includes(changed.id);
 }
 
 /**
@@ -701,13 +895,13 @@ export function rechecks(
  * types above are. The mirror test holds it against `Code.java` so this is not
  * a third vocabulary quietly drifting from the other two.
  */
-export const ACCEPTED = 'ACCEPTED'
+export const ACCEPTED = 'ACCEPTED';
 
 /** A run has begun. Sent before the first model call. */
 export interface Started {
-    readonly kind: 'started'
-    readonly job: string
-    readonly agent: string
+  readonly kind: 'started';
+  readonly job: string;
+  readonly agent: string;
 }
 
 /**
@@ -720,31 +914,31 @@ export interface Started {
  * word so that no view has to learn it twice.
  */
 export interface Stepped {
-    readonly kind: 'step'
-    readonly job: string
-    readonly agent: string
-    readonly steps: number
-    readonly modelCalls: number
+  readonly kind: 'step';
+  readonly job: string;
+  readonly agent: string;
+  readonly steps: number;
+  readonly modelCalls: number;
 }
 
 /** One tool the model asked for is about to run. */
 export interface Called {
-    readonly kind: 'tool'
-    readonly job: string
-    readonly agent: string
+  readonly kind: 'tool';
+  readonly job: string;
+  readonly agent: string;
 
-    /** The name the <b>server</b> registered, never the name the model asked for. */
-    readonly tool: string
+  /** The name the <b>server</b> registered, never the name the model asked for. */
+  readonly tool: string;
 }
 
 /** The run is over and its outcome is filed. The last event for a job. */
 export interface Stopped {
-    readonly kind: 'ended'
-    readonly job: string
-    readonly agent: string
-    readonly ending: string
-    readonly steps: number
-    readonly modelCalls: number
+  readonly kind: 'ended';
+  readonly job: string;
+  readonly agent: string;
+  readonly ending: string;
+  readonly steps: number;
+  readonly modelCalls: number;
 }
 
 /**
@@ -765,11 +959,11 @@ export interface Stopped {
  * every twenty seconds, in place of the progress the run had.
  */
 export interface Beating {
-    readonly kind: 'alive'
-    readonly job: string
-    readonly agent: string
-    readonly steps: number
-    readonly modelCalls: number
+  readonly kind: 'alive';
+  readonly job: string;
+  readonly agent: string;
+  readonly steps: number;
+  readonly modelCalls: number;
 }
 
 /**
@@ -780,20 +974,20 @@ export interface Beating {
  * is spent, and the name travels so a view can still say something true.
  */
 export interface Other {
-    readonly kind: 'other'
-    readonly job: string
-    readonly named: string
+  readonly kind: 'other';
+  readonly job: string;
+  readonly named: string;
 }
 
 /** A frame that is not a `JobEvent` at all, and so belongs to no job. */
 export interface Unreadable {
-    readonly kind: 'unreadable'
-    readonly said: string
+  readonly kind: 'unreadable';
+  readonly said: string;
 }
 
 /** What one arriving push means. */
 export type Progress =
-    Started | Stepped | Called | Beating | Stopped | Other | Unreadable
+  Started | Stepped | Called | Beating | Stopped | Other | Unreadable;
 
 /**
  * What one line a person typed turns out to be. See {@link typed}.
@@ -806,155 +1000,189 @@ export type Progress =
  * answer.
  */
 export type Typed =
-    | { readonly kind: 'messaging'; readonly command: MessageRequest }
-    | { readonly kind: 'usage-report'; readonly command: UsageCommand }
-    | { readonly kind: 'information'; readonly command: InformationCommand }
-    | { readonly kind: 'retrieval'; readonly command: RetrievalCommand }
-    | { readonly kind: 'retrieval-error'; readonly text: string }
-    /** Something to say to the agent, trimmed. */
-    | { readonly kind: 'utterance'; readonly text: string }
-    /** Show the projects. {@link projects} reads what comes back. */
-    | { readonly kind: 'projects'; readonly ask: Ask }
-    /** Show this home's conversations. {@link conversations} reads the answer. */
-    | { readonly kind: 'conversations'; readonly ask: Ask }
-    /**
-     * Show who there is to talk to. {@link agents} reads the answer.
-     *
-     * <b>The same {@link Ask} as `agents` below, and two kinds all the same.</b>
-     * One frame answers with both kinds in one list and the `bot` flag tells
-     * them apart, so the difference is entirely in what is shown — which is the
-     * spec's whole point, and the reason a single `/agents` showing a `bot`
-     * column would have been the wrong shape. A person choosing somebody to
-     * talk to is not scanning a list for a flag.
-     */
-    | { readonly kind: 'bots'; readonly ask: Ask }
-    /** Show what there is to invoke. {@link agents} reads the answer. */
-    | { readonly kind: 'agents'; readonly ask: Ask }
-    /**
-     * Show one agent whole: what it holds, what it may delegate to, where it may
-     * reach, and what it may start.
-     *
-     * <b>The same {@link Ask} as the roster, and the name is picked out of the
-     * answer.</b> There is no frame that reads one agent — `agent.list` is the
-     * whole of what is on the wire — so a detail view is a listing read down to
-     * one row, and a name nothing answers to is said by {@code
-     * wording.describeAgent} rather than refused by a server.
-     */
-    | { readonly kind: 'agent'; readonly name: string; readonly ask: Ask }
-    /**
-     * Show what can be started here. {@link definitionsOf} reads the answer.
-     *
-     * <p>The ask carries whatever project was passed in, and nothing when there
-     * was none — the server degrades that to the boot set, and the view says
-     * which of the two it showed.
-     */
-    | { readonly kind: 'design'; readonly text: string; readonly revision?: string }
-    | { readonly kind: 'orchestrations'; readonly ask: Ask }
-    /** Show one definition whole, its stages one per line. Read off the same listing. */
-    | { readonly kind: 'orchestration'; readonly name: string; readonly ask: Ask }
-    /** Show this account's orchestration runs. {@link runsOf} reads the answer. */
-    | { readonly kind: 'runs'; readonly ask: Ask }
-    /** Show one run: its stages, its messages and its children. {@link runStatusOf} reads it. */
-    | { readonly kind: 'run'; readonly id: string; readonly ask: Ask }
-    /** Follow one run's tree — the one named, or the newest live one. The view reads it. */
-    | { readonly kind: 'watch'; readonly run?: string }
-    /**
-     * Settle one run's question, in the person's own words.
-     *
-     * <b>The answer is carried whole and unedited.</b> Everything after the id is
-     * the answer, spaces and all — a conductor asked a question and this is the
-     * one place in the client where what a person types goes to a model without
-     * anything in between reading it.
-     */
-    /** `/always`: this project's runs start commands without asking, or — `off` — ask again. */
-    | { readonly kind: 'always'; readonly on: boolean }
-    /** `/cap`: this project's caps, each with the source that set it. */
-    | { readonly kind: 'cap' }
-    /** `/cap steps|budget|auto|time|checks N`, or `/always caps`: one cap, written to the project's file. */
-    | { readonly kind: 'capSet'; readonly key: CapKey; readonly value: number }
-    | { readonly kind: 'answerApproval'; readonly id: string; readonly decision: Decision;
-        readonly ask: Ask }
-    | { readonly kind: 'answerRun'; readonly id: string; readonly answer: string;
-        readonly ask: Ask }
-    /** Stop one run, and with it every descendant it started. */
-    | { readonly kind: 'cancelRun'; readonly id: string; readonly ask: Ask }
-    /** Show what is waiting. {@link describeInbox} in `wording.ts` reads the answer. */
-    | { readonly kind: 'inbox'; readonly ask: Ask }
-    /** Read-only board/swarm inspection; paging and refresh are owned by the view. */
-    | { readonly kind: 'board'; readonly view: 'board' | 'swarm'; readonly project?: string }
-    /**
-     * Open the explorer on a conversation's log — spec 2026-09-29 §5: `/trajectory` in the
-     * trajectory view, `/log` in the flat log view. Both read the same rows.
-     *
-     * <b>No ask.</b> With no conversation named, the one read is the one open where the person
-     * is, which {@link typed} does not hold — the view does; and the explorer reads page by page
-     * and descends into delegations, so it is the view's reads and not one frame.
-     */
-    | { readonly kind: 'trajectory'; readonly view: 'trajectory' | 'log'; readonly conversation?: string }
-    /**
-     * Go further back through the conversation on screen. <b>No ask</b>, on `trajectory`'s reason: how
-     * far back the screen already reaches is the view's to know, and {@link readingEarlier}
-     * takes it.
-     */
-    | { readonly kind: 'earlier' }
-    /** Ask Daedalus to inspect an explicit conversation, or the current one when absent. */
-    | { readonly kind: 'diagnose'; readonly conversation?: string; readonly question?: string }
-    /**
-     * What this client can do, which is the first thing anybody types.
-     *
-     * <b>No ask.</b> It is answered from `wording.describeHelp` without a round
-     * trip, which is what makes it the one command that works on a server too
-     * old, too new or too broken to answer anything else.
-     */
-    | { readonly kind: 'help' }
-    /** Refresh the selected agent's human command catalog without starting work. */
-    | { readonly kind: 'command-catalog'; readonly only: 'skill' | 'all'; readonly ask: Ask }
-    /** Make this directory a project, and root it. The name is optional. */
-    | { readonly kind: 'here'; readonly name?: string }
-    /** Move to a project that already exists, by the name a person gave it. */
-    | { readonly kind: 'project'; readonly name: string }
-    /** Stand somewhere else, and look for a project rooted there. */
-    | { readonly kind: 'cd'; readonly path: string }
-    /** `/project` or `/cd`, typed with no argument, which each needs one of. */
-    | { readonly kind: 'usage'; readonly command: string }
-    /**
-     * Show the runs waiting on a person. `held` when an answer was typed and not
-     * sent, because nothing said which run it was for.
-     */
-    | { readonly kind: 'waitingRuns'; readonly held?: true }
-    /** `/sync`, parsed into what it asked for. {@link syncAction} in `union.ts` reads it. */
-    | { readonly kind: 'sync'; readonly action: SyncAction }
-    /**
-     * List the themes, or switch to the one named. Answered by the view: a
-     * theme belongs to this terminal, so there is nothing to ask a server.
-     */
-    | { readonly kind: 'theme'; readonly name?: string }
-    /**
-     * A sentence to read into a schedule. <b>No ask</b>: the zone, the tier and
-     * the conversation are the view's, and {@link readingSchedule} takes them.
-     */
-    | { readonly kind: 'schedule'; readonly text: string }
-    /** Pause, resume or forget one schedule, and the triggers listening to it. */
-    | { readonly kind: 'managing'; readonly verb: 'pause' | 'resume' | 'forget'; readonly name: string }
-    /**
-     * The schedules and their triggers: two listings, joined by the view.
-     * `/schedule list`, or `/schedule` with nothing after it.
-     */
-    | { readonly kind: 'schedules' }
-    /** Fire one schedule's event now, found by the schedule's name. */
-    | { readonly kind: 'fire'; readonly name: string }
-    /** The last firings. {@link firingsOf} reads the answer. */
-    | { readonly kind: 'firings'; readonly ask: Ask }
-    /**
-     * The project approvals standing where a person is. <b>No ask</b>, on
-     * `log`'s reason: the frame needs a project, and a person standing in none
-     * is told so by the view rather than sent a frame naming nothing.
-     */
-    | { readonly kind: 'approvals' }
-    /** Take one standing approval back, by the id `/approvals` showed. */
-    | { readonly kind: 'revoking'; readonly id: string; readonly ask: Ask }
-    /** A slash and a word this client does not know, carried as typed. */
-    | { readonly kind: 'unknown'; readonly named: string }
+  | { readonly kind: 'messaging'; readonly command: MessageRequest }
+  | { readonly kind: 'usage-report'; readonly command: UsageCommand }
+  | { readonly kind: 'information'; readonly command: InformationCommand }
+  | { readonly kind: 'retrieval'; readonly command: RetrievalCommand }
+  | { readonly kind: 'retrieval-error'; readonly text: string }
+  /** Something to say to the agent, trimmed. */
+  | { readonly kind: 'utterance'; readonly text: string }
+  /** Show the projects. {@link projects} reads what comes back. */
+  | { readonly kind: 'projects'; readonly ask: Ask }
+  /** Show this home's conversations. {@link conversations} reads the answer. */
+  | { readonly kind: 'conversations'; readonly ask: Ask }
+  /**
+   * Show who there is to talk to. {@link agents} reads the answer.
+   *
+   * <b>The same {@link Ask} as `agents` below, and two kinds all the same.</b>
+   * One frame answers with both kinds in one list and the `bot` flag tells
+   * them apart, so the difference is entirely in what is shown — which is the
+   * spec's whole point, and the reason a single `/agents` showing a `bot`
+   * column would have been the wrong shape. A person choosing somebody to
+   * talk to is not scanning a list for a flag.
+   */
+  | { readonly kind: 'bots'; readonly ask: Ask }
+  /** Show what there is to invoke. {@link agents} reads the answer. */
+  | { readonly kind: 'agents'; readonly ask: Ask }
+  /**
+   * Show one agent whole: what it holds, what it may delegate to, where it may
+   * reach, and what it may start.
+   *
+   * <b>The same {@link Ask} as the roster, and the name is picked out of the
+   * answer.</b> There is no frame that reads one agent — `agent.list` is the
+   * whole of what is on the wire — so a detail view is a listing read down to
+   * one row, and a name nothing answers to is said by {@code
+   * wording.describeAgent} rather than refused by a server.
+   */
+  | { readonly kind: 'agent'; readonly name: string; readonly ask: Ask }
+  /**
+   * Show what can be started here. {@link definitionsOf} reads the answer.
+   *
+   * <p>The ask carries whatever project was passed in, and nothing when there
+   * was none — the server degrades that to the boot set, and the view says
+   * which of the two it showed.
+   */
+  | {
+      readonly kind: 'design';
+      readonly text: string;
+      readonly revision?: string;
+    }
+  | { readonly kind: 'orchestrations'; readonly ask: Ask }
+  /** Show one definition whole, its stages one per line. Read off the same listing. */
+  | { readonly kind: 'orchestration'; readonly name: string; readonly ask: Ask }
+  /** Show this account's orchestration runs. {@link runsOf} reads the answer. */
+  | { readonly kind: 'runs'; readonly ask: Ask }
+  /** Show one run: its stages, its messages and its children. {@link runStatusOf} reads it. */
+  | { readonly kind: 'run'; readonly id: string; readonly ask: Ask }
+  /** Follow one run's tree — the one named, or the newest live one. The view reads it. */
+  | { readonly kind: 'watch'; readonly run?: string }
+  /**
+   * Settle one run's question, in the person's own words.
+   *
+   * <b>The answer is carried whole and unedited.</b> Everything after the id is
+   * the answer, spaces and all — a conductor asked a question and this is the
+   * one place in the client where what a person types goes to a model without
+   * anything in between reading it.
+   */
+  /** `/always`: this project's runs start commands without asking, or — `off` — ask again. */
+  | { readonly kind: 'always'; readonly on: boolean }
+  /** `/cap`: this project's caps, each with the source that set it. */
+  | { readonly kind: 'cap' }
+  /** `/cap steps|budget|auto|time|checks N`, or `/always caps`: one cap, written to the project's file. */
+  | { readonly kind: 'capSet'; readonly key: CapKey; readonly value: number }
+  | {
+      readonly kind: 'answerApproval';
+      readonly id: string;
+      readonly decision: Decision;
+      readonly ask: Ask;
+    }
+  | {
+      readonly kind: 'answerRun';
+      readonly id: string;
+      readonly answer: string;
+      readonly ask: Ask;
+    }
+  /** Stop one run, and with it every descendant it started. */
+  | { readonly kind: 'cancelRun'; readonly id: string; readonly ask: Ask }
+  | { readonly kind: 'resumeRun'; readonly id: string }
+  /** Show what is waiting. {@link describeInbox} in `wording.ts` reads the answer. */
+  | { readonly kind: 'inbox'; readonly ask: Ask }
+  /** Read-only board/swarm inspection; paging and refresh are owned by the view. */
+  | {
+      readonly kind: 'board';
+      readonly view: 'board' | 'swarm';
+      readonly project?: string;
+    }
+  /**
+   * Open the explorer on a conversation's log — spec 2026-09-29 §5: `/trajectory` in the
+   * trajectory view, `/log` in the flat log view. Both read the same rows.
+   *
+   * <b>No ask.</b> With no conversation named, the one read is the one open where the person
+   * is, which {@link typed} does not hold — the view does; and the explorer reads page by page
+   * and descends into delegations, so it is the view's reads and not one frame.
+   */
+  | {
+      readonly kind: 'trajectory';
+      readonly view: 'trajectory' | 'log';
+      readonly conversation?: string;
+    }
+  /**
+   * Go further back through the conversation on screen. <b>No ask</b>, on `trajectory`'s reason: how
+   * far back the screen already reaches is the view's to know, and {@link readingEarlier}
+   * takes it.
+   */
+  | { readonly kind: 'earlier' }
+  /** Ask Daedalus to inspect an explicit conversation, or the current one when absent. */
+  | {
+      readonly kind: 'diagnose';
+      readonly conversation?: string;
+      readonly question?: string;
+    }
+  /**
+   * What this client can do, which is the first thing anybody types.
+   *
+   * <b>No ask.</b> It is answered from `wording.describeHelp` without a round
+   * trip, which is what makes it the one command that works on a server too
+   * old, too new or too broken to answer anything else.
+   */
+  | { readonly kind: 'help' }
+  /** Refresh the selected agent's human command catalog without starting work. */
+  | {
+      readonly kind: 'command-catalog';
+      readonly only: 'skill' | 'all';
+      readonly ask: Ask;
+    }
+  /** Make this directory a project, and root it. The name is optional. */
+  | { readonly kind: 'here'; readonly name?: string }
+  /** Move to a project that already exists, by the name a person gave it. */
+  | { readonly kind: 'project'; readonly name: string }
+  /** Stand somewhere else, and look for a project rooted there. */
+  | { readonly kind: 'cd'; readonly path: string }
+  /** `/project` or `/cd`, typed with no argument, which each needs one of. */
+  | { readonly kind: 'usage'; readonly command: string }
+  /**
+   * Show the runs waiting on a person. `held` when an answer was typed and not
+   * sent, because nothing said which run it was for.
+   */
+  | { readonly kind: 'waitingRuns'; readonly held?: true }
+  /** `/sync`, parsed into what it asked for. {@link syncAction} in `union.ts` reads it. */
+  | { readonly kind: 'sync'; readonly action: SyncAction }
+  /**
+   * List the themes, or switch to the one named. Answered by the view: a
+   * theme belongs to this terminal, so there is nothing to ask a server.
+   */
+  | { readonly kind: 'theme'; readonly name?: string }
+  /**
+   * A sentence to read into a schedule. <b>No ask</b>: the zone, the tier and
+   * the conversation are the view's, and {@link readingSchedule} takes them.
+   */
+  | { readonly kind: 'schedule'; readonly text: string }
+  | { readonly kind: 'schedule-file'; readonly text: string }
+  /** Pause, resume or forget one schedule, and the triggers listening to it. */
+  | {
+      readonly kind: 'managing';
+      readonly verb: 'pause' | 'resume' | 'forget';
+      readonly name: string;
+    }
+  /**
+   * The schedules and their triggers: two listings, joined by the view.
+   * `/schedule list`, or `/schedule` with nothing after it.
+   */
+  | { readonly kind: 'schedules' }
+  /** Fire one schedule's event now, found by the schedule's name. */
+  | { readonly kind: 'fire'; readonly name: string }
+  /** The last firings. {@link firingsOf} reads the answer. */
+  | { readonly kind: 'firings'; readonly ask: Ask }
+  /**
+   * The project approvals standing where a person is. <b>No ask</b>, on
+   * `log`'s reason: the frame needs a project, and a person standing in none
+   * is told so by the view rather than sent a frame naming nothing.
+   */
+  | { readonly kind: 'approvals' }
+  /** Take one standing approval back, by the id `/approvals` showed. */
+  | { readonly kind: 'revoking'; readonly id: string; readonly ask: Ask }
+  /** A slash and a word this client does not know, carried as typed. */
+  | { readonly kind: 'unknown'; readonly named: string };
 
 /**
  * Who is going to answer, decided out of the roster and whatever was named.
@@ -973,44 +1201,52 @@ export type Typed =
  * `wording.describeChoice` has an arm for each.
  */
 export type Chosen =
-    /**
-     * Somebody will answer.
-     *
-     * @see Agent.bot for why the kind still matters here — an agent answers,
-     *     and a person is told once that it is not a conversation
-     */
-    | {
-        readonly kind: 'answering'
-        readonly agent: Agent
-        /** Whether a person named this, or this client found it on its own. */
-        readonly asked: boolean
-        /** Whether the tier's `bots/default` chose this one. */
-        readonly preferred: boolean
+  /**
+   * Somebody will answer.
+   *
+   * @see Agent.bot for why the kind still matters here — an agent answers,
+   *     and a person is told once that it is not a conversation
+   */
+  | {
+      readonly kind: 'answering';
+      readonly agent: Agent;
+      /** Whether a person named this, or this client found it on its own. */
+      readonly asked: boolean;
+      /** Whether the tier's `bots/default` chose this one. */
+      readonly preferred: boolean;
     }
-    /** A name was given and this server declares nothing by it. */
-    | {
-        readonly kind: 'unknown'
-        readonly asked: string
-        /** What would have worked — never the refused, which would not. */
-        readonly served: readonly Agent[]
+  /** A name was given and this server declares nothing by it. */
+  | {
+      readonly kind: 'unknown';
+      readonly asked: string;
+      /** What would have worked — never the refused, which would not. */
+      readonly served: readonly Agent[];
     }
-    /** A name was given, and this server read that definition and refused it. */
-    | { readonly kind: 'refused'; readonly asked: string; readonly why: readonly string[] }
-    /**
-     * The tier names a default bot, and that name cannot answer — absent, refused,
-     * or an agent rather than a bot. Its own arm and not `refused`, because nobody
-     * asked for it by name, and not `none`, because the tier did say.
-     */
-    | { readonly kind: 'unmet'; readonly named: string; readonly why: readonly string[] }
-    /**
-     * Nobody was named and this deployment serves nothing at all — no bot and no
-     * agent.
-     *
-     * @param unreadable the definitions this server read and refused, which is
-     *     what tells "nothing is defined" from "the only thing defined would not
-     *     parse"
-     */
-    | { readonly kind: 'none'; readonly unreadable: readonly Agent[] }
+  /** A name was given, and this server read that definition and refused it. */
+  | {
+      readonly kind: 'refused';
+      readonly asked: string;
+      readonly why: readonly string[];
+    }
+  /**
+   * The tier names a default bot, and that name cannot answer — absent, refused,
+   * or an agent rather than a bot. Its own arm and not `refused`, because nobody
+   * asked for it by name, and not `none`, because the tier did say.
+   */
+  | {
+      readonly kind: 'unmet';
+      readonly named: string;
+      readonly why: readonly string[];
+    }
+  /**
+   * Nobody was named and this deployment serves nothing at all — no bot and no
+   * agent.
+   *
+   * @param unreadable the definitions this server read and refused, which is
+   *     what tells "nothing is defined" from "the only thing defined would not
+   *     parse"
+   */
+  | { readonly kind: 'none'; readonly unreadable: readonly Agent[] };
 
 /**
  * One turn in flight: everything known about it so far, in any order.
@@ -1020,38 +1256,38 @@ export type Chosen =
  * readline loop and a window.
  */
 export interface Turn {
-    /** The frame that starts it. The view sends this and folds the answer back. */
-    readonly ask: Ask
+  /** The frame that starts it. The view sends this and folds the answer back. */
+  readonly ask: Ask;
 
-    /** The handle, once the `ACCEPTED` has arrived. */
-    readonly job?: string
+  /** The handle, once the `ACCEPTED` has arrived. */
+  readonly job?: string;
 
-    /** This job's events, in arrival order. */
-    readonly progress: readonly Progress[]
+  /** This job's events, in arrival order. */
+  readonly progress: readonly Progress[];
 
-    /**
-     * Events seen before the handle was known.
-     *
-     * <b>The holding area the interleaving contract needs.</b> Several jobs may
-     * be running on one socket — `JobEvent.job` exists for exactly that — so
-     * before the handle arrives an event cannot be attributed, and dropping it
-     * would lose the whole of a fast run. {@link answering} empties this.
-     */
-    readonly held: readonly Progress[]
+  /**
+   * Events seen before the handle was known.
+   *
+   * <b>The holding area the interleaving contract needs.</b> Several jobs may
+   * be running on one socket — `JobEvent.job` exists for exactly that — so
+   * before the handle arrives an event cannot be attributed, and dropping it
+   * would lose the whole of a fast run. {@link answering} empties this.
+   */
+  readonly held: readonly Progress[];
 
-    /** The ending event for this job, once it has been seen. */
-    readonly stopped?: Stopped
+  /** The ending event for this job, once it has been seen. */
+  readonly stopped?: Stopped;
 
-    /** Why there will be no run: the server's sentence, or this client's. */
-    readonly refused?: string
+  /** Why there will be no run: the server's sentence, or this client's. */
+  readonly refused?: string;
 }
 
 /** Every row of an answer that is an `OK` carrying a list, or nothing. */
 function rowsOf(answer: Answer): unknown[] | undefined {
-    if (answer.code !== OK || !Array.isArray(answer.payload)) {
-        return undefined
-    }
-    return answer.payload as unknown[]
+  if (answer.code !== OK || !isList(answer.payload)) {
+    return undefined;
+  }
+  return answer.payload;
 }
 
 /**
@@ -1063,9 +1299,14 @@ function rowsOf(answer: Answer): unknown[] | undefined {
  * keeps what it can read because every caller here would rather show four tools
  * than drop the agent.
  */
-function sentencesAt(fields: Record<string, unknown>, name: string): readonly string[] {
-    const found = fields[name]
-    return Array.isArray(found) ? found.filter((said): said is string => typeof said === 'string') : []
+function sentencesAt(
+  fields: Record<string, unknown>,
+  name: string,
+): readonly string[] {
+  const found = fields[name];
+  return isList(found)
+    ? found.filter((said): said is string => typeof said === 'string')
+    : [];
 }
 
 /**
@@ -1130,45 +1371,55 @@ function sentencesAt(fields: Record<string, unknown>, name: string): readonly st
  *     having set it
  */
 export function whoAnswers(rows: readonly Agent[], named?: string): Chosen {
-    const asked = (named ?? '').trim()
-    if (asked !== '') {
-        const found = rows.find((row) => row.name === asked)
-        if (found === undefined) {
-            return { kind: 'unknown', asked, served: rows.filter((row) => row.served) }
-        }
-        if (!found.served) {
-            return { kind: 'refused', asked, why: found.withheld }
-        }
-        return { kind: 'answering', agent: found, asked: true, preferred: false }
+  const asked = (named ?? '').trim();
+  if (asked !== '') {
+    const found = rows.find((row) => row.name === asked);
+    if (found === undefined) {
+      return {
+        kind: 'unknown',
+        asked,
+        served: rows.filter((row) => row.served),
+      };
     }
-    // THE TIER'S OWN CHOICE, BEFORE THIS CLIENT'S FALLBACK. A project whose
-    // bots/default names somebody is saying who answers here; counting bots
-    // instead would hand the person a character the project did not choose, and
-    // quietly so when the named one is missing. So an unmet default is said, and
-    // the "only bot" rule below is never reached for a tier that named one.
-    const preferred = rows.find((row) => row.preferred)
-    if (preferred !== undefined) {
-        if (preferred.served && preferred.bot) {
-            return { kind: 'answering', agent: preferred, asked: false, preferred: true }
-        }
-        return {
-            kind: 'unmet', named: preferred.name,
-            why: preferred.served
-                ? [`${preferred.name} is an agent rather than a bot`]
-                : preferred.withheld,
-        }
+    if (!found.served) {
+      return { kind: 'refused', asked, why: found.withheld };
     }
-    // NO DEFAULT, SO THE FIRST AVAILABLE ANSWERS (ruling 15). A bot before an
-    // agent, because a bot is somebody to talk to; an agent before nothing,
-    // because a tier that serves only agents still serves something. "First" is
-    // the server's listing order, which it sorts by name, so the same tier
-    // answers with the same one every time.
-    const served = rows.filter((row) => row.served)
-    const first = served.find((row) => row.bot) ?? served[0]
-    if (first !== undefined) {
-        return { kind: 'answering', agent: first, asked: false, preferred: false }
+    return { kind: 'answering', agent: found, asked: true, preferred: false };
+  }
+  // THE TIER'S OWN CHOICE, BEFORE THIS CLIENT'S FALLBACK. A project whose
+  // bots/default names somebody is saying who answers here; counting bots
+  // instead would hand the person a character the project did not choose, and
+  // quietly so when the named one is missing. So an unmet default is said, and
+  // the "only bot" rule below is never reached for a tier that named one.
+  const preferred = rows.find((row) => row.preferred);
+  if (preferred !== undefined) {
+    if (preferred.served && preferred.bot) {
+      return {
+        kind: 'answering',
+        agent: preferred,
+        asked: false,
+        preferred: true,
+      };
     }
-    return { kind: 'none', unreadable: rows.filter((row) => !row.served) }
+    return {
+      kind: 'unmet',
+      named: preferred.name,
+      why: preferred.served
+        ? [`${preferred.name} is an agent rather than a bot`]
+        : preferred.withheld,
+    };
+  }
+  // NO DEFAULT, SO THE FIRST AVAILABLE ANSWERS (ruling 15). A bot before an
+  // agent, because a bot is somebody to talk to; an agent before nothing,
+  // because a tier that serves only agents still serves something. "First" is
+  // the server's listing order, which it sorts by name, so the same tier
+  // answers with the same one every time.
+  const served = rows.filter((row) => row.served);
+  const first = served.find((row) => row.bot) ?? served[0];
+  if (first !== undefined) {
+    return { kind: 'answering', agent: first, asked: false, preferred: false };
+  }
+  return { kind: 'none', unreadable: rows.filter((row) => !row.served) };
 }
 
 /**
@@ -1195,196 +1446,332 @@ export function whoAnswers(rows: readonly Agent[], named?: string): Chosen {
  * @param project the home a listing is asked for, when one is named. Carried
  *     rather than read from anywhere, because this module knows no environment
  */
-const ADMIN_USAGE = 'Use /admin status|accounts|account create|account update|account reset|sessions|session revoke|audit|pricing list|pricing set|service accounts|service account create|service account update|service tokens|service token create|service token rotate|service token revoke. Service token creation needs handle, name and scopes [{project,role}]; expiresInDays defaults to 30 (1–365). Account operations and session reads take a JSON payload with handle; audit accepts handle, before and limit. Pricing set needs billingRoute, model, expectedVersion from pricing list, mode and decimal-string rates in a JSON payload.'
+const ADMIN_USAGE =
+  'Use /admin status|accounts|account create|account update|account reset|sessions|session revoke|audit|pricing list|pricing set|service accounts|service account create|service account update|service tokens|service token create|service token rotate|service token revoke. Service token creation needs handle, name and scopes [{project,role}]; expiresInDays defaults to 30 (1–365). Account operations and session reads take a JSON payload with handle; audit accepts handle, before and limit. Pricing set needs billingRoute, model, expectedVersion from pricing list, mode and decimal-string rates in a JSON payload.';
 
 /** Server management keeps /project NAME as local navigation. */
 export function serverCommand(line: string, project?: string) {
-    const text = line.trim()
-    if (text === '/admin') return {kind:'usage' as const,said:ADMIN_USAGE}
-    if (!/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(text)) return { kind: 'unhandled' as const }
-    return parseCommand(text.slice(1), project)
+  const text = line.trim();
+  if (text === '/admin') return { kind: 'usage' as const, said: ADMIN_USAGE };
+  if (
+    !/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
+      text,
+    )
+  )
+    return { kind: 'unhandled' as const };
+  return parseCommand(text.slice(1), project);
 }
 
-export function typed(line: string, project?: string, waiting: readonly string[] = [], usageContext: {conversation?: string;agent?: string} = {}): Typed {
-    const text = line.trim()
-    if (text === '/admin') return {kind:'retrieval-error',text:ADMIN_USAGE}
-    // Qualified server commands travel unchanged through the ordinary conversation transport.
-    if (/^\/(skill|orchestration):[^\s]+(?:\s|$)/u.test(text)) return { kind: 'utterance', text: line }
-    if (text === HELP_COMMAND) {
-        return { kind: 'help' }
+export function typed(
+  line: string,
+  project?: string,
+  waiting: readonly string[] = [],
+  usageContext: { conversation?: string; agent?: string } = {},
+): Typed {
+  const text = line.trim();
+  if (text === '/admin') return { kind: 'retrieval-error', text: ADMIN_USAGE };
+  // Qualified server commands travel unchanged through the ordinary conversation transport.
+  if (/^\/(skill|orchestration):[^\s]+(?:\s|$)/u.test(text))
+    return { kind: 'utterance', text: line };
+  if (text === HELP_COMMAND) {
+    return { kind: 'help' };
+  }
+  if (text === '/commands' || text === '/skills') {
+    return {
+      kind: 'command-catalog',
+      only: text === '/skills' ? 'skill' : 'all',
+      ask: listingAgents(project),
+    };
+  }
+  if (text === THEME_COMMAND) {
+    return { kind: 'theme' };
+  }
+  if (text.startsWith(`${THEME_COMMAND} `)) {
+    return { kind: 'theme', name: text.slice(THEME_COMMAND.length).trim() };
+  }
+  if (text === PROJECTS_COMMAND) {
+    return { kind: 'projects', ask: listingProjects() };
+  }
+  if (text === CONVERSATIONS_COMMAND) {
+    return { kind: 'conversations', ask: listingConversations(project) };
+  }
+  if (text === BOTS_COMMAND) {
+    return { kind: 'bots', ask: listingAgents(project) };
+  }
+  if (text === INBOX_COMMAND) {
+    return { kind: 'inbox', ask: listingInbox() };
+  }
+  if (text === EARLIER_COMMAND) {
+    return { kind: 'earlier' };
+  }
+  if (text === FIRINGS_COMMAND) {
+    return { kind: 'firings', ask: listingFirings() };
+  }
+  // THE COMMANDS THAT TAKE AN ARGUMENT, READ BEFORE THE BARE-SLASH CHECK
+  // BELOW SO THAT `/here`, `/project` and `/cd` do not fall through to
+  // `unknown` for carrying one. `word` is compared and not `text`, which is
+  // what keeps `/projects` — a whole command of its own — from being read as
+  // `/project` with a stray `s` glued to the front of its argument.
+  const [word = '', ...rest] = text.split(/\s+/);
+  const argument = rest.length === 0 ? '' : text.slice(word.length).trim();
+  if (word === '/message') {
+    const parsed = parseCommand(text.slice(1), project);
+    if (parsed.kind === 'request' && parsed.request.type.startsWith('message.'))
+      return { kind: 'messaging', command: parsed.request };
+    return {
+      kind: 'retrieval-error',
+      text:
+        parsed.kind === 'usage'
+          ? parsed.said
+          : 'Use /message instances|instance|open|default|stop|archive|deliveries|delivery|cancel with a JSON payload or address.',
+    };
+  }
+  // Direct operation grammar is shared by headless adapters and interpreted at the view edge.
+  if (
+    text.startsWith('/memory navigate ') &&
+    !text.slice('/memory navigate '.length).trim().startsWith('{')
+  ) {
+    try {
+      return {
+        kind: 'retrieval',
+        command: retrievalCommand(retrievalWords(text.slice(1)), project),
+      };
+    } catch (failure) {
+      return {
+        kind: 'retrieval-error',
+        text:
+          failure instanceof Error ? failure.message : errorMessage(failure),
+      };
     }
-    if (text === '/commands' || text === '/skills') {
-        return { kind: 'command-catalog', only: text === '/skills' ? 'skill' : 'all', ask: listingAgents(project) }
+  }
+  if ([MEMORY_COMMAND, SEARCH_COMMAND, JOB_COMMAND].includes(word))
+    return { kind: 'usage', command: word };
+  // THE ROSTER AND THE TWO ORCHESTRATION SCREENS, EACH A LISTING THAT NARROWS
+  // TO ONE ROW. `/bots` is not here: a bot's detail is the conversation you
+  // have with it, and `/agents <name>` is where a capability list belongs.
+  if (word === '/usage') {
+    try {
+      return {
+        kind: 'usage-report',
+        command: usageCommand(retrievalWords(text.slice(1)), {
+          ...(project ? { project } : {}),
+          ...usageContext,
+        }),
+      };
+    } catch (failure) {
+      return {
+        kind: 'retrieval-error',
+        text:
+          failure instanceof Error ? failure.message : errorMessage(failure),
+      };
     }
-    if (text === THEME_COMMAND) {
-        return { kind: 'theme' }
+  }
+  if (word === '/information') {
+    try {
+      return {
+        kind: 'information',
+        command: informationCommand(text.slice(1), project),
+      };
+    } catch (failure) {
+      return {
+        kind: 'retrieval-error',
+        text:
+          failure instanceof Error ? failure.message : errorMessage(failure),
+      };
     }
-    if (text.startsWith(`${THEME_COMMAND} `)) {
-        return { kind: 'theme', name: text.slice(THEME_COMMAND.length).trim() }
+  }
+  if (word === '/conversation' || word === '/memory') {
+    try {
+      return {
+        kind: 'retrieval',
+        command: retrievalCommand(retrievalWords(text.slice(1)), project),
+      };
+    } catch (failure) {
+      return {
+        kind: 'retrieval-error',
+        text:
+          failure instanceof Error ? failure.message : errorMessage(failure),
+      };
     }
-    if (text === PROJECTS_COMMAND) {
-        return { kind: 'projects', ask: listingProjects() }
-    }
-    if (text === CONVERSATIONS_COMMAND) {
-        return { kind: 'conversations', ask: listingConversations(project) }
-    }
-    if (text === BOTS_COMMAND) {
-        return { kind: 'bots', ask: listingAgents(project) }
-    }
-    if (text === INBOX_COMMAND) {
-        return { kind: 'inbox', ask: listingInbox() }
-    }
-    if (text === EARLIER_COMMAND) {
-        return { kind: 'earlier' }
-    }
-    if (text === FIRINGS_COMMAND) {
-        return { kind: 'firings', ask: listingFirings() }
-    }
-    // THE COMMANDS THAT TAKE AN ARGUMENT, READ BEFORE THE BARE-SLASH CHECK
-    // BELOW SO THAT `/here`, `/project` and `/cd` do not fall through to
-    // `unknown` for carrying one. `word` is compared and not `text`, which is
-    // what keeps `/projects` — a whole command of its own — from being read as
-    // `/project` with a stray `s` glued to the front of its argument.
-    const [word = '', ...rest] = text.split(/\s+/)
-    const argument = rest.length === 0 ? '' : text.slice(word.length).trim()
-    if (word === '/message') {
-        const parsed = parseCommand(text.slice(1), project)
-        if (parsed.kind === 'request' && parsed.request.type.startsWith('message.')) return { kind: 'messaging', command: parsed.request }
-        return { kind: 'retrieval-error', text: parsed.kind === 'usage' ? parsed.said : 'Use /message instances|instance|open|default|stop|archive|deliveries|delivery|cancel with a JSON payload or address.' }
-    }
-    // Direct operation grammar is shared by headless adapters and interpreted at the view edge.
-    if (text.startsWith('/memory navigate ') && !text.slice('/memory navigate '.length).trim().startsWith('{')) {
-        try { return { kind: 'retrieval', command: retrievalCommand(retrievalWords(text.slice(1)), project) } }
-        catch (failure) { return { kind: 'retrieval-error', text: failure instanceof Error ? failure.message : String(failure) } }
-    }
-    if ([MEMORY_COMMAND, SEARCH_COMMAND, JOB_COMMAND].includes(word)) return { kind: 'usage', command: word }
-    // THE ROSTER AND THE TWO ORCHESTRATION SCREENS, EACH A LISTING THAT NARROWS
-    // TO ONE ROW. `/bots` is not here: a bot's detail is the conversation you
-    // have with it, and `/agents <name>` is where a capability list belongs.
-    if (word === '/usage') {
-        try { return {kind:'usage-report',command:usageCommand(retrievalWords(text.slice(1)), {...(project?{project}:{}),...usageContext})} }
-        catch(failure) {return {kind:'retrieval-error',text:failure instanceof Error?failure.message:String(failure)}}
-    }
-    if (word === '/information') {
-        try { return { kind: 'information', command: informationCommand(text.slice(1), project) } }
-        catch (failure) { return { kind: 'retrieval-error', text: failure instanceof Error ? failure.message : String(failure) } }
-    }
-    if (word === '/conversation' || word === '/memory') {
-        try { return { kind: 'retrieval', command: retrievalCommand(retrievalWords(text.slice(1)), project) } }
-        catch (failure) { return { kind: 'retrieval-error', text: failure instanceof Error ? failure.message : String(failure) } }
-    }
-    if (word === AGENTS_COMMAND) {
-        return narrowed(argument, AGENTS_COMMAND,
-            (name) => ({ kind: 'agent', name, ask: listingAgents(project) }),
-            () => ({ kind: 'agents', ask: listingAgents(project) }))
-    }
-    if (word === '/design-orchestration') {
-        if (!argument) return { kind: 'usage', command: word }
-        const revise = /^--revise\s+([a-z][a-z0-9_]*)\s+([\s\S]+)$/.exec(argument)
-        if (argument.startsWith('--revise') && !revise) return { kind: 'usage', command: word }
-        return { kind: 'design', text: revise?.[2] ?? argument, ...(revise ? { revision: revise[1] } : {}) }
-    }
-    if (word === ORCHESTRATIONS_COMMAND) {
-        return narrowed(argument, ORCHESTRATIONS_COMMAND,
-            (name) => ({ kind: 'orchestration', name, ask: listingDefinitions(project) }),
-            () => ({ kind: 'orchestrations', ask: listingDefinitions(project) }))
-    }
-    if (word === BOARD_COMMAND || word === SWARM_COMMAND) {
-        const view = word === BOARD_COMMAND ? 'board' : 'swarm'
-        const scope = argument || project
-        return { kind: 'board', view, ...(scope === undefined || scope === '' ? {} : { project: scope }) }
-    }
-    if (word === RUNS_COMMAND) {
-        return narrowed(argument, RUNS_COMMAND,
-            (id) => ({ kind: 'run', id, ask: readingRun(id) }),
-            () => ({ kind: 'runs', ask: listingRuns() }))
-    }
-    if (word === LOG_COMMAND || word === TRAJECTORY_COMMAND) {
-        const view = word === LOG_COMMAND ? 'log' : 'trajectory'
-        return narrowed(argument, word,
-            (conversation) => ({ kind: 'trajectory', view, conversation }),
-            () => ({ kind: 'trajectory', view }))
-    }
-    if (word === WATCH_COMMAND) {
-        return narrowed(argument, WATCH_COMMAND,
-            (run) => ({ kind: 'watch', run }),
-            () => ({ kind: 'watch' }))
-    }
-    if (word === ANSWER_COMMAND) {
-        return answeringOne(argument, waiting)
-    }
-    if (word === ALWAYS_COMMAND) {
-        return argument === '' ? { kind: 'always', on: true }
-            : argument === 'off' ? { kind: 'always', on: false }
-                : argument === 'caps' ? { kind: 'capSet', key: 'auto-continue', value: ALWAYS_CAPS }
-                    : { kind: 'usage', command: ALWAYS_COMMAND }
-    }
-    if (word === CAP_COMMAND) {
-        return capping(argument)
-    }
-    if (word === CANCEL_COMMAND) {
-        return argument === '' || /\s/.test(argument)
-            ? { kind: 'usage', command: CANCEL_COMMAND }
-            : { kind: 'cancelRun', id: argument, ask: cancellingRun(argument) }
-    }
-    if (word === DIAGNOSE_COMMAND) {
-        return diagnosis(argument)
-    }
-    if (word === HERE_COMMAND) {
-        return argument === '' ? { kind: 'here' } : { kind: 'here', name: argument }
-    }
-    if (word === PROJECT_COMMAND) {
-        return argument === ''
-            ? { kind: 'usage', command: PROJECT_COMMAND }
-            : { kind: 'project', name: argument }
-    }
-    if (word === CD_COMMAND) {
-        return argument === ''
-            ? { kind: 'usage', command: CD_COMMAND }
-            : { kind: 'cd', path: argument }
-    }
-    if (word === FIRE_COMMAND) {
-        return argument === ''
-            ? { kind: 'usage', command: FIRE_COMMAND }
-            : { kind: 'fire', name: argument }
-    }
-    if (word === SCHEDULE_COMMAND) {
-        return scheduling(argument)
-    }
-    if (word === APPROVALS_COMMAND) {
-        return approving(argument)
-    }
-    if (word === SYNC_COMMAND) {
-        const action = syncAction(argument)
-        return action === undefined ? { kind: 'usage', command: SYNC_COMMAND } : { kind: 'sync', action }
-    }
-    if (text.startsWith('/')) {
-        return { kind: 'unknown', named: text }
-    }
-    return { kind: 'utterance', text }
+  }
+  if (word === AGENTS_COMMAND) {
+    return narrowed(
+      argument,
+      AGENTS_COMMAND,
+      (name) => ({ kind: 'agent', name, ask: listingAgents(project) }),
+      () => ({ kind: 'agents', ask: listingAgents(project) }),
+    );
+  }
+  if (word === '/design-orchestration') {
+    if (!argument) return { kind: 'usage', command: word };
+    const revise = /^--revise\s+([a-z][a-z0-9_]*)\s+([\s\S]+)$/.exec(argument);
+    if (argument.startsWith('--revise') && !revise)
+      return { kind: 'usage', command: word };
+    return {
+      kind: 'design',
+      text: revise?.[2] ?? argument,
+      ...(revise ? { revision: revise[1] } : {}),
+    };
+  }
+  if (word === ORCHESTRATIONS_COMMAND) {
+    return narrowed(
+      argument,
+      ORCHESTRATIONS_COMMAND,
+      (name) => ({
+        kind: 'orchestration',
+        name,
+        ask: listingDefinitions(project),
+      }),
+      () => ({ kind: 'orchestrations', ask: listingDefinitions(project) }),
+    );
+  }
+  if (word === BOARD_COMMAND || word === SWARM_COMMAND) {
+    const view = word === BOARD_COMMAND ? 'board' : 'swarm';
+    const scope = argument || project;
+    return {
+      kind: 'board',
+      view,
+      ...(scope === undefined || scope === '' ? {} : { project: scope }),
+    };
+  }
+  if (word === RUNS_COMMAND) {
+    return narrowed(
+      argument,
+      RUNS_COMMAND,
+      (id) => ({ kind: 'run', id, ask: readingRun(id) }),
+      () => ({ kind: 'runs', ask: listingRuns() }),
+    );
+  }
+  if (word === LOG_COMMAND || word === TRAJECTORY_COMMAND) {
+    const view = word === LOG_COMMAND ? 'log' : 'trajectory';
+    return narrowed(
+      argument,
+      word,
+      (conversation) => ({ kind: 'trajectory', view, conversation }),
+      () => ({ kind: 'trajectory', view }),
+    );
+  }
+  if (word === WATCH_COMMAND) {
+    return narrowed(
+      argument,
+      WATCH_COMMAND,
+      (run) => ({ kind: 'watch', run }),
+      () => ({ kind: 'watch' }),
+    );
+  }
+  if (word === ANSWER_COMMAND) {
+    return answeringOne(argument, waiting);
+  }
+  if (word === ALWAYS_COMMAND) {
+    return argument === ''
+      ? { kind: 'always', on: true }
+      : argument === 'off'
+        ? { kind: 'always', on: false }
+        : argument === 'caps'
+          ? { kind: 'capSet', key: 'auto-continue', value: ALWAYS_CAPS }
+          : { kind: 'usage', command: ALWAYS_COMMAND };
+  }
+  if (word === CAP_COMMAND) {
+    return capping(argument);
+  }
+  if (word === '/resume' || word === '/retry') {
+    return argument === '' || /\s/.test(argument)
+      ? { kind: 'usage', command: word }
+      : { kind: 'resumeRun', id: argument };
+  }
+  if (word === CANCEL_COMMAND) {
+    return argument === '' || /\s/.test(argument)
+      ? { kind: 'usage', command: CANCEL_COMMAND }
+      : { kind: 'cancelRun', id: argument, ask: cancellingRun(argument) };
+  }
+  if (word === DIAGNOSE_COMMAND) {
+    return diagnosis(argument);
+  }
+  if (word === HERE_COMMAND) {
+    return argument === ''
+      ? { kind: 'here' }
+      : { kind: 'here', name: argument };
+  }
+  if (word === PROJECT_COMMAND) {
+    return argument === ''
+      ? { kind: 'usage', command: PROJECT_COMMAND }
+      : { kind: 'project', name: argument };
+  }
+  if (word === CD_COMMAND) {
+    return argument === ''
+      ? { kind: 'usage', command: CD_COMMAND }
+      : { kind: 'cd', path: argument };
+  }
+  if (word === FIRE_COMMAND) {
+    return argument === ''
+      ? { kind: 'usage', command: FIRE_COMMAND }
+      : { kind: 'fire', name: argument };
+  }
+  if (word === SCHEDULE_COMMAND) {
+    return scheduling(argument);
+  }
+  if (word === APPROVALS_COMMAND) {
+    return approving(argument);
+  }
+  if (word === SYNC_COMMAND) {
+    const action = syncAction(argument);
+    return action === undefined
+      ? { kind: 'usage', command: SYNC_COMMAND }
+      : { kind: 'sync', action };
+  }
+  if (text.startsWith('/')) {
+    return { kind: 'unknown', named: text };
+  }
+  return { kind: 'utterance', text };
 }
 
 /**
  * A `caps:` setting `/cap` writes — `environment.ts`'s `CAP_KEYS`, spelled here rather than
  * imported, since this file is the parser's and the binding is the file's.
  */
-export type CapKey = 'steps' | 'budget' | 'auto-continue' | 'time' | 'failed-checks' | 'auto-increase'
+export type CapKey =
+  | 'steps'
+  | 'budget'
+  | 'auto-continue'
+  | 'time'
+  | 'failed-checks'
+  | 'auto-increase';
 
 /** `/cap`, `/cap steps N`, `/cap budget N`, `/cap auto N`, `/cap time N`, `/cap checks N`. */
 function capping(argument: string): Typed {
-    if (argument === '') {
-        return { kind: 'cap' }
-    }
-    const [what, amount, ...rest] = argument.split(/\s+/)
-    if (what === 'auto-increase' && rest.length === 0 && (amount === 'on' || amount === 'off'))
-        return { kind: 'capSet', key: 'auto-increase', value: amount === 'on' ? 1 : 0 }
-    const key: CapKey | undefined = what === 'steps' ? 'steps' : what === 'budget' ? 'budget'
-        : what === 'auto' ? 'auto-continue' : what === 'time' ? 'time'
-            : what === 'checks' ? 'failed-checks' : undefined
-    const value = amount !== undefined && /^[0-9]{1,7}$/.test(amount) ? Number(amount) : undefined
-    return key === undefined || value === undefined || rest.length > 0
-        ? { kind: 'usage', command: CAP_COMMAND }
-        : { kind: 'capSet', key, value }
+  if (argument === '') {
+    return { kind: 'cap' };
+  }
+  const [what, amount, ...rest] = argument.split(/\s+/);
+  if (
+    what === 'auto-increase' &&
+    rest.length === 0 &&
+    (amount === 'on' || amount === 'off')
+  )
+    return {
+      kind: 'capSet',
+      key: 'auto-increase',
+      value: amount === 'on' ? 1 : 0,
+    };
+  const key: CapKey | undefined =
+    what === 'steps'
+      ? 'steps'
+      : what === 'budget'
+        ? 'budget'
+        : what === 'auto'
+          ? 'auto-continue'
+          : what === 'time'
+            ? 'time'
+            : what === 'checks'
+              ? 'failed-checks'
+              : undefined;
+  const value =
+    amount !== undefined && /^[0-9]{1,7}$/.test(amount)
+      ? Number(amount)
+      : undefined;
+  return key === undefined || value === undefined || rest.length > 0
+    ? { kind: 'usage', command: CAP_COMMAND }
+    : { kind: 'capSet', key, value };
 }
 
 /**
@@ -1399,13 +1786,19 @@ function capping(argument: string): Typed {
  * @param all what to do with none, which is the listing
  */
 function narrowed(
-        argument: string, command: string, one: (name: string) => Typed, all: () => Typed): Typed {
-    if (argument === '') {
-        return all()
-    }
-    const names = argument.split(/\s+/)
-    const [name] = names
-    return names.length === 1 && name !== undefined ? one(name) : { kind: 'usage', command }
+  argument: string,
+  command: string,
+  one: (name: string) => Typed,
+  all: () => Typed,
+): Typed {
+  if (argument === '') {
+    return all();
+  }
+  const names = argument.split(/\s+/);
+  const [name] = names;
+  return names.length === 1 && name !== undefined
+    ? one(name)
+    : { kind: 'usage', command };
 }
 
 /**
@@ -1430,40 +1823,60 @@ function narrowed(
  * @param waiting the ids of the runs the last check found waiting
  */
 function answeringOne(argument: string, waiting: readonly string[]): Typed {
-    if (argument === '') {
-        return { kind: 'waitingRuns' }
-    }
-    const split = argument.search(/\s/)
-    const first = split < 0 ? argument : argument.slice(0, split)
-    if (first.startsWith(APPROVAL_ID_PREFIX)) {
-        const decision = decisionIn(split < 0 ? '' : argument.slice(split + 1))
-        return decision === undefined
-            ? { kind: 'usage', command: ANSWER_COMMAND }
-            : { kind: 'answerApproval', id: first, decision, ask: answeringApproval(first, decision) }
-    }
-    if (first.startsWith(RUN_ID_PREFIX)) {
-        const answer = split < 0 ? '' : argument.slice(split + 1).trim()
-        return answer === ''
-            ? { kind: 'usage', command: ANSWER_COMMAND }
-            : { kind: 'answerRun', id: first, answer, ask: answeringRun(first, answer) }
-    }
-    const [only, ...others] = waiting
-    if (only === undefined || others.length > 0) {
-        return { kind: 'waitingRuns', held: true }
-    }
-    if (only.startsWith(APPROVAL_ID_PREFIX)) {
-        // An approval takes a decision and nothing else: a sentence is held rather than
-        // read as one, because "allow" is not a word to guess at.
-        const decision = decisionIn(argument)
-        return decision === undefined
-            ? { kind: 'waitingRuns', held: true }
-            : { kind: 'answerApproval', id: only, decision, ask: answeringApproval(only, decision) }
-    }
-    return { kind: 'answerRun', id: only, answer: argument, ask: answeringRun(only, argument) }
+  if (argument === '') {
+    return { kind: 'waitingRuns' };
+  }
+  const split = argument.search(/\s/);
+  const first = split < 0 ? argument : argument.slice(0, split);
+  if (first.startsWith(APPROVAL_ID_PREFIX)) {
+    const decision = decisionIn(split < 0 ? '' : argument.slice(split + 1));
+    return decision === undefined
+      ? { kind: 'usage', command: ANSWER_COMMAND }
+      : {
+          kind: 'answerApproval',
+          id: first,
+          decision,
+          ask: answeringApproval(first, decision),
+        };
+  }
+  if (first.startsWith(RUN_ID_PREFIX)) {
+    const answer = split < 0 ? '' : argument.slice(split + 1).trim();
+    return answer === ''
+      ? { kind: 'usage', command: ANSWER_COMMAND }
+      : {
+          kind: 'answerRun',
+          id: first,
+          answer,
+          ask: answeringRun(first, answer),
+        };
+  }
+  const [only, ...others] = waiting;
+  if (only === undefined || others.length > 0) {
+    return { kind: 'waitingRuns', held: true };
+  }
+  if (only.startsWith(APPROVAL_ID_PREFIX)) {
+    // An approval takes a decision and nothing else: a sentence is held rather than
+    // read as one, because "allow" is not a word to guess at.
+    const decision = decisionIn(argument);
+    return decision === undefined
+      ? { kind: 'waitingRuns', held: true }
+      : {
+          kind: 'answerApproval',
+          id: only,
+          decision,
+          ask: answeringApproval(only, decision),
+        };
+  }
+  return {
+    kind: 'answerRun',
+    id: only,
+    answer: argument,
+    ask: answeringRun(only, argument),
+  };
 }
 
 /** How every approval id starts: {@code RunApprovalStore}'s prefix. */
-export const APPROVAL_ID_PREFIX = 'apr_'
+export const APPROVAL_ID_PREFIX = 'apr_';
 
 /**
  * The decision a person typed for an approval, or nothing for anything else. `yes` and
@@ -1471,18 +1884,18 @@ export const APPROVAL_ID_PREFIX = 'apr_'
  * here, because it needs the prefix it covers, which `/approvals` is where to give.
  */
 function decisionIn(text: string): Decision | undefined {
-    switch (text.trim().toLowerCase()) {
-        case 'once':
-        case 'yes':
-            return 'once'
-        case 'conversation':
-            return 'conversation'
-        case 'deny':
-        case 'no':
-            return 'deny'
-        default:
-            return undefined
-    }
+  switch (text.trim().toLowerCase()) {
+    case 'once':
+    case 'yes':
+      return 'once';
+    case 'conversation':
+      return 'conversation';
+    case 'deny':
+    case 'no':
+      return 'deny';
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -1492,25 +1905,25 @@ function decisionIn(text: string): Decision | undefined {
  * them after trimming its edges.
  */
 function diagnosis(argument: string): Typed {
-    if (argument === '') {
-        return { kind: 'diagnose' }
-    }
-    if (argument === '--') {
-        return { kind: 'usage', command: DIAGNOSE_COMMAND }
-    }
-    const current = argument.match(/^--\s+(.+)$/s)
-    if (current !== null) {
-        return { kind: 'diagnose', question: current[1]!.trim() }
-    }
-    const named = argument.match(/^(\S+)(?:\s+--\s+(.+))?$/s)
-    if (named === null) {
-        return { kind: 'usage', command: DIAGNOSE_COMMAND }
-    }
-    const conversation = named[1]!
-    const question = named[2]?.trim()
-    return question === undefined
-        ? { kind: 'diagnose', conversation }
-        : { kind: 'diagnose', conversation, question }
+  if (argument === '') {
+    return { kind: 'diagnose' };
+  }
+  if (argument === '--') {
+    return { kind: 'usage', command: DIAGNOSE_COMMAND };
+  }
+  const current = argument.match(/^--\s+(.+)$/s);
+  if (current !== null) {
+    return { kind: 'diagnose', question: current[1]!.trim() };
+  }
+  const named = argument.match(/^(\S+)(?:\s+--\s+(.+))?$/s);
+  if (named === null) {
+    return { kind: 'usage', command: DIAGNOSE_COMMAND };
+  }
+  const conversation = named[1]!;
+  const question = named[2]?.trim();
+  return question === undefined
+    ? { kind: 'diagnose', conversation }
+    : { kind: 'diagnose', conversation, question };
 }
 
 /**
@@ -1527,17 +1940,20 @@ function diagnosis(argument: string): Typed {
  * when it has more than one word after the verb says what happened.
  */
 function scheduling(argument: string): Typed {
-    if (argument === '' || argument === 'list') {
-        return { kind: 'schedules' }
-    }
-    const [verb = '', ...names] = argument.split(/\s+/)
-    if (verb === 'pause' || verb === 'resume' || verb === 'forget') {
-        const [name] = names
-        return names.length === 1 && name !== undefined
-            ? { kind: 'managing', verb, name }
-            : { kind: 'usage', command: `${SCHEDULE_COMMAND} ${verb}` }
-    }
-    return { kind: 'schedule', text: argument }
+  if (argument === 'files' || /^(save|sync)(?:\s|$)/.test(argument))
+    return { kind: 'schedule-file', text: `schedule ${argument}` };
+
+  if (argument === '' || argument === 'list') {
+    return { kind: 'schedules' };
+  }
+  const [verb = '', ...names] = argument.split(/\s+/);
+  if (verb === 'pause' || verb === 'resume' || verb === 'forget') {
+    const [name] = names;
+    return names.length === 1 && name !== undefined
+      ? { kind: 'managing', verb, name }
+      : { kind: 'usage', command: `${SCHEDULE_COMMAND} ${verb}` };
+  }
+  return { kind: 'schedule', text: argument };
 }
 
 /**
@@ -1546,14 +1962,14 @@ function scheduling(argument: string): Typed {
  * for.
  */
 function approving(argument: string): Typed {
-    if (argument === '') {
-        return { kind: 'approvals' }
-    }
-    const [verb = '', ...ids] = argument.split(/\s+/)
-    const [id] = ids
-    return verb === 'revoke' && ids.length === 1 && id !== undefined
-        ? { kind: 'revoking', id, ask: revokingApproval(id) }
-        : { kind: 'usage', command: APPROVALS_COMMAND }
+  if (argument === '') {
+    return { kind: 'approvals' };
+  }
+  const [verb = '', ...ids] = argument.split(/\s+/);
+  const [id] = ids;
+  return verb === 'revoke' && ids.length === 1 && id !== undefined
+    ? { kind: 'revoking', id, ask: revokingApproval(id) }
+    : { kind: 'usage', command: APPROVALS_COMMAND };
 }
 
 /**
@@ -1565,11 +1981,11 @@ function approving(argument: string): Typed {
  * is written.
  */
 export interface Completion {
-    /** The characters being finished. Empty when there is nothing under Tab. */
-    readonly word: string
+  /** The characters being finished. Empty when there is nothing under Tab. */
+  readonly word: string;
 
-    /** Everything that could finish them, in the order a person reads them. */
-    readonly matches: readonly string[]
+  /** Everything that could finish them, in the order a person reads them. */
+  readonly matches: readonly string[];
 }
 
 /**
@@ -1603,14 +2019,18 @@ export interface Completion {
  *     is handed
  * @param names the served names, from {@link completable} over the roster
  */
-export function completing(line: string, names: readonly string[], commands: readonly string[] = []): Completion {
-    const word = /\S*$/.exec(line)?.[0] ?? ''
-    if (word === '') {
-        return { word, matches: [] }
-    }
-    const commanding = word.startsWith('/') && line.trimStart() === word
-    const candidates = commanding ? [...COMMANDS, ...commands] : names
-    return { word, matches: candidates.filter((each) => each.startsWith(word)) }
+export function completing(
+  line: string,
+  names: readonly string[],
+  commands: readonly string[] = [],
+): Completion {
+  const word = /\S*$/.exec(line)?.[0] ?? '';
+  if (word === '') {
+    return { word, matches: [] };
+  }
+  const commanding = word.startsWith('/') && line.trimStart() === word;
+  const candidates = commanding ? [...COMMANDS, ...commands] : names;
+  return { word, matches: candidates.filter((each) => each.startsWith(word)) };
 }
 
 /**
@@ -1625,65 +2045,76 @@ export function completing(line: string, names: readonly string[], commands: rea
  * where that name is information rather than a suggestion.
  */
 export function completable(rows: readonly Agent[]): string[] {
-    return rows.filter((row) => row.served).map((row) => row.name)
+  return rows.filter((row) => row.served).map((row) => row.name);
 }
 
 /** A turn about to be spoken: the frame to send, and nothing known yet. */
 export function taking(
-        conversation: string, agent: string, text: string, session: string): Turn {
-    return {
-        ask: speaking(conversation, agent, text, session),
-        progress: [],
-        held: [],
-    }
+  conversation: string,
+  agent: string,
+  text: string,
+  session: string,
+): Turn {
+  return {
+    ask: speaking(conversation, agent, text, session),
+    progress: [],
+    held: [],
+  };
 }
 
 /** Whether this turn is over, by an ending or by a refusal. */
 export function finished(turn: Turn): boolean {
-    return turn.stopped !== undefined || turn.refused !== undefined
+  return turn.stopped !== undefined || turn.refused !== undefined;
 }
 
 export function followed(push: unknown): Progress {
-    const event = fieldsOf(push)
-    const job = textAt(event, 'job')
-    const kind = textAt(event, 'kind')
-    if (job === undefined || kind === undefined) {
-        return { kind: 'unreadable', said: 'a frame arrived that is not a job event' }
-    }
-    const agent = textAt(event, 'agent') ?? ''
-    const steps = countAt(event, 'steps') ?? 0
-    const modelCalls = countAt(event, 'modelCalls') ?? 0
-    switch (kind) {
-        case 'started':
-            return { kind: 'started', job, agent }
-        case 'model_call':
-            return { kind: 'step', job, agent, steps, modelCalls }
-        case 'tool_called':
-            return { kind: 'tool', job, agent, tool: textAt(event, 'tool') ?? '' }
-        case 'alive':
-            return { kind: 'alive', job, agent, steps, modelCalls }
-        case 'ended':
-            return {
-                kind: 'ended', job, agent, ending: textAt(event, 'ending') ?? '',
-                steps, modelCalls,
-            }
-        default:
-            return { kind: 'other', job, named: kind }
-    }
+  const event = fieldsOf(push);
+  const job = textAt(event, 'job');
+  const kind = textAt(event, 'kind');
+  if (job === undefined || kind === undefined) {
+    return {
+      kind: 'unreadable',
+      said: 'a frame arrived that is not a job event',
+    };
+  }
+  const agent = textAt(event, 'agent') ?? '';
+  const steps = countAt(event, 'steps') ?? 0;
+  const modelCalls = countAt(event, 'modelCalls') ?? 0;
+  switch (kind) {
+    case 'started':
+      return { kind: 'started', job, agent };
+    case 'model_call':
+      return { kind: 'step', job, agent, steps, modelCalls };
+    case 'tool_called':
+      return { kind: 'tool', job, agent, tool: textAt(event, 'tool') ?? '' };
+    case 'alive':
+      return { kind: 'alive', job, agent, steps, modelCalls };
+    case 'ended':
+      return {
+        kind: 'ended',
+        job,
+        agent,
+        ending: textAt(event, 'ending') ?? '',
+        steps,
+        modelCalls,
+      };
+    default:
+      return { kind: 'other', job, named: kind };
+  }
 }
 
 /** Whether this reading belongs to a job at all, and if so to which. */
 function jobOf(seen: Progress): string | undefined {
-    return seen.kind === 'unreadable' ? undefined : seen.job
+  return seen.kind === 'unreadable' ? undefined : seen.job;
 }
 
 /** This turn with one more event folded into it, and its ending if that is it. */
 function attached(turn: Turn, seen: Progress): Turn {
-    return {
-        ...turn,
-        progress: [...turn.progress, seen],
-        ...(seen.kind === 'ended' ? { stopped: seen } : {}),
-    }
+  return {
+    ...turn,
+    progress: [...turn.progress, seen],
+    ...(seen.kind === 'ended' ? { stopped: seen } : {}),
+  };
 }
 
 /**
@@ -1701,15 +2132,15 @@ function attached(turn: Turn, seen: Progress): Turn {
  *     does not.
  */
 export function following(turn: Turn, push: unknown): Turn {
-    const seen = followed(push)
-    const job = jobOf(seen)
-    if (job === undefined) {
-        return turn
-    }
-    if (turn.job === undefined) {
-        return { ...turn, held: [...turn.held, seen] }
-    }
-    return job === turn.job ? attached(turn, seen) : turn
+  const seen = followed(push);
+  const job = jobOf(seen);
+  if (job === undefined) {
+    return turn;
+  }
+  if (turn.job === undefined) {
+    return { ...turn, held: [...turn.held, seen] };
+  }
+  return job === turn.job ? attached(turn, seen) : turn;
 }
 
 /**
@@ -1724,12 +2155,12 @@ export function following(turn: Turn, push: unknown): Turn {
  * {@link following}'s own rule rather than through a second copy of it.
  */
 export function answering(turn: Turn, answer: Answer): Turn {
-    const body = bodyOf(answer, ACCEPTED)
-    const job = body === undefined ? undefined : textAt(body, 'id')
-    if (job === undefined) {
-        return { ...turn, refused: refusedBecause(answer) }
-    }
-    return handing(turn, job)
+  const body = bodyOf(answer, ACCEPTED);
+  const job = body === undefined ? undefined : textAt(body, 'id');
+  if (job === undefined) {
+    return { ...turn, refused: refusedBecause(answer) };
+  }
+  return handing(turn, job);
 }
 
 /**
@@ -1742,10 +2173,11 @@ export function answering(turn: Turn, answer: Answer): Turn {
  * same rule.
  */
 export function handing(turn: Turn, job: string): Turn {
-    const handed: Turn = { ...turn, job, held: [] }
-    return turn.held.reduce(
-        (folded, seen) => (jobOf(seen) === job ? attached(folded, seen) : folded),
-        handed)
+  const handed: Turn = { ...turn, job, held: [] };
+  return turn.held.reduce(
+    (folded, seen) => (jobOf(seen) === job ? attached(folded, seen) : folded),
+    handed,
+  );
 }
 
 /**
@@ -1759,17 +2191,19 @@ export function handing(turn: Turn, job: string): Turn {
  * about a refusal belongs and where it is written once.
  */
 function refusedBecause(answer: Answer): string {
-    if (answer.said !== undefined) {
-        return answer.said
-    }
-    if (answer.code === ACCEPTED) {
-        return 'the run was accepted but the answer named no handle to follow it by'
-    }
-    if (answer.code === OK) {
-        return `${AGENT_RUN} answered OK where a run answers ${ACCEPTED}:`
-            + ' nothing was started, and there is no handle to follow'
-    }
-    return refusal(answer)
+  if (answer.said !== undefined) {
+    return answer.said;
+  }
+  if (answer.code === ACCEPTED) {
+    return 'the run was accepted but the answer named no handle to follow it by';
+  }
+  if (answer.code === OK) {
+    return (
+      `${AGENT_RUN} answered OK where a run answers ${ACCEPTED}:` +
+      ' nothing was started, and there is no handle to follow'
+    );
+  }
+  return refusal(answer);
 }
 
 /**
@@ -1781,25 +2215,25 @@ function refusedBecause(answer: Answer): string {
  * the history it replaces — so it is markdown for the same reason an answer is.
  */
 export interface Fold {
-    /**
-     * The last turn this summary stands for.
-     *
-     * <b>Every turn from the conversation's first through this one was folded
-     * into it, and all of them are still in the log at their own ordinals.</b> A
-     * compaction deletes nothing; what this number says is how far back the
-     * seam reaches, so that a reader knows which part of what they are looking
-     * at the agent was being shown as a summary.
-     */
-    readonly throughOrdinal: number
+  /**
+   * The last turn this summary stands for.
+   *
+   * <b>Every turn from the conversation's first through this one was folded
+   * into it, and all of them are still in the log at their own ordinals.</b> A
+   * compaction deletes nothing; what this number says is how far back the
+   * seam reaches, so that a reader knows which part of what they are looking
+   * at the agent was being shown as a summary.
+   */
+  readonly throughOrdinal: number;
 
-    readonly summary: readonly Block[]
+  readonly summary: readonly Block[];
 }
 
 /** Whether a fallback target produced this entry — the one provenance question a
  *  reader asks first, and false for a primary answer and for a row that names no
  *  model at all. */
 export function answeredByFallback(entry: Entry): boolean {
-    return entry.dispatch === 'fallback'
+  return entry.dispatch === 'fallback';
 }
 
 /**
@@ -1808,13 +2242,20 @@ export function answeredByFallback(entry: Entry): boolean {
  * that arrives live while they watch are drawn by one renderer, speaker included.
  */
 export type Logged =
-    | { readonly kind: 'person'; readonly turn: number; readonly text: string }
-    | { readonly kind: 'harness'; readonly turn: number; readonly source: string; readonly text: string }
-    | {
-        readonly kind: 'answer'; readonly turn: number; readonly body: readonly Block[]
-        readonly cut?: { readonly shown: number; readonly length: number }
+  | { readonly kind: 'person'; readonly turn: number; readonly text: string }
+  | {
+      readonly kind: 'harness';
+      readonly turn: number;
+      readonly source: string;
+      readonly text: string;
     }
-    | { readonly kind: 'seam'; readonly fold: Fold }
+  | {
+      readonly kind: 'answer';
+      readonly turn: number;
+      readonly body: readonly Block[];
+      readonly cut?: { readonly shown: number; readonly length: number };
+    }
+  | { readonly kind: 'seam'; readonly fold: Fold };
 
 /**
  * What the chat view shows of these entries, in their order: every utterance, attributed —
@@ -1824,37 +2265,58 @@ export type Logged =
  * thinking, diagnostics — stays hidden, as it is today.
  */
 export function loggedFrom(entries: readonly Entry[]): Logged[] {
-    const shown: Logged[] = []
-    for (const each of entries) {
-        const text = each.text
-        if (text === undefined) {
-            continue
-        }
-        if (each.kind === 'utterance') {
-            shown.push(each.speaker === 'harness'
-                ? { kind: 'harness', turn: each.turnOrdinal, source: each.speakerName ?? 'harness', text }
-                : { kind: 'person', turn: each.turnOrdinal, text })
-        } else if (each.kind === 'answer' && (each.asked ?? 0) === 0 && text.trim() !== '') {
-            shown.push({
-                kind: 'answer', turn: each.turnOrdinal, body: parse(text),
-                ...(each.cut === true
-                    ? { cut: { shown: [...text].length, length: each.length ?? [...text].length } }
-                    : {}),
-            })
-        } else if (each.kind === 'summary') {
-            shown.push({ kind: 'seam', fold: { throughOrdinal: each.turnOrdinal, summary: parse(text) } })
-        }
+  const shown: Logged[] = [];
+  for (const each of entries) {
+    const text = each.text;
+    if (text === undefined) {
+      continue;
     }
-    return shown
+    if (each.kind === 'utterance') {
+      shown.push(
+        each.speaker === 'harness'
+          ? {
+              kind: 'harness',
+              turn: each.turnOrdinal,
+              source: each.speakerName ?? 'harness',
+              text,
+            }
+          : { kind: 'person', turn: each.turnOrdinal, text },
+      );
+    } else if (
+      each.kind === 'answer' &&
+      (each.asked ?? 0) === 0 &&
+      text.trim() !== ''
+    ) {
+      shown.push({
+        kind: 'answer',
+        turn: each.turnOrdinal,
+        body: parse(text),
+        ...(each.cut === true
+          ? {
+              cut: {
+                shown: [...Array.from(text)].length,
+                length: each.length ?? [...Array.from(text)].length,
+              },
+            }
+          : {}),
+      });
+    } else if (each.kind === 'summary') {
+      shown.push({
+        kind: 'seam',
+        fold: { throughOrdinal: each.turnOrdinal, summary: parse(text) },
+      });
+    }
+  }
+  return shown;
 }
 
 /** A conversation's history, rebuilt from the log: what to draw, and the two counts the banner says. */
 export interface Replay {
-    readonly items: readonly Logged[]
-    /** How many turns the log holds — its latest turn's ordinal. */
-    readonly held: number
-    /** How many of them are drawn. */
-    readonly shown: number
+  readonly items: readonly Logged[];
+  /** How many turns the log holds — its latest turn's ordinal. */
+  readonly held: number;
+  /** How many of them are drawn. */
+  readonly shown: number;
 }
 
 /**
@@ -1866,20 +2328,23 @@ export interface Replay {
  * is drawn where it fell, above the turns after it.
  */
 export function replaying(entries: readonly Entry[], through: number): Replay {
-    const held = entries.filter((each) => each.ordinal <= through)
-    const items = loggedFrom(held)
-    return {
-        items,
-        held: held.reduce((latest, each) => Math.max(latest, each.turnOrdinal), 0),
-        shown: new Set(items.flatMap((item) =>
-            item.kind === 'person' || item.kind === 'harness' ? [item.turn] : [])).size,
-    }
+  const held = entries.filter((each) => each.ordinal <= through);
+  const items = loggedFrom(held);
+  return {
+    items,
+    held: held.reduce((latest, each) => Math.max(latest, each.turnOrdinal), 0),
+    shown: new Set(
+      items.flatMap((item) =>
+        item.kind === 'person' || item.kind === 'harness' ? [item.turn] : [],
+      ),
+    ).size,
+  };
 }
 
 /** What a catch-up draws, and how far down the log it leaves the screen. */
 export interface CatchUp {
-    readonly items: readonly Logged[]
-    readonly through: number
+  readonly items: readonly Logged[];
+  readonly through: number;
 }
 
 /**
@@ -1896,20 +2361,30 @@ export interface CatchUp {
  * after it down one — so the next page begins with the row the last one ended on.
  */
 export function catchingUp(
-        entries: readonly Entry[], from: number, through: number, streamed: boolean): CatchUp {
-    const seen = new Set<number>()
-    const committed = entries.filter((each) => {
-        if (each.ordinal <= from || each.ordinal > through || seen.has(each.ordinal)) {
-            return false
-        }
-        seen.add(each.ordinal)
-        return true
-    })
-    const own = streamed
-        ? committed.reduce((latest, each) => Math.max(latest, each.turnOrdinal), 0)
-        : undefined
-    return {
-        items: loggedFrom(committed.filter((each) => own === undefined || each.turnOrdinal < own)),
-        through: Math.max(from, through),
+  entries: readonly Entry[],
+  from: number,
+  through: number,
+  streamed: boolean,
+): CatchUp {
+  const seen = new Set<number>();
+  const committed = entries.filter((each) => {
+    if (
+      each.ordinal <= from ||
+      each.ordinal > through ||
+      seen.has(each.ordinal)
+    ) {
+      return false;
     }
+    seen.add(each.ordinal);
+    return true;
+  });
+  const own = streamed
+    ? committed.reduce((latest, each) => Math.max(latest, each.turnOrdinal), 0)
+    : undefined;
+  return {
+    items: loggedFrom(
+      committed.filter((each) => own === undefined || each.turnOrdinal < own),
+    ),
+    through: Math.max(from, through),
+  };
 }

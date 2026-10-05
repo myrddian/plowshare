@@ -1,4 +1,4 @@
-import type { Probe } from './system.ts'
+import type { Probe } from './system.ts';
 
 /**
  * Asking the terminal what its colours are, before Ink owns the keyboard.
@@ -27,63 +27,74 @@ import type { Probe } from './system.ts'
 
 /** A reply's colour: `rgb:R/G/B` with 1–4 hex digits a channel, or `#rrggbb`. */
 function colourOf(spelt: string): string | undefined {
-    const hash = /^#([0-9a-f]{6})$/iu.exec(spelt)
-    if (hash !== null) {
-        return `#${(hash[1] as string).toLowerCase()}`
-    }
-    const parts = /^rgba?:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})/iu.exec(spelt)
-    if (parts === null) {
-        return undefined
-    }
-    return `#${parts.slice(1, 4).map((channel) => {
-        const scaled = Math.round((Number.parseInt(channel, 16) / (16 ** channel.length - 1)) * 255)
-        return scaled.toString(16).padStart(2, '0')
-    }).join('')}`
+  const hash = /^#([0-9a-f]{6})$/iu.exec(spelt);
+  if (hash !== null) {
+    return `#${(hash[1] as string).toLowerCase()}`;
+  }
+  const parts =
+    /^rgba?:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})/iu.exec(spelt);
+  if (parts === null) {
+    return undefined;
+  }
+  return `#${parts
+    .slice(1, 4)
+    .map((channel) => {
+      const scaled = Math.round(
+        (Number.parseInt(channel, 16) / (16 ** channel.length - 1)) * 255,
+      );
+      return scaled.toString(16).padStart(2, '0');
+    })
+    .join('')}`;
 }
 
 /** Every colour reply in `data`, as a probe. Pure, so it is tested without a terminal. */
 export function parseReplies(data: string): Probe {
-    const palette: (string | undefined)[] = Array.from({ length: 16 }, () => undefined)
-    let foreground: string | undefined
-    let background: string | undefined
-    // eslint-disable-next-line no-control-regex
-    const reply = /\](\d+)(?:;(\d+))?;([^]*)(?:|\\)/gu
-    for (const found of data.matchAll(reply)) {
-        const colour = colourOf(found[3] as string)
-        if (colour === undefined) {
-            continue
-        }
-        const code = found[1]
-        if (code === '10') {
-            foreground = colour
-        } else if (code === '11') {
-            background = colour
-        } else if (code === '4' && found[2] !== undefined) {
-            const index = Number(found[2])
-            if (index < 16) {
-                palette[index] = colour
-            }
-        }
+  const palette: (string | undefined)[] = Array.from(
+    { length: 16 },
+    () => undefined,
+  );
+  let foreground: string | undefined;
+  let background: string | undefined;
+  // eslint-disable-next-line no-control-regex
+  const reply = /\](\d+)(?:;(\d+))?;([^]*)(?:|\\)/gu;
+  for (const found of data.matchAll(reply)) {
+    const colour = colourOf(found[3] as string);
+    if (colour === undefined) {
+      continue;
     }
-    return {
-        ...(foreground === undefined ? {} : { foreground }),
-        ...(background === undefined ? {} : { background }),
-        palette,
+    const code = found[1];
+    if (code === '10') {
+      foreground = colour;
+    } else if (code === '11') {
+      background = colour;
+    } else if (code === '4' && found[2] !== undefined) {
+      const index = Number(found[2]);
+      if (index < 16) {
+        palette[index] = colour;
+      }
     }
+  }
+  return {
+    ...(foreground === undefined ? {} : { foreground }),
+    ...(background === undefined ? {} : { background }),
+    palette,
+  };
 }
 
 /** The questions, in the order they are asked. The attributes query is last on purpose. */
-export const QUESTIONS = `]10;?]11;?${
-    Array.from({ length: 16 }, (_, index) => `]4;${index};?`).join('')}[c`
+export const QUESTIONS = `]10;?]11;?${Array.from(
+  { length: 16 },
+  (_, index) => `]4;${index};?`,
+).join('')}[c`;
 
 /** The reply to the attributes query, which means the colour replies are all in. */
 // eslint-disable-next-line no-control-regex
-const ATTRIBUTES = /\[\?[\d;]*c/u
+const ATTRIBUTES = /\[\?[\d;]*c/u;
 
 export interface Ends {
-    readonly stdin: NodeJS.ReadStream
-    readonly stdout: NodeJS.WriteStream
-    readonly env: Readonly<Record<string, string | undefined>>
+  readonly stdin: NodeJS.ReadStream;
+  readonly stdout: NodeJS.WriteStream;
+  readonly env: Readonly<Record<string, string | undefined>>;
 }
 
 /**
@@ -92,33 +103,40 @@ export interface Ends {
  * <p>Not asked inside tmux or screen, which answer for themselves rather than
  * for the terminal they run in, or when either end is not a terminal.
  */
-export async function probeTerminal(ends: Ends, patience = 400): Promise<Probe | undefined> {
-    const { stdin, stdout, env } = ends
-    if (stdin.isTTY !== true || stdout.isTTY !== true
-        || env['TMUX'] !== undefined || (env['TERM'] ?? '').startsWith('screen')
-        || env['TERM'] === 'dumb') {
-        return undefined
-    }
-    const wasRaw = stdin.isRaw
-    let heard = ''
-    return new Promise((answer) => {
-        const finish = (): void => {
-            clearTimeout(timer)
-            stdin.removeListener('data', listen)
-            stdin.setRawMode(wasRaw)
-            stdin.pause()
-            answer(heard === '' ? undefined : parseReplies(heard))
-        }
-        const listen = (chunk: Buffer | string): void => {
-            heard += chunk.toString()
-            if (ATTRIBUTES.test(heard)) {
-                finish()
-            }
-        }
-        const timer = setTimeout(finish, patience)
-        stdin.setRawMode(true)
-        stdin.on('data', listen)
-        stdin.resume()
-        stdout.write(QUESTIONS)
-    })
+export async function probeTerminal(
+  ends: Ends,
+  patience = 400,
+): Promise<Probe | undefined> {
+  const { stdin, stdout, env } = ends;
+  if (
+    stdin.isTTY !== true ||
+    stdout.isTTY !== true ||
+    env['TMUX'] !== undefined ||
+    (env['TERM'] ?? '').startsWith('screen') ||
+    env['TERM'] === 'dumb'
+  ) {
+    return undefined;
+  }
+  const wasRaw = stdin.isRaw;
+  let heard = '';
+  return new Promise((answer) => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      stdin.removeListener('data', listen);
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+      answer(heard === '' ? undefined : parseReplies(heard));
+    };
+    const listen = (chunk: Buffer | string): void => {
+      heard += chunk.toString();
+      if (ATTRIBUTES.test(heard)) {
+        finish();
+      }
+    };
+    const timer = setTimeout(finish, patience);
+    stdin.setRawMode(true);
+    stdin.on('data', listen);
+    stdin.resume();
+    stdout.write(QUESTIONS);
+  });
 }

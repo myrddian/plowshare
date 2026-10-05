@@ -359,6 +359,11 @@ public record Outcome(
     return new Outcome(ending, text, steps, modelCalls, detail, measured, requested);
   }
 
+  /** Failure presentation for retained diagnostics, including the owning dependency's reason. */
+  public String failureText() {
+    return detail.isBlank() || detail.equals(text) ? text : text + "\nReason: " + detail;
+  }
+
   public boolean answered() {
     return ending == Ending.ANSWERED;
   }

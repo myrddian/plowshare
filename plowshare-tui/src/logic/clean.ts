@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/clean'
+export * from 'plowshare-client-ts/operations/clean';

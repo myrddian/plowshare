@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.data.DataLayout;
 import java.nio.file.Path;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Which directory a project's images live in, given a {@link Home}.
@@ -11,9 +10,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <p>{@link ExportDirectories}' twin, and it is in this package for that interface's reason rather
  * than because images are archive: a directory is named by a project's <b>id</b> and everything
  * above the archive knows a project by its <b>name</b>, so somebody has to translate, and {@code
- * ProjectIds} — which is package-private, deliberately, so that the translation happens in exactly
- * one place — is here. Handing {@code ImageStore} a {@code JdbcTemplate} so it could resolve a name
- * itself would make every test of the file layout need a database, which is the trade {@link
+ * ProjectIds} — which is package-private, deliberately, so that the translation is owned by the
+ * repository — is here. Handing {@code ImageStore} a {@code JdbcTemplate} so it could resolve a
+ * name itself would make every test of the file layout need a database, which is the trade {@link
  * ExportDirectories} already refused once.
  *
  * <p><b>{@code ProjectIds.toWrite} and not {@code forDirectory}, and that is the one place this
@@ -45,7 +44,7 @@ public interface ImageDirectories {
    * of it — {@link ExportDirectories#under} makes that argument at length, and a directory scheme
    * is exactly the kind of thing that gets edited in one place.
    */
-  static ImageDirectories under(DataLayout data, JdbcTemplate jdbc) {
-    return home -> data.imagesFor(ProjectIds.toWrite(jdbc, home));
+  static ImageDirectories under(DataLayout data, ProjectDirectories projects) {
+    return home -> data.imagesFor(projects.register(home));
   }
 }

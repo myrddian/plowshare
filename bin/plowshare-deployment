@@ -1,44 +1,7 @@
 #!/usr/bin/env bash
-#
-# bin/plowshare-deployment -- start the server against this machine's boxes.
-#
-#
-# Why this is a second script and not four more lines in the first
-# ---------------------------------------------------------------
-# bin/plowshare states an order: a flag, then an exported variable, then the
-# default written in it, then the shipped application.yml. A `source` inside
-# that script cannot honour it. `source` assigns whether or not the caller had
-# already exported the same name, so a deployment file read there would sit
-# ABOVE an exported variable and silently win over one -- the opposite of what
-# the header promises, and not visible until somebody exports a variable and
-# watches it be ignored.
-#
-# Exporting from out here instead puts these values on exactly the rung the
-# order already names. This script sets only names the caller left unset, then
-# hands off. Nothing about bin/plowshare changes, and its order stays true:
-#
-#     a flag  >  an exported variable  >  this file  >  the committed default
-#
-#
-# What it reads
-# -------------
-# ~/.config/plowshare/deployment.env -- the two pools' base URLs and the model
-# each serves. Outside the repo for the reason secrets.env is: no gitignore
-# rule is load-bearing. Not secret, so no mode check; these name boxes rather
-# than authorise anything. bin/deployment.env.example carries the shape.
-#
-# ~/.config/plowshare/application-local.yml -- optional. When it exists it is
-# handed to Spring as an additional config location, read on top of the shipped
-# application.yml. It is how a deployment adds what an environment variable
-# cannot: a third pool, and the class that names it, for refusal fallback.
-# bin/application-local.example.yml carries the shape. PLOWSHARE_CONFIG_OVERLAY
-# names another path; an exported SPRING_CONFIG_ADDITIONAL_LOCATION wins over
-# both, on the order above.
-#
-# The values are out of the tracked tree because bin/plowshare is committed and
-# InvariantsTest.no_source_names_the_reference_box sweeps every tracked file
-# outside docs/ for this machine's address: no test may dial a real box, and
-# that sweep cannot tell a launch script from a source file.
+# Load an operator-owned environment file without evaluating shell code, then
+# launch the server. Exported values win over file values; launcher flags win
+# over both. A Spring overlay describes the complete inference topology.
 
 set -euo pipefail
 
@@ -49,7 +12,7 @@ if [[ ! -f "$DEPLOYMENT" ]]; then
     echo "plowshare-deployment: no file at $DEPLOYMENT" >&2
     echo "                      cp $HERE/deployment.env.example '$DEPLOYMENT'" >&2
     echo "                      then edit it. Or run bin/plowshare directly," >&2
-    echo "                      which defaults to loopback and dials nothing." >&2
+    echo "                      which requires explicit inference and server configuration." >&2
     exit 1
 fi
 
@@ -77,12 +40,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
 done < "$DEPLOYMENT"
 
-# After deployment.env, so that file may name the overlay's path. `optional:`
-# is not what makes a missing file harmless -- the -f test is -- but it keeps a
-# file deleted between here and the JVM reading it from stopping the boot.
+# An explicitly named overlay must exist. Never silently ignore a missing
+# deployment file and fall back to another inference topology.
 OVERLAY="${PLOWSHARE_CONFIG_OVERLAY:-$HOME/.config/plowshare/application-local.yml}"
-if [[ -z "${SPRING_CONFIG_ADDITIONAL_LOCATION:-}" && -f "$OVERLAY" ]]; then
-    export SPRING_CONFIG_ADDITIONAL_LOCATION="optional:file:$OVERLAY"
+if [[ -z "${SPRING_CONFIG_ADDITIONAL_LOCATION:-}" ]]; then
+    if [[ -f "$OVERLAY" ]]; then
+        export PLOWSHARE_CONFIG_OVERLAY="$OVERLAY"
+    elif [[ -n "${PLOWSHARE_CONFIG_OVERLAY:-}" ]]; then
+        echo "plowshare-deployment: configuration file does not exist: $OVERLAY" >&2
+        exit 1
+    fi
 fi
 
 exec "$HERE/plowshare" "$@"

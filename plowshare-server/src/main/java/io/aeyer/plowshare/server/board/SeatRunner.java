@@ -1,7 +1,5 @@
 package io.aeyer.plowshare.server.board;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -35,7 +33,6 @@ import org.slf4j.LoggerFactory;
 public final class SeatRunner implements Dispatcher.Wakes {
 
   private static final Logger log = LoggerFactory.getLogger(SeatRunner.class);
-  private static final ObjectMapper JSON = new ObjectMapper();
 
   private static final String SPENT =
       "the topic's budget is spent, so this wake was not"
@@ -199,23 +196,15 @@ public final class SeatRunner implements Dispatcher.Wakes {
     // is granted, nothing stands between it and the guarded speakToSeat call but clock.get():
     // an unknown reason or a countAfter failure must refuse the wake outright rather than
     // leave calls stuck in BoardPot.leased with no settle to give them back.
-    JsonNode data = parse(wake.data());
+    SeatWake data = ((io.aeyer.plowshare.server.events.EventPayload.Seat) wake.data()).wake();
     String utterance =
         WakeUtterance.of(
             topic,
-            WakeRules.Reason.fromWire(data.path("reason").asText("opened")),
-            data.path("by").asText(""),
+            data.reasonKind(),
+            data.by() == null ? "" : data.by(),
             store.countAfter(topic.id(), seat.seenThrough()));
     int cap = Math.max(1, wakeCap.getAsInt());
-    if (data.has("maxTurns")) {
-      JsonNode requested = data.get("maxTurns");
-      if (!requested.isIntegralNumber()
-          || !requested.canConvertToInt()
-          || requested.intValue() < 1) {
-        throw new IllegalStateException("the member retry has an invalid step limit");
-      }
-      cap = requested.intValue();
-    }
+    if (data.maxTurns() != null) cap = data.maxTurns();
     // Only a spent pot exhausts the root. One that is merely leased out to other wakes is a
     // wake that waits: busy() answered false a moment ago, so another wake took the last of
     // it since. Thrown, not refused — busy() now answers true, and the dispatcher's
@@ -358,13 +347,5 @@ public final class SeatRunner implements Dispatcher.Wakes {
       throw new IllegalStateException("wake " + wake.id() + " names no seat conversation");
     }
     return target.substring("conversation:".length());
-  }
-
-  private static JsonNode parse(String data) {
-    try {
-      return JSON.readTree(data == null ? "{}" : data);
-    } catch (Exception unreadable) {
-      return JSON.createObjectNode();
-    }
   }
 }

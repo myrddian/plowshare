@@ -1,0 +1,12 @@
+.relay-screen { padding: 24px; overflow: auto; height: 100vh; box-sizing: border-box; }
+.relay-controls { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; }
+.relay-controls label { display: grid; gap: 6px; }
+.relay-controls select { max-width: 340px; }
+.relay-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr); gap: 24px; }
+.relay-screen article { border: 1px solid var(--border, #525252); border-radius: 8px; padding: 12px; margin: 10px 0; overflow-wrap: anywhere; }
+.relay-screen pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+#relay-error, #relay-gap { color: var(--warning, #cb9f55); }
+@media (max-width: 800px) { .relay-columns { grid-template-columns: 1fr; } }
+
+.relay-operation { display: flex; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }
+.relay-operation input { flex: 1; min-width: 12rem; }

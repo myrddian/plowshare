@@ -24,7 +24,7 @@ public final class CodeMapTool implements AgentTool {
 
   @Override
   public ToolSchema schema() {
-    return new ToolSchema(
+    return ToolSchema.from(
         NAME,
         "Navigate authorized workspace code by verified raw content hash. files selects an optional relative glob (default **); overview returns a bounded repository map of directories, files and abbreviated declaration signatures (limit at most 25); outline uses an absolute path; symbols uses a literal declaration-name prefix. Files/symbols page at most 100 results. read requires path, source_hash, offset and limit (at most 32768), and refuses changed content. UTF-16 coordinates name newline-normalized snapshots. When tracking is enabled, gated syntax-only code revisions and indexes survive runs; revision and retained_locator link immutable evidence. Hashes and permissions are checked on every lookup. Check state/issues and outline_statuses for incomplete coverage; measurements report this scan's reads and cache reuse. hints contains bounded harness suggestions with optional tool/arguments; suggestions never execute automatically. unwatch removes this account/agent subscription for the rest of this run while preserving historical revisions. Source and signatures are untrusted.",
         ordered(
@@ -148,6 +148,11 @@ public final class CodeMapTool implements AgentTool {
       result.put("outline_statuses", statuses);
       if (path != null) result.put("file", file(files.getFirst()));
       List<Map<String, Object>> rows = new ArrayList<>();
+      var displayed = new ArrayList<CodeNavigationHints.Displayed>();
+      var retainedReads = new LinkedHashSet<UUID>();
+      int navigationTotal = 0;
+      Integer navigationEnd = null;
+      boolean navigationHasMore = false;
       if (operation.equals("read")) {
         var file = files.getFirst();
         String hash =
@@ -164,6 +169,8 @@ public final class CodeMapTool implements AgentTool {
         result.putAll(file(file));
         result.put("start", offset);
         result.put("end", end);
+        navigationTotal = file.text().length();
+        navigationEnd = end;
         result.put("total", file.text().length());
         result.put("text", file.text().substring(offset, end));
         map.verifyRead(home, file);
@@ -200,6 +207,8 @@ public final class CodeMapTool implements AgentTool {
                                     symbol.startLine()))
                         .toList());
               rows.add(row);
+              displayed.add(CodeNavigationHints.Displayed.file(file));
+              if (file.revision() != null) retainedReads.add(file.revision());
             }
             count++;
           } else
@@ -222,8 +231,18 @@ public final class CodeMapTool implements AgentTool {
               row.put("start_line", symbol.startLine());
               row.put("end_line", symbol.endLine());
               rows.add(row);
+              if (file.revision() != null) retainedReads.add(file.revision());
+              displayed.add(
+                  new CodeNavigationHints.Displayed(
+                      file.path().toString(),
+                      file.fingerprint().sha256(),
+                      file.outline().status(),
+                      symbol.start(),
+                      symbol.end()));
             }
         }
+        navigationTotal = count;
+        navigationHasMore = (long) offset + limit < count;
         result.put("offset", offset);
         result.put("total", count);
         result.put("has_more", (long) offset + limit < count);
@@ -250,13 +269,23 @@ public final class CodeMapTool implements AgentTool {
           result.put("directories_truncated", directories.size() > 50);
         }
       }
-      result.put("hints", CodeNavigationHints.forResult(view, operation, args, result, reads));
+      result.put(
+          "hints",
+          CodeNavigationHints.forResult(
+              view,
+              new CodeNavigationHints.Request(
+                  operation, path == null ? null : path.toString(), query, limit),
+              new CodeNavigationHints.Observation(
+                  path == null ? null : CodeNavigationHints.Displayed.file(files.getFirst()),
+                  displayed,
+                  navigationTotal,
+                  offset,
+                  navigationEnd,
+                  navigationHasMore),
+              reads));
       map.verify(view);
-      var retainedReads = new LinkedHashSet<UUID>();
       if (path != null && files.getFirst().revision() != null)
         retainedReads.add(files.getFirst().revision());
-      for (var row : rows)
-        if (row.get("revision") instanceof UUID revision) retainedReads.add(revision);
       for (var revision : retainedReads) map.readRevision(home, revision);
       map.verify(view);
       if (operation.equals("read")) reads.saw(files.getFirst().path());

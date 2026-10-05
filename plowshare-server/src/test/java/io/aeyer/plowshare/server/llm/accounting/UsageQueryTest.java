@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Usage;
 import io.aeyer.plowshare.protocol.frames.*;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.TurnCap;
@@ -92,7 +93,12 @@ class UsageQueryTest {
     var manager = new DataSourceTransactionManager(data);
     queries =
         new UsageQueryService(
-            jdbc, manager, new ObjectMapper().findAndRegisterModules(), AccountingFixtures.CLOCK);
+            new JdbcUsageReportRepository(
+                jdbc,
+                manager,
+                new ObjectMapper().findAndRegisterModules(),
+                AccountingFixtures.CLOCK),
+            AccountingFixtures.CLOCK);
     store = new AccountingStore(jdbc, manager, AccountingFixtures.MAPPER, AccountingFixtures.CLOCK);
     journal =
         new AccountingJournal(
@@ -104,7 +110,7 @@ class UsageQueryTest {
     if (journal != null) journal.close();
   }
 
-  UsageQueryService.Filter filter(
+  Usage.Filter filter(
       String conversation,
       String project,
       String run,
@@ -112,7 +118,7 @@ class UsageQueryTest {
       List<String> groups,
       String cursor,
       Integer limit) {
-    return new UsageQueryService.Filter(
+    return new Usage.Filter(
         conversation,
         project,
         null,
@@ -129,7 +135,7 @@ class UsageQueryTest {
         limit);
   }
 
-  UsageQueryService.Report report(String type, UsageQueryService.Filter f) {
+  Usage.Report report(String type, Usage.Filter f) {
     return queries.report("alice", queries.resolve(type, f));
   }
 
@@ -188,16 +194,16 @@ class UsageQueryTest {
     call(processing, AccountingFixtures.PRICE, 80, false);
     var report =
         report("usage.project", filter(null, "one", null, null, List.of("operation"), null, null));
-    assertEquals("200", report.totals().get("input_tokens"));
-    assertEquals("2", report.totals().get("calls"));
+    assertEquals("200", report.totals().inputTokens());
+    assertEquals("2", report.totals().calls());
     assertEquals(2, report.groups().size());
     assertEquals(
         "200",
         report.groups().stream()
-            .map(row -> new java.math.BigInteger(row.get("input_tokens").toString()))
+            .map(row -> new java.math.BigInteger(row.inputTokens().toString()))
             .reduce(java.math.BigInteger.ZERO, java.math.BigInteger::add)
             .toString());
-    assertEquals(true, report.totals().get("usage_complete"));
+    assertEquals(true, report.totals().usageComplete());
   }
 
   @Test
@@ -211,25 +217,25 @@ class UsageQueryTest {
         report(
             "usage.conversation",
             filter(root, null, null, "subtree", List.of("agent"), null, null));
-    assertEquals("10", direct.totals().get("input_tokens"));
-    assertEquals("30", tree.totals().get("input_tokens"));
-    assertEquals("2", tree.totals().get("calls"));
+    assertEquals("10", direct.totals().inputTokens());
+    assertEquals("30", tree.totals().inputTokens());
+    assertEquals("2", tree.totals().calls());
     assertEquals(2, tree.groups().size());
     assertEquals(
-        tree.totals().get("costs"),
+        tree.totals().costs(),
         report("usage.project", filter(null, "one", null, null, List.of(), null, null))
             .totals()
-            .get("costs"));
+            .costs());
     assertEquals(
         "30",
         report("usage.run", filter(null, null, "run-root", "subtree", List.of(), null, null))
             .totals()
-            .get("input_tokens"));
+            .inputTokens());
     assertEquals(
         "1029",
         report("usage.pools", filter(null, null, null, null, List.of(), null, null))
             .totals()
-            .get("input_tokens"));
+            .inputTokens());
   }
 
   @Test
@@ -279,30 +285,30 @@ class UsageQueryTest {
             "usage.conversation",
             filter(root, null, null, "subtree", List.of("run", "agent"), null, null));
     assertEquals(2, tree.groups().size());
-    assertEquals("parallel-leaf", tree.groups().getFirst().get("run"));
-    assertEquals(List.of("run-child", "run-root"), tree.groups().getFirst().get("ancestor_runs"));
+    assertEquals("parallel-leaf", tree.groups().getFirst().run());
+    assertEquals(List.of("run-child", "run-root"), tree.groups().getFirst().ancestorRuns());
     assertEquals(
         "50",
         report("usage.run", filter(null, null, "run-root", "subtree", List.of(), null, null))
             .totals()
-            .get("input_tokens"));
+            .inputTokens());
     assertEquals(
         "0",
         report("usage.run", filter(null, null, "run-root", "direct", List.of(), null, null))
             .totals()
-            .get("input_tokens"));
+            .inputTokens());
   }
 
   @Test
   void unknown_retry_preserves_known_subtotal_and_explains_incomplete_costs() {
     call(parent, AccountingFixtures.PRICE, 10, true);
     var r = report("usage.project", filter(null, "one", null, null, List.of(), null, null));
-    assertEquals("10", r.totals().get("input_tokens"));
-    assertEquals("2", r.totals().get("attempts"));
-    assertEquals("1", r.totals().get("incomplete_attempts"));
-    assertEquals("1", r.totals().get("unknown_cost_attempts"));
-    assertEquals(false, r.totals().get("complete"));
-    assertEquals(Map.of("USD", "0.000018"), r.totals().get("costs"));
+    assertEquals("10", r.totals().inputTokens());
+    assertEquals("2", r.totals().attempts());
+    assertEquals("1", r.totals().incompleteAttempts());
+    assertEquals("1", r.totals().unknownCostAttempts());
+    assertEquals(false, r.totals().complete());
+    assertEquals(Map.of("USD", "0.000018"), r.totals().costs());
   }
 
   @Test
@@ -323,8 +329,8 @@ class UsageQueryTest {
             "operator");
     call(child, euro, 1, false);
     var r = report("usage.project", filter(null, "one", null, null, List.of(), null, null));
-    assertEquals("9007199254740994", r.totals().get("input_tokens"));
-    var costs = (Map<?, ?>) r.totals().get("costs");
+    assertEquals("9007199254740994", r.totals().inputTokens());
+    var costs = (Map<?, ?>) r.totals().costs();
     assertEquals(2, costs.size());
     assertEquals("0.0000000001", costs.get("EUR"));
   }
@@ -345,7 +351,7 @@ class UsageQueryTest {
         report(
             "usage.conversation",
             filter(root, null, null, "subtree", List.of("agent"), null, null));
-    assertEquals("10", r.totals().get("input_tokens"));
+    assertEquals("10", r.totals().inputTokens());
     assertEquals(1, r.groups().size());
     assertThrows(
         CallerFault.class,
@@ -368,7 +374,7 @@ class UsageQueryTest {
     var first = report("usage.project", f);
     assertEquals(1, first.groups().size());
     assertNotNull(first.cursor());
-    assertEquals("30", first.totals().get("input_tokens"));
+    assertEquals("30", first.totals().inputTokens());
     var next =
         report(
             "usage.project", filter(null, "one", null, null, List.of("agent"), first.cursor(), 1));
@@ -398,8 +404,7 @@ class UsageQueryTest {
                 "usage.calls", filter(null, "one", null, null, List.of(), first.cursor(), 1)));
     assertEquals(1, next.calls().size());
     assertNull(next.cursor());
-    assertNotEquals(
-        first.calls().getFirst().get("call_id"), next.calls().getFirst().get("call_id"));
+    assertNotEquals(first.calls().getFirst().callId(), next.calls().getFirst().callId());
     String wire = new ObjectMapper().findAndRegisterModules().writeValueAsString(first);
     assertFalse(wire.contains("messages"));
     assertFalse(wire.contains("apiKey"));
@@ -498,8 +503,8 @@ class UsageQueryTest {
                         AccountingFixtures.NOW.plusSeconds(1).toString())));
     var outcome = router.route(frame, new Asking("session", "alice"));
     assertEquals(Code.OK, outcome.code());
-    var r = (UsageQueryService.Report) outcome.payload();
-    assertEquals("10", r.totals().get("input_tokens"));
+    var r = (Usage.Report) outcome.payload();
+    assertEquals("10", r.totals().inputTokens());
     var malformed =
         router.route(
             new Envelope(
@@ -521,7 +526,7 @@ class UsageQueryTest {
         "10",
         report("usage.conversation", filter(root, null, null, null, List.of(), null, null))
             .totals()
-            .get("input_tokens"));
+            .inputTokens());
     assertThrows(
         CallerFault.class,
         () ->
@@ -561,18 +566,18 @@ class UsageQueryTest {
     var resolved =
         queries.resolve("usage.calls", filter(null, "one", null, null, List.of(), null, 10));
     var audit = queries.calls("alice", resolved).calls().getFirst();
-    assertEquals(true, audit.get("attempts_truncated"));
-    assertEquals(50, ((List<?>) audit.get("attempts")).size());
-    String id = audit.get("call_id").toString();
-    var tail = queries.attempts("alice", resolved, id, audit.get("attempt_cursor").toString());
+    assertEquals(true, audit.attemptsTruncated());
+    assertEquals(50, ((List<?>) audit.attempts()).size());
+    String id = audit.callId().toString();
+    var tail = queries.attempts("alice", resolved, id, audit.attemptCursor().toString());
     assertEquals(5, tail.attempts().size());
     assertNull(tail.cursor());
-    assertEquals(51, tail.attempts().getFirst().get("attempt_number"));
+    assertEquals(51, tail.attempts().getFirst().attemptNumber());
     var first = queries.attempts("alice", resolved, id, null);
     assertEquals(10, first.attempts().size());
     assertNotNull(first.cursor());
     var second = queries.attempts("alice", resolved, id, first.cursor());
-    assertEquals(11, second.attempts().getFirst().get("attempt_number"));
+    assertEquals(11, second.attempts().getFirst().attemptNumber());
     var different =
         queries.resolve("usage.calls", filter(null, "one", null, null, List.of(), null, 11));
     assertThrows(CallerFault.class, () -> queries.attempts("alice", different, id, first.cursor()));
@@ -590,7 +595,10 @@ class UsageQueryTest {
             new org.springframework.transaction.CannotCreateTransactionException(
                 "private-driver-address-and-credential"));
     var offline =
-        new UsageQueryService(jdbc, manager, new ObjectMapper(), AccountingFixtures.CLOCK);
+        new UsageQueryService(
+            new JdbcUsageReportRepository(
+                jdbc, manager, new ObjectMapper(), AccountingFixtures.CLOCK),
+            AccountingFixtures.CLOCK);
     var frames = new UsageFrames(offline, new UsageSubscriptions(offline));
     var result =
         new FrameRouter(frames.frames())

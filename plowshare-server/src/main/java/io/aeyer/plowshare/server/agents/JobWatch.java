@@ -103,7 +103,7 @@ public final class JobWatch {
    * thread.
    */
   public void started(String agent) {
-    publish(JobEvent.started(job, agent));
+    if (this != UNWATCHED) publish(JobEvent.started(job, agent));
   }
 
   /** One model call has been claimed and is about to be made. */
@@ -114,7 +114,7 @@ public final class JobWatch {
     // stream going backwards.
     this.steps = steps;
     this.modelCalls = modelCalls;
-    publish(JobEvent.modelCall(job, agent, steps, modelCalls));
+    if (this != UNWATCHED) publish(JobEvent.modelCall(job, agent, steps, modelCalls));
   }
 
   /**
@@ -129,7 +129,7 @@ public final class JobWatch {
    * @param agent whose turn it is, as every other kind carries it
    */
   public void alive(String agent) {
-    publish(JobEvent.alive(job, agent, steps, modelCalls));
+    if (this != UNWATCHED) publish(JobEvent.alive(job, agent, steps, modelCalls));
   }
 
   /**
@@ -150,7 +150,7 @@ public final class JobWatch {
   }
 
   public void toolCalled(String agent, String tool) {
-    publish(JobEvent.toolCalled(job, agent, tool));
+    if (this != UNWATCHED) publish(JobEvent.toolCalled(job, agent, tool));
   }
 
   /**
@@ -164,7 +164,7 @@ public final class JobWatch {
    *     detail are not parameters and are not sent
    */
   public void ended(String agent, Ending ending, int steps, int modelCalls) {
-    publish(JobEvent.ended(job, agent, ending.name(), steps, modelCalls));
+    if (this != UNWATCHED) publish(JobEvent.ended(job, agent, ending.name(), steps, modelCalls));
   }
 
   /**
@@ -180,12 +180,12 @@ public final class JobWatch {
 
   /** A piece of the model reasoning, on its way past. Dropped freely. */
   public void thinking(String text) {
-    stream(JobDelta.thinking(job, text));
+    if (this != UNWATCHED) stream(JobDelta.thinking(job, text));
   }
 
   /** A piece of the model answering, on its way past. Dropped freely. */
   public void answering(String text) {
-    stream(JobDelta.answering(job, text));
+    if (this != UNWATCHED) stream(JobDelta.answering(job, text));
   }
 
   /**

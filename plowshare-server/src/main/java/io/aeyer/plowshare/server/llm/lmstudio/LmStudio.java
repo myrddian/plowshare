@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.llm.lmstudio;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.server.llm.LlmProvider;
 import io.aeyer.plowshare.server.llm.OpenAiCompatible;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
@@ -12,7 +11,6 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.time.Duration;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -403,7 +401,7 @@ public final class LmStudio implements LlmProvider {
         return discovered;
       }
       try {
-        Map<String, Integer> found = loadedLengths(base.probe(MODELS));
+        Map<String, Integer> found = base.probe(MODELS).contextLengths();
         discovered = found;
         warned.set(false);
         return found;
@@ -432,35 +430,6 @@ public final class LmStudio implements LlmProvider {
         return Map.of();
       }
     }
-  }
-
-  /**
-   * Every model in the response that reports a length it is loaded at.
-   *
-   * <p><b>{@code loaded_context_length}, and never {@code max_context_length}.</b> A model can be
-   * listed and not loaded — the same response carries {@code state} — and in that case the only
-   * figure present is what the model is capable of, which is not a bound on anything this server
-   * will accept. Falling back to it would report 262144 for a model the box is not running, and the
-   * resulting prompt is refused by the endpoint with a message about the model. So an entry without
-   * the loaded figure contributes nothing, and the length stays honestly unknown.
-   *
-   * <p>Non-positive is treated as absent for the same reason a zero token count is: a length of
-   * nought is not a bound anybody could have meant, and carrying it forward would turn "unknown"
-   * into "no room at all" at whatever layer finally divides by it.
-   */
-  private static Map<String, Integer> loadedLengths(JsonNode root) {
-    Map<String, Integer> lengths = new LinkedHashMap<>();
-    for (JsonNode model : root.path("data")) {
-      JsonNode id = model.path("id");
-      JsonNode loaded = model.path("loaded_context_length");
-      if (id.isTextual()
-          && !id.asText().isBlank()
-          && loaded.isIntegralNumber()
-          && loaded.intValue() > 0) {
-        lengths.put(id.asText(), loaded.intValue());
-      }
-    }
-    return Map.copyOf(lengths);
   }
 
   @Override

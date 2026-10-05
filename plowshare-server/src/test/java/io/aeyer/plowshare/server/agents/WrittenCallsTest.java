@@ -144,7 +144,7 @@ class WrittenCallsTest {
   private static ToolSchema schema(String name, List<String> properties, List<String> required) {
     Map<String, Object> props = new java.util.LinkedHashMap<>();
     properties.forEach(property -> props.put(property, Map.of("type", "string")));
-    return new ToolSchema(
+    return ToolSchema.from(
         name, name, Map.of("type", "object", "properties", props, "required", required));
   }
 

@@ -1,9 +1,9 @@
 package io.aeyer.plowshare.server.events;
 
+import io.aeyer.plowshare.protocol.AccountEvent;
 import io.aeyer.plowshare.server.agents.Outcome;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -89,7 +89,7 @@ public class Inbox {
     return marked;
   }
 
-  public static Map<String, Object> changed(int unread) {
-    return Map.of("kind", CHANGED, "unread", unread);
+  public static AccountEvent.InboxChanged changed(int unread) {
+    return new AccountEvent.InboxChanged(unread);
   }
 }

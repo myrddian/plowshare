@@ -1,18 +1,19 @@
 package io.aeyer.plowshare.server.ws;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.aeyer.plowshare.protocol.Usage;
 import io.aeyer.plowshare.protocol.frames.Outcome;
-import io.aeyer.plowshare.server.llm.accounting.UsageQueryService;
+import io.aeyer.plowshare.server.llm.accounting.UsageReports;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /** Usage has one authenticated WebSocket surface and no REST controller. */
 @Component
 public class UsageFrames implements FrameArea {
-  private final UsageQueryService queries;
+  private final UsageReports queries;
   private final UsageSubscriptions subscriptions;
 
-  public UsageFrames(UsageQueryService queries, UsageSubscriptions subscriptions) {
+  public UsageFrames(UsageReports queries, UsageSubscriptions subscriptions) {
     this.queries = queries;
     this.subscriptions = subscriptions;
   }
@@ -36,7 +37,7 @@ public class UsageFrames implements FrameArea {
 
   private Outcome report(String type, Map<String, Object> payload, Asking asking) {
     String account = asking.requireHandle(type);
-    var query = queries.resolve(type, Payloads.as(payload, UsageQueryService.Filter.class, type));
+    var query = queries.resolve(type, Payloads.as(payload, Usage.Filter.class, type));
     return Outcome.ok(queries.report(account, query));
   }
 
@@ -47,7 +48,7 @@ public class UsageFrames implements FrameArea {
     var query =
         queries.resolve(
             FrameTypes.USAGE_CALLS,
-            Payloads.as(payload, UsageQueryService.Filter.class, FrameTypes.USAGE_CALLS));
+            Payloads.as(payload, Usage.Filter.class, FrameTypes.USAGE_CALLS));
     var call = Payloads.as(payload, CallPage.class, FrameTypes.USAGE_CALLS);
     if (call.call() != null)
       return Outcome.ok(queries.attempts(account, query, call.call(), call.attemptCursor()));
@@ -62,8 +63,7 @@ public class UsageFrames implements FrameArea {
     asking.requireHandle(FrameTypes.USAGE_SUBSCRIBE);
     var type = Payloads.as(payload, Subscribe.class, FrameTypes.USAGE_SUBSCRIBE).reportType();
     var query =
-        queries.resolve(
-            type, Payloads.as(payload, UsageQueryService.Filter.class, FrameTypes.USAGE_SUBSCRIBE));
+        queries.resolve(type, Payloads.as(payload, Usage.Filter.class, FrameTypes.USAGE_SUBSCRIBE));
     return Outcome.ok(subscriptions.subscribe(asking, query));
   }
 

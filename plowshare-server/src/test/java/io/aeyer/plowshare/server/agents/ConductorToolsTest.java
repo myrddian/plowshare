@@ -15,7 +15,6 @@ import io.aeyer.plowshare.server.hooks.Tier;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -116,10 +115,10 @@ class ConductorToolsTest {
   void the_ask_schema_offers_questions_and_still_requires_only_the_question() {
     AgentTool ask = tool(ConductorTools.ASK_NAME, new FakeActions(), new TurnEnd());
 
-    Map<String, Object> parameters = ask.schema().parameters();
-    assertEquals(List.of("question"), parameters.get("required"));
+    var parameters = ask.schema().parameters();
+    assertEquals(List.of("question"), parameters.required());
     @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) parameters.get("properties");
+    var properties = parameters.properties();
     assertEquals(List.of("question", "questions"), List.copyOf(properties.keySet()));
   }
 
@@ -399,7 +398,10 @@ class ConductorToolsTest {
 
     record AskCall(String orchestration, String question) {}
 
-    record StructuredAskCall(String orchestration, String question, String structure) {}
+    record StructuredAskCall(
+        String orchestration,
+        String question,
+        io.aeyer.plowshare.protocol.Orchestration.Structure structure) {}
 
     record FinishCall(String orchestration, String result) {}
 
@@ -423,7 +425,10 @@ class ConductorToolsTest {
     }
 
     @Override
-    public Optional<String> ask(String orchestration, String question, String structure) {
+    public Optional<String> ask(
+        String orchestration,
+        String question,
+        io.aeyer.plowshare.protocol.Orchestration.Structure structure) {
       if (structure == null) {
         return ask(orchestration, question);
       }

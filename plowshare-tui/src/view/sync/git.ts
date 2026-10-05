@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/git'
+export * from 'plowshare-client-node/sync/git';

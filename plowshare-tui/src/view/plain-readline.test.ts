@@ -1,7 +1,7 @@
-import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { PassThrough } from 'node:stream';
+import { describe, expect, it } from 'vitest';
 
-import { plain } from './plain.ts'
+import { plain } from './plain.ts';
 
 /**
  * The prompt, smoke-tested.
@@ -35,37 +35,37 @@ import { plain } from './plain.ts'
  * key would get.
  */
 function atTerminal() {
-    const input = new PassThrough()
-    const output = new PassThrough()
-    const written: string[] = []
-    output.on('data', (chunk: Buffer) => {
-        written.push(chunk.toString('utf8'))
-    })
-    Object.defineProperty(output, 'isTTY', { value: true })
-    // Node selects a deliberately reduced readline implementation when the
-    // surrounding test runner has TERM=dumb. That implementation inserts Tab
-    // literally and ignores the cursor-edit keys used to clear Ctrl-C's line,
-    // contradicting this fixture's claim that it is a real terminal. TERM is
-    // read only while the interface is built, so give that construction a
-    // terminal type and put the runner's environment back immediately.
-    const term = process.env['TERM']
-    process.env['TERM'] = 'xterm-256color'
-    try {
-        return { input, output, written, prompt: plain({ input, output }) }
-    } finally {
-        if (term === undefined) {
-            delete process.env['TERM']
-        } else {
-            process.env['TERM'] = term
-        }
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const written: string[] = [];
+  output.on('data', (chunk: Buffer) => {
+    written.push(chunk.toString('utf8'));
+  });
+  Object.defineProperty(output, 'isTTY', { value: true });
+  // Node selects a deliberately reduced readline implementation when the
+  // surrounding test runner has TERM=dumb. That implementation inserts Tab
+  // literally and ignores the cursor-edit keys used to clear Ctrl-C's line,
+  // contradicting this fixture's claim that it is a real terminal. TERM is
+  // read only while the interface is built, so give that construction a
+  // terminal type and put the runner's environment back immediately.
+  const term = process.env['TERM'];
+  process.env['TERM'] = 'xterm-256color';
+  try {
+    return { input, output, written, prompt: plain({ input, output }) };
+  } finally {
+    if (term === undefined) {
+      delete process.env['TERM'];
+    } else {
+      process.env['TERM'] = term;
     }
+  }
 }
 
 /** One turn of the loop, which is what readline acts on a key within. */
 function tick(): Promise<void> {
-    return new Promise<void>((done) => {
-        setImmediate(done)
-    })
+  return new Promise<void>((done) => {
+    setImmediate(done);
+  });
 }
 
 /**
@@ -80,31 +80,31 @@ function tick(): Promise<void> {
  * a completer that is missing rather than for a chunk that was written wrong.
  */
 async function pressed(input: PassThrough, keys: string): Promise<void> {
-    for (const key of keys) {
-        input.write(key)
-        await tick()
-    }
-    // One more: `_tabComplete` pauses the stream and resumes it from a
-    // callback, so the last key is not always done with when its write is.
-    await tick()
+  for (const key of keys) {
+    input.write(key);
+    await tick();
+  }
+  // One more: `_tabComplete` pauses the stream and resumes it from a
+  // callback, so the last key is not always done with when its write is.
+  await tick();
 }
 
 /** Tab. */
-const TAB = '\t'
+const TAB = '\t';
 /** Return, which readline reads as the end of a line. */
-const ENTER = '\r'
+const ENTER = '\r';
 /** Ctrl-C, as a terminal delivers it to a program in raw mode. */
-const INTERRUPT = '\u0003'
+const INTERRUPT = '\u0003';
 
 /** An input, an output, and the prompt over them. */
 function wired() {
-    const input = new PassThrough()
-    const output = new PassThrough()
-    const written: string[] = []
-    output.on('data', (chunk: Buffer) => {
-        written.push(chunk.toString('utf8'))
-    })
-    return { input, output, written, prompt: plain({ input, output }) }
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const written: string[] = [];
+  output.on('data', (chunk: Buffer) => {
+    written.push(chunk.toString('utf8'));
+  });
+  return { input, output, written, prompt: plain({ input, output }) };
 }
 
 /**
@@ -119,34 +119,34 @@ function wired() {
  * the method that replaced it.
  */
 describe('the readline surface', () => {
-    it('hands back a line somebody typed', async () => {
-        const { input, prompt } = wired()
-        input.write('how many modules?\n')
-        expect(await prompt.asked()).toBe('how many modules?')
-        prompt.close()
-    })
+  it('hands back a line somebody typed', async () => {
+    const { input, prompt } = wired();
+    input.write('how many modules?\n');
+    expect(await prompt.asked()).toBe('how many modules?');
+    prompt.close();
+  });
 
-    it('hands back the lines in the order they were typed', async () => {
-        const { input, prompt } = wired()
-        input.write('one\ntwo\n')
-        expect(await prompt.asked()).toBe('one')
-        expect(await prompt.asked()).toBe('two')
-        prompt.close()
-    })
+  it('hands back the lines in the order they were typed', async () => {
+    const { input, prompt } = wired();
+    input.write('one\ntwo\n');
+    expect(await prompt.asked()).toBe('one');
+    expect(await prompt.asked()).toBe('two');
+    prompt.close();
+  });
 
-    it('answers undefined at the end of input rather than waiting forever', async () => {
-        const { input, prompt } = wired()
-        input.end()
-        expect(await prompt.asked()).toBeUndefined()
-    })
+  it('answers undefined at the end of input rather than waiting forever', async () => {
+    const { input, prompt } = wired();
+    input.end();
+    expect(await prompt.asked()).toBeUndefined();
+  });
 
-    it('answers undefined for every later ask once the input has ended', async () => {
-        const { input, prompt } = wired()
-        input.end()
-        expect(await prompt.asked()).toBeUndefined()
-        expect(await prompt.asked()).toBeUndefined()
-    })
-})
+  it('answers undefined for every later ask once the input has ended', async () => {
+    const { input, prompt } = wired();
+    input.end();
+    expect(await prompt.asked()).toBeUndefined();
+    expect(await prompt.asked()).toBeUndefined();
+  });
+});
 
 /**
  * <b>Tab, driven through the readline that ships rather than asserted off an
@@ -159,47 +159,47 @@ describe('the readline surface', () => {
  * throwing on an empty line, or never being wired in at all.
  */
 describe('what Tab does, which until now was nothing', () => {
-    it('finishes a command, which this prompt used to ignore the key for', async () => {
-        const { input, prompt } = atTerminal()
-        await pressed(input, `/bot${TAB}${ENTER}`)
-        expect(await prompt.asked()).toBe('/bots')
-        prompt.close()
-    })
+  it('finishes a command, which this prompt used to ignore the key for', async () => {
+    const { input, prompt } = atTerminal();
+    await pressed(input, `/bot${TAB}${ENTER}`);
+    expect(await prompt.asked()).toBe('/bots');
+    prompt.close();
+  });
 
-    it('finishes a name once the server has declared it', async () => {
-        const { input, prompt } = atTerminal()
-        prompt.completing(['aristoxenus', 'close_reader'])
-        await pressed(input, `aris${TAB}${ENTER}`)
-        expect(await prompt.asked()).toBe('aristoxenus')
-        prompt.close()
-    })
+  it('finishes a name once the server has declared it', async () => {
+    const { input, prompt } = atTerminal();
+    prompt.completing(['aristoxenus', 'close_reader']);
+    await pressed(input, `aris${TAB}${ENTER}`);
+    expect(await prompt.asked()).toBe('aristoxenus');
+    prompt.close();
+  });
 
-    it('finishes no name the server did not send, and leaves the line as typed', async () => {
-        const { input, prompt } = atTerminal()
-        prompt.completing(['aristoxenus', 'close_reader'])
-        await pressed(input, `hypa${TAB}${ENTER}`)
-        expect(await prompt.asked()).toBe('hypa')
-        prompt.close()
-    })
+  it('finishes no name the server did not send, and leaves the line as typed', async () => {
+    const { input, prompt } = atTerminal();
+    prompt.completing(['aristoxenus', 'close_reader']);
+    await pressed(input, `hypa${TAB}${ENTER}`);
+    expect(await prompt.asked()).toBe('hypa');
+    prompt.close();
+  });
 
-    it('completes no name at all before a roster has arrived', async () => {
-        // The window between the interface being built and `agent.list` being
-        // answered. Commands are this client's own and complete throughout it;
-        // a name completed here would be one nothing had declared.
-        const { input, prompt } = atTerminal()
-        await pressed(input, `aris${TAB}${ENTER}`)
-        expect(await prompt.asked()).toBe('aris')
-        prompt.close()
-    })
+  it('completes no name at all before a roster has arrived', async () => {
+    // The window between the interface being built and `agent.list` being
+    // answered. Commands are this client's own and complete throughout it;
+    // a name completed here would be one nothing had declared.
+    const { input, prompt } = atTerminal();
+    await pressed(input, `aris${TAB}${ENTER}`);
+    expect(await prompt.asked()).toBe('aris');
+    prompt.close();
+  });
 
-    it('does not throw on a Tab with nothing in front of it', async () => {
-        const { input, prompt } = atTerminal()
-        prompt.completing(['aristoxenus'])
-        await pressed(input, `${TAB}${ENTER}`)
-        expect(await prompt.asked()).toBe('')
-        prompt.close()
-    })
-})
+  it('does not throw on a Tab with nothing in front of it', async () => {
+    const { input, prompt } = atTerminal();
+    prompt.completing(['aristoxenus']);
+    await pressed(input, `${TAB}${ENTER}`);
+    expect(await prompt.asked()).toBe('');
+    prompt.close();
+  });
+});
 
 /**
  * <b>Ctrl-C, raised as a key and not as an emitted event.</b>
@@ -210,56 +210,56 @@ describe('what Tab does, which until now was nothing', () => {
  * drives that end over a real socket.
  */
 describe('what Ctrl-C does, which until now was quit without a word', () => {
-    it('hands the press to whoever asked for it, and keeps the session', async () => {
-        const { input, prompt } = atTerminal()
-        let presses = 0
-        prompt.onInterrupt(() => {
-            presses += 1
-        })
-        await pressed(input, INTERRUPT)
+  it('hands the press to whoever asked for it, and keeps the session', async () => {
+    const { input, prompt } = atTerminal();
+    let presses = 0;
+    prompt.onInterrupt(() => {
+      presses += 1;
+    });
+    await pressed(input, INTERRUPT);
 
-        expect(presses).toBe(1)
-        // AND THE PROMPT IS STILL LIVE. A person who pressed it once is still
-        // in their session, with a prompt that takes the next thing they type.
-        await pressed(input, `still here${ENTER}`)
-        expect(await prompt.asked()).toBe('still here')
-        prompt.close()
-    })
+    expect(presses).toBe(1);
+    // AND THE PROMPT IS STILL LIVE. A person who pressed it once is still
+    // in their session, with a prompt that takes the next thing they type.
+    await pressed(input, `still here${ENTER}`);
+    expect(await prompt.asked()).toBe('still here');
+    prompt.close();
+  });
 
-    it('throws the half-typed line away, which is what the key means at a prompt', async () => {
-        const { input, prompt } = atTerminal()
-        prompt.onInterrupt(() => undefined)
-        await pressed(input, 'half a quest')
-        await pressed(input, INTERRUPT)
-        await pressed(input, `what I meant${ENTER}`)
+  it('throws the half-typed line away, which is what the key means at a prompt', async () => {
+    const { input, prompt } = atTerminal();
+    prompt.onInterrupt(() => undefined);
+    await pressed(input, 'half a quest');
+    await pressed(input, INTERRUPT);
+    await pressed(input, `what I meant${ENTER}`);
 
-        // Not `half a questwhat I meant`, which is what a press that only
-        // reported itself would have left behind.
-        expect(await prompt.asked()).toBe('what I meant')
-        prompt.close()
-    })
+    // Not `half a questwhat I meant`, which is what a press that only
+    // reported itself would have left behind.
+    expect(await prompt.asked()).toBe('what I meant');
+    prompt.close();
+  });
 
-    it('hands over the second press too, because the second press is the way out', async () => {
-        // The counting is the caller's: this file knows nothing about runs, and
-        // `main.ts` is where a first press differs from a second.
-        const { input, prompt } = atTerminal()
-        let presses = 0
-        prompt.onInterrupt(() => {
-            presses += 1
-        })
-        await pressed(input, INTERRUPT)
-        await pressed(input, INTERRUPT)
+  it('hands over the second press too, because the second press is the way out', async () => {
+    // The counting is the caller's: this file knows nothing about runs, and
+    // `main.ts` is where a first press differs from a second.
+    const { input, prompt } = atTerminal();
+    let presses = 0;
+    prompt.onInterrupt(() => {
+      presses += 1;
+    });
+    await pressed(input, INTERRUPT);
+    await pressed(input, INTERRUPT);
 
-        expect(presses).toBe(2)
-        prompt.close()
-    })
+    expect(presses).toBe(2);
+    prompt.close();
+  });
 
-    it('ends the input when nobody has asked for the press', async () => {
-        // The window before `converse` has a connection to cancel through. The
-        // old behaviour for every press, kept for the one moment it is still
-        // the honest one: there is nothing to stop, so the key leaves.
-        const { input, prompt } = atTerminal()
-        await pressed(input, INTERRUPT)
-        expect(await prompt.asked()).toBeUndefined()
-    })
-})
+  it('ends the input when nobody has asked for the press', async () => {
+    // The window before `converse` has a connection to cancel through. The
+    // old behaviour for every press, kept for the one moment it is still
+    // the honest one: there is nothing to stop, so the key leaves.
+    const { input, prompt } = atTerminal();
+    await pressed(input, INTERRUPT);
+    expect(await prompt.asked()).toBeUndefined();
+  });
+});

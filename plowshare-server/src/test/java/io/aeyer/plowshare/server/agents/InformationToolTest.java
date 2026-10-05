@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class InformationToolTest {
   private static final UUID REVISION = UUID.fromString("00000000-0000-0000-0000-000000000001");
   private static final Instant INGESTED = Instant.parse("2026-10-02T07:59:00.123456Z");
-  private final ObjectMapper json = new ObjectMapper();
+  private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
   private final InformationAccess access = mock(InformationAccess.class);
   private final InformationJobs inputs = mock(InformationJobs.class);
   private final InformationCatalogue catalogue = mock(InformationCatalogue.class);
@@ -89,17 +89,16 @@ class InformationToolTest {
         .thenReturn(List.of(new DocumentStore.Retrieved(chunk, .2)));
     when(catalogue.locateWindow(context, REVISION, chunk.chunkText()))
         .thenReturn(
-            Map.of(
-                "revision",
+            new io.aeyer.plowshare.protocol.Information.Window(
                 REVISION,
-                "matched",
                 true,
-                "start",
+                null,
                 100,
-                "end",
-                123,
-                "text",
-                chunk.chunkText()));
+                100 + chunk.chunkText().length(),
+                500,
+                chunk.chunkText(),
+                "document",
+                "text"));
     var tool = reader();
     var result =
         json.readTree(
@@ -120,18 +119,17 @@ class InformationToolTest {
 
   @Test
   void catalogue_and_processing_status_serialize_temporal_values() throws Exception {
-    when(catalogue.list(context, 20, 0))
-        .thenReturn(List.of(Map.of("id", REVISION, "ingested_at", INGESTED)));
-    when(catalogue.status(context, REVISION))
-        .thenReturn(Map.of("revision", REVISION, "updated_at", INGESTED));
+    var revision = revision(List.of());
+    when(catalogue.list(context, 20, 0)).thenReturn(List.of(revision));
+    when(catalogue.status(context, REVISION)).thenReturn(revision);
     var tool = reader();
     var listed = json.readTree(tool.run("{\"operation\":\"list\"}", Home.global()));
-    assertEquals(INGESTED.toString(), listed.get(0).path("ingested_at").asText());
+    assertEquals(INGESTED.toString(), listed.get(0).path("created_at").asText());
     var status =
         json.readTree(
             tool.run(
                 "{\"operation\":\"status\",\"revision\":\"" + REVISION + "\"}", Home.global()));
-    assertEquals(INGESTED.toString(), status.path("updated_at").asText());
+    assertEquals(INGESTED.toString(), status.path("created_at").asText());
     verify(catalogue).requireReadable(context, REVISION);
     assertEquals(List.of(REVISION, REVISION), read);
   }
@@ -139,13 +137,12 @@ class InformationToolTest {
   @Test
   void readiness_fence_binds_the_run_account_and_retains_ready_input_dependencies()
       throws Exception {
-    when(catalogue.status(context, REVISION))
-        .thenReturn(
-            Map.of(
-                "generation",
-                1,
-                "steps",
-                List.of(Map.of("generation", 1, "stage", "extract", "state", "ready"))));
+    var step =
+        json.convertValue(
+            Map.of("generation", 1, "stage", "extract", "state", "ready"),
+            io.aeyer.plowshare.protocol.Information.Step.class);
+    var revision = revision(List.of(step));
+    when(catalogue.status(context, REVISION)).thenReturn(revision);
     var tool = reader();
     var result =
         json.readTree(
@@ -162,13 +159,48 @@ class InformationToolTest {
 
   @Test
   void code_navigation_uses_run_identity_and_retains_symbol_input_dependencies() throws Exception {
-    var code = context.withCorpus("code");
+    var code =
+        context.withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     var tool = reader();
     when(inputs.reads("cnv_reader", code)).thenReturn(read::add);
-    when(catalogue.outline(code, REVISION, 0, 50))
-        .thenReturn(Map.of("revision", REVISION, "status", "ready", "symbols", List.of()));
+    var projection =
+        new io.aeyer.plowshare.protocol.Information.Outline(
+            REVISION,
+            "typescript",
+            "extracted-text:utf16",
+            "retained",
+            "source",
+            0,
+            "ready",
+            null,
+            "hash",
+            "parser",
+            0,
+            List.of(),
+            false);
+    when(catalogue.outline(code, REVISION, 0, 50)).thenReturn(projection);
+    var symbol =
+        json.convertValue(
+            Map.of(
+                "revision",
+                REVISION,
+                "name",
+                "load",
+                "kind",
+                "function",
+                "start_line",
+                1,
+                "end_line",
+                1,
+                "start_offset",
+                0,
+                "end_offset",
+                10),
+            io.aeyer.plowshare.protocol.Information.Symbol.class);
     when(catalogue.symbols(code, "load", null, 0, 20))
-        .thenReturn(Map.of("symbols", List.of(Map.of("revision", REVISION, "name", "load"))));
+        .thenReturn(
+            new io.aeyer.plowshare.protocol.Information.Symbols(
+                "load", 0, false, List.of(symbol), "extracted-text:utf16", "retained", "source"));
     var outline =
         json.readTree(
             tool.run(
@@ -186,5 +218,26 @@ class InformationToolTest {
     assertEquals(List.of(REVISION, REVISION), read);
     verify(catalogue).outline(code, REVISION, 0, 50);
     verifyNoInteractions(retrieval);
+  }
+
+  private io.aeyer.plowshare.protocol.Information.Revision revision(
+      List<io.aeyer.plowshare.protocol.Information.Step> steps) {
+    return json.convertValue(
+        Map.ofEntries(
+            Map.entry("id", REVISION),
+            Map.entry("resource_id", REVISION),
+            Map.entry("ordinal", 1),
+            Map.entry("generation", 1),
+            Map.entry("allowance_total", 10),
+            Map.entry("created_at", INGESTED),
+            Map.entry("source_name", "paper.pdf"),
+            Map.entry("title", "A paper"),
+            Map.entry("kind", "source"),
+            Map.entry("document_type", "document"),
+            Map.entry("document_subtype", "text"),
+            Map.entry("availability", "active"),
+            Map.entry("tags", List.of()),
+            Map.entry("steps", steps)),
+        io.aeyer.plowshare.protocol.Information.Revision.class);
   }
 }

@@ -1,8 +1,6 @@
 package io.aeyer.plowshare.server.images;
 
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ImageFormat;
 import io.aeyer.plowshare.server.archive.ImageDirectories;
@@ -128,8 +126,6 @@ public final class ImageStore {
    * normalisation to disagree about.
    */
   private static final Pattern UID = Pattern.compile("img_[0-9a-f]{32}");
-
-  private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final ImageDirectories where;
   private final int maxBytes;
@@ -641,35 +637,7 @@ public final class ImageStore {
   }
 
   private static StoredImage read(Home home, Path record) throws IOException {
-    JsonNode node = MAPPER.readTree(Files.readString(record, StandardCharsets.UTF_8));
-    String format = node.path("format").asText("");
-    ImageFormat parsed = null;
-    for (ImageFormat candidate : ImageFormat.values()) {
-      if (candidate.declared().equals(format)) {
-        parsed = candidate;
-      }
-    }
-    if (parsed == null) {
-      throw new IOException(
-          record
-              + " records the format '"
-              + format
-              + "', which this server does not know; the directory has been edited or was"
-              + " written by a later version");
-    }
-    JsonNode filename = node.path("filename");
-    JsonNode path = node.path("path");
-    return new StoredImage(
-        node.path("id").asText(),
-        home,
-        parsed,
-        filename.isTextual() ? filename.asText() : null,
-        node.path("bytes").asLong(),
-        Instant.parse(node.path("at").asText()),
-        // Missing and null read the same, which is what makes a record
-        // written before this field existed a held image rather than an
-        // unreadable one. `isTextual` is false for both.
-        path.isTextual() ? Path.of(path.asText()) : null);
+    return ImageSidecars.read(home, record);
   }
 
   private static String blankToNull(String filename) {

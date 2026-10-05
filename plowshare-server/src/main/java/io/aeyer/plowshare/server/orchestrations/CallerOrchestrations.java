@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.orchestrations;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -26,7 +25,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Builds and authorises the tools an orchestration's caller holds. */
-public final class CallerOrchestrations {
+public final class CallerOrchestrations implements GrantedOrchestrations {
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final String NOT_OWNED = "No orchestration with that id is owned by this account.";
@@ -230,7 +229,10 @@ public final class CallerOrchestrations {
       }
 
       @Override
-      public String choose(String id, JsonNode choices, String note) {
+      public String choose(
+          String id,
+          List<io.aeyer.plowshare.server.agents.StructuredAnswers.Choice> choices,
+          String note) {
         if (owned(id, context).isEmpty()) {
           return refusedFor(context);
         }

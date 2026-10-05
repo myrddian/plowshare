@@ -361,7 +361,7 @@ public final class BoundCommands {
   }
 
   private static final ToolSchema SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           DISPATCH,
           "Dispatch the explicit user command identified by a bound invocation UUID. Operation, definition and arguments are fixed by the harness. Never auto-trigger.",
           ToolArguments.object(

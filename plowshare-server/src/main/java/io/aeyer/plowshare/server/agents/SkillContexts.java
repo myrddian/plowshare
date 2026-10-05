@@ -1,10 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Redemption;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,9 +9,15 @@ import java.util.function.BooleanSupplier;
 
 /** Parent log copies are data, not a live view or a parent role/system prefix. */
 public final class SkillContexts {
-  public record Prepared(String snapshot, String prompt, int through) {}
+  public record Prepared(SkillContextLog snapshot, String prompt, int through) {
+    public Prepared {
+      java.util.Objects.requireNonNull(snapshot, "snapshot");
+      InvocationValues.text(prompt, false);
+      if (through != snapshot.through() || !snapshot.complete())
+        throw new IllegalArgumentException("incomplete skill context handoff");
+    }
+  }
 
-  private static final ObjectMapper JSON = new ObjectMapper();
   private final EntryStore entries;
   private final Compaction compaction;
   private final SkillExecutions executions;
@@ -32,30 +35,17 @@ public final class SkillContexts {
       Budget budget,
       BooleanSupplier cancelled) {
     if (mode == SkillDefinition.Mode.NEW || mode == SkillDefinition.Mode.DIRECT) return null;
-    String snapshot = entries.forAccount(account).snapshotForSkill(parent.conversationId());
-    if (snapshot.getBytes(StandardCharsets.UTF_8).length > ChannelDefinitions.MAX_SOURCE_BYTES) {
+    SkillContextLog snapshot =
+        entries.forAccount(account).snapshotForSkill(parent.conversationId());
+    if (!snapshot.complete())
       throw new IllegalStateException(
-          "The complete skill context exceeds the source limit; nothing was truncated or substituted");
-    }
-    int through = 0;
-    try {
-      JsonNode rows = JSON.readTree(snapshot);
-      if (!rows.isArray())
-        throw new IllegalStateException("The parent log snapshot is not an array");
-      for (JsonNode row : rows) {
-        through = Math.max(through, row.path("ordinal").asInt());
-        if (row.path("kind").asText().equals("tool_result") && row.path("content").isNull()) {
-          throw new IllegalStateException(
-              "The parent log contains an ejected tool payload; complete context is unavailable");
-        }
-      }
-    } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
-      throw new IllegalStateException("The parent log snapshot is unreadable", invalid);
-    }
+          "The parent log contains an ejected tool payload; complete context is unavailable");
+    int through = snapshot.through();
+    String rendered = SkillContextLogs.write(snapshot);
     String context =
         mode == SkillDefinition.Mode.INHERITED
-            ? snapshot
-            : compaction.summaryForSkill(snapshot, parent, budget, cancelled);
+            ? rendered
+            : compaction.summaryForSkill(rendered, parent, budget, cancelled);
     String prompt =
         "Parent context "
             + mode

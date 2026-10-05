@@ -17,19 +17,32 @@ public class RetrievalIndexConfig {
       UnitOfWork transactions,
       EmbeddingClient embeddings,
       Tokenizer tokenizer,
+      org.springframework.beans.factory.ObjectProvider<
+              io.aeyer.plowshare.server.embedding.EmbeddingTokenizers>
+          embeddingTokenizers,
       LlmProperties llm,
       Environment env) {
     // The operator must bump the generation when an alias's underlying model changes.
     String generation =
         llm.getEmbeddingModel() + ":" + env.getProperty("plowshare.retrieval.generation", "1");
-    int ceiling = Math.min(512, llm.getEmbeddingMaxInputTokens());
+    boolean dual = env.getProperty("plowshare.embeddings.enabled", Boolean.class, false);
+    if (dual) generation = "dual-passages-v1:" + llm.getEmbeddingMaxInputTokens();
+    var counters = embeddingTokenizers.getIfAvailable();
+    int allowance =
+        counters == null
+            ? llm.getEmbeddingMaxInputTokens()
+            : counters.documentLimit(llm.getEmbeddingMaxInputTokens());
+    if (counters != null) {
+      tokenizer = counters.documents();
+      generation += ":" + counters.fingerprint();
+    }
+    int ceiling = Math.min(512, allowance);
     return new PassageIndex(
-        jdbc,
-        transactions,
+        new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
         embeddings,
         new Chunking(tokenizer, Math.min(384, ceiling), ceiling),
         generation,
-        llm.getEmbeddingDim());
+        dual ? 768 : llm.getEmbeddingDim());
   }
 
   @Bean

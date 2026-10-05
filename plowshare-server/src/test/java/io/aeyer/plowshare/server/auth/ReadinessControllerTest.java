@@ -10,7 +10,7 @@ class ReadinessControllerTest {
   @Test
   void startup_and_database_outage_are_not_ready_and_responses_have_no_body() {
     var jdbc = mock(JdbcTemplate.class);
-    var probe = new ReadinessController(jdbc);
+    var probe = new ReadinessController(new JdbcDatabaseReadiness(jdbc));
     assertEquals(503, probe.probe().getStatusCode().value());
     verifyNoInteractions(jdbc);
     probe.ready(null);

@@ -17,14 +17,14 @@ fun Exec.desktopSources() {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     // All neutral request and response readers come from the shared package.
     dependsOn(":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild")
-    inputs.dir(rootProject.file("plowshare-client-node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.file(rootProject.file("plowshare-client-node/package.json"))
-    inputs.dir(rootProject.file("plowshare-client-ts/src"))
+    inputs.dir(rootProject.file("sdk/node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("sdk/node/package.json"))
+    inputs.dir(rootProject.file("sdk/typescript/src"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(rootProject.file("plowshare-client-ts/package.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.base.json"),
-        rootProject.file("plowshare-client-ts/pnpm-lock.yaml"))
+    inputs.files(rootProject.file("sdk/typescript/package.json"),
+        rootProject.file("sdk/typescript/tsconfig.json"),
+        rootProject.file("sdk/typescript/tsconfig.base.json"),
+        rootProject.file("sdk/typescript/pnpm-lock.yaml"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPathSensitivity(PathSensitivity.RELATIVE)
     dependsOn(pnpmInstall)

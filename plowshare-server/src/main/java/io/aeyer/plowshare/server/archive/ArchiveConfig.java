@@ -35,7 +35,7 @@ public class ArchiveConfig {
    */
   @Bean
   public ReasonLog reasonLog(JdbcTemplate jdbc) {
-    return new ReasonLog(jdbc);
+    return new JdbcReasonLog(jdbc);
   }
 
   @Bean
@@ -171,10 +171,10 @@ public class ArchiveConfig {
    */
   @Bean
   public PayloadExport payloadExport(
-      ConversationsProperties conversations, DataLayout data, JdbcTemplate jdbc) {
+      ConversationsProperties conversations, DataLayout data, ProjectDirectories projects) {
     String directory = conversations.getRetention().getExportDirectory();
     if (directory != null && !directory.isBlank()) {
-      return new PayloadExport(ExportDirectories.into(Path.of(directory), jdbc));
+      return new PayloadExport(ExportDirectories.into(Path.of(directory), projects));
     }
     if (directory != null) {
       // BLANK, WHICH IS NOT THE SAME AS ABSENT and is read before the data
@@ -183,7 +183,7 @@ public class ArchiveConfig {
       return PayloadExport.NONE;
     }
     return data.keepsAnything()
-        ? new PayloadExport(ExportDirectories.under(data, jdbc))
+        ? new PayloadExport(ExportDirectories.under(data, projects))
         : PayloadExport.NONE;
   }
 
@@ -196,7 +196,7 @@ public class ArchiveConfig {
    */
   @Bean
   public JobLog jobLog(JdbcTemplate jdbc) {
-    return new JobLog(jdbc);
+    return new JdbcJobLog(jdbc);
   }
 
   /**

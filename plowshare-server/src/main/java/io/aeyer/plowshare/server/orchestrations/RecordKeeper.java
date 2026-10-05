@@ -122,6 +122,19 @@ public final class RecordKeeper implements OrchestrationRecorder {
   }
 
   @Override
+  public void runResumed(OrchestrationRecord run, String author, String failure) {
+    quietly(
+        "the resume of " + run.id(),
+        () ->
+            writeFor(
+                run,
+                RecordKind.RUN_RESUMED,
+                run.definitionName() + " resumed by " + line(author),
+                null,
+                bodyOf(failure)));
+  }
+
+  @Override
   public void runEnded(OrchestrationRecord run) {
     quietly(
         "the end of " + run.id(),
@@ -668,7 +681,9 @@ public final class RecordKeeper implements OrchestrationRecorder {
                               + ": "
                               + outcome.ending().name().toLowerCase(Locale.ROOT)
                               + (said.isEmpty() ? "" : ": " + said),
-                          null);
+                          outcome.detail().isBlank() ? null : line(outcome.detail()),
+                          null,
+                          outcome.answered() ? null : bodyOf(outcome.failureText()));
                     }));
   }
 
@@ -851,9 +866,8 @@ public final class RecordKeeper implements OrchestrationRecorder {
           .get()
           .push(
               handle,
-              settled == null
-                  ? Map.of("kind", RECORDED, "root", root, "through", through)
-                  : Map.of("kind", RECORDED, "root", root, "through", through, "settled", settled));
+              new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationRecorded(
+                  root, through, settled));
     } catch (RuntimeException failed) {
       log.debug(
           "orchestration {}: its account could not be told the record grew; the"

@@ -13,6 +13,11 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.Orchestration.Changed;
+import io.aeyer.plowshare.protocol.Orchestration.DefinitionView;
+import io.aeyer.plowshare.protocol.Orchestration.Definitions;
+import io.aeyer.plowshare.protocol.Orchestration.Listed;
+import io.aeyer.plowshare.protocol.Orchestration.Status;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
@@ -28,12 +33,6 @@ import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.todos.TodoItem;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import io.aeyer.plowshare.server.todos.TodoStatus;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.Answered;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.Cancelled;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.DefinitionView;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.Definitions;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.Listed;
-import io.aeyer.plowshare.server.ws.OrchestrationFrames.Status;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +103,9 @@ class OrchestrationFramesTest {
             key.toString());
     var outcome = frame.start(payload, new Asking("tab-1", "enzo"));
     assertEquals(Code.ACCEPTED, outcome.code());
-    assertEquals("orc_started", ((OrchestrationFrames.Started) outcome.payload()).id());
+    assertEquals(
+        "orc_started",
+        ((io.aeyer.plowshare.protocol.Orchestration.Started) outcome.payload()).id());
     var captured = org.mockito.ArgumentCaptor.forClass(Orchestrations.Start.class);
     verify(orchestrations).start(captured.capture(), eq(key), any());
     assertEquals("enzo", captured.getValue().callerHandle());
@@ -141,8 +142,11 @@ class OrchestrationFramesTest {
         .thenReturn(Optional.of(run("orc_original", "enzo", OrchestrationState.ASKING)));
     var result = route("orchestration.receipt", "{\"requestId\":\"" + key + "\"}");
     assertEquals(Code.OK, result.code());
-    assertEquals("orc_original", ((OrchestrationFrames.Started) result.payload()).id());
-    assertEquals("asking", ((OrchestrationFrames.Started) result.payload()).state());
+    assertEquals(
+        "orc_original",
+        ((io.aeyer.plowshare.protocol.Orchestration.Started) result.payload()).id());
+    assertEquals(
+        "asking", ((io.aeyer.plowshare.protocol.Orchestration.Started) result.payload()).state());
     assertEquals(
         Code.BAD_REQUEST,
         routeAs("other", "orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
@@ -226,6 +230,39 @@ class OrchestrationFramesTest {
         null);
   }
 
+  @Test
+  void resume_routes_account_owned_typed_request_and_returns_current_state() {
+    var key = java.util.UUID.randomUUID();
+    when(store.find("orc_1"))
+        .thenReturn(Optional.of(run("orc_1", "enzo", OrchestrationState.FAILED)));
+    when(orchestrations.resume(
+            new io.aeyer.plowshare.protocol.Orchestration.Resume("orc_1", key), "enzo"))
+        .thenReturn(run("orc_1", "enzo", OrchestrationState.RUNNING));
+    var result =
+        route(FrameTypes.ORCHESTRATION_RESUME, "{\"id\":\"orc_1\",\"requestId\":\"" + key + "\"}");
+    assertEquals(Code.OK, result.code());
+    assertEquals(new Changed("orc_1", "running"), result.payload());
+    verify(orchestrations)
+        .resume(new io.aeyer.plowshare.protocol.Orchestration.Resume("orc_1", key), "enzo");
+  }
+
+  @Test
+  void resume_refuses_foreign_missing_identity_and_malformed_request_before_execution() {
+    when(store.find("orc_1"))
+        .thenReturn(Optional.of(run("orc_1", "other", OrchestrationState.FAILED)));
+    var key = java.util.UUID.randomUUID();
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_RESUME, "{\"id\":\"orc_1\",\"requestId\":\"" + key + "\"}")
+            .code());
+    assertEquals(
+        Code.BAD_REQUEST, route(FrameTypes.ORCHESTRATION_RESUME, "{\"id\":\"orc_1\"}").code());
+    assertEquals(
+        Code.BAD_REQUEST,
+        route(FrameTypes.ORCHESTRATION_RESUME, "{\"id\":12,\"requestId\":true}").code());
+    verify(orchestrations, never()).resume(any(), any());
+  }
+
   // -- definitions -----------------------------------------------------------------------
 
   @Test
@@ -249,7 +286,9 @@ class OrchestrationFramesTest {
     assertEquals("project", served.tier());
     assertEquals(
         List.of("goal", "code"),
-        served.stages().stream().map(OrchestrationFrames.StageView::id).toList());
+        served.stages().stream()
+            .map(io.aeyer.plowshare.protocol.Orchestration.StageView::id)
+            .toList());
     assertEquals(List.of("alpha", "/alpha"), served.triggers());
     assertTrue(served.served());
     assertEquals(null, served.withheld());
@@ -307,7 +346,9 @@ class OrchestrationFramesTest {
     assertEquals(
         List.of("orc_1"),
         ((Listed) outcome.payload())
-            .orchestrations().stream().map(OrchestrationFrames.RunView::id).toList());
+            .orchestrations().stream()
+                .map(io.aeyer.plowshare.protocol.Orchestration.RunView::id)
+                .toList());
   }
 
   @Test
@@ -315,10 +356,7 @@ class OrchestrationFramesTest {
     Outcome outcome = route(FrameTypes.ORCHESTRATION_LIST, "{\"state\":\"pondering\"}");
 
     assertEquals(Code.BAD_REQUEST, outcome.code());
-    assertEquals(
-        "orchestration.list has an unknown state 'pondering'; it is one of running,"
-            + " asking, waiting, finished, failed, capped, cancelled.",
-        outcome.said());
+    assertTrue(outcome.said().contains("invalid orchestration state"));
     verify(store, never()).byCaller(any(), any(), any(), anyInt());
   }
 
@@ -351,7 +389,7 @@ class OrchestrationFramesTest {
     Outcome tooMany = route(FrameTypes.ORCHESTRATION_LIST, "{\"limit\":201}");
 
     assertEquals(Code.BAD_REQUEST, tooFew.code());
-    assertTrue(tooFew.said().contains("1 to 200"), tooFew.said());
+    assertTrue(tooFew.said().contains("1..200"), tooFew.said());
     assertEquals(Code.BAD_REQUEST, tooMany.code());
     verify(store, never()).byCaller(any(), any(), any(), anyInt());
   }
@@ -436,10 +474,14 @@ class OrchestrationFramesTest {
     assertEquals("orc_child_1", status.orchestration().waitingFor());
     assertEquals(
         List.of("orc_child_2", "orc_child_1"),
-        status.children().stream().map(OrchestrationFrames.ChildView::id).toList());
+        status.children().stream()
+            .map(io.aeyer.plowshare.protocol.Orchestration.ChildView::id)
+            .toList());
     assertEquals(
         List.of("running", "finished"),
-        status.children().stream().map(OrchestrationFrames.ChildView::state).toList());
+        status.children().stream()
+            .map(io.aeyer.plowshare.protocol.Orchestration.ChildView::state)
+            .toList());
   }
 
   @Test
@@ -480,8 +522,8 @@ class OrchestrationFramesTest {
     Outcome outcome = route(FrameTypes.ORCHESTRATION_STATUS, "{}");
 
     assertEquals(Code.BAD_REQUEST, outcome.code());
-    assertEquals(
-        "orchestration.status needs the orchestration id; nothing was done.", outcome.said());
+    assertTrue(outcome.said().contains("id must be a bounded nonblank identity"));
+    verify(store, never()).find(any());
   }
 
   // -- answer ------------------------------------------------------------------------------
@@ -498,7 +540,7 @@ class OrchestrationFramesTest {
 
     assertEquals(Code.OK, outcome.code());
     verify(orchestrations).answer("orc_1", "Use PostgreSQL", "enzo");
-    assertEquals(new Answered("orc_1", "running"), outcome.payload());
+    assertEquals(new Changed("orc_1", "running"), outcome.payload());
   }
 
   @Test
@@ -547,8 +589,7 @@ class OrchestrationFramesTest {
         route(FrameTypes.ORCHESTRATION_ANSWER, "{\"id\":\"orc_1\",\"answer\":\"   \"}");
 
     assertEquals(Code.BAD_REQUEST, outcome.code());
-    assertEquals(
-        "orchestration.answer needs the answer text; nothing was answered.", outcome.said());
+    assertTrue(outcome.said().contains("answer needs text or choices"));
     verify(orchestrations, never()).answer(any(), any(), any());
   }
 
@@ -582,12 +623,14 @@ class OrchestrationFramesTest {
     verify(orchestrations)
         .answerChosen(
             eq("orc_1"),
-            eq(JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]")),
+            eq(
+                io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                    JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]"))),
             eq("thanks"),
             eq("enzo"),
             eq(true));
     verify(orchestrations, never()).answer(any(), any(), any());
-    assertEquals(new Answered("orc_1", "running"), outcome.payload());
+    assertEquals(new Changed("orc_1", "running"), outcome.payload());
   }
 
   @Test
@@ -652,14 +695,17 @@ class OrchestrationFramesTest {
                     Instant.parse("2026-09-15T09:00:00Z"),
                     null,
                     null,
-                    "{\"lead\":\"First:\",\"questions\":[]}")));
+                    io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                        "{\"lead\":\"First:\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}]}"))));
 
     Outcome outcome = route(FrameTypes.ORCHESTRATION_STATUS, "{\"id\":\"orc_1\"}");
 
-    OrchestrationFrames.Status status = (OrchestrationFrames.Status) outcome.payload();
+    io.aeyer.plowshare.protocol.Orchestration.Status status =
+        (io.aeyer.plowshare.protocol.Orchestration.Status) outcome.payload();
     assertEquals(
-        JSON.readTree("{\"lead\":\"First:\",\"questions\":[]}"),
-        status.messages().get(0).structure());
+        JSON.readTree(
+            "{\"lead\":\"First:\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}]}"),
+        JSON.valueToTree(status.messages().get(0).structure()));
   }
 
   // -- cancel ------------------------------------------------------------------------------
@@ -673,7 +719,7 @@ class OrchestrationFramesTest {
     Outcome outcome = route(FrameTypes.ORCHESTRATION_CANCEL, "{\"id\":\"orc_1\"}");
 
     assertEquals(Code.OK, outcome.code());
-    assertEquals(new Cancelled("orc_1", "cancelled"), outcome.payload());
+    assertEquals(new Changed("orc_1", "cancelled"), outcome.payload());
     verify(cancel).cancel("orc_1", "enzo");
   }
 

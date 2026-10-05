@@ -95,9 +95,8 @@ import org.apache.pdfbox.text.PDFTextStripper;
  *
  * <p>{@code setSortByPosition(true)} <em>is</em> carried, because that one is right for the corpus:
  * an academic paper is often two columns, and geometric order is what makes a two-column page read
- * as two columns rather than as interleaved half-sentences. It is the opposite of what {@code
- * plowshare-client}'s {@code PdfConverter} does, and deliberately — a {@code file_read} window is
- * supposed to be the file's own order.
+ * as two columns rather than as interleaved half-sentences. File-source window conversion
+ * separately preserves source line order.
  *
  * <p>Static, and not a {@code @Service}, for {@link TextExtraction}'s reason: there is no state and
  * nothing to inject.
@@ -107,9 +106,7 @@ final class PdfExtraction {
   /**
    * {@code %PDF-} and not {@code %PDF}, which is the whole of the signature the format guarantees.
    *
-   * <p>Deliberately identical to {@code PdfConverter.MAGIC} in the client, and to the entry this
-   * replaced in {@code TextExtraction.KNOWN}. Separate literals in separate modules, because the
-   * two do different things with the same five bytes.
+   * <p>The signature is checked before PDFBox sees the bytes.
    */
   private static final byte[] MAGIC = {'%', 'P', 'D', 'F', '-'};
 

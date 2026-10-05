@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.board.BoardMessagingRepository.Termination;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.events.FiringStore;
@@ -26,7 +27,6 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Private messaging is a board transport: same messages, firings, leases and turn scheduler. */
 public final class BoardMessaging
@@ -153,7 +153,7 @@ public final class BoardMessaging
     cancelJob = cancellation;
   }
 
-  private final JdbcTemplate jdbc;
+  private final BoardMessagingRepository repository;
   private final BoardStore boards;
   private final ConversationStore conversations;
   private final FiringStore firings;
@@ -182,7 +182,7 @@ public final class BoardMessaging
   }
 
   public BoardMessaging(
-      JdbcTemplate jdbc,
+      BoardMessagingRepository repository,
       BoardStore boards,
       ConversationStore conversations,
       FiringStore firings,
@@ -192,7 +192,7 @@ public final class BoardMessaging
       Definitions definitions,
       Consumer<String> drain,
       Supplier<Instant> clock) {
-    this.jdbc = jdbc;
+    this.repository = java.util.Objects.requireNonNull(repository);
     this.boards = boards;
     this.conversations = conversations;
     this.firings = firings;
@@ -205,46 +205,11 @@ public final class BoardMessaging
   }
 
   public Optional<Instance> instance(String id) {
-    return instances("id = ?", id).stream().findFirst();
-  }
-
-  private List<Instance> instances(String where, Object... args) {
-    return jdbc.query(
-        "SELECT id, account, project, agent, conversation, topic, lifetime, active"
-            + " FROM board_message_instances WHERE "
-            + where,
-        (rs, n) ->
-            new Instance(
-                rs.getString(1),
-                rs.getString(2),
-                rs.getString(3),
-                rs.getString(4),
-                rs.getString(5),
-                rs.getString(6),
-                rs.getString(7),
-                rs.getBoolean(8)),
-        args);
+    return repository.instance(id);
   }
 
   public Optional<Route> route(String message) {
-    return jdbc
-        .query(
-            "SELECT message, sender, recipient, reply_to, reply_expected, final,"
-                + " generated, ending, handled_at IS NOT NULL FROM board_message_routes WHERE message = ?",
-            (rs, n) ->
-                new Route(
-                    rs.getString(1),
-                    rs.getString(2),
-                    rs.getString(3),
-                    rs.getString(4),
-                    rs.getBoolean(5),
-                    rs.getBoolean(6),
-                    rs.getBoolean(7),
-                    rs.getString(8),
-                    rs.getBoolean(9)),
-            message)
-        .stream()
-        .findFirst();
+    return repository.route(message);
   }
 
   /** Stable source binding. Defaults and caller bindings are serialized in PostgreSQL. */
@@ -267,10 +232,8 @@ public final class BoardMessaging
     }
     lock("source:" + context.conversationId() + ":" + context.definition().name());
     Optional<Instance> found =
-        instances(
-                "conversation = ? AND agent = ?",
-                context.conversationId(),
-                context.definition().name())
+        repository
+            .byConversationAgent(context.conversationId(), context.definition().name())
             .stream()
             .findFirst();
     if (found.isPresent()) {
@@ -319,12 +282,7 @@ public final class BoardMessaging
     if ("task".equals(lifetime))
       return new Target(create(sender.account(), project, definition, lifetime, false, null), true);
     lock("default:" + sender.account() + ":" + project + ":" + to);
-    return instances(
-            "account = ? AND project = ? AND agent = ? AND is_default",
-            sender.account(),
-            project,
-            to)
-        .stream()
+    return repository.defaults(sender.account(), project, to).stream()
         .findFirst()
         .map(i -> new Target(i, false))
         .orElseGet(
@@ -340,8 +298,7 @@ public final class BoardMessaging
     lock("source:" + conversation + ":" + definition.name());
     requireRouteConversation(account, project, definition.name(), conversation);
     Optional<Instance> prior =
-        instances("conversation = ? AND agent = ?", conversation, definition.name()).stream()
-            .findFirst();
+        repository.byConversationAgent(conversation, definition.name()).stream().findFirst();
     if (prior.isPresent()) {
       requireRetainedInstance(prior.get(), account, project);
       return new Target(prior.get(), false);
@@ -354,14 +311,7 @@ public final class BoardMessaging
       Instance sender, String name, String project, AgentDefinition definition) {
     lock("route:" + sender.account() + ":" + sender.project() + ":" + name);
     lock("mailbox:" + sender.account() + ":" + project);
-    List<String> pinned =
-        jdbc.queryForList(
-            "SELECT instance FROM board_message_route_bindings"
-                + " WHERE account = ? AND source_project = ? AND route_name = ?",
-            String.class,
-            sender.account(),
-            sender.project(),
-            name);
+    List<String> pinned = repository.retainedBindings(sender.account(), sender.project(), name);
     if (!pinned.isEmpty()) {
       Instance instance = instance(pinned.getFirst()).orElseThrow();
       if (!instance.project().equals(project) || !instance.agent().equals(definition.name())) {
@@ -374,17 +324,12 @@ public final class BoardMessaging
       return new Target(instance, false);
     }
     Instance instance = create(sender.account(), project, definition, "persistent", false, null);
-    jdbc.update(
-        "INSERT INTO board_message_route_bindings (account, source_project, route_name, instance) VALUES (?, ?, ?, ?)",
-        sender.account(),
-        sender.project(),
-        name,
-        instance.id());
+    repository.bindRoute(sender.account(), sender.project(), name, instance.id());
     return new Target(instance, true);
   }
 
   private void requireRouteConversation(String account, String project, String agent, String id) {
-    jdbc.queryForList("SELECT id FROM conversations WHERE id = ? FOR UPDATE", String.class, id);
+    repository.lockConversation(id);
     var row =
         conversations
             .find(id)
@@ -416,7 +361,7 @@ public final class BoardMessaging
   }
 
   private void lock(String key) {
-    jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", Object.class, key);
+    repository.lockAddress(key);
   }
 
   private Instance create(
@@ -427,12 +372,7 @@ public final class BoardMessaging
       boolean isDefault,
       String boundConversation) {
     lock("mailbox:" + account + ":" + project);
-    Integer count =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_instances WHERE account = ? AND project = ? AND active",
-            Integer.class,
-            account,
-            project);
+    Integer count = repository.activeInstances(account, project);
     if (count >= limits.getInstanceLimit())
       throw new Board.Refused("This project's active messaging instance limit is reached.");
     // Start with the board schema's minimum pot and closing reserve. Each
@@ -457,16 +397,9 @@ public final class BoardMessaging
                 total,
                 1));
     String id = MemoryIds.mint("ins_", clock.get());
-    jdbc.update(
-        "INSERT INTO board_message_instances (id, account, project, agent, conversation,"
-            + " topic, lifetime, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        id,
-        account,
-        project,
-        definition.name(),
-        conversation,
-        topic.id(),
-        lifetime,
+    repository.insertInstance(
+        new Instance(
+            id, account, project, definition.name(), conversation, topic.id(), lifetime, true),
         isDefault);
     if (boundConversation == null) boards.seatIfAbsent(topic.id(), definition.name(), conversation);
     return instance(id).orElseThrow();
@@ -481,6 +414,43 @@ public final class BoardMessaging
   /** One external context has an isolated recipient and passive durable return address. */
   public io.aeyer.plowshare.protocol.Incoming.Task receive(
       String account, io.aeyer.plowshare.protocol.Incoming.Receive request) {
+    return receive(account, request, null);
+  }
+
+  /** An authenticated schedule uses the same private transport, route checks and command wake. */
+  public io.aeyer.plowshare.protocol.Incoming.Task receiveScheduled(
+      String account,
+      String sourceProject,
+      String schedule,
+      String firing,
+      io.aeyer.plowshare.protocol.ScheduledWork definition) {
+    var target = definition.target();
+    String identity = schedule + "\n" + target + "\n" + definition.action().agent();
+    String client =
+        "schedule-"
+            + java.util.UUID.nameUUIDFromBytes(
+                identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var context =
+        java.util.UUID.nameUUIDFromBytes(
+            (account + "\n" + client).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var request =
+        new io.aeyer.plowshare.protocol.Incoming.Receive(
+            sourceProject,
+            client,
+            definition.action().agent(),
+            java.util.UUID.nameUUIDFromBytes(
+                firing.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            context,
+            definition.action().input(),
+            definition.action().command(),
+            null);
+    return receive(account, request, target);
+  }
+
+  private io.aeyer.plowshare.protocol.Incoming.Task receive(
+      String account,
+      io.aeyer.plowshare.protocol.Incoming.Receive request,
+      io.aeyer.plowshare.protocol.ScheduledWork.Target scheduled) {
     if (request.requestId() == null
         || request.project() == null
         || request.project().isBlank()
@@ -501,7 +471,7 @@ public final class BoardMessaging
             .matches(
                 "/(skill|orchestration):[a-zA-Z0-9_.-]+(?: --mode=(INHERITED|SUMMARISED|NEW|DIRECT))?"))
       throw new Board.Refused("Only an explicit qualified bound command can be requested.");
-    Map<String, Object> source = request.source() == null ? Map.of() : request.source();
+    var source = request.source();
     String encoded = json(source);
     if (encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 128 * 1024)
       throw new Board.Refused("Incoming source exceeds 128 KiB.");
@@ -516,59 +486,90 @@ public final class BoardMessaging
                   + request.client()
                   + ":"
                   + request.requestId());
-          var prior =
-              jdbc.queryForList(
-                  "SELECT t.id, t.request_context, t.body, t.command, c.agent, t.source = CAST(? AS jsonb) AS matches FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.account=? AND t.project=? AND t.client=? AND t.request_id=?",
-                  encoded,
-                  account,
-                  request.project(),
-                  request.client(),
-                  request.requestId());
+          var prior = repository.priorExternal(account, request).stream().toList();
           if (!prior.isEmpty()) {
             var old = prior.getFirst();
-            if (!java.util.Objects.equals(old.get("request_context"), request.context())
-                || !old.get("body").equals(request.body())
-                || !java.util.Objects.equals(old.get("command"), request.command())
-                || !old.get("agent").equals(request.agent())
-                || !Boolean.TRUE.equals(old.get("matches")))
+            if (!java.util.Objects.equals(old.requestContext(), request.context())
+                || !old.body().equals(request.body())
+                || !java.util.Objects.equals(old.command(), request.command())
+                || !old.agent().equals(request.agent())
+                || !Boolean.TRUE.equals(old.matches()))
               throw new Board.Refused("This incoming request UUID already names different work.");
-            return externalTask(
-                account, request.project(), request.client(), (java.util.UUID) old.get("id"));
+            return externalTask(account, request.project(), request.client(), old.id());
           }
           java.util.UUID context = request.context();
           Instance sender, recipient;
-          if (context == null) {
-            context = java.util.UUID.randomUUID();
-            AgentDefinition definition = definitions.resolve(request.agent(), request.project());
+          var contexts =
+              context == null
+                  ? java.util.List.<BoardMessagingRepository.ExternalContext>of()
+                  : repository.externalContext(context, account, request).stream().toList();
+          if (context == null || (scheduled != null && contexts.isEmpty())) {
+            if (context == null) context = java.util.UUID.randomUUID();
+            AgentDefinition definition;
+            if (scheduled == null)
+              definition = definitions.resolve(request.agent(), request.project());
+            else {
+              var address =
+                  routing.resolve(
+                      account,
+                      request.project(),
+                      scheduled.project(),
+                      scheduled.to(),
+                      scheduled.route());
+              String targetProject = address.project();
+              if (address.to().startsWith("ins_"))
+                targetProject = owned(address.to(), account).project();
+              routing.require(account, request.project(), targetProject);
+              definition = definitions.resolve(request.agent(), targetProject);
+            }
             sender = create(account, request.project(), definition, "external", false, null);
-            jdbc.update(
-                "UPDATE board_message_instances SET active=FALSE,agent=? WHERE id=?",
-                "external:" + request.client(),
-                sender.id());
+            repository.passiveSender(sender.id(), request.client());
             sender = instance(sender.id()).orElseThrow();
-            recipient = create(account, request.project(), definition, "persistent", false, null);
-            jdbc.update(
-                "INSERT INTO message_external_contexts(id,account,project,client,agent,sender,recipient) VALUES(?,?,?,?,?,?,?)",
-                context,
-                account,
-                request.project(),
-                request.client(),
-                request.agent(),
-                sender.id(),
-                recipient.id());
+            recipient =
+                scheduled == null
+                    ? create(account, request.project(), definition, "persistent", false, null)
+                    : destination(
+                            new SendMessageTool.Request(
+                                scheduled.to(),
+                                request.body(),
+                                null,
+                                true,
+                                false,
+                                "persistent",
+                                request.requestId().toString(),
+                                null,
+                                scheduled.project(),
+                                scheduled.route()),
+                            sender)
+                        .instance();
+            if (!recipient.agent().equals(request.agent()))
+              throw new Board.Refused("Scheduled action does not match its recipient");
+            repository.insertExternalContext(
+                context, account, request, sender.id(), recipient.id());
           } else {
             lock("external-context:" + context);
-            var contexts =
-                jdbc.queryForList(
-                    "SELECT sender,recipient FROM message_external_contexts WHERE id=? AND account=? AND project=? AND client=? AND agent=?",
-                    context,
-                    account,
-                    request.project(),
-                    request.client(),
-                    request.agent());
             if (contexts.isEmpty()) throw new Board.Refused("No accessible incoming context.");
-            sender = owned((String) contexts.getFirst().get("sender"), account);
-            recipient = owned((String) contexts.getFirst().get("recipient"), account);
+            sender = owned(contexts.getFirst().sender(), account);
+            recipient = owned(contexts.getFirst().recipient(), account);
+            if (scheduled != null) {
+              var current =
+                  destination(
+                          new SendMessageTool.Request(
+                              scheduled.to(),
+                              request.body(),
+                              null,
+                              true,
+                              false,
+                              "persistent",
+                              request.requestId().toString(),
+                              null,
+                              scheduled.project(),
+                              scheduled.route()),
+                          sender)
+                      .instance();
+              if (!current.id().equals(recipient.id()))
+                throw new Board.Refused("The schedule route changed its retained destination");
+            }
           }
           requireReadable(sender);
           requireReadable(recipient);
@@ -586,43 +587,20 @@ public final class BoardMessaging
                   false,
                   null);
           java.util.UUID id = java.util.UUID.randomUUID();
-          jdbc.update(
-              "INSERT INTO message_external_tasks(id,context,account,project,client,request_id,request_context,body,command,source,message) VALUES(?,?,?,?,?,?,?,?,?,CAST(? AS jsonb),?)",
-              id,
-              context,
-              account,
-              request.project(),
-              request.client(),
-              request.requestId(),
-              request.context(),
-              request.body(),
-              request.command(),
-              encoded,
-              message);
+          repository.insertExternalTask(id, context, account, request, message);
           return externalTask(account, request.project(), request.client(), id);
         });
   }
 
   public io.aeyer.plowshare.protocol.Incoming.Task externalTask(
       String account, String project, String client, java.util.UUID id) {
-    var rows =
-        jdbc.queryForList(
-            "SELECT t.*,c.agent FROM message_external_tasks t JOIN message_external_contexts c ON c.id=t.context WHERE t.id=? AND t.account=? AND t.project=? AND t.client=?",
-            id,
-            account,
-            project,
-            client);
+    var rows = repository.externalTask(account, project, client, id).stream().toList();
     if (rows.isEmpty()) throw new Board.Refused("No accessible incoming task.");
     var row = rows.getFirst();
-    String message = (String) row.get("message");
+    String message = row.message();
     Delivery delivery = delivery(message, account);
     List<io.aeyer.plowshare.protocol.Incoming.Reply> replies =
-        jdbc
-            .queryForList(
-                "SELECT message FROM (SELECT r.message,b.posted_at FROM board_message_routes r JOIN board_messages b ON b.id=r.message WHERE r.reply_to=? ORDER BY b.posted_at DESC,r.message DESC LIMIT 200) recent ORDER BY posted_at,message",
-                String.class,
-                message)
-            .stream()
+        repository.replies(message).stream()
             .map(
                 reply -> {
                   Delivery d = delivery(reply, account);
@@ -646,25 +624,16 @@ public final class BoardMessaging
                   : "CANCELLED".equals(delivery.ending()) ? "CANCELED" : "FAILED";
           default -> "WORKING";
         };
-    Map<String, Object> source;
-    try {
-      source =
-          JSON.readValue(
-              row.get("source").toString(),
-              new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
-    } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
-      throw new IllegalStateException(invalid);
-    }
     return new io.aeyer.plowshare.protocol.Incoming.Task(
         id,
-        (java.util.UUID) row.get("context"),
-        (String) row.get("agent"),
+        row.context(),
+        row.agent(),
         message,
         state,
         delivery.ending(),
-        source,
+        row.source(),
         replies,
-        ((java.sql.Timestamp) row.get("created_at")).toInstant());
+        row.createdAt());
   }
 
   public io.aeyer.plowshare.protocol.Incoming.Task cancelExternal(
@@ -703,11 +672,7 @@ public final class BoardMessaging
                 // handling turn, while preserving the same identity on a retried call.
                 Integer turn = context.transcript().continuingTurn();
                 if (request.callId() != null && turn == null)
-                  turn =
-                      jdbc.queryForObject(
-                          "SELECT COALESCE(max(turn_ordinal), 0) FROM entries WHERE conversation_id = ?",
-                          Integer.class,
-                          context.conversationId());
+                  turn = repository.lastTurn(context.conversationId());
                 SendMessageTool.Request identified =
                     request.callId() == null
                         ? request
@@ -744,11 +709,7 @@ public final class BoardMessaging
               "reply_expected",
               sent.replyExpected(),
               "queued",
-              Boolean.TRUE.equals(
-                  jdbc.queryForObject(
-                      "SELECT EXISTS (SELECT 1 FROM firings WHERE data->>'direct_message' = ?)",
-                      Boolean.class,
-                      id))));
+              Boolean.TRUE.equals(repository.queued(id))));
     } catch (io.aeyer.plowshare.server.faults.CallerFault
         | io.aeyer.plowshare.server.faults.NotFoundFault refused) {
       return refused.getMessage();
@@ -762,12 +723,7 @@ public final class BoardMessaging
     // Tool call IDs are durable idempotency keys; retries do not owe another wake.
     if (request.callId() != null) {
       lock("send:" + sender.id() + ":" + request.callId());
-      List<String> prior =
-          jdbc.queryForList(
-              "SELECT message FROM board_message_routes WHERE sender = ? AND call_id = ?",
-              String.class,
-              sender.id(),
-              request.callId());
+      List<String> prior = repository.priorSend(sender.id(), request.callId());
       if (!prior.isEmpty()) return prior.getFirst();
     }
     Route original =
@@ -784,11 +740,7 @@ public final class BoardMessaging
       if (request.to() != null && !request.to().equals(recipient.id()))
         throw new Board.Refused("The reply's return address is supplied by the harness; omit to.");
       lockRequest(original.message());
-      if (!generated
-          && jdbc.queryForObject(
-              "SELECT termination IS NOT NULL FROM board_message_routes WHERE message = ?",
-              Boolean.class,
-              original.message()))
+      if (!generated && repository.terminated(original.message()))
         throw new Board.Refused("This message was cancelled or expired.");
       if (request.finalReply() && finalReply(original.message()).isPresent()) {
         throw new Board.Refused("This message already has a final reply.");
@@ -812,12 +764,7 @@ public final class BoardMessaging
     }
     if (!generated
         && recipient.active()
-        && jdbc.queryForObject(
-                "SELECT count(*) FROM board_message_routes"
-                    + " WHERE recipient = ? AND handled_at IS NULL",
-                Integer.class,
-                recipient.id())
-            >= limits.getQueueLimit()) {
+        && repository.pendingCount(recipient.id()) >= limits.getQueueLimit()) {
       throw new Board.Refused("The recipient's pending message queue is full.");
     }
     // Cross-project routing grants message delivery, not document/history inheritance.
@@ -836,37 +783,30 @@ public final class BoardMessaging
                 request.body(),
                 false,
                 List.of()));
-    jdbc.update(
-        "INSERT INTO board_message_routes (message, sender, recipient, reply_to, reply_expected,"
-            + " final, generated, ending, call_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        message.id(),
-        sender.id(),
-        recipient.id(),
-        request.replyTo(),
-        request.replyExpected(),
-        request.finalReply(),
-        generated,
-        ending,
+    repository.insertRoute(
+        new Route(
+            message.id(),
+            sender.id(),
+            recipient.id(),
+            request.replyTo(),
+            request.replyExpected(),
+            request.finalReply(),
+            generated,
+            ending,
+            false),
         request.callId());
     if (request.timeoutSeconds() != null)
-      jdbc.update(
-          "UPDATE board_message_routes SET deadline_at = ? WHERE message = ?",
-          java.sql.Timestamp.from(clock.get().plusSeconds(request.timeoutSeconds())),
-          message.id());
+      repository.deadline(message.id(), clock.get().plusSeconds(request.timeoutSeconds()));
     if (recipient.active()) {
       int allowance = definitions.resolve(recipient.agent(), recipient.project()).maxModelCalls();
-      jdbc.update(
-          "UPDATE board_topics SET pot_total = pot_total + ? WHERE id = ?",
-          allowance,
-          recipient.topic());
+      repository.addAllowance(recipient.topic(), allowance);
       firings.owe(
           recipient.topic(),
           "conversation:" + recipient.conversation(),
-          json(Map.of("direct_message", message.id())),
+          new io.aeyer.plowshare.server.events.EventPayload.Message(new MessageWake(message.id())),
           clock.get());
     } else {
-      jdbc.update(
-          "UPDATE board_message_routes SET handled_at = now() WHERE message = ?", message.id());
+      repository.handled(message.id());
     }
     // Direct wakes are never coalesced: one outcome belongs to exactly one incoming message.
     boolean announce = opening;
@@ -903,30 +843,15 @@ public final class BoardMessaging
   }
 
   private Optional<String> externalCommand(String message) {
-    return jdbc
-        .queryForList(
-            "SELECT command || ' ' || body FROM message_external_tasks WHERE message=? AND command IS NOT NULL",
-            String.class,
-            message)
-        .stream()
-        .findFirst();
+    return repository.externalCommand(message);
   }
 
   private void lockRequest(String message) {
-    jdbc.queryForObject(
-        "SELECT message FROM board_message_routes WHERE message = ? FOR UPDATE",
-        String.class,
-        message);
+    repository.lockRequest(message);
   }
 
   public Optional<String> finalReply(String message) {
-    return jdbc
-        .queryForList(
-            "SELECT message FROM board_message_routes WHERE reply_to = ? AND final",
-            String.class,
-            message)
-        .stream()
-        .findFirst();
+    return repository.finalReply(message);
   }
 
   public String incoming(String message) {
@@ -981,8 +906,7 @@ public final class BoardMessaging
           Route original = route(message).orElseThrow();
           if (original.handled()) return null;
           if (outcome.ending() == Outcome.Ending.AWAITING) {
-            jdbc.update(
-                "UPDATE board_message_routes SET awaiting = TRUE WHERE message = ?", message);
+            repository.awaiting(message);
             return null;
           }
           Instance receiver = instance(original.recipient()).orElseThrow();
@@ -1003,15 +927,12 @@ public final class BoardMessaging
   }
 
   private void endRequest(Route original, Outcome.Ending ending) {
-    jdbc.update(
-        "UPDATE board_message_routes SET handled_at = now(), awaiting = FALSE, ending = COALESCE(ending, ?) WHERE message = ?",
-        ending.name(),
-        original.message());
+    repository.endRequest(original.message(), ending);
     Instance receiver = instance(original.recipient()).orElseThrow();
     if (receiver.lifetime().equals("task")
         && ending != Outcome.Ending.AWAITING
         && receiver.active()) {
-      jdbc.update("UPDATE board_message_instances SET active = FALSE WHERE id = ?", receiver.id());
+      repository.deactivate(receiver.id());
       work.afterCommit(
           () -> {
             try {
@@ -1025,37 +946,19 @@ public final class BoardMessaging
   }
 
   private static String messageOf(FiringRecord wake) {
-    try {
-      return JSON.readTree(wake.data()).path("direct_message").asText(null);
-    } catch (JsonProcessingException bad) {
-      throw new IllegalStateException("Invalid persisted message wake", bad);
-    }
+    return MessageWakeCodec.read(wake).map(MessageWake::message).orElse(null);
   }
 
   public boolean owns(FiringRecord wake) {
     return messageOf(wake) != null;
   }
 
-  private static com.fasterxml.jackson.databind.JsonNode wakeData(FiringRecord wake) {
-    try {
-      return JSON.readTree(wake.data());
-    } catch (JsonProcessingException malformed) {
-      throw new IllegalStateException(malformed);
-    }
-  }
-
   @Override
   public boolean busy(FiringRecord wake) {
     Instance recipient = instance(route(messageOf(wake)).orElseThrow().recipient()).orElseThrow();
     boolean blockedByRequest =
-        !wakeData(wake).has("message_continuation")
-            && Boolean.TRUE.equals(
-                jdbc.queryForObject(
-                    "SELECT EXISTS (SELECT 1 FROM board_message_routes"
-                        + " WHERE recipient = ? AND message <> ? AND started_at IS NOT NULL AND handled_at IS NULL)",
-                    Boolean.class,
-                    recipient.id(),
-                    messageOf(wake)));
+        MessageWakeCodec.read(wake).orElseThrow().continuation() == null
+            && Boolean.TRUE.equals(repository.otherStarted(recipient.id(), messageOf(wake)));
     return voice.busy(recipient.conversation())
         || pot.leased(recipient.topic()) > 0
         || blockedByRequest;
@@ -1067,7 +970,7 @@ public final class BoardMessaging
       io.aeyer.plowshare.server.approvals.RunApproval approval, String utterance) {
     return work.inTransaction(
         () -> {
-          List<Instance> bound = instances("conversation = ?", approval.conversation());
+          List<Instance> bound = repository.byConversation(approval.conversation());
           if (bound.isEmpty()) return false;
           Instance recipient = bound.getFirst();
           if (approval.handle() != null && !recipient.account().equals(approval.handle())) {
@@ -1075,17 +978,8 @@ public final class BoardMessaging
           }
           lockMailbox(recipient);
           lock("continuation:" + approval.id());
-          if (Boolean.TRUE.equals(
-              jdbc.queryForObject(
-                  "SELECT EXISTS (SELECT 1 FROM firings" + " WHERE data->>'message_approval' = ?)",
-                  Boolean.class,
-                  approval.id()))) return true;
-          List<String> handling =
-              jdbc.queryForList(
-                  "SELECT message FROM board_message_routes WHERE recipient = ?"
-                      + " AND started_at IS NOT NULL AND handled_at IS NULL FOR UPDATE",
-                  String.class,
-                  recipient.id());
+          if (Boolean.TRUE.equals(repository.approvalQueued(approval.id()))) return true;
+          List<String> handling = repository.lockHandling(recipient.id());
           if (handling.isEmpty()) return !recipient.lifetime().equals("caller");
           if (!recipient.active()) return true;
           String child =
@@ -1104,25 +998,26 @@ public final class BoardMessaging
               throw new Board.Refused("The approval does not belong to this message instance.");
             }
           }
-          var data = new java.util.LinkedHashMap<String, Object>();
-          data.put("direct_message", handling.getFirst());
-          data.put("message_continuation", "approval");
-          data.put("message_approval", approval.id());
-          data.put("utterance", utterance);
-          if (child != null) data.put("delegate", child);
-          queueContinuation(recipient, data);
+          queueContinuation(
+              recipient,
+              new MessageWake(
+                  handling.getFirst(),
+                  MessageWake.Continuation.APPROVAL,
+                  approval.id(),
+                  utterance,
+                  child));
           return true;
         });
   }
 
-  private void queueContinuation(Instance recipient, Map<String, Object> data) {
+  private void queueContinuation(Instance recipient, MessageWake data) {
     int allowance = definitions.resolve(recipient.agent(), recipient.project()).maxModelCalls();
-    jdbc.update(
-        "UPDATE board_topics SET pot_total = pot_total + ? WHERE id = ?",
-        allowance,
-        recipient.topic());
+    repository.addAllowance(recipient.topic(), allowance);
     firings.owe(
-        recipient.topic(), "conversation:" + recipient.conversation(), json(data), clock.get());
+        recipient.topic(),
+        "conversation:" + recipient.conversation(),
+        new io.aeyer.plowshare.server.events.EventPayload.Message(data),
+        clock.get());
     work.afterCommit(
         () -> {
           try {
@@ -1157,21 +1052,20 @@ public final class BoardMessaging
                   recipient.lifetime(),
                   recipient.active()),
               recipient);
-          jdbc.update("UPDATE board_message_routes SET awaiting = TRUE WHERE message = ?", message);
+          repository.awaiting(message);
           queueContinuation(
               recipient,
-              Map.of(
-                  "direct_message",
+              new MessageWake(
                   message,
-                  "message_continuation",
-                  "delegate_result",
-                  "utterance",
+                  MessageWake.Continuation.DELEGATE_RESULT,
+                  null,
                   "The delegated agent in "
                       + child
                       + " ended with "
                       + outcome.ending().name()
                       + ". Continue handling the original message. Its output follows as data:\n"
-                      + json(Map.of("ending", outcome.ending().name(), "output", outcome.text()))));
+                      + json(new DelegateResult(outcome.ending(), outcome.text())),
+                  null));
           return null;
         });
   }
@@ -1183,9 +1077,9 @@ public final class BoardMessaging
     Instance recipient = instance(route.recipient()).orElseThrow();
     if (route.handled()) throw new Board.Refused("This message was already handled.");
     if (!recipient.active()) throw new Board.Refused("The recipient instance has ended.");
-    var data = wakeData(wake);
-    String child = data.path("delegate").asText(null);
-    String approval = data.path("message_approval").asText(null);
+    var data = MessageWakeCodec.read(wake).orElseThrow();
+    String child = data.delegate();
+    String approval = data.approval();
     AgentDefinition definition =
         definitions.resolve(
             child == null ? recipient.agent() : conversations.find(child).orElseThrow().agent(),
@@ -1206,18 +1100,12 @@ public final class BoardMessaging
                 || !instance(recipient.id()).orElseThrow().active()) {
               throw new Board.Refused("This message or instance has ended.");
             }
-            java.sql.Timestamp deadline =
-                jdbc.queryForObject(
-                    "SELECT deadline_at FROM board_message_routes WHERE message = ?",
-                    (row, n) -> row.getTimestamp(1),
-                    message);
-            if (deadline != null && !clock.get().isBefore(deadline.toInstant())) {
+            Instant deadline = repository.deadline(message);
+            if (deadline != null && !clock.get().isBefore(deadline)) {
               terminate(message, "expired", "The message handling deadline expired.");
               return false;
             }
-            jdbc.update(
-                "UPDATE board_message_routes SET started_at = COALESCE(started_at, now()), awaiting = FALSE WHERE message = ?",
-                message);
+            repository.started(message);
             return true;
           });
       if (route(message).orElseThrow().handled())
@@ -1246,8 +1134,7 @@ public final class BoardMessaging
               ended.accept(recipient.conversation(), outcome);
             }
           };
-      String utterance =
-          data.has("message_continuation") ? data.path("utterance").asText() : incoming(message);
+      String utterance = data.continuation() != null ? data.utterance() : incoming(message);
       String job =
           child != null
               ? voice.resumeDelegate(
@@ -1282,11 +1169,7 @@ public final class BoardMessaging
                                   finished));
       // A stop can commit between the durable start claim and JobStore submission.
       // Once submission returns, cancellation still reaches that exact job.
-      if (Boolean.TRUE.equals(
-          jdbc.queryForObject(
-              "SELECT termination IS NOT NULL FROM board_message_routes WHERE message = ?",
-              Boolean.class,
-              message))) cancelJob.accept(job);
+      if (Boolean.TRUE.equals(repository.terminated(message))) cancelJob.accept(job);
       return job;
     } catch (RuntimeException failure) {
       pot.settle(recipient.topic(), lease);
@@ -1312,15 +1195,7 @@ public final class BoardMessaging
 
   /** An interrupted paid turn is reported, never automatically executed a second time. */
   public void recover() {
-    List<String> interrupted =
-        jdbc.queryForList(
-            "SELECT r.message FROM board_message_routes r"
-                + " JOIN firings f ON f.data->>'direct_message' = r.message"
-                + " WHERE r.handled_at IS NULL AND f.status = 'started' AND f.finished_at IS NOT NULL"
-                + " AND (f.reason IS NOT NULL OR (NOT r.awaiting AND NOT EXISTS (SELECT 1 FROM firings pending"
-                + " WHERE pending.data->>'direct_message' = r.message AND (pending.status = 'queued'"
-                + " OR (pending.status = 'started' AND pending.finished_at IS NULL)))))",
-            String.class);
+    List<String> interrupted = repository.interrupted();
     for (String message : interrupted)
       complete(
           message,
@@ -1333,15 +1208,7 @@ public final class BoardMessaging
     // Recover an answer committed just before its continuation was queued. Already
     // queued or started approval firings are recognized by their durable approval key.
     if (approvals != null) {
-      List<String> answered =
-          jdbc.queryForList(
-              "SELECT a.id FROM run_approvals a"
-                  + " JOIN board_message_instances i ON i.conversation = a.conversation"
-                  + " JOIN board_message_routes r ON r.recipient = i.id"
-                  + " WHERE r.started_at IS NOT NULL AND r.handled_at IS NULL AND i.active"
-                  + " AND a.state IN ('allowed', 'denied') AND a.answered_at >= r.started_at"
-                  + " AND NOT EXISTS (SELECT 1 FROM firings f WHERE f.data->>'message_approval' = a.id)",
-              String.class);
+      List<String> answered = repository.answeredApprovals();
       for (String id : answered)
         approvals
             .find(id)
@@ -1415,14 +1282,7 @@ public final class BoardMessaging
 
   public List<InstanceView> listing(
       String account, String project, boolean archived, int offset, int limit) {
-    return instances(
-            "account = ? AND project = ? AND (? OR archived_at IS NULL) ORDER BY created_at, id OFFSET ? LIMIT ?",
-            account,
-            project,
-            archived,
-            offset,
-            limit)
-        .stream()
+    return repository.listing(account, project, archived, offset, limit).stream()
         .filter(i -> logVisible.test(i.conversation(), account))
         .map(this::view)
         .toList();
@@ -1433,14 +1293,7 @@ public final class BoardMessaging
   /** Page the raw rows before visibility filtering, so a withheld row cannot hide later pages. */
   public InstancePage listingPage(
       String account, String project, boolean archived, int offset, int limit) {
-    List<Instance> rows =
-        instances(
-            "account = ? AND project = ? AND (? OR archived_at IS NULL) ORDER BY created_at, id OFFSET ? LIMIT ?",
-            account,
-            project,
-            archived,
-            offset,
-            limit + 1);
+    List<Instance> rows = repository.listing(account, project, archived, offset, limit + 1);
     return new InstancePage(
         rows.stream()
             .limit(limit)
@@ -1452,53 +1305,31 @@ public final class BoardMessaging
   }
 
   private InstanceView view(Instance instance) {
-    String job =
-        jdbc
-            .queryForList(
-                "SELECT job_id FROM firings WHERE topic = ? AND status = 'started'"
-                    + " AND finished_at IS NULL AND job_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
-                String.class,
-                instance.topic())
-            .stream()
-            .findFirst()
-            .orElse(null);
-    boolean awaiting =
-        Boolean.TRUE.equals(
-            jdbc.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM board_message_routes"
-                    + " WHERE recipient = ? AND handled_at IS NULL AND awaiting)",
-                Boolean.class,
-                instance.id()));
-    int pending =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM board_message_routes WHERE recipient = ? AND handled_at IS NULL",
-            Integer.class,
-            instance.id());
-    return jdbc.queryForObject(
-        "SELECT is_default, archived_at IS NOT NULL, created_at FROM board_message_instances WHERE id = ?",
-        (row, n) ->
-            new InstanceView(
-                instance.id(),
-                instance.project(),
-                instance.agent(),
-                instance.conversation(),
-                instance.lifetime(),
-                row.getBoolean(1),
-                instance.active(),
-                row.getBoolean(2),
-                row.getBoolean(2)
-                    ? "archived"
-                    : !instance.active()
-                        ? "stopped"
-                        : awaiting
-                            ? "awaiting"
-                            : job != null || voice.busy(instance.conversation())
-                                ? "running"
-                                : pending > 0 ? "queued" : "idle",
-                pending,
-                job,
-                row.getTimestamp(3).toInstant()),
-        instance.id());
+    String job = repository.instanceJob(instance.topic()).orElse(null);
+    boolean awaiting = Boolean.TRUE.equals(repository.awaitingAny(instance.id()));
+    int pending = repository.pendingCount(instance.id());
+    var state = repository.instanceState(instance.id());
+    return new InstanceView(
+        instance.id(),
+        instance.project(),
+        instance.agent(),
+        instance.conversation(),
+        instance.lifetime(),
+        state.defaultInstance(),
+        instance.active(),
+        state.archived(),
+        state.archived()
+            ? "archived"
+            : !instance.active()
+                ? "stopped"
+                : awaiting
+                    ? "awaiting"
+                    : job != null || voice.busy(instance.conversation())
+                        ? "running"
+                        : pending > 0 ? "queued" : "idle",
+        pending,
+        job,
+        state.createdAt());
   }
 
   /** Opening is reversible and keyed by the caller's retained UUID; retries create no new log. */
@@ -1514,27 +1345,15 @@ public final class BoardMessaging
     return work.inTransaction(
         () -> {
           lock("mailbox:" + account + ":" + project);
-          var prior =
-              instances(
-                  "account = ? AND project = ? AND request_id = ?", account, project, requestId);
+          var prior = repository.opening(account, project, requestId);
           if (!prior.isEmpty()) {
             Instance instance = prior.getFirst();
-            boolean originalDefault =
-                Boolean.TRUE.equals(
-                    jdbc.queryForObject(
-                        "SELECT open_default FROM board_message_instances WHERE id = ?",
-                        Boolean.class,
-                        instance.id()));
+            boolean originalDefault = Boolean.TRUE.equals(repository.openingDefault(instance.id()));
             if (!instance.agent().equals(agent) || originalDefault != makeDefault)
               throw new Board.Refused("That requestId was used with different opening arguments.");
             return inspect(instance.id(), account);
           }
-          if (makeDefault)
-            jdbc.update(
-                "UPDATE board_message_instances SET is_default = FALSE WHERE account = ? AND project = ? AND agent = ? AND is_default",
-                account,
-                project,
-                agent);
+          if (makeDefault) repository.clearDefault(account, project, agent);
           Instance instance =
               create(
                   account,
@@ -1543,11 +1362,7 @@ public final class BoardMessaging
                   "persistent",
                   makeDefault,
                   null);
-          jdbc.update(
-              "UPDATE board_message_instances SET request_id = ?, open_default = ? WHERE id = ?",
-              requestId,
-              makeDefault,
-              instance.id());
+          repository.recordOpening(instance.id(), requestId, makeDefault);
           work.afterCommit(
               () -> {
                 try {
@@ -1577,12 +1392,8 @@ public final class BoardMessaging
           if (!instance.active() || !instance.lifetime().equals("persistent"))
             throw new Board.Refused(
                 "Only an active persistent instance can be the project default.");
-          jdbc.update(
-              "UPDATE board_message_instances SET is_default = FALSE WHERE account = ? AND project = ? AND agent = ? AND is_default",
-              account,
-              instance.project(),
-              instance.agent());
-          jdbc.update("UPDATE board_message_instances SET is_default = TRUE WHERE id = ?", id);
+          repository.clearDefault(account, instance.project(), instance.agent());
+          repository.makeDefault(id);
           return view(instance);
         });
   }
@@ -1590,15 +1401,7 @@ public final class BoardMessaging
   public List<Delivery> deliveries(String id, String account, int offset, int limit) {
     Instance participant = owned(id, account);
     requireReadable(participant);
-    List<String> ids =
-        jdbc.queryForList(
-            "SELECT r.message FROM board_message_routes r JOIN board_messages b ON b.id = r.message"
-                + " WHERE r.sender = ? OR r.recipient = ? ORDER BY b.posted_at DESC, r.message DESC OFFSET ? LIMIT ?",
-            String.class,
-            id,
-            id,
-            offset,
-            limit);
+    List<String> ids = repository.deliveries(id, offset, limit);
     return ids.stream().map(message -> delivery(message, account)).toList();
   }
 
@@ -1608,41 +1411,28 @@ public final class BoardMessaging
     Instance sender = owned(route.sender(), account), recipient = owned(route.recipient(), account);
     requireReadable(sender);
     requireReadable(recipient);
-    String job =
-        jdbc
-            .queryForList(
-                "SELECT job_id FROM firings WHERE data->>'direct_message' = ?"
-                    + " AND status = 'started' AND finished_at IS NULL AND job_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
-                String.class,
-                message)
-            .stream()
-            .findFirst()
-            .orElse(null);
-    return jdbc.queryForObject(
-        "SELECT awaiting, termination, deadline_at FROM board_message_routes WHERE message = ?",
-        (row, n) -> {
-          BoardMessage posted = boards.message(message).orElseThrow();
-          return new Delivery(
-              message,
-              route.sender(),
-              route.recipient(),
-              route.replyTo(),
-              route.replyExpected(),
-              route.finalReply(),
-              route.generated(),
-              row.getString(2) != null
-                  ? row.getString(2)
-                  : route.handled()
-                      ? "handled"
-                      : row.getBoolean(1) ? "awaiting" : job != null ? "running" : "queued",
-              route.ending(),
-              finalReply(message).orElse(null),
-              job,
-              row.getTimestamp(3) == null ? null : row.getTimestamp(3).toInstant(),
-              posted.postedAt(),
-              posted.body());
-        },
-        message);
+    String job = repository.messageJob(message).orElse(null);
+    var state = repository.deliveryState(message);
+    BoardMessage posted = boards.message(message).orElseThrow();
+    return new Delivery(
+        message,
+        route.sender(),
+        route.recipient(),
+        route.replyTo(),
+        route.replyExpected(),
+        route.finalReply(),
+        route.generated(),
+        state.termination() != null
+            ? state.termination()
+            : route.handled()
+                ? "handled"
+                : state.awaiting() ? "awaiting" : job != null ? "running" : "queued",
+        route.ending(),
+        finalReply(message).orElse(null),
+        job,
+        state.deadline(),
+        posted.postedAt(),
+        posted.body());
   }
 
   public Delivery cancel(String message, String account) {
@@ -1663,18 +1453,10 @@ public final class BoardMessaging
           lockRequest(message);
           Route original = route(message).orElseThrow();
           if (original.handled()) return null;
-          jdbc.update(
-              "UPDATE board_message_routes SET termination = ? WHERE message = ?", state, message);
-          jdbc.update(
-              "UPDATE firings SET status = 'refused', reason = ? WHERE data->>'direct_message' = ? AND status = 'queued'",
-              text,
-              message);
-          List<String> running =
-              jdbc.queryForList(
-                  "SELECT job_id FROM firings WHERE data->>'direct_message' = ? AND status = 'started'"
-                      + " AND finished_at IS NULL AND job_id IS NOT NULL",
-                  String.class,
-                  message);
+          repository.terminate(
+              message, Termination.valueOf(state.toUpperCase(java.util.Locale.ROOT)));
+          repository.refuseQueued(message, text);
+          List<String> running = repository.runningJobs(message);
           complete(message, new Outcome(Outcome.Ending.CANCELLED, text, 0, 0, state));
           work.afterCommit(
               () -> {
@@ -1695,15 +1477,8 @@ public final class BoardMessaging
             throw new Board.Refused(
                 "Archive the caller's conversation through its normal lifecycle controls.");
           boolean wasActive = instance.active();
-          jdbc.update(
-              "UPDATE board_message_instances SET active = FALSE, is_default = FALSE, archived_at = CASE WHEN ? THEN COALESCE(archived_at, now()) ELSE archived_at END WHERE id = ?",
-              archive,
-              id);
-          List<String> pending =
-              jdbc.queryForList(
-                  "SELECT message FROM board_message_routes WHERE recipient = ? AND handled_at IS NULL",
-                  String.class,
-                  id);
+          repository.stop(id, archive);
+          List<String> pending = repository.pending(id);
           for (String message : pending)
             terminate(message, "stopped", "The recipient instance was stopped.");
           if (archive
@@ -1729,12 +1504,7 @@ public final class BoardMessaging
 
   /** Deadlines include time waiting for an approval; expired paid work is never replayed. */
   public void expire() {
-    List<String> expired =
-        jdbc.queryForList(
-            "SELECT message FROM board_message_routes WHERE handled_at IS NULL"
-                + " AND deadline_at <= ? ORDER BY deadline_at LIMIT 200",
-            String.class,
-            java.sql.Timestamp.from(clock.get()));
+    List<String> expired = repository.expired(clock.get());
     for (String message : expired)
       terminate(message, "expired", "The message handling deadline expired.");
   }
@@ -1745,9 +1515,8 @@ public final class BoardMessaging
     while (conversation != null) {
       List<Instance> found =
           delegated
-              ? instances("conversation = ? ORDER BY id", conversation)
-              : instances(
-                  "conversation = ? AND agent = ?", conversation, context.definition().name());
+              ? repository.byConversation(conversation)
+              : repository.byConversationAgent(conversation, context.definition().name());
       if (!found.isEmpty()) {
         Instance i = found.getFirst();
         return Optional.of(new SwarmScheduler.Share(i.account(), i.topic(), i.id()));
@@ -1761,7 +1530,7 @@ public final class BoardMessaging
   }
 
   public boolean isTransport(String conversation) {
-    return !instances("conversation = ? AND lifetime <> 'caller'", conversation).isEmpty();
+    return !repository.transport(conversation).isEmpty();
   }
 
   /** Private conversations cannot be recovered through the general archive tool surface. */
@@ -1775,7 +1544,7 @@ public final class BoardMessaging
   private String participantRoot(String conversation) {
     String id = conversation;
     while (id != null) {
-      if (!instances("conversation = ?", id).isEmpty()) return id;
+      if (!repository.byConversation(id).isEmpty()) return id;
       var row = conversations.find(id);
       if (row.isEmpty() || row.get().origin() != Origin.DELEGATION) break;
       id = row.get().parentId();
@@ -1793,62 +1562,10 @@ public final class BoardMessaging
             "conversation_search",
             "conversation_list")
         .contains(name)) return tool;
-    return new AgentTool() {
-      public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
-        return tool.schema();
-      }
-
-      public void calledAs(String id) {
-        tool.calledAs(id);
-      }
-
-      public String run(String arguments, Home home) {
-        return run(
-            arguments, home, io.aeyer.plowshare.server.llm.accounting.UsageAttribution.LEGACY);
-      }
-
-      public String run(
-          String arguments,
-          Home home,
-          io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
-        try {
-          var args = JSON.readTree(arguments);
-          if (args != null
-              && args.has("conversation")
-              && !visible(args.path("conversation").asText(), conversation)) {
-            return "That conversation is not visible to this participant.";
-          }
-          String answer = tool.run(arguments, home, owner);
-          if (!name.equals("conversation_search") && !name.equals("conversation_list"))
-            return answer;
-          var result = JSON.readTree(answer);
-          var rows = name.equals("conversation_list") ? result : result.path("hits");
-          if (!rows.isArray()) return answer;
-          var visibleRows = JSON.createArrayNode();
-          for (var row : rows) {
-            String id =
-                row.path(name.equals("conversation_list") ? "id" : "conversationId").asText(null);
-            if (visible(id, conversation)) visibleRows.add(row);
-          }
-          if (name.equals("conversation_list")) return json(visibleRows);
-          if (visibleRows.size() != rows.size()) {
-            ((com.fasterxml.jackson.databind.node.ObjectNode) result).set("hits", visibleRows);
-            ((com.fasterxml.jackson.databind.node.ObjectNode) result)
-                .put("visibilityFiltered", true);
-            if (result.path("retrieval").isObject()) {
-              ((com.fasterxml.jackson.databind.node.ObjectNode) result.path("retrieval"))
-                  .put("complete", false);
-            }
-          }
-          return json(result);
-        } catch (JsonProcessingException malformed) {
-          // Arguments and ordinary refusal text are handled by the original tool.
-          // An invalid JSON result from a search/list must never be returned unfiltered.
-          return "Conversation retrieval is unavailable: the visibility projection could not be read.";
-        }
-      }
-    };
+    return new ConversationVisibilityTool(tool, conversation, this::visible);
   }
+
+  private record DelegateResult(Outcome.Ending ending, String output) {}
 
   private static String json(Object value) {
     try {

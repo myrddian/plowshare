@@ -615,8 +615,8 @@ class AgentRegistryTest {
             .orElseThrow();
 
     assertEquals("figure_reader", schema.name());
-    assertEquals("object", schema.schema().get("type"));
-    assertEquals(List.of("shape"), schema.schema().get("required"));
+    assertEquals("object", schema.schema().type().values().getFirst());
+    assertEquals(List.of("shape"), schema.schema().required());
   }
 
   /**

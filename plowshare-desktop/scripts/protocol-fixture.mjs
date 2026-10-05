@@ -35,7 +35,7 @@ export async function protocolFixture(options = {}) {
   const conversations = [conversationWire('fixture-first', { title: 'Fixture conversation', ...(options.conversationProject ? { project: options.conversationProject } : {}) })];
   const entries = new Map([['fixture-first', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', speaker: 'person', excerpt: 'An existing server conversation.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Loaded through the real TypeScript WebSocket binding. Treat <img src=x onerror="window.fixtureInjection=true"> as text.' }]]]);
   entries.set('fixture-board-seat', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', excerpt: 'A board seat wake.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Researching conflict strategies.' }]);
-  const jobs = new Map(), schedules = new Map(), triggers = new Map();
+  const jobs = new Map(), schedules = new Map(), triggers = new Map(), scheduleFiles = new Map();
   let refuseTriggerDefinition = false;
   const timers = new Set();
   let informationTags=['my project'];
@@ -228,6 +228,9 @@ export async function protocolFixture(options = {}) {
       const payload = frame.payload;
       let result = { code: 'OK' };
       switch (frame.type) {
+        case 'relay.topics': case 'relay.log': case 'relay.operate':
+          result = options.relay ? options.relay(frame.type, payload) : {code:'BAD_REQUEST',said:'Relay fixture is not configured'};
+          break;
         case 'information.facets': {
           const names=['kind','tags','autoTag','tagGroup','author','documentAuthor','when','subtype'],filter=payload.filter ?? {};
           if (filter.tags?.includes('plowshare-manual')) {
@@ -543,6 +546,12 @@ export async function protocolFixture(options = {}) {
           if (!run || run.state !== 'asking') { result = { code: 'BAD_REQUEST', said: 'Question already answered elsewhere' }; break; }
           run.state = options.authoring && run.definition === 'design_orchestration' ? 'finished' : 'running'; run.pendingCap = null; result.payload = { id: run.id, state: run.state }; push({ kind: 'orchestration.changed', orchestration: run.id, state: run.state }); break;
         }
+        case 'orchestration.resume': {
+          const run = runRows.find(run => run.id === payload.id);
+          if (!run || run.state !== 'failed' || run.parent !== null) { result = { code: 'BAD_REQUEST', said: 'Only failed roots can resume' }; break; }
+          run.state = 'running'; run.failure = null; run.endedAt = null;
+          result.payload = { id: run.id, state: run.state }; push({ kind: 'orchestration.changed', orchestration: run.id, state: run.state }); break;
+        }
         case 'orchestration.cancel': {
           const run = runRows.find(run => run.id === payload.id);
           run.state = 'cancelled'; result.payload = { id: run.id, state: run.state }; push({ kind: 'orchestration.changed', orchestration: run.id, state: run.state }); break;
@@ -563,6 +572,18 @@ export async function protocolFixture(options = {}) {
         case 'proposal.resolve': {const proposal=library['proposal.list'].find(row=>row.id===payload.proposal);Object.assign(proposal,{state:payload.accept?'accepted':'rejected',resolvedAt:'2026-10-02T10:00:00Z',resolvedBy:payload.by,resolution:payload.reason});result.payload={proposal,promotedId:payload.accept?'global_memory':null,demoted:[]};break;}
         case 'memory.reembed': case 'proposal.reconsider': result.payload=library[frame.type];break;
         case 'conversation.search': result.payload={hits:searchHits.slice(payload.offset??0,(payload.offset??0)+(payload.limit??20)),total:searchHits.length,offset:payload.offset??0,limit:payload.limit??20,reach:{searched:1,ejected:2,recordedOnly:3},retrieval:{requestedMode:payload.mode,effectiveMode:'lexical',totalMeaning:'matches',snapshot:'fixture-snapshot',truncated:false,complete:false,fallback:'embedding provider unavailable',coverage:{eligible:52,indexed:0,passages:0,pending:0,failed:52,stale:0},generation:'fixture-generation',queryEmbeddingCalls:0,provenance:'live_lexical'}};break;
+        case 'schedule.files': result.payload = [...scheduleFiles.values()]; break;
+        case 'schedule.sync': result.payload = [...scheduleFiles.values()]; break;
+        case 'schedule.save': {
+          if (refuseTriggerDefinition) { result = {code:'BAD_REQUEST',said:'Fixture bot unavailable'}; break; }
+          if (scheduleFiles.has(payload.name) && !payload.overwrite) { result = {code:'CONFLICT',said:'Schedule file already exists'}; break; }
+          const d = payload.definition, name = payload.name;
+          result.payload = {name,project:payload.project ?? null,source:payload.source,path:`schedules/${name}.json`,internalName:name,definition:d,status:'active',error:null};
+          scheduleFiles.set(name,result.payload);
+          schedules.set(name,{name,cron:d.cron,zone:d.zone,emits:name,paused:d.paused,nextFireAt:'2026-10-03T09:00:00+10:00',definedBy:'fixture'});
+          triggers.set(name,{name,event:name,project:d.target.project ?? payload.project ?? null,conversation:d.target.conversation,agent:d.action.agent,task:d.action.kind === 'agent' ? d.action.input : `/${d.action.kind}:${d.action.name} ${d.action.input}`,maxModelCalls:d.limits.maxModelCalls,maxTurns:d.limits.maxTurns,queueCap:d.limits.queueCap,paused:d.paused,definedBy:'fixture'});
+          break;
+        }
         case 'schedule.list': result.payload = [...schedules.values()]; break;
         case 'trigger.list': result.payload = [...triggers.values()]; break;
         case 'firing.list': result.payload = []; break;
@@ -571,10 +592,10 @@ export async function protocolFixture(options = {}) {
         case 'trigger.define':
           if (refuseTriggerDefinition) { result = { code: 'BAD_REQUEST', said: 'Fixture bot unavailable' }; break; }
           result.payload = { name: payload.trigger, event: payload.event, project: payload.project ?? null, conversation: payload.conversation ?? null, agent: payload.agent, task: payload.task, maxModelCalls: null, maxTurns: null, queueCap: 3, paused: false, definedBy: 'fixture' }; triggers.set(payload.trigger, result.payload); break;
-        case 'schedule.pause': schedules.get(payload.schedule).paused = payload.paused; result = { code: 'NO_CONTENT', payload: null }; break;
+        case 'schedule.pause': schedules.get(payload.schedule).paused = payload.paused; if (scheduleFiles.has(payload.schedule)) { scheduleFiles.get(payload.schedule).definition.paused = payload.paused; triggers.get(payload.schedule).paused = payload.paused; } result = { code: 'NO_CONTENT', payload: null }; break;
         case 'trigger.pause': triggers.get(payload.trigger).paused = payload.paused; result = { code: 'NO_CONTENT', payload: null }; break;
-        case 'schedule.forget': schedules.delete(payload.schedule); result = { code: 'NO_CONTENT', payload: null }; break;
-        case 'trigger.forget': triggers.delete(payload.trigger); result = { code: 'NO_CONTENT', payload: null }; break;
+        case 'schedule.forget': schedules.delete(payload.schedule); if (scheduleFiles.delete(payload.schedule)) triggers.delete(payload.schedule); result = { code: 'NO_CONTENT', payload: null }; break;
+        case 'trigger.forget': triggers.delete(payload.trigger); if (scheduleFiles.delete(payload.trigger)) schedules.delete(payload.trigger); result = { code: 'NO_CONTENT', payload: null }; break;
         case 'event.fire': result.payload = []; break;
         default:
           if (frame.type.startsWith('union.')) {

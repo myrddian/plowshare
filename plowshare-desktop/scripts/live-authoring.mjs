@@ -3,7 +3,7 @@ import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { authenticateConfigured } from '../../plowshare-client-node/build/session.js';
+import { authenticateConfigured } from '../../sdk/node/build/session.js';
 import { runQuestion } from '../src/shared.ts';
 // Opt-in: this spends model calls and persists a disposable server project.
 if (!process.argv.includes('--live'))

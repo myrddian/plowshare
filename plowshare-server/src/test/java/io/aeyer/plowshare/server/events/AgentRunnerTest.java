@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -32,6 +33,7 @@ class AgentRunnerTest {
             eq(definition),
             eq("go"),
             eq(Home.of("payments")),
+            isNull(),
             eq(40),
             any(TurnCap.class),
             eq("enzo"),
@@ -51,6 +53,7 @@ class AgentRunnerTest {
             eq(definition),
             eq("go"),
             eq(Home.of("payments")),
+            isNull(),
             eq(40),
             any(TurnCap.class),
             eq("enzo"),
@@ -82,5 +85,147 @@ class AgentRunnerTest {
             isNull(),
             eq(Speaker.event("aimed")),
             any());
+  }
+
+  @Test
+  void managedCommandsPreserveArgumentsAndUseTheLiveDefinitionSession() {
+    var callers = mock(Callers.class);
+    var jobs = mock(JobStore.class);
+    var definitions = mock(ScheduleDefinitions.class);
+    var authority = mock(ScheduleDefinitions.Authority.class);
+    var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "workspace");
+    var work =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            1,
+            "0 0 9 * * *",
+            "UTC",
+            false,
+            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
+                "skill", "worker", "review", "exact\narguments", "NEW"),
+            new io.aeyer.plowshare.protocol.ScheduledWork.Target("mailbox", null, null, null, null),
+            null);
+    var file =
+        new io.aeyer.plowshare.protocol.ScheduledWork.File(
+            "daily",
+            "project",
+            "workspace",
+            ".plowshare/schedules/daily.json",
+            "daily",
+            work,
+            "active",
+            null);
+    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.of(file));
+    when(definitions.sourceOf("daily", "owner")).thenReturn(java.util.Optional.of(source));
+    when(definitions.executionSession(source)).thenReturn("live-session");
+    var caller = mock(DefinitionResolver.Caller.class);
+    var agent = mock(AgentDefinition.class);
+    when(callers.callerFor("project", "live-session", "owner")).thenReturn(caller);
+    when(callers.requireAgent("worker", caller)).thenReturn(agent);
+    when(jobs.submitEvent(
+            eq(agent),
+            eq("/skill:review --mode=NEW exact\narguments"),
+            eq(Home.of("project")),
+            eq("live-session"),
+            isNull(),
+            any(),
+            eq("owner"),
+            any(),
+            any()))
+        .thenReturn(new JobStore.EventRun("job", "conversation"));
+    var runner = new AgentRunner(callers, jobs, mock(Turn.class));
+    runner.useSchedules(() -> definitions, () -> authority, () -> null);
+    runner.start(
+        new TriggerRecord(
+            "daily",
+            "daily",
+            "project",
+            null,
+            "worker",
+            work.action().utterance(),
+            null,
+            null,
+            1,
+            false,
+            "owner"),
+        mock(FiringRecord.class),
+        "event metadata must not become command input",
+        (c, o) -> {});
+    verify(authority).validate(source, work);
+    verify(jobs)
+        .submitEvent(
+            eq(agent),
+            eq("/skill:review --mode=NEW exact\narguments"),
+            eq(Home.of("project")),
+            eq("live-session"),
+            isNull(),
+            any(),
+            eq("owner"),
+            any(),
+            any());
+  }
+
+  @Test
+  void messageAdmissionReturnsAMessageReceiptWithoutInventingAJob() {
+    var definitions = mock(ScheduleDefinitions.class);
+    var messages = mock(io.aeyer.plowshare.server.board.BoardMessaging.class);
+    var jobs = mock(JobStore.class);
+    var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "server");
+    var work =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            1,
+            "0 0 9 * * *",
+            "UTC",
+            false,
+            new io.aeyer.plowshare.protocol.ScheduledWork.Action(
+                "agent", "worker", null, "Review", null),
+            new io.aeyer.plowshare.protocol.ScheduledWork.Target(
+                "message", null, null, "worker", null),
+            null);
+    var file =
+        new io.aeyer.plowshare.protocol.ScheduledWork.File(
+            "daily", "project", "server", "schedules/daily.json", "daily", work, "active", null);
+    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.of(file));
+    when(definitions.sourceOf("daily", "owner")).thenReturn(java.util.Optional.of(source));
+    var task = mock(io.aeyer.plowshare.protocol.Incoming.Task.class);
+    when(task.message()).thenReturn("bdm_delivery");
+    when(messages.receiveScheduled("owner", "project", "daily", "firing", work)).thenReturn(task);
+    var firing = mock(FiringRecord.class);
+    when(firing.id()).thenReturn("firing");
+    var runner = new AgentRunner(mock(Callers.class), jobs, mock(Turn.class));
+    runner.useSchedules(() -> definitions, () -> (s, d) -> {}, () -> messages);
+    var receipt =
+        runner.start(
+            new TriggerRecord(
+                "daily", "daily", "project", null, "worker", "Review", null, null, 1, false,
+                "owner"),
+            firing,
+            "Review",
+            (c, o) ->
+                org.junit.jupiter.api.Assertions.assertTrue(o.text().contains("bdm_delivery")));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        new Dispatcher.Started.Message("bdm_delivery"), receipt);
+    verifyNoInteractions(jobs);
+  }
+
+  @Test
+  void anOrphanedFileScheduleCannotFallThroughToLegacyExecution() {
+    var definitions = mock(ScheduleDefinitions.class);
+    when(definitions.managed("daily", "owner")).thenReturn(java.util.Optional.empty());
+    when(definitions.requiresDefinition("daily", "owner")).thenReturn(true);
+    var callers = mock(Callers.class);
+    var jobs = mock(JobStore.class);
+    var runner = new AgentRunner(callers, jobs, mock(Turn.class));
+    runner.useSchedules(() -> definitions, () -> (s, d) -> {}, () -> null);
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException.class,
+        () ->
+            runner.start(
+                new TriggerRecord(
+                    "daily", "daily", null, null, "worker", "Review", null, null, 1, false,
+                    "owner"),
+                mock(FiringRecord.class),
+                "Review",
+                (c, o) -> {}));
+    verifyNoInteractions(callers, jobs);
   }
 }

@@ -8,14 +8,8 @@ package io.aeyer.plowshare.protocol.fetch;
  * <h2>Why this record lives in {@code plowshare-protocol} and not beside the service that builds it
  * </h2>
  *
- * <p>{@code plowshare-client} declares {@code api(project(":plowshare-protocol"))} and carries no
- * dependency on {@code plowshare-server} at all, so a record defined in {@code
- * io.aeyer.plowshare.server.fetch} would be a type the client-side {@code fetch} tool (built in a
- * later task of this slice) has no way to name. {@code SearchPage} made exactly this mistake in the
- * previous slice — defined server-side, then moved here once the client needed it — and this record
- * is placed correctly the first time on that precedent. {@code Navigation} and {@code StartedJob}
- * sit here for the identical reason: a shape both sides of the wire must agree on belongs where
- * both sides can reach it, not where it was first convenient to write.
+ * <p>The public Java SDK and server share this immutable result without exposing server
+ * implementation classes. TypeScript response readers mirror the same bounded fetch fields.
  *
  * <h2>{@code refusal} is a field, not an exception</h2>
  *
@@ -59,4 +53,25 @@ public record FetchWindow(
     int nextOffset,
     int total,
     boolean hasMore,
-    String refusal) {}
+    String refusal) {
+  public FetchWindow {
+    url = io.aeyer.plowshare.protocol.WebContractValues.url(url);
+    title = io.aeyer.plowshare.protocol.WebContractValues.text(title, "fetch title", 32768, false);
+    text = io.aeyer.plowshare.protocol.WebContractValues.text(text, "fetch text", 8388608, false);
+    refusal =
+        io.aeyer.plowshare.protocol.WebContractValues.text(refusal, "fetch refusal", 32768, false);
+    if (offset < 0 || nextOffset < offset || total < 0)
+      throw new IllegalArgumentException("invalid fetch window bounds");
+    if (refusal != null) {
+      if (title != null || text != null || nextOffset != offset || total != 0 || hasMore)
+        throw new IllegalArgumentException("fetch refusal cannot contain a page");
+    } else {
+      java.util.Objects.requireNonNull(text, "fetch text");
+      if (nextOffset - offset != text.length()
+          || hasMore != (nextOffset < total)
+          || offset <= total && nextOffset > total
+          || offset > total && (!text.isEmpty() || hasMore))
+        throw new IllegalArgumentException("fetch content differs from its window bounds");
+    }
+  }
+}

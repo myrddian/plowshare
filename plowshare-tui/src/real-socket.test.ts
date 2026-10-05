@@ -1,12 +1,12 @@
-import { createHash } from 'node:crypto'
-import { createServer } from 'node:http'
-import type { Server } from 'node:http'
-import type { Socket as Stream } from 'node:net'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
+import type { Socket as Stream } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { connect } from 'plowshare-client-ts/binding/connection'
-import type { Socket } from 'plowshare-client-ts/binding/connection'
-import { CURRENT_VERSION } from 'plowshare-client-ts/binding/envelope'
+import { connect } from 'plowshare-client-ts/binding/connection';
+import type { Socket } from 'plowshare-client-ts/binding/connection';
+import { CURRENT_VERSION } from 'plowshare-client-ts/binding/envelope';
 
 /**
  * <b>The claim task 4 made and could not run: a real `WebSocket` is a
@@ -72,64 +72,64 @@ import { CURRENT_VERSION } from 'plowshare-client-ts/binding/envelope'
  */
 
 /** RFC 6455 §1.3: the constant a server hashes the client's key against. */
-const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /** One unmasked text frame, header and payload, for a payload under 64 KiB. */
 function textFrame(text: string): Buffer {
-    const payload = Buffer.from(text, 'utf8')
-    if (payload.length < 126) {
-        return Buffer.concat([Buffer.from([0x81, payload.length]), payload])
-    }
-    const header = Buffer.alloc(4)
-    header[0] = 0x81
-    header[1] = 126
-    header.writeUInt16BE(payload.length, 2)
-    return Buffer.concat([header, payload])
+  const payload = Buffer.from(text, 'utf8');
+  if (payload.length < 126) {
+    return Buffer.concat([Buffer.from([0x81, payload.length]), payload]);
+  }
+  const header = Buffer.alloc(4);
+  header[0] = 0x81;
+  header[1] = 126;
+  header.writeUInt16BE(payload.length, 2);
+  return Buffer.concat([header, payload]);
 }
 
 /** Whole text messages read off a stream, and the bytes of the next one. */
 function read(buffered: Buffer): { messages: string[]; rest: Buffer } {
-    const messages: string[] = []
-    let rest = buffered
-    for (;;) {
-        if (rest.length < 2) {
-            return { messages, rest }
-        }
-        const opcode = (rest[0] ?? 0) & 0x0f
-        const flagged = rest[1] ?? 0
-        const masked = (flagged & 0x80) !== 0
-        let length = flagged & 0x7f
-        let at = 2
-        if (length === 126) {
-            if (rest.length < 4) {
-                return { messages, rest }
-            }
-            length = rest.readUInt16BE(2)
-            at = 4
-        }
-        const mask = rest.subarray(at, masked ? at + 4 : at)
-        at += masked ? 4 : 0
-        if (rest.length < at + length) {
-            return { messages, rest }
-        }
-        const payload = Buffer.from(rest.subarray(at, at + length))
-        if (masked) {
-            for (let index = 0; index < payload.length; index += 1) {
-                payload[index] = (payload[index] ?? 0) ^ (mask[index % 4] ?? 0)
-            }
-        }
-        rest = rest.subarray(at + length)
-        if (opcode === 0x1) {
-            messages.push(payload.toString('utf8'))
-        }
-        if (opcode === 0x8) {
-            return { messages, rest: Buffer.alloc(0) }
-        }
+  const messages: string[] = [];
+  let rest = buffered;
+  for (;;) {
+    if (rest.length < 2) {
+      return { messages, rest };
     }
+    const opcode = (rest[0] ?? 0) & 0x0f;
+    const flagged = rest[1] ?? 0;
+    const masked = (flagged & 0x80) !== 0;
+    let length = flagged & 0x7f;
+    let at = 2;
+    if (length === 126) {
+      if (rest.length < 4) {
+        return { messages, rest };
+      }
+      length = rest.readUInt16BE(2);
+      at = 4;
+    }
+    const mask = rest.subarray(at, masked ? at + 4 : at);
+    at += masked ? 4 : 0;
+    if (rest.length < at + length) {
+      return { messages, rest };
+    }
+    const payload = Buffer.from(rest.subarray(at, at + length));
+    if (masked) {
+      for (let index = 0; index < payload.length; index += 1) {
+        payload[index] = (payload[index] ?? 0) ^ (mask[index % 4] ?? 0);
+      }
+    }
+    rest = rest.subarray(at + length);
+    if (opcode === 0x1) {
+      messages.push(payload.toString('utf8'));
+    }
+    if (opcode === 0x8) {
+      return { messages, rest: Buffer.alloc(0) };
+    }
+  }
 }
 
 /** What the server did with each frame, so a test can assert on the wire. */
-const received: string[] = []
+const received: string[] = [];
 
 /**
  * Every upgraded stream, kept so `afterAll` can destroy them.
@@ -139,52 +139,63 @@ const received: string[] = []
  * tests behind it — measured, and the reason this array exists rather than a
  * bare `close()`.
  */
-const upgraded: Stream[] = []
+const upgraded: Stream[] = [];
 
-let server: Server
-let origin = ''
+let server: Server;
+let origin = '';
 
 beforeAll(async () => {
-    server = createServer()
-    server.on('upgrade', (request, stream: Stream) => {
-        upgraded.push(stream)
-        const key = String(request.headers['sec-websocket-key'] ?? '')
-        const accept = createHash('sha1').update(key + GUID).digest('base64')
-        stream.write('HTTP/1.1 101 Switching Protocols\r\n'
-            + 'Upgrade: websocket\r\nConnection: Upgrade\r\n'
-            + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`)
-        let buffered = Buffer.alloc(0)
-        stream.on('data', (chunk: Buffer) => {
-            buffered = Buffer.concat([buffered, chunk])
-            const { messages, rest } = read(buffered)
-            buffered = rest
-            for (const message of messages) {
-                received.push(message)
-                const asked = JSON.parse(message) as { id: string; type: string }
-                stream.write(textFrame(JSON.stringify({
-                    id: asked.id,
-                    type: asked.type,
-                    protocol_version: CURRENT_VERSION,
-                    payload: { code: 'OK', said: `answered ${asked.type}` },
-                })))
-            }
-        })
-    })
-    await new Promise<void>((listening) => {
-        server.listen(0, '127.0.0.1', listening)
-    })
-    const bound = server.address()
-    origin = typeof bound === 'object' && bound !== null ? `ws://127.0.0.1:${bound.port}` : ''
-})
+  server = createServer();
+  server.on('upgrade', (request, stream: Stream) => {
+    upgraded.push(stream);
+    const key = String(request.headers['sec-websocket-key'] ?? '');
+    const accept = createHash('sha1')
+      .update(key + GUID)
+      .digest('base64');
+    stream.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    let buffered: Buffer = Buffer.alloc(0);
+    stream.on('data', (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const { messages, rest } = read(buffered);
+      buffered = rest;
+      for (const message of messages) {
+        received.push(message);
+        const asked = JSON.parse(message) as { id: string; type: string };
+        stream.write(
+          textFrame(
+            JSON.stringify({
+              id: asked.id,
+              type: asked.type,
+              protocol_version: CURRENT_VERSION,
+              payload: { code: 'OK', said: `answered ${asked.type}` },
+            }),
+          ),
+        );
+      }
+    });
+  });
+  await new Promise<void>((listening) => {
+    server.listen(0, '127.0.0.1', listening);
+  });
+  const bound = server.address();
+  origin =
+    typeof bound === 'object' && bound !== null
+      ? `ws://127.0.0.1:${bound.port}`
+      : '';
+});
 
 afterAll(async () => {
-    for (const stream of upgraded) {
-        stream.destroy()
-    }
-    await new Promise<void>((closed) => {
-        server.close(() => closed())
-    })
-})
+  for (const stream of upgraded) {
+    stream.destroy();
+  }
+  await new Promise<void>((closed) => {
+    server.close(() => closed());
+  });
+});
 
 /**
  * <b>The opener the view will inject, in the six lines it takes.</b>
@@ -198,55 +209,63 @@ afterAll(async () => {
  * a fake and fails on a wire.
  */
 function opening(url: string): Promise<Socket> {
-    return new Promise((open, fail) => {
-        const socket = new WebSocket(url)
-        socket.addEventListener('open', () => open(socket))
-        socket.addEventListener('error', () => fail(new Error(`could not open ${url}`)))
-    })
+  return new Promise((open, fail) => {
+    const socket = new WebSocket(url);
+    socket.addEventListener('open', () => open(socket));
+    socket.addEventListener('error', () =>
+      fail(new Error(`could not open ${url}`)),
+    );
+  });
 }
 
 describe('a real WebSocket is the Socket this binding declares', () => {
-    it('is a global on this Node at all, which is Node 22 and later', () => {
-        expect(typeof WebSocket,
-            'this module needs Node 22 or later, where WebSocket is a global;'
-            + ' Node 21 had it behind --experimental-websocket and Node 20 not at all')
-            .toBe('function')
-    })
+  it('is a global on this Node at all, which is Node 22 and later', () => {
+    expect(
+      typeof WebSocket,
+      'this module needs Node 22 or later, where WebSocket is a global;' +
+        ' Node 21 had it behind --experimental-websocket and Node 20 not at all',
+    ).toBe('function');
+  });
 
-    it('has the four members the interface names, on a real instance', async () => {
-        const socket = await opening(origin)
-        expect(typeof socket.send).toBe('function')
-        expect(typeof socket.close).toBe('function')
-        expect(typeof socket.addEventListener).toBe('function')
-        socket.close()
-    })
+  it('has the four members the interface names, on a real instance', async () => {
+    const socket = await opening(origin);
+    expect(typeof socket.send).toBe('function');
+    expect(typeof socket.close).toBe('function');
+    expect(typeof socket.addEventListener).toBe('function');
+    socket.close();
+  });
 
-    it('carries a frame there and an answer back, through connect()', async () => {
-        const socket = await opening(origin)
-        const connection = connect({ socket })
-        const outcome = await connection.ask('conversation.turns', { conversation: 'c1' })
-        expect(outcome).toEqual({ code: 'OK', said: 'answered conversation.turns' })
-        expect(JSON.parse(received.at(-1) ?? '{}')).toMatchObject({
-            type: 'conversation.turns',
-            protocol_version: CURRENT_VERSION,
-            payload: { conversation: 'c1' },
-        })
-        connection.close()
-    })
+  it('carries a frame there and an answer back, through connect()', async () => {
+    const socket = await opening(origin);
+    const connection = connect({ socket });
+    const outcome = await connection.ask('conversation.turns', {
+      conversation: 'c1',
+    });
+    expect(outcome).toEqual({
+      code: 'OK',
+      said: 'answered conversation.turns',
+    });
+    expect(JSON.parse(received.at(-1) ?? '{}')).toMatchObject({
+      type: 'conversation.turns',
+      protocol_version: CURRENT_VERSION,
+      payload: { conversation: 'c1' },
+    });
+    connection.close();
+  });
 
-    it('delivers the frame as a string, which is what arrived() assumes', async () => {
-        const socket = await opening(origin)
-        const seen: unknown[] = []
-        socket.addEventListener('message', (event) => {
-            seen.push(event.data)
-        })
-        const connection = connect({ socket })
-        await connection.ask('conversation.list')
-        // The assumption `connection.ts` makes and a fake can only assert by
-        // construction: a text frame arrives as a string, so the `typeof data
-        // !== 'string'` guard there is about binary and nothing else. Node's
-        // WebSocket hands text over as a string and a Blob only for binary.
-        expect(seen.map((data) => typeof data)).toEqual(['string'])
-        connection.close()
-    })
-})
+  it('delivers the frame as a string, which is what arrived() assumes', async () => {
+    const socket = await opening(origin);
+    const seen: unknown[] = [];
+    socket.addEventListener('message', (event) => {
+      seen.push(event.data);
+    });
+    const connection = connect({ socket });
+    await connection.ask('conversation.list');
+    // The assumption `connection.ts` makes and a fake can only assert by
+    // construction: a text frame arrives as a string, so the `typeof data
+    // !== 'string'` guard there is about binary and nothing else. Node's
+    // WebSocket hands text over as a string and a Blob only for binary.
+    expect(seen.map((data) => typeof data)).toEqual(['string']);
+    connection.close();
+  });
+});

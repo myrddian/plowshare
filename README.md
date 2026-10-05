@@ -45,8 +45,8 @@ and retained information. A server workspace lets its agents create and update
 files as part of that work. The project remains available after clients disconnect.
 
 Integrations use the SDK to submit agentic or information tasks to the framework
-in a project's scope. The [outbound A2A adapter](plowshare-a2a/README.md) uses that
-SDK. The [Home Assistant binding](plowshare-integration-home-assistant/README.md)
+in a project's scope. The [outbound A2A adapter](integrations/a2a/README.md) uses that
+SDK. The [Home Assistant binding](integrations/home-assistant/README.md)
 uses selected state observations and configured actions through the integration
 runtime; a `home-assistant` project can hold its skills, generated files and ongoing tasks.
 
@@ -184,6 +184,25 @@ Routes can target an existing conversation with `conversation`, or create one
 dedicated log on first use with `retainConversation: true`. Retained route logs
 survive restarts; routes without either option keep the shared default behavior.
 
+**Relay.** The internal broker provides scoped publication logs, independent
+subscriber positions, per-topic retention and explicit gaps. Project packages
+separate pure JavaScript routing from optional durable handlers. Fan-out branches
+pin input and source and dispatch asynchronously to agents, orchestrations or
+same-project topic forwarding, with fenced intents and owning receipts.
+Configuration supports server projects, owner-only Personal unions and
+authenticated remote workspaces. Scoped WebSocket operations, SDK/CLI support and
+the desktop log viewer expose policy, events, offsets, delivery status and owned
+trajectories. Explicit server project/account bindings enable independent automatic
+subscription workers with distributed leases; manual processing uses the same
+ownership rules. Local lifecycle supervision has no central dispatcher. The scheduler publishes through
+Relay with atomic firing admission. Manager controls expose explicit gap
+acknowledgement, receipt reconciliation, abandonment and removal of inactive empty
+metadata through the SDK, CLI and desktop log. Lifecycle publishers use a durable
+outbox; messaging and Board wake availability use private topics and independent
+conversation consumers. Their owning inboxes preserve continuations and receipts.
+See the [Relay manual](docs/relay.md) and
+design and migration plan.
+
 **Execution and automation.** Jobs have inspectable status, cancellation and
 bounded model-call allowances. Schedules emit events; triggers start configured
 work and deliver results through conversations or an account inbox. Model pools,
@@ -203,7 +222,7 @@ server with PostgreSQL and optional search, use the
 
 ### 1. Prepare dependencies and configuration
 
-Source builds require **Java 21**, **Node.js 22.12+** and **pnpm 10.34.5** on
+Source builds require **Java 21**, **Node.js 22.13+** and **pnpm 10.34.5** on
 `PATH`. Use the committed Gradle wrapper; Gradle installs each TypeScript module's
 dependencies with its frozen lockfile. Initial builds need network access.
 
@@ -213,32 +232,42 @@ supply your own connection settings. The role must be able to run the Flyway
 migrations, including `CREATE EXTENSION vector` unless it is already installed.
 Migrations run at server startup.
 
-Configure chat and embedding endpoints before doing agent work. The shipped
-configuration has a `studio` pool for fast chat and embeddings and a `spark` pool
-for reasoning chat and swarm work. Supply the actual model IDs served by your
-endpoints; model classes and pool listings must agree. For example:
+Configure chat and embedding endpoints before doing agent work. The packaged
+configuration supports one generic endpoint serving both models, with explicit
+model IDs and conservative capacity bounds. It assumes no hardware or model
+family. `fast` and `reasoning` initially select the same chat model. Use an
+external Spring overlay to place models on separate endpoints or add more pools.
+This explicitly configured local development example assumes the services below
+are running on your machine:
 
 ```sh
 export PLOWSHARE_DB_URL=jdbc:postgresql://localhost:5432/plowshare
 export PLOWSHARE_DB_USER=plowshare
+export PLOWSHARE_PORT=8091
+export PLOWSHARE_BIND=127.0.0.1
+export PLOWSHARE_DATA_DIR="$PWD/data"
+export PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY="$PWD/workspaces"
 
-export LLM_BASE_URL=http://127.0.0.1:1234/v1
+export LLM_BASE_URL=http://127.0.0.1:8000/v1
 export LLM_PROVIDER=openai
-export LLM_CHAT_MODEL=your-fast-model
+export LLM_CHAT_MODEL=your-chat-model
 export LLM_EMBEDDING_MODEL=your-embedding-model
-
-export SPARK_BASE_URL=http://127.0.0.1:8000/v1
-export SPARK_CHAT_MODEL=your-reasoning-model
-export SYSTEM_MODEL=reasoning
+# Set these for the actual service capacity; swarm work needs spare chat capacity.
+export LLM_CHAT_SLOTS=2
+export LLM_SWARM_SLOTS=1
 ```
 
-Replace the example endpoints and model IDs. Use `LLM_PROVIDER=lmstudio` for an
-LM Studio endpoint. The shipped database vectors are 768-dimensional; use a
-compatible embedding model and review its input limits. The two chat classes
-can use the same model service, with pool capacity configured for that service.
+Replace the example endpoints, paths and model IDs for your deployment. Required
+connection and listener values have no production fallback. Use
+`LLM_PROVIDER=lmstudio` only for an LM Studio endpoint. The single-embedder
+compatibility example uses 768-dimensional legacy vectors. For independent code
+and prose embedders, use the [dual embedding configuration](docs/embedding-evolution.md#enabling-the-two-slots)
+and [complete pool example](bin/application-dual-embeddings.example.yml).
+Both slots support 1–16,000 dimensions in the same permanent layout, with seven
+fixed retrieval modes and background re-embedding when their model changes.
 
 Supply `PLOWSHARE_DB_PASSWORD` and any
-`LM_STUDIO_API_KEY` / `SPARK_API_KEY` through your deployment environment or the
+`LLM_API_KEY` (or API-key variables named by your overlay) through your deployment environment or the
 launcher's mode-0600 `~/.config/plowshare/secrets.env` file. This file is sourced
 as shell assignments and belongs outside the checkout. Leave the admin seed
 variables unset to use first-run CLI setup. Explicit environment provisioning
@@ -248,7 +277,12 @@ those accounts must change their password on first login.
 The [shipped application configuration](plowshare-server/src/main/resources/application.yml)
 is the source of truth for defaults. Use a Spring configuration overlay for a
 different pool layout or advanced settings; the
-[example overlay](bin/application-local.example.yml) demonstrates its structure.
+[example overlay](bin/application-local.example.yml) demonstrates separate chat
+and embedding endpoints. Launch it with `bin/plowshare --config /absolute/path/application-local.yml`.
+Existing deployments should move their complete `studio`/`spark` pool declarations,
+model IDs, capabilities and capacity settings into their private overlay. Hardware
+pool names and the old `SPARK_*` variables are no longer packaged defaults;
+`--spark-url` and `--spark-model` report the configuration-file replacement.
 
 To tune prompt latency for your hardware, set `max-context-lengths` inside each
 pool, keyed by its served wire model name. For example, add this to a pool that
@@ -387,10 +421,12 @@ is a small starting point for code-controlled orchestration.
 
 The main implementation areas are `plowshare-server` (runtime and services),
 `plowshare-protocol` (Java contracts),
-[plowshare-client-ts](plowshare-client-ts/README.md) (shared transport and operation
-contracts), [plowshare-client-node](plowshare-client-node/README.md) (credentials,
-files and platform services), and the client modules. Search adapters live in
-`extensions/` as separate services.
+[plowshare-client-ts](sdk/typescript/README.md) (shared transport and operation
+contracts), [plowshare-client-node](sdk/node/README.md) (credentials,
+files and platform services), and the client modules. All SDK variants live in
+[sdk/](sdk/README.md). A2A, Home Assistant and their shared runtime live in
+[integrations/](integrations/README.md). Services that extend Plowshare, including
+search providers, live in `extensions/`.
 
 Read [AGENTS.md](AGENTS.md) and the [coding standards](docs/coding-standards.md)
 before contributing. System boundaries use interfaces, specialist repositories
@@ -413,6 +449,6 @@ Plowshare is licensed under the [Apache License 2.0](LICENSE).
 
 Language integrations use the [SDKs and roadmap](docs/sdks.md): JS/TS, Java/JVM, Python, C# and Go. Messaging and Skills are implemented; the [A2A receiving manual](docs/a2a-receiving.md) configures inbound text messages and durable tasks.
 
-Java integrations use [plowshare-sdk](plowshare-sdk/README.md). The [A2A adapter](plowshare-a2a/README.md) runs on that SDK and communicates with Plowshare over WebSocket.
+Java integrations use [plowshare-sdk](sdk/java/README.md). The [A2A adapter](integrations/a2a/README.md) runs on that SDK and communicates with Plowshare over WebSocket.
 
 Use the [A2A sending manual](docs/a2a-sending.md) to configure a remote peer, send from the CLI, SDK or an agent, follow results and request cancellation.

@@ -19,4 +19,8 @@ test -d "$PLOWSHARE_DATA_DIR" && test -w "$PLOWSHARE_DATA_DIR" || {
 # Numeric container users have no passwd home. GraalJS needs a writable home
 # for its native runtime cache; keep that disposable cache on the exec tmpfs.
 mkdir -p /tmp/plowshare-runtime
+# Native tokenizer files are packaged, but extraction needs a writable cache for UID 1000.
+# Derive it from the configured data directory rather than assuming a writable home.
+export DJL_CACHE_DIR="${DJL_CACHE_DIR:-${PLOWSHARE_DATA_DIR:?}/tokenizer-runtime}"
+export OPT_OUT_TRACKING=true
 exec java -Duser.home=/tmp/plowshare-runtime -jar /opt/plowshare/server.jar "$@"

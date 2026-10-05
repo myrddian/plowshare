@@ -72,7 +72,7 @@ import org.springframework.stereotype.Service;
  * a home for its own read-side helpers should take this one with it.
  */
 @Service
-public final class Callers {
+public final class Callers implements WorkCallers {
 
   private io.aeyer.plowshare.server.archive.ConversationStore conversations;
   private io.aeyer.plowshare.server.session.SessionRegistry sessions;

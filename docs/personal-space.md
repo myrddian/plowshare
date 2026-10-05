@@ -160,7 +160,7 @@ See [agent instruction scopes](skills-and-agent-rules.md#agent-instructions).
 
 New Personal spaces receive editable instructions, seven workflow skills,
 preferences, a knowledge schema and supporting templates. The shipped defaults
-live in [personal-starter](../plowshare-server/src/main/resources/personal-starter/).
+live in [personal-starter](../plowshare-server/src/main/resources/personal-starter).
 Personal's `Resources/skills.yml` enables automatic discovery for these skills;
 the shared packages remain hidden by default elsewhere.
 

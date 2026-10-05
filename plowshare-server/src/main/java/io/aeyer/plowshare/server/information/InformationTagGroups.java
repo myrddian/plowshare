@@ -28,37 +28,4 @@ public final class InformationTagGroups {
     }
     return Collections.unmodifiableMap(result);
   }
-
-  public static String tags(String revision, String resource) {
-    return "information_visible_tags("
-        + resource
-        + ".tags,"
-        + InformationFacets.readyTags(revision)
-        + ")";
-  }
-
-  public static String groups(String revision, String resource) {
-    String tags = tags(revision, resource);
-    String automatic =
-        "CASE WHEN "
-            + revision
-            + ".tag_groups_input_tags="
-            + tags
-            + " AND EXISTS(SELECT 1 FROM information_steps group_step WHERE group_step.revision_id="
-            + revision
-            + ".id AND group_step.generation="
-            + revision
-            + ".generation AND group_step.stage='tagGroups' AND group_step.state='ready') THEN "
-            + revision
-            + ".auto_tag_groups ELSE '{}'::jsonb END";
-    return "information_visible_tag_groups(CASE WHEN "
-        + resource
-        + ".tag_groups_manual THEN "
-        + resource
-        + ".tag_groups ELSE "
-        + automatic
-        + " END,"
-        + tags
-        + ")";
-  }
 }

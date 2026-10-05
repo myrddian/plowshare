@@ -1,13 +1,18 @@
-import process from 'node:process'
+import { background } from '../background.ts';
+import process from 'node:process';
 
-import { askingAbout, pressingOn, settledAsking } from '../../logic/approval.ts'
-import { parse } from '../../logic/markdown.ts'
-import { entered } from '../../logic/screen.ts'
-import type { Approval, Entry } from '../../logic/session.ts'
-import { tint } from '../../logic/tints.ts'
-import { describeApprovalDialog } from '../../logic/wording.ts'
-import { explore } from '../exploring.ts'
-import { terminal } from './mounting.ts'
+import {
+  askingAbout,
+  pressingOn,
+  settledAsking,
+} from '../../logic/approval.ts';
+import { parse } from '../../logic/markdown.ts';
+import { entered } from '../../logic/screen.ts';
+import type { Approval, Entry } from '../../logic/session.ts';
+import { tint } from '../../logic/tints.ts';
+import { describeApprovalDialog } from '../../logic/wording.ts';
+import { explore } from '../exploring.ts';
+import { terminal } from './mounting.ts';
 
 /**
  * A terminal surface with nothing behind it, for `scrolling.test.ts` to drive.
@@ -47,106 +52,215 @@ import { terminal } from './mounting.ts'
  * network.
  */
 
-const many = Number.parseInt(process.env['PLOWSHARE_HARNESS_ENTRIES'] ?? '0', 10)
+const many = Number.parseInt(
+  process.env['PLOWSHARE_HARNESS_ENTRIES'] ?? '0',
+  10,
+);
 
-const grace = process.env['PLOWSHARE_HARNESS_GRACE']
-const surface = terminal({ colour: true, ...(grace === undefined ? {} : { dialogGrace: Number.parseInt(grace, 10) }) })
+const grace = process.env['PLOWSHARE_HARNESS_GRACE'];
+const surface = terminal({
+  colour: true,
+  ...(grace === undefined ? {} : { dialogGrace: Number.parseInt(grace, 10) }),
+});
 
 for (let at = 1; at <= many; at += 1) {
-    surface.show(entered(at, 'client', parse(
-        `transcript line ${String(at).padStart(3, '0')}`)))
+  surface.show(
+    entered(
+      at,
+      'client',
+      parse(`transcript line ${String(at).padStart(3, '0')}`),
+    ),
+  );
 }
 
-const panel = process.env['PLOWSHARE_HARNESS_PANEL']
+const panel = process.env['PLOWSHARE_HARNESS_PANEL'];
 if (panel !== undefined) {
-    surface.panel?.({ lines: [[tint(panel)]], settled: [panel] })
+  surface.panel?.({ lines: [[tint(panel)]], settled: [panel] });
 }
 
-const viewing = process.env['PLOWSHARE_HARNESS_VIEW']
+const viewing = process.env['PLOWSHARE_HARNESS_VIEW'];
 if (viewing !== undefined) {
-    surface.view?.({
-        head: [[tint('orc_1  implement_specification  3m 0s', 'strong')], [tint('  goal ✓ code ●')]],
-        body: Array.from({ length: Number.parseInt(viewing, 10) }, (_, at) =>
-            [tint(`09:05:03 · record line ${String(at + 1).padStart(3, '0')}`)]),
-        foot: 'milestones and tool activity · esc back',
-    })
-    surface.show(entered(many + 1, 'client', parse('shown while the viewer was up')))
-    // Undefined once the input ends: Ctrl-D, or the pty closing.
-    await surface.viewKey?.()
-    surface.view?.(undefined)
+  surface.view?.({
+    head: [
+      [tint('orc_1  implement_specification  3m 0s', 'strong')],
+      [tint('  goal ✓ code ●')],
+    ],
+    body: Array.from({ length: Number.parseInt(viewing, 10) }, (_, at) => [
+      tint(`09:05:03 · record line ${String(at + 1).padStart(3, '0')}`),
+    ]),
+    foot: 'milestones and tool activity · esc back',
+  });
+  surface.show(
+    entered(many + 1, 'client', parse('shown while the viewer was up')),
+  );
+  // Undefined once the input ends: Ctrl-D, or the pty closing.
+  await surface.viewKey?.();
+  surface.view?.(undefined);
 }
 
 if (process.env['PLOWSHARE_HARNESS_EXPLORE'] !== undefined) {
-    const row = (ordinal: number, kind: string, text: string, extra: Partial<Entry> = {}): Entry =>
-        ({ ordinal, turnOrdinal: 1, kind, state: 'stands', text, ...extra })
-    const entries: Entry[] = [
-        row(1, 'utterance', 'run the tests'),
-        row(2, 'answer', '', { calls: [{ id: 'c1', name: 'run', arguments: '{"command":"./gradlew test"}', length: 28, cut: false, salient: './gradlew test' }] }),
-        row(3, 'tool_result', ['exit 1', 'java.lang.AssertionError: expected 3',
-            '\tat explored.TokenizerTest.counts(TokenizerTest.java:41)', '\u001b[31mBUILD FAILED\u001b[0m\r'].join('\n'),
-        { toolCallId: 'c1', outcome: 'exit 1', tookMillis: 4200 }),
-    ]
-    const page = { entries, through: 3, more: false, total: 3, oldest: 1 }
-    await explore({
-        surface, zone: 'UTC', appended: () => () => undefined, print: () => undefined,
-        reads: { tail: async () => page, before: async () => undefined, after: async () => [], follow: async () => undefined },
-    }, { conversation: 'cnv_harness', label: 'harness', view: 'trajectory' })
+  const row = (
+    ordinal: number,
+    kind: string,
+    text: string,
+    extra: Partial<Entry> = {},
+  ): Entry => ({
+    ordinal,
+    turnOrdinal: 1,
+    kind,
+    state: 'stands',
+    text,
+    ...extra,
+  });
+  const entries: Entry[] = [
+    row(1, 'utterance', 'run the tests'),
+    row(2, 'answer', '', {
+      calls: [
+        {
+          id: 'c1',
+          name: 'run',
+          arguments: '{"command":"./gradlew test"}',
+          length: 28,
+          cut: false,
+          salient: './gradlew test',
+        },
+      ],
+    }),
+    row(
+      3,
+      'tool_result',
+      [
+        'exit 1',
+        'java.lang.AssertionError: expected 3',
+        '\tat explored.TokenizerTest.counts(TokenizerTest.java:41)',
+        '\u001b[31mBUILD FAILED\u001b[0m\r',
+      ].join('\n'),
+      { toolCallId: 'c1', outcome: 'exit 1', tookMillis: 4200 },
+    ),
+  ];
+  const page = { entries, through: 3, more: false, total: 3, oldest: 1 };
+  await explore(
+    {
+      surface,
+      zone: 'UTC',
+      appended: () => () => undefined,
+      print: () => undefined,
+      reads: {
+        tail: () => Promise.resolve(page),
+        before: () => Promise.resolve(undefined),
+        after: () => Promise.resolve([]),
+        follow: () => Promise.resolve(undefined),
+      },
+    },
+    { conversation: 'cnv_harness', label: 'harness', view: 'trajectory' },
+  );
 }
 
-let next = many + 1
-const approving = process.env['PLOWSHARE_HARNESS_DIALOG']
+let next = many + 1;
+const approving = process.env['PLOWSHARE_HARNESS_DIALOG'];
 if (approving === 'approval' || approving === 'set') {
-    // A COMMAND APPROVAL, answered with the approval prompt's own keys, redrawn a key at a time.
-    const approval: Approval = {
-        id: 'apr_1', conversation: 'cnv_conductor', agent: 'code_implementation', side: 'local',
-        command: approving === 'set' ? [] : ['pytest', '-q', 'tests'], cwd: '/repo', state: 'asked',
-        defaultPrefix: approving === 'set' ? [] : ['pytest', '-q'],
-        ...(approving === 'set' ? { commands: [['pytest', '-q', 'tests/test_a.py'], ['pytest', '-q', 'tests/test_b.py']] } : {}),
-    }
-    void (async () => {
-        let state = askingAbout(approval)
-        let again = false
-        while (!settledAsking(state)) {
-            const stroke = await surface.approvalDialog?.(describeApprovalDialog(approval, state, false), again)
-            if (stroke === undefined) {
-                break
-            }
-            state = pressingOn(state, stroke)
-            again = true
+  // A COMMAND APPROVAL, answered with the approval prompt's own keys, redrawn a key at a time.
+  const approval: Approval = {
+    id: 'apr_1',
+    conversation: 'cnv_conductor',
+    agent: 'code_implementation',
+    side: 'local',
+    command: approving === 'set' ? [] : ['pytest', '-q', 'tests'],
+    cwd: '/repo',
+    state: 'asked',
+    defaultPrefix: approving === 'set' ? [] : ['pytest', '-q'],
+    ...(approving === 'set'
+      ? {
+          commands: [
+            ['pytest', '-q', 'tests/test_a.py'],
+            ['pytest', '-q', 'tests/test_b.py'],
+          ],
         }
-        next += 1
-        surface.show(entered(next, 'client', parse(`approval answered: ${state.kind === 'answered'
-            ? JSON.stringify(state.ask.payload) : state.kind}`)))
-    })()
+      : {}),
+  };
+  background(
+    (async () => {
+      let state = askingAbout(approval);
+      let again = false;
+      while (!settledAsking(state)) {
+        const stroke = await surface.approvalDialog?.(
+          describeApprovalDialog(approval, state, false),
+          again,
+        );
+        if (stroke === undefined) {
+          break;
+        }
+        state = pressingOn(state, stroke);
+        again = true;
+      }
+      next += 1;
+      surface.show(
+        entered(
+          next,
+          'client',
+          parse(
+            `approval answered: ${
+              state.kind === 'answered'
+                ? JSON.stringify(state.ask.payload)
+                : state.kind
+            }`,
+          ),
+        ),
+      );
+    })(),
+  );
 } else if (process.env['PLOWSHARE_HARNESS_DIALOG'] === 'question') {
-    // A ROOT'S QUESTION, whose `r` leaves `/answer` and its id in the composer as `converse` does.
-    void surface.capDialog?.([
-        'orc_1 (implement_specification) asks:',
-        'Which database?',
-        'r reply · w watch · esc later',
-    ], ['reply', 'watch', 'later']).then((key) => {
-        next += 1
-        surface.show(entered(next, 'client', parse(`dialog answered: ${key ?? 'nothing'}`)))
+  // A ROOT'S QUESTION, whose `r` leaves `/answer` and its id in the composer as `converse` does.
+  background(
+    surface
+      .capDialog?.(
+        [
+          'orc_1 (implement_specification) asks:',
+          'Which database?',
+          'r reply · w watch · esc later',
+        ],
+        ['reply', 'watch', 'later'],
+      )
+      .then((key) => {
+        next += 1;
+        surface.show(
+          entered(
+            next,
+            'client',
+            parse(`dialog answered: ${key ?? 'nothing'}`),
+          ),
+        );
         if (key === 'reply') {
-            surface.prefill?.('/answer orc_1 ')
+          surface.prefill?.('/answer orc_1 ');
         }
-    })
+      }),
+  );
 } else if (process.env['PLOWSHARE_HARNESS_DIALOG'] !== undefined) {
-    void surface.capDialog?.([
+  background(
+    surface
+      .capDialog?.([
         'code_implementation (orc_2) stopped at its turn cap',
         'last: nothing recorded yet',
         'y continue · n stop · a always (auto-continue 3) · w watch · esc later',
-    ]).then((key) => {
-        next += 1
-        surface.show(entered(next, 'client', parse(`dialog answered: ${key ?? 'nothing'}`)))
-    })
+      ])
+      .then((key) => {
+        next += 1;
+        surface.show(
+          entered(
+            next,
+            'client',
+            parse(`dialog answered: ${key ?? 'nothing'}`),
+          ),
+        );
+      }),
+  );
 }
 for (;;) {
-    const line = await surface.asked()
-    if (line === undefined) {
-        break
-    }
-    next += 1
-    surface.show(entered(next, 'person', parse(line)))
+  const line = await surface.asked();
+  if (line === undefined) {
+    break;
+  }
+  next += 1;
+  surface.show(entered(next, 'person', parse(line)));
 }
-surface.close()
+surface.close();

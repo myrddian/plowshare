@@ -18,7 +18,7 @@ public class CodeTrackingConfig {
       UnitOfWork work,
       @Value("${plowshare.code-tracking.interval:30s}") String interval,
       @Value("${plowshare.code-tracking.capacity:64}") int capacity) {
-    return new CodeWorkspaceStore(
+    return new JdbcCodeWorkspaceStore(
         jdbc,
         work,
         Clock.systemUTC(),

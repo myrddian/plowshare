@@ -23,18 +23,18 @@
  * Re-exported from the REPL rather than declared again: it is the same seam,
  * and a second copy of an interface is the copy that drifts.
  */
-export type { Transport } from '../repl/repl'
+export type { Transport } from '../repl/repl';
 
 export interface Screen {
-    /** The element this screen built, for a caller that wants to place it. */
-    element(): HTMLElement
-    /**
-     * Read the server and draw. Called on first mount and on every reload.
-     *
-     * Never rejects: a screen that threw here would take the shell's switch
-     * with it. What went wrong is drawn on the screen instead.
-     */
-    load(): Promise<void>
-    /** Stop whatever is running. Idempotent. */
-    destroy(): void
+  /** The element this screen built, for a caller that wants to place it. */
+  element(): HTMLElement;
+  /**
+   * Read the server and draw. Called on first mount and on every reload.
+   *
+   * Never rejects: a screen that threw here would take the shell's switch
+   * with it. What went wrong is drawn on the screen instead.
+   */
+  load(): Promise<void>;
+  /** Stop whatever is running. Idempotent. */
+  destroy(): void;
 }

@@ -18,7 +18,11 @@ final class ShippedChunking {
   static final int MAX = 1536;
 
   static final Chunking SHIPPED =
-      new Chunking(new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN), TARGET, MAX);
+      new Chunking(
+          new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+              RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN),
+          TARGET,
+          MAX);
 
   private ShippedChunking() {}
 }

@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.api.ProjectController;
-import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.ws.*;
@@ -140,7 +140,7 @@ class AdminSetupTest {
         200,
         postJson("/v1/projects", Map.of("name", "example", "workspace", tmp.toString()), permanent)
             .getStatus());
-    assertEquals(List.of("owner"), new ProjectMembers(jdbc).members("example"));
+    assertEquals(List.of("owner"), new JdbcProjectMembers(jdbc).members("example"));
     assertFalse(new AdminStore(jdbc).bootstrap(hasher.hash(Tokens.mint().toCharArray())));
     assertTrue(new AdminStore(jdbc).isServerAdmin("owner"));
   }
@@ -199,7 +199,7 @@ class AdminSetupTest {
                     new ProjectFrames(
                         projects,
                         new PresenceRegistry(),
-                        new ProjectMembers(jdbc),
+                        new JdbcProjectMembers(jdbc),
                         new AuthProperties())));
     router.useAccounts(accounts);
     var outcome =

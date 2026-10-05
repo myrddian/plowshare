@@ -162,7 +162,7 @@ class StructuredAnswersTest {
 
   @Test
   void the_stored_structure_names_each_choice() throws Exception {
-    String stored =
+    var stored =
         StructuredAnswers.structure(
             List.of(new Choice("Store", List.of("SQLite"), null, "for now")));
 
@@ -170,6 +170,14 @@ class StructuredAnswersTest {
         json(
             "{\"choices\":[{\"header\":\"Store\",\"chosen\":[\"SQLite\"],"
                 + "\"note\":\"for now\"}]}"),
-        json(stored));
+        new ObjectMapper().valueToTree(stored));
+  }
+
+  @Test
+  void direct_choices_cannot_bypass_the_boundary_field_checks() {
+    assertThrows(Refused.class, () -> new Choice("heading\n", List.of("x"), null, null));
+    assertThrows(Refused.class, () -> new Choice("heading", List.of("x", "x"), null, null));
+    assertThrows(Refused.class, () -> new Choice("heading", List.of("x"), "bad\0text", null));
+    assertThrows(Refused.class, () -> new Choice("heading", List.of("x"), null, "bad\0text"));
   }
 }

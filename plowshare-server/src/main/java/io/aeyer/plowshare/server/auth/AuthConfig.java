@@ -29,36 +29,17 @@ import org.springframework.core.Ordered;
  * drive over a real socket, so the whole of task 7 would rest on calling {@code doFilter} by hand.
  * This is the one wiring decision that belongs to the thing being built.
  *
- * <h2>The startup announcement, and the two tokens it mints</h2>
+ * <h2>Explicit token handoff</h2>
  *
- * <p>On {@link ApplicationReadyEvent} this mints a one-time bootstrap token for the browser and a
- * long-lived operator token for the CLI, writes the second to {@link AuthProperties#getTokenFile()}
- * at mode 600, and prints one line:
+ * <p>When {@link AuthProperties#getTokenFile()} is configured, startup validates the explicit
+ * console origin, mints a one-time browser bootstrap token and stages a mode-0600 file. Its first
+ * line is the operator credential; its second line is the browser URL carrying the bootstrap token.
+ * Logs announce only the origin and the configured handoff location, never either secret. The
+ * operator grant is accepted only after the protected file was successfully written.
  *
- * <pre>
- *   Plowshare console: http://127.0.0.1:8091/?token=&lt;48 hex chars&gt;
- * </pre>
- *
- * <p><b>That line is the only place this server LOGS a secret</b> — not on refresh, not on failure,
- * not at debug level. {@link AuthController} and {@link TokenStore} both refuse a logger outright
- * for the same reason; this file holds one because it also has configuration to complain about.
- *
- * <p><b>The same URL is also written to the token file</b>, as its second line, because the console
- * token had lived only in the log and so had to be scraped out of it after every restart. The two
- * lines are the operator token, which the CLI presents as {@code Authorization: Bearer}, and then
- * the console URL, which carries the one-time bootstrap token the browser exchanges at {@code POST
- * /v1/auth}. They are different credentials and neither works where the other does — measured: the
- * operator token is a 200 on {@code /v1/search/providers} and a 401 on {@code /v1/auth}.
- *
- * <p>The operator token stays the FIRST line so that a reader taking the head of this file gets
- * what it always got. A file is a stopgap either way: it can only serve a client on this machine,
- * and both the CLI and the console can be remote, which is why {@code PLOWSHARE_TOKEN} exists and
- * why proper accounts are the real answer — see {@code implementation rationale}.
- *
- * <p>Why two tokens rather than the design's one is argued where the second one is minted, {@link
- * TokenStore#acceptOperator(String)}. Why the announcement is off unless {@code
- * PlowshareServerApplication.main} switched it on — and it is off in every test context in this
- * repository — is argued on the property that switches it, {@link AuthProperties#getTokenFile()}.
+ * <p>Embedded contexts leave the token path blank unless they deliberately test this behavior. The
+ * server entrypoint supplies no path or address. Remote clients configure their credentials through
+ * their owning authentication flow rather than assuming a shared filesystem.
  *
  * <h2>A {@link FilterRegistrationBean}, not a bare {@code Filter} bean</h2>
  *
@@ -153,9 +134,10 @@ public class AuthConfig {
     if (database != null) {
       if (transactions == null)
         throw new IllegalStateException("Account session persistence needs a transaction manager.");
-      tokens.withServiceCredentials(new ServiceCredentials(database, Clock.systemUTC()));
+      tokens.withServiceCredentials(
+          new JdbcServiceCredentialsRepository(database, Clock.systemUTC()));
       tokens.withDurableSessions(
-          new DurableSessions(
+          new JdbcDurableSessions(
               database,
               transactions,
               Clock.systemUTC(),
@@ -260,40 +242,32 @@ public class AuthConfig {
             configured);
         return;
       }
-      announce(tokens, properties, Path.of(configured), web.getWebServer().getPort());
+      announce(tokens, properties, Path.of(configured));
     };
   }
 
   /**
-   * Mint, write, print — in that order, so a warning about the file precedes the line an operator
-   * is reading for.
-   *
-   * <p>Package-private so {@code AuthControllerTest} can drive it without a container, which is
-   * what lets the file-mode assertion run against a temp directory instead of the operator's own
-   * {@code ~/.config/plowshare/console-token}.
-   *
-   * <p><b>A failed write does not stop the boot.</b> The browser's way in is the printed line and
-   * it does not go through the file, so refusing to start would trade a CLI that cannot
-   * authenticate for a server that does not exist. The warning names the path and the reason and
-   * never the token.
-   *
-   * <p><b>And a failed write leaves nothing behind in the store.</b> The operator token is minted,
-   * written, and only then handed to {@link TokenStore#acceptOperator(String)} — that last call is
-   * what makes it a credential. Doing it the other way round, which is what this did, left a
-   * never-expiring and never-swept access grant in the store on exactly the path where the warning
-   * below tells the operator the CLI has none: measured, with an unwritable path, at {@code
-   * trackedRecords()} 0 before and 2 after. Nothing could present that grant — the only copy of its
-   * token was the local that went out of scope — but it is a live credential for the life of the
-   * process, and the store and the warning disagreeing about whether one exists is the kind of gap
-   * that is only ever found the hard way.
+   * Writes configured credentials before accepting the operator grant. A failed write leaves no
+   * operator grant and is reported without credential contents; logs never substitute a secret URL
+   * for a failed file handoff. Package-private for temporary-file tests.
    */
-  static void announce(TokenStore tokens, AuthProperties properties, Path file, int port) {
+  static void announce(TokenStore tokens, AuthProperties properties, Path file) {
+    var origin = okhttp3.HttpUrl.parse(properties.getConsoleOrigin());
+    if (origin == null
+        || !origin.encodedPath().equals("/")
+        || origin.query() != null
+        || origin.fragment() != null
+        || !origin.username().isEmpty()
+        || !origin.password().isEmpty())
+      throw new IllegalArgumentException(
+          "plowshare.auth.console-origin must be an explicit HTTP(S) origin when token-file is enabled");
     String bootstrap = tokens.mintBootstrap();
     // Mint, write, then record. See the note above on why that order and not
     // the other one; Tokens.mint() is the one generator in this server, so
     // taking the value here rather than from the store weakens nothing.
     String operator = Tokens.mint();
-    String consoleUrl = "http://127.0.0.1:" + port + "/?token=" + bootstrap;
+    String consoleUrl =
+        origin.newBuilder().addQueryParameter("token", bootstrap).build().toString();
     try {
       // Two lines, and the operator token stays the first of them so that a
       // reader taking the head of this file still gets what it always got.
@@ -301,15 +275,14 @@ public class AuthConfig {
       tokens.acceptOperator(operator);
     } catch (IOException | UnsupportedOperationException notWritten) {
       log.warn(
-          "could not write the operator token to {}: {}. The console URL below still"
-              + " works; the CLI has no credential on this machine until it can be"
+          "could not write the operator token to {}: {}. The configured console origin remains available; bootstrap credentials"
+              + " could not be saved; the CLI has no credential on this machine until it can be"
               + " written, and PLOWSHARE_TOKEN is the other way to give it one.",
           file,
           notWritten.toString());
     }
-    // THE ONE LINE IN THIS SERVER THAT PRINTS A SECRET. Not on refresh, not
-    // on failure, not at debug level, and not a second time here.
-    log.info("Plowshare console: http://127.0.0.1:{}/?token={}", port, bootstrap);
+    // The protected token file carries the single-use bootstrap URL; logs carry no credentials.
+    log.info("Plowshare console: {} (bootstrap URL in the configured token file)", origin);
   }
 
   /**
@@ -382,19 +355,5 @@ public class AuthConfig {
       }
       throw failed;
     }
-  }
-
-  /**
-   * {@code ~/.config/plowshare/console-token}, which is what {@code
-   * PlowshareServerApplication.main} sets the property to.
-   *
-   * <p>Public because the CLI reads the same path and the two must agree; {@code
-   * AuthControllerTest} asserts they do, over the client class that resolves it on the other side.
-   * It is not shared through a common module because {@code plowshare-protocol} is the wire
-   * vocabulary the two halves exchange, and where one machine keeps its own credential is not part
-   * of it.
-   */
-  public static Path defaultTokenFile() {
-    return Path.of(System.getProperty("user.home"), ".config", "plowshare", "console-token");
   }
 }

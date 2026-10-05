@@ -133,7 +133,7 @@ class ConversationControllerTest {
     when(runtime.schemasOfferedTo(any()))
         .thenReturn(
             List.of(
-                new ToolSchema(
+                ToolSchema.from(
                     "memory_recall",
                     "The memories nearest a question.",
                     Map.of("type", "object"))));

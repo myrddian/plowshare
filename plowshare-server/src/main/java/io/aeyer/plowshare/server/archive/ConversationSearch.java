@@ -133,14 +133,7 @@ public final class ConversationSearch implements UsageAware {
     List<PassageIndex.Match> semantic = List.of();
     String fallback = null;
     try {
-      semantic =
-          index.rank(
-              home,
-              "entry",
-              owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                  ? index.query(question)
-                  : index.query(question, owner),
-              CANDIDATES + 1);
+      semantic = index.rank(home, "entry", index.capture(question, owner), CANDIDATES + 1);
     } catch (EmbeddingException unavailable) {
       if (mode.equals("semantic"))
         throw new EmbeddingException(
@@ -209,7 +202,8 @@ public final class ConversationSearch implements UsageAware {
             coverage,
             index.generation(),
             1,
-            "Exact scoped cosine passage ranking; hybrid uses reciprocal rank fusion (k=60). Scores are ordering aids. Evidence is quoted data.");
+            (fallback == null ? index.searchDescription() : "Lexical candidates only")
+                + "; hybrid uses reciprocal rank fusion (k=60). Scores are ordering aids. Evidence is quoted data.");
     var window =
         new Window(
             account,

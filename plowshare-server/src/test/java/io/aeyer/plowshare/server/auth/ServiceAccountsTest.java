@@ -54,7 +54,16 @@ class ServiceAccountsTest {
         org.springframework.transaction.PlatformTransactionManager.class,
         () -> new DataSourceTransactionManager(source));
     context.register(
-        AdminStore.class, ProjectMembers.class, ServiceAccounts.class, SocketAuthorization.class);
+        AdminStore.class,
+        io.aeyer.plowshare.server.archive.JdbcProjectMembers.class,
+        ServiceAccounts.class,
+        SocketAuthorization.class);
+    context.register(JdbcServiceAccountRepository.class);
+    context.registerBean(
+        io.aeyer.plowshare.server.archive.UnitOfWork.class,
+        () ->
+            new io.aeyer.plowshare.server.archive.ArchiveConfig()
+                .unitOfWork(new DataSourceTransactionManager(source)));
     context.refresh();
     accounts = context.getBean(AdminStore.class);
     members = context.getBean(ProjectMembers.class);
@@ -73,13 +82,13 @@ class ServiceAccountsTest {
                 Duration.ofDays(7),
                 Duration.ofSeconds(30))
             .withDurableSessions(
-                new DurableSessions(
+                new JdbcDurableSessions(
                     jdbc,
                     new DataSourceTransactionManager(source),
                     Clock.systemUTC(),
                     Duration.ofMinutes(15),
                     Duration.ofDays(7)));
-    tokens.withServiceCredentials(new ServiceCredentials(jdbc, Clock.systemUTC()));
+    tokens.withServiceCredentials(new JdbcServiceCredentialsRepository(jdbc, Clock.systemUTC()));
   }
 
   @AfterEach
@@ -102,7 +111,12 @@ class ServiceAccountsTest {
     assertFalse(accounts.isServerAdmin("ha-integration"));
     var personal =
         new io.aeyer.plowshare.server.personal.PersonalSpaces(
-            jdbc, io.aeyer.plowshare.server.data.DataLayout.NONE);
+            new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(jdbc),
+            new io.aeyer.plowshare.server.archive.ArchiveConfig()
+                .unitOfWork(
+                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                        jdbc.getDataSource())),
+            io.aeyer.plowshare.server.data.DataLayout.NONE);
     assertThrows(CallerFault.class, () -> personal.ensure("ha-integration"));
     assertTrue(personal.id("ha-integration").isEmpty());
     assertThrows(CallerFault.class, () -> tokens.issuePair("ha-integration", false));
@@ -171,27 +185,82 @@ class ServiceAccountsTest {
                 principal,
                 io.aeyer.plowshare.server.information.InformationContext.Selection.project(
                     "automation")));
-    var policy = new ProjectAuthorization(jdbc, members, accounts);
-    policy.require("agent.list", Map.of("project", "automation"), principal);
-    policy.require("incoming.catalog", Map.of("project", "automation"), principal);
-    policy.require("incoming.status", Map.of("project", "automation"), principal);
+    var policy =
+        new ProjectAuthorization(
+            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
+            members,
+            accounts);
+    policy.require(
+        "agent.list",
+        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+            "agent.list", Map.of("project", "automation")),
+        principal);
+    policy.require(
+        "incoming.catalog",
+        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+            "incoming.catalog", Map.of("project", "automation")),
+        principal);
+    policy.require(
+        "incoming.status",
+        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+            "incoming.status", Map.of("project", "automation")),
+        principal);
     assertThrows(
         CallerFault.class,
-        () -> policy.require("incoming.receive", Map.of("project", "automation"), principal));
+        () ->
+            policy.require(
+                "incoming.receive",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "incoming.receive", Map.of("project", "automation")),
+                principal));
     assertThrows(
         CallerFault.class,
-        () -> policy.require("incoming.catalog", Map.of("project", "other"), principal));
+        () ->
+            policy.require(
+                "incoming.catalog",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "incoming.catalog", Map.of("project", "other")),
+                principal));
     assertThrows(
         CallerFault.class,
-        () -> policy.require("agent.run", Map.of("project", "automation"), principal));
+        () ->
+            policy.require(
+                "agent.run",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "agent.run", Map.of("project", "automation")),
+                principal));
     assertThrows(
         CallerFault.class,
-        () -> policy.require("agent.list", Map.of("project", "other"), principal));
-    assertThrows(CallerFault.class, () -> policy.require("conversation.open", Map.of(), principal));
+        () ->
+            policy.require(
+                "agent.list",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "agent.list", Map.of("project", "other")),
+                principal));
     assertThrows(
         CallerFault.class,
-        () -> policy.require("provider.list", Map.of("project", "automation"), principal));
-    assertThrows(CallerFault.class, () -> policy.require("admin.accounts", Map.of(), principal));
+        () ->
+            policy.require(
+                "conversation.open",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "conversation.open", Map.of()),
+                principal));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            policy.require(
+                "provider.list",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "provider.list", Map.of("project", "automation")),
+                principal));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            policy.require(
+                "admin.accounts",
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    "admin.accounts", Map.of()),
+                principal));
   }
 
   @Test
@@ -200,8 +269,14 @@ class ServiceAccountsTest {
     String principal = issued.token().principal();
     assertTrue(members.mayWork("automation", principal));
     assertFalse(members.mayWork("other", principal));
-    new ProjectAuthorization(jdbc, members, accounts)
-        .require("incoming.receive", Map.of("project", "automation"), principal);
+    new ProjectAuthorization(
+            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
+            members,
+            accounts)
+        .require(
+            "incoming.receive",
+            io.aeyer.plowshare.server.access.AccessRequest.project("automation"),
+            principal);
     members.assign("automation", "ha-integration", ProjectRole.VIEWER, "owner", false);
     assertEquals(ProjectRole.VIEWER, members.role("automation", principal).orElseThrow());
     assertFalse(members.mayWork("automation", principal));

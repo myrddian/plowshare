@@ -270,9 +270,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   }
   let authenticateConfigured, credentialDirectory, InformationClient;
   try {
-    ({ authenticateConfigured } = await import(pathToFileURL(join(ROOT, 'plowshare-client-node/build/session.js'))));
-    ({ credentialDirectory } = await import(pathToFileURL(join(ROOT, 'plowshare-client-node/build/credentials.js'))));
-    ({ InformationClient } = await import(pathToFileURL(join(ROOT, 'plowshare-client-ts/build/operations/information.js'))));
+    ({ authenticateConfigured } = await import(pathToFileURL(join(ROOT, 'sdk/node/build/session.js'))));
+    ({ credentialDirectory } = await import(pathToFileURL(join(ROOT, 'sdk/node/build/credentials.js'))));
+    ({ InformationClient } = await import(pathToFileURL(join(ROOT, 'sdk/typescript/build/operations/information.js'))));
   } catch { throw new Error('Build the SDK first: ./gradlew :plowshare-client-node:nodeBuild'); }
   const abort = new AbortController();
   const interrupt = () => abort.abort(new Error('Manual installation interrupted; inspect saved receipts before resuming.'));

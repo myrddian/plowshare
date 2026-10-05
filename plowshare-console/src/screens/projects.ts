@@ -1,10 +1,21 @@
-import { api } from '../api'
-import type { EventStream, EventStreamOptions } from '../events'
-import type { ApprovalList, ApprovalRevoked, ApprovalView } from '../repl/wire'
-import { button, el, field, input, labelled, nothing, problemText, textOf, trouble }
-    from './dom'
-import type { Screen, Transport } from './screen'
-import type { ProjectView } from './wire'
+import { consoleTransport } from '../transport';
+import { background } from '../background.ts';
+import { isList } from '../../../sdk/typescript/src/binding/values.ts';
+import type { EventStream, EventStreamOptions } from '../events';
+import type { ApprovalList, ApprovalRevoked, ApprovalView } from '../repl/wire';
+import {
+  button,
+  el,
+  field,
+  input,
+  labelled,
+  nothing,
+  problemText,
+  textOf,
+  trouble,
+} from './dom';
+import type { Screen, Transport } from './screen';
+import type { ProjectView } from './wire';
 
 /**
  * The projects screen: every leash that has been set -- where each project is,
@@ -89,11 +100,11 @@ import type { ProjectView } from './wire'
  * so that the wording lives beside the argument above.
  */
 export const LEASH_NOTE =
-    'These are the paths this project’s jobs cannot reach, as this server enforces them — not'
-    + ' the paths this project’s row stores. Some of them are the server’s own, applied to every'
-    + ' project so that no row can open them, and this answer does not mark which: the row’s'
-    + ' paths and the server’s arrive undistinguished. Redefining this project can drop only'
-    + ' the paths this project added; the rest stay whatever the row says.'
+  'These are the paths this project’s jobs cannot reach, as this server enforces them — not' +
+  ' the paths this project’s row stores. Some of them are the server’s own, applied to every' +
+  ' project so that no row can open them, and this answer does not mark which: the row’s' +
+  ' paths and the server’s arrive undistinguished. Redefining this project can drop only' +
+  ' the paths this project added; the rest stay whatever the row says.';
 
 /**
  * What an empty exclusion list means, which is not "this project is open".
@@ -104,14 +115,14 @@ export const LEASH_NOTE =
  * would be the one reading that is both reassuring and unsafe.
  */
 export const NO_EXCLUSIONS =
-    'This answer carries no exclusions for this project. This server adds its own before it'
-    + ' answers, so an empty list is not a leash with nothing on it — it is an answer this'
-    + ' console cannot account for. Treat this project’s reach as unknown rather than as open.'
+  'This answer carries no exclusions for this project. This server adds its own before it' +
+  ' answers, so an empty list is not a leash with nothing on it — it is an answer this' +
+  ' console cannot account for. Treat this project’s reach as unknown rather than as open.';
 
 export const NO_PROJECTS =
-    'No project on this server has a workspace. That is an answer and not a failure: a job in a'
-    + ' project with no workspace has no local file access at all, and every file tool says so'
-    + ' in words when it is asked.'
+  'No project on this server has a workspace. That is an answer and not a failure: a job in a' +
+  ' project with no workspace has no local file access at all, and every file tool says so' +
+  ' in words when it is asked.';
 
 /**
  * What an empty `lent` list means, which is the ordinary case and not a
@@ -125,310 +136,370 @@ export const NO_PROJECTS =
  * one.
  */
 export const NOTHING_LENT =
-    'Nothing else is lent to this project. Its jobs reach the workspace above and nothing'
-    + ' beside it.'
+  'Nothing else is lent to this project. Its jobs reach the workspace above and nothing' +
+  ' beside it.';
 
 /** What an empty approved-commands list means: nothing runs here without asking. */
 export const NOTHING_APPROVED =
-    'No command is approved for this whole project. A run that asks is asked again each time,'
-    + ' unless a person allowed it for one conversation.'
+  'No command is approved for this whole project. A run that asks is asked again each time,' +
+  ' unless a person allowed it for one conversation.';
 
 export interface ProjectsOptions {
-    readonly root: HTMLElement
-    readonly transport?: Transport
-    /**
-     * The tab's socket, for the approved-commands list. Absent, the list is not
-     * drawn: approvals are frames only and have no HTTP route to fall back to.
-     */
-    readonly openStream?: (options: EventStreamOptions) => EventStream
-    readonly session?: string
+  readonly root: HTMLElement;
+  readonly transport?: Transport;
+  /**
+   * The tab's socket, for the approved-commands list. Absent, the list is not
+   * drawn: approvals are frames only and have no HTTP route to fall back to.
+   */
+  readonly openStream?: (options: EventStreamOptions) => EventStream;
+  readonly session?: string;
 }
 
 export function createProjects(options: ProjectsOptions): Screen {
-    const transport: Transport = options.transport ?? api
+  const transport: Transport = options.transport ?? consoleTransport;
 
-    const shell = el('section', 'screen projects')
-    const head = el('header', 'screen-head')
-    const title = el('h2', 'screen-title', 'projects')
-    const reload = button('reload', 'reload')
-    const body = el('div', 'screen-body')
-    body.dataset['projects'] = ''
+  const shell = el('section', 'screen projects');
+  const head = el('header', 'screen-head');
+  const title = el('h2', 'screen-title', 'projects');
+  const reload = button('reload', 'reload');
+  const body = el('div', 'screen-body');
+  body.dataset['projects'] = '';
 
-    head.append(title, reload)
-    shell.append(head, body)
-    options.root.replaceChildren(shell)
+  head.append(title, reload);
+  shell.append(head, body);
+  options.root.replaceChildren(shell);
 
-    reload.addEventListener('click', () => {
-        void load()
-    })
+  reload.addEventListener('click', () => {
+    background(load());
+  });
 
-    /**
-     * One project: its workspace, its whole leash, and the one verb this screen
-     * has for it.
-     */
-    function draw(project: ProjectView): HTMLElement {
-        const card = el('article', 'project')
-        card.dataset['project'] = textOf(project.name)
-        card.append(el('h3', 'project-name', textOf(project.name)))
-        card.append(field('workspace', textOf(project.workspace)))
-        card.append(lent(project))
-        card.append(leash(project))
-        card.append(mover(project))
-        if (options.openStream !== undefined) {
-            const section = el('section', 'approved')
-            section.dataset['approved'] = textOf(project.name)
-            card.append(section)
-            void approved(section, textOf(project.name))
-        }
-        return card
+  /**
+   * One project: its workspace, its whole leash, and the one verb this screen
+   * has for it.
+   */
+  function draw(project: ProjectView): HTMLElement {
+    const card = el('article', 'project');
+    card.dataset['project'] = textOf(project.name);
+    card.append(el('h3', 'project-name', textOf(project.name)));
+    card.append(field('workspace', textOf(project.workspace)));
+    card.append(lent(project));
+    card.append(leash(project));
+    card.append(mover(project));
+    if (options.openStream !== undefined) {
+      const section = el('section', 'approved');
+      section.dataset['approved'] = textOf(project.name);
+      card.append(section);
+      background(approved(section, textOf(project.name)));
     }
+    return card;
+  }
 
-    /**
-     * The commands a person allowed for this whole project, each revocable.
-     *
-     * `approval.list { project }` and `approval.revoke`, over the socket -- there
-     * is no HTTP for either. A project approval is a leading part of a command on
-     * one side, any directory there; it is drawn as that prefix, because the
-     * prefix is what it allows, and the command that was first asked about is
-     * only where it came from.
-     */
-    async function approved(section: HTMLElement, name: string): Promise<void> {
-        const headed = (...rest: HTMLElement[]): void => {
-            section.replaceChildren(el('div', 'approved-head', 'approved commands'), ...rest)
-        }
-        if (stream === null || stream.status().state !== 'open') {
-            const waiting = el('p', 'nothing', 'connecting…')
-            waiting.dataset['connecting'] = ''
-            headed(waiting)
-            return
-        }
-        let outcome
-        try {
-            outcome = await stream.ask('approval.list', { project: name })
-        } catch (problem) {
-            headed(trouble(problemText(problem, 'The approved commands could not be listed.')))
-            return
-        }
-        if (outcome.code !== 'OK') {
-            headed(trouble(outcome.said ?? 'The approved commands could not be listed.'))
-            return
-        }
-        const standing = (outcome.payload as ApprovalList | undefined)?.approvals ?? []
-        if (standing.length === 0) {
-            headed(nothing(NOTHING_APPROVED))
-            return
-        }
-        const list = el('ul', 'approved-list')
-        list.append(...standing.map((one) => approval(section, name, one)))
-        headed(list)
+  /**
+   * The commands a person allowed for this whole project, each revocable.
+   *
+   * `approval.list { project }` and `approval.revoke`, over the socket -- there
+   * is no HTTP for either. A project approval is a leading part of a command on
+   * one side, any directory there; it is drawn as that prefix, because the
+   * prefix is what it allows, and the command that was first asked about is
+   * only where it came from.
+   */
+  async function approved(section: HTMLElement, name: string): Promise<void> {
+    const headed = (...rest: HTMLElement[]): void => {
+      section.replaceChildren(
+        el('div', 'approved-head', 'approved commands'),
+        ...rest,
+      );
+    };
+    if (stream === null || stream.status().state !== 'open') {
+      const waiting = el('p', 'nothing', 'connecting…');
+      waiting.dataset['connecting'] = '';
+      headed(waiting);
+      return;
     }
-
-    function approval(section: HTMLElement, name: string, one: ApprovalView): HTMLElement {
-        const item = el('li', 'approved-item')
-        item.dataset['approval'] = textOf(one.id)
-        const prefix = Array.isArray(one.prefix) ? one.prefix : one.command
-        const words = el('code', 'approved-prefix', (prefix ?? []).map(textOf).join(' '))
-        const where = el('span', 'approved-side', `${textOf(one.side)} side, any directory`)
-        const revoke = button('revoke', 'Revoke')
-        revoke.dataset['revoke'] = textOf(one.id)
-        revoke.addEventListener('click', () => {
-            revoke.disabled = true
-            void (async (): Promise<void> => {
-                let outcome
-                try {
-                    if (stream === null) {
-                        throw new Error('the event socket is not open; "approval.revoke" was not sent')
-                    }
-                    outcome = await stream.ask('approval.revoke', { id: one.id })
-                } catch (problem) {
-                    revoke.disabled = false
-                    item.append(trouble(problemText(problem, 'That approval could not be revoked.')))
-                    return
-                }
-                if (outcome.code !== 'OK') {
-                    revoke.disabled = false
-                    item.append(trouble(outcome.said ?? 'That approval could not be revoked.'))
-                    return
-                }
-                // Re-read either way: `revoked: false` is an approval that was no
-                // longer standing, and the list should stop showing it too.
-                if ((outcome.payload as ApprovalRevoked | undefined)?.revoked !== true) {
-                    item.append(trouble('That approval was no longer standing; nothing was changed.'))
-                }
-                await approved(section, name)
-            })()
-        })
-        item.append(words, where, revoke)
-        return item
+    let outcome;
+    try {
+      outcome = await stream.ask('approval.list', { project: name });
+    } catch (problem) {
+      headed(
+        trouble(
+          problemText(problem, 'The approved commands could not be listed.'),
+        ),
+      );
+      return;
     }
-
-    /**
-     * The directories lent alongside the workspace.
-     *
-     * Its own section rather than more `field` rows, because the count is not
-     * fixed and because the heading is what carries the meaning: these are
-     * places the project reaches and is not *at*. `nothing()` and not
-     * `trouble()` for the empty case -- see {@link NOTHING_LENT}, which is the
-     * one place on this card where an empty list is simply true.
-     */
-    function lent(project: ProjectView): HTMLElement {
-        const section = el('section', 'lent')
-        section.append(el('div', 'lent-head', 'also reached from this project'))
-        const paths = Array.isArray(project.lent) ? project.lent : []
-        if (paths.length === 0) {
-            section.append(nothing(NOTHING_LENT))
-            return section
-        }
-        const list = el('ul', 'lent-roots')
-        list.dataset['lent'] = 'roots'
-        for (const path of paths) {
-            const item = el('li', 'lent-root', textOf(path))
-            item.dataset['lentRoot'] = ''
-            list.append(item)
-        }
-        section.append(list)
-        return section
+    if (outcome.code !== 'OK') {
+      headed(
+        trouble(outcome.said ?? 'The approved commands could not be listed.'),
+      );
+      return;
     }
-
-    function leash(project: ProjectView): HTMLElement {
-        const section = el('section', 'leash')
-        section.append(el('div', 'leash-head', 'cannot be reached from this project'))
-        const paths = Array.isArray(project.exclusions) ? project.exclusions : []
-        if (paths.length === 0) {
-            // Not `nothing()`: an empty leash is not "searched, and there was
-            // nothing". It is an answer this console cannot account for, and
-            // the two must not render as the same reassuring sentence.
-            section.append(trouble(NO_EXCLUSIONS))
-            return section
-        }
-        const list = el('ul', 'exclusions')
-        // The attribute a test finds the list by, and the word that says what
-        // the list IS. `effective` rather than a per-entry flag, because the
-        // wire carries no per-entry fact to hang one on -- see this file's
-        // header for why inventing one would be the dangerous error.
-        list.dataset['exclusions'] = 'effective'
-        for (const path of paths) {
-            const item = el('li', 'exclusion', textOf(path))
-            item.dataset['exclusion'] = ''
-            list.append(item)
-        }
-        section.append(list)
-        const note = el('p', 'leash-note', LEASH_NOTE)
-        note.dataset['leashNote'] = ''
-        section.append(note)
-        return section
+    const standing =
+      (outcome.payload as ApprovalList | undefined)?.approvals ?? [];
+    if (standing.length === 0) {
+      headed(nothing(NOTHING_APPROVED));
+      return;
     }
+    const list = el('ul', 'approved-list');
+    list.append(...standing.map((one) => approval(section, name, one)));
+    headed(list);
+  }
 
-    /**
-     * `POST /v1/projects/{name}/workspace`, which moves a project without
-     * touching its exclusions.
-     *
-     * Deliberately not a general edit form. `ProjectView`'s javadoc warns that
-     * a console filling an edit form from a listing and posting it back
-     * unchanged would write the mandatory paths into the row -- which is
-     * exactly what this screen cannot avoid doing, because it cannot tell which
-     * entries those are. `moveWorkspace` is one statement that keeps the row's
-     * own exclusions, so it is the verb this screen can offer honestly.
-     *
-     * It keeps the lent directories too, for the same reason and with no extra
-     * work: the statement names `workspace` and nothing else. So this screen has
-     * no verb that lends either -- `POST /v1/projects/{name}/lend` exists and
-     * would be an honest one to add, since `lent` arrives complete and a form
-     * posting it back would write nothing the server did not send. It is left
-     * out because this screen's one verb is deliberate, not because lending
-     * carries the hazard exclusions do.
-     */
-    function mover(project: ProjectView): HTMLElement {
-        const form = el('div', 'mover')
-        const where = input('workspace', 'a directory on this server')
-        const go = button('move', 'point at this directory')
-        const say = el('p', 'mover-note',
-            'Moves this project’s workspace and keeps both its exclusions and the directories'
-            + ' lent to it. This screen has no verb'
-            + ' that rewrites them: it cannot tell which of the excluded paths came from this'
-            + ' project’s row, so posting the list back would write this server’s own paths into'
-            + ' the row, where a later edit could drop them.')
-        go.addEventListener('click', () => {
-            const wanted = where.value.trim()
-            if (wanted === '') {
-                form.append(trouble('A workspace is a directory on this server’s disk. Nothing'
-                    + ' was sent.'))
-                return
+  function approval(
+    section: HTMLElement,
+    name: string,
+    one: ApprovalView,
+  ): HTMLElement {
+    const item = el('li', 'approved-item');
+    item.dataset['approval'] = textOf(one.id);
+    const prefix = isList(one.prefix) ? one.prefix : one.command;
+    const words = el(
+      'code',
+      'approved-prefix',
+      (prefix ?? []).map(textOf).join(' '),
+    );
+    const where = el(
+      'span',
+      'approved-side',
+      `${textOf(one.side)} side, any directory`,
+    );
+    const revoke = button('revoke', 'Revoke');
+    revoke.dataset['revoke'] = textOf(one.id);
+    revoke.addEventListener('click', () => {
+      revoke.disabled = true;
+      background(
+        (async (): Promise<void> => {
+          let outcome;
+          try {
+            if (stream === null) {
+              throw new Error(
+                'the event socket is not open; "approval.revoke" was not sent',
+              );
             }
-            go.disabled = true
-            void transport
-                .post<ProjectView>(
-                    `/v1/projects/${encodeURIComponent(textOf(project.name))}/workspace`,
-                    { workspace: wanted },
-                )
-                // The listing is re-read rather than the answer patched in.
-                // The answer carries the effective list for one project, and
-                // what this screen shows is every project's; re-reading is one
-                // call and cannot leave the two disagreeing.
-                .then(() => load())
-                .catch((problem: unknown) => {
-                    go.disabled = false
-                    form.append(trouble(problemText(
-                        problem, 'That workspace could not be set, and the failure said nothing'
-                        + ' this console can repeat.')))
-                })
-        })
-        form.append(labelled('move to', where), go, say)
-        return form
+            outcome = await stream.ask('approval.revoke', { id: one.id });
+          } catch (problem) {
+            revoke.disabled = false;
+            item.append(
+              trouble(
+                problemText(problem, 'That approval could not be revoked.'),
+              ),
+            );
+            return;
+          }
+          if (outcome.code !== 'OK') {
+            revoke.disabled = false;
+            item.append(
+              trouble(outcome.said ?? 'That approval could not be revoked.'),
+            );
+            return;
+          }
+          // Re-read either way: `revoked: false` is an approval that was no
+          // longer standing, and the list should stop showing it too.
+          if (
+            (outcome.payload as ApprovalRevoked | undefined)?.revoked !== true
+          ) {
+            item.append(
+              trouble(
+                'That approval was no longer standing; nothing was changed.',
+              ),
+            );
+          }
+          await approved(section, name);
+        })(),
+      );
+    });
+    item.append(words, where, revoke);
+    return item;
+  }
+
+  /**
+   * The directories lent alongside the workspace.
+   *
+   * Its own section rather than more `field` rows, because the count is not
+   * fixed and because the heading is what carries the meaning: these are
+   * places the project reaches and is not *at*. `nothing()` and not
+   * `trouble()` for the empty case -- see {@link NOTHING_LENT}, which is the
+   * one place on this card where an empty list is simply true.
+   */
+  function lent(project: ProjectView): HTMLElement {
+    const section = el('section', 'lent');
+    section.append(el('div', 'lent-head', 'also reached from this project'));
+    const paths = isList(project.lent) ? project.lent : [];
+    if (paths.length === 0) {
+      section.append(nothing(NOTHING_LENT));
+      return section;
     }
+    const list = el('ul', 'lent-roots');
+    list.dataset['lent'] = 'roots';
+    for (const path of paths) {
+      const item = el('li', 'lent-root', textOf(path));
+      item.dataset['lentRoot'] = '';
+      list.append(item);
+    }
+    section.append(list);
+    return section;
+  }
 
-    let stream: EventStream | null = null
-    let stopped = false
+  function leash(project: ProjectView): HTMLElement {
+    const section = el('section', 'leash');
+    section.append(
+      el('div', 'leash-head', 'cannot be reached from this project'),
+    );
+    const paths = isList(project.exclusions) ? project.exclusions : [];
+    if (paths.length === 0) {
+      // Not `nothing()`: an empty leash is not "searched, and there was
+      // nothing". It is an answer this console cannot account for, and
+      // the two must not render as the same reassuring sentence.
+      section.append(trouble(NO_EXCLUSIONS));
+      return section;
+    }
+    const list = el('ul', 'exclusions');
+    // The attribute a test finds the list by, and the word that says what
+    // the list IS. `effective` rather than a per-entry flag, because the
+    // wire carries no per-entry fact to hang one on -- see this file's
+    // header for why inventing one would be the dangerous error.
+    list.dataset['exclusions'] = 'effective';
+    for (const path of paths) {
+      const item = el('li', 'exclusion', textOf(path));
+      item.dataset['exclusion'] = '';
+      list.append(item);
+    }
+    section.append(list);
+    const note = el('p', 'leash-note', LEASH_NOTE);
+    note.dataset['leashNote'] = '';
+    section.append(note);
+    return section;
+  }
 
-    async function load(): Promise<void> {
-        if (options.openStream !== undefined && stream === null && !stopped) {
-            stream = options.openStream({
-                session: options.session ?? '',
-                onEvent: () => {},
-                // Built before the socket opened, a card says "connecting"; the
-                // open is what fills it in.
-                onStatus: (status) => {
-                    if (status.state === 'open' && stream !== null) {
-                        for (const section of body.querySelectorAll<HTMLElement>('[data-approved]')) {
-                            void approved(section, section.dataset['approved'] ?? '')
-                        }
-                    }
-                },
-            })
-        }
-        let projects: readonly ProjectView[]
-        try {
-            projects = (await transport.get<ProjectView[]>('/v1/projects')) ?? []
-        } catch (problem) {
-            body.replaceChildren(trouble(problemText(
-                problem, 'The projects could not be listed.')))
-            return
-        }
-        if (projects.length === 0) {
-            body.replaceChildren(nothing(NO_PROJECTS))
-            return
-        }
-        const personal = projects.filter(project => project.kind === 'personal');
-        const ordinary = projects.filter(project => project.kind !== 'personal');
-        const personalRows = personal.map(() => {
-            const element = document.createElement('section');
-            element.className = 'project';
-            const title = document.createElement('h2'); title.textContent = 'Personal';
-            const note = document.createElement('p'); note.textContent = 'Your account space: In, Out, Resources, Archive, Planning and Bots. Mounted at ~/.plowshare/personal by the desktop or TUI.';
-            element.append(title, note); return element;
+  /**
+   * `POST /v1/projects/{name}/workspace`, which moves a project without
+   * touching its exclusions.
+   *
+   * Deliberately not a general edit form. `ProjectView`'s javadoc warns that
+   * a console filling an edit form from a listing and posting it back
+   * unchanged would write the mandatory paths into the row -- which is
+   * exactly what this screen cannot avoid doing, because it cannot tell which
+   * entries those are. `moveWorkspace` is one statement that keeps the row's
+   * own exclusions, so it is the verb this screen can offer honestly.
+   *
+   * It keeps the lent directories too, for the same reason and with no extra
+   * work: the statement names `workspace` and nothing else. So this screen has
+   * no verb that lends either -- `POST /v1/projects/{name}/lend` exists and
+   * would be an honest one to add, since `lent` arrives complete and a form
+   * posting it back would write nothing the server did not send. It is left
+   * out because this screen's one verb is deliberate, not because lending
+   * carries the hazard exclusions do.
+   */
+  function mover(project: ProjectView): HTMLElement {
+    const form = el('div', 'mover');
+    const where = input('workspace', 'a directory on this server');
+    const go = button('move', 'point at this directory');
+    const say = el(
+      'p',
+      'mover-note',
+      'Moves this project’s workspace and keeps both its exclusions and the directories' +
+        ' lent to it. This screen has no verb' +
+        ' that rewrites them: it cannot tell which of the excluded paths came from this' +
+        ' project’s row, so posting the list back would write this server’s own paths into' +
+        ' the row, where a later edit could drop them.',
+    );
+    go.addEventListener('click', () => {
+      const wanted = where.value.trim();
+      if (wanted === '') {
+        form.append(
+          trouble(
+            'A workspace is a directory on this server’s disk. Nothing' +
+              ' was sent.',
+          ),
+        );
+        return;
+      }
+      go.disabled = true;
+      void transport
+        .post(
+          `/v1/projects/${encodeURIComponent(textOf(project.name))}/workspace`,
+          { workspace: wanted },
+        )
+        // The listing is re-read rather than the answer patched in.
+        // The answer carries the effective list for one project, and
+        // what this screen shows is every project's; re-reading is one
+        // call and cannot leave the two disagreeing.
+        .then(() => load())
+        .catch((problem: unknown) => {
+          go.disabled = false;
+          form.append(
+            trouble(
+              problemText(
+                problem,
+                'That workspace could not be set, and the failure said nothing' +
+                  ' this console can repeat.',
+              ),
+            ),
+          );
         });
-        body.replaceChildren(...personalRows, ...ordinary.map(draw))
-    }
+    });
+    form.append(labelled('move to', where), go, say);
+    return form;
+  }
 
-    return {
-        element: () => shell,
-        load,
-        destroy(): void {
-            // No timer; the socket subscription, when there is one, is the only
-            // thing to let go of.
-            stopped = true
-            stream?.close()
-            stream = null
+  let stream: EventStream | null = null;
+  let stopped = false;
+
+  async function load(): Promise<void> {
+    if (options.openStream !== undefined && stream === null && !stopped) {
+      stream = options.openStream({
+        session: options.session ?? '',
+        onEvent: () => {},
+        // Built before the socket opened, a card says "connecting"; the
+        // open is what fills it in.
+        onStatus: (status) => {
+          if (status.state === 'open' && stream !== null) {
+            for (const section of body.querySelectorAll<HTMLElement>(
+              '[data-approved]',
+            )) {
+              background(approved(section, section.dataset['approved'] ?? ''));
+            }
+          }
         },
+      });
     }
+    let projects: readonly ProjectView[];
+    try {
+      projects = (await transport.get('/v1/projects')) ?? [];
+    } catch (problem) {
+      body.replaceChildren(
+        trouble(problemText(problem, 'The projects could not be listed.')),
+      );
+      return;
+    }
+    if (projects.length === 0) {
+      body.replaceChildren(nothing(NO_PROJECTS));
+      return;
+    }
+    const personal = projects.filter((project) => project.kind === 'personal');
+    const ordinary = projects.filter((project) => project.kind !== 'personal');
+    const personalRows = personal.map(() => {
+      const element = document.createElement('section');
+      element.className = 'project';
+      const title = document.createElement('h2');
+      title.textContent = 'Personal';
+      const note = document.createElement('p');
+      note.textContent =
+        'Your account space: In, Out, Resources, Archive, Planning and Bots. Mounted at ~/.plowshare/personal by the desktop or TUI.';
+      element.append(title, note);
+      return element;
+    });
+    body.replaceChildren(...personalRows, ...ordinary.map(draw));
+  }
+
+  return {
+    element: () => shell,
+    load,
+    destroy(): void {
+      // No timer; the socket subscription, when there is one, is the only
+      // thing to let go of.
+      stopped = true;
+      stream?.close();
+      stream = null;
+    },
+  };
 }

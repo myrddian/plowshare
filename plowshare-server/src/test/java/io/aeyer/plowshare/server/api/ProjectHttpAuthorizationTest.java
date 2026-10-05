@@ -59,7 +59,7 @@ class ProjectHttpAuthorizationTest {
     when(jdbc.queryForList(anyString(), eq(String.class), eq("cnv_project")))
         .thenReturn(List.of("integration"));
     var members =
-        new ProjectMembers(jdbc) {
+        new JdbcProjectMembers(jdbc) {
           @Override
           public Optional<ProjectRole> role(String project, String handle) {
             if (!"integration".equals(project)) return Optional.empty();
@@ -71,7 +71,11 @@ class ProjectHttpAuthorizationTest {
             };
           }
         };
-    var authorization = new ProjectAuthorization(jdbc, members, mock(AdminStore.class));
+    var authorization =
+        new ProjectAuthorization(
+            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
+            members,
+            mock(AdminStore.class));
     var http = new ProjectHttpAuthorization(authorization, new ObjectMapper());
     executions = new AtomicInteger();
     mvc =

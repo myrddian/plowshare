@@ -6,7 +6,7 @@ import java.util.List;
 
 /** A language-neutral projection: contiguous source slices, with no prose reflow or summaries. */
 public final class CodeDerivation {
-  public static final String VERSION = "code-lines-v1";
+  public static final String VERSION = "code-lines-v2";
 
   private CodeDerivation() {}
 
@@ -33,9 +33,14 @@ public final class CodeDerivation {
       int to = text.offsetByCodePoints(from, fitting);
       if (to < text.length()) {
         int newline = text.lastIndexOf('\n', to - 1);
-        if (newline >= from) to = newline + 1;
+        if (newline >= from
+            && bounds.tokens(text.substring(from, newline + 1)) <= bounds.targetTokens())
+          to = newline + 1;
       }
       String slice = text.substring(from, to);
+      if (bounds.tokens(slice) > bounds.maxTokens())
+        throw new IllegalArgumentException(
+            "code slice exceeds the embedding allowance after preprocessing");
       chunks.add(
           new Chunker.Chunk(
               slice, slice.getBytes(StandardCharsets.UTF_8).length, to < text.length()));

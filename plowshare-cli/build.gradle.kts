@@ -13,16 +13,16 @@ fun Exec.cliSources() {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files("package.json", "pnpm-lock.yaml", "tsconfig.json", "tsconfig.test.json")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file("plowshare-client-ts/src")).withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file("plowshare-client-node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(rootProject.file("plowshare-client-node/package.json"),
-        rootProject.file("plowshare-client-node/tsconfig.json"),
-        rootProject.file("plowshare-client-node/pnpm-lock.yaml"))
+    inputs.dir(rootProject.file("sdk/typescript/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(rootProject.file("sdk/node/package.json"),
+        rootProject.file("sdk/node/tsconfig.json"),
+        rootProject.file("sdk/node/pnpm-lock.yaml"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(rootProject.file("plowshare-client-ts/package.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.base.json"),
-        rootProject.file("plowshare-client-ts/pnpm-lock.yaml"))
+    inputs.files(rootProject.file("sdk/typescript/package.json"),
+        rootProject.file("sdk/typescript/tsconfig.json"),
+        rootProject.file("sdk/typescript/tsconfig.base.json"),
+        rootProject.file("sdk/typescript/pnpm-lock.yaml"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 

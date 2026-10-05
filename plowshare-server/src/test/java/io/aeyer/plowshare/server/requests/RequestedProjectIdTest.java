@@ -77,13 +77,9 @@ class RequestedProjectIdTest {
   // --- of(ProjectStore, Home) -------------------------------------------
 
   @Test
-  void a_home_lookup_delegates_a_malformed_name_to_the_lenient_rule() {
-    // Home does not strip -- ProjectStore.named() is what refuses edge
-    // whitespace -- so a Home can hold exactly the malformed name lenient
-    // would be asked to swallow.
-    when(projects.id(" payments ")).thenThrow(new ValidationException("has whitespace"));
-
-    assertNull(RequestedProjectId.of(projects, Home.of(" payments ")));
+  void a_home_rejects_a_malformed_name_before_lookup() {
+    assertThrows(IllegalArgumentException.class, () -> Home.of(" payments "));
+    verify(projects, never()).id(anyString());
   }
 
   @Test

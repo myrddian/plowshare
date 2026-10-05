@@ -9,7 +9,6 @@ import org.springframework.web.socket.WebSocketSession;
 
 /** Account revocation covers event and file channels, including other server processes. */
 @Component
-@org.springframework.scheduling.annotation.EnableScheduling
 public class SocketAuthorization {
   private final AdminStore accounts;
   private final java.util.Set<WebSocketSession> sockets = ConcurrentHashMap.newKeySet();

@@ -43,7 +43,10 @@ public final class CallerOrchestrationTools {
      * Answer a question with options by its labels (spec 2026-09-29-orchestration-studio §2.3),
      * with {@code note} as free words beside them or null.
      */
-    default String choose(String id, JsonNode choices, String note) {
+    default String choose(
+        String id,
+        List<io.aeyer.plowshare.server.agents.StructuredAnswers.Choice> choices,
+        String note) {
       return "This server cannot answer a question by its options; answer it in words.";
     }
 
@@ -108,7 +111,7 @@ public final class CallerOrchestrationTools {
               "Whether to wait for it. True, the default, ends"
                   + " your turn until it reports; false returns at once and lets you carry on."));
       schema =
-          new ToolSchema(
+          ToolSchema.from(
               "orchestrate_" + name,
               oneLine(offer.description())
                   + " Stages: "
@@ -161,7 +164,7 @@ public final class CallerOrchestrationTools {
   private static final class Answer extends Tool {
     private static final String EXAMPLE = "{\"id\": \"orc_...\", \"answer\": \"Use PostgreSQL\"}";
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             ANSWER_NAME,
             "Answer the open question from an orchestration owned by this account. The first"
                 + " answer wins and resumes its conductor. A question with options may be"
@@ -224,14 +227,14 @@ public final class CallerOrchestrationTools {
         }
         return actions.answer(id, answer);
       }
-      return actions.choose(id, choices, answer);
+      return actions.choose(id, StructuredAnswers.decode(choices), answer);
     }
   }
 
   private static final class Status extends Tool {
     private static final String EXAMPLE = "{\"id\": \"orc_...\"}";
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             STATUS_NAME,
             "Read compact state, stages, message previews and ending of an orchestration owned by this"
                 + " account. Checking on a run you started while it is still working ends"
@@ -287,7 +290,7 @@ public final class CallerOrchestrationTools {
   private static final class Cancel extends Tool {
     private static final String EXAMPLE = "{\"id\": \"orc_...\"}";
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             CANCEL_NAME,
             "Cancel an orchestration owned by this account that is asking a question or"
                 + " waiting on a child. A running run can only be stopped by the person,"

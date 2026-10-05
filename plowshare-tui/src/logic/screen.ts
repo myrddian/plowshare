@@ -1,6 +1,6 @@
-import type { Block } from './markdown.ts'
-import type { Tinted } from './tints.ts'
-import type { Call } from './trajectory.ts'
+import type { Block } from './markdown.ts';
+import type { Tinted } from './tints.ts';
+import type { Call } from './trajectory.ts';
 
 /**
  * What is on the screen, described without saying what a screen is.
@@ -49,92 +49,92 @@ import type { Call } from './trajectory.ts'
  * `trace` is a run's tool calls and reasoning, drawn as lines of their own —
  * spec 2026-09-29 §4.
  */
-export type Voice = 'person' | 'bot' | 'client' | 'trouble' | 'trace'
+export type Voice = 'person' | 'bot' | 'client' | 'trouble' | 'trace';
 
 /** One thing that was said, which is never revised once it is on the screen. */
 export interface Entry {
-    /**
-     * Monotonic within a session, and the key a surface renders by.
-     *
-     * <b>Not a clock reading.</b> Two entries can land in the same millisecond
-     * — a refusal and the line explaining it, most obviously — and a React key
-     * that collides drops a row silently.
-     */
-    readonly at: number
+  /**
+   * Monotonic within a session, and the key a surface renders by.
+   *
+   * <b>Not a clock reading.</b> Two entries can land in the same millisecond
+   * — a refusal and the line explaining it, most obviously — and a React key
+   * that collides drops a row silently.
+   */
+  readonly at: number;
 
-    readonly voice: Voice
+  readonly voice: Voice;
 
-    /** Already parsed, so both emitters take it as it stands. */
-    readonly body: readonly Block[]
+  /** Already parsed, so both emitters take it as it stands. */
+  readonly body: readonly Block[];
 
-    /**
-     * A line under the body, played down wherever "played down" means.
-     *
-     * <p>What a turn cost, mostly. It belongs to the entry rather than being an
-     * entry of its own so that a surface can put it where it likes — under the
-     * text in a terminal, in a hover in a window — and so that scrolling past
-     * an answer does not mean scrolling past its price separately.
-     */
-    readonly note?: string
+  /**
+   * A line under the body, played down wherever "played down" means.
+   *
+   * <p>What a turn cost, mostly. It belongs to the entry rather than being an
+   * entry of its own so that a surface can put it where it likes — under the
+   * text in a terminal, in a hover in a window — and so that scrolling past
+   * an answer does not mean scrolling past its price separately.
+   */
+  readonly note?: string;
 
-    /** A trace entry's tool and reasoning lines, drawn as they are, with no gutter mark. */
-    readonly lines?: readonly Tinted[]
+  /** A trace entry's tool and reasoning lines, drawn as they are, with no gutter mark. */
+  readonly lines?: readonly Tinted[];
 }
 
 /** A trace entry: tool and reasoning lines, written into the scrollback once they are settled. */
 export function traced(at: number, lines: readonly Tinted[]): Entry {
-    return { at, voice: 'trace', body: [], lines }
+  return { at, voice: 'trace', body: [], lines };
 }
 
 /** A run in flight. Absent from a {@link Screen} when nothing is running. */
 export interface Working {
-    /** What is running, as this server named it when the run was submitted. */
-    readonly job: string
+  /** What is running, as this server named it when the run was submitted. */
+  readonly job: string;
 
-    /**
-     * `Date.now()` when the run started.
-     *
-     * <b>A timestamp and not `"4s"`.</b> A terminal recomputes elapsed every
-     * hundred milliseconds and a pipe never shows it at all; a formatted string
-     * here would put one surface's refresh rate into data the other reads.
-     * {@link describeElapsed} in `wording.ts` turns it into the sentence, once,
-     * for whoever wants one.
-     */
-    readonly since: number
+  /**
+   * `Date.now()` when the run started.
+   *
+   * <b>A timestamp and not `"4s"`.</b> A terminal recomputes elapsed every
+   * hundred milliseconds and a pipe never shows it at all; a formatted string
+   * here would put one surface's refresh rate into data the other reads.
+   * {@link describeElapsed} in `wording.ts` turns it into the sentence, once,
+   * for whoever wants one.
+   */
+  readonly since: number;
 
-    /**
-     * What the model is producing right now, when anybody asked to see it.
-     *
-     * <p>Absent unless this client sent `job.stream` and the server has sent
-     * something since. See {@link Live}: it is a preview, it may have holes in
-     * it, and it never becomes the answer.
-     */
-    readonly live?: Live
+  /**
+   * What the model is producing right now, when anybody asked to see it.
+   *
+   * <p>Absent unless this client sent `job.stream` and the server has sent
+   * something since. See {@link Live}: it is a preview, it may have holes in
+   * it, and it never becomes the answer.
+   */
+  readonly live?: Live;
 
-    /**
-     * The last lifecycle line, or nothing before the first one arrives.
-     *
-     * <p><b>This field is the point of the whole type.</b> These lines used to
-     * be appended to the transcript, which made `0 steps, 1 model call` read as
-     * something the bot had said. A run's progress is a state that gets
-     * replaced, not speech that accumulates.
-     */
-    readonly said?: string
+  /**
+   * The last lifecycle line, or nothing before the first one arrives.
+   *
+   * <p><b>This field is the point of the whole type.</b> These lines used to
+   * be appended to the transcript, which made `0 steps, 1 model call` read as
+   * something the bot had said. A run's progress is a state that gets
+   * replaced, not speech that accumulates.
+   */
+  readonly said?: string;
 
-    /**
-     * What the model is doing now, or nothing before anything has said.
-     *
-     * <p>Beside {@link said} and not instead of it: `said` is the sentence a
-     * surface with no animation prints, and this is the state one with an
-     * animation draws.
-     */
-    readonly phase?: Phase
+  /**
+   * What the model is doing now, or nothing before anything has said.
+   *
+   * <p>Beside {@link said} and not instead of it: `said` is the sentence a
+   * surface with no animation prints, and this is the state one with an
+   * animation draws.
+   */
+  readonly phase?: Phase;
 
-    /** Calls asked for and not yet answered, oldest first — spec 2026-09-29 §4. */
-    readonly calls?: readonly Call[]
+  /** Calls asked for and not yet answered, oldest first — spec 2026-09-29 §4. */
+  readonly calls?: readonly Call[];
 
-    /** When each of {@link calls} was first seen pending, by id; a call absent here counts from {@link since}. */
-    readonly callsSince?: Readonly<Record<string, number>>
+  /** When each of {@link calls} was first seen pending, by id; a call absent here counts from {@link since}. */
+  readonly callsSince?: Readonly<Record<string, number>>;
 }
 
 /** What the person is part-way through typing. */
@@ -154,40 +154,40 @@ export interface Working {
  * knows it yet.
  */
 export interface Live {
-    /** Which stream this is. A model reasons and then answers. */
-    readonly part: 'thinking' | 'answer'
+  /** Which stream this is. A model reasons and then answers. */
+  readonly part: 'thinking' | 'answer';
 
-    /**
-     * The tail of what has arrived, not all of it.
-     *
-     * <p>Bounded, because reasoning runs to thousands of characters — measured,
-     * 6 571 against 1 965 of answer on one call — and a status region shows the
-     * most recent output rather than a transcript of the model's mind.
-     */
-    readonly text: string
+  /**
+   * The tail of what has arrived, not all of it.
+   *
+   * <p>Bounded, because reasoning runs to thousands of characters — measured,
+   * 6 571 against 1 965 of answer on one call — and a status region shows the
+   * most recent output rather than a transcript of the model's mind.
+   */
+  readonly text: string;
 }
 
 export interface Composer {
-    readonly typed: string
+  readonly typed: string;
 
-    /** The cursor, counted in characters from the start of {@link typed}. */
-    readonly at: number
+  /** The cursor, counted in characters from the start of {@link typed}. */
+  readonly at: number;
 
-    /** What Tab last offered, when it had more than one answer. */
-    readonly offering: readonly string[]
+  /** What Tab last offered, when it had more than one answer. */
+  readonly offering: readonly string[];
 }
 
 /** The whole of it. */
 export interface Screen {
-    /** Who is being talked to. A surface decides whether to draw it at all. */
-    readonly title: string
+  /** Who is being talked to. A surface decides whether to draw it at all. */
+  readonly title: string;
 
-    readonly entries: readonly Entry[]
+  readonly entries: readonly Entry[];
 
-    /** Absent when nothing is running, which is how a surface knows. */
-    readonly working?: Working
+  /** Absent when nothing is running, which is how a surface knows. */
+  readonly working?: Working;
 
-    readonly composer: Composer
+  readonly composer: Composer;
 }
 
 /**
@@ -201,8 +201,12 @@ export interface Screen {
  * wrong.
  */
 export function entered(
-        at: number, voice: Voice, body: readonly Block[], note?: string): Entry {
-    return { at, voice, body, ...(note === undefined ? {} : { note }) }
+  at: number,
+  voice: Voice,
+  body: readonly Block[],
+  note?: string,
+): Entry {
+  return { at, voice, body, ...(note === undefined ? {} : { note }) };
 }
 
 /**
@@ -212,7 +216,7 @@ export function entered(
  * than a transcript, and the thing a person wants from it is what the model is
  * saying <i>now</i>.
  */
-export const LIVE_TAIL = 240
+export const LIVE_TAIL = 240;
 
 /**
  * The live text with one more delta on the end of it, kept to {@link LIVE_TAIL}.
@@ -223,9 +227,13 @@ export const LIVE_TAIL = 240
  * moment the reasoning stops being what somebody wants to look at.
  */
 export function appended(
-        live: Live | undefined, part: Live['part'], text: string): Live {
-    const kept = live !== undefined && live.part === part ? live.text + text : text
-    return { part, text: kept.slice(-LIVE_TAIL) }
+  live: Live | undefined,
+  part: Live['part'],
+  text: string,
+): Live {
+  const kept =
+    live !== undefined && live.part === part ? live.text + text : text;
+  return { part, text: kept.slice(-LIVE_TAIL) };
 }
 
 /**
@@ -250,17 +258,17 @@ export function appended(
  * processing to responding. That is a gap in the picture and not a wrong one.
  */
 export type Phase =
-    | { readonly kind: 'processing' }
-    | { readonly kind: 'thinking' }
-    | { readonly kind: 'responding' }
-    | { readonly kind: 'tool', readonly tool: string }
+  | { readonly kind: 'processing' }
+  | { readonly kind: 'thinking' }
+  | { readonly kind: 'responding' }
+  | { readonly kind: 'tool'; readonly tool: string };
 
 /** What moves a phase: an event about the run, or a delta of either kind. */
 export type Moved =
-    | { readonly kind: 'call' }
-    | { readonly kind: 'tool', readonly tool: string }
-    | { readonly kind: 'delta', readonly part: Live['part'] }
-    | { readonly kind: 'other' }
+  | { readonly kind: 'call' }
+  | { readonly kind: 'tool'; readonly tool: string }
+  | { readonly kind: 'delta'; readonly part: Live['part'] }
+  | { readonly kind: 'other' };
 
 /**
  * The phase after `moved`.
@@ -270,19 +278,22 @@ export type Moved =
  * leaves the phase where it was, because none of them says the model is doing
  * something different.
  */
-export function phaseAfter(was: Phase | undefined, moved: Moved): Phase | undefined {
-    switch (moved.kind) {
-        case 'call':
-            return { kind: 'processing' }
-        case 'tool':
-            return { kind: 'tool', tool: moved.tool }
-        case 'delta':
-            return { kind: moved.part === 'thinking' ? 'thinking' : 'responding' }
-        case 'other':
-            return was
-    }
+export function phaseAfter(
+  was: Phase | undefined,
+  moved: Moved,
+): Phase | undefined {
+  switch (moved.kind) {
+    case 'call':
+      return { kind: 'processing' };
+    case 'tool':
+      return { kind: 'tool', tool: moved.tool };
+    case 'delta':
+      return { kind: moved.part === 'thinking' ? 'thinking' : 'responding' };
+    case 'other':
+      return was;
+  }
 }
 
 export function blank(title: string): Screen {
-    return { title, entries: [], composer: { typed: '', at: 0, offering: [] } }
+  return { title, entries: [], composer: { typed: '', at: 0, offering: [] } };
 }

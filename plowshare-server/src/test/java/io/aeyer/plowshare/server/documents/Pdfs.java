@@ -20,15 +20,8 @@ import java.util.List;
  * cross-reference table and carry on, so a fixture with wrong offsets would still pass while
  * testing a recovery path no real document takes.
  *
- * <h2>This is a second copy of the client's fixture, and that is a cost</h2>
- *
- * <p>{@code plowshare-client}'s {@code files.Pdfs} does the same job for {@code PdfConverter}. It
- * is package-private in another module's <em>test</em> source set, which no Gradle dependency in
- * this repository exposes — {@code testImplementation(project(":plowshare-client"))} carries that
- * module's {@code main} only. Sharing it would mean {@code java-test-fixtures} on a third module,
- * published for two callers, and this copy carries what that one does not: paragraphs with real
- * vertical gaps, a document outline, and a {@code /Info} title. Those three are the whole of what
- * this slice tests and none of them is anything the client's converter can see.
+ * <p>The server owns PDF conversion. These fixtures cover source-window conversion and corpus
+ * derivation, including paragraphs with vertical gaps, outlines and document titles.
  *
  * <h2>What it is not</h2>
  *

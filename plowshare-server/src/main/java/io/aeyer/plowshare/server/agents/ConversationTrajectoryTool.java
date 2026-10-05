@@ -53,7 +53,7 @@ public final class ConversationTrajectoryTool implements AgentTool {
   private static final String EXAMPLE = "{\"conversation\":\"cnv_123\",\"offset\":0,\"limit\":20}";
 
   private static final ToolSchema SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           NAME,
           "Read the persisted append-only trajectory of a conversation in this run's tier."
               + " Returns JSON containing bounded entry excerpts, tool calls and results,"

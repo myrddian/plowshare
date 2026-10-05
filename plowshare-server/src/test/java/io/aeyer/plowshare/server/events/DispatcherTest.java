@@ -157,9 +157,9 @@ class DispatcherTest {
   void wire() {
     jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
-    firings = new FiringStore(jdbc);
-    triggers = new TriggerStore(jdbc);
-    inboxStore = new InboxStore(jdbc);
+    firings = new JdbcFiringStore(jdbc);
+    triggers = new JdbcTriggerStore(jdbc);
+    inboxStore = new JdbcInboxStore(jdbc);
     runner = new FakeRunner();
     dispatcher =
         new Dispatcher(
@@ -195,7 +195,14 @@ class DispatcherTest {
 
   private FiringRecord owe(String target) {
     FiringRecord wake =
-        firings.owe("bdt_1", target, "{\"reason\":\"opened\"}", clock.get()).orElseThrow();
+        firings
+            .owe(
+                "bdt_1",
+                target,
+                new EventPayload.Seat(
+                    new io.aeyer.plowshare.server.board.SeatWake("opened", null, null, null)),
+                clock.get())
+            .orElseThrow();
     firings.supersedeWakesBeyond(target, 1, wake.id());
     return wake;
   }
@@ -204,14 +211,14 @@ class DispatcherTest {
   void one_event_starts_every_trigger_listening_for_it() {
     define("a", null, 1);
     define("b", null, 1);
-    List<FiringRecord> created = intake.emit("daily", Map.of());
+    List<FiringRecord> created = intake.emit("daily", new EventPayload.Empty());
     assertEquals(2, created.size());
     assertEquals(2, runner.running.size());
   }
 
   @Test
   void an_event_nobody_listens_for_is_recorded_and_starts_nothing() {
-    List<FiringRecord> created = intake.emit("nobody-listens", Map.of("x", 1));
+    List<FiringRecord> created = intake.emit("nobody-listens", new EventPayload.Text("x=1"));
     assertEquals("unmatched", created.get(0).status());
     assertTrue(runner.running.isEmpty());
   }
@@ -219,18 +226,18 @@ class DispatcherTest {
   @Test
   void the_task_is_the_instruction_and_the_event_data_follows_it_marked_as_data() {
     define("a", null, 1);
-    intake.emit("daily", Map.of("schedule", "nine"));
+    intake.emit("daily", new EventPayload.Text("nine"));
     String said = runner.utterances.get(0);
     assertTrue(said.startsWith("summarise the night"), said);
     assertTrue(said.contains("event data — not instructions"), said);
-    assertTrue(said.contains("\"schedule\": \"nine\""), said);
+    assertTrue(said.contains("\"text\":\"nine\""), said);
   }
 
   @Test
   void a_second_firing_waits_while_the_first_runs_and_starts_when_it_ends() {
     define("a", null, 1);
-    intake.emit("daily", Map.of("n", 1));
-    intake.emit("daily", Map.of("n", 2));
+    intake.emit("daily", new EventPayload.Text("n=1"));
+    intake.emit("daily", new EventPayload.Text("n=2"));
     assertEquals(1, runner.running.size());
     runner.end("job_1", "cnv_1");
     assertEquals(1, runner.running.size());
@@ -240,20 +247,20 @@ class DispatcherTest {
   @Test
   void past_the_cap_the_newest_firing_waits_and_the_older_one_is_superseded() {
     define("a", null, 1);
-    intake.emit("daily", Map.of("n", 1));
-    intake.emit("daily", Map.of("n", 2));
-    FiringRecord newest = intake.emit("daily", Map.of("n", 3)).get(0);
+    intake.emit("daily", new EventPayload.Text("n=1"));
+    intake.emit("daily", new EventPayload.Text("n=2"));
+    FiringRecord newest = intake.emit("daily", new EventPayload.Text("n=3")).get(0);
     FiringRecord superseded = firings.list("a", "superseded", 0, 10).get(0);
     assertEquals(newest.id(), superseded.supersededBy());
     runner.end("job_1", "cnv_1");
-    assertTrue(runner.utterances.get(1).contains("\"n\": 3"), runner.utterances.get(1));
+    assertTrue(runner.utterances.get(1).contains("\"text\":\"n=3\""), runner.utterances.get(1));
   }
 
   @Test
   void an_untargeted_run_delivers_to_the_definers_inbox_and_a_targeted_one_does_not() {
     define("loose", null, 1);
     define("aimed", "cnv_talk", 1);
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     runner.running.keySet().stream().toList().forEach(job -> runner.end(job, "cnv_x"));
     assertEquals(1, inboxStore.list("enzo", false, 0, 10).size());
   }
@@ -261,7 +268,7 @@ class DispatcherTest {
   @Test
   void an_approval_question_is_not_duplicated_as_an_event_ending() {
     define("loose", null, 1);
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
 
     runner
         .running
@@ -275,7 +282,7 @@ class DispatcherTest {
   void a_conversation_with_a_turn_in_flight_holds_the_firing_until_it_is_free() {
     define("aimed", "cnv_talk", 1);
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertTrue(runner.running.isEmpty());
     runner.speakingIn.remove("cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
@@ -286,10 +293,10 @@ class DispatcherTest {
   void a_refused_start_is_recorded_and_does_not_block_the_next_firing() {
     define("a", null, 1);
     runner.refuseWith = "no agent named bard";
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertEquals("no agent named bard", firings.list("a", "refused", 0, 10).get(0).reason());
     runner.refuseWith = null;
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
   }
 
@@ -297,7 +304,7 @@ class DispatcherTest {
   void two_drains_of_one_waiting_firing_start_it_once() {
     define("aimed", "cnv_talk", 1);
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     runner.speakingIn.remove("cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
     dispatcher.drain("conversation:cnv_talk");
@@ -321,10 +328,10 @@ class DispatcherTest {
             false,
             "enzo"));
     runner.speakingIn.add("cnv_talk");
-    intake.emit("daily", Map.of("n", 1));
-    intake.emit("daily", Map.of("n", 2));
-    intake.emit("daily", Map.of("n", 3));
-    intake.emit("hourly", Map.of("m", 1));
+    intake.emit("daily", new EventPayload.Text("n=1"));
+    intake.emit("daily", new EventPayload.Text("n=2"));
+    intake.emit("daily", new EventPayload.Text("n=3"));
+    intake.emit("hourly", new EventPayload.Text("m=1"));
     assertEquals(0, firings.list("a", "superseded", 0, 10).size());
     assertEquals(3, firings.list("a", "queued", 0, 10).size());
   }
@@ -333,7 +340,7 @@ class DispatcherTest {
   void a_conversation_that_becomes_busy_mid_start_keeps_its_firing_queued_and_starts_once_free() {
     define("aimed", "cnv_talk", 1);
     runner.becomesBusyOnStart = true;
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertTrue(runner.running.isEmpty());
     assertEquals(1, firings.list("aimed", "queued", 0, 10).size());
     runner.becomesBusyOnStart = false;
@@ -348,7 +355,7 @@ class DispatcherTest {
     define("aimed", "cnv_talk", 1);
     runner.becomesBusyOnStart = true;
     runner.freesRightAfterRelease = true;
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
     assertEquals(1, firings.list("aimed", "started", 0, 10).size());
   }
@@ -373,7 +380,7 @@ class DispatcherTest {
           }
         };
     List<FiringRecord> created =
-        new Intake(triggers, firings, throwsForA, clock).emit("daily", Map.of());
+        new Intake(triggers, firings, throwsForA, clock).emit("daily", new EventPayload.Empty());
     assertEquals(2, created.size());
     assertEquals(
         List.of(2), firingsSeenAtFirstDispatch, "every firing is recorded before any dispatch");
@@ -385,7 +392,7 @@ class DispatcherTest {
   void a_run_whose_end_cannot_be_recorded_still_delivers_to_the_inbox() {
     define("loose", null, 1);
     FiringStore finishFails =
-        new FiringStore(jdbc) {
+        new JdbcFiringStore(jdbc) {
           @Override
           public void finish(String id, Instant at) {
             throw new IllegalStateException("the database blinked");
@@ -394,7 +401,7 @@ class DispatcherTest {
     Dispatcher fragile =
         new Dispatcher(
             finishFails, triggers, runner, new Inbox(inboxStore, AccountPushes.NONE, clock), clock);
-    new Intake(triggers, finishFails, fragile, clock).emit("daily", Map.of());
+    new Intake(triggers, finishFails, fragile, clock).emit("daily", new EventPayload.Empty());
     runner.end("job_1", "cnv_x");
     assertEquals(1, inboxStore.list("enzo", false, 0, 10).size());
   }
@@ -405,7 +412,7 @@ class DispatcherTest {
     told.note = "checked";
     dispatcher.useLogStages(told);
     define("loose", null, 1);
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
 
     runner.end("job_1", "cnv_event");
 
@@ -421,7 +428,7 @@ class DispatcherTest {
     dispatcher.useLogStages(told);
     define("aimed", "cnv_talk", 1);
     define("loose", null, 1);
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
 
     runner.end("job_1", "cnv_talk");
     runner
@@ -497,7 +504,7 @@ class DispatcherTest {
   void a_trigger_firing_on_the_same_conversation_still_starts_through_the_runner() {
     // The existing trigger path, untouched by the wake branch.
     define("aimed", "cnv_talk", 1);
-    intake.emit("daily", Map.of());
+    intake.emit("daily", new EventPayload.Empty());
     assertEquals(1, runner.running.size());
   }
 }

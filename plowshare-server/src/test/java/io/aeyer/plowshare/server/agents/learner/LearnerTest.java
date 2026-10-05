@@ -5,10 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -339,14 +337,14 @@ class LearnerTest {
   }
 
   /**
-   * More memories than one window may produce are bounded rather than filed whole.
+   * An oversized proposal list is refused as a whole before any candidate is filed.
    *
    * <p>The failure mode this guards is a small model answering the question "is anything here worth
    * keeping" with a list of everything that happened. Each of those would be a row every future
    * recall pays attention to.
    */
   @Test
-  void more_memories_than_one_window_may_produce_are_bounded() {
+  void more_memories_than_one_window_may_produce_are_refused_before_filing() {
     foldedSpan();
     Archive archive = archive();
     StringBuilder many = new StringBuilder("{\"memories\": [");
@@ -360,13 +358,7 @@ class LearnerTest {
 
     learner(new Scripted().answering(many.toString()), archive, scribe()).thereIsMaterial();
 
-    // The tier as well as the count. This was five `any()`s, which asserted
-    // that MOST_PROPOSED verdicts were applied and nothing about where --
-    // the shape TODO 18.2 records. The home is held by a captor in
-    // `a_proposal_is_judged_and_applied_in_the_tier_it_came_from` too, so
-    // this is a second reader of the same property rather than the only one.
-    verify(archive, times(Learner.MOST_PROPOSED))
-        .applyVerdict(any(), any(), eq(PAYMENTS), any(), any());
+    verify(archive, never()).applyVerdict(any(), any(), any(), any(), any());
   }
 
   /**

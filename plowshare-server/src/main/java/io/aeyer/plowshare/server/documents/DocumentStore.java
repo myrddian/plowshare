@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.documents;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
 import java.sql.ResultSet;
@@ -74,6 +75,11 @@ import org.springframework.jdbc.core.RowMapper;
  * which is what application.yml says beside both keys.
  */
 public final class DocumentStore {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
@@ -111,8 +117,122 @@ public final class DocumentStore {
     policy.requireSelection(caller);
     DocumentStore reader = new DocumentStore(jdbc, transactions, policy, caller);
     reader.embeddingFingerprint = embeddingFingerprint;
+    reader.dualEmbeddings = dualEmbeddings;
+    reader.embeddingQuery = embeddingQuery;
+    reader.embeddingProfile = embeddingProfile;
     reader.readAudit = readAudit;
     return reader;
+  }
+
+  private EmbeddingQuery embeddingQuery;
+  private EmbeddingProfile embeddingProfile;
+
+  /** A query view retains the exact slot/model while scoped authorization is rechecked normally. */
+  DocumentStore queried(EmbeddingQuery query) {
+    DocumentStore reader = audited(readAudit);
+    reader.embeddingQuery = java.util.Objects.requireNonNull(query);
+    reader.embeddingProfile = query.profile();
+    return reader;
+  }
+
+  DocumentStore profiled(EmbeddingProfile profile) {
+    DocumentStore reader = audited(readAudit);
+    reader.embeddingProfile = java.util.Objects.requireNonNull(profile);
+    return reader;
+  }
+
+  /** Both representations of a committed source must be current, including staged replacements. */
+  private static String dualReady(String alias, String table, String key) {
+    String prefix = alias.isEmpty() ? "" : alias + ".";
+    var clauses = new java.util.ArrayList<String>();
+    for (EmbeddingSlot slot : EmbeddingSlot.values()) {
+      String name = slot.stored();
+      clauses.add(
+          "EXISTS(SELECT 1 FROM embedding_slots selected WHERE selected.slot='"
+              + name
+              + "' AND selected.target_space_id IS NOT NULL AND (("
+              + prefix
+              + name
+              + "_embedding IS NOT NULL AND "
+              + prefix
+              + name
+              + "_space_id=selected.target_space_id AND "
+              + prefix
+              + name
+              + "_source_revision="
+              + prefix
+              + "embedding_source_revision) OR EXISTS(SELECT 1 FROM "
+              + table
+              + "_embedding_staging staged WHERE staged.source_id="
+              + key
+              + " AND staged.slot=selected.slot AND staged.space_id=selected.target_space_id AND staged.source_revision="
+              + prefix
+              + "embedding_source_revision)))");
+    }
+    return "(" + String.join(" AND ", clauses) + ")";
+  }
+
+  private ReadQuery embeddingSql(ReadQuery original) {
+    if (dualEmbeddings == null) return original;
+    String sql = original.sql();
+    EmbeddingProfile profile = embeddingProfile;
+    boolean coverage = sql.contains(" AS searchable") || sql.contains(" AS rankable");
+    if (profile == null && coverage)
+      profile =
+          dualEmbeddings.active(
+              context != null && context.corpus() == InformationContext.Corpus.CODE
+                  ? EmbeddingSlot.CODE
+                  : EmbeddingSlot.PROSE);
+    if (profile == null) {
+      // These are write/repair inventories, independent of the capability's query slot.
+      sql =
+          sql.replace("c.embedding IS NULL", "NOT " + dualReady("c", "chunks", "c.id"))
+              .replace(
+                  "summary_embedding IS NULL", "NOT " + dualReady("", "documents", "documents.id"));
+      return new ReadQuery(sql, original.arguments());
+    }
+    var plan = new EmbeddingIndexPlan(profile);
+    boolean summary = sql.contains("summary_embedding");
+    String column = summary ? plan.column() : "c." + plan.column();
+    String present = plan.present(summary ? "" : "c");
+    String oldColumn = summary ? "summary_embedding" : "c.embedding";
+    sql =
+        sql.replace(oldColumn + " IS NOT NULL", "(" + present + ")")
+            .replace(oldColumn + " IS NULL", "NOT (" + present + ")");
+    if (!summary)
+      sql =
+          sql.replaceAll("(?<![A-Za-z0-9_.])embedding IS NOT NULL", "(" + present + ")")
+              .replaceAll("(?<![A-Za-z0-9_.])embedding IS NULL", "NOT (" + present + ")");
+    // Stance is a cosine comparison, regardless of the ranking metric selected for search.
+    boolean ranking = sql.contains(" AS distance");
+    sql =
+        sql.replace(
+            oldColumn + " <=> CAST(? AS vector)",
+            ranking ? plan.denseDistance(column) : column + " <=> CAST(? AS vector)");
+    if (embeddingQuery == null || plan.exact() || !sql.contains("ORDER BY distance"))
+      return new ReadQuery(sql, original.arguments());
+    // Only fixed repository ranking statements have this suffix. Lexical and stance reads keep
+    // their existing ordering. All authorization predicates stay inside the candidate statement.
+    var suffix =
+        java.util.regex.Pattern.compile(
+                "ORDER BY distance(?:, id)?\\s+LIMIT \\?$", java.util.regex.Pattern.DOTALL)
+            .matcher(sql.strip());
+    if (!suffix.find())
+      throw new IllegalStateException("embedding ranking query has no controlled candidate seam");
+    int limit = ((Number) original.arguments()[original.arguments().length - 1]).intValue();
+    String candidates =
+        sql.strip().substring(0, suffix.start())
+            + "ORDER BY "
+            + plan.candidateDistance(column)
+            + " LIMIT ?";
+    var args = new java.util.ArrayList<Object>(java.util.Arrays.asList(original.arguments()));
+    args.removeLast();
+    args.add(embeddingQuery.vectorText());
+    args.add(plan.candidates(limit));
+    args.add(limit);
+    return new ReadQuery(
+        "SELECT candidates.* FROM (" + candidates + ") candidates ORDER BY distance LIMIT ?",
+        args.toArray());
   }
 
   private String embeddingFingerprint;
@@ -125,7 +245,7 @@ public final class DocumentStore {
   }
 
   private String compatible(String expression, String stage) {
-    if (embeddingFingerprint == null) return "true";
+    if (embeddingFingerprint == null || dualEmbeddings != null) return "true";
     // Fingerprint is an internally produced hexadecimal SHA-256, never caller SQL.
     return "NOT EXISTS(SELECT 1 FROM information_revisions space_revision WHERE space_revision.id="
         + expression
@@ -141,6 +261,7 @@ public final class DocumentStore {
     if (access != null) throw new IllegalStateException("a reader cannot become a writer");
     DocumentStore writer = new DocumentStore(jdbc, transactions);
     writer.mutationFence = Objects.requireNonNull(fence, "fence");
+    writer.dualEmbeddings = dualEmbeddings;
     return writer;
   }
 
@@ -148,6 +269,9 @@ public final class DocumentStore {
     DocumentStore reader = new DocumentStore(jdbc, transactions, access, context);
     reader.readAudit = audit;
     reader.embeddingFingerprint = embeddingFingerprint;
+    reader.dualEmbeddings = dualEmbeddings;
+    reader.embeddingQuery = embeddingQuery;
+    reader.embeddingProfile = embeddingProfile;
     return reader;
   }
 
@@ -195,7 +319,9 @@ public final class DocumentStore {
       }
       return new ReadQuery(sql.replace(marker, ""), arguments);
     }
-    InformationAccess.ReadFilter filter = access.filter(context, "information_row");
+    io.aeyer.plowshare.server.information.InformationSql.Filter filter =
+        io.aeyer.plowshare.server.information.InformationSql.read(
+            access.admitted(context), "information_row");
     String predicate =
         "EXISTS (SELECT 1 FROM documents information_row WHERE"
             + " information_row.id = "
@@ -210,8 +336,10 @@ public final class DocumentStore {
                 ? " AND NOT EXISTS(SELECT 1 FROM information_revisions excluded WHERE excluded.id=information_row.id AND excluded.excluded) AND NOT EXISTS(SELECT 1 FROM information_reports report WHERE report.revision_id=information_row.id AND report.status<>'final')"
                 : "")
             + ")";
-    var facets = context.facets().sql("facet_revision", "facet_resource");
-    if (!context.facets().values().isEmpty())
+    var facets =
+        io.aeyer.plowshare.server.information.InformationFacetSql.facets(
+            context.facets(), "facet_revision", "facet_resource");
+    if (!context.facets().empty())
       predicate +=
           " AND EXISTS(SELECT 1 FROM information_revisions facet_revision JOIN information_resources facet_resource ON facet_resource.id=facet_revision.resource_id WHERE facet_revision.id="
               + documentExpression
@@ -222,14 +350,14 @@ public final class DocumentStore {
     List<Object> bound = new ArrayList<>();
     bound.addAll(java.util.Arrays.asList(arguments).subList(0, before));
     bound.addAll(filter.arguments());
-    if (!context.facets().values().isEmpty()) bound.addAll(facets.arguments());
+    if (!context.facets().empty()) bound.addAll(facets.arguments());
     bound.addAll(java.util.Arrays.asList(arguments).subList(before, arguments.length));
     return new ReadQuery(
         sql.replace(marker, (hasWhere ? " AND " : " WHERE ") + predicate), bound.toArray());
   }
 
   private <T> List<T> readRows(String expression, String sql, RowMapper<T> mapper, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     List<T> rows = jdbc.query(query.sql(), mapper, query.arguments());
     if (readAudit != null)
       for (T row : rows) {
@@ -249,28 +377,28 @@ public final class DocumentStore {
   }
 
   private <T> List<T> readList(String expression, String sql, Class<T> type, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     return jdbc.queryForList(query.sql(), type, query.arguments());
   }
 
   private <T> T readValue(String expression, String sql, RowMapper<T> mapper, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     return jdbc.queryForObject(query.sql(), mapper, query.arguments());
   }
 
   private <T> T readScalar(String expression, String sql, Class<T> type, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     return jdbc.queryForObject(query.sql(), type, query.arguments());
   }
 
   private <T> T readExtract(
       String expression, String sql, ResultSetExtractor<T> mapper, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     return jdbc.query(query.sql(), mapper, query.arguments());
   }
 
   private void readEach(String expression, String sql, RowCallbackHandler mapper, Object... args) {
-    ReadQuery query = guarded(sql, expression, args);
+    ReadQuery query = embeddingSql(guarded(sql, expression, args));
     jdbc.query(query.sql(), mapper, query.arguments());
   }
 

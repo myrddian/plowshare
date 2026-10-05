@@ -160,7 +160,7 @@ class SearchEndToEndTest {
   }
 
   private SearchService remoteService(Duration timeout) {
-    return serviceOver(new RemoteSearchProvider(http, mapper, timeout));
+    return serviceOver(new RemoteSearchProvider(http, timeout));
   }
 
   /**

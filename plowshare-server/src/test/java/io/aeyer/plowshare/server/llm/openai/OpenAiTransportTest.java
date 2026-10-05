@@ -1623,7 +1623,7 @@ class OpenAiTransportTest {
         transport.complete(
             "gemma-4-e4b",
             ChatMessage.conversation(null, "what shape"),
-            Sampling.NONE.withResponseFormat(new JsonSchema("figure_reading", schema)),
+            Sampling.NONE.withResponseFormat(JsonSchema.from("figure_reading", schema)),
             List.of());
 
         assertEquals(
@@ -1761,7 +1761,7 @@ class OpenAiTransportTest {
       server.enqueue(json("{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}"));
       server.start();
       ToolSchema schema =
-          new ToolSchema(
+          ToolSchema.from(
               "memory_recall",
               "Search by meaning.",
               Map.of(
@@ -1801,7 +1801,7 @@ class OpenAiTransportTest {
       server.enqueue(json("{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}"));
       server.start();
       ToolSchema schema =
-          new ToolSchema(
+          ToolSchema.from(
               "orchestration_finish",
               "Finish.",
               Map.of(
@@ -1863,7 +1863,7 @@ class OpenAiTransportTest {
       server.enqueue(json("{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}"));
       server.start();
       ToolSchema schema =
-          new ToolSchema(
+          ToolSchema.from(
               "memory_recall",
               "Search by meaning.",
               Map.of("type", "object", "properties", Map.of(), "required", List.of()));
@@ -3109,7 +3109,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "weather in Paris?"),
                 Sampling.NONE,
-                List.of(new ToolSchema("get_weather", "d", Map.of())),
+                List.of(ToolSchema.from("get_weather", "d", Map.of())),
                 tokens::add,
                 () -> false);
 
@@ -3178,7 +3178,7 @@ class OpenAiTransportTest {
       server.start();
 
       List<ChatMessage> asked = ChatMessage.conversation(null, "weather in Paris?");
-      List<ToolSchema> tools = List.of(new ToolSchema("get_weather", "d", Map.of()));
+      List<ToolSchema> tools = List.of(ToolSchema.from("get_weather", "d", Map.of()));
       try (OpenAiTransport transport = transportAt(server.url("/v1").toString())) {
         Completion blocking = transport.complete("qwen3.5-9b", asked, Sampling.NONE, tools);
         Completion streamed =
@@ -3232,7 +3232,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "weather?"),
                 Sampling.NONE,
-                List.of(new ToolSchema("get_weather", "d", Map.of())),
+                List.of(ToolSchema.from("get_weather", "d", Map.of())),
                 token -> {},
                 () -> false);
 
@@ -3281,7 +3281,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "two things"),
                 Sampling.NONE,
-                List.of(new ToolSchema("weather", "d", Map.of())),
+                List.of(ToolSchema.from("weather", "d", Map.of())),
                 token -> {},
                 () -> false);
 
@@ -3327,7 +3327,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "weather?"),
                 Sampling.NONE,
-                List.of(new ToolSchema("get_weather", "d", Map.of())),
+                List.of(ToolSchema.from("get_weather", "d", Map.of())),
                 token -> {},
                 () -> false);
 
@@ -3367,7 +3367,7 @@ class OpenAiTransportTest {
                         "qwen3.5-9b",
                         ChatMessage.conversation(null, "weather?"),
                         Sampling.NONE,
-                        List.of(new ToolSchema("get_weather", "d", Map.of())),
+                        List.of(ToolSchema.from("get_weather", "d", Map.of())),
                         token -> {},
                         () -> false));
 
@@ -3404,7 +3404,7 @@ class OpenAiTransportTest {
                         "qwen3.5-9b",
                         ChatMessage.conversation(null, "weather?"),
                         Sampling.NONE,
-                        List.of(new ToolSchema("get_weather", "d", Map.of())),
+                        List.of(ToolSchema.from("get_weather", "d", Map.of())),
                         token -> {},
                         () -> false));
 
@@ -3440,7 +3440,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "time?"),
                 Sampling.NONE,
-                List.of(new ToolSchema("now", "d", Map.of())),
+                List.of(ToolSchema.from("now", "d", Map.of())),
                 token -> {},
                 () -> false);
 
@@ -3485,7 +3485,7 @@ class OpenAiTransportTest {
                 "qwen3.5-9b",
                 ChatMessage.conversation(null, "weather?"),
                 Sampling.NONE,
-                List.of(new ToolSchema("get_weather", "d", Map.of())),
+                List.of(ToolSchema.from("get_weather", "d", Map.of())),
                 token -> {},
                 () -> false);
 
@@ -3736,7 +3736,7 @@ class OpenAiTransportTest {
                         "qwen3.5-9b",
                         ChatMessage.conversation(null, "write a note"),
                         Sampling.NONE,
-                        List.of(new ToolSchema("note", "d", Map.of())),
+                        List.of(ToolSchema.from("note", "d", Map.of())),
                         token -> {},
                         () -> false));
 

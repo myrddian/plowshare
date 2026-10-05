@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/runner'
+export * from 'plowshare-client-node/runner';

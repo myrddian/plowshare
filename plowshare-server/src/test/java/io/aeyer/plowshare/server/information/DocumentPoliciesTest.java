@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.documents.Chunking;
@@ -11,7 +12,6 @@ import io.aeyer.plowshare.server.documents.RetrievalService;
 import io.aeyer.plowshare.server.documents.TextExtraction;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
-import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -79,9 +79,16 @@ class DocumentPoliciesTest {
     jdbc.update(
         "INSERT INTO project_members (project_id, handle)"
             + " SELECT id, 'alice' FROM projects WHERE name = 'research'");
-    members = new ProjectMembers(jdbc);
+    members = new JdbcProjectMembers(jdbc);
     access = new InformationAccess(members);
-    assignments = new DocumentPolicyAssignments(jdbc, transactions, access, CLOCK, "operator");
+    assignments =
+        new DocumentPolicyAssignments(
+            new JdbcDocumentPolicyRepository(jdbc),
+            new InformationJobs(new JdbcJobInformationRepository(jdbc), access),
+            transactions,
+            access,
+            CLOCK,
+            "operator");
   }
 
   private UUID document(String name) {
@@ -107,7 +114,8 @@ class DocumentPoliciesTest {
     assignments.assign("operator", id, owner, scope, project, "explicit legacy review");
   }
 
-  private List<UUID> read(InformationAccess.ReadFilter filter, String suffix) {
+  private List<UUID> read(
+      io.aeyer.plowshare.server.information.InformationSql.Filter filter, String suffix) {
     return jdbc.queryForList(
         "SELECT d.id FROM documents d WHERE " + filter.sql() + " ORDER BY d.title " + suffix,
         UUID.class,
@@ -126,7 +134,9 @@ class DocumentPoliciesTest {
     assign(shared, "bob", InformationContext.Scope.SHARED, null);
     assign(project, "alice", InformationContext.Scope.PROJECT, "research");
 
-    var personalFilter = access.filter(access.resolve("alice", null), "d");
+    var personalFilter =
+        io.aeyer.plowshare.server.information.InformationSql.read(
+            access.admitted(access.resolve("alice", null)), "d");
     assertEquals(List.of(personal, shared), read(personalFilter, ""));
     assertEquals(List.of(personal), read(personalFilter, "LIMIT 1"));
     assertEquals(
@@ -136,15 +146,22 @@ class DocumentPoliciesTest {
             Integer.class,
             personalFilter.arguments().toArray()));
     var projectFilter =
-        access.filter(
-            access.resolve("alice", InformationContext.Selection.project("research")), "d");
+        io.aeyer.plowshare.server.information.InformationSql.read(
+            access.admitted(
+                access.resolve("alice", InformationContext.Selection.project("research"))),
+            "d");
     assertEquals(List.of(shared, project), read(projectFilter, ""));
     var sharedFilter =
-        access.filter(access.resolve("bob", InformationContext.Selection.shared()), "d");
+        io.aeyer.plowshare.server.information.InformationSql.read(
+            access.admitted(access.resolve("bob", InformationContext.Selection.shared())), "d");
     assertEquals(List.of(shared), read(sharedFilter, ""));
     var noShared = new InformationContext.Selection(InformationContext.Scope.PERSONAL, null, false);
     assertEquals(
-        List.of(personal), read(access.filter(access.resolve("alice", noShared), "d"), ""));
+        List.of(personal),
+        read(
+            io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(access.resolve("alice", noShared)), "d"),
+            ""));
   }
 
   @Test
@@ -152,11 +169,16 @@ class DocumentPoliciesTest {
     UUID id = document("project-paper");
     assign(id, "alice", InformationContext.Scope.PROJECT, "research");
     var context = access.resolve("alice", InformationContext.Selection.project("research"));
-    var oldFilter = access.filter(context, "d");
+    var oldFilter =
+        io.aeyer.plowshare.server.information.InformationSql.read(access.admitted(context), "d");
     assertEquals(List.of(id), read(oldFilter, ""));
     members.remove("research", "alice");
     assertTrue(read(oldFilter, "").isEmpty());
-    assertThrows(CallerFault.class, () -> access.filter(context, "d"));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(context), "d"));
   }
 
   @Test
@@ -179,7 +201,14 @@ class DocumentPoliciesTest {
         () ->
             assignments.assign(
                 "alice", id, "alice", InformationContext.Scope.SHARED, null, "self appointment"));
-    var disabled = new DocumentPolicyAssignments(jdbc, transactions, access, CLOCK, null);
+    var disabled =
+        new DocumentPolicyAssignments(
+            new JdbcDocumentPolicyRepository(jdbc),
+            new InformationJobs(new JdbcJobInformationRepository(jdbc), access),
+            transactions,
+            access,
+            CLOCK,
+            null);
     assertThrows(
         CallerFault.class,
         () ->
@@ -190,7 +219,12 @@ class DocumentPoliciesTest {
                 InformationContext.Scope.PERSONAL,
                 null,
                 "no configured operator"));
-    assertTrue(read(access.filter(access.resolve("alice", null), "d"), "").isEmpty());
+    assertTrue(
+        read(
+                io.aeyer.plowshare.server.information.InformationSql.read(
+                    access.admitted(access.resolve("alice", null)), "d"),
+                "")
+            .isEmpty());
     assign(id, "bob", InformationContext.Scope.PERSONAL, null);
     assertEquals(
         "bob",
@@ -214,7 +248,14 @@ class DocumentPoliciesTest {
   @Test
   void audit_failure_rolls_back_the_ownership_change() {
     UUID id = document("legacy");
-    var missingActor = new DocumentPolicyAssignments(jdbc, transactions, access, CLOCK, "missing");
+    var missingActor =
+        new DocumentPolicyAssignments(
+            new JdbcDocumentPolicyRepository(jdbc),
+            new InformationJobs(new JdbcJobInformationRepository(jdbc), access),
+            transactions,
+            access,
+            CLOCK,
+            "missing");
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
@@ -306,7 +347,12 @@ class DocumentPoliciesTest {
   void missing_policy_and_invalid_policy_shapes_fail_closed() {
     UUID id = UUID.randomUUID();
     insertDocument(jdbc, "", id, "unregistered");
-    assertTrue(read(access.filter(access.resolve("alice", null), "d"), "").isEmpty());
+    assertTrue(
+        read(
+                io.aeyer.plowshare.server.information.InformationSql.read(
+                    access.admitted(access.resolve("alice", null)), "d"),
+                "")
+            .isEmpty());
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
@@ -374,7 +420,8 @@ class DocumentPoliciesTest {
   }
 
   private InformationCatalogue catalogue() {
-    return new InformationCatalogue(jdbc, transactions, access, CLOCK);
+    return io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
+        jdbc, transactions, access, CLOCK);
   }
 
   @Test
@@ -417,26 +464,24 @@ class DocumentPoliciesTest {
         log);
     assertThrows(CallerFault.class, () -> assignments.inspect("alice", log, "review"));
     assertThrows(CallerFault.class, () -> assignments.inspect("operator", log, " "));
-    assertEquals(
-        1,
-        ((List<?>) assignments.inspect("operator", log, "source audit", 1, 0).get("entries"))
-            .size());
-    assertTrue(
-        ((List<?>) assignments.inspect("operator", log, "source audit", 1, 1).get("entries"))
-            .isEmpty());
-    var inputs = new InformationJobs(jdbc, access, catalogue);
+    assertEquals(1, assignments.inspect("operator", log, "source audit", 1, 0).entries().size());
+    assertTrue(assignments.inspect("operator", log, "source audit", 1, 1).entries().isEmpty());
+    var inputs =
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue);
     assertFalse(inputs.logAllowed(log, "alice"));
     assignments.useWriteGates(
         new InformationWriteGates(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(jdbc, CLOCK),
             transactions,
             access,
             inputs,
             conversations,
             io.aeyer.plowshare.server.agents.LogStages.NONE,
             io.aeyer.plowshare.server.hooks.Hooks.NONE,
-            io.aeyer.plowshare.server.harness.Harness.NONE,
-            CLOCK));
+            io.aeyer.plowshare.server.harness.Harness.NONE));
     assertThrows(
         CallerFault.class,
         () ->
@@ -515,7 +560,11 @@ class DocumentPoliciesTest {
             "Private claim", io.aeyer.plowshare.server.agents.Speaker.person("alice")));
     entries.append(log, 1, io.aeyer.plowshare.server.agents.LoggedEntry.summary("Private summary"));
     assertFalse(digests.roots(home).isEmpty());
-    new InformationJobs(jdbc, access, catalogue).bind(log, alice, List.of(revision));
+    new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue)
+        .bind(log, alice, List.of(revision));
     memories.protectInformation();
     digests.protectInformation();
     assertTrue(memories.load(memory.id()).isEmpty());
@@ -560,7 +609,11 @@ class DocumentPoliciesTest {
                 "alice",
                 null)
             .id();
-    var inputs = new InformationJobs(jdbc, access, catalogue);
+    var inputs =
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue);
     inputs.bind(source, alice, List.of(revision));
     transactions.inTransaction(
         () -> {
@@ -609,21 +662,24 @@ class DocumentPoliciesTest {
                 "alice",
                 null)
             .id();
-    var inputs = new InformationJobs(jdbc, access, catalogue);
+    var inputs =
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue);
     inputs.bind(producer, alice, List.of(revision));
     catalogue.useWriteGates(
         new InformationWriteGates(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(jdbc, CLOCK),
             transactions,
             access,
             inputs,
             conversations,
             io.aeyer.plowshare.server.agents.LogStages.NONE,
             io.aeyer.plowshare.server.hooks.Hooks.NONE,
-            io.aeyer.plowshare.server.harness.Harness.NONE,
-            CLOCK));
+            io.aeyer.plowshare.server.harness.Harness.NONE));
     var detail =
-        InformationReportDetails.from(
+        io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
             Map.of(
                 "objectives",
                 List.of("Check the claim"),
@@ -706,7 +762,7 @@ class DocumentPoliciesTest {
     assertThrows(
         CallerFault.class,
         () ->
-            InformationReportDetails.from(
+            io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
                 Map.of(
                     "objectives",
                     List.of("A"),
@@ -749,17 +805,17 @@ class DocumentPoliciesTest {
       InformationLifecycle.Gates gates) {
     var store = new DocumentStore(jdbc, transactions);
     return new InformationLifecycle(
-        jdbc,
+        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(jdbc, CLOCK),
         transactions,
         catalogue,
-        CLOCK,
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             transactions,
             catalogue,
             store,
             embeddings,
-            new Chunking(new RatioTokenizer(4), 512, 2048),
+            new Chunking(new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 512, 2048),
             16,
             768,
             () -> null,
@@ -832,10 +888,13 @@ class DocumentPoliciesTest {
     var opened = new java.util.ArrayList<io.aeyer.plowshare.server.agents.LogStages.LogOpened>();
     var gates =
         new InformationWriteGates(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(jdbc, CLOCK),
             transactions,
             access,
-            new InformationJobs(jdbc, access, catalogue),
+            new InformationJobs(
+                new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+                access,
+                catalogue),
             new io.aeyer.plowshare.server.archive.ConversationStore(jdbc),
             new io.aeyer.plowshare.server.agents.LogStages() {
               @Override
@@ -844,8 +903,7 @@ class DocumentPoliciesTest {
               }
             },
             io.aeyer.plowshare.server.hooks.Hooks.chain(project, local),
-            io.aeyer.plowshare.server.harness.Harness.NONE,
-            CLOCK);
+            io.aeyer.plowshare.server.harness.Harness.NONE);
     catalogue.useWriteGates(gates);
     UUID blocked = UUID.randomUUID();
     assertThrows(
@@ -904,15 +962,29 @@ class DocumentPoliciesTest {
     UUID evidence =
         catalogue.evidence(alice, revision, 0, 2, "An", "extracted-text:utf16", UUID.randomUUID());
     catalogue.availability(alice, revision, "excluded");
-    assertTrue(catalogue.list(alice, 10, 0).isEmpty());
-    assertEquals("An", catalogue.evidence(alice, evidence).get("quote"));
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(alice, 10, 0))
+            .isEmpty());
+    assertEquals(
+        "An",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("quote"));
     var scoped = new DocumentStore(jdbc, transactions).scoped(access, alice);
     assertEquals(0, scoped.count(null));
     assertTrue(scoped.find(revision).isPresent());
     catalogue.availability(alice, revision, "withdrawn");
     catalogue.availability(alice, revision, "active");
-    assertTrue(catalogue.list(alice, 10, 0).isEmpty());
-    assertEquals("An", catalogue.evidence(alice, evidence).get("quote"));
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(alice, 10, 0))
+            .isEmpty());
+    assertEquals(
+        "An",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("quote"));
     catalogue.availability(alice, revision, "included");
     assertEquals(1, scoped.count(null));
   }
@@ -962,10 +1034,13 @@ class DocumentPoliciesTest {
         };
     var models =
         new InformationModelStages(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),
             transactions,
             catalogue,
-            new InformationJobs(jdbc, access, catalogue),
+            new InformationJobs(
+                new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+                access,
+                catalogue),
             hooks,
             io.aeyer.plowshare.server.harness.Harness.NONE);
     var stages = models.forLease(lease, () -> lifecycle.requireLease(lease));
@@ -980,7 +1055,11 @@ class DocumentPoliciesTest {
                 "alice",
                 null)
             .id();
-    new InformationJobs(jdbc, access, catalogue).bind(log, alice, List.of(revision));
+    new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue)
+        .bind(log, alice, List.of(revision));
     var definition =
         new io.aeyer.plowshare.server.agents.AgentDefinition(
             "paragraph_summariser",
@@ -1057,7 +1136,7 @@ class DocumentPoliciesTest {
                     .isActualTransactionActive());
             observed.add(lease.stage());
             if (lease.stage().equals("withdrawn")) {
-              assertEquals("withdrawn", catalogue.row(revision).get("availability"));
+              assertEquals("withdrawn", catalogue.row(revision).availability());
               throw new IllegalStateException("hook unavailable");
             }
             return new io.aeyer.plowshare.server.hooks.Gate("review needed", List.of(), List.of());
@@ -1066,7 +1145,7 @@ class DocumentPoliciesTest {
     catalogue.availability(alice, revision, "withdrawn");
     assertThrows(NotFoundFault.class, () -> catalogue.bytes(alice, revision));
     assertThrows(CallerFault.class, () -> catalogue.availability(alice, revision, "active"));
-    assertEquals("withdrawn", catalogue.row(revision).get("availability"));
+    assertEquals("withdrawn", catalogue.row(revision).availability());
     assertEquals(List.of("withdrawn", "active"), observed);
     catalogue.withGates(new InformationLifecycle.Gates() {});
     catalogue.availability(alice, revision, "deleted");
@@ -1149,7 +1228,7 @@ class DocumentPoliciesTest {
     assertThrows(
         CallerFault.class,
         () -> catalogue.availability(alice, revision, "active", UUID.randomUUID()));
-    assertEquals("withdrawn", catalogue.row(revision).get("availability"));
+    assertEquals("withdrawn", catalogue.row(revision).availability());
   }
 
   @Test
@@ -1160,8 +1239,7 @@ class DocumentPoliciesTest {
     var attempts = new java.util.ArrayList<Object>();
     var first =
         new InformationEventPublisher(
-            jdbc,
-            transactions,
+            new JdbcInformationEventRepository(jdbc, transactions),
             (account, body) -> {
               attempts.add(body);
               throw new IllegalStateException("socket stopped");
@@ -1174,8 +1252,7 @@ class DocumentPoliciesTest {
     var delivered = new java.util.ArrayList<Object>();
     var restarted =
         new InformationEventPublisher(
-            jdbc,
-            transactions,
+            new JdbcInformationEventRepository(jdbc, transactions),
             (account, body) -> {
               assertEquals("alice", account);
               delivered.add(body);
@@ -1221,7 +1298,7 @@ class DocumentPoliciesTest {
     java.util.function.Supplier<InformationAcquisitions> service =
         () ->
             new InformationAcquisitions(
-                jdbc,
+                new io.aeyer.plowshare.server.information.JdbcAcquisitionRepository(jdbc, CLOCK),
                 transactions,
                 access,
                 catalogue,
@@ -1231,17 +1308,18 @@ class DocumentPoliciesTest {
                 io.aeyer.plowshare.server.agents.LogStages.NONE,
                 hooks,
                 io.aeyer.plowshare.server.harness.Harness.NONE,
-                CLOCK,
-                new InformationJobs(jdbc, access, catalogue));
+                new InformationJobs(
+                    new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+                    access,
+                    catalogue));
     var first = service.get();
     UUID request = UUID.randomUUID();
     var submitted = first.submit(alice, request, "https://source.example/paper", "paper", null);
-    UUID ticket = (UUID) submitted.get("id");
-    assertEquals("queued", submitted.get("state"));
+    UUID ticket = submitted.id();
+    assertEquals("queued", submitted.state());
     org.mockito.Mockito.verifyNoInteractions(fetcher);
     assertEquals(
-        ticket,
-        first.submit(alice, request, "https://source.example/paper", "paper", null).get("id"));
+        ticket, first.submit(alice, request, "https://source.example/paper", "paper", null).id());
     assertThrows(
         CallerFault.class,
         () -> first.submit(alice, request, "https://changed.example/paper", "paper", null));
@@ -1252,7 +1330,7 @@ class DocumentPoliciesTest {
                 io.aeyer.plowshare.server.fetch.FetchFailure.REMOTE_STATUS,
                 "HTTP 503"));
     first.drainOne();
-    assertEquals("failed", first.status(alice, ticket).get("state"));
+    assertEquals("failed", first.status(alice, ticket).state());
     assertThrows(NotFoundFault.class, () -> first.status(access.resolve("bob", null), ticket));
     byte[] original = "A captured source statement.".getBytes();
     org.mockito.Mockito.when(fetcher.fetch("https://source.example/paper"))
@@ -1269,10 +1347,14 @@ class DocumentPoliciesTest {
     restarted.retry(alice, ticket);
     restarted.drainOne();
     var captured = restarted.status(alice, ticket);
-    assertEquals("blocked", captured.get("state"));
-    UUID revision = (UUID) captured.get("revision_id");
+    assertEquals("blocked", captured.state());
+    UUID revision = captured.revisionId();
     assertArrayEquals(original, catalogue.bytes(alice, revision));
-    assertEquals(12, catalogue.status(alice, revision).get("allowance_total"));
+    assertEquals(
+        12,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, revision))
+            .get("allowance_total"));
     assertFalse(
         pipeline(
                 catalogue,
@@ -1282,7 +1364,7 @@ class DocumentPoliciesTest {
     postDenied.set(false);
     restarted.retry(alice, ticket);
     restarted.drainOne();
-    assertEquals("succeeded", restarted.status(alice, ticket).get("state"));
+    assertEquals("succeeded", restarted.status(alice, ticket).state());
     assertTrue(
         pipeline(
                 catalogue,
@@ -1292,9 +1374,14 @@ class DocumentPoliciesTest {
     org.mockito.Mockito.verify(fetcher, org.mockito.Mockito.times(2))
         .fetch("https://source.example/paper");
     assertEquals(
-        "https://source.example/final", catalogue.status(alice, revision).get("source_uri"));
+        "https://source.example/final",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, revision))
+            .get("source_uri"));
     assertTrue(
-        catalogue.list(alice, 100, 0).stream()
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(alice, 100, 0))
+            .stream()
             .anyMatch(source -> revision.equals(source.get("id"))),
         "Fetched content is a catalogue document before any research report cites it");
     assertEquals(
@@ -1419,25 +1506,35 @@ class DocumentPoliciesTest {
             });
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             transactions,
             catalogue,
             store,
             embeddings,
-            new Chunking(new RatioTokenizer(4), 512, 2048),
+            new Chunking(new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 512, 2048),
             16,
             768,
             () -> summariser,
             new io.aeyer.plowshare.server.documents.DocumentsProperties());
     var first =
         new InformationLifecycle(
-            jdbc, transactions, catalogue, CLOCK, processor, new InformationLifecycle.Gates() {});
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, CLOCK),
+            transactions,
+            catalogue,
+            processor,
+            new InformationLifecycle.Gates() {});
     first.drainOne();
     first.drainOne();
     first.drainOne();
     first.drainOne();
     assertEquals(2, calls.get());
-    assertEquals(2, catalogue.status(alice, revision).get("allowance_spent"));
+    assertEquals(
+        2,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, revision))
+            .get("allowance_spent"));
     assertEquals(
         "failed",
         jdbc.queryForObject(
@@ -1449,11 +1546,20 @@ class DocumentPoliciesTest {
     catalogue.retry(alice, revision);
     var recovered =
         new InformationLifecycle(
-            jdbc, transactions, catalogue, CLOCK, processor, new InformationLifecycle.Gates() {});
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, CLOCK),
+            transactions,
+            catalogue,
+            processor,
+            new InformationLifecycle.Gates() {});
     recovered.drainOne();
     recovered.drainOne();
     assertEquals(4, calls.get());
-    assertEquals(4, catalogue.status(alice, revision).get("allowance_spent"));
+    assertEquals(
+        4,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, revision))
+            .get("allowance_spent"));
     assertEquals(
         0,
         jdbc.queryForObject(
@@ -1506,7 +1612,11 @@ class DocumentPoliciesTest {
             io.aeyer.plowshare.server.agents.Budget.of(10),
             "alice",
             null);
-    var inputs = new InformationJobs(jdbc, access, catalogue);
+    var inputs =
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue);
     var tool =
         new io.aeyer.plowshare.server.agents.InformationTool(false, () -> catalogue)
             .forRun(access, inputs, "alice", reader.id());
@@ -1532,15 +1642,26 @@ class DocumentPoliciesTest {
     assertNotEquals(report.revision(), feedback.revision());
     assertEquals(
         report.revision(),
-        ((Map<?, ?>) catalogue.status(alice, feedback.revision()).get("report"))
+        ((Map<?, ?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.status(alice, feedback.revision()))
+                    .get("report"))
             .get("feedback_revision"));
     var newer = admitted(catalogue, "alice", "complete", "A changed origin claim.");
     recovered.drainOne();
     recovered.drainOne();
     assertNotEquals(revision, newer.revision());
-    assertEquals("A", catalogue.evidence(alice, evidence).get("quote"));
+    assertEquals(
+        "A",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("quote"));
     catalogue.availability(alice, revision, "deleted");
-    assertThrows(NotFoundFault.class, () -> catalogue.evidence(alice, evidence));
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence)));
     assertThrows(NotFoundFault.class, () -> catalogue.requireReadable(alice, feedback.revision()));
     assertFalse(inputs.logAllowed(reader.id(), "alice"));
   }
@@ -1566,10 +1687,10 @@ class DocumentPoliciesTest {
     var released = new java.util.concurrent.atomic.AtomicInteger();
     var recovered =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, later),
             transactions,
             catalogue,
-            later,
             (lease, cancelled, fence) -> {
               assertEquals(2, lease.attempt());
               assertNotEquals(old.token(), lease.token());
@@ -1650,15 +1771,31 @@ class DocumentPoliciesTest {
         paragraph,
         jdbc.queryForObject(
             "SELECT id FROM paragraphs WHERE document_id=? LIMIT 1", UUID.class, revision));
-    assertEquals("retained", catalogue.evidence(alice, evidence).get("quote"));
+    assertEquals(
+        "retained",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("quote"));
     assertThrows(CallerFault.class, () -> catalogue.rebuild(alice, revision, "extract"));
     assertThrows(
         NotFoundFault.class,
         () -> catalogue.rebuild(access.resolve("bob", null), revision, "embed"));
     catalogue.allowance(alice, revision, 25);
-    assertEquals(25, catalogue.status(alice, revision).get("allowance_total"));
-    assertEquals("retained", catalogue.window(alice, revision, 2, 8).get("text"));
-    assertThrows(CallerFault.class, () -> catalogue.window(alice, revision, 0, 32769));
+    assertEquals(
+        25,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, revision))
+            .get("allowance_total"));
+    assertEquals(
+        "retained",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.window(alice, revision, 2, 8))
+            .get("text"));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.window(alice, revision, 0, 32769)));
     assertThrows(
         org.springframework.dao.DataAccessException.class,
         () ->
@@ -1672,14 +1809,20 @@ class DocumentPoliciesTest {
                 "UPDATE information_revisions SET source_bytes=? WHERE id=?",
                 "replaced".getBytes(),
                 revision));
-    var feed = catalogue.events(alice, 0, 100);
+    var feed =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+            catalogue.events(alice, 0, 100));
     assertFalse(((List<?>) feed.get("events")).isEmpty());
     assertTrue(
-        ((List<?>) catalogue.events(access.resolve("bob", null), 0, 100).get("events")).isEmpty());
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.events(access.resolve("bob", null), 0, 100))
+                    .get("events"))
+            .isEmpty());
     assertTrue(
         ((List<?>)
-                catalogue
-                    .events(alice, ((Number) feed.get("cursor")).longValue(), 100)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.events(alice, ((Number) feed.get("cursor")).longValue(), 100))
                     .get("events"))
             .isEmpty());
   }
@@ -1737,7 +1880,11 @@ class DocumentPoliciesTest {
             .rank("claim", 10)
             .documents()
             .isEmpty());
-    var steps = (List<?>) catalogue.status(alice, revision).get("steps");
+    var steps =
+        (List<?>)
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                    catalogue.status(alice, revision))
+                .get("steps");
     assertFalse(
         (Boolean)
             steps.stream()
@@ -1773,11 +1920,19 @@ class DocumentPoliciesTest {
     assertEquals(first.revision(), replay.revision());
     assertFalse(replay.created());
     assertArrayEquals(bytes, catalogue.bytes(alice, first.revision()));
-    assertEquals(1, catalogue.list(alice, 20, 0).size());
-    assertTrue(catalogue.list(access.resolve("bob", null), 20, 0).isEmpty());
+    assertEquals(
+        1,
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(alice, 20, 0))
+            .size());
     assertTrue(
-        catalogue
-            .list(access.resolve("alice", InformationContext.Selection.shared()), 20, 0)
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(access.resolve("bob", null), 20, 0))
+            .isEmpty());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(
+                    access.resolve("alice", InformationContext.Selection.shared()), 20, 0))
             .isEmpty());
     assertThrows(
         CallerFault.class,
@@ -1849,8 +2004,16 @@ class DocumentPoliciesTest {
         2,
         jdbc.queryForObject(
             "SELECT count(*) FROM documents WHERE source_name='same'", Integer.class));
-    assertEquals("original budget", catalogue.evidence(alice, evidence).get("quote"));
-    assertEquals(first.revision(), catalogue.evidence(alice, evidence).get("revision_id"));
+    assertEquals(
+        "original budget",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("quote"));
+    assertEquals(
+        first.revision(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.evidence(alice, evidence))
+            .get("revision_id"));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -1890,7 +2053,11 @@ class DocumentPoliciesTest {
             Integer.class,
             first.revision()));
     assertThrows(NotFoundFault.class, () -> catalogue.text(alice, first.revision()));
-    assertEquals("withdrawn", catalogue.status(alice, first.revision()).get("availability"));
+    assertEquals(
+        "withdrawn",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(alice, first.revision()))
+            .get("availability"));
     assertTrue(
         new DocumentStore(jdbc, transactions)
             .scoped(access, alice)
@@ -2068,7 +2235,11 @@ class DocumentPoliciesTest {
         1,
         io.aeyer.plowshare.server.agents.LoggedEntry.utterance(
             "Private budget conclusion.", io.aeyer.plowshare.server.agents.Speaker.harness()));
-    var policies = new InformationJobs(jdbc, access, catalogue);
+    var policies =
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue);
     policies.bind(child.id(), alice, List.of(source.revision()));
     assertTrue(policies.logAllowed(root.id(), "alice"));
     var later =
@@ -2095,7 +2266,7 @@ class DocumentPoliciesTest {
             .search(io.aeyer.plowshare.protocol.Home.global(), "budget", 0, 1)
             .total());
     assertThrows(NotFoundFault.class, () -> entries.forAccount("bob").forConversation(child.id()));
-    var inbox = new io.aeyer.plowshare.server.events.InboxStore(jdbc);
+    var inbox = new io.aeyer.plowshare.server.events.JdbcInboxStore(jdbc);
     inbox.useInformationInputs(policies);
     inbox.deliver("alice", null, root.id(), "answered", "Private conclusion", CLOCK.instant());
     assertEquals(1, inbox.unread("alice"));
@@ -2150,7 +2321,7 @@ class DocumentPoliciesTest {
             .get("information.upload")
             .handle(payload, new io.aeyer.plowshare.server.ws.Asking("session", "alice"));
     var admitted = (InformationCatalogue.Admission) accepted.payload();
-    assertEquals("alice", catalogue.row(admitted.revision()).get("owner_handle"));
+    assertEquals("alice", catalogue.row(admitted.revision()).ownerHandle());
     assertEquals(io.aeyer.plowshare.protocol.frames.Code.ACCEPTED, accepted.code());
     assertThrows(
         CallerFault.class,
@@ -2191,7 +2362,10 @@ class DocumentPoliciesTest {
                 bytes.length,
                 "attribution",
                 CLOCK.instant(),
-                Derivation.derive(extracted, new Chunking(new RatioTokenizer(4), 512, 2048)))
+                Derivation.derive(
+                    extracted,
+                    new Chunking(
+                        new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 512, 2048)))
             .documentId();
     jdbc.update("INSERT INTO information_document_policies (document_id) VALUES (?)", id);
     return id;
@@ -2224,7 +2398,9 @@ class DocumentPoliciesTest {
             List.of(evidence),
             null);
     assertTrue(
-        catalogue.list(alice, 100, 0).stream()
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(alice, 100, 0))
+            .stream()
             .anyMatch(row -> unused.revision().equals(row.get("id"))));
     assertArrayEquals(
         "Consulted but not used in the report.".getBytes(java.nio.charset.StandardCharsets.UTF_8),
@@ -2268,27 +2444,30 @@ class DocumentPoliciesTest {
     var asking = new io.aeyer.plowshare.server.ws.Asking("session", "alice");
     assertEquals(
         false,
-        ((java.util.Map<?, ?>) frames.get("information.await").handle(payload, asking).payload())
-            .get("complete"));
+        ((io.aeyer.plowshare.protocol.Information.Readiness)
+                frames.get("information.await").handle(payload, asking).payload())
+            .complete());
     assertTrue(pipeline(catalogue, embeddings, new InformationLifecycle.Gates() {}).drainOne());
     var ready =
-        (java.util.Map<?, ?>) frames.get("information.await").handle(payload, asking).payload();
-    assertEquals(true, ready.get("complete"));
-    assertEquals(1, ready.get("ready"));
+        (io.aeyer.plowshare.protocol.Information.Readiness)
+            frames.get("information.await").handle(payload, asking).payload();
+    assertEquals(true, ready.complete());
+    assertEquals(1, ready.ready());
     var hidden =
-        (java.util.Map<?, ?>)
+        (io.aeyer.plowshare.protocol.Information.Readiness)
             frames
                 .get("information.await")
                 .handle(payload, new io.aeyer.plowshare.server.ws.Asking("session", "bob"))
                 .payload();
-    assertEquals(true, hidden.get("complete"));
-    assertEquals(0, hidden.get("ready"));
+    assertEquals(true, hidden.complete());
+    assertEquals(0, hidden.ready());
     assertFalse(hidden.toString().contains("fenced-source"));
     catalogue.availability(alice, source.revision(), "withdrawn");
     var unavailable =
-        (java.util.Map<?, ?>) frames.get("information.await").handle(payload, asking).payload();
-    assertEquals(true, unavailable.get("complete"));
-    assertEquals(0, unavailable.get("ready"));
+        (io.aeyer.plowshare.protocol.Information.Readiness)
+            frames.get("information.await").handle(payload, asking).payload();
+    assertEquals(true, unavailable.complete());
+    assertEquals(0, unavailable.ready());
   }
 
   @Test
@@ -2302,20 +2481,25 @@ class DocumentPoliciesTest {
             org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.EmbeddingClient.class),
             new InformationLifecycle.Gates() {})
         .drainOne();
-    var located = catalogue.locateWindow(alice, admitted.revision(), "  exact retained quotation.");
+    var located =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+            catalogue.locateWindow(alice, admitted.revision(), "  exact retained quotation."));
     assertEquals(true, located.get("matched"));
     assertEquals(10, located.get("start"));
     assertEquals("  exact retained quotation.", located.get("text"));
     assertEquals(
         false,
-        catalogue
-            .locateWindow(alice, admitted.revision(), "a generated paraphrase")
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.locateWindow(alice, admitted.revision(), "a generated paraphrase"))
             .get("matched"));
     assertThrows(
         NotFoundFault.class,
         () ->
-            catalogue.locateWindow(
-                access.resolve("bob", null), admitted.revision(), "  exact retained quotation."));
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.locateWindow(
+                    access.resolve("bob", null),
+                    admitted.revision(),
+                    "  exact retained quotation.")));
   }
 
   @Test
@@ -2360,19 +2544,19 @@ class DocumentPoliciesTest {
                 null,
                 io.aeyer.plowshare.server.agents.Budget.of(10),
                 "alice");
-    new InformationJobs(jdbc, access, catalogue)
+    new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            access,
+            catalogue)
         .bind(conversation.id(), alice, List.of(source.revision()));
-    var journal = new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore(jdbc);
+    var journal = new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc);
     var json = new com.fasterxml.jackson.databind.ObjectMapper();
-    journal.prepare(
+    jdbc.update(
+        "INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command) VALUES (?,0,?,?::jsonb,?::jsonb)",
         conversation.id(),
-        new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Step(
-            0,
-            "hash",
-            json.createObjectNode().put("quote", "Sensitive retained source."),
-            json.createObjectNode().put("tool", "information_read"),
-            null,
-            null));
+        "hash",
+        json.createObjectNode().put("quote", "Sensitive retained source.").toString(),
+        "{\"tool\":\"information_read\",\"arguments\":{}}");
     journal.started(conversation.id(), 0, "{}");
     journal.executed(conversation.id(), 0, "Sensitive retained source.");
     catalogue.availability(alice, source.revision(), "deleted");
@@ -2383,21 +2567,40 @@ class DocumentPoliciesTest {
   void code_revisions_preserve_source_and_are_isolated_before_discovery_and_ranking() {
     var catalogue = catalogue();
     var alice = access.resolve("alice", null);
-    var codeContext = alice.withCorpus("code");
+    var codeContext =
+        alice.withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     String source = "class Main {\n    void repeat() {}\n    void repeat() {}\n}\n".repeat(90);
     var code = admitted(catalogue, "alice", "Main.java", source);
     var prose = admitted(catalogue, "alice", "design.md", "A design document about Main.");
     assertEquals(
         List.of(prose.revision()),
-        catalogue.list(alice, 1, 0).stream().map(r -> r.get("id")).toList());
+        io.aeyer.plowshare.server.information.InformationFixtures.views(catalogue.list(alice, 1, 0))
+            .stream()
+            .map(r -> r.get("id"))
+            .toList());
     assertEquals(
         List.of(code.revision()),
-        catalogue.list(codeContext, 1, 0).stream().map(r -> r.get("id")).toList());
-    for (Object row : (List<?>) catalogue.events(alice, 0, 100).get("events"))
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(codeContext, 1, 0))
+            .stream()
+            .map(r -> r.get("id"))
+            .toList());
+    for (Object row :
+        (List<?>)
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                    catalogue.events(alice, 0, 100))
+                .get("events"))
       assertEquals(prose.revision(), ((Map<?, ?>) row).get("revision_id"));
-    for (Object row : (List<?>) catalogue.events(codeContext, 0, 100).get("events"))
-      assertEquals(code.revision(), ((Map<?, ?>) row).get("revision_id"));
-    assertEquals("java", catalogue.status(codeContext, code.revision()).get("document_subtype"));
+    for (Object row :
+        (List<?>)
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                    catalogue.events(codeContext, 0, 100))
+                .get("events")) assertEquals(code.revision(), ((Map<?, ?>) row).get("revision_id"));
+    assertEquals(
+        "java",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(codeContext, code.revision()))
+            .get("document_subtype"));
     assertThrows(
         org.springframework.dao.DataAccessException.class,
         () ->
@@ -2406,7 +2609,13 @@ class DocumentPoliciesTest {
                 code.revision()));
     assertThrows(
         NotFoundFault.class,
-        () -> catalogue.text(access.resolve("bob", null).withCorpus("code"), code.revision()));
+        () ->
+            catalogue.text(
+                access
+                    .resolve("bob", null)
+                    .withCorpus(
+                        io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE),
+                code.revision()));
 
     var embeddings = org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.EmbeddingClient.class);
     org.mockito.Mockito.when(embeddings.embedAll(org.mockito.ArgumentMatchers.anyList()))
@@ -2437,7 +2646,15 @@ class DocumentPoliciesTest {
     assertTrue(store.scoped(access, alice).find(code.revision()).isEmpty());
     assertTrue(store.scoped(access, codeContext).find(prose.revision()).isEmpty());
     assertEquals(
-        0, store.scoped(access, access.resolve("bob", null).withCorpus("code")).count(null));
+        0,
+        store
+            .scoped(
+                access,
+                access
+                    .resolve("bob", null)
+                    .withCorpus(
+                        io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE))
+            .count(null));
     var chunks =
         jdbc.queryForList(
             "SELECT c.id,c.text FROM chunks c JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=? ORDER BY c.ordinal",
@@ -2451,7 +2668,8 @@ class DocumentPoliciesTest {
     int offset = 0;
     for (var chunk : chunks) {
       var located =
-          catalogue.locateCodeWindow(codeContext, code.revision(), (UUID) chunk.get("id"));
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+              catalogue.locateCodeWindow(codeContext, code.revision(), (UUID) chunk.get("id")));
       assertEquals(offset, located.get("start"));
       assertEquals(chunk.get("text"), located.get("text"));
       offset += ((String) chunk.get("text")).length();
@@ -2481,7 +2699,12 @@ class DocumentPoliciesTest {
             .documentId());
     assertTrue(
         retrieval
-            .scoped(access, access.resolve("bob", null).withCorpus("code"))
+            .scoped(
+                access,
+                access
+                    .resolve("bob", null)
+                    .withCorpus(
+                        io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE))
             .retrieve("Main", null, 1)
             .isEmpty());
     catalogue.rebuild(codeContext, code.revision(), "embed");
@@ -2543,7 +2766,10 @@ class DocumentPoliciesTest {
   @Test
   void syntax_navigation_round_trips_retained_source_and_rechecks_live_permissions() {
     var catalogue = catalogue();
-    var alice = access.resolve("alice", null).withCorpus("code");
+    var alice =
+        access
+            .resolve("alice", null)
+            .withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     String source =
         "// 😀 function fake() {}\nexport function load() { return '😀'; }\nclass Store { load() { return load(); } }\n";
     var admitted =
@@ -2554,7 +2780,11 @@ class DocumentPoliciesTest {
             source.getBytes(java.nio.charset.StandardCharsets.UTF_8),
             "text/plain",
             null);
-    assertEquals("pending", catalogue.outline(alice, admitted.revision(), 0, 20).get("status"));
+    assertEquals(
+        "pending",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(alice, admitted.revision(), 0, 20))
+            .get("status"));
     var embeddings = org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.EmbeddingClient.class);
     org.mockito.Mockito.when(embeddings.embedAll(org.mockito.ArgumentMatchers.anyList()))
         .thenAnswer(
@@ -2565,7 +2795,9 @@ class DocumentPoliciesTest {
     var pipeline = pipeline(catalogue, embeddings, new InformationLifecycle.Gates() {});
     assertTrue(pipeline.drainOne());
     assertTrue(pipeline.drainOne());
-    var outline = catalogue.outline(alice, admitted.revision(), 0, 1);
+    var outline =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+            catalogue.outline(alice, admitted.revision(), 0, 1));
     assertEquals("ready", outline.get("status"));
     assertEquals(true, outline.get("has_more"));
     assertEquals(3, outline.get("symbol_count"));
@@ -2573,33 +2805,67 @@ class DocumentPoliciesTest {
     int start = ((Number) first.get("start_offset")).intValue(),
         end = ((Number) first.get("end_offset")).intValue();
     String quote =
-        (String) catalogue.window(alice, admitted.revision(), start, end - start).get("text");
+        (String)
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                    catalogue.window(alice, admitted.revision(), start, end - start))
+                .get("text");
     assertEquals("function load() { return '😀'; }", quote);
     assertNotNull(
         catalogue.evidence(alice, admitted.revision(), start, end, quote, "extracted-text:utf16"));
     assertEquals(
-        2, ((List<?>) catalogue.outline(alice, admitted.revision(), 1, 100).get("symbols")).size());
+        2,
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.outline(alice, admitted.revision(), 1, 100))
+                    .get("symbols"))
+            .size());
     assertThrows(
         CallerFault.class,
-        () -> catalogue.outline(access.resolve("alice", null), admitted.revision(), 0, 20));
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(access.resolve("alice", null), admitted.revision(), 0, 20)));
     assertThrows(
         NotFoundFault.class,
         () ->
-            catalogue.outline(
-                access.resolve("bob", null).withCorpus("code"), admitted.revision(), 0, 20));
-    assertThrows(CallerFault.class, () -> catalogue.symbols(alice, "load", null, 0, 101));
-    assertThrows(CallerFault.class, () -> catalogue.symbols(alice, " ", null, 0, 20));
-    var matches = catalogue.symbols(alice, "LOAD", null, 0, 1);
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(
+                    access
+                        .resolve("bob", null)
+                        .withCorpus(
+                            io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE),
+                    admitted.revision(),
+                    0,
+                    20)));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.symbols(alice, "load", null, 0, 101)));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.symbols(alice, " ", null, 0, 20)));
+    var matches =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+            catalogue.symbols(alice, "LOAD", null, 0, 1));
     assertEquals(true, matches.get("has_more"));
     assertEquals(
         admitted.revision(),
         ((Map<?, ?>) ((List<?>) matches.get("symbols")).getFirst()).get("revision"));
     assertTrue(
-        ((List<?>) catalogue.symbols(alice, "%", null, 0, 20).get("symbols")).isEmpty(),
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.symbols(alice, "%", null, 0, 20))
+                    .get("symbols"))
+            .isEmpty(),
         "wildcards are literal prefixes");
     org.mockito.Mockito.verifyNoInteractions(embeddings);
 
-    var bob = access.resolve("bob", null).withCorpus("code");
+    var bob =
+        access
+            .resolve("bob", null)
+            .withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     var other =
         catalogue.admit(
             bob, UUID.randomUUID(), "load.ts", "function load() {}".getBytes(), "text/plain", null);
@@ -2608,17 +2874,34 @@ class DocumentPoliciesTest {
             alice, UUID.randomUUID(), "src/main.rs", "fn load() {}".getBytes(), "text/plain", null);
     for (int i = 0; i < 20; i++) if (!pipeline.drainOne()) break;
     assertEquals(
-        "unsupported", catalogue.outline(alice, unsupported.revision(), 0, 20).get("status"));
-    assertEquals(1, ((List<?>) catalogue.symbols(bob, "load", null, 0, 1).get("symbols")).size());
+        "unsupported",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(alice, unsupported.revision(), 0, 20))
+            .get("status"));
+    assertEquals(
+        1,
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.symbols(bob, "load", null, 0, 1))
+                    .get("symbols"))
+            .size());
     assertEquals(
         other.revision(),
         ((Map<?, ?>)
-                ((List<?>) catalogue.symbols(bob, "load", null, 0, 1).get("symbols")).getFirst())
+                ((List<?>)
+                        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                                catalogue.symbols(bob, "load", null, 0, 1))
+                            .get("symbols"))
+                    .getFirst())
             .get("revision"));
     assertEquals(
         admitted.revision(),
         ((Map<?, ?>)
-                ((List<?>) catalogue.symbols(alice, "load", null, 0, 1).get("symbols")).getFirst())
+                ((List<?>)
+                        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                                catalogue.symbols(alice, "load", null, 0, 1))
+                            .get("symbols"))
+                    .getFirst())
             .get("revision"));
 
     var store = new DocumentStore(jdbc, transactions);
@@ -2642,25 +2925,25 @@ class DocumentPoliciesTest {
             "revision",
             admitted.revision().toString());
     var response =
-        (Map<?, ?>)
+        (io.aeyer.plowshare.protocol.Information.Outline)
             frames
                 .get("information.outline")
                 .handle(payload, new io.aeyer.plowshare.server.ws.Asking("s", "alice"))
                 .payload();
-    assertEquals("ready", response.get("status"));
+    assertEquals("ready", response.status());
     var symbolPayload = new java.util.LinkedHashMap<>(payload);
     symbolPayload.put("query", "load");
     assertEquals(
         2,
         ((List<?>)
-                ((Map<?, ?>)
+                ((io.aeyer.plowshare.protocol.Information.Symbols)
                         frames
                             .get("information.symbols")
                             .handle(
                                 symbolPayload,
                                 new io.aeyer.plowshare.server.ws.Asking("s", "alice"))
                             .payload())
-                    .get("symbols"))
+                    .symbols())
             .size());
     assertThrows(
         NotFoundFault.class,
@@ -2670,13 +2953,22 @@ class DocumentPoliciesTest {
                 .handle(payload, new io.aeyer.plowshare.server.ws.Asking("s", "bob")));
     jdbc.update(
         "UPDATE code_outlines SET parser_version='older' WHERE document_id=?", admitted.revision());
-    assertEquals("stale", catalogue.outline(alice, admitted.revision(), 0, 20).get("status"));
-    assertTrue(((List<?>) catalogue.symbols(alice, "load", null, 0, 20).get("symbols")).isEmpty());
+    assertEquals(
+        "stale",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(alice, admitted.revision(), 0, 20))
+            .get("status"));
+    assertTrue(
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.symbols(alice, "load", null, 0, 20))
+                    .get("symbols"))
+            .isEmpty());
 
     var project =
         access
             .resolve("alice", InformationContext.Selection.project("research"))
-            .withCorpus("code");
+            .withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     var projectSource =
         catalogue.admit(
             project,
@@ -2688,16 +2980,43 @@ class DocumentPoliciesTest {
     for (int i = 0; i < 8; i++) if (!pipeline.drainOne()) break;
     members.add("research", "bob");
     var member =
-        access.resolve("bob", InformationContext.Selection.project("research")).withCorpus("code");
+        access
+            .resolve("bob", InformationContext.Selection.project("research"))
+            .withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
     assertEquals(
-        1, ((List<?>) catalogue.symbols(member, "load", null, 0, 1).get("symbols")).size());
-    assertEquals("ready", catalogue.outline(member, projectSource.revision(), 0, 20).get("status"));
+        1,
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.symbols(member, "load", null, 0, 1))
+                    .get("symbols"))
+            .size());
+    assertEquals(
+        "ready",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(member, projectSource.revision(), 0, 20))
+            .get("status"));
     members.remove("research", "bob");
-    assertThrows(CallerFault.class, () -> catalogue.symbols(member, "load", null, 0, 1));
     assertThrows(
-        CallerFault.class, () -> catalogue.outline(member, projectSource.revision(), 0, 20));
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.symbols(member, "load", null, 0, 1)));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(member, projectSource.revision(), 0, 20)));
     catalogue.availability(bob, other.revision(), "withdrawn");
-    assertTrue(((List<?>) catalogue.symbols(bob, "load", null, 0, 1).get("symbols")).isEmpty());
-    assertThrows(NotFoundFault.class, () -> catalogue.outline(bob, other.revision(), 0, 20));
+    assertTrue(
+        ((List<?>)
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.symbols(bob, "load", null, 0, 1))
+                    .get("symbols"))
+            .isEmpty());
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.outline(bob, other.revision(), 0, 20)));
   }
 }

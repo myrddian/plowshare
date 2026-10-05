@@ -2,12 +2,10 @@ spring:
   application:
     name: plowshare-server
   datasource:
-    # Default points at a local Postgres on the standard port; Anchor's own
-    # compose stack claims 5433, so 5432 stays free for Plowshare to avoid a
-    # collision when both run on one box.
-    url: ${PLOWSHARE_DB_URL:jdbc:postgresql://localhost:5432/plowshare}
-    username: ${PLOWSHARE_DB_USER:plowshare}
-    password: ${PLOWSHARE_DB_PASSWORD:plowshare}
+    # Connection origin and credentials belong to the deployment; no local fallback.
+    url: ${PLOWSHARE_DB_URL}
+    username: ${PLOWSHARE_DB_USER}
+    password: ${PLOWSHARE_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   flyway:
     enabled: true
@@ -33,45 +31,10 @@ spring:
       max-request-size: ${PLOWSHARE_MAX_UPLOAD_REQUEST:9MB}
 
 server:
-  # Anchor defaults to 8090; one digit up keeps both runnable on one box
-  # without a port clash needing to be discovered at boot time.
-  port: ${PLOWSHARE_PORT:8091}
-  # Loopback unless an operator says otherwise, and the default is the whole of
-  # what stands between this port and a network.
-  #
-  # IT IS NO LONGER THE WHOLE OF WHAT STANDS BETWEEN A REQUEST AND THE ARCHIVE.
-  # This block used to say "there is no authentication, and the design spec says
-  # so rather than pretending otherwise". Slice 4 built it: plowshare.auth below
-  # gates every /v1 path, including the two WebSocket upgrades, and a request
-  # with no access token is refused before any handler runs.
-  #
-  # What that changes about the session id, said plainly because the old
-  # sentence is quoted in several files: a session id is still a name and not a
-  # secret — SessionRegistry.attach is computeIfAbsent and find asks only that
-  # an id be non-blank — but nobody reaches the socket to attach under one
-  # without the operator's credential. Holding that credential means being the
-  # operator, and the operator may attach to any session by name. That is
-  # correct for a single-user system and it is the honest description of what
-  # was already true.
-  #
-  # This key still matters and is not made redundant by that: an unauthenticated
-  # caller reaching the port can still spend its CPU on TLS-less connections and
-  # on the filter's digest, and plowshare.auth.enabled is one line away from
-  # being false. Two independent bounds, not one behind the other.
-  #
-  # The spec used to offer "the server binds loopback in every deployment this
-  # project has" as one of three bounds on that. It was false: this block set a
-  # port and no address, so the container bound EVERY interface and a run of
-  # this server was reachable from whatever network it was on. Offering an
-  # untrue sentence as a bound on a capability is the worst place to be wrong,
-  # which is why the correction was to the spec first and is now to the tree.
-  #
-  # PLOWSHARE_BIND is the escape, and it is deliberately an env var with a safe
-  # default rather than a commented-out key: an operator who wants this server
-  # reachable from the network says so in one place, once, on purpose — and now
-  # has an answer to the authentication question this comment used to hand them
-  # unbuilt. 0.0.0.0 restores the pre-slice-3 behaviour exactly.
-  address: ${PLOWSHARE_BIND:127.0.0.1}
+  # Listener port belongs to deployment configuration.
+  port: ${PLOWSHARE_PORT}
+  # Deployment bind address is required.
+  address: ${PLOWSHARE_BIND}
 
 management:
   endpoints:
@@ -79,21 +42,20 @@ management:
       exposure:
         include: health,info,metrics
 
-# The inference hosts, one entry per box. Same shape as Anchor's lmstudio.*,
-# deliberately: both projects are meant to point at one LM Studio, and an
-# operator who already set LLM_BASE_URL for Anchor should not need a second
-# variable for the same box. See LlmProperties and PoolProperties for what each
-# key does.
-#
-# This prefix is closed: LlmProperties binds with ignoreUnknownFields = false,
-# so a key that no setter accepts — a `base-url` left at the llm level after it
-# moved into a pool, say — stops the boot by name rather than being discarded in
-# silence while the server talks to some other host.
+# Inference endpoints and models are supplied by the operator. The generic
+# single-pool shape below can be replaced by a complete external pool list.
+# LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
   projects:
-    workspace-directory: ${PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY:workspaces}
+    workspace-directory: ${PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY}
+  # To enable named code/prose spaces, provide both complete external model
+  # declarations described in docs/embedding-evolution.md. No model identity,
+  # endpoint or preprocessing convention is inferred from the legacy settings.
+  embeddings:
+    enabled: ${PLOWSHARE_DUAL_EMBEDDINGS_ENABLED:false}
+    paused: ${PLOWSHARE_EMBEDDING_REPAIR_PAUSED:false}
   llm:
-    # One embedding model for the whole archive. Changing it is a re-embed of
+    # Legacy single-embedder compatibility mode: one embedding model for the whole archive. Changing it is a re-embed of
     # every row, not a setting — vectors are comparable only within one model's
     # space, and a question embedded with a different model does not error, it
     # returns nonsense.
@@ -106,54 +68,20 @@ plowshare:
     # drifted, and deleting a key here would have brought a stale one back to
     # life in silence. Removing a key here now stops the boot naming it, which is
     # the report an operator can act on.
-    embedding-model: ${LLM_EMBEDDING_MODEL:nomic-embed-text}
+    embedding-model: ${LLM_EMBEDDING_MODEL:}
     # Must match the vector(n) width in V1__memories.sql. LlmConfig refuses a
     # non-positive value at boot, because embedding-dim: 0 otherwise produces a
     # mismatch message asserting that vector(0) is what the schema holds, which
     # is false — and 0 is what an unbound LlmProperties answers, for the reason
     # above.
     embedding-dim: ${LLM_EMBEDDING_DIM:768}
-    # The largest input, in TOKENS as plowshare.llm.tokenizer counts them, that
-    # may be sent to the embedding endpoint. THE SAME KIND OF THING AS
-    # embedding-model ABOVE: changing it is a re-chunk and a re-embed of every
-    # document, not a setting. Every chunk already stored was cut under the rule
-    # in force when it was written, and a re-ingest will NOT repair one whose
-    # paragraph did not change -- the identity rule keeps that paragraph's chunks
-    # and their vectors on purpose, because that is what makes re-ingesting an
-    # edited document cheap.
-    #
-    # TOKENS, COUNTED BY THE TOKENIZER BEAN. Bytes are not tokens. This key was
-    # embedding-max-input-bytes: 2048, on the argument that no tokenizer emits
-    # more tokens than its input has bytes -- a bound that could not be wrong,
-    # and a quarter of the window for English prose. It refused every 300-word
-    # digest summary the archive wrote (2-3 KB each), so none of them was
-    # embedded. The count is now the one Tokenizer every surface on this server
-    # counts with, and a real tokenizer replacing the ratio heuristic behind
-    # that interface moves this ceiling with nothing else to edit.
-    #
-    # WHY 1536 AND NOT 2048. Measured against the reference node 2026-09-03:
-    # nomic-embed-text reports loaded_context_length 2048 AND max_context_length
-    # 2048, so there is no headroom to be bought by raising this. The shipped
-    # tokenizer ESTIMATES (four characters a token) and an estimate can be low,
-    # so the ceiling sits a quarter under the window: the count can be short by
-    # a third before the endpoint sees more than it holds. Prose is inside that
-    # margin. WHAT IT DOES NOT COVER: text that tokenizes far denser than four
-    # characters a token -- a script without spaces above all, where a real
-    # tokenizer spends about a token a character -- can still be under-counted
-    # past it, and there the endpoint is the only backstop. A measured
-    # tokenizer is what closes that, and this key is where the margin goes back.
-    #
-    # Enforced twice, deliberately. documents.Chunker never emits a chunk over
-    # it, cutting an oversized run at the ceiling and RECORDING the cut on the
-    # row; DispatchingEmbeddingClient refuses any input over it before anything
-    # leaves the process. Both count with the same Tokenizer, so they cannot
-    # disagree about what a chunk costs. The second is the one that matters: a
-    # silently truncated input produces a vector for text that is not the text,
-    # and nothing downstream can tell that from a correct one.
-    #
-    # LlmConfig refuses a non-positive value at boot, for the reason it refuses
-    # a non-positive embedding-dim: zero here is not "no ceiling", it is a
-    # server with the defect this key exists to close.
+    # Legacy embedding input allowance, counted with the model's pinned local tokenizer.
+    # Configure plowshare.llm.embedding-tokenizer.file (absolute tokenizer.json path)
+    # and .sha256 in the deployment overlay. Missing configuration refuses embedding
+    # and document derivation; the chat ratio tokenizer is never an input bound.
+    # Both named embedding slots instead declare their own tokenizer and allowance.
+    # Counts include task prefixes and model special tokens, with no truncation.
+    # Changing tokenizer/allowance requires re-derivation and re-embedding.
     embedding-max-input-tokens: ${LLM_EMBEDDING_MAX_INPUT_TOKENS:1536}
     # What a model's context length is assumed to be when nobody could say what
     # it really is. The bottom of three tiers, and the only one that always
@@ -207,80 +135,17 @@ plowshare:
     # Leave absent to use the existing streaming limits without a fold override.
     # Environment override: PLOWSHARE_LLM_FOLDTIMEOUT.
     # fold-timeout: 10m
-    # WHAT A CLASS NAME MEANS, FOR THE WHOLE SERVER. One class, one wire model.
-    #
-    # This was per pool until 2026-09-07, and per pool a class could mean two
-    # things at once. LlmDispatcher.route resolves a specifier by walking every
-    # pool and taking the LIGHTEST LOADED one that serves it, so two pools
-    # mapping `fast` to different models made the model a function of which box
-    # was busier: the same request answered by qwen or by GLM depending on queue
-    # depth, with nothing logged. That shipped when the Spark pool was added and
-    # was reverted the same day by deleting the second pool's map. One map is the
-    # shape fix — there is no second entry left to disagree with.
-    #
-    # THE KEY WAS BUILT FOR CAPACITY AND STILL DOES THAT. Its old comment said
-    # "the field exists so that adding a second [node] is config" — a second node
-    # serving the SAME model. Two pools both listing the model a class names both
-    # answer that class, because LlmPool.resolve answers for a class only when
-    # the pool serves the model it names, and the dispatcher load-balances
-    # between them. What is gone is one class meaning two models, which nothing
-    # ever wanted.
-    #
-    # context-lengths and compaction-thresholds DID NOT MOVE and are still per
-    # pool. A class is a statement about the fleet; a context length is a
-    # property of THIS NODE SERVING THAT MODEL — two nodes may load one model at
-    # different --ctx-size, and an operator may hold a margin under what a node
-    # reports. Moving those would assert a model has one length wherever it runs.
-    #
-    # LlmConfig REFUSES THE BOOT for a class naming a model no pool serves,
-    # naming the class, the model and every pool it searched. That check is what
-    # the move buys: per pool it was not a statement about anything, so the fault
-    # could only surface at the first request that named the class — and an agent
-    # naming an unserved model is DISABLED rather than refused, so the report was
-    # one quietly missing agent.
-    #
-    # THE PLACEHOLDER IS REPEATED FROM `models` BELOW, DEFAULT AND ALL, and the
-    # two must agree. They did not: 773c063 moved the pool's chat model default
-    # to qwen3.8-27b and left these two at qwen3.5-9b, so a boot with no
-    # LLM_CHAT_MODEL set sent `model: qwen3.5-9b` to a box that did not serve it
-    # and got a 404 at the first turn. Nothing caught it, because the old
-    # per-pool resolve returned whatever the map said without checking the pool
-    # served it. Both halves of that are now closed — the clause in resolve and
-    # the boot refusal above — so this drift cannot recur silently.
+    # One class resolves to one wire model across the fleet. Multiple pools may
+    # serve that same model for capacity; queue depth must not choose between
+    # different models behind one class. Context/capability declarations remain
+    # per pool because endpoints may load the same model differently.
+    # Classes describe model capabilities; they are independent of endpoint or
+    # hardware names. A one-pool deployment uses the same chat model for both.
     classes:
-      # ONE PLACEHOLDER PER MODEL, REFERENCED IN BOTH PLACES IT APPEARS, and
-      # that discipline is not style. Until 2026-09-07 `models` defaulted to
-      # qwen3.8-27b while these two defaulted to qwen3.5-9b -- one placeholder,
-      # two different defaults -- so with LLM_CHAT_MODEL unset every agent named
-      # a model the pool never served and got a 404 on its first turn. Live for
-      # two days, caught by the check below rather than by anyone noticing.
-      # Change a model here and change it in that pool's `models`, or the boot
-      # refuses; the two are meant to be edited together.
-      fast: ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
-      reasoning: ${SPARK_CHAT_MODEL:openai/gpt-oss-120b}
-      # REFUSAL FALLBACK -- a class an agent's `fallback:` can name. Commented,
-      # because a class must be served by a pool below or the boot refuses, and
-      # this jar ships no low-refusal pool. See the example pool at the end of
-      # `pools` for the rest, and bin/application-local.example.yml for the
-      # overlay bin/plowshare-deployment reads so none of this needs editing here.
-      #
-      # low_refusal_osint: ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
-    # WHICH MACHINE RUNS HARNESS WORK. Not a class: `fast` and `reasoning` above
-    # say what kind of thinking an agent's job needs, and a fold needs no kind of
-    # thinking, it needs a machine. This key was introduced because
-    # `plowshare.memory.model` was `fast`, which said "run memory digests
-    # wherever the quick conversational agents run" -- a sentence nobody meant.
-    system: ${SYSTEM_MODEL:openai/gpt-oss-120b}
-    # A TYPE THAT WANTS A DIFFERENT MACHINE, and the reason is measured rather
-    # than felt. implementation rationale
-    # §5.1: the shipped memory prompts on gpt-oss-120b answer NONE where Gemma
-    # finds the branch, take 38s at medium effort to choose one, and write 533
-    # words against their own 300-word limit. A fold is long-form summarising
-    # and wants the large model; a digest is terse and instruction-bound and
-    # does not.
-    #
-    # Commented at their default of "inherit", like the pool keys below: a key
-    # an operator cannot see is a key they will guess at.
+      fast: ${LLM_CHAT_MODEL:}
+      reasoning: ${LLM_CHAT_MODEL:}
+    # Harness calls resolve a model/class through the same declared fleet.
+    system: ${SYSTEM_MODEL:reasoning}
     system-overrides:
       memory: ${SYSTEM_MEMORY_MODEL:fast}
       # Required orchestration builder (orchestrations/design_orchestration.md).
@@ -308,422 +173,23 @@ plowshare:
       # run in, so name one you would send those to.
       judge: ${SYSTEM_JUDGE_MODEL:}
     #   compaction: <specifier>
-    # One pool per inference host. A second machine is a second entry here and
-    # no code change. LLM_BASE_URL keeps the name Anchor already uses, so an
-    # operator who configured one box does not learn a second vocabulary.
-    #
-    # A pool cannot be overridden key by key. A property source of higher
-    # precedence that names any key inside pools[0] replaces the whole list
-    # entry rather than merging with it, and the half it discards is not
-    # reported — measured, including a variant where a restated pool lost its
-    # then-per-pool classes map in silence. (That map has since moved to
-    # plowshare.llm.classes above, which is a top-level key and so is not subject
-    # to this; the measurement is kept because it is about list entries and every
-    # remaining pool key is one.) The placeholders below are therefore the
-    # supported override: the host, the models, the key and the width are
-    # placeholders, and this YAML stays the sole source of the pool itself. The
-    # slot counts below are not, deliberately — they are a property of the box
-    # rather than of a deployment, and a second box is a second entry here in any
-    # case, since a pool cannot be assembled from an environment variable.
+    # Generic single-endpoint configuration. No URL, model ID or hardware
+    # capability is assumed. Supply LLM_* explicitly, or replace this entire
+    # list through a Spring configuration overlay. Spring replaces lists rather
+    # than merging individual entries; declare every pool you intend to serve.
+    # Capacity defaults are conservative bounds, not measured hardware capacity.
     pools:
-      # NAMED FOR THE BOX, NOT FOR WHERE THE BOX IS. This was `local` until
-      # 2026-09-07, which is a property of a pool wearing its name: two local
-      # instances can exist, and both of this fleet's nodes are on the operator's
-      # own network, so calling one of them `local` implied the other was not.
-      # `spark` below was named after its hardware from the start, and that is
-      # what made its neighbour's name visible as wrong. This box is a Mac
-      # Studio.
-      #
-      # AND THE WORD WAS ALREADY TAKEN, for something that earns it:
-      # LocalProvider.NAME is "local", naming the FILE provider — the server's
-      # own disk as against a client machine's. That is a real binary with two
-      # values and no third, so `local` there is a name for a kind rather than a
-      # property, and one string meaning two unrelated things in two subsystems
-      # is what a grep cannot tell apart.
-      #
-      # `name: studio` sits two lines above `provider: lmstudio`, which reads as
-      # a collision and is the point: the box and the software it happens to run
-      # are different things, and having both on screen is what makes that
-      # legible. It must not be named for the provider — `lmstudio` would be the
-      # same category error a third time, coupling an identity to software that
-      # can change without the box changing. An operator who would rather not
-      # rely on a reader noticing should use `mac`, at the cost of the parallel
-      # with `spark`.
-      #
-      # Nothing branches on a pool's name. It reaches logs, the dispatcher's boot
-      # line and refusal messages, so a rename is operator-visible and no more —
-      # and LLM_BASE_URL is not pool-named, so a deployment setting it is
-      # unaffected.
-      - name: studio
-        base-url: ${LLM_BASE_URL:http://localhost:1234/v1}
-        # Env-var form, never a literal. A key committed in YAML is how keys leak.
-        api-key: ${LM_STUDIO_API_KEY:}
-        # Whether a caller that asks for prompt-processing progress may get it
-        # from LM Studio's own websocket API instead of /v1. Off, and /v1 stays
-        # the path every call takes until an operator says otherwise.
-        #
-        # Only /v1 is the contract every backend honours, so this is opt-in per
-        # pool and meaningless unless provider is lmstudio. What it buys is the
-        # one figure /v1 has no field for: measured 2026-09-02 against the
-        # reference box, a novel 30 415-token prompt took 119 seconds before its
-        # first token, and over /v1 that is 119 seconds in which a run shows
-        # nothing at all. The same request over the websocket reports progress
-        # throughout. The same api-key above authenticates both.
-        prefill-progress: ${LM_STUDIO_PREFILL_PROGRESS:false}
-        # Verified against `GET /v1/models` on the reference box 2026-08-29:
-        # it serves exactly these two ids, and a single-input /v1/embeddings
-        # call returned a 768-wide vector, matching embedding-dim and the
-        # vector(768) column in V1__memories.sql. This is worth re-checking
-        # whenever the box's loaded models change: a wire model name is matched
-        # exactly by the endpoint, and a name the server does not know fails at
-        # the call rather than at startup — where the write path swallows it,
-        # so the symptom is an archive that stores everything and embeds
-        # nothing rather than an error.
-        #
-        # The first entry repeats embedding-model's own placeholder rather than
-        # the literal: a pool only serves what it lists, so an operator who
-        # exports LLM_EMBEDDING_MODEL and finds nothing routes to it has a
-        # configuration puzzle with two halves that must agree. Repeating the
-        # expression makes them agree by construction — and where they still do
-        # not, LlmConfig refuses the boot instead of leaving every memory
-        # unembedded and every recall empty.
+      - name: ${LLM_POOL_NAME:primary}
+        base-url: ${LLM_BASE_URL:}
+        api-key: ${LLM_API_KEY:}
+        provider: ${LLM_PROVIDER:openai}
         models:
-          - ${LLM_EMBEDDING_MODEL:nomic-embed-text}
-          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
-        # WHICH OF THIS POOL'S MODELS CAN BE SHOWN A PICTURE.
-        #
-        # Declared and not discovered, because /v1 has no field to read it from
-        # -- the same reason `context-lengths` is written out for a pool whose
-        # provider cannot be asked. LM Studio's own /api/v0/models does say
-        # `type: vlm`, but that is a vendor endpoint one provider has and the
-        # rule has to hold for all of them.
-        #
-        # MEASURED 2026-09-07 before it was written here: a 64x64 PNG through
-        # the OpenAI image_url shape came back "A red square is in the image."
-        # in 3.0s. Audio was measured the same day and does NOT work -- the
-        # model's 751-tensor audio tower is loaded and LM Studio exposes no door
-        # to it, so `vision` is the whole of what this pool can be shown.
-        vision:
-          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
-        # Which backend this is, and therefore what may be asked of it beyond
-        # /v1. It changes no chat and no embedding call: those go to /v1 either
-        # way, because that is the contract every backend honours.
-        #
-        # The reference box runs LM Studio, which publishes a fact /v1 has no
-        # field for — how many tokens each model is currently LOADED at, which
-        # is not the same as what the model is capable of. Verified against
-        # `GET /api/v0/models` on 2026-08-31: qwen3.5-9b reports
-        # max_context_length 262144 and loaded_context_length 128000. Building a
-        # prompt to the first is valid for the model and refused by the server
-        # running it.
-        #
-        # THAT MEASUREMENT IS ABOUT A MODEL THAT IS NO LONGER THE DEFAULT --
-        # 773c063 moved the chat default to qwen3.8-27b on 2026-09-06 and this
-        # paragraph was not revisited. It is kept rather than restated for the
-        # current model, and deliberately: what it is evidence for is that the
-        # two numbers DIFFER, by a factor of two on a real box, which is the
-        # whole reason `provider` is worth declaring. Re-measuring against
-        # qwen3.8-27b would produce a different pair of numbers and the same
-        # argument, and a figure nobody re-checks is worse read as current than
-        # read as dated. Treat both numbers as historical; the ratio is the point.
-        #
-        # Set this to `openai` if LLM_BASE_URL is retargeted at anything that is
-        # not LM Studio. Left as lmstudio, that endpoint 404s the vendor path
-        # and the pool logs one warning and carries on with no length — nothing
-        # else changes, but the warning is there to be acted on.
-        provider: ${LLM_PROVIDER:lmstudio}
-        # A context length an operator has decided rather than left to be
-        # discovered, keyed by wire model name. A configured value WINS over a
-        # discovered one, on purpose: an operator holding a margin under what
-        # the node reports is doing it deliberately. Where neither answers,
-        # LlmConfig names the pool and the model at boot — a warning, not a
-        # refusal, because a model name the server does not know is meant to
-        # fail at the call rather than at startup.
-        #
-        # Commented at its default of "nothing", like the keys below. Both
-        # spellings of a dotted key bind — measured on Spring Boot 3.3.5 — and
-        # the bracketed one is shown because it is explicit about where the key
-        # ends.
-        # Optional working-context cap for slower hardware. The effective ceiling
-        # is min(model capacity, this maximum); a larger maximum never raises it.
-        # When capacity is unknown, this caps default-context-length instead.
-        # max-context-lengths:
-        #   "[mlx-community/gemma-4-e4b-it]": 64000
-        # context-lengths:
-        #   "[qwen3.5-9b]": 128000
-        # The prompt size, in tokens, at which a fold of a conversation on this
-        # model becomes DUE: its older turns are folded into a summary when the
-        # turn ends, if the conversation is still over this then. Keyed by wire
-        # model, like the key above, and a configured value wins over the
-        # default the same way.
-        #
-        # The default follows the context length the model turns out to be
-        # loaded at (implementation rationale
-        # §1a): NONE at 64K or less, which cannot spare room to an early fold;
-        # 60% just above 64K, rising linearly to 75% at 200K and staying there —
-        # 87 895 tokens on a 131 072 window. It is not the wall, and folding at
-        # the wall is what this replaced: measured 2026-09-02, a turn costs
-        # roughly 0.845 s more for every further thousand tokens of history it
-        # carries. See implementation rationale
-        #
-        # Those are one model's curves on one box. Set this if you serve
-        # something else, or the same thing on faster hardware. Lower folds more
-        # often, which is cheaper per turn and loses more to summarising; it may
-        # not pass the model's context length, and must stay below the in-turn
-        # threshold below — the boot refuses either wherever it can see both.
-        # compaction-thresholds:
-        #   "[qwen3.5-9b]": 40000
-        # The prompt size, in tokens, at which a conversation on this model folds
-        # NOW, inside a turn: at the next tool-call boundary, before the next
-        # model call, keeping the turn's request and its latest whole steps. A
-        # single turn of a hundred model calls can outgrow the window before it
-        # ends, which is why this exists. The default is 90% at 64K or less,
-        # falling linearly to 80% at 128K and 80% beyond; a configured value must
-        # be above compaction-thresholds and within the context length.
-        # compaction-now-thresholds:
-        #   "[qwen3.5-9b]": 100000
-        # NO `classes` HERE, AND SETTING ONE STOPS THE BOOT. The key is
-        # plowshare.llm.classes, above, one map for the server. LlmConfig refuses
-        # a pool that still declares it, naming this pool and the new location,
-        # rather than ignoring it — an operator who upgraded without moving the
-        # key would otherwise get a server whose classes resolve to nothing and
-        # whose configuration still looks correct.
-        #
-        # The reference box generates one stream at a time and will embed while
-        # it does. This is the whole reason the dispatcher exists.
-        #
-        # Written out rather than left to the defaults, unlike the keys below:
-        # LlmConfig refuses a lane sized to zero, and an operator who wants a
-        # lane switched off has to be able to see the key before they can be
-        # told that removing the pool is what does it.
-        chat: 1
-        embedding: 2
+          - ${LLM_CHAT_MODEL:}
+          - ${LLM_EMBEDDING_MODEL:}
+        chat: ${LLM_CHAT_SLOTS:1}
+        embedding: ${LLM_EMBEDDING_SLOTS:1}
+        swarm: ${LLM_SWARM_SLOTS:0}
         submit-timeout: 30s
-        # The rest of a pool, commented at its default rather than set, because
-        # a key an operator cannot see is a key they will guess at.
-        #
-        # Every duration in this pool, submit-timeout above included, takes a
-        # bare number as SECONDS, except retry-initial-backoff, which takes
-        # MILLISECONDS — it keeps the unit of
-        # the retry-initial-backoff-ms key it replaced, so a value carried
-        # across still means what it meant. Writing the unit works everywhere
-        # and always wins; prefer it. See PoolProperties for the whole account.
-        #
-        # chat-timeout bounds the model calls that still block — the scribe
-        # and the schedule reader. Compaction and every turn an
-        # agent takes is streamed, because a model that thinks for 96 seconds
-        # blows a 60-second wait on an answer that arrives all at once. Raising
-        # this will not help a turn; see PoolProperties#chatTimeout.
-        #
-        # max-stream-duration is not a second spelling of streaming-timeout.
-        # That one is inactivity between chunks; this one is the whole of a
-        # streaming call, and it is the only total bound a stream has, because
-        # okhttp-sse switches the call timeout off once the response opens. An
-        # endpoint emitting one keepalive byte a minute never trips the
-        # inactivity bound at all.
-        #
-        # streaming-timeout bounds the silence BEFORE the first chunk as well as
-        # the gaps between chunks, and the first one is the expensive one: the
-        # node reads the whole prompt before it emits anything and that prefill
-        # is silent. It was 90s, chosen against inter-chunk gaps before any
-        # prefill had been measured; a 30 415-token prompt then prefilled for
-        # 119 seconds and blew it. 300s clears that with margin and covers a
-        # prompt of roughly 76 700 tokens at the rate it implies — not the
-        # 128 000 this pool's chat model is loaded at, which would need about
-        # 500s. See PoolProperties#streamingTimeout for why the answer to that
-        # is not simply a larger number here.
-        #
-        # LlmConfig refuses the boot, naming the pool and the key, for a
-        # non-positive value of any of the first five (retry-max-attempts must
-        # be at least 1, meaning one attempt and no retry) — and for a NEGATIVE
-        # retry-initial-backoff, where 0ms is a real setting meaning "retry with
-        # no pause". (This said "none of the six may be zero", which told an
-        # operator a value was refused that the code's own error message
-        # recommends.) Zero is worth calling out because
-        # OkHttp reads it as "no timeout" and that is not what it does here: a
-        # chat-timeout of 0 falls back to the transport's own twenty-second
-        # ceiling, which is SHORTER than the sixty it replaced, and a
-        # streaming-timeout of 0 loses every bound except max-stream-duration.
-        # Before that check, a negative value failed the boot as OkHttp's
-        # "timeout < 0" — three words naming neither the pool nor the key.
-        # chat-timeout: 60s
-        # streaming-timeout: 300s
-        # max-stream-duration: 10m
-        # embedding-timeout: 30s
-        # retry-max-attempts: 2
-        # retry-initial-backoff: 500ms
-  # Where an operator's agent definitions live: a directory of .md files with
-  # YAML frontmatter, one per agent. A filesystem path and never a classpath
-  # location, because an agent is configuration rather than code — changing a
-  # prompt is not a rebuild — and because the definitions this repository ships
-  # are inside the jar at run time, where nothing can list them as a Path.
-  #
-  # `agents`, relative to the process's working directory, is the default. There
-  # is no absolute path that is right on two machines, and a server started with
-  # no key at all should still pick up a directory dropped beside it.
-  #
-  # Seed it from plowshare-server/src/main/resources/agents, which holds the
-  # scribe and the promotion judge this server is built around. They are
-  # reference copies: edit yours, not those.
-  #
-  # The asymmetry is deliberate and is the spec's. A directory that IS NOT THERE
-  # starts the server — no scribe judges anything, every write is filed as new
-  # and says so in its own reason, and a write is never lost over an agent
-  # nobody deployed. A directory that IS there and is wrong STOPS the boot
-  # naming the file and the key: a cycle, an unknown tool, an unknown callee, a
-  # model no pool serves. A path that exists and is not a directory also stops
-  # the boot, because that is a typo rather than a decision.
-
-      # THE SECOND HOST, AND SINCE 2026-09-09 A ROUTED ONE.
-      #
-      # A DGX Spark serving vLLM over plain /v1. It was declared and deliberately
-      # not routed to -- no agent and no class named its model, so declaring it
-      # cost a provider at boot and nothing else. `plowshare.llm.classes` now
-      # maps `reasoning` onto the model below, so work does reach it, and the
-      # paragraph that used to say otherwise was stale rather than wrong when
-      # written.
-      #
-      # That split is deliberate rather than timid. `requireModelServed`
-      # DISABLES an agent naming a model no pool serves -- it only refuses the
-      # boot for the three required agents -- so pointing an agent here before
-      # the node actually serves this model would not fail loudly. It would
-      # come back as one quietly missing agent.
-      #
-      # PROVIDER openai AND NOT lmstudio. The LM Studio decorator exists for the
-      # facts /v1 has no field for, read over its own /api/v0. vLLM serves /v1
-      # and nothing else, so the plain provider is the whole of what is true
-      # here -- and `canDiscover()` is false for it, which is why the next key
-      # is written out rather than left to be found. vLLM does report
-      # max_model_len on /v1/models, which the plain provider does not read; the
-      # key below is therefore hand-kept and checkable against that field.
-      #
-      # WHY context-lengths IS SET. Without it
-      # `warnAboutUnknownContextLengths` names this model at every boot and
-      # compaction falls back to default-context-length, 64000 -- half of what
-      # this node serves, so folds would start far earlier than they need to.
-      #
-      # THE NUMBER IS THE SERVED WINDOW, NOT THE MODEL'S MAXIMUM. Under
-      # llama.cpp that was the sharper warning, because --ctx-size is divided
-      # across --parallel slots and raising concurrency silently shrank it. vLLM
-      # does not: --max-model-len is per request and concurrency draws on a
-      # shared KV cache instead. So this survives `chat` being raised -- what it
-      # does not survive is --max-model-len being lowered to fit the cache, which
-      # is the one change that makes this line a lie without announcing itself.
-      #
-      # THE WIRE NAME IS LOAD-BEARING. `SamplingProfiles` matches a family by
-      # startsWith after stripping a `vendor/` prefix, so `openai/gpt-oss-120b`
-      # reaches the shipped `gpt-oss` profile. A name that matches nothing
-      # resolves to the default profile and never says so -- the failure is
-      # silent and looks like the model being bad.
-      #
-      # vLLM reports the HuggingFace repo id it was launched with, which is
-      # already the name above; --served-model-name overrides it and must then
-      # match this key, `classes.reasoning` and `context-lengths` together. Under
-      # llama.cpp the same hazard was the GGUF's absolute path, fixed with
-      # --alias; the flag differs, the rule does not.
-      - name: spark
-        # llama.cpp's own default port, on loopback. THE ADDRESS OF A REAL NODE
-        # IS NEVER THE SHIPPED DEFAULT: it would put one deployment's network
-        # into everyone's jar, and a test context inheriting it would dial a
-        # live machine. An operator points this at the box, exactly as
-        # LLM_BASE_URL already does for `studio`.
-        base-url: ${SPARK_BASE_URL:http://localhost:30000/v1}
-        api-key: ${SPARK_API_KEY:}
-        models:
-          - ${SPARK_CHAT_MODEL:openai/gpt-oss-120b}
-        provider: openai
-        # THIS POOL IS REACHED BY MODEL NAME, AND NOTHING ELSE REACHES IT.
-        #
-        # A first draft mapped `fast` and `reasoning` on this pool as well, back
-        # when `classes` was a per-pool key. That is the bug the key was moved
-        # for: `LlmDispatcher.route` resolves a specifier by walking every pool
-        # and taking the LIGHTEST LOADED one that serves it, so `studio` and
-        # `spark` both answering to `fast` meant the request landed on qwen or on
-        # GLM depending on which node happened to be busier -- two models behind
-        # one name, chosen by load.
-        #
-        # It is no longer expressible. `fast` names one model server-wide, and a
-        # pool answers for a class only when it serves the model that class
-        # names -- so this pool would answer `fast` only by listing qwen, which
-        # would be a second node serving the SAME model and is exactly the
-        # capacity case the key exists for.
-        #
-        # So: this pool's model is served by exactly one pool, naming it routes
-        # here and nowhere else. `fast` resolves to `studio`; `reasoning` now
-        # resolves here, which is the sentence at the top of this block. An agent
-        # that wants this model can also say so by name.
-        # THE THIRD PLACE THE MODEL NAME APPEARS, and the one that does not
-        # follow the placeholder. `classes.reasoning` and `models` above are both
-        # ${SPARK_CHAT_MODEL}, so they move together; a map KEY cannot be a
-        # placeholder, so this one is a literal and must be edited by hand.
-        #
-        # That is not a latent trap, because the boot refuses the mismatch by
-        # name -- "pool 'spark' sets a context-length for X, which it does not
-        # serve" -- which is how this very line was found after the node changed
-        # models. The discipline note on `classes` says "both places it appears";
-        # it is three, and this is the third.
-        context-lengths:
-          "[openai/gpt-oss-120b]": 131072
-        # EIGHT, and not `studio`'s one. vLLM batches continuously: concurrent
-        # requests share one KV cache rather than each taking a slice of the
-        # context, so parallelism here costs throughput headroom and not window.
-        # That is the whole difference from the llama.cpp note above, and it is
-        # why this number can be raised at all.
-        #
-        # It is a ceiling on what THIS server keeps in flight, not a promise the
-        # node can serve them: vLLM queues past --max-num-seqs, so a number above
-        # that buys latency and no throughput. No embedding lane: this node
-        # serves one completion model and LlmConfig refuses a lane sized to
-        # zero, so the key is absent rather than set to 0.
-        chat: 8
-        # SWARM SLOTS -- omitted defaults to half of `chat`, rounded down: four
-        # of these eight slots. Other runs share the remaining capacity.
-        # Set `swarm: N` to override (0 disables swarm work); a positive ceiling
-        # must stay below `chat`. A one-chat-slot pool defaults to no swarm work.
-        submit-timeout: 30s
-
-      # ---- REFUSAL FALLBACK: an example, commented ----------------------------
-      #
-      # An agent can have a probable refusal from its own model answered by a
-      # different model. Three pieces, and all three are needed:
-      #
-      #   1. A POOL that serves the low-refusal model. Any OpenAI-compatible
-      #      endpoint -- the Spark, a Mac, another server; nothing about an agent
-      #      depends on which.
-      #
-      #      - name: refusal-fallback
-      #        base-url: ${FALLBACK_BASE_URL:http://localhost:8001/v1}
-      #        api-key: ${FALLBACK_API_KEY:}
-      #        models:
-      #          - ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
-      #        provider: openai
-      #        chat: 2
-      #        submit-timeout: 30s
-      #
-      #   2. A CLASS naming that model -- the commented `low_refusal_osint` line
-      #      under plowshare.llm.classes above.
-      #
-      #   3. An AGENT that is allowed to use it. Refusals are only rerouted for an
-      #      agent whose definition says so; detection alone reroutes nothing.
-      #      In the agent's .md frontmatter (for an operator's own agents,
-      #      $PLOWSHARE_DATA_DIR/global/agents/<name>.md):
-      #
-      #        fallback:
-      #          when: [refusal]          # `when`, not `on`: YAML reads `on` as true
-      #          model: low_refusal_osint # a class above, or a wire model
-      #          max-attempts: 1          # the only value accepted
-      #
-      # Uncommenting here works, but a pool list cannot be extended key by key
-      # (see the note above `pools`), so a deployment is better served by the
-      # overlay: copy bin/application-local.example.yml to
-      # ~/.config/plowshare/application-local.yml and start with
-      # bin/plowshare-deployment, which hands it to Spring as an additional
-      # config location.
-      #
-      # WHAT HAPPENS WITHOUT IT. An agent whose fallback class no pool serves
-      # boots with its fallback dropped and a warning, and behaves as it would
-      # with none. A fallback that is configured but unreachable leaves the
-      # agent's own answer standing. Neither stops a run.
 
   agents:
     # `directory` retired with task 10: it named a standalone filesystem path
@@ -1060,6 +526,31 @@ plowshare:
     # How often due schedules are looked for. LIVE -- see EventsProperties. A fire
     # time is honoured to within this. ISO-8601, as every live duration is.
     tick-interval: ${PLOWSHARE_EVENTS_TICK_INTERVAL:PT15S}
+  relay:
+    # Built-in source/wake adapters derive authority from their owning rows.
+    internal-enabled: ${PLOWSHARE_RELAY_INTERNAL_ENABLED:true}
+    # Optional explicit server-topic retention overrides; project policies live in Relay/topics.json.
+    system-topics: []
+    # Explicit worker project/account bindings enable independent automatic subscriptions.
+    workers:
+      projects: []
+      configuration-interval: ${PLOWSHARE_RELAY_WORKER_CONFIGURATION_INTERVAL:PT30S}
+      idle-interval: ${PLOWSHARE_RELAY_WORKER_IDLE_INTERVAL:PT5S}
+      failure-backoff: ${PLOWSHARE_RELAY_WORKER_FAILURE_BACKOFF:PT30S}
+      max-workers: ${PLOWSHARE_RELAY_MAX_WORKERS:256}
+      concurrency: ${PLOWSHARE_RELAY_WORKER_CONCURRENCY:8}
+      batch-size: ${PLOWSHARE_RELAY_WORKER_BATCH_SIZE:8}
+    # Existing event/message execution remains with its owning runtime.
+    # Bound automatic topic-forwarding cycles; missing retained ancestry refuses another hop.
+    max-forwarding-hops: ${PLOWSHARE_RELAY_MAX_FORWARDING_HOPS:8}
+    cleanup-enabled: ${PLOWSHARE_RELAY_CLEANUP_ENABLED:true}
+    cleanup-interval: ${PLOWSHARE_RELAY_CLEANUP_INTERVAL:PT1M}
+    topic-batch-size: ${PLOWSHARE_RELAY_TOPIC_BATCH_SIZE:100}
+    publication-batch-size: ${PLOWSHARE_RELAY_PUBLICATION_BATCH_SIZE:1000}
+    # Claim recovery never replays prepared dispatch; settled inputs have separate retention.
+    delivery-batch-size: ${PLOWSHARE_RELAY_DELIVERY_BATCH_SIZE:1000}
+    settled-retention: ${PLOWSHARE_RELAY_SETTLED_RETENTION:P30D}
+    operator-retention: ${PLOWSHARE_RELAY_OPERATOR_RETENTION:P90D}
   messaging:
     personal:
       # Personal is identified by persisted account ownership, not its display label.
@@ -1106,14 +597,10 @@ plowshare:
   # unrelated directories, each defaulting to something relative, which is a
   # layout only in the sense that a pile is one.
   #
-  # `data`, relative to the working directory, is the default, and it is set by
-  # PlowshareServerApplication.main rather than here. A value in this file is a
-  # value EVERY TEST READS TOO, and this repository stands dozens of Spring
-  # contexts up against a real database -- each of them would create and mark a
-  # data directory beside whichever module it ran in. It is the same reason
-  # plowshare.auth.token-file is not in this file either. Set PLOWSHARE_DATA_DIR
-  # or --plowshare.data.dir=... to move it; both outrank main's default. Set
-  # PLOWSHARE_DATA_DIR to nothing and this server keeps no files at all.
+  # Set PLOWSHARE_DATA_DIR or --plowshare.data.dir explicitly. The entrypoint
+  # chooses no directory. Embedded contexts may leave it blank to avoid local
+  # filesystem side effects; deployments using persistent resources or initial
+  # account setup must provide their owned data tree.
   #
   # ON FIRST START the tree is created and layout.properties written into it. A
   # directory that already holds files and has no marker STOPS THE BOOT rather
@@ -1127,12 +614,9 @@ plowshare:
   # exactly how the export directory came to be outside the fence for as long as
   # it was.
   #
-  # WHAT IS NOT IN IT. The operator token stays at
-  # ~/.config/plowshare/console-token because PlowshareClient.consoleTokenFile()
-  # HARDCODES that path: it is a contract between two binaries, not server state,
-  # and moving it breaks the CLI. The configuration file and the working
-  # directory are fence parameters -- paths this server never uses and only
-  # protects. The sampling directory is named by its own key above and has not
+  # The operator credential output, configuration file and working directory
+  # have explicitly configured paths and their own fences. The sampling
+  # directory is named by its own key above and has not
   # moved. Agent and bot definitions are not a fence parameter here at all any
   # more: they live inside this tree, at global/agents/ and global/bots/, so
   # naming this root already covers them.
@@ -1210,27 +694,10 @@ plowshare:
   # creates the first administrator. Startup operator tokens are not issued in
   # that mode. The token description below applies to explicit legacy opt-out.
   #
-  # THAT WINDOW IS CLOSED, and this paragraph is the sweep. It said turning the
-  # gate off was the only way to use this server, because between the commit
-  # that added the filter and the commit that added POST /v1/auth nothing could
-  # mint a credential over HTTP. Both now exist. A server started with this key
-  # at its default prints one line when it comes up —
-  #
-  #     Plowshare console: http://127.0.0.1:8091/?token=<48 hex chars>
-  #
-  # — which is the browser's way in, single-use, and writes a second, long-lived
-  # operator token to ~/.config/plowshare/console-token at mode 600, which is
-  # the CLI's. `plowshare` and the MCP client read that file with no flag and no
-  # export; PLOWSHARE_TOKEN overrides it for a server on another machine.
-  #
-  # WHERE THAT FILE GOES IS DELIBERATELY NOT A KEY IN THIS BLOCK. It is
-  # plowshare.auth.token-file, and PlowshareServerApplication.main sets it as a
-  # default property instead — a value here would be read by every test as well,
-  # and each @SpringBootTest would then overwrite the live credential of
-  # whatever server the operator is actually using. Set it on the command line
-  # (--plowshare.auth.token-file=...) or as PLOWSHARE_AUTH_TOKEN_FILE to move
-  # it; both outrank main's default. AuthProperties.getTokenFile carries the
-  # argument.
+  # Operator-token handoff is opt-in through plowshare.auth.token-file
+  # (PLOWSHARE_AUTH_TOKEN_FILE). Configure plowshare.auth.console-origin too.
+  # The protected file holds the operator token and bootstrap URL; logs carry
+  # only the origin. The entrypoint chooses no local path or advertised address.
   #
   # The lifetimes are the design's, and they are also AuthProperties' own
   # defaults. Written out here rather than left implicit, for the reason the
@@ -1259,11 +726,7 @@ plowshare:
     # argument.
     login-max-failures: ${PLOWSHARE_LOGIN_MAX_FAILURES:5}
     login-lockout: ${PLOWSHARE_LOGIN_LOCKOUT:15m}
-    # The one admin account's login name, and it is safe to default here in a
-    # way token-file above is not. That key's "off" value is a real path with
-    # a side effect if written naively, so it is set only by
-    # PlowshareServerApplication.main, which a test context never calls. This
-    # key's "off" value is the empty string below, which is safe to read in
+    # Optional pre-provisioned administrator name. Empty is safe to read in
     # every context including a test's. With first-run-setup enabled a blank
     # handle selects temporary account setup; otherwise AdminSeed treats it
     # as "no admin has been asked for yet" and does nothing at all — no
@@ -1289,27 +752,17 @@ plowshare:
   # spellings of one bound that had to agree is the drift embedding-model's own
   # comment is written about.
   documents:
-    # What chunk packing aims at, in TOKENS as plowshare.llm.tokenizer counts
+    # What chunk packing aims at, in TOKENS as the embedding tokenizers count
     # them -- the same tokenizer the ceiling is counted with. A target and not
     # the ceiling: whole sentences are added while they fit under this, and one
     # that would not fit starts the next chunk. DocumentsConfig refuses a target
     # above the ceiling at boot, and Chunking refuses the same pair wherever one
     # is made.
     #
-    # LIKE THE CEILING, CHANGING THIS IS A RE-CHUNK AND A RE-EMBED OF THE
-    # CORPUS, NOT A SETTING. Every stored chunk was packed under the rule in
-    # force when it was written, and re-ingesting will NOT repair one whose
-    # paragraph did not change -- the identity rule keeps an unchanged
-    # paragraph's chunks and their vectors on purpose, because that is what
-    # makes re-ingesting an edited document cheap.
-    #
-    # 400 because it is where the byte target sat: this key was
-    # chunk-target-bytes: 1600, and 1600 characters of prose at the shipped
-    # four characters a token is 400. So a chunk packed out of prose is the size
-    # it always was and a changed paragraph re-chunks to what its neighbours
-    # already are. What moved is the ceiling, which only an oversized run
-    # reaches. How big a chunk should be for retrieval is its own question, and
-    # this number has not been measured against one.
+    # Changing the target or tokenizer requires new derivations from retained source.
+    # Existing information revisions preserve their historical chunks. Embedding-only
+    # rebuilds refuse old chunks that exceed the new encoder's input allowance.
+    # 400 is an initial retrieval tuning choice, not a model context limit.
     chunk-target-tokens: ${PLOWSHARE_CHUNK_TARGET_TOKENS:400}
     # How many chunks go to the embedding endpoint in one request.
     #

@@ -184,10 +184,11 @@ class StructuredQuestionsTest {
   void a_structure_round_trips_and_ignores_fields_it_does_not_know() throws Exception {
     Asked asked = new Asked("Two things first.", StructuredQuestions.read(json(STORE)));
 
-    String stored = StructuredQuestions.structure(asked);
+    var stored = StructuredQuestions.structure(asked);
     assertEquals(asked, StructuredQuestions.parse(stored));
 
-    String withMore = stored.substring(0, stored.length() - 1) + ",\"sha256\":\"sha256:ab\"}";
+    String wire = io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.encode(stored);
+    String withMore = wire.substring(0, wire.length() - 1) + ",\"sha256\":\"sha256:ab\"}";
     assertEquals(asked, StructuredQuestions.parse(withMore));
     assertNull(asked.questions().get(0).options().get(0).preview());
   }

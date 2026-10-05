@@ -21,8 +21,8 @@
     "test": "node --test build-tests/*.test.js"
   },
   "dependencies": {
-    "plowshare-client-ts": "link:../plowshare-client-ts",
-    "plowshare-client-node": "link:../plowshare-client-node"
+    "plowshare-client-ts": "link:../sdk/typescript",
+    "plowshare-client-node": "link:../sdk/node"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

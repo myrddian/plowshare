@@ -13,12 +13,9 @@ import java.util.Map;
  *
  * <h2>Why the frames live here</h2>
  *
- * <p>{@code plowshare-server} writes them and {@code plowshare-client} reads them, and the client
- * must not depend on the server. Hand-writing the same JSON on both sides was the alternative —
- * {@code ServerClient.IndexEntry} does it that way for the HTTP surface and its javadoc says the
- * shared type would be better — and it fails silently here in a way it does not there: a server
- * sending {@code "path"} to a client reading {@code "file"} refuses every request with a message
- * about a missing path, and the two halves ship separately.
+ * <p>The Java server sends these frames to the Node platform provider. TypeScript request decoders
+ * mirror this contract; cross-runtime tests check path fencing, source bytes and bounded text
+ * windows. The provider has no server implementation dependency.
  *
  * <h2>The fields not every op uses are null, and that is the shape</h2>
  *
@@ -503,6 +500,31 @@ public record FileRequest(
         needle,
         ignoreCase,
         DEFINITIONS,
+        replacing,
+        to,
+        createOnly,
+        argv,
+        env,
+        inherit,
+        timeoutMillis,
+        outputBytes,
+        shells,
+        stdin);
+  }
+
+  /** Harness-only access to project schedule JSON, including authenticated file mutations. */
+  public FileRequest forSchedules() {
+    return new FileRequest(
+        id,
+        op,
+        path,
+        pattern,
+        content,
+        offset,
+        limit,
+        needle,
+        ignoreCase,
+        "schedules",
         replacing,
         to,
         createOnly,

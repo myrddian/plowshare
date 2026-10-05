@@ -152,7 +152,7 @@ class ResultToolsTest {
 
     assertEquals(ResultTools.READ_NAME, tool.schema().name());
     assertTrue(tool.schema().description().contains("handle"), tool.schema().description());
-    assertNotNull(tool.schema().parameters().get("properties"));
+    assertNotNull(tool.schema().parameters().properties());
   }
 
   /**
@@ -444,7 +444,7 @@ class ResultToolsTest {
     assertEquals(ResultTools.LIST_NAME, tool.schema().name());
     assertTrue(
         tool.schema().description().contains(ResultTools.READ_NAME), tool.schema().description());
-    assertNotNull(tool.schema().parameters().get("properties"));
+    assertNotNull(tool.schema().parameters().properties());
   }
 
   /**

@@ -1,7 +1,7 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join, relative, sep } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, relative, sep } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
 /**
  * The edges of this module, stated as a property of its source.
@@ -142,9 +142,9 @@ import { describe, expect, it } from 'vitest'
  * half exists for, reproduced, rather than asserted.
  */
 
-const SRC = dirname(fileURLToPath(import.meta.url))
-const LOGIC = join(SRC, 'logic')
-const BINDING = join(SRC, '..', '..', 'plowshare-client-ts', 'src', 'binding')
+const SRC = dirname(fileURLToPath(import.meta.url));
+const LOGIC = join(SRC, 'logic');
+const BINDING = join(SRC, '..', '..', 'sdk', 'typescript', 'src', 'binding');
 
 /**
  * Every non-test `.ts` file under a directory: what these guards read.
@@ -167,13 +167,15 @@ const BINDING = join(SRC, '..', '..', 'plowshare-client-ts', 'src', 'binding')
  * shipped and never adopted.
  */
 function sourcesUnder(directory: string): string[] {
-    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-        const full = join(directory, entry.name)
-        if (entry.isDirectory()) {
-            return sourcesUnder(full)
-        }
-        return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [full] : []
-    })
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return sourcesUnder(full);
+    }
+    return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')
+      ? [full]
+      : [];
+  });
 }
 
 /**
@@ -192,18 +194,18 @@ function sourcesUnder(directory: string): string[] {
  * said so when this was written.
  */
 function withoutComments(source: string): string {
-    return source
-        .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ' '))
-        .replace(/\/\/.*$/gm, '')
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ' '))
+    .replace(/\/\/.*$/gm, '');
 }
 
 function codeOf(file: string): string {
-    return withoutComments(readFileSync(file, 'utf8'))
+  return withoutComments(readFileSync(file, 'utf8'));
 }
 
 interface Rule {
-    readonly named: string
-    readonly spotted: RegExp
+  readonly named: string;
+  readonly spotted: RegExp;
 }
 
 /**
@@ -220,50 +222,57 @@ interface Rule {
  * new one, which is the point of having two.
  */
 const RUNTIME: readonly Rule[] = [
-    { named: 'a node: import', spotted: /\bnode:[a-z]/ },
-    { named: 'process', spotted: /\bprocess\b/ },
-    { named: '__dirname', spotted: /\b__dirname\b/ },
-    { named: '__filename', spotted: /\b__filename\b/ },
-    { named: 'require', spotted: /\brequire\b/ },
-    { named: 'Buffer', spotted: /\bBuffer\b/ },
-    { named: 'setImmediate', spotted: /\bsetImmediate\b/ },
-    // THE FOUR BELOW WERE ADDED THE DAY THE COMPILER WAS RE-MEASURED AND FOUND
-    // TO HAVE STOPPED REFUSING THEM. See `logic/tsconfig.json`: five of its six
-    // documented probes now compile clean, because this project's `include` is
-    // `**/*.ts` and that takes in the test files, whose `import … from 'vitest'`
-    // pulls Node's ambient globals into the whole program. `types: []` cannot
-    // stop that -- it governs automatic @types inclusion, not the globals a
-    // .d.ts reached through an explicit import contributes.
-    //
-    // They are not Node-only names, which is the point: `fetch`, `WebSocket`
-    // and the timers exist in a browser too. `logic/` may not reach for them
-    // ANYWHERE, because a module that acquires I/O is not runtime-neutral even
-    // when the I/O happens to be portable.
-    { named: 'fetch', spotted: /\bfetch\s*\(/ },
-    { named: 'WebSocket', spotted: /\bWebSocket\b/ },
-    { named: 'setTimeout', spotted: /\bsetTimeout\b/ },
-    { named: 'setInterval', spotted: /\bsetInterval\b/ },
-]
+  { named: 'a node: import', spotted: /\bnode:[a-z]/ },
+  { named: 'process', spotted: /\bprocess\b/ },
+  { named: '__dirname', spotted: /\b__dirname\b/ },
+  { named: '__filename', spotted: /\b__filename\b/ },
+  { named: 'require', spotted: /\brequire\b/ },
+  { named: 'Buffer', spotted: /\bBuffer\b/ },
+  { named: 'setImmediate', spotted: /\bsetImmediate\b/ },
+  // THE FOUR BELOW WERE ADDED THE DAY THE COMPILER WAS RE-MEASURED AND FOUND
+  // TO HAVE STOPPED REFUSING THEM. See `logic/tsconfig.json`: five of its six
+  // documented probes now compile clean, because this project's `include` is
+  // `**/*.ts` and that takes in the test files, whose `import … from 'vitest'`
+  // pulls Node's ambient globals into the whole program. `types: []` cannot
+  // stop that -- it governs automatic @types inclusion, not the globals a
+  // .d.ts reached through an explicit import contributes.
+  //
+  // They are not Node-only names, which is the point: `fetch`, `WebSocket`
+  // and the timers exist in a browser too. `logic/` may not reach for them
+  // ANYWHERE, because a module that acquires I/O is not runtime-neutral even
+  // when the I/O happens to be portable.
+  { named: 'fetch', spotted: /\bfetch\s*\(/ },
+  { named: 'WebSocket', spotted: /\bWebSocket\b/ },
+  { named: 'setTimeout', spotted: /\bsetTimeout\b/ },
+  { named: 'setInterval', spotted: /\bsetInterval\b/ },
+];
 
 /** What `logic/` may not touch, because a terminal has none of it. */
 const DOM: readonly Rule[] = [
-    // A quoted wire kind ('document') is data, not a reference to the DOM global.
-    { named: 'document', spotted: /(?<!['"])\bdocument\b(?!['"])/ },
-    { named: 'window', spotted: /\bwindow\b/ },
-    { named: 'HTMLElement', spotted: /\bHTMLElement\b/ },
-    { named: 'DocumentFragment', spotted: /\bDocumentFragment\b/ },
-]
+  // A quoted wire kind ('document') is data, not a reference to the DOM global.
+  { named: 'document', spotted: /(?<!['"])\bdocument\b(?!['"])/ },
+  { named: 'window', spotted: /\bwindow\b/ },
+  { named: 'HTMLElement', spotted: /\bHTMLElement\b/ },
+  { named: 'DocumentFragment', spotted: /\bDocumentFragment\b/ },
+];
 
 /** Pure over source text, so the matcher itself can be tested without a file. */
 function breachesIn(code: string, rules: readonly Rule[]): string[] {
-    return code.split('\n').flatMap((line, index) => rules
+  return code
+    .split('\n')
+    .flatMap((line, index) =>
+      rules
         .filter((rule) => rule.spotted.test(line))
-        .map((rule) => `${rule.named} (line ${index + 1})`))
+        .map((rule) => `${rule.named} (line ${index + 1})`),
+    );
 }
 
 function offendersUnder(directory: string, rules: readonly Rule[]): string[] {
-    return sourcesUnder(directory).flatMap((file) => breachesIn(codeOf(file), rules)
-        .map((breach) => `${relative(SRC, file)}: ${breach}`))
+  return sourcesUnder(directory).flatMap((file) =>
+    breachesIn(codeOf(file), rules).map(
+      (breach) => `${relative(SRC, file)}: ${breach}`,
+    ),
+  );
 }
 
 /**
@@ -300,22 +309,24 @@ function offendersUnder(directory: string, rules: readonly Rule[]): string[] {
  * keeps `Array.from('x')` out of it.
  */
 const SPECIFIERS: readonly RegExp[] = [
-    /^[ \t]*(?:import|export)\b[^'";]*?[\s}]from\s*['"]([^'"]+)['"]/gm,
-    /^[ \t]*import\s+['"]([^'"]+)['"]/gm,
-    /\bimport\s*\(\s*['"]([^'"]+)['"]/g,
-]
+  /^[ \t]*(?:import|export)\b[^'";]*?[\s}]from\s*['"]([^'"]+)['"]/gm,
+  /^[ \t]*import\s+['"]([^'"]+)['"]/gm,
+  /\bimport\s*\(\s*['"]([^'"]+)['"]/g,
+];
 
 /** Every specifier in a source, comments already blanked. */
 function specifiersIn(code: string): string[] {
-    return SPECIFIERS.flatMap((shape) => [...code.matchAll(shape)].map((found) => found[1] ?? ''))
+  return SPECIFIERS.flatMap((shape) =>
+    [...code.matchAll(shape)].map((found) => found[1] ?? ''),
+  );
 }
 
 function importsOf(file: string): string[] {
-    return specifiersIn(codeOf(file))
+  return specifiersIn(codeOf(file));
 }
 
 function isUnder(path: string, directory: string): boolean {
-    return path === directory || path.startsWith(directory + sep)
+  return path === directory || path.startsWith(directory + sep);
 }
 
 /**
@@ -332,11 +343,15 @@ function isUnder(path: string, directory: string): boolean {
  * path to resolve, and that one is "is this a path at all".
  */
 function reachesOutOf(home: string): string[] {
-    return sourcesUnder(home).flatMap((file) => importsOf(file)
-        .filter((specifier) => specifier.startsWith('.'))
-        .map((specifier) => join(dirname(file), specifier))
-        .filter((target) => !isUnder(target, home))
-        .map((target) => `${relative(SRC, file)} imports ${relative(SRC, target)}`))
+  return sourcesUnder(home).flatMap((file) =>
+    importsOf(file)
+      .filter((specifier) => specifier.startsWith('.'))
+      .map((specifier) => join(dirname(file), specifier))
+      .filter((target) => !isUnder(target, home))
+      .map(
+        (target) => `${relative(SRC, file)} imports ${relative(SRC, target)}`,
+      ),
+  );
 }
 
 /**
@@ -373,142 +388,212 @@ function reachesOutOf(home: string): string[] {
  * including ones with no colon in them. Neither contains the other, and the
  * overlap is two guards agreeing rather than one being redundant.
  */
-// Package exceptions are the extracted pure request/response and union helpers.
+// Package exceptions are the extracted pure request/response, scalar validation and union helpers.
 // Messaging uses commands for neutral parsing and direct for request types.
 // Transport and dispatch remain in view/, and core has its own AST neutrality guard.
 function reachingPackages(home: string): string[] {
-    return sourcesUnder(home).flatMap((file) => importsOf(file)
-        .filter((specifier) => !specifier.startsWith('.') && !(home === LOGIC && (
-            ['session', 'commands', 'direct', 'response', 'union', 'views', 'project-label', 'activity', 'records', 'inspection', 'pace', 'board', 'board-demo', 'clean', 'markdown', 'swarm', 'tints', 'trajectory', 'information', 'usage', 'usage-command', 'usage-presentation', 'reference-cost'].some(name => specifier === `plowshare-client-ts/operations/${name}`)
-            || specifier === 'plowshare-client-ts/binding/job-view')))
-        .map((specifier) => `${relative(SRC, file)} imports the package "${specifier}"`))
+  return sourcesUnder(home).flatMap((file) =>
+    importsOf(file)
+      .filter(
+        (specifier) =>
+          !specifier.startsWith('.') &&
+          !(
+            home === LOGIC &&
+            ([
+              'session',
+              'commands',
+              'direct',
+              'response',
+              'union',
+              'views',
+              'project-label',
+              'activity',
+              'records',
+              'inspection',
+              'pace',
+              'board',
+              'board-demo',
+              'clean',
+              'markdown',
+              'swarm',
+              'tints',
+              'trajectory',
+              'information',
+              'response',
+              'direct',
+              'schema',
+              'retrieval',
+              'usage',
+              'usage-command',
+              'usage-presentation',
+              'reference-cost',
+            ].some(
+              (name) => specifier === `plowshare-client-ts/operations/${name}`,
+            ) ||
+              specifier === 'plowshare-client-ts/binding/job-view' ||
+              specifier === 'plowshare-client-ts/binding/values')
+          ),
+      )
+      .map(
+        (specifier) =>
+          `${relative(SRC, file)} imports the package "${specifier}"`,
+      ),
+  );
 }
 
 describe('logic/ is runtime-neutral', () => {
-    it('has no file in logic/ that reaches for node, process or require', () => {
-        expect(offendersUnder(LOGIC, RUNTIME)).toEqual([])
-        // The scan can still see something, or it is asserting over nothing and
-        // passing vacuously. This half is not decoration: it is the console's
-        // idiom and it is what the Java invariant
-        // `the_guard_can_see_the_files_it_asserts_over` exists because of.
-        // Task 3 deleted the `wiring.ts` this line was written against and
-        // put `markdown.ts` in its place. The line is what would have turned
-        // that deletion into a red suite rather than into a guard that
-        // quietly stopped guarding, had the replacement not arrived with it.
-        //
-        // Task 7 deleted `binding/wiring.ts`, the last of that scaffolding,
-        // and re-measured BOTH self-checks rather than assuming them: pointed
-        // at an empty directory, `LOGIC` failed all three assertions and
-        // `BINDING` failed the third, each with "expected 0 to be greater than
-        // 0" and none of the rule assertions going red — which is the whole
-        // point, because a scan over nothing passes every rule it has.
-        expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0)
-    })
+  it('has no file in logic/ that reaches for node, process or require', () => {
+    expect(offendersUnder(LOGIC, RUNTIME)).toEqual([]);
+    // The scan can still see something, or it is asserting over nothing and
+    // passing vacuously. This half is not decoration: it is the console's
+    // idiom and it is what the Java invariant
+    // `the_guard_can_see_the_files_it_asserts_over` exists because of.
+    // Task 3 deleted the `wiring.ts` this line was written against and
+    // put `markdown.ts` in its place. The line is what would have turned
+    // that deletion into a red suite rather than into a guard that
+    // quietly stopped guarding, had the replacement not arrived with it.
+    //
+    // Task 7 deleted `binding/wiring.ts`, the last of that scaffolding,
+    // and re-measured BOTH self-checks rather than assuming them: pointed
+    // at an empty directory, `LOGIC` failed all three assertions and
+    // `BINDING` failed the third, each with "expected 0 to be greater than
+    // 0" and none of the rule assertions going red — which is the whole
+    // point, because a scan over nothing passes every rule it has.
+    expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0);
+  });
 
-    it('has no file in logic/ that touches a DOM global', () => {
-        expect(offendersUnder(LOGIC, DOM)).toEqual([])
-        expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0)
-    })
-})
+  it('has no file in logic/ that touches a DOM global', () => {
+    expect(offendersUnder(LOGIC, DOM)).toEqual([]);
+    expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0);
+  });
+});
 
 describe('the dependencies run one way', () => {
-    it('has no file in logic/ or binding/ that imports the view or each other', () => {
-        // Spec §3: view/ -> binding/ and logic/; neither of those imports the
-        // other or the view. The second half is what stops logic/ acquiring a
-        // runtime transitively — a logic module that imported the binding would
-        // pass the two assertions above and still be unadoptable, because the
-        // socket it pulled in is as absent from a browser bundle as `node:fs`.
-        expect(reachesOutOf(LOGIC)).toEqual([])
-        expect(reachesOutOf(BINDING)).toEqual([])
-        expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0)
-        expect(sourcesUnder(BINDING).length).toBeGreaterThan(0)
-    })
+  it('has no file in logic/ or binding/ that imports the view or each other', () => {
+    // Spec §3: view/ -> binding/ and logic/; neither of those imports the
+    // other or the view. The second half is what stops logic/ acquiring a
+    // runtime transitively — a logic module that imported the binding would
+    // pass the two assertions above and still be unadoptable, because the
+    // socket it pulled in is as absent from a browser bundle as `node:fs`.
+    expect(reachesOutOf(LOGIC)).toEqual([]);
+    expect(reachesOutOf(BINDING)).toEqual([]);
+    expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0);
+    expect(sourcesUnder(BINDING).length).toBeGreaterThan(0);
+  });
 
-    it('allows only sibling paths and the extracted neutral request builders', () => {
-        // The half the assertion above could not see: it resolves relative
-        // specifiers and exempts everything else, so a path alias, a
-        // self-referencing package import, or a dependency all walked past it.
-        // See `reachingPackages`. Zero runtime dependencies (client design §6)
-        // is what makes the strong form of this rule available: there is
-        // nothing in either directory that a relative path cannot name.
-        expect(reachingPackages(LOGIC)).toEqual([])
-        expect(reachingPackages(BINDING)).toEqual([])
-        expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0)
-        expect(sourcesUnder(BINDING).length).toBeGreaterThan(0)
-    })
-})
+  it('allows only sibling paths and the extracted neutral request builders', () => {
+    // The half the assertion above could not see: it resolves relative
+    // specifiers and exempts everything else, so a path alias, a
+    // self-referencing package import, or a dependency all walked past it.
+    // See `reachingPackages`. Zero runtime dependencies (client design §6)
+    // is what makes the strong form of this rule available: there is
+    // nothing in either directory that a relative path cannot name.
+    expect(reachingPackages(LOGIC)).toEqual([]);
+    expect(reachingPackages(BINDING)).toEqual([]);
+    expect(sourcesUnder(LOGIC).length).toBeGreaterThan(0);
+    expect(sourcesUnder(BINDING).length).toBeGreaterThan(0);
+  });
+});
 
 describe('the scan itself', () => {
-    it('matches what it claims to, and is not fooled by prose about it', () => {
-        // The matcher tested directly, which the planted violations cannot do
-        // for the cases nobody thought to plant. Synthetic on purpose: a
-        // control that reads a named real file breaks the day task 3 deletes
-        // `wiring.ts`, and would fail for a reason that has nothing to do with
-        // what it checks.
-        //
-        // The comment cases are the ones that earn their keep. Blanking rather
-        // than deleting is what keeps the reported line number the line you go
-        // to, and stripping at all is what lets `logic/` state these rules in
-        // its own javadoc — which it does today, so the two assertions above
-        // are themselves the standing proof that stripping works on a real
-        // file: break it and they go red over prose.
-        expect(breachesIn("import { readFile } from 'node:fs'", RUNTIME))
-            .toEqual(['a node: import (line 1)'])
-        expect(breachesIn(withoutComments('// process, node:fs, __dirname'), RUNTIME))
-            .toEqual([])
-        const commented = '/* node:fs\n   process */\nconst a = document.title'
-        expect(breachesIn(withoutComments(commented), DOM)).toEqual(['document (line 3)'])
-    })
+  it('matches what it claims to, and is not fooled by prose about it', () => {
+    // The matcher tested directly, which the planted violations cannot do
+    // for the cases nobody thought to plant. Synthetic on purpose: a
+    // control that reads a named real file breaks the day task 3 deletes
+    // `wiring.ts`, and would fail for a reason that has nothing to do with
+    // what it checks.
+    //
+    // The comment cases are the ones that earn their keep. Blanking rather
+    // than deleting is what keeps the reported line number the line you go
+    // to, and stripping at all is what lets `logic/` state these rules in
+    // its own javadoc — which it does today, so the two assertions above
+    // are themselves the standing proof that stripping works on a real
+    // file: break it and they go red over prose.
+    expect(breachesIn("import { readFile } from 'node:fs'", RUNTIME)).toEqual([
+      'a node: import (line 1)',
+    ]);
+    expect(
+      breachesIn(withoutComments('// process, node:fs, __dirname'), RUNTIME),
+    ).toEqual([]);
+    const commented = '/* node:fs\n   process */\nconst a = document.title';
+    expect(breachesIn(withoutComments(commented), DOM)).toEqual([
+      'document (line 3)',
+    ]);
+  });
 
-    it('allows the quoted board message kind while still detecting DOM references', () => {
-        expect(breachesIn("const message = { kind: 'document' }", DOM)).toEqual([])
-        expect(breachesIn('const message = { kind: "document" }', DOM)).toEqual([])
-        for (const code of ['document.title', 'const dom = document', 'document["title"]', '${document.title}']) {
-            expect(breachesIn(code, DOM)).toEqual(['document (line 1)'])
-        }
-    })
+  it('allows the quoted board message kind while still detecting DOM references', () => {
+    expect(breachesIn("const message = { kind: 'document' }", DOM)).toEqual([]);
+    expect(breachesIn('const message = { kind: "document" }', DOM)).toEqual([]);
+    for (const code of [
+      'document.title',
+      'const dom = document',
+      'document["title"]',
+      '${document.title}',
+    ]) {
+      expect(breachesIn(code, DOM)).toEqual(['document (line 1)']);
+    }
+  });
 
-    it('reads the three shapes an import takes, over as many lines as it takes', () => {
-        expect(specifiersIn("import { isCode } from './codes.ts'")).toEqual(['./codes.ts'])
-        expect(specifiersIn("import type { Code } from './codes.ts'")).toEqual(['./codes.ts'])
-        expect(specifiersIn("export { parse } from './markdown.ts'")).toEqual(['./markdown.ts'])
-        expect(specifiersIn("import 'node:process'")).toEqual(['node:process'])
-        expect(specifiersIn("const m = await import('@view/main.ts')")).toEqual(['@view/main.ts'])
-        // A clause over several lines is one specifier and not none, which is
-        // how this module writes an import of more than four names.
-        expect(specifiersIn("import {\n    answering,\n    checking,\n} from './session.ts'"))
-            .toEqual(['./session.ts'])
-    })
+  it('reads the three shapes an import takes, over as many lines as it takes', () => {
+    expect(specifiersIn("import { isCode } from './codes.ts'")).toEqual([
+      './codes.ts',
+    ]);
+    expect(specifiersIn("import type { Code } from './codes.ts'")).toEqual([
+      './codes.ts',
+    ]);
+    expect(specifiersIn("export { parse } from './markdown.ts'")).toEqual([
+      './markdown.ts',
+    ]);
+    expect(specifiersIn("import 'node:process'")).toEqual(['node:process']);
+    expect(specifiersIn("const m = await import('@view/main.ts')")).toEqual([
+      '@view/main.ts',
+    ]);
+    // A clause over several lines is one specifier and not none, which is
+    // how this module writes an import of more than four names.
+    expect(
+      specifiersIn(
+        "import {\n    answering,\n    checking,\n} from './session.ts'",
+      ),
+    ).toEqual(['./session.ts']);
+  });
 
-    it('is not fooled by a sentence that happens to end in "from"', () => {
-        // VERBATIM FROM `binding/envelope.ts`, which is where this was found.
-        // The matcher that stood here read `from'` and captured the rest of
-        // the file as a package name; the only reason nobody saw it is that
-        // the one caller filtered the result away before reading it.
-        expect(specifiersIn(
-            "throw new Error('a response carried no { code } payload to read an outcome from')"))
-            .toEqual([])
-        // And the two shapes next door to it, for the same reason: a line
-        // beginning `export` whose next quote is a value rather than a
-        // specifier, and a `from` that is a method.
-        expect(specifiersIn("export const CONVERSATION_TURNS = 'conversation.turns'"))
-            .toEqual([])
-        expect(specifiersIn("export const chars = Array.from('abc')")).toEqual([])
-    })
+  it('is not fooled by a sentence that happens to end in "from"', () => {
+    // VERBATIM FROM `binding/envelope.ts`, which is where this was found.
+    // The matcher that stood here read `from'` and captured the rest of
+    // the file as a package name; the only reason nobody saw it is that
+    // the one caller filtered the result away before reading it.
+    expect(
+      specifiersIn(
+        "throw new Error('a response carried no { code } payload to read an outcome from')",
+      ),
+    ).toEqual([]);
+    // And the two shapes next door to it, for the same reason: a line
+    // beginning `export` whose next quote is a value rather than a
+    // specifier, and a `from` that is a method.
+    expect(
+      specifiersIn("export const CONVERSATION_TURNS = 'conversation.turns'"),
+    ).toEqual([]);
+    expect(specifiersIn("export const chars = Array.from('abc')")).toEqual([]);
+  });
 
-    it('calls a package, an alias and a self-reference what they are', () => {
-        // The three shapes `reachesOutOf` exempted, which is the hole
-        // `reachingPackages` exists to close. Synthetic, because there is none
-        // of any of them in either directory — which is the point.
-        const bare = [
-            "import { readFile } from 'node:fs'",
-            "import { describe } from 'vitest'",
-            "import { main } from '@view/main.ts'",
-            "import { main } from 'plowshare-tui/src/view/main.ts'",
-        ].join('\n')
-        expect(specifiersIn(bare).filter((each) => !each.startsWith('.'))).toHaveLength(4)
-        // And a relative one is not among them, which is the whole rule.
-        expect(specifiersIn("import { parse } from './markdown.ts'")
-            .filter((each) => !each.startsWith('.'))).toEqual([])
-    })
-})
+  it('calls a package, an alias and a self-reference what they are', () => {
+    // The three shapes `reachesOutOf` exempted, which is the hole
+    // `reachingPackages` exists to close. Synthetic, because there is none
+    // of any of them in either directory — which is the point.
+    const bare = [
+      "import { readFile } from 'node:fs'",
+      "import { describe } from 'vitest'",
+      "import { main } from '@view/main.ts'",
+      "import { main } from 'plowshare-tui/src/view/main.ts'",
+    ].join('\n');
+    expect(
+      specifiersIn(bare).filter((each) => !each.startsWith('.')),
+    ).toHaveLength(4);
+    // And a relative one is not among them, which is the whole rule.
+    expect(
+      specifiersIn("import { parse } from './markdown.ts'").filter(
+        (each) => !each.startsWith('.'),
+      ),
+    ).toEqual([]);
+  });
+});

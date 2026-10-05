@@ -255,7 +255,7 @@ class FileWiringTest {
 
     @Override
     public ToolSchema schema() {
-      return new ToolSchema(
+      return ToolSchema.from(
           name, "a fixture tool", Map.of("type", "object", "properties", Map.of()));
     }
 
@@ -421,7 +421,7 @@ class FileWiringTest {
     var observations =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.files.CodeMapObservations.class);
     org.mockito.Mockito.when(observations.status(org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Map.of("state", "inactive"));
+        .thenReturn(io.aeyer.plowshare.protocol.CodeTrackingStatus.state("inactive"));
     var monitor =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.files.CodeWorkspaceMonitor.class);
     org.mockito.Mockito.when(monitor.observations("reader", null, null)).thenReturn(observations);
@@ -717,7 +717,7 @@ class FileWiringTest {
       List.of("project_define", "project_workspace_set", "project_forget");
 
   /**
-   * Workspace management is not a tool an agent can be granted, and a runtime that reaches a
+   * TestWorkspace management is not a tool an agent can be granted, and a runtime that reaches a
    * filesystem still serves none of the three.
    *
    * <p>The three live on the client's MCP surface, where the caller is a person deciding what their

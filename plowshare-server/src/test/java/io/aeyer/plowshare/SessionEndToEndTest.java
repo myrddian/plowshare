@@ -10,19 +10,13 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.client.HttpServerClient;
-import io.aeyer.plowshare.client.ServerClient;
-import io.aeyer.plowshare.client.SessionClient;
-import io.aeyer.plowshare.client.files.ChannelClient;
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Rooting;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.sdk.ServerClient;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.AgentsConfig;
 import io.aeyer.plowshare.server.agents.AgentsProperties;
@@ -75,6 +69,12 @@ import io.aeyer.plowshare.server.ws.EventChannelConfig;
 import io.aeyer.plowshare.server.ws.EventChannelHandler;
 import io.aeyer.plowshare.server.ws.FileChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import io.aeyer.plowshare.testpeer.ControllerPeer;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.SessionPeer;
+import io.aeyer.plowshare.testpeer.SocketPeer;
+import io.aeyer.plowshare.testpeer.TestRooting;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -130,8 +130,8 @@ import org.springframework.context.annotation.Import;
  *       #a_job_submitted_with_a_session_reads_a_file_only_the_operator_has} goes over a real HTTP
  *       POST, through {@code AgentController}, {@code JobStore}, {@code JobRuntime}, {@code
  *       FileTools}, {@code ProviderRouter}, {@code RemoteProvider}, a real WebSocket, the real
- *       {@code ChannelClient} and the real {@code ClientEnforcer}, and the bytes it hands the model
- *       are bytes this server's own filesystem never held;
+ *       {@code SocketPeer} and the real {@code NodeFiles}, and the bytes it hands the model are
+ *       bytes this server's own filesystem never held;
  *   <li><b>{@code SESSION_GONE} comes from a real disconnect mid-request</b> — {@link
  *       #a_socket_that_dies_with_a_request_on_it_is_the_run_ending} closes a live socket from the
  *       client side <em>while the server is waiting on a frame that socket owes it</em>, and the
@@ -174,7 +174,7 @@ import org.springframework.context.annotation.Import;
  * through it, and it is already covered — by two tests that compose, so a third here would be a
  * longer way of asking the same question. The two halves are {@code
  * RemoteWiringTest.closing_the_file_channel_takes_the_second_machine_away}, where a <b>real</b>
- * {@code ChannelClient} closing a <b>real</b> socket is what empties the role, and {@code
+ * {@code SocketPeer} closing a <b>real</b> socket is what empties the role, and {@code
  * RemoteWiringTest.a_client_going_away_mid_run_does_not_end_a_run_that_reads_the_servers_own_disk},
  * where the role emptying between two turns leaves the run answering off the server's own disk.
  * <b>Measured</b> rather than argued, by deleting {@code sessions.detach} from {@code
@@ -278,7 +278,7 @@ class SessionEndToEndTest {
             // A command-line argument and not properties(...): FileChannelTest
             // measured that the latter loses to application.yml, which names a
             // fixed port.
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((WebServerApplicationContext) context).getWebServer().getPort();
     handler = context.getBean(FileChannelHandler.class);
     registry = context.getBean(SessionRegistry.class);
@@ -325,10 +325,10 @@ class SessionEndToEndTest {
    * A terminal opens a session, submits a run under it, and the run reads a file this server has
    * never had.
    *
-   * <p>Everything on the path is the production article: {@link SessionClient} attaches both roles
+   * <p>Everything on the path is the production article: {@link SessionPeer} attaches both roles
    * over two real sockets on an ephemeral port, {@code submit} is an HTTP POST carrying the session
    * id in the body, and the server's answer to {@code file_read} is what the operator's own {@code
-   * ClientEnforcer} read off their disk.
+   * NodeFiles} read off their disk.
    *
    * <p>Three separate claims, because "it worked" is not one of them: the run answered; the file's
    * text reached the model as a tool result; and the server's own workspace never held that file,
@@ -336,7 +336,7 @@ class SessionEndToEndTest {
    */
   @Test
   void a_job_submitted_with_a_session_reads_a_file_only_the_operator_has() throws Exception {
-    SessionClient session = attach(workspaceOver(onTheLaptop));
+    SessionPeer session = attach(workspaceOver(onTheLaptop));
     MODEL
         .then(
             asking(
@@ -367,14 +367,14 @@ class SessionEndToEndTest {
    * The lifecycle of that same run is watched as it happens, and the events carry nothing that was
    * read.
    *
-   * <p>The listener is the second role the same {@link SessionClient} attached, on the second
-   * socket. What arrives is four kinds of event and no payload — {@code JobEvent} has nowhere to
-   * put one, which is containment by signature, and this is that claim asserted against a real
-   * stream rather than against the record's component list.
+   * <p>The listener is the second role the same {@link SessionPeer} attached, on the second socket.
+   * What arrives is four kinds of event and no payload — {@code JobEvent} has nowhere to put one,
+   * which is containment by signature, and this is that claim asserted against a real stream rather
+   * than against the record's component list.
    */
   @Test
   void the_terminal_watches_that_run_go_by_without_ever_being_told_what_it_read() throws Exception {
-    SessionClient session = attach(workspaceOver(onTheLaptop));
+    SessionPeer session = attach(workspaceOver(onTheLaptop));
     MODEL
         .then(
             asking(
@@ -447,7 +447,7 @@ class SessionEndToEndTest {
   @Test
   void one_request_is_canonicalised_by_the_router_and_refused_again_by_the_client()
       throws Exception {
-    SessionClient session = attach(workspaceOver(onTheLaptop));
+    SessionPeer session = attach(workspaceOver(onTheLaptop));
     // The fixture has something to refuse. Both refusals below are about
     // containment, and a test whose file simply was not there would read
     // exactly the same from outside.
@@ -524,11 +524,10 @@ class SessionEndToEndTest {
    * session ... is connected" — is what a request sent after the socket had already gone would
    * produce, and a test that only checked the ending would pass on either.
    *
-   * <p>The client is a raw listener on {@link ChannelClient#dial} rather than a {@code
-   * ClientEnforcer}, because its whole job in this proof is to stop answering and disappear, and
-   * the enforcer is what the two tests above drive. It is still {@code ChannelClient}'s own socket,
-   * on the connection pool the module's HTTP client owns, so no fourth HTTP client is built to
-   * write this.
+   * <p>The client is a raw listener on {@link SocketPeer#dial} rather than a {@code NodeFiles},
+   * because its whole job in this proof is to stop answering and disappear, and the enforcer is
+   * what the two tests above drive. It is still {@code SocketPeer}'s own socket, on the connection
+   * pool the module's HTTP client owns, so no fourth HTTP client is built to write this.
    */
   @Test
   void a_socket_that_dies_with_a_request_on_it_is_the_run_ending() throws Exception {
@@ -573,7 +572,7 @@ class SessionEndToEndTest {
   // --- fixtures -------------------------------------------------------------
 
   /**
-   * A real {@link SessionClient} attached in both roles, closed after the test. Its id is minted by
+   * A real {@link SessionPeer} attached in both roles, closed after the test. Its id is minted by
    * the client, as it is on a laptop.
    *
    * <p><b>And it roots {@link #PROJECT}</b>, which is what makes every run in this file reach it.
@@ -582,13 +581,13 @@ class SessionEndToEndTest {
    * production upgrade, by the production client, exactly as {@code cli.Plowshare} composes one
    * from {@code --workspace} and {@code --project}.
    */
-  private SessionClient attach(Workspace workspace) throws Exception {
-    SessionClient session =
-        new SessionClient(
-            new HttpServerClient("http://localhost:" + port),
+  private SessionPeer attach(TestWorkspace workspace) throws Exception {
+    SessionPeer session =
+        new SessionPeer(
+            new ControllerPeer("http://localhost:" + port),
             workspace,
             null,
-            Rooting.of(workspace.roots().get(0), PROJECT));
+            TestRooting.of(workspace.roots().get(0), PROJECT));
     opened.add(session);
     session.attach(PATIENCE);
     assertTrue(session.providing() && session.listening(), "the session attached in both roles");
@@ -602,8 +601,8 @@ class SessionEndToEndTest {
   }
 
   /**
-   * A bare socket in the file-provider role, on {@code ChannelClient}'s own HTTP client, closed
-   * after the test.
+   * A bare socket in the file-provider role, on {@code SocketPeer}'s own HTTP client, closed after
+   * the test.
    *
    * <p>The dialled socket is held and closed <b>before</b> the client, which is that method's
    * stated contract and was not being kept: {@code open()} is never called here, so {@code
@@ -612,9 +611,9 @@ class SessionEndToEndTest {
    * actually opened was the one thing cleanup did not close.
    */
   private void dial(String id, WebSocketListener frames) {
-    ChannelClient dialling =
-        new ChannelClient("http://localhost:" + port, id, new ClientEnforcer(new Workspace()));
-    WebSocket socket = dialling.dial(ChannelClient.PATH, frames);
+    SocketPeer dialling =
+        new SocketPeer("http://localhost:" + port, id, new NodeFiles(new TestWorkspace()));
+    WebSocket socket = dialling.dial(SocketPeer.PATH, frames);
     // The presence, declared into the registry rather than sent up the
     // socket. `dial` is the raw-listener door — production uses it for the
     // EVENTS path, which carries a session id and nothing else — so it does
@@ -634,8 +633,8 @@ class SessionEndToEndTest {
         });
   }
 
-  private static Workspace workspaceOver(Path root) {
-    Workspace workspace = new Workspace();
+  private static TestWorkspace workspaceOver(Path root) {
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(root));
     return workspace;
   }
@@ -671,7 +670,7 @@ class SessionEndToEndTest {
   }
 
   /** The job polled the way the terminal polls it: over HTTP, until it has an outcome. */
-  private static ServerClient.JobStatus awaitOutcome(SessionClient session, String job)
+  private static ServerClient.JobStatus awaitOutcome(SessionPeer session, String job)
       throws Exception {
     for (long waited = 0; waited < PATIENCE.toMillis(); waited += 10) {
       ServerClient.JobStatus status = session.job(job);
@@ -702,7 +701,7 @@ class SessionEndToEndTest {
    * Every event the terminal was handed for {@code job}, up to and including the one that says it
    * ended.
    */
-  private static List<JobEvent> awaitEnded(SessionClient session, String job) throws Exception {
+  private static List<JobEvent> awaitEnded(SessionPeer session, String job) throws Exception {
     List<JobEvent> seen = new ArrayList<>();
     long deadline = System.nanoTime() + PATIENCE.toNanos();
     while (System.nanoTime() < deadline) {
@@ -939,16 +938,10 @@ class SessionEndToEndTest {
       org.mockito.Mockito.when(
               authorization.allowed(
                   org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.anyMap(),
+                  org.mockito.ArgumentMatchers.any(
+                      io.aeyer.plowshare.server.access.AccessRequest.class),
                   org.mockito.ArgumentMatchers.nullable(String.class)))
           .thenReturn(true);
-      org.mockito.Mockito.when(
-              authorization.filter(
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(
-                      io.aeyer.plowshare.protocol.frames.Outcome.class),
-                  org.mockito.ArgumentMatchers.nullable(String.class)))
-          .thenAnswer(call -> call.getArgument(1));
       return authorization;
     }
 

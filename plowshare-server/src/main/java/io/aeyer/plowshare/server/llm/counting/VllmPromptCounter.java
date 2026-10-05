@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.llm.counting;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.llm.CountingProperties;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
@@ -16,7 +15,37 @@ import java.util.concurrent.Semaphore;
 public final class VllmPromptCounter {
   @FunctionalInterface
   public interface Exchange {
-    JsonNode post(Map<String, Object> body, Duration remaining) throws Exception;
+    Observation post(int input, Duration remaining) throws Exception;
+  }
+
+  /** A transport has validated this response before it can affect the count or cache. */
+  public record Observation(Long count, String model) {
+    public Observation {
+      if (count == null || count < 0)
+        throw new IllegalArgumentException("Nonnegative token count required");
+      if (model != null
+          && (model.isBlank()
+              || !model.equals(model.strip())
+              || model.length() > 1024
+              || model.codePoints().anyMatch(Character::isISOControl)))
+        throw new IllegalArgumentException("Invalid counted model");
+    }
+  }
+
+  /** Cache identities are SHA-256 digests, never serialized request bodies or credentials. */
+  public record Inputs(List<String> digests, String configurationDigest) {
+    public Inputs {
+      digests = List.copyOf(digests);
+      if (digests.isEmpty() || digests.size() > 10000)
+        throw new IllegalArgumentException("Bounded counter inputs required");
+      for (String value : digests) hash(value);
+      hash(configurationDigest);
+    }
+
+    private static void hash(String value) {
+      if (value == null || !value.matches("[a-f0-9]{64}"))
+        throw new IllegalArgumentException("SHA-256 cache identity required");
+    }
   }
 
   private record Entry(PromptCount count, long expires) {}
@@ -38,17 +67,16 @@ public final class VllmPromptCounter {
   public PromptCount count(
       String pool,
       String model,
-      List<Map<String, Object>> bodies,
+      Inputs inputs,
       UsageAttribution owner,
       CountingProperties settings,
-      Object configurationSalt,
       Exchange exchange) {
     long start = System.nanoTime();
     try {
-      String fingerprint =
-          digest(mapper.writeValueAsBytes(List.of(settings.fingerprint(), configurationSalt)));
+      String fingerprint = inputs.configurationDigest();
       String key =
-          digest(mapper.writeValueAsBytes(List.of(fingerprint, pool, model, owner, bodies)));
+          digest(
+              mapper.writeValueAsBytes(List.of(fingerprint, pool, model, owner, inputs.digests())));
       synchronized (this) {
         if (!fingerprint.equals(configuration)) {
           cache.clear();
@@ -61,16 +89,13 @@ public final class VllmPromptCounter {
       if (!slots.tryAcquire()) return PromptCount.unknown(pool, model, "counter_busy");
       try {
         long count = 0;
-        for (Map<String, Object> body : bodies) {
+        for (int input = 0; input < inputs.digests().size(); input++) {
           long remaining = settings.getTimeout().toNanos() - (System.nanoTime() - start);
           if (remaining <= 0) return PromptCount.unknown(pool, model, "counter_timeout");
-          JsonNode response = exchange.post(body, Duration.ofNanos(remaining));
-          if (response.has("model") && !model.equals(response.path("model").asText()))
+          Observation response = exchange.post(input, Duration.ofNanos(remaining));
+          if (response.model() != null && !model.equals(response.model()))
             return PromptCount.unknown(pool, model, "counter_model_mismatch");
-          JsonNode n = response.get("count");
-          if (n == null || !n.isIntegralNumber() || !n.canConvertToLong() || n.longValue() < 0)
-            return PromptCount.unknown(pool, model, "counter_invalid_response");
-          count = Math.addExact(count, n.longValue());
+          count = Math.addExact(count, response.count());
         }
         PromptCount answer =
             new PromptCount(

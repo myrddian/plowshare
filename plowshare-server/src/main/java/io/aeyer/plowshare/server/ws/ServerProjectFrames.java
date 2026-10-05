@@ -24,10 +24,14 @@ public class ServerProjectFrames implements FrameArea {
   private final Path directory;
 
   public ServerProjectFrames(
-      ProjectStore projects,
-      @Value("${plowshare.projects.workspace-directory:workspaces}") String directory) {
-    this.projects = projects;
-    this.directory = Path.of(directory).toAbsolutePath().normalize();
+      ProjectStore projects, @Value("${plowshare.projects.workspace-directory}") String directory) {
+    this.projects = java.util.Objects.requireNonNull(projects, "projects");
+    if (directory == null || directory.isBlank() || directory.indexOf('\0') >= 0)
+      throw new IllegalArgumentException("plowshare.projects.workspace-directory is required");
+    Path configured = Path.of(directory);
+    if (!configured.isAbsolute())
+      throw new IllegalArgumentException("plowshare.projects.workspace-directory must be absolute");
+    this.directory = configured.normalize();
   }
 
   @Override

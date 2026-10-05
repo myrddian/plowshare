@@ -34,7 +34,7 @@ public final class GetDateTool implements AgentTool {
   public GetDateTool(Supplier<Instant> clock, ZoneId defaultZone) {
     this.clock = Objects.requireNonNull(clock, "clock");
     this.defaultZone = Objects.requireNonNull(defaultZone, "defaultZone");
-    this.schema = new ToolSchema(NAME, DESCRIPTION, schemaMap());
+    this.schema = ToolSchema.from(NAME, DESCRIPTION, schemaMap());
   }
 
   @Override

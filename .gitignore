@@ -38,8 +38,8 @@ plowshare.yml
 __pycache__/
 *.pyc
 *.egg-info/
-/plowshare-sdk-dotnet/**/bin/
-/plowshare-sdk-dotnet/**/obj/
+/sdk/dotnet/**/bin/
+/sdk/dotnet/**/obj/
 
 # Local, untracked deployment overrides. Spring reads ./config/ with higher
 # precedence than the packaged application.yml, and the working directory is
@@ -63,6 +63,9 @@ __pycache__/
 /network-plan-output/Live-Relevant.png
 /network-plan-output/Pi-hole-Ready.png
 /network-plan-output/Reservation-Plan.png
+
+# TypeScript incremental compiler caches are generated build state.
+*.tsbuildinfo
 
 # JavaScript dependencies and local package caches
 node_modules/

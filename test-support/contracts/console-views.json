@@ -1,0 +1,14 @@
+{
+  "views": [
+    "chat",
+    "config",
+    "documents",
+    "inbox",
+    "information",
+    "jobs",
+    "memory",
+    "projects",
+    "proposals",
+    "usage"
+  ]
+}

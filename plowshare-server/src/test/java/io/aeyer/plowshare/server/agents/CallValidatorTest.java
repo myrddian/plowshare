@@ -54,7 +54,7 @@ class CallValidatorTest {
   @Test
   void the_absent_validator_never_says_call() {
     ToolSchema todoWrite =
-        new ToolSchema("todo_write", "todos", Map.of("type", "object", "properties", Map.of()));
+        ToolSchema.from("todo_write", "todos", Map.of("type", "object", "properties", Map.of()));
 
     assertFalse(
         CallValidator.NONE

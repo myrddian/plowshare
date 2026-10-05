@@ -13,7 +13,6 @@ import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.*;
 import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
-import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
 import java.nio.file.*;
 import java.time.*;
 import java.util.*;
@@ -74,15 +73,23 @@ class CodeWorkspaceIndexTest {
         "INSERT INTO admins(handle,password_hash) VALUES ('alice','fixture'),('bob','fixture')");
     jdbc.update("INSERT INTO projects(name) VALUES (?)", HOME.project());
     jdbc.update("INSERT INTO project_members SELECT id,'alice' FROM projects");
-    var access = new InformationAccess(new ProjectMembers(jdbc));
-    context = access.forRun("alice", HOME).withCorpus("code");
-    catalogue = new InformationCatalogue(jdbc, work, access, CLOCK);
+    var access = new InformationAccess(new JdbcProjectMembers(jdbc));
+    context =
+        access
+            .forRun("alice", HOME)
+            .withCorpus(io.aeyer.plowshare.server.information.InformationContext.Corpus.CODE);
+    catalogue =
+        io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
+            jdbc, work, access, CLOCK);
     catalogue.useWriteGates(
         new InformationWriteGates(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(jdbc, CLOCK),
             work,
             access,
-            new InformationJobs(jdbc, access, catalogue),
+            new InformationJobs(
+                new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+                access,
+                catalogue),
             new ConversationStore(jdbc),
             LogStages.NONE,
             new Hooks() {
@@ -95,28 +102,29 @@ class CodeWorkspaceIndexTest {
                 return deny.get() ? new Gate("intake denied", List.of(), List.of()) : Gate.NOTHING;
               }
             },
-            Harness.NONE,
-            CLOCK));
+            Harness.NONE));
     embeddings = mock(EmbeddingClient.class);
     lifecycle =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, CLOCK),
             work,
             catalogue,
-            CLOCK,
             InformationLifecycle.processing(
-                jdbc,
+                new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                    jdbc, java.time.Clock.systemUTC()),
                 work,
                 catalogue,
                 new DocumentStore(jdbc, work),
                 embeddings,
-                new Chunking(new RatioTokenizer(4), 512, 2048),
+                new Chunking(
+                    new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 512, 2048),
                 16,
                 768,
                 () -> null,
                 new DocumentsProperties()),
             new InformationLifecycle.Gates() {});
-    store = new CodeWorkspaceStore(jdbc, work, CLOCK, Duration.ofSeconds(30), 64);
+    store = new JdbcCodeWorkspaceStore(jdbc, work, CLOCK, Duration.ofSeconds(30), 64);
     provider =
         spy(
             LocalProvider.over(
@@ -202,8 +210,19 @@ class CodeWorkspaceIndexTest {
         jdbc.queryForList(
             "SELECT state FROM information_steps WHERE stage IN ('embed','summarise','summary_embed') ORDER BY stage",
             String.class));
-    assertTrue(catalogue.list(context.withCorpus("documents"), 10, 0).isEmpty());
-    assertEquals(1, catalogue.list(context, 10, 0).size());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(
+                    context.withCorpus(
+                        io.aeyer.plowshare.server.information.InformationContext.Corpus.DOCUMENTS),
+                    10,
+                    0))
+            .isEmpty());
+    assertEquals(
+        1,
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(context, 10, 0))
+            .size());
   }
 
   @Test
@@ -249,7 +268,10 @@ class CodeWorkspaceIndexTest {
         jdbc.queryForObject("SELECT revision_id FROM code_workspace_sources", UUID.class);
     assertEquals(
         "After",
-        catalogue.outline(context, current, 0, 10).get("symbols") instanceof List<?> rows
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                        catalogue.outline(context, current, 0, 10))
+                    .get("symbols")
+                instanceof List<?> rows
             ? ((Map<?, ?>) rows.getFirst()).get("name")
             : null);
   }
@@ -378,12 +400,13 @@ class CodeWorkspaceIndexTest {
     source("A.java", "class A {}");
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             new DocumentStore(jdbc, work),
             embeddings,
-            new Chunking(new RatioTokenizer(4), 512, 2048),
+            new Chunking(new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(4), 512, 2048),
             16,
             768,
             () -> null,
@@ -392,10 +415,10 @@ class CodeWorkspaceIndexTest {
     lifecycle.close();
     lifecycle =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, CLOCK),
             work,
             catalogue,
-            CLOCK,
             processor,
             new InformationLifecycle.Gates() {
               @Override
@@ -423,7 +446,10 @@ class CodeWorkspaceIndexTest {
   void displayed_revisions_are_bound_to_the_run_input_ledger() throws Exception {
     for (int i = 0; i < 3; i++) source("F" + i + ".java", "class F" + i + " {}");
     var jobs =
-        new InformationJobs(jdbc, new InformationAccess(new ProjectMembers(jdbc)), catalogue);
+        new InformationJobs(
+            new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+            new InformationAccess(new JdbcProjectMembers(jdbc)),
+            catalogue);
     String log =
         new ConversationStore(jdbc)
             .log(Origin.SUBMISSION, HOME, "coder", null, Budget.of(1), "alice", null)

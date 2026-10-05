@@ -9,7 +9,6 @@ import io.aeyer.plowshare.server.agents.CallerOrchestrationTools.Offer;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -30,12 +29,12 @@ class CallerOrchestrationToolsTest {
     ToolSchema schema = start.schema();
 
     @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.parameters().get("properties");
+    var properties = schema.parameters().properties();
     assertTrue(properties.containsKey("wait"), properties.keySet().toString());
     @SuppressWarnings("unchecked")
-    Map<String, Object> wait = (Map<String, Object>) properties.get("wait");
-    assertEquals("boolean", wait.get("type"));
-    assertEquals(List.of("request"), schema.parameters().get("required"));
+    var wait = properties.get("wait");
+    assertEquals("boolean", wait.type().values().getFirst());
+    assertEquals(List.of("request"), schema.parameters().required());
     assertTrue(schema.description().endsWith("Returns its handle at once."), schema.description());
   }
 

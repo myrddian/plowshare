@@ -58,8 +58,7 @@ class InformationMetadataTest {
     for (Object organisation :
         List.of(
             candidate("Analytical Society", "Published by Analytical Society.", false),
-            candidate("Invented Organisation", "Published by Invented Organisation.", true),
-            Map.of())) {
+            candidate("Invented Organisation", "Published by Invented Organisation.", true))) {
       var result = InformationMetadata.from(metadata(null, organisation), retained);
       assertNull(result.author());
       assertNull(result.authorSource());
@@ -99,5 +98,44 @@ class InformationMetadataTest {
     assertThrows(
         io.aeyer.plowshare.server.faults.CallerFault.class,
         () -> InformationMetadata.from(raw, retained));
+  }
+
+  @Test
+  void
+      malformed_candidates_and_duplicate_fields_are_refused_even_when_the_other_candidate_is_valid() {
+    for (String wire :
+        List.of(
+            "{\"autoTag\":[],\"documentAuthor\":{}}",
+            "{\"autoTag\":[],\"documentAuthor\":{\"name\":\"Ada\",\"evidence\":\"Written by Ada\",\"certain\":\"true\"}}",
+            "{\"autoTag\":[],\"documentAuthor\":{\"name\":7,\"evidence\":\"Written by Ada\",\"certain\":true}}",
+            "{\"autoTag\":[],\"documentAuthor\":null,\"documentOrganisation\":{},\"unexpected\":true}",
+            "{\"autoTag\":[],\"autoTag\":[\"sql\"]}",
+            "{\"autoTag\":[]} {}")) {
+      assertThrows(
+          IllegalStateException.class, () -> InformationMetadataCodec.read(wire, retained), wire);
+    }
+  }
+
+  @Test
+  void direct_metadata_values_are_immutable_and_cannot_bypass_attribution_checks() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new InformationMetadata(List.of(), null, "person", "quote"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new InformationMetadata(List.of(), "Ada\n", "person", "Written by Ada\n"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new InformationMetadata(List.of(), "Ada", "invented", "Written by Ada"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new InformationMetadata(List.of(), "Ada", "person", "Unrelated quote"));
+    var tags = new ArrayList<>(List.of("postgresql"));
+    var groups = new HashMap<String, List<String>>(Map.of("databases", tags));
+    var result = new InformationMetadata(tags, null, null, null, groups);
+    tags.clear();
+    groups.clear();
+    assertEquals(Map.of("databases", List.of("postgresql")), result.groups());
+    assertThrows(UnsupportedOperationException.class, () -> result.groups().clear());
   }
 }

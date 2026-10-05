@@ -1,0 +1,21 @@
+{
+  "name": "plowshare-code-quality",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "scripts": {
+    "lint": "eslint --max-warnings=0",
+    "format": "prettier --write \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\"",
+    "format:check": "prettier --check \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\""
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

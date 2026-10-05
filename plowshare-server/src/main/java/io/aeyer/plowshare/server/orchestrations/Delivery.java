@@ -427,9 +427,16 @@ public final class Delivery implements DeliveryPort {
     deliver(
         "ending:" + run.id(),
         RESULT,
-        () -> store.find(run.id()).filter(r -> r.resultDeliveredAt() == null),
+        () ->
+            store
+                .find(run.id())
+                .filter(
+                    r ->
+                        r.resultDeliveredAt() == null
+                            && run.endedAt() != null
+                            && run.endedAt().equals(r.endedAt())),
         Utterances::endingForCaller,
-        () -> store.resultDelivered(run.id()),
+        () -> store.resultDelivered(run.id(), run.endedAt()),
         null);
   }
 

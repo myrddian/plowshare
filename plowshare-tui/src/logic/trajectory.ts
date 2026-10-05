@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/trajectory'
+export * from 'plowshare-client-ts/operations/trajectory';

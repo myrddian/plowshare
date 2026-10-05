@@ -80,7 +80,7 @@ class ServerProjectFramesTest {
             .readTree("{\"version\":1,\"name\":\"home-assistant\"}"),
         new com.fasterxml.jackson.databind.ObjectMapper()
             .readTree(Files.readString(row.workspace().resolve(".plowshare/project"))));
-    assertTrue(new ProjectMembers(jdbc).isMember("home-assistant", "owner"));
+    assertTrue(new JdbcProjectMembers(jdbc).isMember("home-assistant", "owner"));
     assertThrows(RuntimeException.class, () -> create(Map.of("name", "home-assistant")));
     assertEquals(row.workspace(), projects.find("home-assistant").orElseThrow().workspace());
     try (var entries = Files.list(tmp.resolve("workspaces"))) {
@@ -205,7 +205,7 @@ class ServerProjectFramesTest {
                 presences,
                 ImageStore.NONE,
                 unions,
-                new ProjectMembers(jdbc));
+                new JdbcProjectMembers(jdbc));
     assertInstanceOf(
         LocalProvider.class,
         routing
@@ -260,7 +260,8 @@ class ServerProjectFramesTest {
     assertTrue(new UnionStore(jdbc).find(first.name()).isEmpty());
     new UnionStore(jdbc).enable(first.name(), java.time.Instant.now());
     assertTrue(new UnionStore(jdbc).find(first.name()).isEmpty());
-    assertThrows(RuntimeException.class, () -> new ProjectMembers(jdbc).add(first.name(), "owner"));
+    assertThrows(
+        RuntimeException.class, () -> new JdbcProjectMembers(jdbc).add(first.name(), "owner"));
     assertThrows(
         RuntimeException.class,
         () -> ClientProjects.requireOwn(first.name(), "second-client", "member"));
@@ -306,8 +307,10 @@ class ServerProjectFramesTest {
     assertThrows(
         RuntimeException.class,
         () ->
-            ClientProjects.requirePayload(
-                Map.of("scope", Map.of("project", first.name())), "second-client", "member"));
+            io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(
+                    Map.of("scope", Map.of("project", first.name())))
+                .clientProjects()
+                .forEach(project -> ClientProjects.requireOwn(project, "second-client", "member")));
     assertEquals(manifest, Files.readString(checkout.resolve("plowshare")));
     assertFalse(Files.exists(checkout.resolve(".plowshare")));
   }

@@ -213,7 +213,7 @@ public final class RunTool implements AgentTool {
             "The most it may take before it is killed. Omit for the environment's limit;"
                 + " a larger number is brought down to it."));
     this.schema =
-        new ToolSchema(NAME, DESCRIPTION, ToolArguments.object(properties, List.of("command")));
+        ToolSchema.from(NAME, DESCRIPTION, ToolArguments.object(properties, List.of("command")));
   }
 
   @Override

@@ -377,7 +377,10 @@
         "value": null,
         "source": "default"
       },
-      "autoIncrease": {"value": null, "source": "definition"},
+      "autoIncrease": {
+        "value": null,
+        "source": "definition"
+      },
       "autoContinue": {
         "value": null,
         "source": "default"
@@ -499,7 +502,7 @@
       {
         "id": "f",
         "event": "daily",
-        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "data": "{\"text\":\"Manual observation\"}",
         "schedule": null,
         "fireAt": null,
         "trigger": "t",
@@ -519,7 +522,7 @@
       {
         "id": "unmatched",
         "event": "daily",
-        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "data": "{\"text\":\"Manual observation\"}",
         "schedule": null,
         "fireAt": null,
         "trigger": null,
@@ -541,7 +544,7 @@
       {
         "id": "f",
         "event": "daily",
-        "data": "{\"nested\":[true,null,{\"reason\":\"manual\"}]}",
+        "data": "{\"text\":\"Manual observation\"}",
         "schedule": null,
         "fireAt": null,
         "trigger": "t",
@@ -666,6 +669,128 @@
       },
       "member": "researcher",
       "maxTurns": 24
+    }
+  },
+  "schedule.save": {
+    "code": "OK",
+    "payload": {
+      "name": "weekday",
+      "project": "p",
+      "source": "server",
+      "path": "schedules/weekday.json",
+      "internalName": "scheduled-1-weekday",
+      "definition": {
+        "version": 1,
+        "cron": "0 0 9 * * MON-FRI",
+        "zone": "UTC",
+        "paused": false,
+        "action": {
+          "kind": "skill",
+          "agent": "reviewer",
+          "name": "review",
+          "input": "Review retained sources",
+          "mode": "NEW"
+        },
+        "target": {
+          "kind": "mailbox",
+          "project": null,
+          "conversation": null,
+          "to": null,
+          "route": null
+        },
+        "limits": {
+          "maxModelCalls": 50,
+          "maxTurns": 10,
+          "queueCap": 1
+        }
+      },
+      "status": "active",
+      "error": null
+    }
+  },
+  "schedule.sync": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "weekday",
+        "project": "p",
+        "source": "server",
+        "path": "schedules/weekday.json",
+        "internalName": "scheduled-1-weekday",
+        "definition": {
+          "version": 1,
+          "cron": "0 0 9 * * MON-FRI",
+          "zone": "UTC",
+          "paused": false,
+          "action": {
+            "kind": "skill",
+            "agent": "reviewer",
+            "name": "review",
+            "input": "Review retained sources",
+            "mode": "NEW"
+          },
+          "target": {
+            "kind": "mailbox",
+            "project": null,
+            "conversation": null,
+            "to": null,
+            "route": null
+          },
+          "limits": {
+            "maxModelCalls": 50,
+            "maxTurns": 10,
+            "queueCap": 1
+          }
+        },
+        "status": "active",
+        "error": null
+      }
+    ]
+  },
+  "schedule.files": {
+    "code": "OK",
+    "payload": [
+      {
+        "name": "weekday",
+        "project": "p",
+        "source": "server",
+        "path": "schedules/weekday.json",
+        "internalName": "scheduled-1-weekday",
+        "definition": {
+          "version": 1,
+          "cron": "0 0 9 * * MON-FRI",
+          "zone": "UTC",
+          "paused": false,
+          "action": {
+            "kind": "skill",
+            "agent": "reviewer",
+            "name": "review",
+            "input": "Review retained sources",
+            "mode": "NEW"
+          },
+          "target": {
+            "kind": "mailbox",
+            "project": null,
+            "conversation": null,
+            "to": null,
+            "route": null
+          },
+          "limits": {
+            "maxModelCalls": 50,
+            "maxTurns": 10,
+            "queueCap": 1
+          }
+        },
+        "status": "active",
+        "error": null
+      }
+    ]
+  },
+  "orchestration.resume": {
+    "code": "OK",
+    "payload": {
+      "id": "o",
+      "state": "running"
     }
   }
 }

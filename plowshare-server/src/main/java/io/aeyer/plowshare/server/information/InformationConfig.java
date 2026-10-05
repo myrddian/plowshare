@@ -23,7 +23,13 @@ public class InformationConfig {
       @org.springframework.beans.factory.annotation.Value(
               "${plowshare.information.migration-account:}")
           String operator) {
-    return new DocumentPolicyAssignments(jdbc, work, access, Clock.systemUTC(), operator);
+    return new DocumentPolicyAssignments(
+        new JdbcDocumentPolicyRepository(jdbc),
+        new InformationJobs(new JdbcJobInformationRepository(jdbc), access),
+        work,
+        access,
+        Clock.systemUTC(),
+        operator);
   }
 
   @Bean
@@ -31,19 +37,19 @@ public class InformationConfig {
       JdbcTemplate jdbc,
       UnitOfWork work,
       InformationAccess access,
+      InformationLogAccess logs,
       DocumentsProperties properties) {
-    return new InformationCatalogue(jdbc, work, access, Clock.systemUTC())
+    return new InformationCatalogue(
+            new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC()), work, access, logs)
         .withAllowance(properties::ingestBudgetNow);
   }
 
   @Bean(destroyMethod = "close")
   public InformationEventPublisher informationEventPublisher(
-      JdbcTemplate jdbc,
-      UnitOfWork work,
+      InformationEventRepository events,
       ObjectProvider<io.aeyer.plowshare.server.events.AccountPushes> pushes) {
     return new InformationEventPublisher(
-        jdbc,
-        work,
+        events,
         pushes.getIfAvailable(() -> io.aeyer.plowshare.server.events.AccountPushes.NONE),
         Clock.systemUTC());
   }
@@ -64,7 +70,8 @@ public class InformationConfig {
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks) {
     var queue =
         new InformationAcquisitions(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcAcquisitionRepository(
+                jdbc, Clock.systemUTC()),
             work,
             access,
             catalogue,
@@ -76,7 +83,6 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE),
-            Clock.systemUTC(),
             inputs);
     catalogue.useAcquisitions(queue);
     return queue;
@@ -97,7 +103,8 @@ public class InformationConfig {
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks) {
     var gates =
         new InformationWriteGates(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationGateRepository(
+                jdbc, Clock.systemUTC()),
             work,
             access,
             inputs,
@@ -106,8 +113,7 @@ public class InformationConfig {
             Hooks.chain(
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
-            harness.getIfAvailable(() -> Harness.NONE),
-            Clock.systemUTC());
+            harness.getIfAvailable(() -> Harness.NONE));
     catalogue.useWriteGates(gates);
     migration.useWriteGates(gates);
     return gates;
@@ -123,7 +129,7 @@ public class InformationConfig {
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks) {
     return new InformationModelStages(
-        jdbc,
+        new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),
         work,
         catalogue,
         inputs,
@@ -135,8 +141,13 @@ public class InformationConfig {
 
   @Bean
   public InformationJobs informationJobs(
-      JdbcTemplate jdbc, InformationAccess access, InformationCatalogue catalogue) {
-    return new InformationJobs(jdbc, access, catalogue);
+      JdbcTemplate jdbc,
+      InformationAccess access,
+      ObjectProvider<InformationReadAccess> catalogue) {
+    return new InformationJobs(
+        new io.aeyer.plowshare.server.information.JdbcJobInformationRepository(jdbc),
+        access,
+        (context, revision) -> catalogue.getObject().requireReadable(context, revision));
   }
 
   @Bean
@@ -209,28 +220,40 @@ public class InformationConfig {
       ObjectProvider<Harness> harness,
       ObjectProvider<AgentRegistry> agents,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
-      @Qualifier("localHooks") ObjectProvider<Hooks> localHooks) {
+      @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
+      ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
+      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers) {
+    var dual = dualProvider.getIfAvailable();
+    var counters = embeddingTokenizers.getIfAvailable();
+    var chunkTokenizer = counters == null ? tokenizer : counters.documents();
+    int chunkLimit =
+        counters == null
+            ? llm.getEmbeddingMaxInputTokens()
+            : counters.documentLimit(llm.getEmbeddingMaxInputTokens());
     catalogue.useConfiguration(
-        () -> InformationConfiguration.fingerprints(llm, properties, agents.getIfAvailable()));
+        () ->
+            InformationConfiguration.fingerprints(
+                llm, properties, agents.getIfAvailable(), dual, counters));
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             store,
             embeddings,
-            new Chunking(
-                tokenizer, properties.getChunkTargetTokens(), llm.getEmbeddingMaxInputTokens()),
+            new Chunking(chunkTokenizer, properties.getChunkTargetTokens(), chunkLimit),
             properties.getEmbedBatchSize(),
             llm.getEmbeddingDim(),
             summariser::getIfAvailable,
             properties,
             modelStages,
             usageOwners.getIfAvailable(
-                () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));
+                () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE),
+            dual);
     var gates =
         new InformationStageHooks(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),
             catalogue,
             conversations,
             logStages.getIfAvailable(() -> LogStages.NONE),
@@ -244,7 +267,13 @@ public class InformationConfig {
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));
     catalogue.withGates(gates);
-    return new InformationLifecycle(jdbc, work, catalogue, Clock.systemUTC(), processor, gates);
+    return new InformationLifecycle(
+        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+            jdbc, Clock.systemUTC()),
+        work,
+        catalogue,
+        processor,
+        gates);
   }
 
   @Bean

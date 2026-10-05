@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.MemoryProposal;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ValidationTest {
@@ -20,25 +19,21 @@ class ValidationTest {
    * spelled out directly rather than through the three-arg {@code proposal} helper.
    */
   @Test
-  void every_field_is_required() {
-    for (var p :
-        List.of(
-            proposal("", "scope", "body"),
-            proposal("summary", "", "body"),
-            proposal("summary", "scope", ""),
-            new MemoryProposal("summary", "scope", "body", "", "test"))) {
-      assertThrows(ValidationException.class, () -> Validation.check(p, 8000));
-    }
+  void every_field_is_validated_before_a_proposal_exists() {
+    assertThrows(IllegalArgumentException.class, () -> proposal("", "scope", "body"));
+    assertThrows(IllegalArgumentException.class, () -> proposal("summary", "", "body"));
+    assertThrows(IllegalArgumentException.class, () -> proposal("summary", "scope", ""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new MemoryProposal("summary", "scope", "body", "", "test"));
   }
 
-  /**
-   * A summary is the one line the index shows and the thing recall matches against. A multi-line
-   * summary breaks the index's shape silently.
-   */
   @Test
-  void a_summary_must_be_one_line() {
-    var p = proposal("first line\nsecond line", "scope", "body");
-    var e = assertThrows(ValidationException.class, () -> Validation.check(p, 8000));
+  void a_summary_must_be_one_line_before_application_validation() {
+    var e =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> proposal("first line\nsecond line", "scope", "body"));
     assertTrue(e.getMessage().contains("single line"));
   }
 

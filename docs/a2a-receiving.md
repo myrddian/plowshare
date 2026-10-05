@@ -111,8 +111,8 @@ Save an operator-owned configuration outside tracked source:
 | `plowshare` | Server HTTP(S) origin; the SDK connects to `/v1/events` |
 | `project` | Required receiving project; the account must have access |
 | `receive.agent` | One exported, served agent in that project's server catalog |
-| `receive.bind` | Listener address, default `127.0.0.1` |
-| `receive.port` | Listener port, default `8093` |
+| `receive.bind` | Required explicit listener address |
+| `receive.port` | Required explicit listener port, 1–65535 |
 | `receive.publicUrl` | Exact public HTTP(S) RPC URL; no credentials, query or fragment |
 | `receive.waitMs` | Blocking response deadline, default 30,000 ms, allowed 1–300,000 |
 | `receive.clients` | External client aliases, each with a distinct bearer-token environment variable |
@@ -138,7 +138,7 @@ previous message mutations. No automatic credential renewal occurs in a running
 process, and rotating/revoking the account credential remains an operator action.
 
 ```sh
-plowshare-a2a/build/install/plowshare-a2a/bin/plowshare-a2a /absolute/private/path/a2a.json
+integrations/a2a/build/install/plowshare-a2a/bin/plowshare-a2a /absolute/private/path/a2a.json
 ```
 
 Route HTTPS through your reverse proxy to the configured listener. Forward
@@ -311,3 +311,10 @@ provides typed receipt/read/cancel calls. The JS/TS, Python, C# and Go SDKs can 
 the same generic operation catalog. These operations trust an authenticated adapter
 to supply external client aliases; they are not anonymous A2A endpoints on the
 Plowshare server itself.
+
+The container health probe requires `PLOWSHARE_A2A_HEALTH_URL`, the complete
+HTTP(S) `/.well-known/agent-card.json` URL reachable from the adapter container.
+It does not infer an address or port and does not follow redirects. Configure
+`PLOWSHARE_A2A_LISTEN_ADDRESS`, `PLOWSHARE_A2A_PUBLISHED_PORT` and
+`PLOWSHARE_A2A_PORT` explicitly for the Compose overlay; the last must match
+`receive.port`. Keep the public RPC URL distinct from this readiness URL.

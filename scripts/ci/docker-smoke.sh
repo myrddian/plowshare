@@ -11,6 +11,9 @@ fixture=$(mktemp -d "$PLOWSHARE_CI_SHARED_ROOT/smoke.XXXXXXXX")
 export PLOWSHARE_STATE_ROOT="$fixture/state"
 export PLOWSHARE_CI_FIXTURE_SCRIPT="$fixture/fixtures.mjs"
 export PLOWSHARE_LISTEN_ADDRESS=0.0.0.0 PLOWSHARE_PUBLISHED_PORT=0
+# This disposable fixture exercises a pre-provisioned administrator. A blank
+# handle selects temporary first-run setup, which cannot register providers.
+export PLOWSHARE_ADMIN_HANDLE=admin
 export PLOWSHARE_SEARCH_LADDER=searxng SEARXNG_BASE_URL=http://fixtures:8080
 project="plowshare-ci-$(basename "$fixture" | tr '[:upper:].' '[:lower:]-')"
 mkdir -p build/ci-reports
@@ -30,19 +33,24 @@ cleanup() {
 trap cleanup EXIT
 cp scripts/ci/fixtures.mjs "$PLOWSHARE_CI_FIXTURE_SCRIPT"
 python3 - <<'PY'
-import os,pathlib,secrets
+import os,pathlib,secrets,hashlib,shutil
 state=pathlib.Path(os.environ['PLOWSHARE_STATE_ROOT'])
 for name in ('data','config','secrets','postgres'): (state/name).mkdir(parents=True)
 for name in ('database-password','admin-password','changed-password'):
  path=state/'secrets'/name;path.write_text(secrets.token_hex(32)+'\n');path.chmod(0o600)
-(state/'config'/'models.env').write_text('LLM_BASE_URL=http://fixtures:8080/v1\nSPARK_BASE_URL=http://fixtures:8080/v1\nLM_STUDIO_API_KEY=ci-fixture\nSPARK_API_KEY=ci-fixture\n')
+tokenizer=state/'config'/'tokenizers'/'fixture.json'
+tokenizer.parent.mkdir()
+shutil.copyfile('plowshare-server/src/test/resources/tokenizers/fixture.json',tokenizer)
+checksum=hashlib.sha256(tokenizer.read_bytes()).hexdigest()
+(state/'config'/'application.yml').write_text('plowshare:\n  llm:\n    embedding-tokenizer:\n      file: /etc/plowshare/tokenizers/fixture.json\n      sha256: '+checksum+'\n')
+(state/'config'/'models.env').write_text('LLM_BASE_URL=http://fixtures:8080/v1\nLLM_CHAT_MODEL=fixture-chat\nLLM_EMBEDDING_MODEL=fixture-embedding\nLLM_API_KEY=ci-fixture\nLLM_CHAT_SLOTS=2\nLLM_SWARM_SLOTS=1\n')
 PY
 chown -R 1000:1000 "$PLOWSHARE_STATE_ROOT"
 compose config --quiet
 compose up -d --no-build --wait --wait-timeout 240
 port=$(compose port server 8091)
 export PLOWSHARE_URL="http://${TESTCONTAINERS_HOST_OVERRIDE:-127.0.0.1}:${port##*:}"
-PLOWSHARE_URL="$PLOWSHARE_URL" sh deploy/docker/register-search.sh
+export PLOWSHARE_SEARCH_PROVIDER_URL=http://searxng-provider:8086
 export PLOWSHARE_PASSWORD_FILE="$PLOWSHARE_STATE_ROOT/secrets/admin-password"
 export PLOWSHARE_NEXT_PASSWORD_FILE="$PLOWSHARE_STATE_ROOT/secrets/changed-password"
 export PLOWSHARE_CI_EXPECT_FIXTURES=true

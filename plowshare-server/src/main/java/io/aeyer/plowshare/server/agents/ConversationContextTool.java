@@ -27,7 +27,7 @@ public final class ConversationContextTool implements AgentTool {
   private final Pricing pricing;
   private final String session;
   private static final ToolSchema SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           NAME,
           "Read measured context and prefix costs for a conversation in this run's tier. Optional agent prices that agent's prefix; omitted agent uses whoever answered. Uses the run's session, never a model-supplied session or project.",
           Map.of(

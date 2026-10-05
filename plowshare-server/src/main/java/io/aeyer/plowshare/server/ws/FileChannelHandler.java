@@ -216,7 +216,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   /**
    * Bound leniently on purpose. A client built against a later server sends a field this one has
    * never heard of, and the two halves ship separately — the same setting, for the same reason, as
-   * {@code HttpServerClient}'s mapper on the other side of the wire.
+   * a typed SDK caller's mapper on the other side of the wire.
    */
   private final ObjectMapper json =
       new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);

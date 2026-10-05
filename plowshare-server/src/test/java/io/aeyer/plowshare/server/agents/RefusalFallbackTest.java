@@ -530,7 +530,7 @@ class RefusalFallbackTest {
 
       @Override
       public ToolSchema schema() {
-        return new ToolSchema(LOOK, "looks something up in public records", Map.of());
+        return ToolSchema.from(LOOK, "looks something up in public records", Map.of());
       }
 
       @Override

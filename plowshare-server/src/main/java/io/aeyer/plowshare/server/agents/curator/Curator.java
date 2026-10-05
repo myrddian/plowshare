@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents.curator;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
@@ -22,7 +21,6 @@ import io.aeyer.plowshare.server.archive.TocEntry;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -699,9 +697,9 @@ public final class Curator {
    * "the 'payments' archive".
    *
    * <p>Flattened, like every other value this renderer puts in a single-line slot. {@code Home.of}
-   * refuses a blank project name and checks nothing else, so a line break in one would otherwise
-   * reach column zero — and this string opens the message, which is the line a forged entry would
-   * have to imitate.
+   * validates project identities before rendering; flattening also protects the output slot if its
+   * input source changes. A line break in an unvalidated value would otherwise reach column zero —
+   * and this string opens the message, which is the line a forged entry would have to imitate.
    *
    * <p>No global branch, because {@link #pass} builds every {@code Home} it has through {@code
    * Home.of} and that method cannot produce one. A branch for a tier this class refuses to curate
@@ -755,52 +753,14 @@ public final class Curator {
     file(candidate, ruling, tally);
   }
 
-  private static Ruling read(String answer) {
-    JsonNode object;
+  private static Ruling read(String content) {
     try {
-      object = ModelJson.object(answer);
+      var answer = io.aeyer.plowshare.server.agents.ModelAnswers.curation(content);
+      return new Ruling(
+          Decision.valueOf(answer.decision().name()), MemoryTools.oneLine(answer.reason()));
     } catch (ModelJson.Unreadable why) {
-      // Re-wrapped rather than caught in act(): the shared reader reports
-      // a detail — "it said nothing" — and this class frames it as being
-      // about one memory's ruling, where Scribe frames the same three
-      // details as being about a write it is filing flat.
       throw new Unreadable(why.getMessage());
     }
-
-    JsonNode decision = object.path("decision");
-    if (!decision.isTextual()) {
-      // isTextual and not asText: measured against Jackson 2.17.2, this
-      // project's version, NullNode.asText() returns the four-character
-      // string "null", which would arrive here as a decision word.
-      throw new Unreadable("no 'decision'");
-    }
-    Decision what =
-        switch (decision.asText().strip().toLowerCase(Locale.ROOT)) {
-          case "promote" -> Decision.PROMOTE;
-          case "ask" -> Decision.ASK;
-          case "keep" -> Decision.KEEP;
-          default ->
-              throw new Unreadable(
-                  "'"
-                      + MemoryTools.oneLine(decision.asText())
-                      + "' is not one of promote, ask, keep");
-        };
-
-    JsonNode reason = object.path("reason");
-    if (!reason.isTextual() || reason.asText().isBlank()) {
-      // Required for all three, and all three file: ProposalStore.propose
-      // refuses a blank reason outright, so reaching that refusal would be
-      // a worse way to learn the same thing. It would be required anyway —
-      // a decision with no account of itself is not a decision, and for a
-      // keep the account is the whole of why a memory will never be judged
-      // again.
-      throw new Unreadable("no 'reason'");
-    }
-    // Flattened here, at the one boundary, rather than at each place the
-    // reason is used. It travels into a proposal row a human reads, into the
-    // promoted record's provenance prose, and into this pass's own account,
-    // and a line break in any of those reaches column zero.
-    return new Ruling(what, MemoryTools.oneLine(reason.asText()));
   }
 
   /**

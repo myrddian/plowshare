@@ -20,7 +20,6 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import io.aeyer.plowshare.client.PlowshareClient;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -80,8 +79,8 @@ import org.springframework.web.bind.annotation.RestController;
  * TokenStore#acceptOperator(String)} goes in the file. {@link
  * #the_startup_line_and_the_file_carry_two_different_credentials()} is what fails if they ever
  * become one token again, and {@link
- * #the_operator_token_a_real_boot_writes_authenticates_the_cli_end_to_end()} is what fails if the
- * file stops being a credential the CLI can use.
+ * #the_operator_token_a_real_boot_writes_authenticates_bearer_requests()} is what fails if the file
+ * stops being a credential the CLI can use.
  *
  * <h2>Two instruments, and why both</h2>
  *
@@ -379,7 +378,7 @@ class AuthControllerTest {
     OkHttpClient http = new OkHttpClient.Builder().build();
     ConfigurableApplicationContext context = null;
     try {
-      context = boot(said, "--server.port=0");
+      context = boot(said, "--server.port=0", "--server.address=127.0.0.1");
       String url =
           "http://localhost:"
               + ((WebServerApplicationContext) context).getWebServer().getPort()
@@ -1806,7 +1805,7 @@ class AuthControllerTest {
     capturing(
         said,
         () -> {
-          AuthConfig.announce(store, new AuthProperties(), file, 8091);
+          AuthConfig.announce(store, announcementProperties(), file);
           return null;
         });
 
@@ -1817,23 +1816,12 @@ class AuthControllerTest {
             + " the only line in this server allowed to carry a secret");
     assertEquals(Level.INFO, said.get(0).getLevel());
     String line = said.get(0).getFormattedMessage();
-    assertTrue(
-        line.startsWith("Plowshare console: http://127.0.0.1:8091/?token="),
-        "the console line is not the line the design specifies, so a person following the"
-            + " spec's instructions has nothing to click");
-
-    String printed = line.substring(line.indexOf("?token=") + "?token=".length());
     List<String> lines = Files.readAllLines(file);
-    assertEquals(
-        2,
-        lines.size(),
-        "the file is the operator token and then the console URL, in that order, and a"
-            + " reader taking its head must still get the credential it always got");
-    assertEquals(
-        line.substring(line.indexOf("http://")),
-        lines.get(1),
-        "the file's second line is not the URL the startup line printed, so the two"
-            + " disagree about how to reach the console");
+    assertEquals(2, lines.size());
+    String printed = lines.get(1).substring(lines.get(1).indexOf("?token=") + "?token=".length());
+    assertTrue(line.contains("http://127.0.0.1:8091/"));
+    assertFalse(line.contains(printed));
+    assertFalse(line.contains(lines.getFirst()));
     String written = lines.get(0).strip();
     assertFalse(
         printed.equals(written),
@@ -1907,7 +1895,7 @@ class AuthControllerTest {
         said,
         () -> {
           AuthConfig.announce(
-              store, new AuthProperties(), notADirectory.resolve("console-token"), 8091);
+              store, announcementProperties(), notADirectory.resolve("console-token"));
           return null;
         });
 
@@ -1924,7 +1912,7 @@ class AuthControllerTest {
 
     // The control: the same call over a path that works does record one.
     TokenStore worked = realStore();
-    AuthConfig.announce(worked, new AuthProperties(), tmp.resolve("console-token"), 8091);
+    AuthConfig.announce(worked, announcementProperties(), tmp.resolve("console-token"));
     assertEquals(
         2,
         worked.trackedRecords(),
@@ -1934,31 +1922,22 @@ class AuthControllerTest {
 
   // --- the real boot, and the CLI's own resolution -------------------------
 
-  /**
-   * The whole path a person actually runs, over a socket.
-   *
-   * <p>Server starts, writes the file, prints the line. Then: the CLI's own {@link
-   * PlowshareClient#accessToken()} reads it and the token authenticates a gated route as a {@code
-   * Bearer} header, and the printed token exchanges for cookies that authenticate the same route.
-   * Both clients, from the two credentials one startup produced, with no export and no flag.
-   *
-   * <p>{@link PlowshareClient#TOKEN_FILE_PROPERTY} moves the client's lookup into the temp
-   * directory. It is the real resolution otherwise — the same method {@code cli.Plowshare} and the
-   * MCP client call — and it carries a path and never a token, which is the distinction that class
-   * draws about why the credential itself is an environment variable instead.
-   */
+  /** A real boot writes protected credentials that authenticate both bearer and cookie requests. */
   @Test
-  void the_operator_token_a_real_boot_writes_authenticates_the_cli_end_to_end(@TempDir Path tmp)
+  void the_operator_token_a_real_boot_writes_authenticates_bearer_requests(@TempDir Path tmp)
       throws Exception {
     Path file = tmp.resolve("console-token");
     List<ILoggingEvent> said = new ArrayList<>();
     OkHttpClient http = new OkHttpClient.Builder().build();
-    String was = System.getProperty(PlowshareClient.TOKEN_FILE_PROPERTY);
-    System.setProperty(PlowshareClient.TOKEN_FILE_PROPERTY, file.toString());
 
     ConfigurableApplicationContext context = null;
     try {
-      context = boot(said, "--server.port=0", "--plowshare.auth.token-file=" + file);
+      context =
+          boot(
+              said,
+              "--server.port=0",
+              "--server.address=127.0.0.1",
+              "--plowshare.auth.token-file=" + file);
       int port = ((WebServerApplicationContext) context).getWebServer().getPort();
 
       assertEquals(
@@ -1967,7 +1946,7 @@ class AuthControllerTest {
           "a real boot wrote the operator token at a mode other than 600");
 
       // THE CLI. Its own resolution, not this test reading the file.
-      String operator = PlowshareClient.accessToken();
+      String operator = Files.readAllLines(file).getFirst().strip();
       assertNotNull(
           operator,
           "the client resolved no credential from the file the server just wrote, so"
@@ -1982,7 +1961,7 @@ class AuthControllerTest {
 
       // THE BROWSER. The printed token, exchanged for cookies, and the
       // access cookie carried on a gated request the way a page carries it.
-      String printed = printedToken(said);
+      String printed = Files.readAllLines(file).get(1).split("token=", 2)[1];
       try (Response exchanged =
           httpPost(http, port, "/v1/auth", "{\"token\":\"" + printed + "\"}")) {
         assertEquals(
@@ -2010,10 +1989,6 @@ class AuthControllerTest {
         }
       }
     } finally {
-      System.clearProperty(PlowshareClient.TOKEN_FILE_PROPERTY);
-      if (was != null) {
-        System.setProperty(PlowshareClient.TOKEN_FILE_PROPERTY, was);
-      }
       http.dispatcher().executorService().shutdown();
       http.connectionPool().evictAll();
       if (context != null) {
@@ -2052,7 +2027,7 @@ class AuthControllerTest {
 
     ConfigurableApplicationContext context = null;
     try {
-      context = boot(said, "--server.port=0");
+      context = boot(said, "--server.port=0", "--server.address=127.0.0.1");
       int port = ((WebServerApplicationContext) context).getWebServer().getPort();
 
       assertEquals(
@@ -2085,24 +2060,21 @@ class AuthControllerTest {
    * its test classpath already.
    */
   @Test
-  void the_server_and_the_client_agree_where_the_operator_token_lives() {
-    String was = System.getProperty(PlowshareClient.TOKEN_FILE_PROPERTY);
-    System.clearProperty(PlowshareClient.TOKEN_FILE_PROPERTY);
-    try {
-      assertEquals(
-          AuthConfig.defaultTokenFile(),
-          PlowshareClient.consoleTokenFile(),
-          "the server writes the operator token somewhere the CLI does not read, so a"
-              + " `plowshare` run against a server on this very machine is a 401"
-              + " with a credential sitting on disk");
-    } finally {
-      if (was != null) {
-        System.setProperty(PlowshareClient.TOKEN_FILE_PROPERTY, was);
-      }
-    }
+  void operator_token_file_has_no_deployment_fallback() {
+    assertEquals("", new AuthProperties().getTokenFile());
+    assertEquals("", new AuthProperties().getConsoleOrigin());
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> AuthConfig.announce(realStore(), new AuthProperties(), Path.of("unused")));
   }
 
   // --- fixtures ------------------------------------------------------------
+
+  private static AuthProperties announcementProperties() {
+    var properties = new AuthProperties();
+    properties.setConsoleOrigin("http://127.0.0.1:8091");
+    return properties;
+  }
 
   private static TokenStore realStore() {
     AuthProperties properties = new AuthProperties();
@@ -2214,18 +2186,6 @@ class AuthControllerTest {
     return parsed;
   }
 
-  /** The token out of the one console line the boot printed. */
-  private static String printedToken(List<ILoggingEvent> said) {
-    for (ILoggingEvent event : said) {
-      String line = event.getFormattedMessage();
-      int at = line.indexOf("?token=");
-      if (at >= 0) {
-        return line.substring(at + "?token=".length());
-      }
-    }
-    throw new AssertionError("the boot printed no console line, so there is no way in");
-  }
-
   /**
    * Starts {@link Wiring} on a port the OS picks, with {@link AuthConfig}'s logger captured into
    * {@code said}.
@@ -2245,12 +2205,26 @@ class AuthControllerTest {
       return new SpringApplicationBuilder(Wiring.class)
           .web(WebApplicationType.SERVLET)
           .listeners(
+              (ApplicationListener<
+                      org.springframework.boot.web.servlet.context
+                          .ServletWebServerInitializedEvent>)
+                  event ->
+                      event
+                          .getApplicationContext()
+                          .getBean(AuthProperties.class)
+                          .setConsoleOrigin("http://127.0.0.1:" + event.getWebServer().getPort()))
+          .listeners(
               (ApplicationListener<ApplicationPreparedEvent>)
                   prepared -> {
                     captured.start();
                     configLog.addAppender(captured);
                   })
-          .run(args);
+          .run(
+              java.util.stream.Stream.concat(
+                      java.util.stream.Stream.of("--server.address=127.0.0.1"),
+                      java.util.Arrays.stream(args)
+                          .filter(arg -> !arg.startsWith("--server.address=")))
+                  .toArray(String[]::new));
     } finally {
       configLog.detachAppender(captured);
       said.addAll(captured.list);

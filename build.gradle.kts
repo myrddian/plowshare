@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     java
     id("com.diffplug.spotless") version "7.0.4"
@@ -48,8 +50,8 @@ allprojects {
 
 val serverLaunchTest by tasks.registering(Exec::class) {
     group = "verification"
-    description = "Checks that server launches survive replacement of the build jar."
-    inputs.files("bin/plowshare", "scripts/server-launch.test.mjs")
+    description = "Checks explicit server configuration and immutable launch snapshots."
+    inputs.files("bin/plowshare", "bin/plowshare-deployment", "scripts/server-launch.test.mjs")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("node", "--test", "scripts/server-launch.test.mjs")
 }
@@ -77,7 +79,7 @@ val manualCheck by tasks.registering(Exec::class) {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(fileTree("docs") { include("*.md", "manual/**") })
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files("plowshare-integrations/README.md", "plowshare-integration-home-assistant/README.md", "plowshare-hooks/README.md", "deploy/docker/README.md")
+    inputs.files("integrations/runtime/README.md", "integrations/home-assistant/README.md", "plowshare-hooks/README.md", "deploy/docker/README.md")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("node", "--test", "scripts/install-manual.test.mjs")
 }
@@ -92,7 +94,7 @@ val databaseTestBoundaryCheck by tasks.registering(Exec::class) {
     description = "Refuses Docker test fixtures without the full-db opt-in tag."
     workingDir = rootDir
     inputs.file("scripts/check-database-tests.py")
-    inputs.files(fileTree(rootDir) { include("*/src/test/java/**/*.java") })
+    inputs.files(fileTree(rootDir) { include("*/src/test/java/**/*.java", "sdk/*/src/test/java/**/*.java", "integrations/*/src/test/java/**/*.java") })
     commandLine("python3", "scripts/check-database-tests.py")
 }
 tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, manualCheck, clientManifestCheck, legacyCliAuditCheck, databaseTestBoundaryCheck) }
@@ -160,19 +162,93 @@ subprojects {
         }
     }
 }
+// TypeScript tools live in a private root package so client runtime dependencies
+// and independent package installs remain separate from repository verification.
+val typescriptModules = listOf("plowshare-client-ts", "plowshare-client-node", "plowshare-cli",
+    "plowshare-mcp", "plowshare-tui", "plowshare-console", "plowshare-desktop")
+val typescriptTools by tasks.registering(Exec::class) {
+    workingDir = rootDir
+    inputs.files("package.json", "pnpm-lock.yaml")
+    outputs.file("node_modules/.modules.yaml")
+    commandLine("pnpm", "install", "--frozen-lockfile")
+}
+fun Exec.typescriptSources() {
+    workingDir = rootDir
+    dependsOn(typescriptTools)
+    inputs.files("package.json", "pnpm-lock.yaml", "eslint.config.mjs", ".prettierrc.json",
+        ".prettierignore", "tsconfig.strict.json")
+    inputs.files(fileTree(rootDir) {
+        include("sdk/*/src/**/*.ts", "sdk/*/**/tsconfig*.json", "plowshare-*/src/**/*.ts", "plowshare-*/**/tsconfig*.json", "plowshare-*/vite.config.ts")
+        exclude("**/node_modules/**", "**/build/**", "**/build-tests/**", "**/dist/**")
+    }).withPathSensitivity(PathSensitivity.RELATIVE)
+}
+val typescriptFormat by tasks.registering(Exec::class) {
+    group = "formatting"
+    typescriptSources()
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--write", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+}
+val typescriptFormatCheck by tasks.registering(Exec::class) {
+    group = "verification"
+    typescriptSources()
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--check", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+}
+val typescriptLint by tasks.registering(Exec::class) {
+    group = "verification"
+    typescriptSources()
+    // Typed linting consumes package declarations; never lint stale SDK builds.
+    dependsOn(":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild",
+        ":plowshare-mcp:mcpBuild")
+    // Every lint project resolves its own test/framework types. The corresponding
+    // check tasks may run concurrently, so their installs cannot supply this ordering.
+    dependsOn(typescriptModules.map { ":$it:pnpmInstall" })
+    commandLine("node", "node_modules/eslint/bin/eslint.js", "--max-warnings=0")
+}
+val typescriptPolicyTest by tasks.registering(Exec::class) {
+    group = "verification"
+    workingDir = rootDir
+    dependsOn(typescriptTools)
+    inputs.files("scripts/check-typescript-policy.mjs", "scripts/check-typescript-policy.test.mjs")
+    commandLine("node", "--test", "scripts/check-typescript-policy.test.mjs")
+}
+val typescriptPolicyCheck by tasks.registering(Exec::class) {
+    group = "verification"
+    typescriptSources()
+    inputs.files("scripts/check-typescript-policy.mjs", "sdk/typescript/scripts/generate-operation-schemas.mjs")
+    commandLine("node", "scripts/check-typescript-policy.mjs")
+}
+val typescriptAdditionalTypes by tasks.registering(Exec::class) {
+    group = "verification"
+    typescriptSources()
+    // The extra TUI project resolves its own Node types. Its install must complete before
+    // this gate runs; another check's install is not an ordering dependency on a clean runner.
+    dependsOn(":plowshare-client-node:nodeBuild", ":plowshare-mcp:mcpBuild", ":plowshare-tui:pnpmInstall")
+    // These test/lint projects cover source files outside the emitted solutions.
+    commandLine("node", "scripts/check-typescript-policy.mjs", "--compile-additional")
+}
+for (module in typescriptModules) {
+    project(":$module").tasks.named("check") {
+        dependsOn(typescriptFormatCheck, typescriptLint, typescriptPolicyCheck, typescriptPolicyTest, typescriptAdditionalTypes)
+    }
+    project(":$module").tasks.withType<Exec>().configureEach {
+        inputs.file(rootProject.file("tsconfig.strict.json"))
+    }
+}
+
 // Explicit apply/check entry points cover every module, even from the root.
 // Verification never rewrites source; each module's check also runs Spotless.
 tasks.register("format") {
     group = "formatting"
-    description = "Formats all Java source and tests using Google Java Style."
+    description = "Formats Java with Google Java Style and TypeScript with Prettier."
+    dependsOn(typescriptFormat)
     dependsOn(subprojects.map { "${it.path}:spotlessApply" })
 }
 val formatCheck by tasks.registering {
     group = "verification"
-    description = "Checks Google Java formatting in every module without editing source."
+    description = "Checks Java and TypeScript formatting without editing source."
+    dependsOn(typescriptFormatCheck)
     dependsOn(subprojects.map { "${it.path}:spotlessCheck" })
 }
-tasks.named("check") { dependsOn(formatCheck) }
+tasks.named("check") { dependsOn(formatCheck, typescriptLint, typescriptPolicyCheck, typescriptPolicyTest, typescriptAdditionalTypes) }
 
 // Installable artifacts are opt-in; ordinary check does not open Electron windows.
 val clientDistributions by tasks.registering(Exec::class) {
@@ -183,8 +259,8 @@ val clientDistributions by tasks.registering(Exec::class) {
     inputs.files("scripts/distributions.mjs", "scripts/distribution-archive.py", "scripts/distribution-talk.mjs", "scripts/distribution-native.mjs", "scripts/distribution-runtime.mjs", "scripts/distribution-runtime.json", "scripts/distribution-entitlements.plist", "docs/distributions.md")
     inputs.dir("plowshare-desktop/assets/icons").withPathSensitivity(PathSensitivity.RELATIVE)
     for (module in listOf("plowshare-cli", "plowshare-mcp", "plowshare-tui", "plowshare-desktop", "plowshare-client-ts", "plowshare-client-node")) {
-        inputs.dir("$module/src")
-        inputs.files("$module/package.json", "$module/pnpm-lock.yaml")
+        inputs.dir(project(":$module").file("src"))
+        inputs.files(project(":$module").file("package.json"), project(":$module").file("pnpm-lock.yaml"))
     }
     // Build provenance changes even when the compiled payload does not.
     outputs.upToDateWhen { false }
@@ -227,19 +303,30 @@ tasks.register<Exec>("desktopDistributionCheck") {
     commandLine("node", "--experimental-strip-types", "scripts/desktop-distribution-check.mjs")
 }
 
+val nativeSdkPolicyCheck by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Guards public native SDK boundaries without native toolchains."
+    workingDir = rootDir
+    commandLine("python3", "scripts/check-native-sdk-policy.py")
+}
+tasks.named("check") { dependsOn(nativeSdkPolicyCheck) }
+
 // Native SDK toolchains are an explicit verification entry point. They aren't
 // dependencies of server/client check or the server image build.
 val sdkContractCheck by tasks.registering(Exec::class) {
     group = "verification"
-    description = "Checks shared operation/code catalogs for all SDK languages (requires Go/gofmt)."
+    description = "Checks generated operation/DTO catalogs for all SDK languages (requires Go/gofmt)."
     dependsOn(":plowshare-client-ts:clientBuild")
     workingDir = rootDir
     commandLine("node", "scripts/generate-sdk-contracts.mjs", "--check")
+    doLast {
+        project.exec { commandLine("node", "scripts/sdk-dto-fixtures.mjs", "--check") }
+    }
 }
 val sdkBuild by tasks.registering(Exec::class) {
     group = "build"
     description = "Builds native Python/.NET/Go SDKs; requires their documented toolchains."
-    dependsOn(sdkContractCheck, ":plowshare-client-node:nodeBuild")
+    dependsOn(sdkContractCheck, nativeSdkPolicyCheck, ":plowshare-client-node:nodeBuild")
     workingDir = rootDir
     commandLine("python3", "scripts/sdk-build.py", "build")
 }
@@ -265,3 +352,61 @@ val sdkPackageCheck by tasks.registering(Exec::class) {
     workingDir = rootDir
     commandLine("python3", "scripts/sdk-package-check.py")
 }
+
+// Adapters are public SDK consumers, never alternate compositions of the server.
+// Inspect resolved production graphs so a transitive dependency cannot hide a
+// core dependency. Test-only server loaders are intentionally outside this gate.
+val integrationBoundaryCheck by tasks.registering {
+    group = "verification"
+    description = "Enforces production SDK/integration isolation from core."
+    doLast {
+        val adapters = subprojects.filter {
+            it.projectDir.toPath().startsWith(rootDir.resolve("integrations").toPath())
+        }
+        val sdkProjects = subprojects.filter {
+            it.projectDir.toPath().startsWith(rootDir.resolve("sdk").toPath())
+        }
+        val server = project(":plowshare-server")
+        val coreProjects = listOf(server, project(":plowshare-protocol"))
+        val consumers = adapters + sdkProjects + coreProjects
+        for (consumer in consumers) {
+            val forbidden = if (consumer in coreProjects) adapters.map { it.path }.toSet()
+                else setOf(server.path)
+            for (scope in listOf("compileClasspath", "runtimeClasspath")) {
+                val graph = consumer.configurations.findByName(scope) ?: continue
+                val violations = graph.incoming.resolutionResult.allComponents.mapNotNull { component ->
+                    when (val id = component.id) {
+                        is org.gradle.api.artifacts.component.ProjectComponentIdentifier ->
+                            id.projectPath.takeIf { it in forbidden }
+                        is org.gradle.api.artifacts.component.ModuleComponentIdentifier ->
+                            id.displayName.takeIf { id.group == "io.aeyer" &&
+                                id.module in forbidden.map { it.removePrefix(":") } }
+                        else -> null
+                    }
+                }
+                // File dependencies or repackaged jars must not smuggle server
+                // classes past project/module identity checks.
+                val forbiddenPackages = if (consumer in coreProjects)
+                    listOf("io/aeyer/plowshare/a2a/", "io/aeyer/plowshare/integrations/")
+                    else listOf("io/aeyer/plowshare/server/")
+                val fileViolations = if (violations.isNotEmpty()) emptyList<File>() else graph.files.filter { entry ->
+                    when {
+                        entry.isDirectory -> forbiddenPackages.any { entry.resolve(it).exists() }
+                        entry.isFile && entry.extension == "jar" -> ZipFile(entry).use { jar ->
+                            jar.entries().asSequence().any { item -> forbiddenPackages.any { prefix ->
+                                item.name.startsWith(prefix) || item.name.startsWith("BOOT-INF/classes/$prefix")
+                            } }
+                        }
+                        else -> false
+                    }
+                }
+                if (violations.isNotEmpty() || fileViolations.isNotEmpty()) throw GradleException(
+                    "${consumer.path} $scope violates the integration/core boundary: $violations $fileViolations. " +
+                    "Use public SDK contracts; core extensions require a separately authorized platform task. " +
+                    "See docs/decisions/0001-integration-boundary.md."
+                )
+            }
+        }
+    }
+}
+tasks.named("check") { dependsOn(integrationBoundaryCheck) }

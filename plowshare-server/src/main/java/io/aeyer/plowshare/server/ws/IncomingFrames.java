@@ -68,19 +68,31 @@ public final class IncomingFrames implements FrameArea {
             skills.forCaller(caller),
             procedures == null ? Map.of() : procedures.forCaller(caller));
     return Outcome.ok(
-        Map.of(
-            "name",
+        new Incoming.Catalog(
             definition.name(),
-            "description",
             definition.description(),
-            "served",
             true,
-            "commands",
-            commands));
+            commands.stream()
+                .map(
+                    command ->
+                        new Incoming.Command(
+                            command.command(),
+                            command.aliases(),
+                            command.kind(),
+                            command.name(),
+                            command.description(),
+                            command.argumentHint(),
+                            command.executor(),
+                            command.mode(),
+                            command.tier(),
+                            command.hash(),
+                            command.agentVisible()))
+                .toList()));
   }
 
   private Outcome receive(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Incoming.Receive.class, FrameTypes.INCOMING_RECEIVE);
+    var body =
+        io.aeyer.plowshare.server.board.IncomingRequests.read(payload, Incoming.Receive.class);
     String account = owner(asking, FrameTypes.INCOMING_RECEIVE, body.project());
     if (body.project() == null || body.project().isBlank())
       throw new io.aeyer.plowshare.server.board.Board.Refused("A project is required for ingress.");
@@ -103,7 +115,7 @@ public final class IncomingFrames implements FrameArea {
 
   private Outcome read(Map<String, Object> payload, Asking asking, boolean cancel) {
     String type = cancel ? FrameTypes.INCOMING_CANCEL : FrameTypes.INCOMING_STATUS;
-    var body = Payloads.as(payload, Incoming.Id.class, type);
+    var body = io.aeyer.plowshare.server.board.IncomingRequests.read(payload, Incoming.Id.class);
     String account = owner(asking, type, body.project());
     return Outcome.ok(
         cancel

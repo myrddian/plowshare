@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/conflicts'
+export * from 'plowshare-client-node/sync/conflicts';

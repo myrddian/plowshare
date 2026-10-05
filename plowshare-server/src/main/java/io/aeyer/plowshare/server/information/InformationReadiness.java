@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.information;
 
+import io.aeyer.plowshare.protocol.Information;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import java.util.*;
@@ -17,30 +18,7 @@ public final class InformationReadiness {
     }
   }
 
-  public static List<Source> sources(Object value) {
-    if (!(value instanceof List<?> rows) || rows.isEmpty() || rows.size() > 100)
-      throw new CallerFault("readiness sources must contain 1..100 source references");
-    var sources = new LinkedHashSet<Source>();
-    for (Object row : rows) {
-      if (!(row instanceof Map<?, ?> fields))
-        throw new CallerFault("each fence source must be an object");
-      sources.add(new Source(id(fields, "revision"), id(fields, "acquisition")));
-    }
-    return List.copyOf(sources);
-  }
-
-  private static UUID id(Map<?, ?> fields, String name) {
-    Object value = fields.get(name);
-    if (value == null) return null;
-    if (!(value instanceof String text)) throw new CallerFault(name + " must be a UUID");
-    try {
-      return UUID.fromString(text);
-    } catch (IllegalArgumentException invalid) {
-      throw new CallerFault(name + " must be a UUID");
-    }
-  }
-
-  public static Map<String, Object> await(
+  public static Information.Readiness await(
       InformationCatalogue catalogue,
       InformationContext context,
       List<Source> sources,
@@ -50,101 +28,117 @@ public final class InformationReadiness {
     long deadline = System.nanoTime() + waitMs * 1_000_000L;
     while (true) {
       var snapshot = snapshot(catalogue, context, sources);
-      if (Boolean.TRUE.equals(snapshot.get("complete")) || System.nanoTime() >= deadline)
-        return snapshot;
+      if (snapshot.complete() || System.nanoTime() >= deadline) return snapshot;
       try {
         Thread.sleep(Math.min(1000, Math.max(1, (deadline - System.nanoTime()) / 1_000_000)));
       } catch (InterruptedException stopped) {
         Thread.currentThread().interrupt();
-        snapshot.put("interrupted", true);
-        return snapshot;
+        return snapshot.interruptedObserver();
       }
     }
   }
 
-  static Map<String, Object> snapshot(
+  static Information.Readiness snapshot(
       InformationCatalogue catalogue, InformationContext context, List<Source> sources) {
-    var outcomes = new ArrayList<Map<String, Object>>();
-    int settled = 0, ready = 0;
-    for (Source source : new LinkedHashSet<>(sources)) {
-      var outcome = outcome(catalogue, context, source);
-      outcomes.add(outcome);
-      if (!"pending".equals(outcome.get("state"))) settled++;
-      if ("ready".equals(outcome.get("state"))) ready++;
-    }
-    var result = new LinkedHashMap<String, Object>();
-    result.put("expected", outcomes.size());
-    result.put("settled", settled);
-    result.put("ready", ready);
-    result.put("pending", outcomes.size() - settled);
-    result.put("complete", settled == outcomes.size());
-    result.put("outcomes", outcomes);
-    return result;
+    if (sources == null || sources.isEmpty() || sources.size() > 100)
+      throw new CallerFault("readiness sources must contain 1..100 references");
+    var outcomes =
+        new LinkedHashSet<>(sources)
+            .stream().map(source -> outcome(catalogue, context, source)).toList();
+    int settled = (int) outcomes.stream().filter(value -> !"pending".equals(value.state())).count();
+    int ready = (int) outcomes.stream().filter(value -> "ready".equals(value.state())).count();
+    return new Information.Readiness(
+        outcomes.size(),
+        settled,
+        ready,
+        outcomes.size() - settled,
+        settled == outcomes.size(),
+        outcomes,
+        null);
   }
 
-  private static Map<String, Object> outcome(
+  private static Information.ReadinessOutcome outcome(
       InformationCatalogue catalogue, InformationContext context, Source source) {
-    var result = new LinkedHashMap<String, Object>();
     UUID revision = source.revision();
-    if (source.acquisition() != null) result.put("acquisition", source.acquisition());
-    else result.put("revision", revision);
+    String acquisitionState = null;
     try {
       if (source.acquisition() != null) {
         var ticket = catalogue.acquisitionStatus(context, source.acquisition());
-        result.put("acquisition_state", ticket.get("state"));
-        copy(ticket, result, "attempt", "error");
-        String state = String.valueOf(ticket.get("state"));
-        if (!state.equals("succeeded")) {
-          result.put(
-              "state",
-              List.of("failed", "blocked", "cancelled").contains(state) ? state : "pending");
-          return result;
-        }
-        Object retained = ticket.get("revision_id");
-        if (retained == null) {
-          result.put("state", "unavailable");
-          result.put("error", "Acquisition retained no revision");
-          return result;
-        }
-        revision = retained instanceof UUID id ? id : UUID.fromString(retained.toString());
-        result.put("revision", revision);
+        acquisitionState = ticket.state();
+        if (!acquisitionState.equals("succeeded"))
+          return new Information.ReadinessOutcome(
+              null,
+              source.acquisition(),
+              acquisitionState,
+              null,
+              List.of("failed", "blocked").contains(acquisitionState)
+                  ? acquisitionState
+                  : "pending",
+              ticket.attempt(),
+              ticket.error(),
+              null,
+              null,
+              null,
+              null);
+        revision = ticket.revisionId();
+        if (revision == null)
+          return new Information.ReadinessOutcome(
+              null,
+              source.acquisition(),
+              acquisitionState,
+              null,
+              "unavailable",
+              ticket.attempt(),
+              "Acquisition retained no revision",
+              null,
+              null,
+              null,
+              null);
       }
       catalogue.requireReadable(context, revision);
       var status = catalogue.status(context, revision);
-      result.put("generation", status.get("generation"));
-      copy(status, result, "source_uri");
-      var steps = (List<?>) status.getOrDefault("steps", List.of());
-      for (Object value : steps)
-        if (value instanceof Map<?, ?> step
-            && "extract".equals(step.get("stage"))
-            && step.get("generation") instanceof Number generation
-            && status.get("generation") instanceof Number current
-            && generation.longValue() == current.longValue()) {
-          String state = String.valueOf(step.get("state"));
-          result.put("extraction_state", state);
-          result.put(
-              "state",
-              List.of("ready", "failed", "blocked", "cancelled", "skipped").contains(state)
-                  ? state
-                  : "pending");
-          for (String field : List.of("attempt", "error", "started_at", "finished_at"))
-            if (step.get(field) != null) result.put(field, step.get(field));
-          return result;
-        }
-      result.put("state", "unavailable");
-      result.put("error", "No extraction stage in the current generation");
+      for (var step : status.steps())
+        if (step.stage().equals("extract") && step.generation() == status.generation())
+          return new Information.ReadinessOutcome(
+              revision,
+              source.acquisition(),
+              acquisitionState,
+              step.state(),
+              List.of("ready", "failed", "blocked", "cancelled", "skipped").contains(step.state())
+                  ? step.state()
+                  : "pending",
+              step.attempt(),
+              step.error(),
+              status.generation(),
+              status.sourceUri(),
+              step.startedAt(),
+              step.finishedAt());
+      return new Information.ReadinessOutcome(
+          revision,
+          source.acquisition(),
+          acquisitionState,
+          null,
+          "unavailable",
+          null,
+          "No extraction stage in the current generation",
+          status.generation(),
+          status.sourceUri(),
+          null,
+          null);
     } catch (NotFoundFault unavailable) {
-      // No foreign source metadata, and no false claim that its background job failed.
-      result
-          .keySet()
-          .retainAll(source.acquisition() == null ? Set.of("revision") : Set.of("acquisition"));
-      result.put("state", "unavailable");
-      result.put("error", "Source is unavailable in this information scope");
+      // A scope reduction must not disclose a foreign ticket's metadata or claim its job failed.
+      return new Information.ReadinessOutcome(
+          source.revision(),
+          source.acquisition(),
+          null,
+          null,
+          "unavailable",
+          null,
+          "Source is unavailable in this information scope",
+          null,
+          null,
+          null,
+          null);
     }
-    return result;
-  }
-
-  private static void copy(Map<String, Object> from, Map<String, Object> to, String... fields) {
-    for (String field : fields) if (from.get(field) != null) to.put(field, from.get(field));
   }
 }

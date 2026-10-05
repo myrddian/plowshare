@@ -6,13 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Needle;
-import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -50,10 +49,9 @@ class ClientReadWordsTest {
   void aClientOverOneTree() throws IOException {
     repo = Files.createDirectory(tmp.resolve("repo")).toRealPath();
     other = Files.createDirectory(tmp.resolve("other")).toRealPath();
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    ClientEnforcer client =
-        new ClientEnforcer(workspace, (filename, bytes) -> "img_0000000000000042");
+    NodeFiles client = new NodeFiles(workspace);
     provider =
         new RemoteProvider(
             (session, request) -> {
@@ -143,32 +141,6 @@ class ClientReadWordsTest {
   }
 
   @Test
-  void a_picture_the_client_named_is_one_line_worded_here_and_counted_as_one() throws IOException {
-    Path logo =
-        Files.write(
-            repo.resolve("logo.png"),
-            new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00});
-
-    Span read = provider.read(logo, FIRST);
-    Span stat = provider.stat(logo);
-
-    assertEquals(
-        List.of(
-            "The file "
-                + logo
-                + " is a png image, so it is named rather than"
-                + " read: no tool here answers with a picture. It was uploaded to the server and"
-                + " its id is img_0000000000000042. Hand that id to an agent that can see, as"
-                + " agent_run's 'images', and it will be shown the picture -- you will not. The"
-                + " bytes were copied to get there, which is what a workspace on another machine"
-                + " costs: editing this file now does not change what that id resolves to."),
-        read.lines());
-    assertEquals(1, stat.totalLines());
-    assertEquals(
-        1, provider.grep(new Needle("img_0000000000000042", false), logo).matches().size());
-  }
-
-  @Test
   void a_workspace_gone_from_under_the_client_ends_the_run_in_the_client_s_old_words()
       throws IOException {
     Files.delete(repo);
@@ -181,7 +153,7 @@ class ClientReadWordsTest {
   }
 
   @Test
-  void a_run_outside_the_workspace_is_worded_as_any_path_outside_it() {
+  void an_unattended_node_peer_refuses_local_commands_before_execution() {
     FileRequest run =
         FileRequest.run(
             "r1",
@@ -193,19 +165,15 @@ class ClientReadWordsTest {
             1_024L,
             false,
             null);
-    FileReply reply = new ClientEnforcer(workspaceOf(repo)).answer(run);
+    FileReply reply = new NodeFiles(workspaceOf(repo)).answer(run);
 
     assertEquals(
-        "path "
-            + other
-            + " is outside this session's workspace, which is "
-            + repo
-            + "; ask for the roots you have rather than guessing at paths",
+        "this machine's .plowshare/environment.yml does not allow commands to run here; its local mode is off",
         FileWords.said(reply));
   }
 
-  private static Workspace workspaceOf(Path root) {
-    Workspace workspace = new Workspace();
+  private static TestWorkspace workspaceOf(Path root) {
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(root));
     return workspace;
   }

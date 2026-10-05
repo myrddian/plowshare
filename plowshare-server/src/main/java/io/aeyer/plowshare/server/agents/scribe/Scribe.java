@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents.scribe;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.MemoryProposal;
@@ -277,14 +276,6 @@ public final class Scribe implements UsageAware {
       return flat("this server defines no agent named '" + AGENT + "'");
     }
     AgentDefinition definition = registry.get(AGENT);
-    if (proposal.summary().isBlank()) {
-      // Reached before Validation.check does, because MemoryController
-      // judges and then applies. Without this the blank summary becomes an
-      // embedding call and a model call, both spent on a write that is
-      // about to be refused with 400.
-      return flat("the proposal had no summary to judge it by");
-    }
-
     // Embedded here rather than inside recall, so the vector survives this
     // method and reaches the archive. Everything below this line files under
     // a reason AND hands the vector on; everything above it -- the three
@@ -490,9 +481,10 @@ public final class Scribe implements UsageAware {
    * "the global archive" or "the 'payments' archive".
    *
    * <p>Flattened, like every other value this renderer puts in a single-line slot. {@code Home.of}
-   * refuses a blank project name and checks nothing else, so a line break in one would otherwise
-   * reach column zero — and this string now appears on a candidate's own heading line, which is the
-   * line a forged entry would have to imitate.
+   * validates project identities before rendering; flattening also protects the output slot if its
+   * input source changes. A line break in an unvalidated value would otherwise reach column zero —
+   * and this string now appears on a candidate's own heading line, which is the line a forged entry
+   * would have to imitate.
    */
   private static String describe(Home home) {
     return home.isGlobal()
@@ -514,51 +506,16 @@ public final class Scribe implements UsageAware {
   }
 
   private static Verdict read(String content, List<Memory> candidates) {
-    JsonNode answer;
+    io.aeyer.plowshare.server.agents.ModelAnswers.Scribe answer;
     try {
-      answer = ModelJson.object(content);
+      answer = io.aeyer.plowshare.server.agents.ModelAnswers.scribe(content);
     } catch (ModelJson.Unreadable why) {
-      // Re-wrapped rather than caught in judged(): every sentence a write
-      // files flat under opens "the scribe's answer could not be read",
-      // and the shared reader deliberately reports a detail rather than a
-      // sentence, because the curator frames the same three details as
-      // being about a memory's ruling instead.
       throw new Unreadable(why.getMessage());
     }
-
-    JsonNode kindNode = answer.path("verdict");
-    if (!kindNode.isTextual()) {
-      throw new Unreadable("no 'verdict'");
-    }
-    VerdictKind kind;
-    try {
-      kind = VerdictKind.fromWireName(kindNode.asText());
-    } catch (IllegalArgumentException unknown) {
-      throw new Unreadable(
-          "'" + kindNode.asText() + "' is not one of new, merged_into," + " supersedes");
-    }
-
-    JsonNode reasonNode = answer.path("reason");
-    if (!reasonNode.isTextual() || reasonNode.asText().isBlank()) {
-      // Required, on Verdict's own reasoning: a supersession whose reason
-      // was optional would routinely arrive without one, leaving a retired
-      // memory and no account of what retired it.
-      throw new Unreadable("no 'reason'");
-    }
-    String reason = judgedReason(reasonNode.asText());
-
-    if (kind == VerdictKind.NEW) {
-      // Whatever it put in 'target' is dropped rather than passed through.
-      // NEW names nothing, and WriteResult.targetId would otherwise report
-      // a memory this write did not touch.
-      return new Verdict(VerdictKind.NEW, null, reason);
-    }
-
-    JsonNode targetNode = answer.path("target");
-    if (!targetNode.isTextual() || targetNode.asText().isBlank()) {
-      throw new Unreadable("a '" + kind.wireName() + "' verdict names no memory");
-    }
-    String target = targetNode.asText().strip();
+    VerdictKind kind = answer.verdict();
+    String reason = judgedReason(answer.reason());
+    if (kind == VerdictKind.NEW) return new Verdict(kind, null, reason);
+    String target = answer.target();
 
     if (candidates.stream().noneMatch(candidate -> candidate.id().equals(target))) {
       // The hallucinated id. Archive.applyVerdict throws for one, and a

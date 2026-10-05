@@ -628,7 +628,7 @@ class FoldInsideATurnTest {
 
     @Override
     public ToolSchema schema() {
-      return new ToolSchema(
+      return ToolSchema.from(
           TOOL, "fetches a thing", Map.of("type", "object", "properties", Map.of()));
     }
 

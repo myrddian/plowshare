@@ -47,7 +47,11 @@ final class CriticOutput {
   private final String support;
 
   private CriticOutput(List<String> challenges, String support) {
-    this.challenges = List.copyOf(challenges);
+    this.challenges =
+        challenges.stream().map(value -> DocumentModelValues.text(value, "challenge")).toList();
+    if (challenges.size() > DocumentModelValues.MAX_ENTRIES || !VERDICTS.contains(support)) {
+      throw new IllegalArgumentException("Invalid critic output");
+    }
     this.support = Objects.requireNonNull(support, "support");
   }
 
@@ -65,20 +69,28 @@ final class CriticOutput {
     } catch (ModelJson.Unreadable notJson) {
       return Optional.empty();
     }
-    JsonNode listed = read.path("challenges");
-    if (!listed.isArray()) {
+    try {
+      DocumentModelValues.fields(
+          read, "challenges", "challenges_count", "macro_view_supports_proposer");
+      JsonNode listed = read.path("challenges");
+      if (!listed.isArray()) return Optional.empty();
+      DocumentModelValues.array(listed);
+      List<String> challenges = new ArrayList<>();
+      for (JsonNode challenge : listed) {
+        challenges.add(DocumentModelValues.text(challenge, "challenge"));
+      }
+      if (read.has("challenges_count")) {
+        JsonNode count = read.get("challenges_count");
+        if (!count.isIntegralNumber()
+            || !count.canConvertToInt()
+            || count.intValue() != challenges.size()) {
+          return Optional.empty();
+        }
+      }
+      return Optional.of(new CriticOutput(challenges, verdict(read)));
+    } catch (IllegalArgumentException invalidFields) {
       return Optional.empty();
     }
-    List<String> challenges = new ArrayList<>();
-    for (JsonNode challenge : listed) {
-      // Textual and not asText: a number or an object in this array is a
-      // model that did not answer the question, and asText would turn it
-      // into a challenge reading "7".
-      if (challenge.isTextual() && !challenge.asText().isBlank()) {
-        challenges.add(challenge.asText().strip());
-      }
-    }
-    return Optional.of(new CriticOutput(challenges, verdict(read)));
   }
 
   /**
@@ -100,22 +112,17 @@ final class CriticOutput {
    */
   private static final List<String> VERDICTS = List.of("true", "false", "partially", UNKNOWN);
 
-  /**
-   * The verdict, <b>constrained to the four words rather than passed through</b>.
-   *
-   * <p>Anchor's parser takes {@code asText()} of whatever the field held and hands it to a caller
-   * that renders it. That is a model writing directly into a sentence somebody reads, with no bound
-   * on its length or its line breaks — and {@code Deliberation} puts this one under a heading it
-   * wrote itself, beside a block that says whether the answer's quotations held. A verdict is a
-   * closed set of words and there is nothing here worth passing through; anything else is a critic
-   * that did not answer the question, which is what {@link #UNKNOWN} already means.
-   */
+  /** Missing historical verdicts mean unknown; a supplied invalid verdict triggers the retry. */
   private static String verdict(JsonNode read) {
-    String said =
-        read.path("macro_view_supports_proposer")
-            .asText("")
-            .strip()
-            .toLowerCase(java.util.Locale.ROOT);
-    return VERDICTS.contains(said) ? said : UNKNOWN;
+    JsonNode value = read.path("macro_view_supports_proposer");
+    if (value.isMissingNode()) return UNKNOWN;
+    String said;
+    if (value.isBoolean()) said = Boolean.toString(value.booleanValue());
+    else
+      said =
+          DocumentModelValues.text(value, "macro_view_supports_proposer")
+              .toLowerCase(java.util.Locale.ROOT);
+    if (!VERDICTS.contains(said)) throw new IllegalArgumentException("Invalid critic verdict");
+    return said;
   }
 }

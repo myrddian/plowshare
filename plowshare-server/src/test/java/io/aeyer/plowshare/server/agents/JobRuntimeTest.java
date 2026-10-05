@@ -273,7 +273,7 @@ class JobRuntimeTest {
 
     Probe(String name, Function<String, String> behaviour) {
       this(
-          new ToolSchema(
+          ToolSchema.from(
               name, "a probe called " + name, Map.of("type", "object", "properties", Map.of())),
           behaviour);
     }
@@ -291,7 +291,7 @@ class JobRuntimeTest {
     static Probe taking(String name, String property, String result) {
       Probe probe = new Probe(name, args -> result);
       return new Probe(
-          new ToolSchema(
+          ToolSchema.from(
               name,
               "a probe called " + name,
               Map.of(
@@ -757,7 +757,7 @@ class JobRuntimeTest {
         new AgentTool() {
           @Override
           public ToolSchema schema() {
-            return new ToolSchema("skill_run", "explicit activation", Map.of());
+            return ToolSchema.from("skill_run", "explicit activation", Map.of());
           }
 
           @Override
@@ -770,7 +770,7 @@ class JobRuntimeTest {
         new AgentTool() {
           @Override
           public ToolSchema schema() {
-            return new ToolSchema("probe_write", "write probe", Map.of());
+            return ToolSchema.from("probe_write", "write probe", Map.of());
           }
 
           @Override
@@ -825,7 +825,7 @@ class JobRuntimeTest {
         new AgentTool() {
           @Override
           public ToolSchema schema() {
-            return new ToolSchema("probe_write", "write probe", Map.of());
+            return ToolSchema.from("probe_write", "write probe", Map.of());
           }
 
           @Override
@@ -973,7 +973,7 @@ class JobRuntimeTest {
           new AgentTool() {
             @Override
             public ToolSchema schema() {
-              return new ToolSchema("command_dispatch", "Bound invocation", Map.of());
+              return ToolSchema.from("command_dispatch", "Bound invocation", Map.of());
             }
 
             @Override
@@ -2364,7 +2364,7 @@ class JobRuntimeTest {
     return new AgentTool() {
       @Override
       public ToolSchema schema() {
-        return new ToolSchema(
+        return ToolSchema.from(
             name,
             "ends the turn",
             Map.of("type", "object", "properties", Map.of(), "required", List.of()));
@@ -2454,7 +2454,7 @@ class JobRuntimeTest {
               new AgentTool() {
                 @Override
                 public ToolSchema schema() {
-                  return new ToolSchema(
+                  return ToolSchema.from(
                       "ends_it",
                       "ends the turn",
                       Map.of("type", "object", "properties", Map.of(), "required", List.of()));
@@ -5913,7 +5913,7 @@ class JobRuntimeTest {
             if (asked.getAndIncrement() > 0) {
               throw new IllegalStateException("a bug nobody expected");
             }
-            return new ToolSchema("probe_read", "d", Map.of("type", "object"));
+            return ToolSchema.from("probe_read", "d", Map.of("type", "object"));
           }
 
           @Override
@@ -5963,7 +5963,7 @@ class JobRuntimeTest {
             if (asked.getAndIncrement() > 0) {
               throw new StackOverflowError("the JVM is unhappy");
             }
-            return new ToolSchema("probe_read", "d", Map.of("type", "object"));
+            return ToolSchema.from("probe_read", "d", Map.of("type", "object"));
           }
 
           @Override

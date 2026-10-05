@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.client.files.Rooting;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.Provenance;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.session.Presence;
+import io.aeyer.plowshare.testpeer.TestRooting;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -872,9 +872,9 @@ class ProjectStoreTest {
    *
    * <p><b>Both artefacts, because they are composed by different code from the same string.</b>
    * {@code Presence.canonicalName()} is the server's, built from what a client declared; {@code
-   * Rooting.of} is the client's, and its {@code root()} is the value that goes on the query string
-   * as {@code ?root=}. A change that left one alone and moved the other would be two halves of an
-   * identity disagreeing, which is the failure neither half can report on its own.
+   * TestRooting.of} is the client's, and its {@code root()} is the value that goes on the query
+   * string as {@code ?root=}. A change that left one alone and moved the other would be two halves
+   * of an identity disagreeing, which is the failure neither half can report on its own.
    *
    * <p><b>Asserted against the column and not against the record</b>, because the column is what a
    * presence and {@code projects_machine_has_a_place} actually read. A record whose {@code
@@ -893,7 +893,7 @@ class ProjectStoreTest {
 
     String placeBefore = workspaceOf("payments");
     String nameBefore = new Presence("s", "bench.local", placeBefore, "payments").canonicalName();
-    String rootParamBefore = Rooting.of(Path.of(placeBefore), "payments").root();
+    String rootParamBefore = TestRooting.of(Path.of(placeBefore), "payments").root();
 
     store.lend("payments", List.of(inside, second, third));
 
@@ -909,7 +909,7 @@ class ProjectStoreTest {
             + " rename this project every time the array reordered");
     assertEquals(
         rootParamBefore,
-        Rooting.of(Path.of(placeAfter), "payments").root(),
+        TestRooting.of(Path.of(placeAfter), "payments").root(),
         "and so is the ?root= a client puts on the channel, which is the other half"
             + " of the same identity and is composed by different code");
 

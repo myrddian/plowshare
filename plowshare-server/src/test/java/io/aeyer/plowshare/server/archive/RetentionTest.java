@@ -110,7 +110,7 @@ class RetentionTest {
     clock.set(NOW);
     conversations = new ConversationStore(jdbc, clock::get, null);
     entries = new EntryStore(jdbc, clock::get);
-    jobs = new JobLog(jdbc);
+    jobs = new JdbcJobLog(jdbc);
   }
 
   // --- the staged path -------------------------------------------------------
@@ -545,7 +545,7 @@ class RetentionTest {
    * itself.
    */
   private static PayloadExport asWired(DataLayout layout) {
-    return new PayloadExport(ExportDirectories.under(layout, jdbc));
+    return new PayloadExport(ExportDirectories.under(layout, new JdbcProjectDirectories(jdbc)));
   }
 
   private static long idOf(String project) {

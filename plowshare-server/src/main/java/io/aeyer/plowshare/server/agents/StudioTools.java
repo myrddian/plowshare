@@ -141,7 +141,7 @@ public final class StudioTools {
 
   private static final class Catalog extends Tool {
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             CATALOG_NAME,
             "What an orchestration in this project may be granted: the tools this server"
                 + " binds, the agents a conductor may call, the orchestrations reachable"
@@ -172,7 +172,7 @@ public final class StudioTools {
       Map<String, Object> fields = new LinkedHashMap<>();
       fields.put("name", ToolArguments.string("The orchestration's name."));
       SCHEMA =
-          new ToolSchema(
+          ToolSchema.from(
               READ_NAME,
               "The whole source of an orchestration this project"
                   + " can reach, shipped ones included, and the tier it comes from. Start a"
@@ -199,7 +199,7 @@ public final class StudioTools {
 
   private static final class Validate extends Tool {
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             VALIDATE_NAME,
             "Trial a draft with the real loader, as this project would load it: its refusals,"
                 + " what else it would disable, its stages and grants, and lints. A"
@@ -236,7 +236,7 @@ public final class StudioTools {
 
   private static final class Install extends Tool {
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             INSTALL_NAME,
             "Ask the person whether to install a draft into this project. It is trialled"
                 + " again first; the person is shown what it grants and what it replaces;"

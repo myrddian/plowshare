@@ -34,7 +34,10 @@ public interface ConductorActions {
    *
    * @param structure {@code StructuredQuestions.structure}, or null for a plain question
    */
-  default Optional<String> ask(String orchestration, String question, String structure) {
+  default Optional<String> ask(
+      String orchestration,
+      String question,
+      io.aeyer.plowshare.protocol.Orchestration.Structure structure) {
     return structure == null
         ? ask(orchestration, question)
         : Optional.of("this server cannot put a question with options; ask it in words");

@@ -34,7 +34,8 @@ public class HarnessConfig {
       LlmProperties llm,
       ObjectProvider<HarnessHookFactory> factories) {
     return new Harness(
-        properties, Harness.assignments(llm.getPools()), factories.orderedStream().toList());
+        io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+            properties, Harness.assignments(llm.getPools()), factories.orderedStream().toList()));
   }
 
   /**

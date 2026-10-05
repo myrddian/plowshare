@@ -21,10 +21,10 @@ import java.util.Objects;
  * <h2>The hole {@link FetchTool}'s own javadoc names, closed the same way</h2>
  *
  * <p>The previous slice shipped {@code search} as an MCP tool ({@code
- * io.aeyer.plowshare.client.tools.SearchTools}) and a CLI verb and never built the agent tool, so a
- * foreign harness driving Plowshare could search and Plowshare's own agents could not — the same
- * hazard {@link FetchTool}'s class comment names for {@code fetch}, one task earlier. This class is
- * that fix for {@code search}, and it is {@link SearchService#search} verbatim, rendered — there is
+ * plowshare-mcp/src/adapter.ts}) and a CLI verb and never built the agent tool, so a foreign
+ * harness driving Plowshare could search and Plowshare's own agents could not — the same hazard
+ * {@link FetchTool}'s class comment names for {@code fetch}, one task earlier. This class is that
+ * fix for {@code search}, and it is {@link SearchService#search} verbatim, rendered — there is
  * nothing for this class to add on top of that shape.
  *
  * <h2>No provider name may reach the model, and that rule has one amendment</h2>
@@ -98,8 +98,8 @@ import java.util.Objects;
  * server-side default to fall back on. A model that already gave a good {@code query} should not
  * have a whole call refused for omitting three numbers it had no strong opinion about, so {@link
  * #DEFAULT_PAGE_SIZE}, {@link #DEFAULT_MAX} and {@link #DEFAULT_PAGE} are supplied here, on {@code
- * io.aeyer.plowshare.client.tools.SearchTools}' own reasoning and its own numbers — the two
- * surfaces answer a bare {@code search} the same way rather than merely claiming to.
+ * plowshare-mcp/src/adapter.ts}' own reasoning and its own numbers — the two surfaces answer a bare
+ * {@code search} the same way rather than merely claiming to.
  *
  * <h2>One catch, {@link DocumentTools.Search}'s shape and not {@link FetchTool}'s</h2>
  *
@@ -140,8 +140,8 @@ public final class SearchTool implements AgentTool {
 
   /**
    * How many hits a page holds when {@code page_size} is omitted. {@code
-   * io.aeyer.plowshare.client.tools.SearchTools#DEFAULT_PAGE_SIZE}'s own number, so a bare {@code
-   * search} through either surface answers the same shape rather than merely claiming to.
+   * plowshare-mcp/src/adapter.ts#DEFAULT_PAGE_SIZE}'s own number, so a bare {@code search} through
+   * either surface answers the same shape rather than merely claiming to.
    */
   static final int DEFAULT_PAGE_SIZE = 10;
 
@@ -166,7 +166,7 @@ public final class SearchTool implements AgentTool {
 
   public SearchTool(SearchService search) {
     this.search = Objects.requireNonNull(search, "search");
-    this.schema = new ToolSchema(NAME, DESCRIPTION, schemaMap());
+    this.schema = ToolSchema.from(NAME, DESCRIPTION, schemaMap());
   }
 
   private boolean scripted;

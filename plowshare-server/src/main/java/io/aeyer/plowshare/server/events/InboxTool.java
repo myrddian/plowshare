@@ -13,7 +13,7 @@ public final class InboxTool implements AgentTool {
   public static final String NAME = "inbox_read";
 
   private static final ToolSchema SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           NAME,
           "Read the unread items in the user-inbox of the person you are talking to: what"
               + " scheduled and event-started runs left for them. Reading marks them read.",

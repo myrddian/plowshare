@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -58,11 +57,11 @@ class ScheduleReaderDefinitionTest {
    */
   @Test
   void every_property_the_schema_declares_is_required() {
-    Map<String, Object> schema = shipped().sampling().responseFormat().orElseThrow().schema();
+    var schema = shipped().sampling().responseFormat().orElseThrow().schema();
     @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+    var properties = schema.properties();
     @SuppressWarnings("unchecked")
-    List<String> required = (List<String>) schema.get("required");
+    var required = schema.required();
     assertEquals(
         Set.copyOf(properties.keySet()),
         Set.copyOf(required),

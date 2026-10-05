@@ -31,9 +31,14 @@ public record WriteResult(
 
   public WriteResult {
     Objects.requireNonNull(kind, "kind");
-    Objects.requireNonNull(memoryId, "memoryId");
+    memoryId = ContractValues.identity(memoryId, "memoryId", 1024);
+    reason = ContractValues.text(reason, "reason", 32768, false);
+    targetId = ContractValues.optionalIdentity(targetId, "targetId", 1024);
     // Copied, not stored by reference: the archive builds this list while
     // demoting and a caller that held the live list would watch it change.
-    demoted = List.copyOf(demoted);
+    demoted =
+        ContractValues.list(demoted, "demoted", 10000).stream()
+            .map(id -> ContractValues.identity(id, "demoted id", 1024))
+            .toList();
   }
 }

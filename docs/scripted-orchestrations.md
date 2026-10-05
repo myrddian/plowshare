@@ -347,6 +347,18 @@ message; the driver refuses automatic replay. This is not a universal exactly-on
 guarantee for external effects. Stable information mutation receipts provide their
 own service guarantee; they do not authorize replay of every other tool.
 
+An explicit `orchestration.resume` request can revive a failed root while retaining
+this journal and the last turn's input. The desktop Resume control and TUI
+`/resume` (`/retry`) expose it. A recorded transient delegate failure continues
+that delegate's existing conversation; its eventual answer becomes the pending
+command's receipt. Completed commands remain completed, and uncertain native
+mutations remain refused. Each intended resume has a stable UUID `requestId`;
+repeating it never dispatches another turn, including after a later failure.
+Resume requires remaining allowance and current account/project authority.
+Observers receive `orchestration.resumed` (run ID and resume request UUID), the
+existing `orchestration.changed` account push and a
+`run_resumed` milestone through `orchestration.recorded`.
+
 Do not delete/edit journal rows to force progress or silently alter pinned source.
 Deleting a consumed document clears associated script journal material under the
 existing policy. Retained states and raw outputs carry the root's input restrictions.
@@ -362,6 +374,7 @@ operation names and **payloads**, not standalone REST requests or complete frame
 | `orchestration.status` | `{"id":"orc_…"}` | Run state, stages/todos and messages. |
 | `orchestration.record` | `{"root":"orc_…","tail":true,"limit":50}` | Recent run-tree record, including questions and failures. |
 | `orchestration.answer` | `{"id":"orc_…","answer":"The gate cause has been resolved; recheck."}` | Continue an outstanding question after resolving its cause. |
+| `orchestration.resume` | `{"id":"orc_…","requestId":"22222222-2222-4222-8222-222222222222"}` | Explicitly resume a failed root; retain the UUID after uncertainty. |
 | `orchestration.cancel` | `{"id":"orc_…"}` | Stop the selected run. |
 
 Caller agents instead use their offered `orchestration_status`,

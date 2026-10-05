@@ -14,40 +14,99 @@
  */
 
 export const TOKENS = [
-    // The screen around the conversation.
-    'text', 'muted', 'accent', 'border', 'panel',
-    'person', 'bot', 'trouble', 'busy', 'success', 'warning',
-    'wordmarkFaint', 'wordmarkBright',
-    // Markdown.
-    'mdHeading1', 'mdHeading2', 'mdHeading3', 'mdLink', 'mdLinkUrl', 'mdCode',
-    'mdCodeBlockBorder', 'mdCodeBlockLabel', 'mdQuote', 'mdRule', 'mdBullet',
-    'mdTableBorder', 'mdTableHeader',
-    // Code.
-    'syntaxComment', 'syntaxKeyword', 'syntaxFunction', 'syntaxVariable', 'syntaxString',
-    'syntaxNumber', 'syntaxType', 'syntaxOperator', 'syntaxPunctuation', 'syntaxMeta',
-    // Diffs.
-    'diffAdded', 'diffRemoved', 'diffHunk',
-    // The trajectory: tool lines, the explorer, /watch — spec 2026-09-29 §8.
-    'tool', 'ok', 'fail', 'waiting', 'reasoning', 'selection',
-    'actor1', 'actor2', 'actor3', 'actor4',
-    'badgeUser', 'badgeThink', 'badgeAnswer', 'badgeTool', 'badgeFold',
-    'badgeNote', 'badgeFail', 'badgeHook', 'badgePlan',
-    'timelineModel', 'timelineTool',
-] as const
+  // The screen around the conversation.
+  'text',
+  'muted',
+  'accent',
+  'border',
+  'panel',
+  'person',
+  'bot',
+  'trouble',
+  'busy',
+  'success',
+  'warning',
+  'wordmarkFaint',
+  'wordmarkBright',
+  // Markdown.
+  'mdHeading1',
+  'mdHeading2',
+  'mdHeading3',
+  'mdLink',
+  'mdLinkUrl',
+  'mdCode',
+  'mdCodeBlockBorder',
+  'mdCodeBlockLabel',
+  'mdQuote',
+  'mdRule',
+  'mdBullet',
+  'mdTableBorder',
+  'mdTableHeader',
+  // Code.
+  'syntaxComment',
+  'syntaxKeyword',
+  'syntaxFunction',
+  'syntaxVariable',
+  'syntaxString',
+  'syntaxNumber',
+  'syntaxType',
+  'syntaxOperator',
+  'syntaxPunctuation',
+  'syntaxMeta',
+  // Diffs.
+  'diffAdded',
+  'diffRemoved',
+  'diffHunk',
+  // The trajectory: tool lines, the explorer, /watch — spec 2026-09-29 §8.
+  'tool',
+  'ok',
+  'fail',
+  'waiting',
+  'reasoning',
+  'selection',
+  'actor1',
+  'actor2',
+  'actor3',
+  'actor4',
+  'badgeUser',
+  'badgeThink',
+  'badgeAnswer',
+  'badgeTool',
+  'badgeFold',
+  'badgeNote',
+  'badgeFail',
+  'badgeHook',
+  'badgePlan',
+  'timelineModel',
+  'timelineTool',
+] as const;
 
-export type Token = typeof TOKENS[number]
+export type Token = (typeof TOKENS)[number];
 
 /** Whether `name` is one of {@link TOKENS}. */
 export function isToken(name: string): name is Token {
-    return (TOKENS as readonly string[]).includes(name)
+  return (TOKENS as readonly string[]).includes(name);
 }
 
 /** The sixteen terminal palette slots, by the names themes write them with. */
 export const ANSI_NAMES = [
-    'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
-    'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
-    'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
-] as const
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+  'brightBlack',
+  'brightRed',
+  'brightGreen',
+  'brightYellow',
+  'brightBlue',
+  'brightMagenta',
+  'brightCyan',
+  'brightWhite',
+] as const;
 
 /**
  * One resolved colour.
@@ -62,31 +121,34 @@ export const ANSI_NAMES = [
  * </ul>
  */
 export type Colour =
-    | { readonly kind: 'rgb', readonly hex: string }
-    | { readonly kind: 'index', readonly index: number }
-    | { readonly kind: 'ansi', readonly slot: number }
-    | { readonly kind: 'none' }
+  | { readonly kind: 'rgb'; readonly hex: string }
+  | { readonly kind: 'index'; readonly index: number }
+  | { readonly kind: 'ansi'; readonly slot: number }
+  | { readonly kind: 'none' };
 
-export type Palette = Readonly<Record<Token, Colour>>
+export type Palette = Readonly<Record<Token, Colour>>;
 
 /** Whether the theme was resolved for a dark or a light background. */
-export type Mode = 'dark' | 'light'
+export type Mode = 'dark' | 'light';
 
-export const rgb = (hex: string): Colour => ({ kind: 'rgb', hex: hex.toLowerCase() })
+export const rgb = (hex: string): Colour => ({
+  kind: 'rgb',
+  hex: hex.toLowerCase(),
+});
 
 /** A stable key for a colour, so two runs can be compared. */
 export function keyOf(colour: Colour | undefined): string {
-    if (colour === undefined) {
-        return ''
-    }
-    switch (colour.kind) {
-        case 'rgb':
-            return colour.hex
-        case 'index':
-            return `i${colour.index}`
-        case 'ansi':
-            return `a${colour.slot}`
-        case 'none':
-            return 'none'
-    }
+  if (colour === undefined) {
+    return '';
+  }
+  switch (colour.kind) {
+    case 'rgb':
+      return colour.hex;
+    case 'index':
+      return `i${colour.index}`;
+    case 'ansi':
+      return `a${colour.slot}`;
+    case 'none':
+      return 'none';
+  }
 }

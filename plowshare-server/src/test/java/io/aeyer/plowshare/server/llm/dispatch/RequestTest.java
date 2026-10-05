@@ -467,7 +467,7 @@ class RequestTest {
   void the_wither_methods_carry_the_tools_across() {
     ChatRequest request =
         ChatRequest.of("fast", null, "hello")
-            .withTools(List.of(new ToolSchema("memory_recall", "d", Map.of())));
+            .withTools(List.of(ToolSchema.from("memory_recall", "d", Map.of())));
     assertEquals(1, request.withBudget(Duration.ofSeconds(2)).tools().size());
     assertEquals(1, request.withSampling(Sampling.NONE.withTemperature(0.7d)).tools().size());
   }
@@ -480,7 +480,7 @@ class RequestTest {
   @Test
   void a_chat_request_does_not_share_the_caller_s_tool_list() {
     List<ToolSchema> mutable = new ArrayList<>();
-    mutable.add(new ToolSchema("memory_recall", "d", Map.of()));
+    mutable.add(ToolSchema.from("memory_recall", "d", Map.of()));
     ChatRequest request = ChatRequest.of("fast", null, "hello").withTools(mutable);
     mutable.clear();
     assertEquals(1, request.tools().size());
@@ -495,62 +495,35 @@ class RequestTest {
   void a_tool_schema_does_not_share_the_caller_s_parameter_map() {
     Map<String, Object> mutable = new LinkedHashMap<>();
     mutable.put("type", "object");
-    ToolSchema schema = new ToolSchema("memory_recall", "d", mutable);
+    ToolSchema schema = ToolSchema.from("memory_recall", "d", mutable);
     mutable.put("type", "array");
-    assertEquals("object", schema.parameters().get("type"));
+    assertEquals("object", schema.parameters().type().values().getFirst());
   }
 
-  /**
-   * The order the caller wrote is the order the model is shown.
-   *
-   * <p>{@code Map.copyOf}, which the plan asked for, does not preserve it — the same coin flip
-   * {@code OpenAiTransport.chatBody} avoids for the messages array, which would put a schema's
-   * properties in a different order between JVM runs and make a request body nobody can diff
-   * against a previous one.
-   *
-   * <p><b>Against that mutant this test is a probabilistic guard and nothing more</b>, in the sense
-   * {@code LlmPoolTest}'s saturation test uses the phrase. {@code Map.copyOf}'s iteration order is
-   * randomised per JVM run and fixed within one, so a three-entry map comes back in insertion order
-   * some runs and not others: measured at 3 runs in 20, so restoring {@code Map.copyOf} would slip
-   * past this roughly one run in seven. It is not what makes the property true — the {@code
-   * LinkedHashMap} in {@code ToolSchema} is — and against that implementation it is deterministic.
-   * This is what would eventually notice if someone took it away.
-   */
+  /** Property order is retained while schema keywords use a stable typed declaration order. */
   @Test
-  void a_tool_schema_keeps_the_order_its_parameters_were_written_in() {
-    // Four keys at the deepest level and three above it, rather than the
-    // two a minimal fixture would need. Order is what this test is about,
-    // and against a mutant that reorders, two keys come back right half the
-    // time by chance; four come back right one time in twenty-four.
-    Map<String, Object> question = new LinkedHashMap<>();
-    question.put("type", "string");
-    question.put("description", "what to look for");
-    question.put("minLength", 1);
-    question.put("examples", List.of("why is the cache cold"));
-
+  void a_tool_schema_keeps_property_order() throws Exception {
     Map<String, Object> properties = new LinkedHashMap<>();
-    properties.put("question", question);
+    properties.put(
+        "question", Map.of("type", "string", "minLength", 1, "examples", List.of("why")));
     properties.put("limit", Map.of("type", "integer"));
     properties.put("project", Map.of("type", "string"));
-
-    Map<String, Object> ordered = new LinkedHashMap<>();
-    ordered.put("type", "object");
-    ordered.put("properties", properties);
-    ordered.put("required", List.of("question"));
-
-    ToolSchema schema = new ToolSchema("memory_recall", "d", ordered);
-
+    ToolSchema schema =
+        ToolSchema.from(
+            "memory_recall",
+            "d",
+            Map.of("type", "object", "properties", properties, "required", List.of("question")));
     assertEquals(
-        List.of("type", "properties", "required"), List.copyOf(schema.parameters().keySet()));
-
-    // And at every level below it. The copy is recursive, so the top-level
-    // assertion alone passes a regression that flattens the nested maps —
-    // which is where a JSON Schema keeps everything worth reading.
-    Map<?, ?> copiedProperties = (Map<?, ?>) schema.parameters().get("properties");
-    assertEquals(List.of("question", "limit", "project"), List.copyOf(copiedProperties.keySet()));
+        List.of("question", "limit", "project"),
+        List.copyOf(schema.parameters().properties().keySet()));
+    var rendered =
+        new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(schema.parameters());
+    assertEquals("string", rendered.path("properties").path("question").path("type").textValue());
+    assertEquals(1, rendered.path("properties").path("question").path("minLength").intValue());
     assertEquals(
-        List.of("type", "description", "minLength", "examples"),
-        List.copyOf(((Map<?, ?>) copiedProperties.get("question")).keySet()));
+        "why", rendered.path("properties").path("question").path("examples").get(0).textValue());
+    assertThrows(
+        UnsupportedOperationException.class, () -> schema.parameters().properties().clear());
   }
 
   /**
@@ -572,12 +545,12 @@ class RequestTest {
     Map<String, Object> nullValue = new LinkedHashMap<>();
     nullValue.put("description", null);
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolSchema("memory_recall", "d", nullValue));
+        IllegalArgumentException.class, () -> ToolSchema.from("memory_recall", "d", nullValue));
 
     Map<String, Object> nullKey = new LinkedHashMap<>();
     nullKey.put(null, "object");
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolSchema("memory_recall", "d", nullKey));
+        IllegalArgumentException.class, () -> ToolSchema.from("memory_recall", "d", nullKey));
 
     Map<String, Object> nested = new LinkedHashMap<>();
     Map<String, Object> question = new LinkedHashMap<>();
@@ -585,7 +558,7 @@ class RequestTest {
     nested.put("properties", Map.of("question", question));
     IllegalArgumentException deep =
         assertThrows(
-            IllegalArgumentException.class, () -> new ToolSchema("memory_recall", "d", nested));
+            IllegalArgumentException.class, () -> ToolSchema.from("memory_recall", "d", nested));
     // The path, because "a null value" in a nested structure sends the
     // reader through the whole of it looking for which field.
     assertTrue(deep.getMessage().contains("question.type"), deep.getMessage());
@@ -595,7 +568,7 @@ class RequestTest {
     required.add(null);
     inAList.put("required", required);
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolSchema("memory_recall", "d", inAList));
+        IllegalArgumentException.class, () -> ToolSchema.from("memory_recall", "d", inAList));
   }
 
   /**
@@ -608,12 +581,13 @@ class RequestTest {
     Map<String, Object> question = new LinkedHashMap<>();
     question.put("type", "string");
     Map<String, Object> parameters = new LinkedHashMap<>();
-    parameters.put("properties", question);
+    parameters.put("properties", Map.of("question", question));
 
-    ToolSchema schema = new ToolSchema("memory_recall", "d", parameters);
+    ToolSchema schema = ToolSchema.from("memory_recall", "d", parameters);
     question.put("type", "integer");
 
-    assertEquals("string", ((Map<?, ?>) schema.parameters().get("properties")).get("type"));
+    assertEquals(
+        "string", schema.parameters().properties().get("question").type().values().getFirst());
   }
 
   /**

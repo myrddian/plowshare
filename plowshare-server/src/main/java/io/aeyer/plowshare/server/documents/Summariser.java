@@ -3,12 +3,14 @@ package io.aeyer.plowshare.server.documents;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
+import io.aeyer.plowshare.server.agents.AttributedTranscript;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Compaction;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.JobWatch;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.agents.SystemModelTasks;
 import io.aeyer.plowshare.server.agents.Transcript;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -182,6 +184,7 @@ public final class Summariser implements UsageAware {
 
   private String owner;
   private String parentLog;
+  private UsageAttribution parentUsage = UsageAttribution.LEGACY;
 
   private final DocumentStore store;
   private final JobRuntime runtime;
@@ -310,6 +313,9 @@ public final class Summariser implements UsageAware {
     copy.home = selectedHome;
     copy.owner = account;
     copy.parentLog = parent;
+    if (parent != null)
+      copy.parentUsage =
+          usageOwners.processing(parent, UsageAttribution.Operation.DOCUMENT_SUMMARY);
     copy.stages = stages;
     copy.usageOwners = usageOwners;
     return copy;
@@ -318,27 +324,15 @@ public final class Summariser implements UsageAware {
   public io.aeyer.plowshare.server.information.InformationMetadata autoTag(
       String task, String retained, Budget budget, BooleanSupplier cancelled) {
     Outcome outcome = metadataWorker("information_tagger", task, budget, cancelled);
-    try {
-      Object metadata =
-          new com.fasterxml.jackson.databind.ObjectMapper()
-              .readValue(outcome.text().strip(), Object.class);
-      return io.aeyer.plowshare.server.information.InformationMetadata.from(metadata, retained);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException("information tagger returned invalid JSON", invalid);
-    }
+    return io.aeyer.plowshare.server.information.InformationMetadataCodec.read(
+        outcome.text(), retained);
   }
 
   public Map<String, List<String>> tagGroups(
       String task, List<String> tags, Budget budget, BooleanSupplier cancelled) {
     Outcome outcome = metadataWorker("information_tag_grouper", task, budget, cancelled);
-    try {
-      Object groups =
-          new com.fasterxml.jackson.databind.ObjectMapper()
-              .readValue(outcome.text().strip(), Object.class);
-      return io.aeyer.plowshare.server.information.InformationTagGroups.from(groups, tags);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException("information tag grouper returned invalid JSON", invalid);
-    }
+    return io.aeyer.plowshare.server.information.InformationMetadataCodec.groups(
+        outcome.text(), tags);
   }
 
   private Outcome metadataWorker(
@@ -347,6 +341,7 @@ public final class Summariser implements UsageAware {
     if (registry == null || !registry.names().contains(name))
       throw new IllegalStateException("no " + name + " is configured");
     var definition = registry.get(name);
+    requireInternalCapabilities(definition);
     Transcript transcript =
         logs == null
             ? Transcript.NONE
@@ -358,6 +353,8 @@ public final class Summariser implements UsageAware {
                 parentLog == null ? budget : null,
                 io.aeyer.plowshare.server.agents.Speaker.harness(),
                 owner);
+    if (parentUsage.status() != UsageAttribution.Status.LEGACY_UNATTRIBUTED)
+      transcript = new AttributedTranscript(transcript, UsageAttribution.LEGACY, parentUsage);
     if (logs != null && logs.accountingEnabled())
       transcript = logs.own(home, transcript, definition, owner);
     final Transcript conversation = transcript;
@@ -423,6 +420,8 @@ public final class Summariser implements UsageAware {
     AgentDefinition section = registry.get(SECTION);
     AgentDefinition chapter = registry.get(CHAPTER);
     AgentDefinition document = registry.get(DOCUMENT);
+    for (var definition : List.of(paragraph, span, section, chapter, document))
+      requireInternalCapabilities(definition);
 
     List<DocumentStore.UnsummarisedParagraph> waiting = store.unsummarised(documentId);
     boolean documentIsSummarised = store.documentSummary(documentId) != null;
@@ -463,6 +462,8 @@ public final class Summariser implements UsageAware {
                 parentLog == null ? budget : null,
                 io.aeyer.plowshare.server.agents.Speaker.harness(),
                 account == null ? owner : account);
+    if (parentUsage.status() != UsageAttribution.Status.LEGACY_UNATTRIBUTED)
+      root = new AttributedTranscript(root, UsageAttribution.LEGACY, parentUsage);
     if (logs != null && logs.accountingEnabled()) {
       root = logs.own(home, root, document, account == null ? owner : account);
     }
@@ -749,6 +750,8 @@ public final class Summariser implements UsageAware {
       BooleanSupplier cancelled,
       Tally tally) {
 
+    requireInternalCapabilities(level);
+
     Outcome ran;
     try {
       ran =
@@ -878,6 +881,10 @@ public final class Summariser implements UsageAware {
                 level.name() + ": " + ran.detail()));
       }
     }
+  }
+
+  private void requireInternalCapabilities(AgentDefinition definition) {
+    if (parentLog != null) SystemModelTasks.requireModelOnly(definition);
   }
 
   // --- what a level is asked ------------------------------------------------

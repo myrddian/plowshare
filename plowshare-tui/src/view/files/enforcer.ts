@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/enforcer'
+export * from 'plowshare-client-node/enforcer';

@@ -126,6 +126,17 @@ class FrameShapeTest {
       mockBean(context, io.aeyer.plowshare.server.access.ProjectAuthorization.class);
       FrameAreas.declared().forEach(context::register);
       context.register(FrameRoutingConfig.class);
+      context
+          .getEnvironment()
+          .getPropertySources()
+          .addFirst(
+              new org.springframework.core.env.MapPropertySource(
+                  "fixture",
+                  Map.of(
+                      "plowshare.projects.workspace-directory",
+                      java.nio.file.Path.of(System.getProperty("java.io.tmpdir"))
+                          .toAbsolutePath()
+                          .toString())));
       context.refresh();
 
       FrameRouter router = context.getBean(FrameRouter.class);

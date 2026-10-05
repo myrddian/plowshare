@@ -1,6 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "outDir": "build-tests", "noEmit": false, "declaration": false },
+  "compilerOptions": {
+    "outDir": "build-tests",
+    "noEmit": false,
+    "declaration": false
+  },
   "exclude": [],
   "include": ["src/**/*.ts"]
 }

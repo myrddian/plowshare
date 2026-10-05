@@ -53,7 +53,7 @@ class ServerAdministrationTest {
     return new TokenStore(
             Clock.systemUTC(), Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofSeconds(30))
         .withDurableSessions(
-            new DurableSessions(
+            new JdbcDurableSessions(
                 jdbc,
                 new DataSourceTransactionManager(source),
                 Clock.systemUTC(),
@@ -74,6 +74,12 @@ class ServerAdministrationTest {
     context.registerBean(PasswordHasher.class);
     context.registerBean(TokenStore.class, this::server);
     context.register(ServerAdministration.class, SocketAuthorization.class);
+    context.register(JdbcAccountAdministrationRepository.class);
+    context.registerBean(
+        io.aeyer.plowshare.server.archive.UnitOfWork.class,
+        () ->
+            new io.aeyer.plowshare.server.archive.ArchiveConfig()
+                .unitOfWork(new DataSourceTransactionManager(source)));
     context.refresh();
     accounts = context.getBean(AdminStore.class);
     service = context.getBean(ServerAdministration.class);

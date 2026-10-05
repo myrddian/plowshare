@@ -36,6 +36,9 @@ public interface OrchestrationRecorder extends RunActivity, StatusMoves, Approva
   /** A run has just reached a terminal state; {@code run} is its row read after. */
   default void runEnded(OrchestrationRecord run) {}
 
+  /** An explicit recovery committed, before its next turn is submitted. */
+  default void runResumed(OrchestrationRecord run, String author, String failure) {}
+
   default void questionAsked(OrchestrationRecord run, String question) {}
 
   default void questionAnswered(OrchestrationRecord run, String answer, String author) {}

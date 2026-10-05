@@ -12,6 +12,23 @@ public record InformationMetadata(
     Map<String, List<String>> groups) {
   public InformationMetadata {
     tags = InformationFacets.tags(tags);
+    if (groups != null) groups = InformationTagGroups.from(groups, tags);
+    if (author == null) {
+      if (authorSource != null || authorEvidence != null)
+        throw new IllegalArgumentException("Absent author cannot carry attribution");
+    } else if (author.isBlank()
+        || author.length() > 256
+        || author.codePoints().anyMatch(Character::isISOControl)
+        || author.indexOf('\u2028') >= 0
+        || author.indexOf('\u2029') >= 0
+        || !java.util.Set.of("person", "organisation")
+            .contains(authorSource == null ? "" : authorSource)
+        || authorEvidence == null
+        || authorEvidence.isBlank()
+        || authorEvidence.length() > 512
+        || authorEvidence.indexOf('\0') >= 0
+        || !authorEvidence.contains(author))
+      throw new IllegalArgumentException("Invalid bibliographic attribution");
   }
 
   public InformationMetadata(
@@ -19,44 +36,8 @@ public record InformationMetadata(
     this(tags, author, authorSource, authorEvidence, null);
   }
 
+  /** Conversion at the model/checkpoint boundary; services receive only this validated value. */
   public static InformationMetadata from(Object raw, String retained) {
-    // Old paid tag checkpoints remain reusable; they contain no bibliographic attribution.
-    if (raw instanceof List<?>)
-      return new InformationMetadata(InformationFacets.tags(raw), null, null, null);
-    if (!(raw instanceof Map<?, ?> fields))
-      throw new IllegalStateException("information metadata must be a JSON object");
-    var tags = InformationFacets.tags(fields.get("autoTag"));
-    var groups =
-        fields.containsKey("tagGroups")
-            ? InformationTagGroups.from(fields.get("tagGroups"), tags)
-            : null;
-    var person = candidate(fields.get("documentAuthor"), retained);
-    if (person != null)
-      return new InformationMetadata(tags, person.name(), "person", person.evidence(), groups);
-    var organisation = candidate(fields.get("documentOrganisation"), retained);
-    return organisation == null
-        ? new InformationMetadata(tags, null, null, null, groups)
-        : new InformationMetadata(
-            tags, organisation.name(), "organisation", organisation.evidence(), groups);
-  }
-
-  private record Candidate(String name, String evidence) {}
-
-  private static Candidate candidate(Object raw, String retained) {
-    if (!(raw instanceof Map<?, ?> fields)
-        || !Boolean.TRUE.equals(fields.get("certain"))
-        || !(fields.get("name") instanceof String name)
-        || !(fields.get("evidence") instanceof String evidence)) return null;
-    name = name.strip();
-    evidence = evidence.strip();
-    if (name.isEmpty()
-        || name.length() > 256
-        || evidence.isEmpty()
-        || evidence.length() > 512
-        || name.codePoints().anyMatch(Character::isISOControl)
-        || !evidence.contains(name)
-        || retained == null
-        || !retained.contains(evidence)) return null;
-    return new Candidate(name, evidence);
+    return InformationMetadataCodec.convert(raw, retained);
   }
 }

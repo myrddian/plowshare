@@ -1,5 +1,11 @@
-import { markdown } from './markdown'
-import type { ApprovalDecision, ApprovalView, CompactionView, TurnView } from './wire'
+import { isList } from '../../../sdk/typescript/src/binding/values.ts';
+import { markdown } from './markdown';
+import type {
+  ApprovalDecision,
+  ApprovalView,
+  CompactionView,
+  TurnView,
+} from './wire';
 
 /**
  * The scrollback's renderer: one function per kind of thing that can appear in
@@ -47,46 +53,47 @@ import type { ApprovalDecision, ApprovalView, CompactionView, TurnView } from '.
  */
 
 /** Where a line came from. The value of `data-role`, and what decides the gutter. */
-export type Role = 'utterance' | 'answer' | 'seam' | 'tool' | 'model' | 'runtime' | 'refusal'
+export type Role =
+  'utterance' | 'answer' | 'seam' | 'tool' | 'model' | 'runtime' | 'refusal';
 
 /** What the person said, as the transcript records it. */
 export interface UtteranceEntry {
-    readonly role: 'utterance'
-    readonly text: string
-    readonly ordinal: number | null
+  readonly role: 'utterance';
+  readonly text: string;
+  readonly ordinal: number | null;
 }
 
 /** What the turn came to, whatever its ending. */
 export interface AnswerEntry {
-    readonly role: 'answer'
-    readonly text: string
-    readonly ending: string
-    readonly promptTokens: number | null | undefined
-    readonly ordinal: number | null
+  readonly role: 'answer';
+  readonly text: string;
+  readonly ending: string;
+  readonly promptTokens: number | null | undefined;
+  readonly ordinal: number | null;
 }
 
 /** A fold in the history, at the turn it reaches through. */
 export interface SeamEntry {
-    readonly role: 'seam'
-    readonly throughOrdinal: number
-    readonly summary: string
+  readonly role: 'seam';
+  readonly throughOrdinal: number;
+  readonly summary: string;
 }
 
 /** One tool a run called. The name the server registered, never one a model invented. */
 export interface ToolEntry {
-    readonly role: 'tool'
-    readonly tool: string
-    readonly agent: string
+  readonly role: 'tool';
+  readonly tool: string;
+  readonly agent: string;
 }
 
 /** One model call claimed from the budget. */
 export interface ModelEntry {
-    readonly role: 'model'
-    readonly agent: string
-    /** Steps completed before this call. `wire.OutcomeView.steps` says why this
-     *  is not called turns. */
-    readonly steps: number
-    readonly modelCalls: number
+  readonly role: 'model';
+  readonly agent: string;
+  /** Steps completed before this call. `wire.OutcomeView.steps` says why this
+   *  is not called turns. */
+  readonly steps: number;
+  readonly modelCalls: number;
 }
 
 /**
@@ -99,24 +106,24 @@ export interface ModelEntry {
  * in the person's mouth.
  */
 export interface RuntimeEntry {
-    readonly role: 'runtime'
-    readonly text: string
+  readonly role: 'runtime';
+  readonly text: string;
 }
 
 /** Something the server would not do, said in this console's own words. */
 export interface RefusalEntry {
-    readonly role: 'refusal'
-    readonly text: string
+  readonly role: 'refusal';
+  readonly text: string;
 }
 
 export type Entry =
-    | UtteranceEntry
-    | AnswerEntry
-    | SeamEntry
-    | ToolEntry
-    | ModelEntry
-    | RuntimeEntry
-    | RefusalEntry
+  | UtteranceEntry
+  | AnswerEntry
+  | SeamEntry
+  | ToolEntry
+  | ModelEntry
+  | RuntimeEntry
+  | RefusalEntry;
 
 /**
  * The word in the gutter, per role.
@@ -127,14 +134,14 @@ export type Entry =
  * stop being a column to read down.
  */
 const GUTTER: Readonly<Record<Role, string>> = Object.freeze({
-    utterance: 'you',
-    answer: 'agent',
-    seam: 'folded',
-    tool: 'tool',
-    model: 'model',
-    runtime: 'runtime',
-    refusal: 'refused',
-})
+  utterance: 'you',
+  answer: 'agent',
+  seam: 'folded',
+  tool: 'tool',
+  model: 'model',
+  runtime: 'runtime',
+  refusal: 'refused',
+});
 
 /**
  * What each ending this server has today means, in a person's words.
@@ -150,24 +157,28 @@ const GUTTER: Readonly<Record<Role, string>> = Object.freeze({
  * `an_ending_naming_a_property_of_every_object_is_still_unknown` holds it.
  */
 const ENDINGS: Readonly<Record<string, string>> = Object.freeze({
-    ANSWERED: 'answered',
-    TURN_CAP: 'stopped at its turn cap without reaching an answer',
-    CALL_BUDGET: 'stopped: this conversation has spent its whole model-call budget',
-    CANCELLED: 'cancelled',
-    STUCK: 'stopped: it kept making the same call and was getting nowhere',
-    UNAVAILABLE: 'stopped: the model could not be reached',
-    SUB_AGENT_FAILED: 'stopped: an agent this one delegated to failed',
-    SESSION_GONE: 'stopped: the client that owned the files went away',
-    AWAITING: 'waiting for an answer to its question',
-    CALL_FAILURES: 'stopped: it kept writing tool calls as text instead of making them',
-})
+  ANSWERED: 'answered',
+  TURN_CAP: 'stopped at its turn cap without reaching an answer',
+  CALL_BUDGET:
+    'stopped: this conversation has spent its whole model-call budget',
+  CANCELLED: 'cancelled',
+  STUCK: 'stopped: it kept making the same call and was getting nowhere',
+  UNAVAILABLE: 'stopped: the model could not be reached',
+  SUB_AGENT_FAILED: 'stopped: an agent this one delegated to failed',
+  SESSION_GONE: 'stopped: the client that owned the files went away',
+  AWAITING: 'waiting for an answer to its question',
+  CALL_FAILURES:
+    'stopped: it kept writing tool calls as text instead of making them',
+});
 
 /** How this turn ended, in words if this build knows the name and as the name if not. */
 export function describeEnding(ending: unknown): string {
-    if (typeof ending !== 'string' || ending === '') {
-        return 'ended, and the server did not say how'
-    }
-    return Object.hasOwn(ENDINGS, ending) ? (ENDINGS[ending] as string) : `ended ${ending}`
+  if (typeof ending !== 'string' || ending === '') {
+    return 'ended, and the server did not say how';
+  }
+  return Object.hasOwn(ENDINGS, ending)
+    ? (ENDINGS[ending] as string)
+    : `ended ${ending}`;
 }
 
 /**
@@ -181,23 +192,29 @@ export function describeEnding(ending: unknown): string {
  * crash.
  */
 export function describeCost(promptTokens: number | null | undefined): string {
-    if (promptTokens === null || promptTokens === undefined || typeof promptTokens !== 'number') {
-        return 'prompt not measured'
-    }
-    return promptTokens === 1 ? '1 prompt token' : `${promptTokens} prompt tokens`
+  if (
+    promptTokens === null ||
+    promptTokens === undefined ||
+    typeof promptTokens !== 'number'
+  ) {
+    return 'prompt not measured';
+  }
+  return promptTokens === 1
+    ? '1 prompt token'
+    : `${promptTokens} prompt tokens`;
 }
 
 /** How many characters of a body are shown before it is clamped behind a button. */
-export const CLAMP_AT = 600
+export const CLAMP_AT = 600;
 
 /** An element with a class and, optionally, its text. */
 function el(tag: string, className: string, text?: string): HTMLElement {
-    const node = document.createElement(tag)
-    node.className = className
-    if (text !== undefined) {
-        node.textContent = text
-    }
-    return node
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text !== undefined) {
+    node.textContent = text;
+  }
+  return node;
 }
 
 /**
@@ -208,10 +225,10 @@ function el(tag: string, className: string, text?: string): HTMLElement {
  * provenance without matching prose that may be reworded.
  */
 function line(role: Role): HTMLElement {
-    const entry = el('div', 'entry')
-    entry.dataset['role'] = role
-    entry.appendChild(el('span', 'who', GUTTER[role]))
-    return entry
+  const entry = el('div', 'entry');
+  entry.dataset['role'] = role;
+  entry.appendChild(el('span', 'who', GUTTER[role]));
+  return entry;
 }
 
 /**
@@ -224,22 +241,22 @@ function line(role: Role): HTMLElement {
  * the same place whether it is shown verbatim or read for marks.
  */
 function clamped(text: string, shown: HTMLElement): HTMLElement {
-    const column = el('div', 'column')
-    column.appendChild(shown)
-    if (text.length > CLAMP_AT) {
-        shown.dataset['clamped'] = 'true'
-        const more = document.createElement('button')
-        more.type = 'button'
-        more.className = 'more'
-        more.textContent = 'show all'
-        more.addEventListener('click', () => {
-            const hidden = shown.dataset['clamped'] === 'true'
-            shown.dataset['clamped'] = hidden ? 'false' : 'true'
-            more.textContent = hidden ? 'show less' : 'show all'
-        })
-        column.appendChild(more)
-    }
-    return column
+  const column = el('div', 'column');
+  column.appendChild(shown);
+  if (text.length > CLAMP_AT) {
+    shown.dataset['clamped'] = 'true';
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'more';
+    more.textContent = 'show all';
+    more.addEventListener('click', () => {
+      const hidden = shown.dataset['clamped'] === 'true';
+      shown.dataset['clamped'] = hidden ? 'false' : 'true';
+      more.textContent = hidden ? 'show less' : 'show all';
+    });
+    column.appendChild(more);
+  }
+  return column;
 }
 
 /**
@@ -250,7 +267,7 @@ function clamped(text: string, shown: HTMLElement): HTMLElement {
  * be this console reformatting somebody else's output.
  */
 function body(text: string): HTMLElement {
-    return clamped(text, el('pre', 'body', text))
+  return clamped(text, el('pre', 'body', text));
 }
 
 /**
@@ -271,102 +288,106 @@ function body(text: string): HTMLElement {
  * which goes on asserting it through this path.
  */
 function prose(text: string): HTMLElement {
-    const shown = el('div', 'body md')
-    shown.appendChild(markdown(text))
-    return clamped(text, shown)
+  const shown = el('div', 'body md');
+  shown.appendChild(markdown(text));
+  return clamped(text, shown);
 }
 
 /** One line of the scrollback, built as nodes. */
 export function renderEntry(entry: Entry): HTMLElement {
-    switch (entry.role) {
-        case 'utterance':
-            return utterance(entry)
-        case 'answer':
-            return answer(entry)
-        case 'seam':
-            return seam(entry)
-        case 'tool':
-            return tool(entry)
-        case 'model':
-            return model(entry)
-        case 'runtime':
-        case 'refusal':
-            return note(entry)
-    }
+  switch (entry.role) {
+    case 'utterance':
+      return utterance(entry);
+    case 'answer':
+      return answer(entry);
+    case 'seam':
+      return seam(entry);
+    case 'tool':
+      return tool(entry);
+    case 'model':
+      return model(entry);
+    case 'runtime':
+    case 'refusal':
+      return note(entry);
+  }
 }
 
 function stamp(node: HTMLElement, ordinal: number | null): void {
-    if (ordinal !== null) {
-        node.dataset['ordinal'] = String(ordinal)
-    }
+  if (ordinal !== null) {
+    node.dataset['ordinal'] = String(ordinal);
+  }
 }
 
 function utterance(entry: UtteranceEntry): HTMLElement {
-    const node = line('utterance')
-    stamp(node, entry.ordinal)
-    node.appendChild(body(entry.text))
-    return node
+  const node = line('utterance');
+  stamp(node, entry.ordinal);
+  node.appendChild(body(entry.text));
+  return node;
 }
 
 function answer(entry: AnswerEntry): HTMLElement {
-    const node = line('answer')
-    stamp(node, entry.ordinal)
-    const column = prose(entry.text)
-    // The ending before the cost, and both under the text: a turn that stopped
-    // says how it stopped, and a reader who took the text for a reply without
-    // reading this would be reading a truncation as an answer.
-    const meta = el('div', 'meta')
-    meta.appendChild(el('span', 'ending', describeEnding(entry.ending)))
-    meta.appendChild(el('span', 'cost', describeCost(entry.promptTokens)))
-    column.appendChild(meta)
-    node.appendChild(column)
-    return node
+  const node = line('answer');
+  stamp(node, entry.ordinal);
+  const column = prose(entry.text);
+  // The ending before the cost, and both under the text: a turn that stopped
+  // says how it stopped, and a reader who took the text for a reply without
+  // reading this would be reading a truncation as an answer.
+  const meta = el('div', 'meta');
+  meta.appendChild(el('span', 'ending', describeEnding(entry.ending)));
+  meta.appendChild(el('span', 'cost', describeCost(entry.promptTokens)));
+  column.appendChild(meta);
+  node.appendChild(column);
+  return node;
 }
 
 function seam(entry: SeamEntry): HTMLElement {
-    const node = line('seam')
-    // The attribute the fold is found by. Its value is the turn the fold
-    // reaches through, so a test can assert WHERE the seam landed and not only
-    // that one exists.
-    node.dataset['seam'] = String(entry.throughOrdinal)
-    const column = el('div', 'column')
-    column.appendChild(el(
-        'div',
-        'seam-head',
-        `everything up to and including turn ${entry.throughOrdinal} was folded into this`
-        + ' summary; the turns themselves are still above',
-    ))
-    column.appendChild(prose(entry.summary))
-    node.appendChild(column)
-    return node
+  const node = line('seam');
+  // The attribute the fold is found by. Its value is the turn the fold
+  // reaches through, so a test can assert WHERE the seam landed and not only
+  // that one exists.
+  node.dataset['seam'] = String(entry.throughOrdinal);
+  const column = el('div', 'column');
+  column.appendChild(
+    el(
+      'div',
+      'seam-head',
+      `everything up to and including turn ${entry.throughOrdinal} was folded into this` +
+        ' summary; the turns themselves are still above',
+    ),
+  );
+  column.appendChild(prose(entry.summary));
+  node.appendChild(column);
+  return node;
 }
 
 function tool(entry: ToolEntry): HTMLElement {
-    const node = line('tool')
-    const column = el('div', 'column')
-    column.appendChild(el('div', 'body', entry.tool))
-    column.appendChild(el('div', 'meta', `called by ${entry.agent}`))
-    node.appendChild(column)
-    return node
+  const node = line('tool');
+  const column = el('div', 'column');
+  column.appendChild(el('div', 'body', entry.tool));
+  column.appendChild(el('div', 'meta', `called by ${entry.agent}`));
+  node.appendChild(column);
+  return node;
 }
 
 function model(entry: ModelEntry): HTMLElement {
-    const node = line('model')
-    const column = el('div', 'column')
-    column.appendChild(el(
-        'div',
-        'body',
-        `${entry.agent}: model call ${entry.modelCalls}, after ${entry.steps} completed`
-        + (entry.steps === 1 ? ' step' : ' steps'),
-    ))
-    node.appendChild(column)
-    return node
+  const node = line('model');
+  const column = el('div', 'column');
+  column.appendChild(
+    el(
+      'div',
+      'body',
+      `${entry.agent}: model call ${entry.modelCalls}, after ${entry.steps} completed` +
+        (entry.steps === 1 ? ' step' : ' steps'),
+    ),
+  );
+  node.appendChild(column);
+  return node;
 }
 
 function note(entry: RuntimeEntry | RefusalEntry): HTMLElement {
-    const node = line(entry.role)
-    node.appendChild(body(entry.text))
-    return node
+  const node = line(entry.role);
+  node.appendChild(body(entry.text));
+  return node;
 }
 
 /**
@@ -386,46 +407,54 @@ function note(entry: RuntimeEntry | RefusalEntry): HTMLElement {
  * failing to match.
  */
 export function transcript(
-    turns: readonly TurnView[], compactions: readonly CompactionView[],
+  turns: readonly TurnView[],
+  compactions: readonly CompactionView[],
 ): Entry[] {
-    const ordered = [...turns].sort((left, right) => ordinalOf(left) - ordinalOf(right))
-    const folds = [...compactions].sort((left, right) => left.throughOrdinal - right.throughOrdinal)
-    const entries: Entry[] = []
-    let next = 0
+  const ordered = [...turns].sort(
+    (left, right) => ordinalOf(left) - ordinalOf(right),
+  );
+  const folds = [...compactions].sort(
+    (left, right) => left.throughOrdinal - right.throughOrdinal,
+  );
+  const entries: Entry[] = [];
+  let next = 0;
 
-    for (const turn of ordered) {
-        const ordinal = ordinalOf(turn)
-        entries.push({ role: 'utterance', text: textOf(turn.utterance), ordinal })
-        entries.push({
-            role: 'answer',
-            text: textOf(turn.answer),
-            ending: typeof turn.ending === 'string' ? turn.ending : '',
-            promptTokens: turn.promptTokens,
-            ordinal,
-        })
-        while (next < folds.length && (folds[next] as CompactionView).throughOrdinal <= ordinal) {
-            const fold = folds[next] as CompactionView
-            entries.push({
-                role: 'seam',
-                throughOrdinal: fold.throughOrdinal,
-                summary: textOf(fold.summary),
-            })
-            next += 1
-        }
+  for (const turn of ordered) {
+    const ordinal = ordinalOf(turn);
+    entries.push({ role: 'utterance', text: textOf(turn.utterance), ordinal });
+    entries.push({
+      role: 'answer',
+      text: textOf(turn.answer),
+      ending: typeof turn.ending === 'string' ? turn.ending : '',
+      promptTokens: turn.promptTokens,
+      ordinal,
+    });
+    while (
+      next < folds.length &&
+      (folds[next] as CompactionView).throughOrdinal <= ordinal
+    ) {
+      const fold = folds[next] as CompactionView;
+      entries.push({
+        role: 'seam',
+        throughOrdinal: fold.throughOrdinal,
+        summary: textOf(fold.summary),
+      });
+      next += 1;
     }
-    for (const fold of folds.slice(next)) {
-        entries.push({
-            role: 'seam',
-            throughOrdinal: fold.throughOrdinal,
-            summary: textOf(fold.summary),
-        })
-    }
-    return entries
+  }
+  for (const fold of folds.slice(next)) {
+    entries.push({
+      role: 'seam',
+      throughOrdinal: fold.throughOrdinal,
+      summary: textOf(fold.summary),
+    });
+  }
+  return entries;
 }
 
 /** A number, or zero for a field the server stopped sending. */
 function ordinalOf(turn: TurnView): number {
-    return typeof turn.ordinal === 'number' ? turn.ordinal : 0
+  return typeof turn.ordinal === 'number' ? turn.ordinal : 0;
 }
 
 /**
@@ -437,7 +466,7 @@ function ordinalOf(turn: TurnView): number {
  * is visibly wrong and still a page.
  */
 function textOf(value: unknown): string {
-    return typeof value === 'string' ? value : ''
+  return typeof value === 'string' ? value : '';
 }
 
 /**
@@ -448,17 +477,18 @@ function textOf(value: unknown): string {
  * the server's sentence for a busy conversation, or why the answer was not taken.
  */
 export interface ApprovalResult {
-    readonly answered: boolean
-    readonly note: string | null
+  readonly answered: boolean;
+  readonly note: string | null;
 }
 
 /** The four buttons, in the order they are drawn, and the words on each. */
-export const DECISIONS: readonly (readonly [ApprovalDecision, string])[] = Object.freeze([
+export const DECISIONS: readonly (readonly [ApprovalDecision, string])[] =
+  Object.freeze([
     ['once', 'Allow once'],
     ['conversation', 'Allow for this conversation'],
     ['project', 'Allow for project…'],
     ['deny', 'Deny'],
-] as const)
+  ] as const);
 
 /**
  * The prefix a project approval starts on: the server's `defaultPrefix` when it
@@ -468,12 +498,18 @@ export const DECISIONS: readonly (readonly [ApprovalDecision, string])[] = Objec
  * does not lead the command, and a block that opened on one would offer a
  * confirm button the server was certain to refuse.
  */
-export function startingPrefix(command: readonly string[], suggested: readonly string[] | null | undefined)
-    : readonly string[] {
-    const offered = Array.isArray(suggested) ? suggested : []
-    const leads = offered.length > 0 && offered.length <= command.length
-        && offered.every((word, index) => word === command[index])
-    return leads ? command.slice(0, offered.length) : command.slice(0, Math.min(1, command.length))
+export function startingPrefix(
+  command: readonly string[],
+  suggested: readonly string[] | null | undefined,
+): readonly string[] {
+  const offered = isList(suggested) ? suggested : [];
+  const leads =
+    offered.length > 0 &&
+    offered.length <= command.length &&
+    offered.every((word, index) => word === command[index]);
+  return leads
+    ? command.slice(0, offered.length)
+    : command.slice(0, Math.min(1, command.length));
 }
 
 /**
@@ -492,128 +528,158 @@ export function startingPrefix(command: readonly string[], suggested: readonly s
  * is recorded; `data-answered` names the decision that was.
  */
 export function renderApproval(
-    view: ApprovalView,
-    answer: (decision: ApprovalDecision, prefix: readonly string[] | null) => Promise<ApprovalResult>,
+  view: ApprovalView,
+  answer: (
+    decision: ApprovalDecision,
+    prefix: readonly string[] | null,
+  ) => Promise<ApprovalResult>,
 ): HTMLElement {
-    const command = Array.isArray(view.command) ? view.command.map(textOf) : []
-    const block = el('article', 'approval')
-    block.dataset['approval'] = textOf(view.id)
+  const command = isList(view.command) ? view.command.map(textOf) : [];
+  const block = el('article', 'approval');
+  block.dataset['approval'] = textOf(view.id);
 
-    block.appendChild(el('div', 'approval-head',
-        `${textOf(view.agent) || 'the agent'} asks before running this command`))
-    const shown = el('pre', 'approval-command', command.join(' '))
-    shown.dataset['approvalCommand'] = ''
-    block.appendChild(shown)
-    block.appendChild(detail('side', textOf(view.side)))
-    block.appendChild(detail('cwd', textOf(view.cwd)))
-    block.appendChild(detail('reason', typeof view.reason === 'string' && view.reason !== ''
+  block.appendChild(
+    el(
+      'div',
+      'approval-head',
+      `${textOf(view.agent) || 'the agent'} asks before running this command`,
+    ),
+  );
+  const shown = el('pre', 'approval-command', command.join(' '));
+  shown.dataset['approvalCommand'] = '';
+  block.appendChild(shown);
+  block.appendChild(detail('side', textOf(view.side)));
+  block.appendChild(detail('cwd', textOf(view.cwd)));
+  block.appendChild(
+    detail(
+      'reason',
+      typeof view.reason === 'string' && view.reason !== ''
         ? view.reason
-        : 'none given: this environment asks before every command it has no rule for'))
+        : 'none given: this environment asks before every command it has no rule for',
+    ),
+  );
 
-    const actions = el('div', 'approval-actions')
-    const buttons: HTMLButtonElement[] = []
-    for (const [decision, words] of DECISIONS) {
-        const control = document.createElement('button')
-        control.type = 'button'
-        control.textContent = words
-        control.dataset['decision'] = decision
-        buttons.push(control)
-        actions.appendChild(control)
+  const actions = el('div', 'approval-actions');
+  const buttons: HTMLButtonElement[] = [];
+  for (const [decision, words] of DECISIONS) {
+    const control = document.createElement('button');
+    control.type = 'button';
+    control.textContent = words;
+    control.dataset['decision'] = decision;
+    buttons.push(control);
+    actions.appendChild(control);
+  }
+  block.appendChild(actions);
+
+  let prefix: readonly string[] = startingPrefix(command, view.defaultPrefix);
+  const chooser = el('div', 'approval-prefix');
+  chooser.dataset['prefix'] = '';
+  chooser.hidden = true;
+  const chips = el('div', 'approval-chips');
+  const covers = el('div', 'approval-covers');
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.dataset['confirmPrefix'] = '';
+  buttons.push(confirm);
+  const chipButtons = command.map((word, index) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = word;
+    chip.dataset['chip'] = String(index);
+    chip.addEventListener('click', () => {
+      prefix = command.slice(0, index + 1);
+      showPrefix();
+    });
+    chips.appendChild(chip);
+    return chip;
+  });
+  buttons.push(...chipButtons);
+  chooser.append(
+    el(
+      'div',
+      'approval-prefix-head',
+      'allow, on this side of this project, any command starting',
+    ),
+    chips,
+    covers,
+    confirm,
+  );
+  block.appendChild(chooser);
+
+  const said = el('p', 'approval-note');
+  said.dataset['approvalNote'] = '';
+  said.hidden = true;
+  block.appendChild(said);
+
+  function showPrefix(): void {
+    chipButtons.forEach((chip, index) => {
+      chip.dataset['selected'] = String(index < prefix.length);
+    });
+    covers.textContent = prefix.join(' ');
+    confirm.textContent = `Allow \u201c${prefix.join(' ')}\u201d for this project`;
+  }
+  showPrefix();
+
+  function settle(result: ApprovalResult, decision: ApprovalDecision): void {
+    if (result.answered) {
+      block.dataset['answered'] = decision;
+    } else {
+      for (const control of buttons) {
+        control.disabled = false;
+      }
     }
-    block.appendChild(actions)
+    said.hidden = result.note === null;
+    said.textContent = result.note ?? '';
+    said.dataset['approvalNote'] = result.answered ? 'answered' : 'refused';
+  }
 
-    let prefix: readonly string[] = startingPrefix(command, view.defaultPrefix)
-    const chooser = el('div', 'approval-prefix')
-    chooser.dataset['prefix'] = ''
-    chooser.hidden = true
-    const chips = el('div', 'approval-chips')
-    const covers = el('div', 'approval-covers')
-    const confirm = document.createElement('button')
-    confirm.type = 'button'
-    confirm.dataset['confirmPrefix'] = ''
-    buttons.push(confirm)
-    const chipButtons = command.map((word, index) => {
-        const chip = document.createElement('button')
-        chip.type = 'button'
-        chip.className = 'chip'
-        chip.textContent = word
-        chip.dataset['chip'] = String(index)
-        chip.addEventListener('click', () => {
-            prefix = command.slice(0, index + 1)
-            showPrefix()
-        })
-        chips.appendChild(chip)
-        return chip
-    })
-    buttons.push(...chipButtons)
-    chooser.append(
-        el('div', 'approval-prefix-head', 'allow, on this side of this project, any command starting'),
-        chips, covers, confirm)
-    block.appendChild(chooser)
-
-    const said = el('p', 'approval-note')
-    said.dataset['approvalNote'] = ''
-    said.hidden = true
-    block.appendChild(said)
-
-    function showPrefix(): void {
-        chipButtons.forEach((chip, index) => {
-            chip.dataset['selected'] = String(index < prefix.length)
-        })
-        covers.textContent = prefix.join(' ')
-        confirm.textContent = `Allow \u201c${prefix.join(' ')}\u201d for this project`
+  function send(
+    decision: ApprovalDecision,
+    chosen: readonly string[] | null,
+  ): void {
+    for (const control of buttons) {
+      control.disabled = true;
     }
-    showPrefix()
+    void answer(decision, chosen).then(
+      (result) => settle(result, decision),
+      (problem: unknown) =>
+        settle(
+          {
+            answered: false,
+            note:
+              problem instanceof Error
+                ? problem.message
+                : 'That answer could not be sent.',
+          },
+          decision,
+        ),
+    );
+  }
 
-    function settle(result: ApprovalResult, decision: ApprovalDecision): void {
-        if (result.answered) {
-            block.dataset['answered'] = decision
-        } else {
-            for (const control of buttons) {
-                control.disabled = false
-            }
-        }
-        said.hidden = result.note === null
-        said.textContent = result.note ?? ''
-        said.dataset['approvalNote'] = result.answered ? 'answered' : 'refused'
-    }
-
-    function send(decision: ApprovalDecision, chosen: readonly string[] | null): void {
-        for (const control of buttons) {
-            control.disabled = true
-        }
-        void answer(decision, chosen).then(
-            (result) => settle(result, decision),
-            (problem: unknown) => settle({
-                answered: false,
-                note: problem instanceof Error ? problem.message : 'That answer could not be sent.',
-            }, decision),
-        )
-    }
-
-    for (const control of buttons.slice(0, DECISIONS.length)) {
-        const decision = control.dataset['decision'] as ApprovalDecision
-        control.addEventListener('click', () => {
-            if (decision === 'project') {
-                // Opens the chooser and sends nothing: the prefix is the answer's
-                // whole content, and it has not been chosen yet.
-                chooser.hidden = !chooser.hidden
-                control.setAttribute('aria-expanded', String(!chooser.hidden))
-                return
-            }
-            send(decision, null)
-        })
-    }
-    confirm.addEventListener('click', () => {
-        send('project', prefix)
-    })
-    return block
+  for (const control of buttons.slice(0, DECISIONS.length)) {
+    const decision = control.dataset['decision'] as ApprovalDecision;
+    control.addEventListener('click', () => {
+      if (decision === 'project') {
+        // Opens the chooser and sends nothing: the prefix is the answer's
+        // whole content, and it has not been chosen yet.
+        chooser.hidden = !chooser.hidden;
+        control.setAttribute('aria-expanded', String(!chooser.hidden));
+        return;
+      }
+      send(decision, null);
+    });
+  }
+  confirm.addEventListener('click', () => {
+    send('project', prefix);
+  });
+  return block;
 }
 
 /** A labelled value inside an approval block. */
 function detail(label: string, value: string): HTMLElement {
-    const row = el('div', 'approval-detail')
-    row.dataset['detail'] = label
-    row.append(el('span', 'label', label), el('span', 'value', value))
-    return row
+  const row = el('div', 'approval-detail');
+  row.dataset['detail'] = label;
+  row.append(el('span', 'label', label), el('span', 'value', value));
+  return row;
 }

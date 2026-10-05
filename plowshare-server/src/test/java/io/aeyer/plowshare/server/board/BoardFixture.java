@@ -5,6 +5,7 @@ import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.events.JdbcFiringStore;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +51,7 @@ final class BoardFixture {
     Instant start = Instant.parse("2026-09-30T09:00:00Z");
     clock = () -> start.plusMillis(ticks.getAndIncrement());
     conversations = new ConversationStore(jdbc);
-    firings = new FiringStore(jdbc);
+    firings = new JdbcFiringStore(jdbc);
     store = new BoardStore(jdbc, clock);
   }
 

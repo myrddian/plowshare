@@ -1,8 +1,7 @@
 package io.aeyer.plowshare.server.ws;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.Orchestration.*;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
@@ -17,7 +16,6 @@ import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.requests.RequestedProjectId;
 import io.aeyer.plowshare.server.todos.TodoLists;
-import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -80,111 +78,13 @@ public class OrchestrationFrames implements FrameArea {
         FrameTypes.ORCHESTRATION_LIST, this::list,
         FrameTypes.ORCHESTRATION_STATUS, this::status,
         FrameTypes.ORCHESTRATION_ANSWER, this::answer,
-        FrameTypes.ORCHESTRATION_CANCEL, this::cancel);
+        FrameTypes.ORCHESTRATION_CANCEL, this::cancel,
+        FrameTypes.ORCHESTRATION_RESUME, this::resume);
   }
 
   // -- wire records ----------------------------------------------------------------------
 
-  /** One stage of a definition, as a caller reads it — never evaluated, only shown. */
-  public record StageView(String id, String doneWhen, List<String> mayReturnTo) {}
-
-  /**
-   * One orchestration a caller could start, or could not — {@code tier} and {@code stages} are null
-   * and empty on a refused row, which carries only its name and why it is withheld.
-   */
-  public record DefinitionView(
-      String name,
-      String description,
-      String tier,
-      List<StageView> stages,
-      List<String> triggers,
-      boolean served,
-      String withheld) {}
-
-  /**
-   * One run, as a caller reads it.
-   *
-   * <p><b>{@code stalledSince} is last and read from the store, not the record.</b> It is the stall
-   * sweep's own mark rather than anything {@code OrchestrationRecord} carries, so it is filled the
-   * same way for every run a caller reads — a listing, or one status — and never among the fields
-   * {@link #viewOf} takes straight off the record above it.
-   */
-  public record RunView(
-      String id,
-      String definition,
-      String tier,
-      String project,
-      String state,
-      String pendingCap,
-      String result,
-      String failure,
-      int returnsUsed,
-      int maxReturns,
-      int nudges,
-      int restarts,
-      String callerAgent,
-      String callerConversation,
-      String conductorConversation,
-      String parent,
-      int depth,
-      String waitingFor,
-      Instant createdAt,
-      Instant endedAt,
-      Instant stalledSince) {}
-
-  /**
-   * One child a run has started, as a caller reads it — just enough to point at it with {@code
-   * orchestration_status}.
-   */
-  public record ChildView(String id, String state) {}
-
-  /**
-   * One question the conductor asked, or one answer it was given, as a caller reads it — {@code
-   * structure} its options or choices (V70), or null for plain words.
-   */
-  public record MessageView(
-      String id,
-      String kind,
-      String text,
-      String author,
-      Instant createdAt,
-      Instant deliveredAt,
-      String capKind,
-      JsonNode structure) {}
-
-  public record Definitions(List<DefinitionView> definitions) {}
-
-  public record Listed(List<RunView> orchestrations) {}
-
-  public record Status(
-      RunView orchestration,
-      List<TodoView> todos,
-      List<MessageView> messages,
-      List<ChildView> children) {}
-
-  public record Answered(String id, String state) {}
-
-  public record Cancelled(String id, String state) {}
-
-  record ListBody(String project, String state, Integer limit) {}
-
-  record IdBody(String id) {}
-
-  record AnswerBody(String id, String answer, JsonNode choices) {}
-
   // -- handlers ----------------------------------------------------------------------------
-
-  record StartBody(
-      String agent,
-      String definition,
-      String request,
-      String context,
-      String project,
-      String requestId) {}
-
-  record ReceiptBody(String requestId) {}
-
-  public record Started(String id, String state, String requestId) {}
 
   private io.aeyer.plowshare.server.agents.Callers callers;
   private ObjectProvider<io.aeyer.plowshare.server.orchestrations.CallerOrchestrations> grants;
@@ -208,9 +108,13 @@ public class OrchestrationFrames implements FrameArea {
   }
 
   Outcome start(Map<String, Object> payload, Asking asking) {
-    StartBody body = Payloads.as(payload, StartBody.class, FrameTypes.ORCHESTRATION_START);
+    io.aeyer.plowshare.protocol.Orchestration.Start body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload,
+            io.aeyer.plowshare.protocol.Orchestration.Start.class,
+            FrameTypes.ORCHESTRATION_START);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_START);
-    var key = requestId(body.requestId());
+    var key = body.requestId();
     for (String field : List.of("agent", "definition", "request")) {
       Payloads.required(payload, field, FrameTypes.ORCHESTRATION_START, "Nothing was started.");
     }
@@ -256,24 +160,30 @@ public class OrchestrationFrames implements FrameArea {
     return new Outcome(
         io.aeyer.plowshare.protocol.frames.Code.ACCEPTED,
         null,
-        new Started(run.id(), run.state().wire(), key.toString()));
+        new Started(run.id(), run.state().wire(), key));
   }
 
   Outcome receipt(Map<String, Object> payload, Asking asking) {
-    ReceiptBody body = Payloads.as(payload, ReceiptBody.class, FrameTypes.ORCHESTRATION_RECEIPT);
+    Receipt body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, Receipt.class, FrameTypes.ORCHESTRATION_RECEIPT);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_RECEIPT);
-    var key = requestId(body.requestId());
+    var key = body.requestId();
     var receipt =
         store
             .startReceipt(handle, key)
             .orElseThrow(
                 () -> new CallerFault("No orchestration start receipt is owned by this account"));
     var run = owned(FrameTypes.ORCHESTRATION_RECEIPT, receipt.id(), handle);
-    return Outcome.ok(new Started(run.id(), run.state().wire(), key.toString()));
+    return Outcome.ok(new Started(run.id(), run.state().wire(), key));
   }
 
   Outcome definitions(Map<String, Object> payload, Asking asking) {
-    Tiered body = Payloads.as(payload, Tiered.class, FrameTypes.ORCHESTRATION_DEFINITIONS);
+    io.aeyer.plowshare.protocol.Orchestration.DefinitionQuery body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload,
+            io.aeyer.plowshare.protocol.Orchestration.DefinitionQuery.class,
+            FrameTypes.ORCHESTRATION_DEFINITIONS);
     OrchestrationResolver r = resolver.getIfAvailable();
     if (r == null) {
       return Outcome.ok(new Definitions(List.of()));
@@ -302,7 +212,9 @@ public class OrchestrationFrames implements FrameArea {
   }
 
   Outcome list(Map<String, Object> payload, Asking asking) {
-    ListBody body = Payloads.as(payload, ListBody.class, FrameTypes.ORCHESTRATION_LIST);
+    ListedQuery body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, ListedQuery.class, FrameTypes.ORCHESTRATION_LIST);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_LIST);
     int limit = body.limit() == null ? 50 : body.limit();
     if (limit < 1 || limit > 200) {
@@ -329,11 +241,26 @@ public class OrchestrationFrames implements FrameArea {
   }
 
   Outcome status(Map<String, Object> payload, Asking asking) {
-    IdBody body = Payloads.as(payload, IdBody.class, FrameTypes.ORCHESTRATION_STATUS);
+    Reference body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, Reference.class, FrameTypes.ORCHESTRATION_STATUS);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_STATUS);
     OrchestrationRecord run = owned(FrameTypes.ORCHESTRATION_STATUS, body.id(), handle);
-    List<TodoView> todoViews =
-        todos.list(run.conductorConversation()).stream().map(TodoView::of).toList();
+    List<Todo> todoViews =
+        todos.list(run.conductorConversation()).stream()
+            .map(
+                item ->
+                    new Todo(
+                        item.id(),
+                        item.parent(),
+                        item.position(),
+                        item.text(),
+                        item.status().wire(),
+                        item.summary(),
+                        item.locked(),
+                        item.stageId(),
+                        item.updatedAt()))
+            .toList();
     List<MessageView> messages =
         store.messages(run.id()).stream().map(OrchestrationFrames::viewOf).toList();
     List<ChildView> children =
@@ -344,11 +271,23 @@ public class OrchestrationFrames implements FrameArea {
   }
 
   Outcome answer(Map<String, Object> payload, Asking asking) {
-    AnswerBody body = Payloads.as(payload, AnswerBody.class, FrameTypes.ORCHESTRATION_ANSWER);
+    Answer body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, Answer.class, FrameTypes.ORCHESTRATION_ANSWER);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_ANSWER);
     owned(FrameTypes.ORCHESTRATION_ANSWER, body.id(), handle);
-    if (body.choices() != null && !body.choices().isNull()) {
-      switch (orchestrations.answerChosen(body.id(), body.choices(), body.answer(), handle, true)) {
+    if (body.choices() != null) {
+      switch (orchestrations.answerChosen(
+          body.id(),
+          body.choices().stream()
+              .map(
+                  choice ->
+                      new io.aeyer.plowshare.server.agents.StructuredAnswers.Choice(
+                          choice.header(), choice.chosen(), choice.other(), choice.note()))
+              .toList(),
+          body.answer(),
+          handle,
+          true)) {
         case Orchestrations.Chosen.Answered answered -> {}
         case Orchestrations.Chosen.Refused refused ->
             throw new CallerFault(refused.why() + " Nothing was answered.");
@@ -362,7 +301,7 @@ public class OrchestrationFrames implements FrameArea {
                             + " is not waiting for an answer; nothing changed."));
       }
       String state = store.find(body.id()).map(r -> r.state().wire()).orElse(null);
-      return Outcome.ok(new Answered(body.id(), state));
+      return Outcome.ok(new Changed(body.id(), state));
     }
     if (body.answer() == null || body.answer().isBlank()) {
       throw new CallerFault("orchestration.answer needs the answer text; nothing was answered.");
@@ -380,17 +319,29 @@ public class OrchestrationFrames implements FrameArea {
                       + " is not waiting for an answer; nothing changed."));
     }
     String state = store.find(body.id()).map(r -> r.state().wire()).orElse(null);
-    return Outcome.ok(new Answered(body.id(), state));
+    return Outcome.ok(new Changed(body.id(), state));
+  }
+
+  Outcome resume(Map<String, Object> payload, Asking asking) {
+    Resume body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, Resume.class, FrameTypes.ORCHESTRATION_RESUME);
+    String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_RESUME);
+    owned(FrameTypes.ORCHESTRATION_RESUME, body.id(), handle);
+    var run = orchestrations.resume(body, handle);
+    return Outcome.ok(new Changed(run.id(), run.state().wire()));
   }
 
   Outcome cancel(Map<String, Object> payload, Asking asking) {
-    IdBody body = Payloads.as(payload, IdBody.class, FrameTypes.ORCHESTRATION_CANCEL);
+    Reference body =
+        io.aeyer.plowshare.server.orchestrations.OrchestrationRequests.as(
+            payload, Reference.class, FrameTypes.ORCHESTRATION_CANCEL);
     String handle = asking.requireHandle(FrameTypes.ORCHESTRATION_CANCEL);
     owned(FrameTypes.ORCHESTRATION_CANCEL, body.id(), handle);
     if (!cancel.cancel(body.id(), handle)) {
       throw new CallerFault("Orchestration " + body.id() + " has already ended; nothing changed.");
     }
-    return Outcome.ok(new Cancelled(body.id(), "cancelled"));
+    return Outcome.ok(new Changed(body.id(), "cancelled"));
   }
 
   // -- shared -------------------------------------------------------------------------------
@@ -456,18 +407,6 @@ public class OrchestrationFrames implements FrameArea {
 
   private static final ObjectMapper JSON = new ObjectMapper();
 
-  private static JsonNode treeOf(String structure) {
-    if (structure == null) {
-      return null;
-    }
-    try {
-      return JSON.readTree(structure);
-    } catch (JsonProcessingException unreadable) {
-      // The table's CHECK keeps this an object; a row it let through is shown as plain words.
-      return null;
-    }
-  }
-
   private static MessageView viewOf(OrchestrationMessage message) {
     return new MessageView(
         message.id(),
@@ -477,6 +416,6 @@ public class OrchestrationFrames implements FrameArea {
         message.createdAt(),
         message.deliveredAt(),
         message.capKind(),
-        treeOf(message.structure()));
+        message.structure());
   }
 }

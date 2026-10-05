@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.archive.JdbcJobLog;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.JobRecord;
 import io.aeyer.plowshare.server.archive.Origin;
@@ -124,7 +125,7 @@ class DurableJobsTest {
   void fresh() {
     jdbc.execute(
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, jobs, projects CASCADE");
-    rows = new JobLog(jdbc);
+    rows = new JdbcJobLog(jdbc);
   }
 
   @AfterEach
@@ -285,7 +286,7 @@ class DurableJobsTest {
   @Test
   void an_event_run_reports_its_ending_once_with_the_conversation_it_ran_in() throws Exception {
     JobStore store =
-        track(new JobStore(answeringRuntime(), JobEvents.NONE, null, new JobLog(jdbc)));
+        track(new JobStore(answeringRuntime(), JobEvents.NONE, null, new JdbcJobLog(jdbc)));
     List<Outcome> endings = new CopyOnWriteArrayList<>();
     JobStore.EventRun run =
         store.submitEvent(
@@ -318,7 +319,7 @@ class DurableJobsTest {
           asked.add(utterance);
           return Optional.empty();
         });
-    JobStore store = track(new JobStore(runtime, JobEvents.NONE, null, new JobLog(jdbc)));
+    JobStore store = track(new JobStore(runtime, JobEvents.NONE, null, new JdbcJobLog(jdbc)));
 
     JobStore.EventRun run =
         store.submitEvent(
@@ -353,7 +354,7 @@ class DurableJobsTest {
           asked.add(utterance);
           return Optional.empty();
         });
-    JobStore store = track(new JobStore(runtime, JobEvents.NONE, null, new JobLog(jdbc)));
+    JobStore store = track(new JobStore(runtime, JobEvents.NONE, null, new JdbcJobLog(jdbc)));
     List<Outcome> endings = new CopyOnWriteArrayList<>();
 
     String id =
@@ -374,7 +375,7 @@ class DurableJobsTest {
   // --- scaffolding -------------------------------------------------------------
 
   private JobStore storeWithARecord() {
-    return track(new JobStore(runtime(), JobEvents.NONE, null, new JobLog(jdbc)));
+    return track(new JobStore(runtime(), JobEvents.NONE, null, new JdbcJobLog(jdbc)));
   }
 
   private JobStore track(JobStore store) {

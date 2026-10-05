@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.personal;
 
 import io.aeyer.plowshare.server.archive.ConversationStore;
-import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,16 +14,15 @@ public final class PersonalAccess {
     this.conversations = conversations;
   }
 
-  public void project(Object project, String handle) {
-    if (project instanceof String name)
-      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(name, null, handle);
-    if (project instanceof String name) PersonalSpaces.requireOwn(name, handle);
+  public void project(String project, String handle) {
+    io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(project, null, handle);
+    PersonalSpaces.requireOwn(project, handle);
   }
 
-  public void conversation(Object conversation, String handle) {
-    if (conversation instanceof String id)
+  public void conversation(String conversation, String handle) {
+    if (conversation != null)
       conversations
-          .find(id)
+          .find(conversation)
           .ifPresent(
               row -> {
                 io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
@@ -33,13 +31,14 @@ public final class PersonalAccess {
               });
   }
 
-  public void payload(Map<?, ?> payload, String handle, String session) {
-    io.aeyer.plowshare.server.archive.ClientProjects.requirePayload(payload, session, handle);
-    if (payload.get("project") instanceof String name) {
-      PersonalSpaces.requireOwn(name, handle);
-      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(name, session, handle);
+  public void check(PersonalScope scope, String handle, String session) {
+    for (String project : scope.clientProjects())
+      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(project, session, handle);
+    for (String project : scope.projects()) {
+      PersonalSpaces.requireOwn(project, handle);
+      io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(project, session, handle);
     }
-    if (payload.get("conversation") instanceof String id)
+    for (String id : scope.conversations())
       conversations
           .find(id)
           .ifPresent(
@@ -48,11 +47,9 @@ public final class PersonalAccess {
                 io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
                     row.home().project(), session, handle);
               });
-    if (payload.get("conversations") instanceof Iterable<?> ids)
-      for (Object id : ids) payload(Map.of("conversation", id), handle, session);
   }
 
-  public void payload(Map<?, ?> payload, String handle) {
-    payload(payload, handle, null);
+  public void check(PersonalScope scope, String handle) {
+    check(scope, handle, null);
   }
 }

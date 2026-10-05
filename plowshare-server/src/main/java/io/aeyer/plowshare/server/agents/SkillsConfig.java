@@ -18,7 +18,7 @@ public class SkillsConfig {
 
   @Bean
   public SkillExecutions skillExecutions(JdbcTemplate jdbc) {
-    return new SkillExecutions(jdbc);
+    return new JdbcSkillExecutionsRepository(jdbc);
   }
 
   @Bean
@@ -31,7 +31,11 @@ public class SkillsConfig {
       JobRuntime runtime) {
     BoundCommands commands =
         new BoundCommands(
-            new CommandInvocations(jdbc), skills, orchestrations, callers, skillsRuntime);
+            new JdbcCommandInvocationsRepository(jdbc),
+            skills,
+            orchestrations,
+            callers,
+            skillsRuntime);
     runtime.useBoundCommands(commands);
     return commands;
   }

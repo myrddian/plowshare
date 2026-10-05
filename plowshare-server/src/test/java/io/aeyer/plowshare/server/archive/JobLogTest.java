@@ -99,7 +99,7 @@ class JobLogTest {
     // file writes them by writing jobs.
     jdbc.execute(
         "TRUNCATE TABLE digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, jobs, projects CASCADE");
-    jobs = new JobLog(jdbc);
+    jobs = new JdbcJobLog(jdbc);
   }
 
   // --- the id ------------------------------------------------------------------

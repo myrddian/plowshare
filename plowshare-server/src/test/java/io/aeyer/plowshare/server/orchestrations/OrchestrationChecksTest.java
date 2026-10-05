@@ -42,7 +42,7 @@ class OrchestrationChecksTest {
   @BeforeEach
   void setUp() {
     jdbc.update("DELETE FROM orchestration_checks");
-    checks = new OrchestrationChecks(jdbc);
+    checks = new JdbcOrchestrationChecks(jdbc);
   }
 
   private static OrchestrationChecks.Check check(String run, String consent, String approval) {

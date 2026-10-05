@@ -11,48 +11,18 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * Which tier a memory lives in, and — the reason this file exists — <b>exactly what a project name
- * is</b>.
- *
- * <h2>Why the non-stripping is pinned here</h2>
- *
- * <p>{@code Home.of} keeps its argument character for character. That is not an incidental
- * property: {@code ProjectStore.named} refuses a project name with whitespace at one end
- * <em>because</em> of it, since a store that stripped would key workspaces by {@code "payments"}
- * while this class kept the memories under {@code " payments "} — two leashes disagreeing about
- * which project a job is in.
- *
- * <p>That argument spans two modules, so before this file nothing held it still. A tidy-up that
- * made {@code of} strip would turn a paragraph of justification in {@code ProjectStore}, a
- * user-facing refusal message naming this class, and a plan annotation silently false, and every
- * server-side test would stay green. These three assertions are what make that break loudly
- * instead.
- */
+/** Home preserves valid names and rejects ambiguous aliases before any project lookup. */
 class HomeTest {
 
   @Test
-  void a_project_name_is_kept_exactly_as_given() {
-    assertEquals(
-        " payments ",
-        Home.of(" payments ").project(),
-        "Home does not strip; ProjectStore refuses padded names because of it");
-    assertEquals("payments\n", Home.of("payments\n").project());
-    assertEquals(
-        "payments api",
-        Home.of("payments api").project(),
-        "an internal space is an ordinary part of a name");
+  void a_valid_project_name_is_kept_exactly_as_given() {
+    assertEquals("payments api", Home.of("payments api").project());
   }
 
-  /**
-   * The pair that makes the padded name a real tier rather than a curiosity: it is accepted here,
-   * and it is a different project from the trimmed one.
-   */
-  @Test
-  void a_padded_name_is_a_different_project_from_the_trimmed_one() {
-    assertFalse(
-        Home.of(" payments ").equals(Home.of("payments")),
-        "two spellings, two tiers — which is the whole of why the stores must agree");
+  @ParameterizedTest
+  @ValueSource(strings = {" payments ", "payments\n", "payments\tother"})
+  void an_ambiguous_or_control_containing_name_is_rejected(String name) {
+    assertThrows(IllegalArgumentException.class, () -> Home.of(name));
   }
 
   @ParameterizedTest

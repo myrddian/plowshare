@@ -195,7 +195,7 @@ public final class InformationTool implements AgentTool {
                   "required",
                   List.of("stage", "outcome", "text"))));
     }
-    return new ToolSchema(
+    return ToolSchema.from(
         writing ? WRITE : READ,
         writing
             ? "Queue public URL acquisition, record exact quoted evidence or a draft research report in your current information namespace. Acquire needs url, name and stable UUID requestId; returns a durable acquisition ticket with a separately captured processing allowance. Use information_read await with selected acquisition/revision references to fence on readable extraction or terminal unavailability. A fetch receipt alone is not readiness. Evidence needs revision, start/end UTF-16 offsets, quote, locator extracted-text:utf16 and a stable UUID requestId. Reports need a stable UUID requestId, name, text, inputs and optional evidence UUIDs in citations. Every document consumed by this run is inherited as an input, including uncited sources. Returns durable IDs; report processing uses the configured independent allowance, visible in status. This tool cannot share or finalise."
@@ -228,10 +228,17 @@ public final class InformationTool implements AgentTool {
       inputs.requireLog(log, owner);
       Map<String, Object> args =
           JSON.readValue(arguments, new TypeReference<Map<String, Object>>() {});
-      InformationContext context = access.forRun(owner, home).withCorpus(args.get("corpus"));
+      InformationContext context =
+          access
+              .forRun(owner, home)
+              .withCorpus(
+                  io.aeyer.plowshare.server.information.InformationInputs.corpus(
+                      args.get("corpus")));
       String operation = required(args, "operation");
       if (List.of("list", "facets", "search", "rank").contains(operation))
-        context = context.withFacets(args.get("filter"));
+        context =
+            context.withFacets(
+                io.aeyer.plowshare.server.information.InformationInputs.facets(args.get("filter")));
       Object result;
       InformationCatalogue service = catalogue.get();
       if (writing) {
@@ -273,7 +280,8 @@ public final class InformationTool implements AgentTool {
                     ids(args, "citations"),
                     args.containsKey("feedback") ? id(args, "feedback") : null,
                     session,
-                    io.aeyer.plowshare.server.information.InformationReportDetails.from(args),
+                    io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
+                        args),
                     log);
             inputs.reads(log, context).accept(admission.revision());
             result = admission;
@@ -298,8 +306,8 @@ public final class InformationTool implements AgentTool {
                     args.containsKey("revision") ? id(args, "revision") : null,
                     number(args, "offset", 0),
                     number(args, "limit", 20));
-            for (Object value : (List<?>) matches.get("symbols"))
-              inputs.reads(log, context).accept((UUID) ((Map<?, ?>) value).get("revision"));
+            for (var symbol : matches.symbols())
+              inputs.reads(log, context).accept(symbol.revision());
             result = matches;
           }
           case "search" -> {
@@ -317,9 +325,11 @@ public final class InformationTool implements AgentTool {
               inputs.reads(log, context).accept(revision);
               var window =
                   new LinkedHashMap<>(
-                      context.corpus() == InformationContext.Corpus.CODE
-                          ? service.locateCodeWindow(context, revision, hit.chunk().chunkId())
-                          : service.locateWindow(context, revision, hit.chunk().chunkText()));
+                      JSON.<Map<String, Object>>convertValue(
+                          context.corpus() == InformationContext.Corpus.CODE
+                              ? service.locateCodeWindow(context, revision, hit.chunk().chunkId())
+                              : service.locateWindow(context, revision, hit.chunk().chunkText()),
+                          new TypeReference<>() {}));
               window.put(
                   "title",
                   hit.chunk().documentTitle() == null
@@ -358,19 +368,18 @@ public final class InformationTool implements AgentTool {
                 InformationReadiness.await(
                     service,
                     context,
-                    InformationReadiness.sources(args.get("sources")),
+                    io.aeyer.plowshare.server.information.InformationReadinessDecoder.sources(
+                        args.get("sources")),
                     number(args, "waitMs", 30000));
-            for (var value : (List<?>) fence.get("outcomes"))
-              if (value instanceof Map<?, ?> row
-                  && row.get("revision") instanceof UUID revision
-                  && !"unavailable".equals(row.get("state")))
-                inputs.reads(log, context).accept(revision);
+            for (var outcome : fence.outcomes())
+              if (outcome.revision() != null && !"unavailable".equals(outcome.state()))
+                inputs.reads(log, context).accept(outcome.revision());
             result = fence;
           }
           case "facets" -> result = service.facetsForRun(context, inputs.reads(log, context));
           case "list" -> {
             var rows = service.list(context, number(args, "limit", 20), number(args, "offset", 0));
-            for (var row : rows) inputs.reads(log, context).accept((UUID) row.get("id"));
+            for (var row : rows) inputs.reads(log, context).accept(row.id());
             result = rows;
           }
           case "status", "read" -> {
@@ -385,7 +394,7 @@ public final class InformationTool implements AgentTool {
           }
           case "evidence" -> {
             var evidence = service.evidence(context, id(args, "evidence"));
-            inputs.reads(log, context).accept((UUID) evidence.get("revision_id"));
+            inputs.reads(log, context).accept(evidence.revisionId());
             result = evidence;
           }
           default ->

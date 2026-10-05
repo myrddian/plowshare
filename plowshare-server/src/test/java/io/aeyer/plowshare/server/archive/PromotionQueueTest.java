@@ -126,7 +126,7 @@ class PromotionQueueTest {
     archive =
         new Archive(
             memories,
-            new ReasonLog(jdbc),
+            new JdbcReasonLog(jdbc),
             new StubEmbeddingClient(),
             MAX_BODY_CHARS,
             threshold,
@@ -553,7 +553,7 @@ class PromotionQueueTest {
                 throw new DataAccessResourceFailureException("the database went away");
               }
             },
-            new ReasonLog(jdbc),
+            new JdbcReasonLog(jdbc),
             new StubEmbeddingClient(),
             MAX_BODY_CHARS,
             INDEX_THRESHOLD,

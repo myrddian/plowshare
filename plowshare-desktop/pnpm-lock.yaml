@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       plowshare-client-node:
-        specifier: link:../plowshare-client-node
-        version: link:../plowshare-client-node
+        specifier: link:../sdk/node
+        version: link:../sdk/node
       plowshare-client-ts:
-        specifier: link:../plowshare-client-ts
-        version: link:../plowshare-client-ts
+        specifier: link:../sdk/typescript
+        version: link:../sdk/typescript
     devDependencies:
       '@electron/packager':
         specifier: 20.0.4

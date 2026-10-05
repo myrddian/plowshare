@@ -21,7 +21,10 @@ public final class LlmJson {
   public static final int MAX_INPUT = 524288;
   public static final int MAX_RECOVERY = 32768;
   private static final ObjectMapper JSON =
-      JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+      JsonMapper.builder()
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .build();
   private static final ObjectReader STRICT;
   private static final ObjectReader LENIENT;
 

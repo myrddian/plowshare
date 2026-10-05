@@ -277,6 +277,25 @@ class DeliveryTest {
   }
 
   @Test
+  void a_delayed_failure_delivery_cannot_mark_or_announce_a_resumed_attempt() {
+    var run = run(null, "enzo");
+    store.stop(run.id(), OrchestrationState.FAILED, "temporary outage");
+    var failed = store.find(run.id()).orElseThrow();
+    var recovery = new JdbcOrchestrationRecovery(jdbc, work);
+    recovery.claim(run.id(), "enzo", java.util.UUID.randomUUID(), failed.endedAt());
+    delivery.runEnded(failed);
+    assertTrue(inbox.notices.isEmpty());
+    assertNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
+    store.stop(run.id(), OrchestrationState.FAILED, "later failure");
+    delivery.runEnded(failed);
+    assertTrue(inbox.notices.isEmpty());
+    assertNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
+    delivery.runEnded(store.find(run.id()).orElseThrow());
+    assertEquals(1, inbox.notices.size());
+    assertNotNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
+  }
+
+  @Test
   void a_run_s_ending_is_delivered_once_even_when_it_is_asked_twice() {
     String conv = callerConversation();
     OrchestrationRecord run = finished(run(conv, "enzo"));

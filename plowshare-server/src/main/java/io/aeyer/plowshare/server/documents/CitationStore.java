@@ -96,7 +96,8 @@ public final class CitationStore {
     int at = sql.indexOf(marker);
     if (at < 0) throw new IllegalStateException("citation read needs a policy seam");
     if (access == null) return jdbc.query(sql.replace(marker, ""), CITED, arguments);
-    var filter = access.filter(context, "d");
+    var filter =
+        io.aeyer.plowshare.server.information.InformationSql.read(access.admitted(context), "d");
     int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
     List<Object> bound = new ArrayList<>(java.util.Arrays.asList(arguments).subList(0, before));
     bound.addAll(filter.arguments());
@@ -149,7 +150,8 @@ public final class CitationStore {
                 at.atOffset(ZoneOffset.UTC),
                 paragraphId));
     if (access != null) {
-      var filter = access.filter(context, "d");
+      var filter =
+          io.aeyer.plowshare.server.information.InformationSql.read(access.admitted(context), "d");
       sql += " AND " + filter.sql();
       bound.addAll(filter.arguments());
       if (conversationId != null) {

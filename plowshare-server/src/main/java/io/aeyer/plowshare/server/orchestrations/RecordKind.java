@@ -14,6 +14,7 @@ import java.util.Set;
 public enum RecordKind {
   RUN_STARTED("run_started"),
   RUN_ENDED("run_ended"),
+  RUN_RESUMED("run_resumed"),
   STAGE_MOVED("stage_moved"),
   PHASE_STARTED("phase_started"),
   PHASE_ENDED("phase_ended"),

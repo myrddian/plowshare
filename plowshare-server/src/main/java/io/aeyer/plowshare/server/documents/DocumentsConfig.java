@@ -76,9 +76,9 @@ public class DocumentsConfig {
    * wherever one is made — this is the half that says so before a document has been uploaded, and
    * in the vocabulary of the keys an operator set.
    *
-   * <p>Both are tokens, counted by the one {@link Tokenizer} bean every surface on this server
-   * counts with — the same one the embedding client refuses by, so the chunker and the refusal
-   * cannot disagree about what a chunk costs.
+   * <p>Both are tokens, counted by the embedding-specific tokenizer capability. Shared chunks must
+   * fit both encoders after their document prefixes and special tokens are applied. Chat token
+   * estimates are independent and must never enforce an embedding boundary.
    *
    * <h2>The ingest budget is checked as bound and handed over as an object</h2>
    *
@@ -110,9 +110,15 @@ public class DocumentsConfig {
       DocumentsProperties props,
       LlmProperties llm,
       Tokenizer tokenizer,
+      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers,
       ObjectProvider<Summariser> summariser) {
     int target = props.getChunkTargetTokens();
-    int ceiling = llm.getEmbeddingMaxInputTokens();
+    var counters = embeddingTokenizers.getIfAvailable();
+    int ceiling =
+        counters == null
+            ? llm.getEmbeddingMaxInputTokens()
+            : counters.documentLimit(llm.getEmbeddingMaxInputTokens());
+    if (counters != null) tokenizer = counters.documents();
     if (target < 1) {
       throw new IllegalStateException(
           "plowshare.documents.chunk-target-tokens is "

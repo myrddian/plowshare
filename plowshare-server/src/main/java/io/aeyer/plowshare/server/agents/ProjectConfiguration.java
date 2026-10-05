@@ -12,11 +12,18 @@ import java.nio.file.*;
 import java.util.*;
 
 /** Recognized project settings in the existing version 1 identity manifest. */
-public record ProjectConfiguration(String source, JsonNode body) {
+public record ProjectConfiguration(
+    String source,
+    ProjectCaps caps,
+    EnvironmentFile.Parsed commands,
+    Map<String, Boolean> skills,
+    Optional<DefinitionResolver.DefaultBot> defaultBot) {
   static final int MAX_BYTES = 65536;
   static final List<String> FILES =
       List.of(".plowshare/plowshare", ".plowshare/project", "plowshare");
-  public static final ProjectConfiguration NONE = new ProjectConfiguration("definition", null);
+  public static final ProjectConfiguration NONE =
+      new ProjectConfiguration(
+          "definition", ProjectCaps.NONE, EnvironmentFile.Parsed.EMPTY, Map.of(), Optional.empty());
   private static final ObjectMapper JSON =
       new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -43,22 +50,26 @@ public record ProjectConfiguration(String source, JsonNode body) {
           || name.matches("(?s).*[\\r\\n\\x00].*")
           || project != null && !name.equals(ClientProjects.label(project)))
         throw new IllegalArgumentException("Invalid project manifest identity or version");
-      var config = new ProjectConfiguration(source, body);
-      config.caps();
-      config.commands();
-      config.skills();
-      config.defaultBot();
-      return config;
+      return new ProjectConfiguration(
+          source,
+          ManifestCaps.parse(body, source),
+          commands(body),
+          skills(body),
+          defaultBot(body, source));
     } catch (IOException malformed) {
       throw new IllegalArgumentException("Invalid JSON project manifest", malformed);
     }
   }
 
-  public ProjectCaps caps() {
-    return body == null ? ProjectCaps.NONE : ManifestCaps.parse(body, source);
+  public ProjectConfiguration {
+    Objects.requireNonNull(source);
+    Objects.requireNonNull(caps);
+    Objects.requireNonNull(commands);
+    skills = Map.copyOf(skills);
+    Objects.requireNonNull(defaultBot);
   }
 
-  public EnvironmentFile.Parsed commands() {
+  private static EnvironmentFile.Parsed commands(JsonNode body) {
     JsonNode commands = body == null ? null : body.get("commands");
     if (commands == null) return EnvironmentFile.Parsed.EMPTY;
     if (!commands.isObject())
@@ -75,12 +86,12 @@ public record ProjectConfiguration(String source, JsonNode body) {
             commands, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
   }
 
-  public Map<String, Boolean> skills() {
+  private static Map<String, Boolean> skills(JsonNode body) {
     JsonNode skills = body == null ? null : body.get("skills");
     return skills == null ? Map.of() : SkillVisibility.parse("{\"skills\":" + skills + "}");
   }
 
-  public Optional<DefinitionResolver.DefaultBot> defaultBot() {
+  private static Optional<DefinitionResolver.DefaultBot> defaultBot(JsonNode body, String source) {
     JsonNode bot = body == null ? null : body.get("defaultBot");
     if (bot == null) return Optional.empty();
     if (!bot.isTextual() || !bot.textValue().matches("[\\p{L}\\p{Nd}]+(?:-[\\p{L}\\p{Nd}]+)*"))

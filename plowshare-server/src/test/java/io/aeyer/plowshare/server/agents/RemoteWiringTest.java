@@ -8,10 +8,6 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import io.aeyer.plowshare.client.files.ChannelClient;
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Rooting;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Home;
@@ -50,6 +46,10 @@ import io.aeyer.plowshare.server.union.UnionRouting;
 import io.aeyer.plowshare.server.ws.EventChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelConfig;
 import io.aeyer.plowshare.server.ws.FileChannelHandler;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.SocketPeer;
+import io.aeyer.plowshare.testpeer.TestRooting;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -97,7 +97,7 @@ import org.springframework.context.annotation.Import;
  *       that refusal stops being theoretical. The fixture is two providers that <em>genuinely</em>
  *       serve the path, and the test proves that of them before asking the router;
  *   <li><b>the role gets populated at all</b> — the wiring above is worth nothing if nothing ever
- *       attaches, so the last section drives a real {@link ChannelClient} over a real socket on an
+ *       attaches, so the last section drives a real {@link SocketPeer} over a real socket on an
  *       ephemeral port and reads a file off the client's own disk through the production seam.
  * </ul>
  *
@@ -281,11 +281,11 @@ class RemoteWiringTest {
    * accidentally-correct one.
    *
    * <p>Both sides are the production code: the local one is a {@code LocalProvider} over a real
-   * project workspace, and the remote one is the real {@code ClientEnforcer} over a real client
-   * {@code Workspace}, reached through a {@link SessionChannel} that hands the request straight to
-   * it. What the fixture cannot have is two machines, so one tree stands in for two trees that
-   * share a spelling — which is the spec's own worked example, an operator with the same checkout
-   * at the same absolute path on the server and on their laptop.
+   * project workspace, and the remote one is the real {@code NodeFiles} over a real client {@code
+   * TestWorkspace}, reached through a {@link SessionChannel} that hands the request straight to it.
+   * What the fixture cannot have is two machines, so one tree stands in for two trees that share a
+   * spelling — which is the spec's own worked example, an operator with the same checkout at the
+   * same absolute path on the server and on their laptop.
    *
    * <p><b>And the query has something to filter out.</b> The client also holds a root the server
    * does not, so a path under that one is routed to the remote provider alone — the same call, the
@@ -435,10 +435,10 @@ class RemoteWiringTest {
    * left the client's machine.
    *
    * <p>This is the sentence the commit is named for, driven end to end at this task's layer: a real
-   * socket on an ephemeral port, the real {@link ChannelClient} with the real {@code
-   * ClientEnforcer} behind it, and the production {@code AgentsConfig.runProviders} asked for the
-   * providers. Nothing in slice 3b could reach this state, because nothing attached anything to the
-   * {@link Role#FILE_PROVIDER} role.
+   * socket on an ephemeral port, the real {@link SocketPeer} with the real {@code NodeFiles} behind
+   * it, and the production {@code AgentsConfig.runProviders} asked for the providers. Nothing in
+   * slice 3b could reach this state, because nothing attached anything to the {@link
+   * Role#FILE_PROVIDER} role.
    */
   @Test
   void opening_the_file_channel_is_what_lets_a_run_read_the_clients_own_disk() throws Exception {
@@ -561,7 +561,7 @@ class RemoteWiringTest {
   @Test
   void closing_the_file_channel_takes_the_second_machine_away() throws Exception {
     String id = "leaving";
-    ChannelClient client = client(id, workspaceOver(tmp));
+    SocketPeer client = client(id, workspaceOver(tmp));
     assertEquals(List.of("local", "remote"), names(production().forRun(PAYMENTS, READ, id, null)));
 
     client.close();
@@ -594,7 +594,7 @@ class RemoteWiringTest {
     String id = "crowd";
     assertAgree(id);
 
-    ChannelClient earlier = client(id, workspaceOver(first));
+    SocketPeer earlier = client(id, workspaceOver(first));
     assertAgree(id);
     assertEquals(
         List.of(first.toRealPath()),
@@ -665,7 +665,7 @@ class RemoteWiringTest {
   private static int port;
   private static OkHttpClient http;
 
-  private final List<ChannelClient> opened = new ArrayList<>();
+  private final List<SocketPeer> opened = new ArrayList<>();
 
   @BeforeAll
   static void startTheServer() {
@@ -675,7 +675,7 @@ class RemoteWiringTest {
             // A command-line argument and not properties(...): FileChannelTest
             // measured that the latter supplies default properties and loses
             // to application.yml, which names a fixed port.
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((WebServerApplicationContext) context).getWebServer().getPort();
     handler = context.getBean(FileChannelHandler.class);
     registry = context.getBean(SessionRegistry.class);
@@ -692,7 +692,7 @@ class RemoteWiringTest {
 
   @AfterEach
   void closeWhatThisTestOpened() throws InterruptedException {
-    for (ChannelClient open : opened) {
+    for (SocketPeer open : opened) {
       open.close();
     }
     opened.clear();
@@ -808,27 +808,27 @@ class RemoteWiringTest {
    * client is that the answers are the ones the production client would give — its roots, its
    * containment, its refusals — so the enforcer is real and only the transport is short-circuited.
    */
-  private static SessionChannel enforcing(Workspace workspace) {
-    ClientEnforcer enforcer = new ClientEnforcer(workspace);
+  private static SessionChannel enforcing(TestWorkspace workspace) {
+    NodeFiles enforcer = new NodeFiles(workspace);
     return (session, request) -> enforcer.answer(request);
   }
 
-  private static Workspace workspaceOver(Path... roots) {
+  private static TestWorkspace workspaceOver(Path... roots) {
     return workspaceOver(List.of(roots));
   }
 
-  private static Workspace workspaceOver(List<Path> roots) {
-    Workspace workspace = new Workspace();
+  private static TestWorkspace workspaceOver(List<Path> roots) {
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(roots);
     return workspace;
   }
 
   /**
-   * A real {@link ChannelClient} on the ephemeral port, closed after the test.
+   * A real {@link SocketPeer} on the ephemeral port, closed after the test.
    *
    * <p><b>Waits for THIS client's attachment and not for the role being occupied</b>, and the
    * difference is the whole of a flake this file produced three times in fifty runs of the class on
-   * its own. {@code ChannelClient.open} is fire-and-forget by design — its own javadoc says so — so
+   * its own. {@code SocketPeer.open} is fire-and-forget by design — its own javadoc says so — so
    * everything after it is asynchronous. Waiting on {@code Session.has(FILE_PROVIDER)} answers "is
    * anybody attached", which is already true when a SECOND client is opened under a live id: the
    * poll returned on its first pass, before the displacing socket had upgraded, and the caller's
@@ -847,13 +847,13 @@ class RemoteWiringTest {
    * <p>{@code Object.class} rather than the attachment's real type because that type is {@code
    * FileChannelHandler.Live}, which is private. Identity is all this needs.
    */
-  private ChannelClient client(String id, Workspace workspace) throws Exception {
+  private SocketPeer client(String id, TestWorkspace workspace) throws Exception {
     Object incumbent = fileProvider(id).orElse(null);
-    ChannelClient client =
-        new ChannelClient(
+    SocketPeer client =
+        new SocketPeer(
             "http://localhost:" + port,
             id,
-            new ClientEnforcer(workspace),
+            new NodeFiles(workspace),
             null,
             // THE PRODUCTION DECLARATION, over the production socket. Every
             // run in this file is a run in `payments`, so a client that lent
@@ -861,7 +861,7 @@ class RemoteWiringTest {
             // which is the rule rather than a fixture problem. The root is
             // the first directory it lends, exactly as `cli.Plowshare`
             // composes one.
-            Rooting.of(workspace.roots().get(0), "payments"));
+            TestRooting.of(workspace.roots().get(0), "payments"));
     opened.add(client);
     client.open();
     awaitFileProviderOtherThan(id, incumbent);
@@ -1120,14 +1120,12 @@ class RemoteWiringTest {
     @Bean
     io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization() {
       var authorization = mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);
-      when(authorization.allowed(anyString(), anyMap(), nullable(String.class))).thenReturn(true);
-      org.mockito.Mockito.when(
-              authorization.filter(
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(
-                      io.aeyer.plowshare.protocol.frames.Outcome.class),
-                  org.mockito.ArgumentMatchers.nullable(String.class)))
-          .thenAnswer(call -> call.getArgument(1));
+      when(authorization.allowed(
+              anyString(),
+              org.mockito.ArgumentMatchers.any(
+                  io.aeyer.plowshare.server.access.AccessRequest.class),
+              nullable(String.class)))
+          .thenReturn(true);
       return authorization;
     }
 

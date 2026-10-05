@@ -40,7 +40,18 @@ package io.aeyer.plowshare.protocol;
  *     comparable
  * @param text the characters this delta added. Never null, never empty
  */
-public record JobDelta(String job, Part part, String text) {
+public record JobDelta(String job, Part part, String text) implements ServerPush {
+  public JobDelta {
+    if (job == null
+        || job.isBlank()
+        || job.length() > 1024
+        || job.codePoints()
+            .anyMatch(code -> Character.isISOControl(code) || code == 0x2028 || code == 0x2029)
+        || part == null
+        || text == null
+        || text.length() > 1048576
+        || text.indexOf('\0') >= 0) throw new IllegalArgumentException("invalid job delta");
+  }
 
   /** Which of the two streams a delta belongs to. */
   public enum Part {

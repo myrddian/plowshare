@@ -53,6 +53,37 @@ may require `choices`. Cancel is a separate explicit operation. Watching or leav
 the client is not cancellation. A lost start reply is a reason to inspect its
 receipt, not invent a new UUID and start the same work again.
 
+## Resume a failed run
+
+In desktop **Activity → Runs**, select a failed root and press **Resume**. In the
+TUI, use `/resume <orc-handle>` or `/retry <orc-handle>`. The CLI exposes the same
+WebSocket operation, with optional waiting:
+
+```sh
+bin/plowshare-cli --wait orchestration resume '{"id":"<orc-handle>","requestId":"22222222-2222-4222-8222-222222222222"}'
+```
+
+Choose a fresh UUID for each intended resume. Retain it after uncertain delivery;
+resubmitting the same key reconciles that request without dispatching another turn,
+even if the run subsequently failed again. Inspect status before a new retry.
+Resume retains the run ID, pinned definition, conductor history, todos, script
+journal and spent allowance. It requires the owning account's current project
+work permission and remaining model-call budget. Resume a failed tree through its
+root; cancelled descendants are retained in history rather than revived wholesale.
+Finished, cancelled and capped runs are not eligible for this operation.
+
+For scripts, a worker with a recorded `UNAVAILABLE` or `SESSION_GONE` ending can
+continue in its existing conversation. A completed worker receipt is reused. An
+interrupted mutation with no durable result is refused for reconciliation.
+
+Listeners already exist: authenticated `/v1/events` sockets for the owning account
+receive `orchestration.resumed` with the run ID (`orchestration`) and `requestId`,
+and `orchestration.changed` with `state: "running"` after the resume commits.
+The durable record appends `run_resumed`, producing the existing
+`orchestration.recorded` push for observers. The Java SDK's `Plowshare.connect`
+push callback receives these account events; no new listener registry is needed.
+A repeated resume key emits neither another resume record nor another transition.
+
 ## Pick Markdown or JavaScript
 
 | Format | Who chooses the next action? | Good starting use |

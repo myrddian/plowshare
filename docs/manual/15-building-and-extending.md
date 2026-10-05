@@ -70,8 +70,11 @@ experiment at your only production database.
 
 Configure actual chat and embedding providers. Logical bindings such as `fast`
 and `reasoning` select served model IDs; an agent's `model: fast` is not itself a
-provider endpoint. The shipped embedding schema uses 768 dimensions, so choose a
-compatible embedding model and input bounds.
+provider endpoint. The single-embedder compatibility example below uses the
+legacy 768-dimensional columns. The [dual embedding runtime](../embedding-evolution.md)
+supports independent code/prose models at 1–16,000 dimensions, controlled index
+choices and a durable rebuild before activation. Configure both models explicitly
+when enabling it; changing model width does not require another table migration.
 
 The following loopback values illustrate configuration for services on the same
 host. Replace model IDs and endpoints with what your development services serve:
@@ -81,21 +84,41 @@ export PLOWSHARE_DB_URL=jdbc:postgresql://localhost:5432/plowshare
 export PLOWSHARE_DB_USER=plowshare
 export LLM_BASE_URL=http://127.0.0.1:1234/v1
 export LLM_PROVIDER=openai
-export LLM_CHAT_MODEL=your-fast-model
+export LLM_CHAT_MODEL=your-chat-model
 export LLM_EMBEDDING_MODEL=your-embedding-model
-export SPARK_BASE_URL=http://127.0.0.1:8000/v1
-export SPARK_CHAT_MODEL=your-reasoning-model
+export LLM_CHAT_SLOTS=2
+export LLM_SWARM_SLOTS=1
 export SYSTEM_MODEL=reasoning
 ```
 
+For legacy embedding mode, provide the matching model's local `tokenizer.json`
+and its SHA-256 in the private Spring overlay:
+
+```yaml
+plowshare:
+  llm:
+    embedding-tokenizer:
+      file: ${LLM_EMBEDDING_TOKENIZER_FILE}
+      sha256: ${LLM_EMBEDDING_TOKENIZER_SHA256}
+```
+
+Both named embedding slots instead require their own pinned tokenizer files,
+including when their dimensions are identical. Missing configuration refuses
+embedding and derivation rather than using a character estimate. See the
+[embedding input contract](../embedding-evolution.md#input-tokenization-and-shared-chunks).
+
 Supply the database password and provider keys through your private environment
-or the launcher's mode-0600 `~/.config/plowshare/secrets.env`. That file is sourced
+(`LLM_API_KEY` for the generic pool) or the launcher's mode-0600 `~/.config/plowshare/secrets.env`. That file is sourced
 as shell assignments; it belongs outside the checkout. Keep authentication on
 and complete normal first administrator setup. Use one separate development data
 directory, and preserve it if you want to keep the work.
 
 The packaged application settings and your private Spring overlay determine the
-effective pool layout. A list overlay replaces the whole pool list; retain every
+effective pool layout. The generic packaged pool uses explicit endpoint/model
+values and maps both chat classes to the same model. Use
+`bin/plowshare --config /absolute/path/application-local.yml` for a different topology; see the
+[example overlay](../../bin/application-local.example.yml). A list overlay replaces
+the whole pool list; retain every
 pool you intend to serve. Pool capacity, model context and timeouts have different
 purposes. Review [Server administration](09-server-administration.md) before
 changing them.

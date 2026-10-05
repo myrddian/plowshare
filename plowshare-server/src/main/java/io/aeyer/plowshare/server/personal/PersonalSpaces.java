@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.personal;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.union.Hub;
@@ -16,31 +17,28 @@ import java.util.Optional;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.event.EventListener;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * One private union per account. Disk initialization is resumable; existing files are never
  * replaced.
  */
 @Component
-public final class PersonalSpaces implements ApplicationRunner {
+public final class PersonalSpaces implements ApplicationRunner, PersonalWorkspaces {
   public static final List<String> SECTIONS =
       List.of("In", "Out", "Resources", "Archive", "Planning", "Bots");
 
   public record AccountCreated(String handle) {}
 
-  private final JdbcTemplate jdbc;
+  private final PersonalSpaceRepository repository;
   private final DataLayout data;
-  private final TransactionTemplate transactions;
+  private final UnitOfWork transactions;
 
-  public PersonalSpaces(JdbcTemplate jdbc, DataLayout data) {
-    this.jdbc = jdbc;
+  public PersonalSpaces(
+      PersonalSpaceRepository repository, UnitOfWork transactions, DataLayout data) {
+    this.repository = repository;
     this.data = data;
-    this.transactions =
-        new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
+    this.transactions = transactions;
     if (data.keepsAnything()) data.usePersonalProjects(id -> owner(id).isPresent());
   }
 
@@ -71,34 +69,17 @@ public final class PersonalSpaces implements ApplicationRunner {
   }
 
   public Optional<String> owner(long id) {
-    return jdbc
-        .queryForList(
-            "SELECT personal_owner FROM projects WHERE id = ? AND personal_owner IS NOT NULL",
-            String.class,
-            id)
-        .stream()
-        .findFirst();
+    return repository.owner(id);
   }
 
   public Optional<Long> id(String handle) {
-    if (handle == null) return Optional.empty();
-    return jdbc
-        .queryForList("SELECT id FROM projects WHERE personal_owner = ?", Long.class, handle)
-        .stream()
-        .findFirst();
+    return repository.id(handle);
   }
 
   /** Physical policy files belong to this exact Personal identity, never the display label. */
   public Optional<Path> workspace(String project) {
     if (!data.keepsAnything()) return Optional.empty();
-    return jdbc
-        .queryForList(
-            "SELECT id FROM projects WHERE name = ? AND personal_owner IS NOT NULL",
-            Long.class,
-            project)
-        .stream()
-        .findFirst()
-        .map(id -> new Hub(data.unionFor(id)).tree());
+    return repository.projectId(project).map(id -> new Hub(data.unionFor(id)).tree());
   }
 
   public Home home(String requested, String handle) {
@@ -115,37 +96,20 @@ public final class PersonalSpaces implements ApplicationRunner {
 
   @Override
   public void run(ApplicationArguments args) {
-    for (String handle :
-        jdbc.queryForList(
-            "SELECT handle FROM admins WHERE NOT bootstrap AND account_kind='USER' ORDER BY handle",
-            String.class)) ensure(handle);
+    for (String handle : repository.accounts()) ensure(handle);
   }
 
   public void ensure(String handle) {
-    if (!jdbc.queryForList(
-            "SELECT 1 FROM admins WHERE handle=? AND account_kind<>'USER'", Integer.class, handle)
-        .isEmpty())
+    if (repository.serviceAccount(handle))
       throw new CallerFault("Service accounts have no Personal space; supply a project");
     String name = name(handle);
     if (!data.keepsAnything())
       throw new IllegalStateException("Personal spaces require PLOWSHARE_DATA_DIR");
-    transactions.executeWithoutResult(
-        status -> {
-          jdbc.update(
-              "INSERT INTO projects(name, personal_owner) VALUES (?, ?) ON CONFLICT (personal_owner) DO NOTHING",
-              name,
-              handle);
-          long id =
-              jdbc.queryForObject(
-                  "SELECT id FROM projects WHERE personal_owner = ? FOR UPDATE",
-                  Long.class,
-                  handle);
-          boolean initialized =
-              Boolean.TRUE.equals(
-                  jdbc.queryForObject(
-                      "SELECT union_since IS NOT NULL FROM projects WHERE id = ?",
-                      Boolean.class,
-                      id));
+    transactions.inTransaction(
+        () -> {
+          var reserved = repository.reserve(handle);
+          long id = reserved.id();
+          boolean initialized = reserved.initialized();
           Hub hub = new Hub(data.unionFor(id));
           if (initialized
               && (!hub.exists() || hub.main().isEmpty() || !Files.isDirectory(hub.tree()))) {
@@ -185,14 +149,8 @@ public final class PersonalSpaces implements ApplicationRunner {
             }
             hub.commitTree(Hub.SERVER_AUTHOR, "Create personal space");
           }
-          jdbc.update(
-              "UPDATE projects SET workspace = ?, union_since = COALESCE(union_since, now()) WHERE id = ?",
-              "/personal",
-              id);
-          jdbc.update(
-              "INSERT INTO project_members(project_id, handle,role) VALUES (?, ?, 'MANAGER') ON CONFLICT DO NOTHING",
-              id,
-              handle);
+          repository.initialized(id, handle);
+          return null;
         });
   }
 }

@@ -725,7 +725,9 @@ class CallerOrchestrationsTest {
     verify(engine)
         .answerChosen(
             eq("orc_own"),
-            eq(JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]")),
+            eq(
+                io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                    JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]"))),
             eq("thanks"),
             eq("interlocutor"),
             eq(false));

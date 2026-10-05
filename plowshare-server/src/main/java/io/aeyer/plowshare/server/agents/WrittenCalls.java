@@ -90,7 +90,7 @@ final class WrittenCalls {
   static final String REPLY_AS_WRITTEN = "reply_as_written";
 
   static final ToolSchema REPLY_AS_WRITTEN_SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           REPLY_AS_WRITTEN,
           "Deliver the reply you already wrote, as written. Use it only if the call in it was an"
               + " example, not something to run.",
@@ -217,21 +217,15 @@ final class WrittenCalls {
   }
 
   private static Set<String> takes(ToolSchema schema) {
-    return schema.parameters().get("properties") instanceof Map<?, ?> properties
-        ? toStrings(properties.keySet())
-        : Set.of();
+    return schema.parameters().properties() == null
+        ? Set.of()
+        : schema.parameters().properties().keySet();
   }
 
   private static Set<String> requires(ToolSchema schema) {
-    return schema.parameters().get("required") instanceof Collection<?> required
-        ? toStrings(required)
-        : Set.of();
-  }
-
-  private static Set<String> toStrings(Collection<?> values) {
-    Set<String> strings = new HashSet<>();
-    values.forEach(value -> strings.add(String.valueOf(value)));
-    return strings;
+    return schema.parameters().required() == null
+        ? Set.of()
+        : Set.copyOf(schema.parameters().required());
   }
 
   /**

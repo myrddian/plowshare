@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
+import io.aeyer.plowshare.protocol.CodeTrackingStatus;
 import io.aeyer.plowshare.protocol.DocumentType;
 import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Home;
@@ -33,7 +34,7 @@ public final class WorkspaceCodeMap {
     return this;
   }
 
-  public Map<String, Object> trackingStatus(Home home) {
+  public CodeTrackingStatus trackingStatus(Home home) {
     return observations.status(home);
   }
 

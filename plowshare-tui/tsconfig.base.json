@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.strict.json",
   // The options every one of the three projects shares. It is not a project
   // itself — it has no `include`, is referenced by nobody, and `tsc -b` never
   // reads it directly. What each of src/binding, src/logic and src/view adds on
@@ -39,16 +40,6 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
 
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "exactOptionalPropertyTypes": true,
-
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
 

@@ -151,13 +151,13 @@ public class OrchestrationsConfig {
   /** Where a run's check is stored — spec 2026-09-26, {@code orchestration_check}. */
   @Bean
   public OrchestrationChecks orchestrationChecks(JdbcTemplate jdbc) {
-    return new OrchestrationChecks(jdbc);
+    return new JdbcOrchestrationChecks(jdbc);
   }
 
   /** Where a run's acceptance commands are registered — spec 2026-09-29 §1b, V60's table. */
   @Bean
   public OrchestrationAcceptance orchestrationAcceptance(JdbcTemplate jdbc, UnitOfWork work) {
-    return new OrchestrationAcceptance(jdbc, work);
+    return new JdbcOrchestrationAcceptance(jdbc, work);
   }
 
   /** The acceptance checker's concerns — spec 2026-10-01, V77's table. */
@@ -283,7 +283,8 @@ public class OrchestrationsConfig {
       Checking checking,
       CallerAccess access,
       org.springframework.jdbc.core.JdbcTemplate jdbc) {
-    runtime.useScripts(new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore(jdbc));
+    var scripts = new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc);
+    runtime.useScripts(scripts);
     Orchestrations orchestrations =
         new Orchestrations(
             store,
@@ -300,7 +301,17 @@ public class OrchestrationsConfig {
             pushChanges(pushes),
             OrchestrationCancel.jobsIn(jobs, conversations),
             properties.getMaxDepth(),
-            access);
+            access,
+            new JdbcOrchestrationRecovery(jdbc, work),
+            scripts);
+    orchestrations.useResumeListener(
+        (run, requestId) ->
+            pushes
+                .getIfAvailable(() -> AccountPushes.NONE)
+                .push(
+                    run.callerHandle(),
+                    new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationResumed(
+                        run.id(), requestId)));
     orchestrations.useApprovalDrain(runtime::deliverApprovalQuestions);
     orchestrations.useRecorder(recordKeeper);
     // A conductor's agent_run that returned is progress: its nudge count starts again.
@@ -1092,7 +1103,8 @@ public class OrchestrationsConfig {
           .getIfAvailable(() -> AccountPushes.NONE)
           .push(
               run.callerHandle(),
-              Map.of("kind", CHANGED, "orchestration", run.id(), "state", run.state().wire()));
+              new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationChanged(
+                  run.id(), run.state().wire()));
     };
   }
 

@@ -168,23 +168,24 @@ Read the scoped information catalogue, a revision's processing status, a bounded
 
 parameters:
 {
+  "type": "object",
   "properties": {
     "acquisition": {
       "type": "string"
     },
     "citations": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "corpus": {
+      "type": "string",
       "description": "Select the document or code corpus. Defaults to documents; permissions still come from the run.",
       "enum": [
         "documents",
         "code"
-      ],
-      "type": "string"
+      ]
     },
     "end": {
       "type": "integer"
@@ -196,14 +197,14 @@ parameters:
       "type": "string"
     },
     "filter": {
-      "description": "Intersect kind, tags, autoTag, tagGroup (related category), author (owner handle), documentAuthor (person, issuing organisation or account fallback), when (UTC year/month), subtype and lexical search before discovery.",
-      "type": "object"
+      "type": "object",
+      "description": "Intersect kind, tags, autoTag, tagGroup (related category), author (owner handle), documentAuthor (person, issuing organisation or account fallback), when (UTC year/month), subtype and lexical search before discovery."
     },
     "inputs": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "limit": {
       "type": "integer"
@@ -218,6 +219,7 @@ parameters:
       "type": "integer"
     },
     "operation": {
+      "type": "string",
       "enum": [
         "list",
         "status",
@@ -230,8 +232,7 @@ parameters:
         "outline",
         "symbols",
         "facets"
-      ],
-      "type": "string"
+      ]
     },
     "query": {
       "type": "string"
@@ -246,7 +247,9 @@ parameters:
       "type": "string"
     },
     "sources": {
+      "type": "array",
       "items": {
+        "type": "object",
         "properties": {
           "acquisition": {
             "type": "string"
@@ -254,10 +257,8 @@ parameters:
           "revision": {
             "type": "string"
           }
-        },
-        "type": "object"
-      },
-      "type": "array"
+        }
+      }
     },
     "start": {
       "type": "integer"
@@ -269,15 +270,14 @@ parameters:
       "type": "string"
     },
     "waitMs": {
-      "maximum": 30000,
+      "type": "integer",
       "minimum": 0,
-      "type": "integer"
+      "maximum": 30000
     }
   },
   "required": [
     "operation"
-  ],
-  "type": "object"
+  ]
 }
 
 === tool: result_read ===
@@ -329,23 +329,24 @@ Queue public URL acquisition, record exact quoted evidence or a draft research r
 
 parameters:
 {
+  "type": "object",
   "properties": {
     "acquisition": {
       "type": "string"
     },
     "citations": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "corpus": {
+      "type": "string",
       "description": "Select the document or code corpus. Defaults to documents; permissions still come from the run.",
       "enum": [
         "documents",
         "code"
-      ],
-      "type": "string"
+      ]
     },
     "end": {
       "type": "integer"
@@ -357,16 +358,18 @@ parameters:
       "type": "string"
     },
     "findings": {
+      "type": "array",
       "items": {
+        "type": "object",
         "properties": {
           "claim": {
             "type": "string"
           },
           "counterEvidence": {
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "id": {
             "type": "string"
@@ -378,19 +381,19 @@ parameters:
             "type": "string"
           },
           "support": {
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "verdict": {
+            "type": "string",
             "enum": [
               "holds",
               "weakened",
               "refuted",
               "not_checked"
-            ],
-            "type": "string"
+            ]
           }
         },
         "required": [
@@ -399,16 +402,14 @@ parameters:
           "claim",
           "rationale",
           "verdict"
-        ],
-        "type": "object"
-      },
-      "type": "array"
+        ]
+      }
     },
     "inputs": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "limit": {
       "type": "integer"
@@ -420,21 +421,21 @@ parameters:
       "type": "string"
     },
     "objectives": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "offset": {
       "type": "integer"
     },
     "operation": {
+      "type": "string",
       "enum": [
         "acquire",
         "evidence",
         "report"
-      ],
-      "type": "string"
+      ]
     },
     "query": {
       "type": "string"
@@ -446,7 +447,9 @@ parameters:
       "type": "string"
     },
     "reviews": {
+      "type": "array",
       "items": {
+        "type": "object",
         "properties": {
           "outcome": {
             "type": "string"
@@ -462,19 +465,17 @@ parameters:
           "stage",
           "outcome",
           "text"
-        ],
-        "type": "object"
-      },
-      "type": "array"
+        ]
+      }
     },
     "revision": {
       "type": "string"
     },
     "scopeChanges": {
+      "type": "array",
       "items": {
         "type": "string"
-      },
-      "type": "array"
+      }
     },
     "start": {
       "type": "integer"
@@ -488,6 +489,5 @@ parameters:
   },
   "required": [
     "operation"
-  ],
-  "type": "object"
+  ]
 }

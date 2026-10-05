@@ -277,7 +277,9 @@ class OrchestrationsConfigTest {
         run -> {},
         cancelledJobs::add,
         2,
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+        new JdbcOrchestrationRecovery(jdbc, work),
+        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc));
   }
 
   private OrchestrationRecord started(Orchestrations engine) {
@@ -504,8 +506,9 @@ class OrchestrationsConfigTest {
         engine.askInstall(
             run.id(),
             "Install triage?",
-            "{\"lead\":\"Install?\",\"questions\":[],\"name\":\"triage\","
-                + "\"path\":\"artifacts/triage.md\",\"text\":\"---\"}"));
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],\"name\":\"triage\","
+                    + "\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}")));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Don't install", "enzo"));
@@ -535,8 +538,9 @@ class OrchestrationsConfigTest {
     engine.askInstall(
         run.id(),
         "Install triage?",
-        "{\"lead\":\"Install?\",\"questions\":[],"
-            + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\"}");
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+            "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],"
+                + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}"));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Not yet: name the coder in the prompt", "enzo"));
@@ -590,8 +594,9 @@ class OrchestrationsConfigTest {
     engine.askInstall(
         run.id(),
         "Install triage?",
-        "{\"lead\":\"Install?\",\"questions\":[],"
-            + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\"}");
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+            "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],"
+                + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}"));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Install", "enzo"));
@@ -732,7 +737,7 @@ class OrchestrationsConfigTest {
     runtime.useTodos(board);
     runtime.useRunExtras(
         OrchestrationsConfig.runExtras(
-            store, engine, board, new OrchestrationChecks(jdbc), mock(RunApprovalStore.class)));
+            store, engine, board, new JdbcOrchestrationChecks(jdbc), mock(RunApprovalStore.class)));
     List<LoggedEntry> logged = new ArrayList<>();
     Transcript transcript =
         new Transcript() {
@@ -876,7 +881,7 @@ class OrchestrationsConfigTest {
         new AgentTool() {
           @Override
           public ToolSchema schema() {
-            return new ToolSchema(CallerOrchestrationTools.STATUS_NAME, "status", Map.of());
+            return ToolSchema.from(CallerOrchestrationTools.STATUS_NAME, "status", Map.of());
           }
 
           @Override
@@ -1128,7 +1133,7 @@ class OrchestrationsConfigTest {
                     store,
                     engine,
                     board,
-                    new OrchestrationChecks(jdbc),
+                    new JdbcOrchestrationChecks(jdbc),
                     mock(RunApprovalStore.class))
                 .forRun(contextWithTranscript(parent.conductorConversation())));
     write.run(
@@ -1228,7 +1233,7 @@ class OrchestrationsConfigTest {
                     store,
                     engine,
                     board,
-                    new OrchestrationChecks(jdbc),
+                    new JdbcOrchestrationChecks(jdbc),
                     mock(RunApprovalStore.class))
                 .forRun(contextWithTranscript(run.conductorConversation())));
 
@@ -1247,7 +1252,7 @@ class OrchestrationsConfigTest {
     jdbc.update("DELETE FROM orchestration_acceptance_requirements");
     Orchestrations engine = engine();
     OrchestrationRecord run = accepting(engine);
-    OrchestrationAcceptance acceptance = new OrchestrationAcceptance(jdbc, work);
+    OrchestrationAcceptance acceptance = new JdbcOrchestrationAcceptance(jdbc, work);
     io.aeyer.plowshare.server.agents.Commands.Port port =
         new io.aeyer.plowshare.server.agents.Commands.Port() {
           @Override
@@ -1295,7 +1300,7 @@ class OrchestrationsConfigTest {
                     store,
                     engine,
                     board,
-                    new OrchestrationChecks(jdbc),
+                    new JdbcOrchestrationChecks(jdbc),
                     mock(RunApprovalStore.class),
                     OrchestrationRecorder.NONE,
                     acceptance,
@@ -1727,8 +1732,7 @@ class OrchestrationsConfigTest {
     verify(accountPushes)
         .push(
             "enzo",
-            Map.of(
-                "kind", OrchestrationsConfig.CHANGED, "orchestration", "orc_1", "state", "asking"));
+            new io.aeyer.plowshare.protocol.AccountEvent.OrchestrationChanged("orc_1", "asking"));
   }
 
   @Test

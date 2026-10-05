@@ -1223,7 +1223,7 @@ class ProjectionTest {
 
     @Override
     public ToolSchema schema() {
-      return new ToolSchema(
+      return ToolSchema.from(
           "probe_read", "reads something", Map.of("type", "object", "properties", Map.of()));
     }
 

@@ -1,7 +1,10 @@
 # Working on Plowshare
 
-These instructions apply to the whole repository. Read the
-[coding standards](docs/coding-standards.md) before changing code. User instructions
+These instructions apply to the whole repository. All contributors and coding
+agents must read and follow the [coding standards](docs/coding-standards.md)
+before changing code. TypeScript
+also follows the [TypeScript standard](docs/typescript-standards.md). Native SDKs
+follow the [native SDK standard](docs/native-sdk-standards.md). User instructions
 take precedence; more specific repository instructions apply within their scope.
 
 ## Understand the system first
@@ -12,14 +15,13 @@ server capabilities; they do not create a second durable runtime.
 - `plowshare-server`: Java 21 / Spring Boot runtime, JDBC persistence, scheduling,
   agents, information, memory, messaging and orchestration.
 - `plowshare-protocol`: shared Java contracts.
-- `plowshare-sdk`: Java WebSocket SDK; `plowshare-a2a` adapts external A2A work.
-- `plowshare-client`: Java client tools and file/transport support.
-- `plowshare-client-ts`: shared TypeScript WebSocket operations and contracts.
-- `plowshare-client-node`: Node credentials, filesystem and platform support.
+- `sdk/`: Java, TypeScript, Node, Python, Go and .NET SDKs.
+  `sdk/typescript` owns shared WebSocket operations and contracts; `sdk/node`
+  adds credentials, filesystem and platform support.
 - `plowshare-cli`, `plowshare-mcp`, `plowshare-tui`, `plowshare-console`,
   `plowshare-desktop`: user-facing clients.
-- `plowshare-integrations`, `plowshare-integration-home-assistant`: external
-  integration runtime and Home Assistant adapter.
+- `integrations/`: external SDK consumers, including the shared integration
+  runtime, A2A adapter and Home Assistant adapter.
 - `extensions/`: search providers running as separate services.
 
 Start with the relevant implementation, tests and current manuals in `docs/`.
@@ -76,6 +78,14 @@ test counts or obsolete transport assumptions into new documentation.
   capability as a gap; a platform extension requires separately authorized scope.
   SDK consumers must configure server origins and adapter bind/advertised addresses
   explicitly, with no assumption that the server shares their host or container.
+- **An integration that needs core changes is a failed integration task.** Do not
+  modify core runtime, APIs, tools, persistence or shared contracts to complete
+  an adapter. Report the exact public capability gap and continue independent
+  adapter work. A core change needs a separately authorized platform task and a
+  design decision explaining the general platform need, SDK-only alternatives,
+  authorization/lifecycle impact and compatibility tests. Convenience, passing
+  an adapter test or wrapping internal access in an SDK are insufficient reasons.
+  See [the integration boundary decision](docs/decisions/0001-integration-boundary.md).
 - Use WebSocket operations for client/server work where supported. Document
   required HTTP boundaries such as login, uploads, Git and external protocols;
   do not add silent HTTP fallback or replay a mutation after uncertain delivery.
@@ -123,7 +133,7 @@ nullable success values to conceal an error.
 ./gradlew check -PfullDb         # Full DB coverage only when required or explicitly requested.
 ```
 
-The build requires Java 21, Node.js 22.12+, pnpm and Python 3. Database tests require
+The build requires Java 21, Node.js 22.13+, pnpm and Python 3. Database tests require
 the explicit `-PfullDb` flag and Docker/Testcontainers. Default runs use the
 non-database tests, including mocks and in-memory fakes. Native SDK and
 distribution checks have additional toolchains and are explicit entry points; see [SDKs](docs/sdks.md) and

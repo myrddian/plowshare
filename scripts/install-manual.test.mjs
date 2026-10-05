@@ -34,18 +34,19 @@ function catalogue() {
     if (operation === 'upload') {
       const revision = randomUUID();
       rows.set(revision, { name: payload.name, text: payload.text, tags: [], shared: false, excluded: false });
-      result = { revision };
+      result = { revision, resource: randomUUID(), created: true };
     } else {
       const row = rows.get(payload.revision); assert.ok(row, 'existing revision required');
       if (operation === 'tags') { row.tags = payload.tags; result = { changed: true }; }
       else if (operation === 'status') result = { id: payload.revision, generation: 1,
         availability: 'active', excluded: row.excluded, tags: row.tags,
-        steps: [{ stage: 'extract', state: 'ready', generation: 1 },
-          { stage: 'derive', state: derivation, generation: 1 },
-          { stage: 'embed', state: 'failed', generation: 1 }] };
+        steps: [{ stage: 'extract', state: 'ready', generation: 1, attempt: 1 },
+          { stage: 'derive', state: derivation, generation: 1, attempt: 1 },
+          { stage: 'embed', state: 'failed', generation: 1, attempt: 1 }] };
       else if (operation === 'read') {
         if (scope === 'shared' && !row.shared) throw new Error('unavailable in Shared');
-        result = { revision: payload.revision, text: row.text.slice(payload.offset, payload.offset + payload.limit) };
+        const start = payload.offset ?? 0, text = row.text.slice(start, start + payload.limit);
+        result = { revision: payload.revision, start, end: start + text.length, total: row.text.length, text };
       } else if (operation === 'share') { row.shared = true; result = { changed: true }; }
       else if (operation === 'exclude') { row.excluded = true; result = { availability: 'excluded' }; }
       else throw new Error(`unexpected operation ${operation}`);

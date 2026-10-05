@@ -560,6 +560,13 @@ public final class JobRuntime {
     }
   }
 
+  private static void requireSystemModelCapabilities(
+      AgentDefinition definition, Transcript transcript) {
+    if (transcript.usage().status() == UsageAttribution.Status.SYSTEM
+        && transcript.usage().operation() == UsageAttribution.Operation.DOCUMENT_SUMMARY)
+      SystemModelTasks.requireModelOnly(definition);
+  }
+
   public void useApprovalDelivery(io.aeyer.plowshare.server.approvals.ApprovalDelivery delivery) {
     this.approvalDelivery = Objects.requireNonNull(delivery, "delivery");
   }
@@ -1356,6 +1363,7 @@ public final class JobRuntime {
     // Rules attach to the current executor, never by copying a parent's role prefix.
     // A refused rules file ends the run before it can make model calls or mutate files.
     definition = withAgentRules(definition, home, sessionId, transcript.conversationId(), owner);
+    requireSystemModelCapabilities(definition, ownedTranscript);
     Rerouting route = new Rerouting(definition, ownedTranscript);
     Pacing pacing = new Pacing(ticker);
     HarnessRun harnessRun = harness.begin();
@@ -1443,7 +1451,12 @@ public final class JobRuntime {
       int steps,
       int calls) {
     AgentTool ask = offered.get(ConductorTools.ASK_NAME);
-    if (ask == null) throw new IllegalStateException(reason);
+    if (ask == null) {
+      // Event handlers have no conductor question tool. Preserve the refusal in their log and
+      // stop; a generic handler must never acquire orchestration authority to park a command.
+      transcript.record(LoggedEntry.notice(reason));
+      return new Outcome(Ending.UNAVAILABLE, reason, steps, calls, reason);
+    }
     String arguments =
         new com.fasterxml.jackson.databind.ObjectMapper()
             .createObjectNode()
@@ -1470,14 +1483,17 @@ public final class JobRuntime {
       Rerouting route,
       HarnessRun harnessRun,
       JobWatch watch) {
-    var json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
     String conversation = transcript.conversationId();
     if (scripts == null
         || conversation == null
-        || transcript.origin() != io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION)
-      throw new IllegalStateException("script driver needs a durable orchestration conversation");
+        || (transcript.origin() != io.aeyer.plowshare.server.archive.Origin.ORCHESTRATION
+            && transcript.origin() != io.aeyer.plowshare.server.archive.Origin.EVENT))
+      throw new IllegalStateException(
+          "script driver needs a durable orchestration or event conversation");
+    // SYSTEM is the usage actor; the admitted log owner still gates source access. It never
+    // supplies an administrator role or replaces the owner's authorization context.
     String owner =
-        transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+        transcript.usage().status() != UsageAttribution.Status.ATTRIBUTED
             ? ownerOf(callerHandle, session, conversation)
             : transcript.usage().accountHandle();
     if (informationInputs != null) informationInputs.requireLog(conversation, owner);
@@ -1520,6 +1536,12 @@ public final class JobRuntime {
                 commands,
                 end,
                 runHooks));
+    if (extras == null) throw new IllegalStateException("script run extras are unavailable");
+    if (extras.end() == null)
+      extras =
+          new RunExtras.Extras(
+              extras.tools(), end, extras.keepsTodos(), extras.requiresAToolCall(), extras.fence());
+    transcript.record(LoggedEntry.utterance(message, transcript.speaker()));
     Map<String, AgentTool> offered =
         offeredTo(
             definition, budget, cancelled, session, transcript, List.of(), extras, owner, runHooks);
@@ -1563,14 +1585,18 @@ public final class JobRuntime {
       if (resuming
           && previous.started()
           && previous.raw() == null
-          && previous.command().path("tool").asText().equals(InformationTool.READ)
-          && previous.command().path("arguments").path("operation").asText().equals("await")) {
+          && previous.command()
+              instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool observer
+          && observer.readinessObserver()) {
         scripts.retryReadinessObserver(conversation, previous.sequence());
         previous = scripts.latest(conversation).orElseThrow();
       }
       if (resuming && previous.started() && previous.raw() == null) {
         String recovered =
-            previous.command().path("tool").asText().equals(AgentRunTool.NAME)
+            previous.command()
+                        instanceof
+                        io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool delegate
+                    && delegate.name().equals(AgentRunTool.NAME)
                 ? scripts.delegateResult(conversation, previous.sequence()).orElse(null)
                 : null;
         if (recovered == null)
@@ -1581,28 +1607,24 @@ public final class JobRuntime {
         scripts.executed(conversation, previous.sequence(), recovered);
         previous = scripts.latest(conversation).orElseThrow();
       }
-      var input = json.createObjectNode().put("run", conversation).put("message", message);
       int sequence = previous == null ? 0 : previous.sequence() + 1;
-      input
-          .put("sequence", sequence)
-          .put(
-              "requestId",
-              java.util
-                  .UUID
-                  .nameUUIDFromBytes(
-                      (conversation + ":" + sequence)
-                          .getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                  .toString());
-      input.set("state", previous == null ? json.nullNode() : previous.state());
-      input.put("result", previous == null ? null : previous.result());
-      input.set("todos", json.valueToTree(todos == null ? List.of() : todos.list(conversation)));
+      var input =
+          new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Input(
+              conversation,
+              message,
+              sequence,
+              java.util.UUID.nameUUIDFromBytes(
+                  (conversation + ":" + sequence)
+                      .getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+              previous == null ? null : previous.sequence(),
+              previous == null ? null : previous.result(),
+              todos == null ? List.of() : todos.list(conversation),
+              hash);
       var pending = previous;
       if (!resuming) {
-        com.fasterxml.jackson.databind.JsonNode next;
+        io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Preparation next;
         try {
-          next =
-              io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.step(
-                  definition.prompt(), input);
+          next = scripts.prepareNext(definition.prompt(), input, !budget.exhausted());
         } catch (IllegalStateException failed) {
           // Script evaluation includes output validation. Keep its reason and the
           // completed work counts instead of falling through JobStore's last resort.
@@ -1615,10 +1637,7 @@ public final class JobRuntime {
               budget.spent() - callsBefore,
               reason);
         }
-        if (!next.has("state") || !next.path("command").isObject())
-          throw new IllegalStateException("script step must return state and one command");
-        var command = next.path("command");
-        if (command.path("tool").asText().equals(AgentRunTool.NAME) && budget.exhausted())
+        if (next instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.NeedsCall)
           return new Outcome(
               Ending.CALL_BUDGET,
               "script needs another model call",
@@ -1626,18 +1645,26 @@ public final class JobRuntime {
               budget.spent() - callsBefore,
               "");
         pending =
-            new io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Step(
-                sequence, hash, next.path("state"), command, null, null);
-        scripts.prepare(conversation, pending);
+            ((io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Prepared) next).step();
       }
       taken++;
-      if (pending.command().has("waitMs")) {
-        int wait = pending.command().path("waitMs").asInt(-1);
-        if (wait < 1 || wait > 1000)
-          throw new IllegalStateException("script wait must be 1–1000 ms");
+      if (pending.command()
+          instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Finish finish) {
+        if (transcript.origin() != io.aeyer.plowshare.server.archive.Origin.EVENT)
+          throw new IllegalStateException(
+              "orchestration scripts must finish through their stage gates");
+        // Pure terminal commands are journaled just like waits; no external effect can be replayed.
+        if (pending.raw() == null)
+          scripts.executed(conversation, pending.sequence(), finish.text());
+        scripts.completed(conversation, pending.sequence(), finish.text());
+        transcript.record(LoggedEntry.answer(finish.text(), List.of()));
+        return new Outcome(Ending.ANSWERED, finish.text(), taken, budget.spent() - callsBefore, "");
+      }
+      if (pending.command()
+          instanceof io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Wait wait) {
         if (pending.raw() == null) {
           try {
-            Thread.sleep(wait);
+            Thread.sleep(wait.milliseconds());
           } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
           }
@@ -1647,8 +1674,10 @@ public final class JobRuntime {
         previous = scripts.latest(conversation).orElseThrow();
         continue;
       }
-      String name = pending.command().path("tool").asText();
-      String arguments = pending.command().path("arguments").toString();
+      var command =
+          (io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool) pending.command();
+      String name = command.name();
+      String arguments = command.arguments();
       String id = "script_" + pending.sequence();
       AgentTool tool = offered.get(name);
       if (tool == null)
@@ -1664,10 +1693,21 @@ public final class JobRuntime {
             "Script command denied by hook: " + pre.denied(),
             taken,
             budget.spent() - callsBefore);
+      String fenced = extras.fence().refusal(name, pre.arguments());
+      if (fenced != null)
+        return pauseScript(
+            offered,
+            home,
+            transcript,
+            end,
+            "Script command refused by its execution fence: " + fenced,
+            taken,
+            budget.spent() - callsBefore);
       String raw = pending.raw();
       if (raw != null
           && pending.arguments() != null
-          && !pending.arguments().equals(pre.arguments()))
+          && !io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.sameArguments(
+              pending.arguments(), pre.arguments()))
         throw new IllegalStateException(
             "a hook changed a cached command's arguments; its paid result cannot be reused for a different request");
       if (raw == null) {
@@ -1686,6 +1726,21 @@ public final class JobRuntime {
                       ? tool.run(pre.arguments(), home)
                       : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
                   name);
+        } catch (AgentRunTool.SubAgentFailed child) {
+          // A dependency failure is an ordinary terminal child outcome, not a runtime bug.
+          // The failed command has no successful journal receipt and must never be replayed
+          // automatically. Retain its causal detail beside the call for trajectory inspection.
+          Outcome failure =
+              new Outcome(
+                  Ending.SUB_AGENT_FAILED,
+                  child.sentence(),
+                  taken - 1,
+                  budget.spent() - callsBefore,
+                  child.detail());
+          transcript.record(
+              LoggedEntry.toolResult(id, failure.failureText()).told(ToolLines.ERROR));
+          runHooks.drain().forEach(record -> transcript.record(LoggedEntry.hook(record)));
+          return failure;
         } catch (AgentRunTool.ScriptedDelegateStopped stopped) {
           return stopped.outcome;
         }
@@ -1799,10 +1854,11 @@ public final class JobRuntime {
     // child turn is given it in turn. See ownerOf: a turn the harness spoke into (a run's
     // question, its result) carries no handle and no session, and still has an owner.
     String owner =
-        transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+        transcript.usage().status() != UsageAttribution.Status.ATTRIBUTED
             ? ownerOf(callerHandle, sessionId, transcript.conversationId())
             : transcript.usage().accountHandle();
     if (informationInputs != null) informationInputs.requireLog(transcript.conversationId(), owner);
+    requireSystemModelCapabilities(definition, transcript);
     RunExtras.Extras extras;
     try {
       // A run's own port to place, judge and run a command, for a provider that needs one
@@ -3226,7 +3282,11 @@ public final class JobRuntime {
                 informationInputs
                     .reads(
                         transcript.conversationId(),
-                        informationAccess.forRun(codeOwner, home).withCorpus("code"))
+                        informationAccess
+                            .forRun(codeOwner, home)
+                            .withCorpus(
+                                io.aeyer.plowshare.server.information.InformationContext.Corpus
+                                    .CODE))
                     .accept(revision));
     }
     FileTools.Reads reads = new FileTools.Reads(codeMap);

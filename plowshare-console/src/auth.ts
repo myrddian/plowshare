@@ -16,10 +16,10 @@
  */
 
 /** The query parameter the server's startup line puts the token in. */
-export const TOKEN_PARAM = 'token'
+export const TOKEN_PARAM = 'token';
 
 /** `POST /v1/auth`: the one endpoint that turns a bootstrap token into cookies. */
-export const AUTH_PATH = '/v1/auth'
+export const AUTH_PATH = '/v1/auth';
 
 /**
  * What happened, for a caller that wants to say so on the screen.
@@ -32,7 +32,7 @@ export const AUTH_PATH = '/v1/auth'
  *   ordinary state of every navigation after the first, when the cookie is
  *   already in the jar.
  */
-export type BootstrapOutcome = 'exchanged' | 'refused' | 'absent'
+export type BootstrapOutcome = 'exchanged' | 'refused' | 'absent';
 
 /**
  * Spend the token in the address bar, then remove it from the address bar.
@@ -58,48 +58,50 @@ export type BootstrapOutcome = 'exchanged' | 'refused' | 'absent'
  *     parameter so that a test can hand over a double, and NOT so that a caller
  *     can point this at another frame.
  */
-export async function bootstrapFromUrl(scope: Window = window): Promise<BootstrapOutcome> {
-    const url = new URL(scope.location.href)
-    const token = url.searchParams.get(TOKEN_PARAM)
-    if (token === null) {
-        return 'absent'
-    }
-    try {
-        const response = await fetch(AUTH_PATH, {
-            method: 'POST',
-            // Same-origin and not `include`: this page and this API are one
-            // origin -- served from the jar in production, and behind the Vite
-            // proxy in development, which is the whole reason that proxy
-            // exists. `include` would additionally send credentials on a
-            // cross-origin request, which is a capability nothing here needs.
-            credentials: 'same-origin',
-            // The server's `@PostMapping(consumes = APPLICATION_JSON_VALUE)`
-            // answers 415 to a request that carries a body without this. It
-            // answers 401 to one carrying no body at all, which is a different
-            // path and not the one this call is on.
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token }),
-        })
-        return response.status === 204 ? 'exchanged' : 'refused'
-    } catch {
-        // A `fetch` rejection is a transport failure -- the server is not
-        // there, or the page was closed mid-flight. It is reported as a
-        // refusal because there is nothing a caller could do differently, and
-        // the error object is deliberately not carried out of this function:
-        // it was constructed from a request whose body held the token.
-        return 'refused'
-    } finally {
-        strip(scope, url)
-    }
+export async function bootstrapFromUrl(
+  scope: Window = window,
+): Promise<BootstrapOutcome> {
+  const url = new URL(scope.location.href);
+  const token = url.searchParams.get(TOKEN_PARAM);
+  if (token === null) {
+    return 'absent';
+  }
+  try {
+    const response = await fetch(AUTH_PATH, {
+      method: 'POST',
+      // Same-origin and not `include`: this page and this API are one
+      // origin -- served from the jar in production, and behind the Vite
+      // proxy in development, which is the whole reason that proxy
+      // exists. `include` would additionally send credentials on a
+      // cross-origin request, which is a capability nothing here needs.
+      credentials: 'same-origin',
+      // The server's `@PostMapping(consumes = APPLICATION_JSON_VALUE)`
+      // answers 415 to a request that carries a body without this. It
+      // answers 401 to one carrying no body at all, which is a different
+      // path and not the one this call is on.
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    return response.status === 204 ? 'exchanged' : 'refused';
+  } catch {
+    // A `fetch` rejection is a transport failure -- the server is not
+    // there, or the page was closed mid-flight. It is reported as a
+    // refusal because there is nothing a caller could do differently, and
+    // the error object is deliberately not carried out of this function:
+    // it was constructed from a request whose body held the token.
+    return 'refused';
+  } finally {
+    strip(scope, url);
+  }
 }
 
 /** Rewrite the address bar to the same URL without the token parameter. */
 function strip(scope: Window, url: URL): void {
-    url.searchParams.delete(TOKEN_PARAM)
-    const query = url.searchParams.toString()
-    scope.history.replaceState(
-        scope.history.state,
-        '',
-        url.pathname + (query === '' ? '' : `?${query}`) + url.hash,
-    )
+  url.searchParams.delete(TOKEN_PARAM);
+  const query = url.searchParams.toString();
+  scope.history.replaceState(
+    scope.history.state,
+    '',
+    url.pathname + (query === '' ? '' : `?${query}`) + url.hash,
+  );
 }

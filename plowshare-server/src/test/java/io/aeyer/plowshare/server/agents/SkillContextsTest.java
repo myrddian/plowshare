@@ -32,18 +32,19 @@ class SkillContextsTest {
     assertNull(contexts.prepare(SkillDefinition.Mode.NEW, parent, "alice", budget, () -> false));
     verifyNoInteractions(entries, compaction);
     String log =
-        "[{\"ordinal\":1,\"kind\":\"utterance\",\"content\":\"Earlier context\",\"speaker\":\"person\"},"
-            + "{\"ordinal\":2,\"kind\":\"answer\",\"tool_calls\":[{\"name\":\"run\"}],\"content\":\"\"}]";
+        "[{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":1,\"kind\":\"utterance\",\"content\":\"Earlier context\",\"speaker\":\"person\"},"
+            + "{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":2,\"kind\":\"answer\",\"tool_calls\":[{\"id\":\"call\",\"name\":\"run\",\"arguments\":\"{}\"}],\"content\":\"\"}]";
     when(entries.forAccount("alice")).thenReturn(entries);
-    when(entries.snapshotForSkill("parent")).thenReturn(log);
+    when(entries.snapshotForSkill("parent")).thenReturn(SkillContextLogs.read(log));
     var inherited =
         contexts.prepare(SkillDefinition.Mode.INHERITED, parent, "alice", budget, () -> false);
-    assertEquals(log, inherited.snapshot());
-    assertTrue(inherited.prompt().contains(log));
+    assertEquals(SkillContextLogs.read(log), inherited.snapshot());
+    assertTrue(inherited.prompt().contains(SkillContextLogs.write(SkillContextLogs.read(log))));
     assertTrue(inherited.prompt().contains("never replayed"));
     assertEquals(2, inherited.through());
     contexts.pin("alice", UUID.fromString("00000000-0000-0000-0000-000000000001"), inherited);
-    verify(executions).context(eq("alice"), any(), eq(log), eq(inherited.prompt()), eq(2));
+    verify(executions)
+        .context(eq("alice"), any(), eq(SkillContextLogs.read(log)), eq(inherited.prompt()), eq(2));
     verifyNoInteractions(compaction);
     assertEquals(0, budget.spent());
   }
@@ -53,7 +54,9 @@ class SkillContextsTest {
     EntryStore entries = mock(EntryStore.class);
     when(entries.forAccount("alice")).thenReturn(entries);
     when(entries.snapshotForSkill("parent"))
-        .thenReturn("[{\"ordinal\":1,\"kind\":\"tool_result\",\"content\":null}]");
+        .thenReturn(
+            SkillContextLogs.read(
+                "[{\"conversation_id\":\"parent\",\"turn_ordinal\":1,\"ordinal\":1,\"kind\":\"tool_result\",\"content\":null,\"ejected_at\":\"2026-10-04T00:00:00Z\"}]"));
     Transcript parent = mock(Transcript.class);
     when(parent.conversationId()).thenReturn("parent");
     Compaction compaction = mock(Compaction.class);

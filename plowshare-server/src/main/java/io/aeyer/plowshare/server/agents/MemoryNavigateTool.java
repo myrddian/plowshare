@@ -32,7 +32,7 @@ public final class MemoryNavigateTool implements AgentTool {
 
   @Override
   public ToolSchema schema() {
-    return new ToolSchema(
+    return ToolSchema.from(
         NAME,
         "Navigate the memory digest tree to a lesson, original log entries, or the deepest "
             + "surviving summary. Costs one tool call; the navigator uses a separate system model allowance. "

@@ -11,8 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.client.SessionClient;
-import io.aeyer.plowshare.client.files.ChannelClient;
 import io.aeyer.plowshare.protocol.JobDelta;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.frames.Code;
@@ -22,6 +20,8 @@ import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.Session;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.testpeer.SessionPeer;
+import io.aeyer.plowshare.testpeer.SocketPeer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -164,7 +164,7 @@ class EventChannelTest {
     context =
         new SpringApplicationBuilder(Wiring.class)
             .web(WebApplicationType.SERVLET)
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((WebServerApplicationContext) context).getWebServer().getPort();
     registry = context.getBean(SessionRegistry.class);
     http = new OkHttpClient.Builder().build();
@@ -902,11 +902,11 @@ class EventChannelTest {
    *
    * <p>{@code FileChannelTest} has this pair for the file channel — {@code
    * the_production_wiring_publishes_the_channel_on_the_path_the_client_dials} — and there was no
-   * equivalent for the listener, because the class that dials it is {@link SessionClient}, in a
+   * equivalent for the listener, because the class that dials it is {@link SessionPeer}, in a
    * module whose own tests cannot see a server to compare against. So the claim had nowhere to live
    * except here.
    *
-   * <p>Today a mismatch is not silent: the upgrade fails and {@code SessionClient} reports the 404
+   * <p>Today a mismatch is not silent: the upgrade fails and {@code SessionPeer} reports the 404
    * with a sentence about a server that has no such channel. But that is a mismatch found by
    * running the pair, on a machine where both halves happen to be deployed together, and the two
    * literals are compiled from two modules that ship independently. This is the same claim at
@@ -915,14 +915,14 @@ class EventChannelTest {
    * <p>{@code assertNotEquals} against the file channel's path is not repeated here — the test
    * above owns it. What is added is the second half of the agreement: the query parameter. {@link
    * EventChannelHandler} reads the id with {@code FileChannelHandler}'s parser and under its
-   * constant, and {@code SessionClient} dials through {@link ChannelClient#dial}, which appends
-   * {@code ChannelClient}'s. A listener that attached under a different key would be a session no
-   * job could publish to.
+   * constant, and {@code SessionPeer} dials through {@link SocketPeer#dial}, which appends {@code
+   * SocketPeer}'s. A listener that attached under a different key would be a session no job could
+   * publish to.
    */
   @Test
   void the_production_wiring_publishes_the_listener_on_the_path_the_client_dials() {
-    assertEquals("/" + SessionClient.EVENTS_PATH, EventChannelHandler.PATH);
-    assertEquals(ChannelClient.SESSION_PARAM, FileChannelHandler.SESSION_PARAM);
+    assertEquals("/" + SessionPeer.EVENTS_PATH, EventChannelHandler.PATH);
+    assertEquals(SocketPeer.SESSION_PARAM, FileChannelHandler.SESSION_PARAM);
   }
 
   // --- the account a socket is signed in as ---------------------------------
@@ -954,7 +954,7 @@ class EventChannelTest {
     attachAs(handler, own, "s-terminal", "enzo", terminal);
     attachAs(handler, own, "s-sam", "sam", someoneElse);
 
-    handler.push("enzo", Map.of("kind", "inbox.changed", "unread", 2));
+    handler.push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(2));
 
     assertTrue(console.awaitFrameContaining("inbox.changed", 2_000));
     assertTrue(terminal.awaitFrameContaining("inbox.changed", 2_000));
@@ -1055,7 +1055,7 @@ class EventChannelTest {
     Stalling console = new Stalling(false);
     attachAs(handler, own, "s-console", "enzo", console);
     handler.afterConnectionClosed(console, CloseStatus.NORMAL);
-    handler.push("enzo", Map.of("kind", "inbox.changed", "unread", 1));
+    handler.push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
     assertFalse(console.awaitFrameContaining("inbox.changed", 200));
   }
 
@@ -1071,9 +1071,7 @@ class EventChannelTest {
     attach(handler, own, "s-following", following);
     attach(handler, own, "s-elsewhere", elsewhere);
 
-    handler.tell(
-        "s-following",
-        Map.of("kind", "conversation.appended", "conversation", "cnv_1", "through", 7));
+    handler.tell("s-following", new io.aeyer.plowshare.protocol.ConversationGrowth("cnv_1", 7));
 
     assertTrue(following.awaitFrameContaining("conversation.appended", 2_000));
     assertFalse(elsewhere.awaitFrameContaining("conversation.appended", 200));
@@ -1132,7 +1130,7 @@ class EventChannelTest {
     var queries =
         org.mockito.Mockito.mock(io.aeyer.plowshare.server.llm.accounting.UsageQueryService.class);
     var filter =
-        new io.aeyer.plowshare.server.llm.accounting.UsageQueryService.Filter(
+        new io.aeyer.plowshare.protocol.Usage.Filter(
             null,
             null,
             null,
@@ -1147,9 +1145,7 @@ class EventChannelTest {
             List.of(),
             null,
             200);
-    var query =
-        new io.aeyer.plowshare.server.llm.accounting.UsageQueryService.Resolved(
-            "usage.models", filter);
+    var query = new io.aeyer.plowshare.protocol.Usage.Resolved("usage.models", filter);
     var value = new java.util.concurrent.atomic.AtomicInteger();
     org.mockito.Mockito.when(
             queries.resolve(
@@ -1160,12 +1156,28 @@ class EventChannelTest {
                 org.mockito.ArgumentMatchers.eq("enzo"), org.mockito.ArgumentMatchers.eq(query)))
         .thenAnswer(
             invocation ->
-                new io.aeyer.plowshare.server.llm.accounting.UsageQueryService.Report(
+                new io.aeyer.plowshare.protocol.Usage.Report(
                     query,
-                    Map.of("calls", Integer.toString(value.get())),
+                    usageTotals(value.get()),
                     List.of(),
                     null,
-                    Map.of("watermark", Integer.toString(value.get()))));
+                    new io.aeyer.plowshare.protocol.Usage.Health(
+                        null,
+                        null,
+                        Integer.toString(value.get()),
+                        java.time.Instant.now(),
+                        "not_imported",
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null)));
     var subscriptions = new UsageSubscriptions(queries);
     var registry = new SessionRegistry();
     var channel =
@@ -1176,7 +1188,7 @@ class EventChannelTest {
     channel.useUsageSubscriptions(subscriptions);
     var socket = new Stalling(true);
     attachAs(channel, registry, "usage-session", "enzo", socket);
-    channel.push("enzo", Map.of("holding", true));
+    channel.push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
     assertTrue(socket.awaitWedged(2_000));
     channel.handleMessage(
         socket,
@@ -1215,8 +1227,11 @@ class EventChannelTest {
     Stalling console = new Stalling(false);
     attachAs(handler, own, "s-console", "enzo", console);
 
-    handler.push("enzo", new Unwritable());
-    handler.push("enzo", Map.of("kind", "inbox.changed", "unread", 1));
+    var unwritable =
+        org.mockito.Mockito.mock(io.aeyer.plowshare.protocol.AccountEvent.InboxChanged.class);
+    org.mockito.Mockito.when(unwritable.kind()).thenThrow(new IllegalStateException("boom"));
+    handler.push("enzo", unwritable);
+    handler.push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(1));
 
     assertTrue(
         console.awaitFrameContaining("inbox.changed", 2_000),
@@ -1252,7 +1267,7 @@ class EventChannelTest {
     attachAs(handler, own, "s-console", "enzo", second);
     handler.afterConnectionClosed(first, CloseStatus.NORMAL);
 
-    handler.push("enzo", Map.of("kind", "inbox.changed", "unread", 3));
+    handler.push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.InboxChanged(3));
 
     assertTrue(second.awaitFrameContaining("inbox.changed", 2_000));
     assertFalse(first.awaitFrameContaining("inbox.changed", 200));
@@ -1657,16 +1672,10 @@ class EventChannelTest {
       org.mockito.Mockito.when(
               authorization.allowed(
                   org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.anyMap(),
+                  org.mockito.ArgumentMatchers.any(
+                      io.aeyer.plowshare.server.access.AccessRequest.class),
                   org.mockito.ArgumentMatchers.nullable(String.class)))
           .thenReturn(true);
-      org.mockito.Mockito.when(
-              authorization.filter(
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(
-                      io.aeyer.plowshare.protocol.frames.Outcome.class),
-                  org.mockito.ArgumentMatchers.nullable(String.class)))
-          .thenAnswer(call -> call.getArgument(1));
       return authorization;
     }
 
@@ -1676,5 +1685,42 @@ class EventChannelTest {
       return new SocketAuthorization(
           org.mockito.Mockito.mock(io.aeyer.plowshare.server.auth.AdminStore.class));
     }
+  }
+
+  private static io.aeyer.plowshare.protocol.Usage.Aggregate usageTotals(int calls) {
+    return new io.aeyer.plowshare.protocol.Usage.Aggregate(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Integer.toString(calls),
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        Map.of(),
+        true,
+        true,
+        true,
+        null);
   }
 }

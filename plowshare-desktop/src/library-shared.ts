@@ -1,8 +1,22 @@
 import type { InformationWindow } from 'plowshare-client-ts/operations/information-replies';
-import type { RetrievalReplies, DocumentDetailResponse, ChunkDetailResponse, MemoryRecord, CitationsResponse, DocumentStanceResponse } from 'plowshare-client-ts/operations/retrieval';
-export type LibraryView = 'sources' | 'documents' | 'memories' | 'search' | 'manual';
-export type SearchKind = 'conversation' | 'documents' | 'retrieve' | 'rank' | 'recall' | 'navigate';
-export interface Reading<T> { value?: T; loading?: boolean; stale?: boolean; error?: string }
+import type {
+  RetrievalReplies,
+  DocumentDetailResponse,
+  ChunkDetailResponse,
+  MemoryRecord,
+  CitationsResponse,
+  DocumentStanceResponse,
+} from 'plowshare-client-ts/operations/retrieval';
+export type LibraryView =
+  'sources' | 'documents' | 'memories' | 'search' | 'manual';
+export type SearchKind =
+  'conversation' | 'documents' | 'retrieve' | 'rank' | 'recall' | 'navigate';
+export interface Reading<T> {
+  value?: T;
+  loading?: boolean;
+  stale?: boolean;
+  error?: string;
+}
 export interface LibraryState {
   view: LibraryView;
   report?: { revision: string; sequence: number };
@@ -24,11 +38,35 @@ export interface LibraryState {
   error?: string;
 }
 export type SearchValue = {
-  kind: SearchKind; query: string; project: string | null; mode: 'lexical' | 'semantic' | 'hybrid';
-  reply: RetrievalReplies['conversation.search'] | RetrievalReplies['document.search'] | RetrievalReplies['document.retrieve'] | RetrievalReplies['document.rank'] | RetrievalReplies['memory.recall'] | RetrievalReplies['memory.navigate'];
+  kind: SearchKind;
+  query: string;
+  project: string | null;
+  mode: 'lexical' | 'semantic' | 'hybrid';
+  reply:
+    | RetrievalReplies['conversation.search']
+    | RetrievalReplies['document.search']
+    | RetrievalReplies['document.retrieve']
+    | RetrievalReplies['document.rank']
+    | RetrievalReplies['memory.recall']
+    | RetrievalReplies['memory.navigate'];
 };
-export const emptyLibrary = (): LibraryState => ({ view: 'documents', project: null, documents: { query: '' }, memories: {}, proposals: {}, document: {}, chunk: {}, memory: {}, citations: {}, stance: {}, search: {} });
+export const emptyLibrary = (): LibraryState => ({
+  view: 'documents',
+  project: null,
+  documents: { query: '' },
+  memories: {},
+  proposals: {},
+  document: {},
+  chunk: {},
+  memory: {},
+  citations: {},
+  stance: {},
+  search: {},
+});
 export const libraryIdentity = (value: unknown) => JSON.stringify(value);
 
 /** Reading a memory counts a use server-side; those two counters are not an edit. */
-export function memoryIdentity(value: MemoryRecord): string { const {uses, lastUsed, ...content} = value; return libraryIdentity(content); }
+export function memoryIdentity(value: MemoryRecord): string {
+  const { uses: _uses, lastUsed: _lastUsed, ...content } = value;
+  return libraryIdentity(content);
+}

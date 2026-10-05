@@ -87,7 +87,8 @@
  */
 
 /** The inline marks, tried left to right at each position. */
-const INLINE = new RegExp([
+const INLINE = new RegExp(
+  [
     // Code first, so a name with a mark in it survives being quoted. The
     // backreference makes the run length its own closer, which is what lets
     // ``a `b` c`` hold a backtick.
@@ -100,7 +101,9 @@ const INLINE = new RegExp([
     // is left as the text it is rather than truncated at the character this
     // pattern could not carry.
     '\\[([^\\]\\n]*)\\]\\(([^()\\s]*)\\)',
-].join('|'), 'g')
+  ].join('|'),
+  'g',
+);
 
 /**
  * One piece of a run of prose, as data rather than as an element.
@@ -110,11 +113,15 @@ const INLINE = new RegExp([
  * already flattened would leave a second emitter nothing to decide with.
  */
 export type Span =
-    | { readonly kind: 'text', readonly text: string }
-    | { readonly kind: 'code', readonly text: string }
-    | { readonly kind: 'strong', readonly spans: readonly Span[] }
-    | { readonly kind: 'em', readonly spans: readonly Span[] }
-    | { readonly kind: 'link', readonly label: readonly Span[], readonly address: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'code'; readonly text: string }
+  | { readonly kind: 'strong'; readonly spans: readonly Span[] }
+  | { readonly kind: 'em'; readonly spans: readonly Span[] }
+  | {
+      readonly kind: 'link';
+      readonly label: readonly Span[];
+      readonly address: string;
+    };
 
 /**
  * One list item: its blocks, and whether the source wrote it on one line.
@@ -127,8 +134,8 @@ export type Span =
  * exists to close.
  */
 export interface Item {
-    readonly tight: boolean
-    readonly blocks: readonly Block[]
+  readonly tight: boolean;
+  readonly blocks: readonly Block[];
 }
 
 /**
@@ -143,34 +150,45 @@ export interface Item {
  * which is what keeps a one-line item free of a paragraph's margins.
  */
 export type Block =
-    | { readonly kind: 'para', readonly spans: readonly Span[] }
-    | { readonly kind: 'heading', readonly level: number, readonly spans: readonly Span[] }
-    | { readonly kind: 'code', readonly text: string }
-    | { readonly kind: 'quote', readonly blocks: readonly Block[] }
-    | { readonly kind: 'rule' }
-    | { readonly kind: 'list', readonly ordered: false, readonly items: readonly Item[] }
-    | {
-        readonly kind: 'list', readonly ordered: true, readonly start: number,
-        readonly items: readonly Item[],
+  | { readonly kind: 'para'; readonly spans: readonly Span[] }
+  | {
+      readonly kind: 'heading';
+      readonly level: number;
+      readonly spans: readonly Span[];
     }
+  | { readonly kind: 'code'; readonly text: string }
+  | { readonly kind: 'quote'; readonly blocks: readonly Block[] }
+  | { readonly kind: 'rule' }
+  | {
+      readonly kind: 'list';
+      readonly ordered: false;
+      readonly items: readonly Item[];
+    }
+  | {
+      readonly kind: 'list';
+      readonly ordered: true;
+      readonly start: number;
+      readonly items: readonly Item[];
+    };
 
 /** ` ``` ` or `~~~`, with whatever info string followed it. */
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 /** `# ` through `###### `. The space is required, so `#1` is not a heading. */
-const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/
+const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
 /** Three or more of one mark, alone on the line. Checked before the bullets,
  *  because `* * *` is a rule and reads as a list item to the pattern below. */
-const RULE = /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$/
+const RULE =
+  /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$/;
 /** `> `, with the space optional so an empty quoted line still quotes. */
-const QUOTE = /^ {0,3}> ?(.*)$/
+const QUOTE = /^ {0,3}> ?(.*)$/;
 /** `- `, `* `, `+ `. The space is required, so a dash mid-sentence is a dash. */
-const BULLET = /^( {0,3})([-*+])[ \t]+(.*)$/
+const BULLET = /^( {0,3})([-*+])[ \t]+(.*)$/;
 /** `1. ` or `1) `. The value is kept, not necessarily the spelling: a list
  *  renumbered from 1 would be this console rewriting which step somebody was
  *  told to take. The digits round-trip through `Number` and `String`, so a
  *  leading zero is not -- `007.` starts at 7, which browsers render the same
  *  as `007` in a `start` attribute either way. */
-const ORDERED = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/
+const ORDERED = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/;
 
 /** One run of prose, as data. The grammar lives here and nothing else does. */
 /**
@@ -205,50 +223,52 @@ const ORDERED = /^( {0,3})(\d{1,9})[.)][ \t]+(.*)$/
  * the other, and it is this one's test group.
  */
 function pasteable(code: string): string {
-    return code
-        // Spaces that are not the space they look like.
-        .replace(/[\u00a0\u2007\u2009\u202f\u2060]/gu, ' ')
-        // A hyphen that is not the hyphen it looks like. `--color` written with
-        // these is a different flag and looks identical.
-        .replace(/\u2011/gu, '-')
-        // Characters that look like nothing and are not nothing.
-        .replace(/[\u200b\u200c\u200d\ufeff]/gu, '')
+  return (
+    code
+      // Spaces that are not the space they look like.
+      .replace(/[\u00a0\u2007\u2009\u202f\u2060]/gu, ' ')
+      // A hyphen that is not the hyphen it looks like. `--color` written with
+      // these is a different flag and looks identical.
+      .replace(/\u2011/gu, '-')
+      // Characters that look like nothing and are not nothing.
+      .replace(/(?:\u200b|\u200c|\u200d|\ufeff)/gu, '')
+  );
 }
 
 export function spansOf(text: string): Span[] {
-    const spans: Span[] = []
-    let at = 0
-    for (const found of text.matchAll(INLINE)) {
-        const start = found.index
-        if (start > at) {
-            spans.push({ kind: 'text', text: text.slice(at, start) })
-        }
-        if (found[2] !== undefined) {
-            spans.push({ kind: 'code', text: pasteable(found[2]) })
-        } else if (found[3] !== undefined) {
-            spans.push({ kind: 'strong', spans: spansOf(found[3]) })
-        } else if (found[4] !== undefined) {
-            spans.push({ kind: 'em', spans: spansOf(found[4]) })
-        } else {
-            spans.push({
-                kind: 'link',
-                label: spansOf(found[5] as string),
-                address: found[6] as string,
-            })
-        }
-        at = start + found[0].length
+  const spans: Span[] = [];
+  let at = 0;
+  for (const found of text.matchAll(INLINE)) {
+    const start = found.index;
+    if (start > at) {
+      spans.push({ kind: 'text', text: text.slice(at, start) });
     }
-    if (at < text.length) {
-        spans.push({ kind: 'text', text: text.slice(at) })
+    if (found[2] !== undefined) {
+      spans.push({ kind: 'code', text: pasteable(found[2]) });
+    } else if (found[3] !== undefined) {
+      spans.push({ kind: 'strong', spans: spansOf(found[3]) });
+    } else if (found[4] !== undefined) {
+      spans.push({ kind: 'em', spans: spansOf(found[4]) });
+    } else {
+      spans.push({
+        kind: 'link',
+        label: spansOf(found[5] as string),
+        address: found[6] as string,
+      });
     }
-    return spans
+    at = start + found[0].length;
+  }
+  if (at < text.length) {
+    spans.push({ kind: 'text', text: text.slice(at) });
+  }
+  return spans;
 }
 
 /** An element holding `text` verbatim, with no parse step of any kind. */
 function textNode(tag: string, text: string): HTMLElement {
-    const node = document.createElement(tag)
-    node.textContent = text
-    return node
+  const node = document.createElement(tag);
+  node.textContent = text;
+  return node;
 }
 
 /**
@@ -259,24 +279,24 @@ function textNode(tag: string, text: string): HTMLElement {
  * link, and this emitter has decided how a browser shows one.
  */
 function spansToDom(spans: readonly Span[]): Node[] {
-    const nodes: Node[] = []
-    for (const span of spans) {
-        if (span.kind === 'text') {
-            nodes.push(document.createTextNode(span.text))
-        } else if (span.kind === 'code') {
-            nodes.push(textNode('code', span.text))
-        } else if (span.kind === 'strong' || span.kind === 'em') {
-            const node = document.createElement(span.kind)
-            node.append(...spansToDom(span.spans))
-            nodes.push(node)
-        } else {
-            nodes.push(...spansToDom(span.label))
-            if (span.address !== '') {
-                nodes.push(document.createTextNode(` (${span.address})`))
-            }
-        }
+  const nodes: Node[] = [];
+  for (const span of spans) {
+    if (span.kind === 'text') {
+      nodes.push(document.createTextNode(span.text));
+    } else if (span.kind === 'code') {
+      nodes.push(textNode('code', span.text));
+    } else if (span.kind === 'strong' || span.kind === 'em') {
+      const node = document.createElement(span.kind);
+      node.append(...spansToDom(span.spans));
+      nodes.push(node);
+    } else {
+      nodes.push(...spansToDom(span.label));
+      if (span.address !== '') {
+        nodes.push(document.createTextNode(` (${span.address})`));
+      }
     }
-    return nodes
+  }
+  return nodes;
 }
 
 /**
@@ -289,49 +309,54 @@ function spansToDom(spans: readonly Span[]): Node[] {
  * truncated answer renders with a paragraph break through the middle of it.
  */
 function fenceEnd(lines: readonly string[], at: number): number | null {
-    const opened = (lines[at] as string).match(FENCE)
-    if (opened === null) {
-        return null
+  const opened = (lines[at] as string).match(FENCE);
+  if (opened === null) {
+    return null;
+  }
+  const marker = opened[1] as string;
+  for (let index = at + 1; index < lines.length; index += 1) {
+    const closing = (lines[index] as string).match(FENCE);
+    if (
+      closing !== null &&
+      (closing[1] as string)[0] === marker[0] &&
+      (closing[1] as string).length >= marker.length &&
+      (closing[2] as string).trim() === ''
+    ) {
+      return index;
     }
-    const marker = opened[1] as string
-    for (let index = at + 1; index < lines.length; index += 1) {
-        const closing = (lines[index] as string).match(FENCE)
-        if (closing !== null
-            && (closing[1] as string)[0] === marker[0]
-            && (closing[1] as string).length >= marker.length
-            && (closing[2] as string).trim() === '') {
-            return index
-        }
-    }
-    return null
+  }
+  return null;
 }
 
 /** Whether the line at `at` is the start of something other than more paragraph. */
 function opensBlock(lines: readonly string[], at: number): boolean {
-    const line = lines[at] as string
-    return line.trim() === ''
-        || RULE.test(line)
-        || HEADING.test(line)
-        || QUOTE.test(line)
-        || BULLET.test(line)
-        || ORDERED.test(line)
-        || fenceEnd(lines, at) !== null
+  const line = lines[at] as string;
+  return (
+    line.trim() === '' ||
+    RULE.test(line) ||
+    HEADING.test(line) ||
+    QUOTE.test(line) ||
+    BULLET.test(line) ||
+    ORDERED.test(line) ||
+    fenceEnd(lines, at) !== null
+  );
 }
 
 /** How far in an item's own content sits: its indent, its marker, and the space after. */
 function contentIndent(matched: RegExpMatchArray, line: string): number {
-    const marker = (matched[1] as string).length + (matched[2] as string).length
-    const after = line.slice(marker).length - line.slice(marker).trimStart().length
-    return marker + after
+  const marker = (matched[1] as string).length + (matched[2] as string).length;
+  const after =
+    line.slice(marker).length - line.slice(marker).trimStart().length;
+  return marker + after;
 }
 
 /** `line` with up to `depth` leading spaces taken off. */
 function dedent(line: string, depth: number): string {
-    let taken = 0
-    while (taken < depth && (line[taken] === ' ' || line[taken] === '\t')) {
-        taken += 1
-    }
-    return line.slice(taken)
+  let taken = 0;
+  while (taken < depth && (line[taken] === ' ' || line[taken] === '\t')) {
+    taken += 1;
+  }
+  return line.slice(taken);
 }
 
 /**
@@ -345,10 +370,13 @@ function dedent(line: string, depth: number): string {
  * a single paragraph is not the same source as a one-line item -- see `Item`.
  */
 function item(content: readonly string[]): Item {
-    if (content.length === 1) {
-        return { tight: true, blocks: [{ kind: 'para', spans: spansOf(content[0] as string) }] }
-    }
-    return { tight: false, blocks: blocksOf(content) }
+  if (content.length === 1) {
+    return {
+      tight: true,
+      blocks: [{ kind: 'para', spans: spansOf(content[0] as string) }],
+    };
+  }
+  return { tight: false, blocks: blocksOf(content) };
 }
 
 /**
@@ -359,130 +387,138 @@ function item(content: readonly string[]): Item {
  * followed by anything that is not indented and not another item ends the
  * list, which is what keeps the sentence after a list out of its last bullet.
  */
-function list(lines: readonly string[], at: number): { block: Block, next: number } {
-    const opened = (lines[at] as string).match(BULLET) ?? (lines[at] as string).match(ORDERED)
-    const numbered = (lines[at] as string).match(BULLET) === null
-    const items: Item[] = []
+function list(
+  lines: readonly string[],
+  at: number,
+): { block: Block; next: number } {
+  const opened =
+    (lines[at] as string).match(BULLET) ?? (lines[at] as string).match(ORDERED);
+  const numbered = (lines[at] as string).match(BULLET) === null;
+  const items: Item[] = [];
 
-    let content: string[] = [(opened as RegExpMatchArray)[3] as string]
-    let depth = contentIndent(opened as RegExpMatchArray, lines[at] as string)
-    let index = at + 1
-    let blank = false
+  let content: string[] = [(opened as RegExpMatchArray)[3] as string];
+  let depth = contentIndent(opened as RegExpMatchArray, lines[at] as string);
+  let index = at + 1;
+  let blank = false;
 
-    for (; index < lines.length; index += 1) {
-        const line = lines[index] as string
-        if (line.trim() === '') {
-            blank = true
-            continue
-        }
-        const next = numbered ? line.match(ORDERED) : line.match(BULLET)
-        const indented = line.length - line.trimStart().length >= depth
-        if (next !== null && !indented) {
-            items.push(item(content))
-            content = [next[3] as string]
-            depth = contentIndent(next, line)
-            blank = false
-            continue
-        }
-        if (!indented && blank) {
-            break
-        }
-        if (!indented && (BULLET.test(line) || ORDERED.test(line) || RULE.test(line))) {
-            // A bullet under a numbered list, or the other way about: a second
-            // list rather than a stray item in this one.
-            break
-        }
-        if (blank) {
-            content.push('')
-            blank = false
-        }
-        content.push(dedent(line, depth))
+  for (; index < lines.length; index += 1) {
+    const line = lines[index] as string;
+    if (line.trim() === '') {
+      blank = true;
+      continue;
     }
-    items.push(item(content))
-
-    return {
-        block: numbered
-            ? {
-                kind: 'list',
-                ordered: true,
-                start: Number((opened as RegExpMatchArray)[2]),
-                items,
-            }
-            : { kind: 'list', ordered: false, items },
-        next: index,
+    const next = numbered ? line.match(ORDERED) : line.match(BULLET);
+    const indented = line.length - line.trimStart().length >= depth;
+    if (next !== null && !indented) {
+      items.push(item(content));
+      content = [next[3] as string];
+      depth = contentIndent(next, line);
+      blank = false;
+      continue;
     }
+    if (!indented && blank) {
+      break;
+    }
+    if (
+      !indented &&
+      (BULLET.test(line) || ORDERED.test(line) || RULE.test(line))
+    ) {
+      // A bullet under a numbered list, or the other way about: a second
+      // list rather than a stray item in this one.
+      break;
+    }
+    if (blank) {
+      content.push('');
+      blank = false;
+    }
+    content.push(dedent(line, depth));
+  }
+  items.push(item(content));
+
+  return {
+    block: numbered
+      ? {
+          kind: 'list',
+          ordered: true,
+          start: Number((opened as RegExpMatchArray)[2]),
+          items,
+        }
+      : { kind: 'list', ordered: false, items },
+    next: index,
+  };
 }
 
 /** The lines, as the blocks they spell. */
 function blocksOf(lines: readonly string[]): Block[] {
-    const blocks: Block[] = []
-    let at = 0
+  const blocks: Block[] = [];
+  let at = 0;
 
-    while (at < lines.length) {
-        const line = lines[at] as string
-        if (line.trim() === '') {
-            at += 1
-            continue
-        }
-
-        const closes = fenceEnd(lines, at)
-        if (closes !== null) {
-            blocks.push({
-                kind: 'code', text: pasteable(lines.slice(at + 1, closes).join('\n')),
-            })
-            at = closes + 1
-            continue
-        }
-
-        if (RULE.test(line)) {
-            blocks.push({ kind: 'rule' })
-            at += 1
-            continue
-        }
-
-        const heading = line.match(HEADING)
-        if (heading !== null) {
-            const stripped = (heading[2] as string).replace(/[ \t]+#+[ \t]*$/, '')
-            blocks.push({
-                kind: 'heading',
-                level: (heading[1] as string).length,
-                spans: spansOf(stripped),
-            })
-            at += 1
-            continue
-        }
-
-        if (QUOTE.test(line)) {
-            const quoted: string[] = []
-            while (at < lines.length) {
-                const inside = (lines[at] as string).match(QUOTE)
-                if (inside === null) {
-                    break
-                }
-                quoted.push(inside[1] as string)
-                at += 1
-            }
-            blocks.push({ kind: 'quote', blocks: blocksOf(quoted) })
-            continue
-        }
-
-        if (BULLET.test(line) || ORDERED.test(line)) {
-            const built = list(lines, at)
-            blocks.push(built.block)
-            at = built.next
-            continue
-        }
-
-        const paragraph: string[] = [line]
-        at += 1
-        while (at < lines.length && !opensBlock(lines, at)) {
-            paragraph.push(lines[at] as string)
-            at += 1
-        }
-        const joined = paragraph.join('\n').replace(/\s+$/, '')
-        blocks.push({ kind: 'para', spans: spansOf(joined) })
+  while (at < lines.length) {
+    const line = lines[at] as string;
+    if (line.trim() === '') {
+      at += 1;
+      continue;
     }
-    return blocks
+
+    const closes = fenceEnd(lines, at);
+    if (closes !== null) {
+      blocks.push({
+        kind: 'code',
+        text: pasteable(lines.slice(at + 1, closes).join('\n')),
+      });
+      at = closes + 1;
+      continue;
+    }
+
+    if (RULE.test(line)) {
+      blocks.push({ kind: 'rule' });
+      at += 1;
+      continue;
+    }
+
+    const heading = line.match(HEADING);
+    if (heading !== null) {
+      const stripped = (heading[2] as string).replace(/[ \t]+#+[ \t]*$/, '');
+      blocks.push({
+        kind: 'heading',
+        level: (heading[1] as string).length,
+        spans: spansOf(stripped),
+      });
+      at += 1;
+      continue;
+    }
+
+    if (QUOTE.test(line)) {
+      const quoted: string[] = [];
+      while (at < lines.length) {
+        const inside = (lines[at] as string).match(QUOTE);
+        if (inside === null) {
+          break;
+        }
+        quoted.push(inside[1] as string);
+        at += 1;
+      }
+      blocks.push({ kind: 'quote', blocks: blocksOf(quoted) });
+      continue;
+    }
+
+    if (BULLET.test(line) || ORDERED.test(line)) {
+      const built = list(lines, at);
+      blocks.push(built.block);
+      at = built.next;
+      continue;
+    }
+
+    const paragraph: string[] = [line];
+    at += 1;
+    while (at < lines.length && !opensBlock(lines, at)) {
+      paragraph.push(lines[at] as string);
+      at += 1;
+    }
+    const joined = paragraph.join('\n').replace(/\s+$/, '');
+    blocks.push({ kind: 'para', spans: spansOf(joined) });
+  }
+  return blocks;
 }
 
 /**
@@ -494,48 +530,48 @@ function blocksOf(lines: readonly string[]): Block[] {
  * place rather than spread through a grammar.
  */
 export function toDom(blocks: readonly Block[]): DocumentFragment {
-    const fragment = document.createDocumentFragment()
-    for (const block of blocks) {
-        fragment.append(blockToDom(block))
-    }
-    return fragment
+  const fragment = document.createDocumentFragment();
+  for (const block of blocks) {
+    fragment.append(blockToDom(block));
+  }
+  return fragment;
 }
 
 function blockToDom(block: Block): HTMLElement {
-    switch (block.kind) {
-        case 'para':
-            return spanned('p', block.spans)
-        case 'heading':
-            // The clamp lives here and not in the grammar: the shell owns h1
-            // and the screens own h2, which is a fact about this page.
-            return spanned(`h${Math.min(6, block.level + 2)}`, block.spans)
-        case 'code':
-            return textNode('pre', block.text)
-        case 'rule':
-            return document.createElement('hr')
-        case 'quote': {
-            const node = document.createElement('blockquote')
-            node.append(toDom(block.blocks))
-            return node
-        }
-        case 'list': {
-            const node = document.createElement(block.ordered ? 'ol' : 'ul')
-            if (block.ordered) {
-                node.setAttribute('start', String(block.start))
-            }
-            for (const entry of block.items) {
-                node.append(itemToDom(entry))
-            }
-            return node
-        }
+  switch (block.kind) {
+    case 'para':
+      return spanned('p', block.spans);
+    case 'heading':
+      // The clamp lives here and not in the grammar: the shell owns h1
+      // and the screens own h2, which is a fact about this page.
+      return spanned(`h${Math.min(6, block.level + 2)}`, block.spans);
+    case 'code':
+      return textNode('pre', block.text);
+    case 'rule':
+      return document.createElement('hr');
+    case 'quote': {
+      const node = document.createElement('blockquote');
+      node.append(toDom(block.blocks));
+      return node;
     }
+    case 'list': {
+      const node = document.createElement(block.ordered ? 'ol' : 'ul');
+      if (block.ordered) {
+        node.setAttribute('start', String(block.start));
+      }
+      for (const entry of block.items) {
+        node.append(itemToDom(entry));
+      }
+      return node;
+    }
+  }
 }
 
 /** An element whose children are these spans. */
 function spanned(tag: string, spans: readonly Span[]): HTMLElement {
-    const node = document.createElement(tag)
-    node.append(...spansToDom(spans))
-    return node
+  const node = document.createElement(tag);
+  node.append(...spansToDom(spans));
+  return node;
 }
 
 /**
@@ -546,22 +582,22 @@ function spanned(tag: string, spans: readonly Span[]): HTMLElement {
  * comes from the source rather than from the block shape -- see `Item`.
  */
 function itemToDom(entry: Item): HTMLElement {
-    const node = document.createElement('li')
-    const only = entry.blocks.length === 1 ? entry.blocks[0] as Block : null
-    if (entry.tight && only !== null && only.kind === 'para') {
-        node.append(...spansToDom(only.spans))
-    } else {
-        node.append(toDom(entry.blocks))
-    }
-    return node
+  const node = document.createElement('li');
+  const only = entry.blocks.length === 1 ? (entry.blocks[0] as Block) : null;
+  if (entry.tight && only !== null && only.kind === 'para') {
+    node.append(...spansToDom(only.spans));
+  } else {
+    node.append(toDom(entry.blocks));
+  }
+  return node;
 }
 
 /** The text, as the blocks it spells. */
 export function parse(text: string): Block[] {
-    return blocksOf(text.split('\n'))
+  return blocksOf(text.split('\n'));
 }
 
 /** `text` as nodes, ready to append. Parse then emit, and nothing between. */
 export function markdown(text: string): DocumentFragment {
-    return toDom(parse(text))
+  return toDom(parse(text));
 }

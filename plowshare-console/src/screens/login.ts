@@ -1,6 +1,6 @@
-import { ApiError } from '../api'
-import { button, el, labelled, trouble } from './dom'
-import type { Screen, Transport } from './screen'
+import { ApiError } from '../api';
+import { button, el, labelled, trouble } from './dom';
+import type { Screen, Transport } from './screen';
 
 /**
  * The door itself: a handle, a password, and one sentence for a refusal.
@@ -72,27 +72,27 @@ import type { Screen, Transport } from './screen'
  */
 
 /** What this screen says about every refusal, and the only thing it says. */
-export const LOGIN_FAILED = 'Sign-in failed. Check the handle and password.'
+export const LOGIN_FAILED = 'Sign-in failed. Check the handle and password.';
 
 export interface LoginOptions {
-    /** Where the form is built. Its children are replaced. */
-    readonly root: HTMLElement
-    /** Called once a session exists, with the flag `login` read off the header. */
-    readonly onSignedIn: (mustChangePassword: boolean) => void
-    /** Unused by this screen today; carried for the shape every screen shares. */
-    readonly transport?: Transport
-    /**
-     * How the credentials reach the server, so a test can replace the one call
-     * that has to read a response header rather than a parsed body. Defaults
-     * to {@link login}. See this file's header for why `transport.post`
-     * cannot be used here.
-     *
-     * @returns whether the new session must still change its password
-     * @throws whatever the server refused with, or a transport failure -- this
-     *     screen shows {@link LOGIN_FAILED} for either, never the rejection's
-     *     own message
-     */
-    readonly login?: (handle: string, password: string) => Promise<boolean>
+  /** Where the form is built. Its children are replaced. */
+  readonly root: HTMLElement;
+  /** Called once a session exists, with the flag `login` read off the header. */
+  readonly onSignedIn: (mustChangePassword: boolean) => void;
+  /** Unused by this screen today; carried for the shape every screen shares. */
+  readonly transport?: Transport;
+  /**
+   * How the credentials reach the server, so a test can replace the one call
+   * that has to read a response header rather than a parsed body. Defaults
+   * to {@link login}. See this file's header for why `transport.post`
+   * cannot be used here.
+   *
+   * @returns whether the new session must still change its password
+   * @throws whatever the server refused with, or a transport failure -- this
+   *     screen shows {@link LOGIN_FAILED} for either, never the rejection's
+   *     own message
+   */
+  readonly login?: (handle: string, password: string) => Promise<boolean>;
 }
 
 /**
@@ -105,96 +105,100 @@ export interface LoginOptions {
  * the 204 this gets back on success in any case.
  */
 async function login(handle: string, password: string): Promise<boolean> {
-    const response = await fetch('/v1/auth/login', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handle, password }),
-    })
-    if (!response.ok) {
-        // Deliberately not this server's own sentence, if it ever sent one:
-        // `AuthController.login` answers a refused attempt with an empty
-        // body today, but even a future sentence must not reach this screen
-        // -- see this file's header on why every refusal says one thing.
-        throw new ApiError(LOGIN_FAILED, response.status)
-    }
-    return response.headers.get('X-Plowshare-Must-Change-Password') === 'true'
+  const response = await fetch('/v1/auth/login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handle, password }),
+  });
+  if (!response.ok) {
+    // Deliberately not this server's own sentence, if it ever sent one:
+    // `AuthController.login` answers a refused attempt with an empty
+    // body today, but even a future sentence must not reach this screen
+    // -- see this file's header on why every refusal says one thing.
+    throw new ApiError(LOGIN_FAILED, response.status);
+  }
+  return response.headers.get('X-Plowshare-Must-Change-Password') === 'true';
 }
 
 export function createLogin(options: LoginOptions): Screen {
-    const submit = options.login ?? login
+  const submit = options.login ?? login;
 
-    const shell = el('section', 'screen login')
-    const head = el('header', 'screen-head')
-    const title = el('h2', 'screen-title', 'sign in')
-    head.append(title)
+  const shell = el('section', 'screen login');
+  const head = el('header', 'screen-head');
+  const title = el('h2', 'screen-title', 'sign in');
+  head.append(title);
 
-    const body = el('div', 'login-form')
-    body.dataset['login'] = ''
+  const body = el('div', 'login-form');
+  body.dataset['login'] = '';
 
-    const handleField = document.createElement('input')
-    handleField.type = 'text'
-    handleField.autocomplete = 'username'
-    handleField.dataset['input'] = 'handle'
+  const handleField = document.createElement('input');
+  handleField.type = 'text';
+  handleField.autocomplete = 'username';
+  handleField.dataset['input'] = 'handle';
 
-    const passwordField = document.createElement('input')
-    passwordField.type = 'password'
-    passwordField.autocomplete = 'current-password'
-    passwordField.dataset['input'] = 'password'
+  const passwordField = document.createElement('input');
+  passwordField.type = 'password';
+  passwordField.autocomplete = 'current-password';
+  passwordField.dataset['input'] = 'password';
 
-    const signIn = button('submit', 'sign in')
+  const signIn = button('submit', 'sign in');
 
-    body.append(labelled('handle', handleField), labelled('password', passwordField), signIn)
-    shell.append(head, body)
-    options.root.replaceChildren(shell)
+  body.append(
+    labelled('handle', handleField),
+    labelled('password', passwordField),
+    signIn,
+  );
+  shell.append(head, body);
+  options.root.replaceChildren(shell);
 
-    let problem: HTMLElement | null = null
+  let problem: HTMLElement | null = null;
 
-    function clearProblem(): void {
-        if (problem !== null) {
-            problem.remove()
-            problem = null
-        }
+  function clearProblem(): void {
+    if (problem !== null) {
+      problem.remove();
+      problem = null;
     }
+  }
 
-    function attempt(): void {
-        if (signIn.disabled) {
-            return
-        }
-        clearProblem()
-        signIn.disabled = true
-        const handle = handleField.value
-        const password = passwordField.value
-        void submit(handle, password)
-            .then((mustChangePassword) => {
-                passwordField.value = ''
-                options.onSignedIn(mustChangePassword)
-            })
-            .catch(() => {
-                passwordField.value = ''
-                signIn.disabled = false
-                problem = trouble(LOGIN_FAILED)
-                body.append(problem)
-            })
+  function attempt(): void {
+    if (signIn.disabled) {
+      return;
     }
+    clearProblem();
+    signIn.disabled = true;
+    const handle = handleField.value;
+    const password = passwordField.value;
+    void submit(handle, password)
+      .then((mustChangePassword) => {
+        passwordField.value = '';
+        options.onSignedIn(mustChangePassword);
+      })
+      .catch(() => {
+        passwordField.value = '';
+        signIn.disabled = false;
+        problem = trouble(LOGIN_FAILED);
+        body.append(problem);
+      });
+  }
 
-    signIn.addEventListener('click', () => attempt())
-    for (const field of [handleField, passwordField]) {
-        field.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                attempt()
-            }
-        })
-    }
+  signIn.addEventListener('click', () => attempt());
+  for (const field of [handleField, passwordField]) {
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        attempt();
+      }
+    });
+  }
 
-    return {
-        element: () => shell,
-        async load(): Promise<void> {
-            // Nothing to read on mount: the form has no state the server owns
-            // until somebody submits it.
-        },
-        destroy(): void {
-            // Nothing running: no socket, no timer, no in-flight poll.
-        },
-    }
+  return {
+    element: () => shell,
+    async load(): Promise<void> {
+      // Nothing to read on mount: the form has no state the server owns
+      // until somebody submits it.
+    },
+    destroy(): void {
+      // Nothing running: no socket, no timer, no in-flight poll.
+    },
+  };
 }

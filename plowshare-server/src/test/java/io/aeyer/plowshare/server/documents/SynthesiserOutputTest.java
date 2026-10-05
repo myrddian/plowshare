@@ -109,7 +109,7 @@ class SynthesiserOutputTest {
   }
 
   @Test
-  void an_entry_whose_paragraph_is_not_a_uuid_is_dropped_and_the_rest_survive() {
+  void an_invalid_paragraph_refuses_the_whole_block_and_preserves_prose() {
     SynthesiserOutput read =
         SynthesiserOutput.of(
             """
@@ -124,9 +124,9 @@ class SynthesiserOutputTest {
                 ]}
                 """);
 
-    assertEquals(
-        List.of(new SynthesiserOutput.Grounded(PARAGRAPH, "the second one here")),
-        read.grounding());
+    assertEquals("Two claims.", read.response());
+    assertEquals(List.of(), read.grounding());
+    assertTrue(read.groundingWasUnreadable().isPresent());
   }
 
   /**
@@ -134,9 +134,9 @@ class SynthesiserOutputTest {
    *
    * <p>The check {@code Deliberation} runs is a substring, so what a quotation buys is that finding
    * it where it says it is counts as evidence. A blank one is in every paragraph in the corpus and
-   * {@code "."} very nearly is, so both would validate against whatever they named. Dropped and not
-   * failed: an entry this short is not a wrong attribution, it is not an attribution, and reporting
-   * it as a failure would fire the loudest signal this system has at a model that was terse.
+   * {@code "."} very nearly is, so both would validate against whatever they named. The block is
+   * refused rather than silently dropping invalid entries and treating its remaining evidence as
+   * complete.
    */
   @Test
   void a_quote_too_short_to_be_evidence_is_not_an_attribution() {
@@ -155,6 +155,7 @@ class SynthesiserOutputTest {
                   .formatted(quote));
 
       assertEquals(List.of(), read.grounding(), quote);
+      assertTrue(read.groundingWasUnreadable().isPresent(), quote);
     }
   }
 
@@ -238,6 +239,7 @@ class SynthesiserOutputTest {
                 """);
 
     assertEquals(List.of(), read.rejected());
+    assertTrue(read.groundingWasUnreadable().isPresent());
   }
 
   /**
@@ -260,6 +262,7 @@ class SynthesiserOutputTest {
                 """);
 
     assertEquals(List.of(), read.rejected());
+    assertTrue(read.groundingWasUnreadable().isPresent());
   }
 
   /**
@@ -280,7 +283,8 @@ class SynthesiserOutputTest {
                  "incorporated_critic_challenges": ["the first one", 2]}
                 """);
 
-    assertEquals(List.of(2), read.incorporated());
+    assertEquals(List.of(), read.incorporated());
+    assertTrue(read.groundingWasUnreadable().isPresent());
   }
 
   /**
@@ -294,5 +298,41 @@ class SynthesiserOutputTest {
 
     assertEquals(List.of(), read.incorporated());
     assertEquals(List.of(), read.rejected());
+  }
+
+  @Test
+  void all_declared_grounding_fields_are_checked_before_any_claim_is_used() {
+    for (String block :
+        List.of(
+            "{\"grounded_in\": null}",
+            "{\"grounded_in\": {}, \"confidence\": \"high\"}",
+            "{\"confidence\": 7}",
+            "{\"confidence\": \"certain\"}",
+            "{\"refusals\": [{\"sub_claim\": \"claim\", \"reason\": 7}]}",
+            "{\"incorporated_critic_challenges\": [0]}",
+            "{\"incorporated_critic_challenges\": [2147483648]}",
+            "{\"incorporated_critic_challenges\": [1,1]}",
+            "{\"incorporated_critic_challenges\": [1], \"rejected_critic_challenges\": [{\"challenge\": 1, \"reason\": \"because\"}]}",
+            "{\"objections_addressed\": [1.0]}",
+            "{\"unexpected\": true}")) {
+      SynthesiserOutput result =
+          SynthesiserOutput.of("RESPONSE: The paid answer.\nGROUNDING: " + block);
+      assertEquals("The paid answer.", result.response(), block);
+      assertTrue(result.groundingWasUnreadable().isPresent(), block);
+      assertTrue(result.grounding().isEmpty(), block);
+      assertTrue(result.incorporated().isEmpty(), block);
+      assertTrue(result.rejected().isEmpty(), block);
+    }
+  }
+
+  @Test
+  void refusals_and_confidence_are_immutable_typed_values() {
+    SynthesiserOutput result =
+        SynthesiserOutput.of(
+            "GROUNDING: {\"refusals\": [{\"sub_claim\": \"claim\", \"reason\": \"not in the source\"}], \"confidence\": \"low\"}");
+    assertEquals(
+        List.of(new SynthesiserOutput.Refusal("claim", "not in the source")), result.refusals());
+    assertEquals("low", result.confidence().orElseThrow());
+    assertTrue(result.groundingWasUnreadable().isEmpty());
   }
 }

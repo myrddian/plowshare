@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Found;
@@ -14,6 +12,8 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Needle;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,12 +41,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>{@code WindowAgreementTest}'s reason, at the other tool. Every javadoc in this slice says that
  * {@link Needle} is in {@code plowshare-protocol} so that a remote search and a local one cannot
  * disagree — {@code FileProvider.grep} says both implementations match with it and neither writes
- * the comparison out, {@code LocalProvider} and {@code ClientEnforcer} each say it about
- * themselves. None of that is a test. Each half is measured against {@code Needle} inside its own
- * module, and the two could each be right about {@code Needle} and still be reached through code
- * that walked, skipped or capped differently before {@code find} ever ran — <b>which is precisely
- * where the two halves have their own code</b>, since reading a file and choosing which files to
- * read is what an implementation keeps.
+ * the comparison out, {@code LocalProvider} and {@code NodeFiles} each say it about themselves.
+ * None of that is a test. Each half is measured against {@code Needle} inside its own module, and
+ * the two could each be right about {@code Needle} and still be reached through code that walked,
+ * skipped or capped differently before {@code find} ever ran — <b>which is precisely where the two
+ * halves have their own code</b>, since reading a file and choosing which files to read is what an
+ * implementation keeps.
  *
  * <h2>The fixtures have to be able to express a disagreement</h2>
  *
@@ -81,11 +81,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <h2>What this file deliberately does not assert</h2>
  *
  * <p><b>That either half can read a file the other cannot.</b> {@code LocalProvider.MAX_FILE_BYTES}
- * and {@code ClientEnforcer.MAX_FILE_BYTES} are each machine's own by design — a laptop and a
- * server may spend different amounts of their own memory — so a tree holding a file between two
- * different ceilings is a tree the two would legitimately search differently. That is a property of
- * the architecture rather than a defect, and a fixture asserting agreement across it would be
- * asserting the opposite of what the design says.
+ * and {@code NodeFiles.MAX_FILE_BYTES} are each machine's own by design — a laptop and a server may
+ * spend different amounts of their own memory — so a tree holding a file between two different
+ * ceilings is a tree the two would legitimately search differently. That is a property of the
+ * architecture rather than a defect, and a fixture asserting agreement across it would be asserting
+ * the opposite of what the design says.
  *
  * <h2>Why there is a database in a test about matching</h2>
  *
@@ -140,7 +140,7 @@ class GrepAgreementTest {
   private Path binary;
 
   private LocalProvider local;
-  private ClientEnforcer client;
+  private NodeFiles client;
 
   @BeforeAll
   static void migrate() {
@@ -198,9 +198,9 @@ class GrepAgreementTest {
     local =
         new LocalProvider(store, Home.of(PROJECT), List.of(new Grant(Scope.WORKSPACE, Mode.READ)));
 
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    client = new ClientEnforcer(workspace);
+    client = new NodeFiles(workspace);
   }
 
   /**

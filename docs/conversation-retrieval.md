@@ -28,7 +28,7 @@ and labels its actual tier. `--json` preserves the server result. Exit statuses:
 2 invalid command, 3 successful but incomplete retrieval.
 
 Search modes are lexical, semantic, and hybrid. New commands and the internal
-tool default to hybrid. HTTP, Java CLI/MCP and WS requests omitting `mode` keep
+tool default to hybrid. HTTP and WS requests omitting `mode` keep
 the original lexical matching, exact totals, scope, reach counts and response
 shape. Explicit lexical mode adds retrieval metadata. Search never starts
 model-funded navigation automatically.

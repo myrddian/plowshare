@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
@@ -266,7 +265,7 @@ public class OpenAiCompatible implements LlmProvider, WebSocketOpener {
    *
    * @param path an absolute path on the host, beginning with {@code /}
    */
-  public JsonNode probe(String path) {
+  public LoadedModels probe(String path) {
     return transport.metadata(path);
   }
 

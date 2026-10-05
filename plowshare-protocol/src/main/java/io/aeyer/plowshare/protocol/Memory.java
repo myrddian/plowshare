@@ -51,7 +51,7 @@ public record Memory(
     Home home) {
 
   /**
-   * Rejects the nulls that have no meaning, and only those.
+   * Validates required values, bounded narrative fields and nonnegative usage.
    *
    * <p>{@code lastUsed}, {@code supersedes}, {@code supersededBy} and {@code invalidation} are
    * legitimately absent on a memory that has never been recalled, replaced or invalidated. The rest
@@ -60,12 +60,15 @@ public record Memory(
    * {@code null} state would make the four-state lifecycle five.
    */
   public Memory {
-    Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(summary, "summary");
-    Objects.requireNonNull(scope, "scope");
+    id = ContractValues.identity(id, "id", 1024);
+    summary = ContractValues.text(summary, "summary", 32768, true);
+    scope = ContractValues.text(scope, "scope", 32768, true);
+    body = ContractValues.text(body, "body", 1048576, true);
+    supersedes = ContractValues.optionalIdentity(supersedes, "supersedes", 1024);
+    supersededBy = ContractValues.optionalIdentity(supersededBy, "supersededBy", 1024);
+    if (uses < 0) throw new IllegalArgumentException("uses must be nonnegative");
     Objects.requireNonNull(formed, "formed");
     Objects.requireNonNull(state, "state");
-    Objects.requireNonNull(body, "body");
     Objects.requireNonNull(home, "home");
   }
 

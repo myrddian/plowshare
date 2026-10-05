@@ -194,15 +194,12 @@ class MemoryFramesTest {
   }
 
   /**
-   * A malformed proposal is the same 422 in the same words, and is refused before the scribe is
-   * asked on either surface.
+   * A malformed proposal fails DTO binding on both surfaces before the scribe is asked.
    *
-   * <p>The ordering is the point rather than the status: judging first would cost an embedding call
-   * and a model call before answering 422, and a frame handler that called the service in the other
-   * order would spend that bill while agreeing about the eventual answer.
+   * <p>Neither malformed request may incur an embedding or model call.
    */
   @Test
-  void a_malformed_proposal_is_the_same_422_before_the_scribe_is_asked() throws Exception {
+  void a_malformed_proposal_is_refused_at_binding_before_the_scribe_is_asked() throws Exception {
     String body =
         """
                 {"proposal": {"summary": "one line\\nand a second",
@@ -214,8 +211,10 @@ class MemoryFramesTest {
     MockHttpServletResponse http = posted("/v1/memories", body);
     Outcome outcome = route(FrameTypes.MEMORY_WRITE, body);
 
-    assertEquals(Code.VALIDATION_FAILED, outcome.code());
-    FrameParity.assertSameRefusal(http, outcome);
+    assertEquals(Code.BAD_REQUEST, outcome.code());
+    assertEquals(400, http.getStatus());
+    // Spring reports a generic binding refusal; WS also identifies the DTO's failed field.
+    assertTrue(outcome.said().contains("summary"));
     verify(scribe, never()).judge(any(), any());
   }
 

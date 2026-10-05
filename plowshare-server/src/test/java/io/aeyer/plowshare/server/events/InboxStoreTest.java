@@ -47,7 +47,7 @@ class InboxStoreTest {
             + " entries, turns, conversations CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('sam', 'h')");
-    store = new InboxStore(jdbc);
+    store = new JdbcInboxStore(jdbc);
   }
 
   @Test

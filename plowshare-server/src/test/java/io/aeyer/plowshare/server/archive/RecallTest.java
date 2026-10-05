@@ -101,7 +101,7 @@ class RecallTest {
     archive =
         new Archive(
             store,
-            new ReasonLog(jdbc),
+            new JdbcReasonLog(jdbc),
             embeddings,
             MAX_BODY_CHARS,
             INDEX_THRESHOLD,

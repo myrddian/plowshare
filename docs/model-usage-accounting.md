@@ -8,6 +8,26 @@ Source deletion does not cascade into accounting. The original account can inspe
 
 ## Accounting and prices
 
+Internal document processing uses the built-in **SYSTEM** identity for summaries,
+automatic tagging, tag grouping and embeddings. SYSTEM is an internal principal:
+it has no password, bearer token, login, administrator role or project membership.
+The original admission owner still controls source access, processing allowance,
+hooks, cancellation and visibility of the logs. Usage records distinguish SYSTEM
+from that owner; user-submitted agent work and its delegations retain user attribution.
+
+The server freezes the processing root before starting its model workers and
+carries that snapshot into each fixed child stage. A harness-created child does
+not need an invented parent model tool call. Document workers cannot acquire
+tools, delegation targets, filesystem grants, skills, orchestration launches,
+board capabilities or reviewers from configuration. They only judge the supplied
+input; the fenced lifecycle owns persistence and the next step. SYSTEM never
+skips an authorization check or promotes a user account.
+
+Previously frozen user-owned processing logs retain their attribution. Future
+processing switches atomically to a fresh source-bound log with the same admission
+owner and remaining allowance; existing logs and paid responses remain retained.
+No account provisioning or schema migration is required.
+
 Calls and upstream attempts are different units. A retry adds an attempt to the same call; an earlier attempt with missing usage remains unknown after a successful retry. Project totals sum atomic attempts once. A conversation/run/orchestration subtree uses captured ancestor IDs rather than adding already inclusive reports.
 
 Input, output, provider total, cache read/write and reasoning observations remain independently nullable. Cache and reasoning are subsets, not extra tokens to add to the provider total. Reports return known subtotals, known-field counts and incomplete-attempt counts. All cumulative quantities and monetary amounts are decimal strings. Money is separated by currency, and estimates are not invoices.
@@ -155,7 +175,7 @@ The dated presets, checked **2026-10-02**, are:
 
 Select **Custom rates / Azure deployment** for regional, negotiated or other reference rates. Only input and output rates are used: no cache discounts, request tiers, batch discounts, tool fees, taxes, currency conversion or automatic future repricing. The selected default/custom reference is saved in this client's local preferences, separately from server configuration and usage. Changing it sends no model call, price mutation or usage read. Presets are dated comparisons, not a billing quote.
 
-The TypeScript CLI accepts `usage models {"scope":"subtree"}` and other typed one-shot usage frames; subscriptions require a persistent view. The lightweight TUI supports `/usage` for the current conversation and `/usage models --days 30 --reference openai-gpt-4.1`; `bin/plowshare-talk usage project research --direct --json` provides a one-shot report outside the chat. `usage count CONVERSATION AGENT` is separate context counting. Java callers use `HttpServerClient.usage(type, filter)` or hold `usageSocket()` and `watch(type, filter, callback)`; close views to unsubscribe and call `reconnect()` to reissue reads/subscriptions after transport loss. Java callbacks are coalesced away from the socket reader so callbacks may issue further reads.
+The TypeScript CLI accepts `usage models {"scope":"subtree"}` and other typed one-shot usage frames; subscriptions require a persistent view. The lightweight TUI supports `/usage` for the current conversation and `/usage models --days 30 --reference openai-gpt-4.1`; `bin/plowshare-talk usage project research --direct --json` provides a one-shot report outside the chat. `usage count CONVERSATION AGENT` is separate context counting. Java callers use the public SDK’s `UsageClient` with validated `Usage.Filter` and typed reports/subscriptions.
 
 Views replace complete durable snapshots, ignore old revisions/other subscriptions and check selected filters. They retain marked stale measurements on same-scope outages, clear data when changing account/scope, and create new socket-owned subscriptions after reconnect. Audit pages expose active IDs and snapshot watermark rather than adding speculative streaming counters. Every usage/count read and push uses the authenticated WebSocket; there is no metrics REST route or fallback, and no new fleet-access model tool.
 

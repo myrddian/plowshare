@@ -55,6 +55,14 @@ class OutgoingEndToEndTest {
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
+    registry.add("server.address", () -> "127.0.0.1");
+    registry.add(
+        "plowshare.projects.workspace-directory",
+        () ->
+            java.nio.file.Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "plowshare-test-workspaces-" + java.util.UUID.randomUUID())
+                .toString());
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -78,8 +86,8 @@ class OutgoingEndToEndTest {
     return new Outgoing.Send(UUID.randomUUID(), "fixture", nullMessage(), null, null);
   }
 
-  private static Map<String, Object> nullMessage() {
-    return Map.of("parts", List.of(Map.of("text", "Do opaque remote work")));
+  private static io.aeyer.plowshare.protocol.ExternalMessage nullMessage() {
+    return io.aeyer.plowshare.protocol.ExternalMessage.text("Do opaque remote work");
   }
 
   private static Map<String, Object> card(MockWebServer peer) {
@@ -179,23 +187,21 @@ class OutgoingEndToEndTest {
       var request = send();
       var receipt = outgoing.send(request);
       assertEquals(receipt.id(), outgoing.send(request).id());
-      assertEquals(
-          "BAD_REQUEST",
-          sdk.request(
-                  "outgoing.send",
-                  Map.of(
-                      "requestId",
+      assertThrows(
+          java.io.IOException.class,
+          () ->
+              outgoing.send(
+                  new Outgoing.Send(
                       request.requestId(),
-                      "peer",
                       "fixture",
-                      "message",
-                      Map.of("parts", List.of(Map.of("text", "different")))))
-              .code());
+                      io.aeyer.plowshare.protocol.ExternalMessage.text("different"),
+                      null,
+                      null)));
       try (var client = new A2aClient(peer.url("/rpc").toString(), null, Duration.ofSeconds(3))) {
         assertTrue(new Adapter(outgoing, null, Map.of("fixture", client)).tick());
         assertEquals("WORKING", outgoing.status(receipt.id()).state());
         assertEquals(
-            "Fixture research", outgoing.peers(null).details().getFirst().agentCard().get("name"));
+            "Fixture research", outgoing.peers(null).details().getFirst().agentCard().name());
         assertEquals(
             "research",
             JSON.valueToTree(outgoing.peers(null))
@@ -261,16 +267,25 @@ class OutgoingEndToEndTest {
         var other = sdk("card-other");
         var client = new A2aClient(peer.url("/rpc").toString(), null, Duration.ofSeconds(2))) {
       var outgoing = new OutgoingClient(sdk);
-      outgoing.advertise(null, List.of("fixture"), Map.of("fixture", card(peer)));
+      outgoing.advertise(
+          null,
+          List.of("fixture"),
+          Map.of(
+              "fixture",
+              io.aeyer.plowshare.sdk.AgentCardCodec.read(JSON.writeValueAsString(card(peer)))));
       assertEquals(
-          "Fixture research", outgoing.peers(null).details().getFirst().agentCard().get("name"));
+          "Fixture research", outgoing.peers(null).details().getFirst().agentCard().name());
       assertTrue(new OutgoingClient(other).peers(null).details().isEmpty());
-      assertEquals(
-          "BAD_REQUEST",
-          sdk.request(
-                  "outgoing.advertise",
-                  Map.of("peers", List.of("fixture"), "agentCards", Map.of("other", card(peer))))
-              .code());
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              outgoing.advertise(
+                  null,
+                  List.of("fixture"),
+                  Map.of(
+                      "other",
+                      io.aeyer.plowshare.sdk.AgentCardCodec.read(
+                          JSON.writeValueAsString(card(peer))))));
       var receipt = outgoing.send(send());
       peer.enqueue(new MockResponse().setBody("{}"));
       assertThrows(
@@ -311,13 +326,20 @@ class OutgoingEndToEndTest {
               "WORKING",
               "remote",
               "context",
-              Map.of("task", Map.of("id", "remote")),
+              new io.aeyer.plowshare.protocol.ExternalResult.TaskResult(
+                  new io.aeyer.plowshare.protocol.ExternalResult.Task(
+                      "remote",
+                      "context",
+                      new io.aeyer.plowshare.protocol.ExternalResult.Status(
+                          "TASK_STATE_WORKING", null, null),
+                      null,
+                      null,
+                      null)),
               null);
       assertThrows(java.io.IOException.class, () -> notClaiming.report(observation));
       assertEquals("WORKING", claiming.report(observation).state());
       assertThrows(java.io.IOException.class, () -> claiming.report(observation));
-      assertEquals(
-          "BAD_REQUEST", other.request("outgoing.status", Map.of("id", receipt.id())).code());
+      assertThrows(java.io.IOException.class, () -> new OutgoingClient(other).status(receipt.id()));
       first.cancel(receipt.id());
       expire(receipt.id());
       var cancel = second.claim(null, List.of("fixture"));

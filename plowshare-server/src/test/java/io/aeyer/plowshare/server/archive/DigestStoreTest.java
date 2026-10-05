@@ -63,7 +63,13 @@ class DigestStoreTest {
     when(embeddings.embed(anyString())).thenReturn(new float[768]);
     archive =
         new Archive(
-            new MemoryStore(jdbc), new ReasonLog(jdbc), embeddings, transactions, 8000, 200, 30);
+            new MemoryStore(jdbc),
+            new JdbcReasonLog(jdbc),
+            embeddings,
+            transactions,
+            8000,
+            200,
+            30);
     model = mock(DigestModel.class);
     operation = mock(DigestModel.Operation.class);
     when(model.operation(anyString(), any(), any())).thenReturn(operation);
@@ -92,7 +98,7 @@ class DigestStoreTest {
   }
 
   Navigator navigator() {
-    return new Navigator(digests, archive, entries, new ReasonLog(jdbc), model);
+    return new Navigator(digests, archive, entries, new JdbcReasonLog(jdbc), model);
   }
 
   @Test

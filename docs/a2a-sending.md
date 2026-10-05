@@ -90,7 +90,7 @@ and the HTTP authentication exception. Application work still uses WebSocket.
 Start it in a separate terminal or under your process supervisor:
 
 ```sh
-plowshare-a2a/build/install/plowshare-a2a/bin/plowshare-a2a \
+integrations/a2a/build/install/plowshare-a2a/bin/plowshare-a2a \
   /absolute/private/path/a2a.json
 ```
 
@@ -110,8 +110,10 @@ the default cache duration is five minutes. Expired cards are revalidated using
 ETag or Last-Modified when supplied. A failed refresh stops advertisement and
 dispatch instead of silently using an expired card. Existing advertisements then
 expire under Plowshare's two-minute lease. Cards are bounded to 64 KiB each and
-512 KiB per advertisement. HTTPS validates the transport; card signatures are
-retained but not cryptographically verified by this implementation.
+512 KiB per advertisement. HTTPS validates the transport. The card codec supports
+the declared DTO fields; signatures and custom extension parameters require their
+own explicit contracts and are currently refused. It performs no card-signature
+verification.
 
 ## 2. Configure the Plowshare agent
 
@@ -273,7 +275,8 @@ to available adapter capacity and remote response time.
 
 For task responses, retained output is in `result.task`, including any
 `result.task.artifacts`, history and status message. For a direct agent reply it is
-in `result.message`; no remote task is invented. These are opaque peer reports.
+in `result.message`; no remote task is invented. These are validated DTOs containing
+untrusted peer observations, not evidence that Plowshare performed the remote work.
 Plowshare does not download referenced artifact URLs or verify remote filesystem
 access, artifact availability, model usage or cost.
 
@@ -316,7 +319,6 @@ The adapter uses [A2A 1.0's part shape](https://a2a-protocol.org/v1.0.0/specific
 {
   "parts": [
     { "text": "Review this report using the supplied criteria." },
-    { "data": { "criteria": ["accuracy", "coverage"] }, "mediaType": "application/json" },
     { "url": "https://files.example.invalid/report.pdf", "filename": "report.pdf", "mediaType": "application/pdf" },
     { "raw": "SGVsbG8K", "filename": "note.txt", "mediaType": "text/plain" }
   ]
@@ -326,12 +328,21 @@ The adapter uses [A2A 1.0's part shape](https://a2a-protocol.org/v1.0.0/specific
 Use content types the remote agent accepts. A local path is not uploaded by placing
 it in a part. A URL must be usable by the remote agent under its own access rules;
 the adapter does not forward Plowshare credentials to artifact hosts. Inline bytes
-count toward the 256 KiB outgoing-message limit. Message and part metadata remain
-JSON data; they do not grant local tool, filesystem or skill access.
+count toward the 256 KiB outgoing-message limit. Requests and observations are
+validated DTOs before application logic or persistence. Generic JSON object parts
+are refused. Structured `data` currently supports the explicit
+`plowshare-integration/1` request contract (binding, operation and validated
+arguments); adding another family requires a shared DTO and boundary codec.
+
+Message/task/artifact metadata accepts only `plowshareCommand`, `plowshareEnding`,
+`plowshareGenerated` and `plowshareFinal`. Parts have no metadata field. Unknown
+fields, malformed values and unregistered result families are refused. Remote
+metadata grants no local tool, filesystem or skill access. A refused remote
+observation preserves delivery uncertainty and does not replay the initial send.
 
 ## Send from the Node SDK
 
-Use the [Node SDK](../plowshare-client-node/README.md) in a project where the local
+Use the [Node SDK](../sdk/node/README.md) in a project where the local
 SDK packages are installed. Supply a valid token yourself. Retain the UUID and
 payload durably before calling `sendOutgoing`:
 
@@ -360,7 +371,7 @@ try {
 ```
 
 The Java SDK offers the typed `OutgoingClient`; see the
-[adapter example](../plowshare-a2a/README.md#send-and-observe).
+[adapter example](../integrations/a2a/README.md#send-and-observe).
 Python, C# and Go can call the same `outgoing.send`, `outgoing.status`,
 `outgoing.cancel` and `outgoing.peers` operations through their generic SDKs.
 See [SDK packages and installation](sdks.md). None of these SDK calls removes

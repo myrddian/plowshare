@@ -24,7 +24,7 @@ import java.util.UUID;
  * text has no other way to tell the renderer's words from the document's, and JSON already draws
  * that line — a key is the server's and a string value is whatever was put in it. So no quoting is
  * applied here, and the duty moves out to whoever renders this into prose. Every surface in {@code
- * plowshare-client} that prints one of these indents it, for exactly the reason that rule gives.
+ * external clients} that prints one of these indents it, for exactly the reason that rule gives.
  *
  * @param chunkId what matched. <b>Deliberately not a citation</b>: a chunk is an artefact of the
  *     chunker and a re-ingest may not produce the same one, which is why {@link #paragraphId} is

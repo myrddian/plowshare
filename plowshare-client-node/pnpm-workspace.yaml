@@ -1,4 +1,0 @@
-packages:
-  - '.'
-overrides:
-  plowshare-client-ts: link:../plowshare-client-ts

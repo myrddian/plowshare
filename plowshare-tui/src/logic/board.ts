@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/board'
+export * from 'plowshare-client-ts/operations/board';

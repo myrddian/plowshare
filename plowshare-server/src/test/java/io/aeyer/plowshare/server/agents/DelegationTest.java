@@ -228,7 +228,7 @@ class DelegationTest {
 
     Probe(String name, Function<String, String> behaviour) {
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               name, "a probe called " + name, Map.of("type", "object", "properties", Map.of()));
       this.behaviour = behaviour;
     }
@@ -2191,7 +2191,7 @@ class DelegationTest {
         description.indexOf("- frugal") < description.indexOf("- helper")
             && description.indexOf("- helper") < description.indexOf("- middle"),
         description);
-    Object properties = tool.schema().parameters().get("properties");
+    Object properties = tool.schema().parameters().properties();
     assertTrue(
         properties instanceof Map<?, ?> map
             && map.keySet().equals(Set.of("agent", "task", "images")),
@@ -2200,7 +2200,7 @@ class DelegationTest {
     // holding no picture at all: a schema that appeared and disappeared with
     // an attachment would be a tool no model could learn, and
     // JobRuntime.schemasOfferedTo -- which prices the block -- holds none.
-    assertEquals(List.of("agent", "task"), tool.schema().parameters().get("required"));
+    assertEquals(List.of("agent", "task"), tool.schema().parameters().required());
   }
 
   // --- a picture handed on ------------------------------------------------------
@@ -2701,11 +2701,11 @@ class DelegationTest {
    * bytes, so the only way to know they are still there is to look — and looking is where the fence
    * is, which is why the liveness check and the permission check are one act.
    *
-   * <p><b>The sentence must not say refused</b>, on {@code ClientEnforcer.Vanished}'s argument: a
-   * run told it lacked permission goes looking for a permission to fix, and there is none — the id
-   * was perfectly real and the picture is not there. Asserted as the two words being right
-   * <em>and</em> the wrong one being absent, because one sentence for two states is one state to
-   * anybody reading it.
+   * <p><b>The sentence must not say refused</b>, on {@code NodeFiles.Vanished}'s argument: a run
+   * told it lacked permission goes looking for a permission to fix, and there is none — the id was
+   * perfectly real and the picture is not there. Asserted as the two words being right <em>and</em>
+   * the wrong one being absent, because one sentence for two states is one state to anybody reading
+   * it.
    */
   @Test
   void a_picture_whose_workspace_file_is_gone_is_not_called_refused(@TempDir Path tmp)

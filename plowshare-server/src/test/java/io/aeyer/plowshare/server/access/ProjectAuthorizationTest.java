@@ -44,8 +44,12 @@ class ProjectAuthorizationTest {
         "INSERT INTO admins(handle,password_hash,server_admin,must_change_password) VALUES ('admin','hash',true,false),('manager','hash',false,false),('contributor','hash',false,false),('viewer','hash',false,false),('stranger','hash',false,false)");
     project("integration");
     project("other");
-    members = new ProjectMembers(jdbc);
-    access = new ProjectAuthorization(jdbc, members, new AdminStore(jdbc));
+    members = new JdbcProjectMembers(jdbc);
+    access =
+        new ProjectAuthorization(
+            new io.aeyer.plowshare.server.access.JdbcResourceScopeRepository(jdbc),
+            members,
+            new AdminStore(jdbc));
     members.assign("integration", "manager", ProjectRole.MANAGER, "admin", true);
     members.assign("integration", "contributor", ProjectRole.CONTRIBUTOR, "manager", true);
     members.assign("integration", "viewer", ProjectRole.VIEWER, "manager", true);
@@ -68,8 +72,20 @@ class ProjectAuthorizationTest {
             "project.access",
             "proposal.list")) {
       for (String account : List.of("admin", "manager", "contributor", "viewer"))
-        assertTrue(access.allowed(op, Map.of("project", "integration"), account), op + account);
-      assertFalse(access.allowed(op, Map.of("project", "integration"), "stranger"), op);
+        assertTrue(
+            access.allowed(
+                op,
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    op, Map.of("project", "integration")),
+                account),
+            op + account);
+      assertFalse(
+          access.allowed(
+              op,
+              io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                  op, Map.of("project", "integration")),
+              "stranger"),
+          op);
     }
     for (String op :
         List.of(
@@ -84,15 +100,38 @@ class ProjectAuthorizationTest {
             "memory.digest",
             "memory.navigate")) {
       for (String account : List.of("admin", "manager", "contributor"))
-        assertTrue(access.allowed(op, Map.of("project", "integration"), account), op + account);
-      assertFalse(access.allowed(op, Map.of("project", "integration"), "viewer"), op);
+        assertTrue(
+            access.allowed(
+                op,
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    op, Map.of("project", "integration")),
+                account),
+            op + account);
+      assertFalse(
+          access.allowed(
+              op,
+              io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                  op, Map.of("project", "integration")),
+              "viewer"),
+          op);
     }
     for (String op :
         List.of(
             "agent.define", "project.member.add", "project.member.remove", "project.member.role")) {
-      assertTrue(access.allowed(op, Map.of("project", "integration"), "manager"));
+      assertTrue(
+          access.allowed(
+              op,
+              io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                  op, Map.of("project", "integration")),
+              "manager"));
       for (String account : List.of("viewer", "contributor", "stranger"))
-        assertFalse(access.allowed(op, Map.of("project", "integration"), account), op + account);
+        assertFalse(
+            access.allowed(
+                op,
+                io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                    op, Map.of("project", "integration")),
+                account),
+            op + account);
     }
     for (String op :
         List.of(
@@ -102,7 +141,13 @@ class ProjectAuthorizationTest {
             "provider.deregister",
             "event.fire",
             "schedule.define"))
-      assertFalse(access.allowed(op, Map.of("project", "integration"), "manager"), op);
+      assertFalse(
+          access.allowed(
+              op,
+              io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                  op, Map.of("project", "integration")),
+              "manager"),
+          op);
   }
 
   @Test
@@ -181,9 +226,24 @@ class ProjectAuthorizationTest {
     jdbc.update("UPDATE projects SET personal_owner='viewer' WHERE id=?", id);
     jdbc.update(
         "INSERT INTO project_members(project_id,handle,role) VALUES (?,'viewer','MANAGER')", id);
-    assertTrue(access.allowed("agent.run", Map.of("project", personal), "viewer"));
-    assertFalse(access.allowed("conversation.list", Map.of("project", personal), "admin"));
-    assertFalse(access.allowed("conversation.list", Map.of("project", personal), "manager"));
+    assertTrue(
+        access.allowed(
+            "agent.run",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "agent.run", Map.of("project", personal)),
+            "viewer"));
+    assertFalse(
+        access.allowed(
+            "conversation.list",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.list", Map.of("project", personal)),
+            "admin"));
+    assertFalse(
+        access.allowed(
+            "conversation.list",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.list", Map.of("project", personal)),
+            "manager"));
     assertThrows(
         ArchiveRefusedException.class,
         () -> members.assign(personal, "contributor", ProjectRole.VIEWER, "viewer", true));
@@ -199,17 +259,47 @@ class ProjectAuthorizationTest {
     assertFalse(
         access.allowed(
             "conversation.resume",
-            Map.of("conversation", "cnv_rbac", "project", "other"),
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.resume", Map.of("conversation", "cnv_rbac", "project", "other")),
             "viewer"));
     assertFalse(
-        access.allowed("conversation.turns", Map.of("conversation", "cnv_rbac"), "stranger"));
-    assertTrue(access.allowed("conversation.turns", Map.of("conversation", "cnv_rbac"), "viewer"));
-    assertFalse(access.allowed("job.cancel", Map.of("job", "job_rbac"), "viewer"));
-    assertTrue(access.allowed("job.status", Map.of("job", "job_rbac"), "viewer"));
+        access.allowed(
+            "conversation.turns",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.turns", Map.of("conversation", "cnv_rbac")),
+            "stranger"));
+    assertTrue(
+        access.allowed(
+            "conversation.turns",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.turns", Map.of("conversation", "cnv_rbac")),
+            "viewer"));
+    assertFalse(
+        access.allowed(
+            "job.cancel",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "job.cancel", Map.of("job", "job_rbac")),
+            "viewer"));
+    assertTrue(
+        access.allowed(
+            "job.status",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "job.status", Map.of("job", "job_rbac")),
+            "viewer"));
     members.assign("integration", "contributor", ProjectRole.VIEWER, "manager", false);
-    assertFalse(access.allowed("agent.run", Map.of("conversation", "cnv_rbac"), "contributor"));
+    assertFalse(
+        access.allowed(
+            "agent.run",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "agent.run", Map.of("conversation", "cnv_rbac")),
+            "contributor"));
     members.remove("integration", "viewer", "manager");
-    assertFalse(access.allowed("job.status", Map.of("job", "job_rbac"), "viewer"));
+    assertFalse(
+        access.allowed(
+            "job.status",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "job.status", Map.of("job", "job_rbac")),
+            "viewer"));
   }
 
   @Test
@@ -303,7 +393,12 @@ class ProjectAuthorizationTest {
     jdbc.update("UPDATE admins SET enabled=false WHERE handle='viewer'");
     assertFalse(members.mayUse("integration", "viewer"));
     assertFalse(members.isMember("integration", "viewer"));
-    assertFalse(access.allowed("conversation.list", Map.of("project", "integration"), "viewer"));
+    assertFalse(
+        access.allowed(
+            "conversation.list",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "conversation.list", Map.of("project", "integration")),
+            "viewer"));
   }
 
   @Test
@@ -315,23 +410,31 @@ class ProjectAuthorizationTest {
         new io.aeyer.plowshare.server.events.TriggerRecord(
             "foreign", "tick", "integration", null, "bot", "work", null, null, 1, false, "manager");
     var outcome = io.aeyer.plowshare.protocol.frames.Outcome.ok(List.of(own, foreign));
-    assertEquals(List.of(own), access.filter("trigger.list", outcome, "viewer").payload());
+    assertEquals(
+        List.of(own),
+        new io.aeyer.plowshare.server.ws.ProjectListingFilter(access)
+            .filter("trigger.list", outcome, "viewer")
+            .payload());
     members.remove("integration", "viewer", "manager");
-    assertEquals(List.of(), access.filter("trigger.list", outcome, "viewer").payload());
+    assertEquals(
+        List.of(),
+        new io.aeyer.plowshare.server.ws.ProjectListingFilter(access)
+            .filter("trigger.list", outcome, "viewer")
+            .payload());
 
-    var visible =
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.ws.OrchestrationFrames.RunView.class);
+    var visible = org.mockito.Mockito.mock(io.aeyer.plowshare.protocol.Orchestration.RunView.class);
     org.mockito.Mockito.when(visible.project()).thenReturn("integration");
     var privateWork =
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.ws.OrchestrationFrames.RunView.class);
+        org.mockito.Mockito.mock(io.aeyer.plowshare.protocol.Orchestration.RunView.class);
     org.mockito.Mockito.when(privateWork.project()).thenReturn(PersonalSpaces.name("viewer"));
     var runs =
         io.aeyer.plowshare.protocol.frames.Outcome.ok(
-            new io.aeyer.plowshare.server.ws.OrchestrationFrames.Listed(
-                List.of(visible, privateWork)));
+            new io.aeyer.plowshare.protocol.Orchestration.Listed(List.of(visible, privateWork)));
     var filtered =
-        (io.aeyer.plowshare.server.ws.OrchestrationFrames.Listed)
-            access.filter("orchestration.list", runs, "admin").payload();
+        (io.aeyer.plowshare.protocol.Orchestration.Listed)
+            new io.aeyer.plowshare.server.ws.ProjectListingFilter(access)
+                .filter("orchestration.list", runs, "admin")
+                .payload();
     assertEquals(List.of(visible), filtered.orchestrations());
   }
 
@@ -383,10 +486,22 @@ class ProjectAuthorizationTest {
   @Test
   void regular_accounts_can_stop_their_legacy_schedules_but_cannot_resume_global_emission() {
     assertTrue(
-        access.allowed("schedule.pause", Map.of("schedule", "old", "paused", true), "manager"));
+        access.allowed(
+            "schedule.pause",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "schedule.pause", Map.of("schedule", "old", "paused", true)),
+            "manager"));
     assertFalse(
-        access.allowed("schedule.pause", Map.of("schedule", "old", "paused", false), "manager"));
+        access.allowed(
+            "schedule.pause",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "schedule.pause", Map.of("schedule", "old", "paused", false)),
+            "manager"));
     assertTrue(
-        access.allowed("schedule.pause", Map.of("schedule", "old", "paused", false), "admin"));
+        access.allowed(
+            "schedule.pause",
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                "schedule.pause", Map.of("schedule", "old", "paused", false)),
+            "admin"));
   }
 }

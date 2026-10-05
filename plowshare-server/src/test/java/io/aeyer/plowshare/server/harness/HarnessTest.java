@@ -137,7 +137,8 @@ class HarnessTest {
   void a_model_gets_its_assigned_profile_and_an_unassigned_one_the_default() throws Exception {
     Harness harness =
         new Harness(
-            bound(PROFILES), Map.of("openai/gpt-oss-120b", "guided"), List.of(new Counting()));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                bound(PROFILES), Map.of("openai/gpt-oss-120b", "guided"), List.of(new Counting())));
 
     assertEquals("guided", harness.profileFor("openai/gpt-oss-120b"));
     assertEquals("standard", harness.profileFor("qwen3-coder"));
@@ -148,7 +149,9 @@ class HarnessTest {
   void parameters_are_typed_and_defaulted_and_built_once_per_run_per_profile() throws Exception {
     Counting counting = new Counting();
     Harness harness =
-        new Harness(bound(PROFILES), Map.of("openai/gpt-oss-120b", "guided"), List.of(counting));
+        new Harness(
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                bound(PROFILES), Map.of("openai/gpt-oss-120b", "guided"), List.of(counting)));
 
     HarnessRun run = harness.begin();
     Hooks first = run.forModel("openai/gpt-oss-120b");
@@ -167,7 +170,10 @@ class HarnessTest {
   @Test
   void an_empty_profile_runs_no_harness_hooks() throws Exception {
     Counting counting = new Counting();
-    Harness harness = new Harness(bound(PROFILES), Map.of("small", "minimal"), List.of(counting));
+    Harness harness =
+        new Harness(
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                bound(PROFILES), Map.of("small", "minimal"), List.of(counting)));
 
     harness.begin().forModel("small");
 
@@ -178,16 +184,17 @@ class HarnessTest {
   void no_default_profile_and_no_assignment_is_no_harness() throws Exception {
     Harness harness =
         new Harness(
-            bound(
-                """
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                bound(
+                    """
                 plowshare:
                   harness:
                     profiles:
                       guided:
                         - hook: harness:counting
                 """),
-            Map.of(),
-            List.of(new Counting()));
+                Map.of(),
+                List.of(new Counting())));
 
     assertNull(harness.profileFor("anything"));
     assertSame(Hooks.NONE, harness.begin().forModel("anything"));
@@ -201,16 +208,17 @@ class HarnessTest {
             IllegalStateException.class,
             () ->
                 new Harness(
-                    bound(
-                        """
+                    io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                        bound(
+                            """
                 plowshare:
                   harness:
                     profiles:
                       guided:
                         - hook: harness:nope
                 """),
-                    Map.of(),
-                    known));
+                        Map.of(),
+                        known)));
     assertTrue(unknownHook.getMessage().contains("harness:nope"), unknownHook.getMessage());
     assertTrue(unknownHook.getMessage().contains("harness:counting"), unknownHook.getMessage());
 
@@ -219,8 +227,9 @@ class HarnessTest {
             IllegalStateException.class,
             () ->
                 new Harness(
-                    bound(
-                        """
+                    io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                        bound(
+                            """
                 plowshare:
                   harness:
                     profiles:
@@ -228,8 +237,8 @@ class HarnessTest {
                         - hook: harness:counting
                           after-stepz: 4
                 """),
-                    Map.of(),
-                    known));
+                        Map.of(),
+                        known)));
     assertTrue(
         unknownParameter.getMessage().contains("after-stepz"), unknownParameter.getMessage());
 
@@ -238,8 +247,9 @@ class HarnessTest {
             IllegalStateException.class,
             () ->
                 new Harness(
-                    bound(
-                        """
+                    io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                        bound(
+                            """
                 plowshare:
                   harness:
                     profiles:
@@ -247,8 +257,8 @@ class HarnessTest {
                         - hook: harness:counting
                           after-steps: soon
                 """),
-                    Map.of(),
-                    known));
+                        Map.of(),
+                        known)));
     assertTrue(wrongType.getMessage().contains("after-steps"), wrongType.getMessage());
 
     IllegalStateException noDefault =
@@ -256,20 +266,24 @@ class HarnessTest {
             IllegalStateException.class,
             () ->
                 new Harness(
-                    bound(
-                        """
+                    io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                        bound(
+                            """
                         plowshare:
                           harness:
                             default-profile: missing
                         """),
-                    Map.of(),
-                    known));
+                        Map.of(),
+                        known)));
     assertTrue(noDefault.getMessage().contains("default-profile"), noDefault.getMessage());
 
     IllegalStateException noAssigned =
         assertThrows(
             IllegalStateException.class,
-            () -> new Harness(bound(PROFILES), Map.of("m", "missing"), known));
+            () ->
+                new Harness(
+                    io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                        bound(PROFILES), Map.of("m", "missing"), known)));
     assertTrue(noAssigned.getMessage().contains("'m'"), noAssigned.getMessage());
   }
 
@@ -307,7 +321,10 @@ class HarnessTest {
                         - hook: harness:counting
                         - hook: harness:failing
                 """);
-    Harness harness = new Harness(properties, Map.of("m", "guided"), List.of(counting, failing));
+    Harness harness =
+        new Harness(
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("m", "guided"), List.of(counting, failing)));
     HarnessRun run = harness.begin();
 
     Hooks first = run.forModel("m");
@@ -353,7 +370,9 @@ class HarnessTest {
                         - hook: harness:finish-fails
                 """);
     Harness harness =
-        new Harness(properties, Map.of("m", "guided"), List.of(counting, finishFails));
+        new Harness(
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("m", "guided"), List.of(counting, finishFails)));
     HarnessRun run = harness.begin();
     run.forModel("m");
 

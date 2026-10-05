@@ -126,11 +126,11 @@ public final class Navigator {
     List<Home> homes = home.isGlobal() ? List.of(home) : List.of(home, Home.global());
     Result fallback = null;
     Home fallbackTier = null;
-    float[] query = null;
+    PassageIndex.Query query = null;
     if (index != null) {
       trace.queryCalls++;
       try {
-        query = index.query(question, operation.usage());
+        query = index.capture(question, operation.usage());
       } catch (io.aeyer.plowshare.server.llm.EmbeddingException unavailable) {
         trace.fallback = "Query embedding unavailable; bounded tree navigation used";
       }

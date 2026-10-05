@@ -46,9 +46,11 @@ class InformationFacetsTest {
     jdbc.execute("TRUNCATE admins CASCADE");
     jdbc.update("INSERT INTO admins(handle,password_hash) VALUES('reader','h'),('other','h')");
     work = new ArchiveConfig().unitOfWork(new DataSourceTransactionManager(source));
-    access = new InformationAccess(new ProjectMembers(jdbc));
+    access = new InformationAccess(new JdbcProjectMembers(jdbc));
     catalogue =
-        new InformationCatalogue(jdbc, work, access, Clock.systemUTC()).withAllowance(() -> 5);
+        io.aeyer.plowshare.server.information.InformationFixtures.catalogue(
+                jdbc, work, access, Clock.systemUTC())
+            .withAllowance(() -> 5);
   }
 
   UUID revision(String owner, String tags, String automatic, String kind) {
@@ -91,43 +93,71 @@ class InformationFacetsTest {
     jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", withdrawn);
     var context =
         own.withFacets(
-            Map.of(
-                "tags",
-                List.of(" RESEARCH ", "databases"),
-                "autoTag",
-                List.of("PostgreSQL"),
-                "search",
-                "vector",
-                "author",
-                "reader"));
+            io.aeyer.plowshare.server.information.InformationInputs.facets(
+                Map.of(
+                    "tags",
+                    List.of(" RESEARCH ", "databases"),
+                    "autoTag",
+                    List.of("PostgreSQL"),
+                    "search",
+                    "vector",
+                    "author",
+                    "reader")));
     assertEquals(
-        List.of(target), catalogue.list(context, 1, 0).stream().map(row -> row.get("id")).toList());
-    assertTrue(catalogue.list(context, 1, 1).isEmpty());
-    var counts = catalogue.facets(context, null);
+        List.of(target),
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(context, 1, 0))
+            .stream()
+            .map(row -> row.get("id"))
+            .toList());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(context, 1, 1))
+            .isEmpty());
+    var counts =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+            catalogue.facets(context, null));
     assertEquals(1L, counts.get("total"));
     var contributing = new LinkedHashSet<UUID>();
-    assertEquals(1L, catalogue.facetsForRun(context, contributing::add).get("total"));
+    assertEquals(
+        1L,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.facetsForRun(context, contributing::add))
+            .get("total"));
     assertEquals(Set.of(target), contributing);
     assertEquals(List.of(Map.of("value", "postgresql", "count", 1L)), facet(counts, "autoTag"));
     assertEquals(2, facet(counts, "tags").size());
-    assertEquals(List.of("research", "databases"), catalogue.status(own, target).get("tags"));
-    assertFalse(catalogue.facets(own, null).toString().contains("secret topic"));
-    assertThrows(NotFoundFault.class, () -> catalogue.status(own, foreign));
+    assertEquals(
+        List.of("research", "databases"),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, target))
+            .get("tags"));
+    assertFalse(
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.facets(own, null))
+            .toString()
+            .contains("secret topic"));
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, foreign)));
     assertEquals(
         1L,
-        catalogue
-            .facets(
-                context.withFacets(
-                    Map.of("when", "2024-10", "tags", List.of("research", "databases"))),
-                null)
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.facets(
+                    context.withFacets(
+                        io.aeyer.plowshare.server.information.InformationInputs.facets(
+                            Map.of("when", "2024-10", "tags", List.of("research", "databases")))),
+                    null))
             .get("total"));
     assertEquals(
         0L,
-        catalogue
-            .facets(
-                context.withFacets(
-                    Map.of("when", "2024-11", "tags", List.of("research", "databases"))),
-                null)
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.facets(
+                    context.withFacets(
+                        io.aeyer.plowshare.server.information.InformationInputs.facets(
+                            Map.of("when", "2024-11", "tags", List.of("research", "databases")))),
+                    null))
             .get("total"));
   }
 
@@ -137,8 +167,16 @@ class InformationFacetsTest {
         request = UUID.randomUUID();
     catalogue.tags(own, target, List.of(" My Project ", "my project", "Database"), request);
     catalogue.tags(own, target, List.of("database", "my project"), request);
-    assertEquals(List.of("database", "my project"), catalogue.status(own, target).get("tags"));
-    assertEquals(List.of("postgresql"), catalogue.status(own, target).get("autoTag"));
+    assertEquals(
+        List.of("database", "my project"),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, target))
+            .get("tags"));
+    assertEquals(
+        List.of("postgresql"),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, target))
+            .get("autoTag"));
     assertThrows(
         CallerFault.class, () -> catalogue.tags(own, target, List.of("different"), request));
     var other = new InformationContext("other", InformationContext.Selection.personal());
@@ -146,7 +184,11 @@ class InformationFacetsTest {
         NotFoundFault.class,
         () -> catalogue.tags(other, target, List.of("take over"), UUID.randomUUID()));
     catalogue.tags(own, target, List.of(), UUID.randomUUID());
-    assertEquals(List.of(), catalogue.status(own, target).get("tags"));
+    assertEquals(
+        List.of(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, target))
+            .get("tags"));
   }
 
   @Test
@@ -156,7 +198,8 @@ class InformationFacetsTest {
         new Chunking(new io.aeyer.plowshare.server.llm.tokens.RatioTokenizer(4), 1000, 2000);
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             store,
@@ -168,10 +211,10 @@ class InformationFacetsTest {
             new DocumentsProperties());
     try (var queue =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, Clock.systemUTC()),
             work,
             catalogue,
-            Clock.systemUTC(),
             processor,
             new InformationLifecycle.Gates() {})) {
       var wanted =
@@ -208,7 +251,11 @@ class InformationFacetsTest {
       var retrieval = new RetrievalService(store, embeddings, "fixture", 768);
       var selected =
           retrieval
-              .scoped(access, own.withFacets(Map.of("tags", List.of("selected"))))
+              .scoped(
+                  access,
+                  own.withFacets(
+                      io.aeyer.plowshare.server.information.InformationInputs.facets(
+                          Map.of("tags", List.of("selected")))))
               .search("PostgreSQL", 1, RetrievalService.Mode.LEXICAL);
       assertEquals(
           List.of(wanted.revision()),
@@ -216,24 +263,40 @@ class InformationFacetsTest {
       assertEquals(1, selected.searchable());
       var ranked =
           retrieval
-              .scoped(access, own.withFacets(Map.of("tags", List.of("selected"))))
+              .scoped(
+                  access,
+                  own.withFacets(
+                      io.aeyer.plowshare.server.information.InformationInputs.facets(
+                          Map.of("tags", List.of("selected")))))
               .rank("PostgreSQL", 1);
       assertEquals(
           List.of(wanted.revision()),
           ranked.documents().stream().map(row -> row.document().id()).toList());
       assertTrue(
           retrieval
-              .scoped(access, own.withFacets(Map.of("tags", List.of("absent"))))
+              .scoped(
+                  access,
+                  own.withFacets(
+                      io.aeyer.plowshare.server.information.InformationInputs.facets(
+                          Map.of("tags", List.of("absent")))))
               .within(wanted.revision(), "PostgreSQL", 1)
               .isEmpty());
       assertFalse(
           retrieval
-              .scoped(access, own.withFacets(Map.of("tags", List.of("selected"))))
+              .scoped(
+                  access,
+                  own.withFacets(
+                      io.aeyer.plowshare.server.information.InformationInputs.facets(
+                          Map.of("tags", List.of("selected")))))
               .within(wanted.revision(), "PostgreSQL", 1)
               .isEmpty());
       assertTrue(
           retrieval
-              .scoped(access, own.withFacets(Map.of("tags", List.of("absent"))))
+              .scoped(
+                  access,
+                  own.withFacets(
+                      io.aeyer.plowshare.server.information.InformationInputs.facets(
+                          Map.of("tags", List.of("absent")))))
               .search("PostgreSQL", 10, RetrievalService.Mode.LEXICAL)
               .hits()
               .isEmpty());
@@ -244,7 +307,11 @@ class InformationFacetsTest {
           "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage='autoTag'",
           wanted.revision());
       var authored =
-          retrieval.scoped(access, own.withFacets(Map.of("documentAuthor", "Ada Lovelace")));
+          retrieval.scoped(
+              access,
+              own.withFacets(
+                  io.aeyer.plowshare.server.information.InformationInputs.facets(
+                      Map.of("documentAuthor", "Ada Lovelace"))));
       assertEquals(
           List.of(wanted.revision()),
           authored.search("PostgreSQL", 1, RetrievalService.Mode.LEXICAL).hits().stream()
@@ -296,7 +363,8 @@ class InformationFacetsTest {
             });
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             store,
@@ -308,10 +376,10 @@ class InformationFacetsTest {
             new DocumentsProperties());
     try (var queue =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, Clock.systemUTC()),
             work,
             catalogue,
-            Clock.systemUTC(),
             processor,
             new InformationLifecycle.Gates() {})) {
       assertTrue(queue.drainOne(id));
@@ -320,17 +388,34 @@ class InformationFacetsTest {
               id)); // grouping is independent and fails without a supplied group response
       assertFalse(queue.drainOne(id));
       assertEquals(
-          List.of("postgresql", "vector search"), catalogue.status(own, id).get("autoTag"));
-      assertEquals(List.of("my project"), catalogue.status(own, id).get("tags"));
-      assertEquals("Ada Lovelace", catalogue.status(own, id).get("documentAuthor"));
-      assertEquals("person", catalogue.status(own, id).get("documentAuthorSource"));
+          List.of("postgresql", "vector search"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("autoTag"));
+      assertEquals(
+          List.of("my project"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("tags"));
+      assertEquals(
+          "Ada Lovelace",
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("documentAuthor"));
+      assertEquals(
+          "person",
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("documentAuthorSource"));
       assertEquals(
           1,
           jdbc.queryForObject(
               "SELECT allowance_spent FROM information_revisions WHERE id=?", Integer.class, id));
       catalogue.rebuild(own, id, "autoTag", UUID.randomUUID());
-      assertEquals("reader", catalogue.status(own, id).get("documentAuthor"));
-      assertEquals("account", catalogue.status(own, id).get("documentAuthorSource"));
+      assertEquals(
+          "reader",
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("documentAuthor"));
+      assertEquals(
+          "account",
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("documentAuthorSource"));
       assertTrue(queue.drainOne(id));
       assertEquals(
           2,
@@ -355,23 +440,58 @@ class InformationFacetsTest {
     jdbc.update(
         "UPDATE information_revisions SET document_author='Private Person',document_author_source='person',document_author_evidence='Written by Private Person.' WHERE id=?",
         foreign);
-    var selected = own.withFacets(Map.of("documentAuthor", "Ada Lovelace", "author", "reader"));
+    var selected =
+        own.withFacets(
+            io.aeyer.plowshare.server.information.InformationInputs.facets(
+                Map.of("documentAuthor", "Ada Lovelace", "author", "reader")));
     assertEquals(
         List.of(person),
-        catalogue.list(selected, 1, 0).stream().map(row -> row.get("id")).toList());
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(selected, 1, 0))
+            .stream()
+            .map(row -> row.get("id"))
+            .toList());
     assertEquals(
         List.of(Map.of("value", "Ada Lovelace", "count", 1L)),
-        facet(catalogue.facets(selected, null), "documentAuthor"));
-    assertEquals("reader", catalogue.status(own, person).get("author"));
-    assertEquals("organisation", catalogue.status(own, org).get("documentAuthorSource"));
-    assertEquals("reader", catalogue.status(own, account).get("documentAuthor"));
-    assertEquals("account", catalogue.status(own, account).get("documentAuthorSource"));
-    assertFalse(catalogue.facets(own, null).toString().contains("Private Person"));
+        facet(
+            io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.facets(selected, null)),
+            "documentAuthor"));
+    assertEquals(
+        "reader",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, person))
+            .get("author"));
+    assertEquals(
+        "organisation",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, org))
+            .get("documentAuthorSource"));
+    assertEquals(
+        "reader",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, account))
+            .get("documentAuthor"));
+    assertEquals(
+        "account",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, account))
+            .get("documentAuthorSource"));
+    assertFalse(
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.facets(own, null))
+            .toString()
+            .contains("Private Person"));
     jdbc.update(
         "UPDATE information_steps SET state='blocked' WHERE revision_id=? AND stage='autoTag'",
         person);
-    assertEquals("reader", catalogue.status(own, person).get("documentAuthor"));
-    assertTrue(catalogue.list(selected, 10, 0).isEmpty());
+    assertEquals(
+        "reader",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, person))
+            .get("documentAuthor"));
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(selected, 10, 0))
+            .isEmpty());
     jdbc.update(
         "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage='autoTag'",
         person);
@@ -381,7 +501,10 @@ class InformationFacetsTest {
             "SELECT document_author_evidence FROM information_revisions WHERE id=?",
             String.class,
             person));
-    assertFalse(catalogue.status(own, person).containsKey("documentAuthor"));
+    assertFalse(
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, person))
+            .containsKey("documentAuthor"));
   }
 
   @Test
@@ -389,13 +512,31 @@ class InformationFacetsTest {
     UUID id = revision("reader", "[]", "[\"postgresql\"]", "source");
     jdbc.update(
         "UPDATE information_steps SET state='blocked' WHERE revision_id=? AND stage='autoTag'", id);
-    assertEquals(List.of(), catalogue.status(own, id).get("autoTag"));
-    assertTrue(facet(catalogue.facets(own, null), "autoTag").isEmpty());
+    assertEquals(
+        List.of(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("autoTag"));
     assertTrue(
-        catalogue.list(own.withFacets(Map.of("autoTag", List.of("postgresql"))), 10, 0).isEmpty());
+        facet(
+                io.aeyer.plowshare.server.information.InformationFixtures.view(
+                    catalogue.facets(own, null)),
+                "autoTag")
+            .isEmpty());
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(
+                    own.withFacets(
+                        io.aeyer.plowshare.server.information.InformationInputs.facets(
+                            Map.of("autoTag", List.of("postgresql")))),
+                    10,
+                    0))
+            .isEmpty());
     jdbc.update(
         "UPDATE information_steps SET state='ready' WHERE revision_id=? AND stage='autoTag'", id);
-    assertEquals(List.of("postgresql"), catalogue.status(own, id).get("autoTag"));
+    assertEquals(
+        List.of("postgresql"),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("autoTag"));
   }
 
   @Test
@@ -435,7 +576,7 @@ class InformationFacetsTest {
             .id();
     var stages =
         new InformationModelStages(
-                jdbc,
+                new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc),
                 work,
                 catalogue,
                 mock(InformationJobs.class),
@@ -488,7 +629,11 @@ class InformationFacetsTest {
             Map.of("when", "2024-13"),
             Map.of("tags", "one"),
             Map.of("autoTag", List.of("")),
-            "tags:postgresql")) assertThrows(CallerFault.class, () -> own.withFacets(raw));
+            "tags:postgresql"))
+      assertThrows(
+          CallerFault.class,
+          () ->
+              own.withFacets(io.aeyer.plowshare.server.information.InformationInputs.facets(raw)));
     assertThrows(CallerFault.class, () -> InformationFacets.tags(List.of("x".repeat(65))));
   }
 
@@ -524,7 +669,8 @@ class InformationFacetsTest {
             });
     var processor =
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             store,
@@ -534,7 +680,13 @@ class InformationFacetsTest {
             2,
             () -> summariser,
             new DocumentsProperties());
-    return new InformationLifecycle(jdbc, work, catalogue, Clock.systemUTC(), processor, gates);
+    return new InformationLifecycle(
+        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+            jdbc, Clock.systemUTC()),
+        work,
+        catalogue,
+        processor,
+        gates);
   }
 
   @Test
@@ -557,11 +709,31 @@ class InformationFacetsTest {
       assertTrue(queue.drainOne(tagged));
       assertTrue(queue.drainOne(empty));
       assertEquals(2, calls.get());
-      assertEquals(List.of("postgresql"), catalogue.status(own, tagged).get("autoTag"));
-      assertEquals(List.of(), catalogue.status(own, tagged).get("tags"));
-      assertEquals("Ada Lovelace", catalogue.status(own, tagged).get("documentAuthor"));
-      assertEquals(List.of(), catalogue.status(own, empty).get("autoTag"));
-      assertEquals(true, catalogue.status(own, empty).get("auto_tag_generated"));
+      assertEquals(
+          List.of("postgresql"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+                  catalogue.status(own, tagged))
+              .get("autoTag"));
+      assertEquals(
+          List.of(),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+                  catalogue.status(own, tagged))
+              .get("tags"));
+      assertEquals(
+          "Ada Lovelace",
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+                  catalogue.status(own, tagged))
+              .get("documentAuthor"));
+      assertEquals(
+          List.of(),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+                  catalogue.status(own, empty))
+              .get("autoTag"));
+      assertEquals(
+          true,
+          io.aeyer.plowshare.server.information.InformationFixtures.view(
+                  catalogue.status(own, empty))
+              .get("auto_tag_generated"));
       assertEquals(0, queue.sweepUntagged());
       assertFalse(queue.drainOne());
       for (UUID id : List.of(tagged, empty))
@@ -593,7 +765,10 @@ class InformationFacetsTest {
               String.class,
               id));
       assertEquals(0, calls.get());
-      assertEquals(List.of("reviewed"), catalogue.status(own, id).get("tags"));
+      assertEquals(
+          List.of("reviewed"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("tags"));
       catalogue.tags(own, id, List.of(), UUID.randomUUID());
       assertEquals(1, queue.sweepUntagged());
       assertTrue(queue.drainOne(id));
@@ -626,7 +801,10 @@ class InformationFacetsTest {
           0,
           jdbc.queryForObject(
               "SELECT allowance_spent FROM information_revisions WHERE id=?", Integer.class, id));
-      assertEquals(List.of("just curated"), catalogue.status(own, id).get("tags"));
+      assertEquals(
+          List.of("just curated"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("tags"));
     }
   }
 
@@ -665,10 +843,10 @@ class InformationFacetsTest {
         ownerless);
     try (var queue =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, Clock.systemUTC()),
             work,
             catalogue,
-            Clock.systemUTC(),
             (lease, cancelled, fence) -> {},
             new InformationLifecycle.Gates() {})) {
       assertEquals(1, queue.sweepUntagged());
@@ -682,10 +860,10 @@ class InformationFacetsTest {
     for (int i = 0; i < 105; i++) sweepCandidate("batch-" + i + ".txt", "PostgreSQL");
     try (var queue =
         new InformationLifecycle(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, Clock.systemUTC()),
             work,
             catalogue,
-            Clock.systemUTC(),
             (lease, cancelled, fence) -> {},
             new InformationLifecycle.Gates() {})) {
       assertEquals(100, queue.sweepUntagged());
@@ -718,7 +896,10 @@ class InformationFacetsTest {
                       String.class,
                       id))
           && System.nanoTime() < deadline) Thread.sleep(20);
-      assertEquals(List.of("postgresql"), catalogue.status(own, id).get("autoTag"));
+      assertEquals(
+          List.of("postgresql"),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("autoTag"));
       assertEquals(1, calls.get());
     }
   }
@@ -729,9 +910,9 @@ class InformationFacetsTest {
         id);
     jdbc.update(
         "UPDATE information_revisions r SET auto_tag_groups=CAST(? AS jsonb),tag_groups_input_tags="
-            + InformationTagGroups.tags("r", "q")
+            + InformationFacetSql.visibleTags("r", "q")
             + ",tag_groups_generated=true FROM information_resources q WHERE q.id=r.resource_id AND r.id=?",
-        InformationFacets.json(groups),
+        io.aeyer.plowshare.server.information.InformationJson.json(groups),
         id);
   }
 
@@ -745,7 +926,8 @@ class InformationFacetsTest {
         Map.of("databases", List.of("postgresql", "sqlite"), "software", List.of("postgresql")));
     automaticGroups(second, Map.of("databases", List.of("postgresql")));
     automaticGroups(privateId, Map.of("private group", List.of("secret")));
-    var all = catalogue.facets(own, null);
+    var all =
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.facets(own, null));
     assertFalse(all.toString().contains("secret"));
     assertEquals(
         List.of(
@@ -754,17 +936,35 @@ class InformationFacetsTest {
     var edges = (List<?>) ((Map<?, ?>) all.get("tagGraph")).get("edges");
     assertTrue(edges.contains(Map.of("group", "databases", "tag", "postgresql", "count", 2L)));
     assertTrue(edges.contains(Map.of("group", "databases", "tag", "sqlite", "count", 1L)));
-    var selected = own.withFacets(Map.of("tagGroup", "Software", "autoTag", List.of("postgresql")));
+    var selected =
+        own.withFacets(
+            io.aeyer.plowshare.server.information.InformationInputs.facets(
+                Map.of("tagGroup", "Software", "autoTag", List.of("postgresql"))));
     assertEquals(
         List.of(wanted),
-        catalogue.list(selected, 1, 0).stream().map(row -> row.get("id")).toList());
-    assertEquals(1L, catalogue.facets(selected, null).get("total"));
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(selected, 1, 0))
+            .stream()
+            .map(row -> row.get("id"))
+            .toList());
+    assertEquals(
+        1L,
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.facets(selected, null))
+            .get("total"));
     var inherited = new HashSet<UUID>();
-    catalogue.facetsForRun(selected, inherited::add);
+    io.aeyer.plowshare.server.information.InformationFixtures.view(
+        catalogue.facetsForRun(selected, inherited::add));
     assertEquals(Set.of(wanted), inherited);
     catalogue.availability(own, wanted, "withdrawn");
-    assertTrue(catalogue.list(selected, 10, 0).isEmpty());
-    assertFalse(catalogue.facets(own, null).toString().contains("software"));
+    assertTrue(
+        io.aeyer.plowshare.server.information.InformationFixtures.views(
+                catalogue.list(selected, 10, 0))
+            .isEmpty());
+    assertFalse(
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.facets(own, null))
+            .toString()
+            .contains("software"));
   }
 
   @Test
@@ -787,8 +987,12 @@ class InformationFacetsTest {
     catalogue.tagGroups(own, id, override, request);
     assertEquals(
         Map.of("my work", List.of("postgresql", "sqlite")),
-        catalogue.status(own, id).get("tagGroups"));
-    assertEquals("manual", catalogue.status(own, id).get("tagGroupsSource"));
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroups"));
+    assertEquals(
+        "manual",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroupsSource"));
     assertThrows(
         CallerFault.class,
         () -> catalogue.tagGroups(own, id, Map.of("other", List.of("postgresql")), request));
@@ -814,14 +1018,23 @@ class InformationFacetsTest {
             null);
     assertEquals(
         Map.of("my work", List.of("postgresql", "sqlite")),
-        catalogue.status(own, newer.revision()).get("tagGroups"));
+        io.aeyer.plowshare.server.information.InformationFixtures.view(
+                catalogue.status(own, newer.revision()))
+            .get("tagGroups"));
     catalogue.tagGroups(own, id, Map.of(), UUID.randomUUID());
-    assertEquals(Map.of(), catalogue.status(own, id).get("tagGroups"));
+    assertEquals(
+        Map.of(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroups"));
     catalogue.tagGroups(own, id, null, UUID.randomUUID());
-    assertEquals("automatic", catalogue.status(own, id).get("tagGroupsSource"));
+    assertEquals(
+        "automatic",
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroupsSource"));
     assertEquals(
         Map.of("databases", List.of("postgresql", "sqlite")),
-        catalogue.status(own, id).get("tagGroups"));
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroups"));
   }
 
   @Test
@@ -829,10 +1042,16 @@ class InformationFacetsTest {
     UUID id = revision("reader", "[\"postgresql\",\"sqlite\"]", "[]", "source");
     automaticGroups(id, Map.of("databases", List.of("postgresql", "sqlite")));
     catalogue.tags(own, id, List.of("postgresql"), UUID.randomUUID());
-    assertEquals(Map.of(), catalogue.status(own, id).get("tagGroups"));
+    assertEquals(
+        Map.of(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroups"));
     catalogue.tagGroups(own, id, Map.of("chosen", List.of("postgresql")), UUID.randomUUID());
     catalogue.tags(own, id, List.of(), UUID.randomUUID());
-    assertEquals(Map.of(), catalogue.status(own, id).get("tagGroups"));
+    assertEquals(
+        Map.of(),
+        io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+            .get("tagGroups"));
   }
 
   InformationLifecycle groupingWorker(Summariser summariser) {
@@ -841,12 +1060,13 @@ class InformationFacetsTest {
     when(summariser.forRevision(any(), any(), anyString(), nullable(String.class)))
         .thenReturn(summariser);
     return new InformationLifecycle(
-        jdbc,
+        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+            jdbc, Clock.systemUTC()),
         work,
         catalogue,
-        Clock.systemUTC(),
         InformationLifecycle.processing(
-            jdbc,
+            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+                jdbc, java.time.Clock.systemUTC()),
             work,
             catalogue,
             store,
@@ -884,7 +1104,9 @@ class InformationFacetsTest {
       assertEquals(1, queue.sweepTagGroups());
       assertTrue(queue.drainOne(id));
       assertEquals(
-          Map.of("databases", List.of("postgresql")), catalogue.status(own, id).get("tagGroups"));
+          Map.of("databases", List.of("postgresql")),
+          io.aeyer.plowshare.server.information.InformationFixtures.view(catalogue.status(own, id))
+              .get("tagGroups"));
       assertEquals(
           1,
           jdbc.queryForObject(

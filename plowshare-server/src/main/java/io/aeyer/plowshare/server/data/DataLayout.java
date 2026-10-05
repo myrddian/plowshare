@@ -104,10 +104,9 @@ import java.util.stream.Stream;
  *
  * <h2>What is NOT in the tree, and why not</h2>
  *
- * <p><b>The operator token.</b> It stays at {@code ~/.config/plowshare/console-token} because
- * {@code PlowshareClient.consoleTokenFile()} <em>hardcodes that path</em>. The location is a
- * contract between two binaries — the server's handoff to the local operator — rather than server
- * state, and moving it breaks the CLI with no error either binary could raise.
+ * <p><b>The operator token.</b> Its handoff path is independent, explicit authentication
+ * configuration. It is fenced separately from the data root, and no shared local path is assumed
+ * between server and client.
  *
  * <p><b>The configuration file and the working directory.</b> They are fence parameters: paths this
  * server never uses and only protects. {@code WorkspaceProperties}' one key exists so that {@code
@@ -381,6 +380,11 @@ public final class DataLayout {
   }
 
   /** Standard skill packages at the same project/global authority tiers as agents. */
+  /** File-backed schedule definitions beside the other project/global definitions. */
+  public Path schedulesFor(Long projectId) {
+    return tierDirectory(projectId, "schedules");
+  }
+
   public Path skillsFor(Long projectId) {
     if (root == null) throw new IllegalStateException("this server keeps no data directory");
     return tierDirectory(projectId, "skills");
@@ -441,6 +445,7 @@ public final class DataLayout {
                 "agents",
                 "bots",
                 "skills",
+                "schedules",
                 "orchestrations",
                 "hooks",
                 "environment.yml",

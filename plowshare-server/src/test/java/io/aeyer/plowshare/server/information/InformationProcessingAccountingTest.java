@@ -10,7 +10,6 @@ import io.aeyer.plowshare.server.llm.accounting.*;
 import java.util.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 class InformationProcessingAccountingTest {
   @ParameterizedTest
@@ -20,10 +19,30 @@ class InformationProcessingAccountingTest {
     var catalogue = mock(InformationCatalogue.class);
     var store = mock(DocumentStore.class);
     var embeddings = mock(EmbeddingClient.class);
-    when(catalogue.row(revision)).thenReturn(Map.of("processing_log", "pipeline-log"));
+    var repository = mock(InformationProcessingRepository.class);
+    when(repository.readRevision(revision))
+        .thenReturn(
+            new InformationProcessingRepository.Revision(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                0,
+                0,
+                0,
+                "pipeline-log",
+                false));
     when(store.fenced(any())).thenReturn(store);
     var owner =
-        UsageAttribution.project("alice", "project-id", UsageAttribution.Operation.EMBEDDING_WRITE)
+        UsageAttribution.system("project-id", UsageAttribution.Operation.EMBEDDING_WRITE)
             .withExecution(
                 UsageLineage.root("pipeline-log"),
                 UsageLineage.NONE,
@@ -31,6 +50,7 @@ class InformationProcessingAccountingTest {
                 "document_pipeline",
                 0L,
                 null);
+    assertEquals(UsageAttribution.Status.SYSTEM, owner.status());
     UsageOwners owners =
         new UsageOwners() {
           @Override
@@ -42,8 +62,7 @@ class InformationProcessingAccountingTest {
           }
 
           @Override
-          public UsageAttribution conversation(
-              String log, int turn, UsageAttribution.Operation operation) {
+          public UsageAttribution processing(String log, UsageAttribution.Operation operation) {
             assertEquals("pipeline-log", log);
             assertEquals(UsageAttribution.Operation.EMBEDDING_WRITE, operation);
             return owner;
@@ -60,7 +79,7 @@ class InformationProcessingAccountingTest {
     when(embeddings.embed("summary", owner)).thenReturn(vector);
     var processor =
         InformationLifecycle.processing(
-            mock(JdbcTemplate.class),
+            repository,
             mock(UnitOfWork.class),
             catalogue,
             store,

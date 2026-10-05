@@ -14,7 +14,7 @@ the root build. The default Google formatter uses two-space indentation; do not
 select AOSP style or disable formatting to preserve a preferred layout.
 
 ```sh
-./gradlew format                         # All module Java source and tests.
+./gradlew format                         # All Java and TypeScript source and tests.
 ./gradlew formatCheck                    # All modules, without rewriting files.
 ./gradlew :plowshare-server:spotlessApply # One module while iterating.
 ./gradlew :plowshare-server:check         # Includes that module's formatting check.
@@ -28,7 +28,10 @@ same requirement applies locally and in pull requests. Keep mass formatting
 separate from behavior changes. Formatter version upgrades require their own
 reviewable pass.
 
-The Java formatter does not format TypeScript, Python, SQL or Gradle Kotlin files.
+TypeScript follows the mandatory [TypeScript standard](typescript-standards.md),
+with shared strict compiler settings, typed ESLint checks and pinned Prettier.
+The Java formatter does not format Python, SQL or Gradle Kotlin files.
+Native SDKs follow the mandatory [native SDK standard](native-sdk-standards.md).
 Follow the surrounding language conventions there. In every language, use clear
 names, cohesive methods and explicit error handling. Avoid compressed one-line
 classes, deeply nested control flow, boolean-heavy APIs and clever expressions
@@ -80,6 +83,12 @@ values; they do not justify hard-coded endpoints or paths.
 
 ## SDK integrations must preserve the core boundary
 
+All SDK variants belong under `sdk/`. External-system adapters and their shared
+integration runtime belong under `integrations/`. Reserve `extensions/` for
+services that extend Plowshare capabilities, such as search providers. Keep
+published package coordinates and Gradle task identities independent of source
+locations, and update build, generator, deployment and manual paths together.
+
 A2A adapters and other SDK-based integrations are external consumers of the
 platform. Implement their protocol translation, configuration, routing and
 adapter-owned state in their own module/process using the public SDK and existing
@@ -99,6 +108,22 @@ extension must be separately authorized and scoped as platform work, with shared
 contracts and affected clients updated together. Adapter acceptance must be
 verified through its public SDK boundary against a configured server, including
 deployment where the adapter and server run on different hosts or containers.
+
+An integration that cannot work without changing core is an unsuccessful
+integration task. Report the missing public capability; do not silently expand
+scope. Any exception requires explicit authorization for a separate platform
+change and a recorded design decision explaining why the capability belongs in
+Plowshare independently of the adapter, the SDK-only alternatives considered,
+and the security, lifecycle, compatibility and test consequences. Adapter
+convenience, deadline pressure and making an integration test pass are not
+sufficient reasons. An approval to build an integration is not approval to
+extend core. See [ADR 0001](decisions/0001-integration-boundary.md).
+
+`integrationBoundaryCheck`, included in `check`, verifies production classpaths
+in both directions. Test-only dependencies may exercise actual server loaders;
+they must not enter shipped adapters. Dependency checks complement review of
+core changes and public capability gaps; they cannot establish the business
+justification for a platform change.
 
 ## Persistence belongs to specialist repositories
 
@@ -224,6 +249,10 @@ callers cannot bypass bounds or persist an invalid state.
 - Define accepted fields, types, enum values and required/optional/null semantics
   for the operation. Reject malformed values and unexpected fields according to
   the versioned contract; never silently reinterpret a malformed request.
+- Enforce embedding input limits with the served model's matching, pinned tokenizer,
+  counting the complete preprocessed input and special tokens without truncation.
+  Chat token estimates, character/word ratios and safety margins are not hard bounds.
+  Shared chunks must fit every encoder that consumes them; recheck before submission.
 - Enforce length, byte-size, list-count, numeric-range and pagination limits.
   Distinguish user text from structured identifiers. Normalize only where the
   contract defines it; do not strip characters from arbitrary text and call it
@@ -301,3 +330,12 @@ semantics rather than adding client-only safeguards. A review must verify the
 interface/repository boundary, input handling and useful comments as well as
 behavior. Gradle currently enforces formatting, compilation warnings and Javadoc
 references; architecture and comment quality still require code review.
+
+Internal model processing uses the server's SYSTEM principal for accounting.
+SYSTEM is never a login, administrator role, permission bypass or fallback for
+missing user attribution. Keep the admitted owner and scope responsible for data
+access, lifecycle fences, allowances, hooks, cancellation and log visibility.
+Document processing models have no tools, model-directed delegation, filesystem
+grants, skills or other capability acquisition. Reject a definition that would
+widen that ceiling before inference. Preserve existing usage attribution rather
+than relabeling historical calls as SYSTEM.

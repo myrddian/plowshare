@@ -72,6 +72,24 @@ class RetrievalServiceTest {
     verify(embeddings, never()).embed("owned question");
   }
 
+  @Test
+  void anEmptyDualCorpusReportsCoverageWithoutSubmittingAnEmbedding() {
+    var dual = mock(io.aeyer.plowshare.server.embedding.DualEmbeddings.class);
+    var profile = mock(io.aeyer.plowshare.server.embedding.EmbeddingProfile.class);
+    when(dual.active(io.aeyer.plowshare.server.embedding.EmbeddingSlot.PROSE)).thenReturn(profile);
+    when(store.profiled(profile)).thenReturn(store);
+    when(store.coverage()).thenReturn(new DocumentStore.Coverage(0, 3));
+    when(dual.read(org.mockito.ArgumentMatchers.eq(profile), any()))
+        .thenAnswer(
+            invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(1)).get());
+    retrieval.useDualEmbeddings(dual);
+    var found = retrieval.search("where is the source", 5);
+    assertTrue(found.hits().isEmpty());
+    assertEquals(3, found.coverage().unsearchable());
+    verify(dual, never()).queries(any(), any(), any());
+    verify(embeddings, never()).embed(any());
+  }
+
   // --- the model coupling ---------------------------------------------------
 
   /**

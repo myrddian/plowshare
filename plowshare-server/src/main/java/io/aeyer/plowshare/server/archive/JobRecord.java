@@ -57,10 +57,18 @@ public record JobRecord(
     Integer modelCalls) {
 
   public JobRecord {
-    Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(agent, "agent");
+    id = ArchiveValues.identity(id, "job id");
+    agent = ArchiveValues.identity(agent, "agent");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(startedAt, "startedAt");
+    if ((endedAt == null) != (ending == null)
+        || (endedAt == null) != (steps == null)
+        || (endedAt == null) != (modelCalls == null))
+      throw new IllegalArgumentException("job outcome fields must be all present or all absent");
+    if (endedAt != null && endedAt.isBefore(startedAt))
+      throw new IllegalArgumentException("job cannot end before its start");
+    if (steps != null && steps < 0 || modelCalls != null && modelCalls < 0)
+      throw new IllegalArgumentException("negative job counters");
   }
 
   /**

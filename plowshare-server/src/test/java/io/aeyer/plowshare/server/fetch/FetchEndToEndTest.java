@@ -234,7 +234,7 @@ class FetchEndToEndTest {
       server.enqueue(htmlPage("<article><p>the needle this window must contain</p></article>"));
 
       SearchService searchService =
-          searchServiceOver(new RemoteSearchProvider(http, mapper, Duration.ofSeconds(5)));
+          searchServiceOver(new RemoteSearchProvider(http, Duration.ofSeconds(5)));
       SearchPage searchPage = searchService.search("plowshare fetch composition", 10, 10, 1);
 
       assertEquals(1, searchPage.hits().size(), "the ladder must actually return the hit");
@@ -400,7 +400,7 @@ class FetchEndToEndTest {
       server.enqueue(htmlPage("<article><p>must not be read</p></article>"));
 
       SearchPage searchPage =
-          searchServiceOver(new RemoteSearchProvider(http, mapper, Duration.ofSeconds(5)))
+          searchServiceOver(new RemoteSearchProvider(http, Duration.ofSeconds(5)))
               .search("plowshare fetch guard", 10, 10, 1);
       assertEquals(
           1,

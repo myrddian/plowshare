@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.information;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.*;
@@ -11,7 +10,6 @@ import io.aeyer.plowshare.server.llm.accounting.*;
 import java.time.*;
 import java.util.*;
 import java.util.function.Supplier;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Gates a prepared, validated database transition before making its new information visible. No
@@ -26,8 +24,7 @@ public final class InformationWriteGates implements UsageAware {
     usageOwners = java.util.Objects.requireNonNull(source);
   }
 
-  private static final ObjectMapper JSON = new ObjectMapper();
-  private final JdbcTemplate jdbc;
+  private final InformationGateRepository repository;
   private final UnitOfWork work;
   private final InformationAccess access;
   private final InformationJobs inputs;
@@ -35,19 +32,17 @@ public final class InformationWriteGates implements UsageAware {
   private final LogStages logs;
   private final Hooks configured;
   private final Harness harness;
-  private final Clock clock;
 
   public InformationWriteGates(
-      JdbcTemplate jdbc,
+      InformationGateRepository repository,
       UnitOfWork work,
       InformationAccess access,
       InformationJobs inputs,
       ConversationStore conversations,
       LogStages logs,
       Hooks configured,
-      Harness harness,
-      Clock clock) {
-    this.jdbc = jdbc;
+      Harness harness) {
+    this.repository = Objects.requireNonNull(repository);
     this.work = work;
     this.access = access;
     this.inputs = inputs;
@@ -55,78 +50,28 @@ public final class InformationWriteGates implements UsageAware {
     this.logs = logs;
     this.configured = configured;
     this.harness = harness;
-    this.clock = clock;
   }
 
-  public <T> T execute(
+  public <T extends InformationGateResult> T execute(
       InformationContext context,
       UUID request,
       String operation,
-      Object identity,
+      InformationGateIdentity identity,
       List<UUID> sources,
       String session,
       Class<T> resultType,
       Supplier<T> transition) {
     access.requireSelection(context);
     if (request == null) throw new CallerFault("stage transition needs a stable requestId");
-    String fingerprint =
-        InformationCatalogue.sha256(
-            json(Arrays.asList(operation, context.selection(), identity))
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    String fingerprint = InformationGateFingerprint.of(operation, context.selection(), identity);
     var receipt =
         work.inTransaction(
-            () -> {
-              jdbc.queryForObject(
-                  "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
-                  Boolean.class,
-                  context.account() + ":write-gates:" + request);
-              var prior =
-                  jdbc.queryForList(
-                      "SELECT * FROM information_write_gates WHERE account=? AND request_id=? FOR UPDATE",
-                      context.account(),
-                      request);
-              if (!prior.isEmpty()) {
-                var row = prior.getFirst();
-                if (!fingerprint.equals(row.get("fingerprint")))
-                  throw new CallerFault(
-                      "requestId was already used for a different prepared transition");
-                if (row.get("state").equals("completed")) return row;
-                if (row.get("state").equals("blocked"))
-                  throw new CallerFault((String) row.get("error"));
-                if (((OffsetDateTime) row.get("lease_until")).toInstant().isAfter(clock.instant()))
-                  throw new CallerFault(
-                      "transition is in progress; reconcile with the same requestId");
-                UUID token = UUID.randomUUID();
-                jdbc.update(
-                    "UPDATE information_write_gates SET token=?,lease_until=? WHERE account=? AND request_id=?",
-                    token,
-                    expiry(),
-                    context.account(),
-                    request);
-                var claimed = new LinkedHashMap<>(row);
-                claimed.put("token", token);
-                return claimed;
-              }
-              UUID token = UUID.randomUUID();
-              jdbc.update(
-                  "INSERT INTO information_write_gates(account,request_id,fingerprint,operation,token,lease_until) VALUES(?,?,?,?,?,?)",
-                  context.account(),
-                  request,
-                  fingerprint,
-                  operation,
-                  token,
-                  expiry());
-              return jdbc.queryForMap(
-                  "SELECT * FROM information_write_gates WHERE account=? AND request_id=?",
-                  context.account(),
-                  request);
-            });
-    if (receipt.get("state").equals("completed"))
-      return decode(receipt.get("response"), resultType);
+            () -> repository.claim(context.account(), request, fingerprint, operation, resultType));
+    if (receipt.state() == InformationGateRepository.State.COMPLETED) return receipt.response();
     HarnessRun run = harness.begin();
     try {
-      if (!receipt.get("state").equals("approved")) {
-        String log = (String) receipt.get("log_id");
+      if (receipt.state() != InformationGateRepository.State.APPROVED) {
+        String log = receipt.log();
         if (log == null) {
           String project = context.selection().project();
           Home home = project == null ? Home.global() : Home.of(project);
@@ -149,11 +94,7 @@ public final class InformationWriteGates implements UsageAware {
           work.inTransaction(
               () -> {
                 fence(context, request, receipt);
-                jdbc.update(
-                    "UPDATE information_write_gates SET log_id=? WHERE account=? AND request_id=?",
-                    opened,
-                    context.account(),
-                    request);
+                repository.opened(context.account(), request, opened);
                 return null;
               });
         }
@@ -173,22 +114,19 @@ public final class InformationWriteGates implements UsageAware {
         Hooks chain = Hooks.chain(run.forModel(null), configured);
         var shown = new StageShown(operation, operation, 0, 1);
         Gate pre = chain.stagePre(hookContext, new StageStart(shown, null, null));
-        record(context, request, receipt, "pre_gate", pre);
+        repository.preGate(context.account(), request, receipt.token(), pre);
         if (pre.isDenied()) throw new CallerFault(pre.denied());
         Gate post =
             chain.stagePost(
                 hookContext,
                 new StageDone(shown, "validated information transition prepared", null));
-        record(context, request, receipt, "post_gate", post);
+        repository.postGate(context.account(), request, receipt.token(), post);
         if (post.isDenied()) throw new CallerFault(post.denied());
         work.inTransaction(
             () -> {
               fence(context, request, receipt);
               inputs.requireLog(openedLog(context, request), context.account());
-              jdbc.update(
-                  "UPDATE information_write_gates SET state='approved' WHERE account=? AND request_id=?",
-                  context.account(),
-                  request);
+              repository.approved(context.account(), request);
               return null;
             });
       }
@@ -198,83 +136,27 @@ public final class InformationWriteGates implements UsageAware {
             access.requireSelection(context);
             inputs.requireLog(openedLog(context, request), context.account());
             T result = transition.get();
-            jdbc.update(
-                "UPDATE information_write_gates SET state='completed',response=CAST(? AS jsonb) WHERE account=? AND request_id=?",
-                json(result),
-                context.account(),
-                request);
+            repository.completed(context.account(), request, result);
             return result;
           });
     } catch (RuntimeException failure) {
-      jdbc.update(
-          "UPDATE information_write_gates SET state='blocked',error=? WHERE account=? AND request_id=? AND token=? AND state<>'completed'",
-          failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage(),
+      repository.blocked(
           context.account(),
           request,
-          receipt.get("token"));
+          receipt.token(),
+          failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
       throw failure;
     } finally {
-      record(context, request, receipt, "finish_records", run.finish());
+      repository.finishRecords(context.account(), request, receipt.token(), run.finish());
     }
   }
 
   private String openedLog(InformationContext context, UUID request) {
-    return jdbc.queryForObject(
-        "SELECT log_id FROM information_write_gates WHERE account=? AND request_id=?",
-        String.class,
-        context.account(),
-        request);
+    return repository.openedLog(context.account(), request);
   }
 
-  private void record(
-      InformationContext context,
-      UUID request,
-      Map<String, Object> receipt,
-      String column,
-      Object value) {
-    // Column names are fixed internal call sites, never caller input.
-    jdbc.update(
-        "UPDATE information_write_gates SET "
-            + column
-            + "=CAST(? AS jsonb) WHERE account=? AND request_id=? AND token=?",
-        json(value),
-        context.account(),
-        request,
-        receipt.get("token"));
-  }
-
-  private void fence(InformationContext context, UUID request, Map<String, Object> receipt) {
-    if (jdbc.queryForList(
-            "SELECT request_id FROM information_write_gates WHERE account=? AND request_id=? AND token=? AND lease_until>=? FOR UPDATE",
-            context.account(),
-            request,
-            receipt.get("token"),
-            now())
-        .isEmpty())
-      throw new CallerFault("transition lease expired; reconcile with the same requestId");
-  }
-
-  private OffsetDateTime now() {
-    return clock.instant().atOffset(ZoneOffset.UTC);
-  }
-
-  private OffsetDateTime expiry() {
-    return clock.instant().plusSeconds(300).atOffset(ZoneOffset.UTC);
-  }
-
-  private static String json(Object value) {
-    try {
-      return JSON.writeValueAsString(value);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException(invalid);
-    }
-  }
-
-  private static <T> T decode(Object value, Class<T> type) {
-    try {
-      return JSON.readValue(value.toString(), type);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException(invalid);
-    }
+  private void fence(
+      InformationContext context, UUID request, InformationGateRepository.Receipt<?> receipt) {
+    repository.fence(context.account(), request, receipt.token());
   }
 }

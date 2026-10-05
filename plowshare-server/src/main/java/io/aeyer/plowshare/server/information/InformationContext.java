@@ -12,8 +12,8 @@ public record InformationContext(
     this(account, selection, corpus, InformationFacets.NONE);
   }
 
-  public InformationContext withFacets(Object value) {
-    return new InformationContext(account, selection, corpus, InformationFacets.from(value));
+  public InformationContext withFacets(InformationFacets value) {
+    return new InformationContext(account, selection, corpus, Objects.requireNonNull(value));
   }
 
   public InformationContext(String account, Selection selection) {
@@ -35,19 +35,8 @@ public record InformationContext(
   }
 
   /** Corpus selection changes discovery, never ownership or workspace permissions. */
-  public InformationContext withCorpus(Object value) {
-    if (value == null) return this;
-    if (!(value instanceof String name))
-      throw new io.aeyer.plowshare.server.faults.CallerFault("corpus must be documents or code");
-    Corpus selected =
-        switch (name) {
-          case "documents" -> Corpus.DOCUMENTS;
-          case "code" -> Corpus.CODE;
-          default ->
-              throw new io.aeyer.plowshare.server.faults.CallerFault(
-                  "corpus must be documents or code");
-        };
-    return new InformationContext(account, selection, selected, facets);
+  public InformationContext withCorpus(Corpus value) {
+    return value == null ? this : new InformationContext(account, selection, value, facets);
   }
 
   public InformationContext {

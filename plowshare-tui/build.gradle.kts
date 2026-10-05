@@ -122,10 +122,8 @@ fun Exec.requirePnpm() {
                 |  Install it:  npm install -g pnpm      (or: brew install pnpm)
                 |  Then:        ./gradlew build
                 |
-                |plowshare-tui is the TERMINAL client and not plowshare-client, which is
-                |the Java one and needs only a JDK. This module is TypeScript, like
-                |plowshare-console; that module's build file says why the second ecosystem
-                |was accepted into a build that used to need only a JDK.
+                |plowshare-tui is the TypeScript terminal client. The shared TypeScript
+                |client and Node platform packages also require this toolchain.
                 |
                 |PATH as this build saw it:
                 |  ${(System.getenv("PATH") ?: "<unset>").replace(File.pathSeparator, "\n  ")}
@@ -191,19 +189,19 @@ fun Exec.declareSources() {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     // The public package's build must exist before resolving its runtime/types exports.
     dependsOn(":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild")
-    inputs.dir(rootProject.file("plowshare-client-ts/src"))
+    inputs.dir(rootProject.file("sdk/typescript/src"))
         .withPropertyName("sharedClientSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(rootProject.file("plowshare-client-ts/package.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.json"),
-        rootProject.file("plowshare-client-ts/tsconfig.base.json"),
-        rootProject.file("plowshare-client-ts/pnpm-lock.yaml"))
+    inputs.files(rootProject.file("sdk/typescript/package.json"),
+        rootProject.file("sdk/typescript/tsconfig.json"),
+        rootProject.file("sdk/typescript/tsconfig.base.json"),
+        rootProject.file("sdk/typescript/pnpm-lock.yaml"))
         .withPropertyName("sharedClientConfiguration")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file("plowshare-client-node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(rootProject.file("plowshare-client-node/package.json"),
-        rootProject.file("plowshare-client-node/tsconfig.json"),
-        rootProject.file("plowshare-client-node/pnpm-lock.yaml")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(rootProject.file("sdk/node/package.json"),
+        rootProject.file("sdk/node/tsconfig.json"),
+        rootProject.file("sdk/node/pnpm-lock.yaml")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src")
         .withPropertyName("sources")
         .withPathSensitivity(PathSensitivity.RELATIVE)

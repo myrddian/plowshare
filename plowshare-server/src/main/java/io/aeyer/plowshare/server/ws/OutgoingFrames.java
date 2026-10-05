@@ -46,14 +46,15 @@ public final class OutgoingFrames implements FrameArea {
   }
 
   private Outgoing.Work owned(String type, Map<String, Object> payload, Asking asking) {
-    var id = Payloads.as(payload, Outgoing.Id.class, type);
+    var id = io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.Id.class);
     var found = work.get(asking.requireHandle(type), id.id());
     scoped(type, found.project(), asking);
     return found;
   }
 
   private Outcome send(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Outgoing.Send.class, FrameTypes.OUTGOING_SEND);
+    var body =
+        io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.Send.class);
     String account = scoped(FrameTypes.OUTGOING_SEND, body.project(), asking);
     if (body.conversation() != null)
       callers.requireConversationProject(body.conversation(), account);
@@ -70,13 +71,15 @@ public final class OutgoingFrames implements FrameArea {
   }
 
   private Outcome peers(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Outgoing.Advertise.class, FrameTypes.OUTGOING_PEERS);
+    var body =
+        io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.PeerQuery.class);
     String project = body.project();
     return Outcome.ok(work.peers(scoped(FrameTypes.OUTGOING_PEERS, project, asking), project));
   }
 
   private Outcome advertise(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Outgoing.Advertise.class, FrameTypes.OUTGOING_ADVERTISE);
+    var body =
+        io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.Advertise.class);
     work.advertise(
         scoped(FrameTypes.OUTGOING_ADVERTISE, body.project(), asking),
         body.project(),
@@ -86,7 +89,8 @@ public final class OutgoingFrames implements FrameArea {
   }
 
   private Outcome claim(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Outgoing.Claim.class, FrameTypes.OUTGOING_CLAIM);
+    var body =
+        io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.Claim.class);
     return Outcome.ok(
         work.claim(
             scoped(FrameTypes.OUTGOING_CLAIM, body.project(), asking),
@@ -96,7 +100,8 @@ public final class OutgoingFrames implements FrameArea {
   }
 
   private Outcome report(Map<String, Object> payload, Asking asking) {
-    var body = Payloads.as(payload, Outgoing.Report.class, FrameTypes.OUTGOING_REPORT);
+    var body =
+        io.aeyer.plowshare.server.outgoing.OutgoingCodec.request(payload, Outgoing.Report.class);
     if (body.id() == null)
       throw new io.aeyer.plowshare.server.faults.CallerFault("outgoing report requires id");
     owned(FrameTypes.OUTGOING_REPORT, Map.of("id", body.id()), asking);

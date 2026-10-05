@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.*;
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -16,7 +15,6 @@ public final class OutgoingTool implements AgentTool {
   public static final Set<String> NAMES =
       Set.of("outgoing_send", "outgoing_read", "outgoing_cancel", "outgoing_peers");
   private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
-  private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
   private final Supplier<OutgoingWork> service;
   private final String verb;
   private final ToolSchema schema;
@@ -43,7 +41,7 @@ public final class OutgoingTool implements AgentTool {
           default -> throw new IllegalArgumentException("unknown outgoing tool");
         };
     schema =
-        new ToolSchema(
+        ToolSchema.from(
             "outgoing_" + verb,
             "send".equals(verb)
                 ? "Queue external work and return a durable receipt. Reuse requestId only for identical work; never resubmit uncertain work with a new id."
@@ -95,7 +93,8 @@ public final class OutgoingTool implements AgentTool {
                 new Outgoing.Send(
                     UUID.fromString(text(args, "requestId")),
                     text(args, "peer"),
-                    JSON.convertValue(args.get("message"), MAP),
+                    io.aeyer.plowshare.server.outgoing.OutgoingCodec.message(
+                        args.get("message").toString()),
                     home.project(),
                     owner.conversations().id()));
       } else {

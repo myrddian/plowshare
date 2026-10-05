@@ -14,4 +14,10 @@ import java.time.Instant;
  * @param by the agent or human that invalidated it
  * @param reason why it stopped being true, in prose
  */
-public record Invalidation(Instant at, String by, String reason) {}
+public record Invalidation(Instant at, String by, String reason) {
+  public Invalidation {
+    java.util.Objects.requireNonNull(at, "at");
+    by = ContractValues.identity(by, "by", 1024);
+    reason = ContractValues.text(reason, "reason", 32768, true);
+  }
+}

@@ -8,8 +8,11 @@ defines what an emitted event starts; a firing records an occurrence and its
 outcome. A scheduled assistant still needs its effective definition, permissions
 and model allowance.
 
-Use the current schedule/trigger define and read contracts and validate the proposal
-offline first. A newly defined trigger is active immediately; inspect its list and
+Use [schedule definitions](../scheduling.md) to save a monitored project JSON file
+from desktop, TUI or CLI. Files can run agents, explicit granted skills or
+orchestrations, and route to inboxes, conversations or existing message destinations.
+The CLI exposes `schedule save`, `schedule sync` and `schedule files`; legacy
+schedule/trigger define operations remain available. Validate requests offline first. A newly defined trigger is active immediately; inspect its list and
 use pause deliberately. List and pause controls let you stop future
 starts without erasing earlier firings. An event source should provide bounded,
 well-defined data and retain correlation so repeated delivery does not become

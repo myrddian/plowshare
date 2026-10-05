@@ -4,7 +4,6 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.LogGrowth;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.archive.EntryStore;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -44,8 +43,7 @@ public final class ConversationAppended implements LogGrowth {
     }
     try {
       int through = entries.through(conversationId);
-      Map<String, Object> body =
-          Map.of("kind", KIND, "conversation", conversationId, "through", through);
+      var body = new io.aeyer.plowshare.protocol.ConversationGrowth(conversationId, through);
       for (String session : followers) {
         pushes.tell(session, body);
       }

@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/union'
+export * from 'plowshare-client-ts/operations/union';

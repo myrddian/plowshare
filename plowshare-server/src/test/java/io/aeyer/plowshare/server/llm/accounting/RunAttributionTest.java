@@ -623,11 +623,14 @@ class RunAttributionTest {
                 harness.dispatcher, () -> registry.get("middle"))) {
       var question =
           new CallValidator.Question(
-              "held", new ToolSchema("file_read", "read", Map.of("type", "object")), "task", owner);
+              "held",
+              ToolSchema.from("file_read", "read", Map.of("type", "object")),
+              "task",
+              owner);
       validator.validate(question, () -> false);
       var trap =
           advisor.create(
-              io.aeyer.plowshare.server.harness.Parameters.read(
+              io.aeyer.plowshare.server.harness.ParameterValues.decode(
                   "harness:stuck",
                   io.aeyer.plowshare.server.harness.StuckTrapFactory.PARAMETERS,
                   Map.of(
@@ -759,6 +762,159 @@ class RunAttributionTest {
   }
 
   @Test
+  void system_processing_keeps_admission_authority_and_needs_no_parent_model_call()
+      throws Exception {
+    var registry = registry();
+    var pipeline =
+        conversations.log(
+            Origin.SUBMISSION, PAYMENTS, "document_pipeline", null, Budget.of(10), "alice");
+    var system = owners.processing(pipeline.id(), UsageAttribution.Operation.DOCUMENT_SUMMARY);
+    assertEquals(UsageAttribution.Status.SYSTEM, system.status());
+    assertNull(system.accountHandle());
+    assertEquals(
+        system, source().processing(pipeline.id(), UsageAttribution.Operation.DOCUMENT_SUMMARY));
+    assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM entries", Integer.class));
+    try (var harness = harness(RunAttributionTest::answer)) {
+      var logs = logs(harness.dispatcher, registry.get("leaf"));
+      logs.useRunUsage(owners);
+      try {
+        var child =
+            new AttributedTranscript(
+                logs.logFor(
+                    Origin.DELEGATION,
+                    PAYMENTS,
+                    registry.get("leaf"),
+                    pipeline.id(),
+                    null,
+                    Speaker.harness(),
+                    "alice"),
+                UsageAttribution.LEGACY,
+                system);
+        var owned = logs.own(PAYMENTS, child, registry.get("leaf"), "alice");
+        var runtime = new JobRuntime(harness.dispatcher, List.of());
+        runtime.useRunUsage(owners);
+        runtime.useLogOwners(conversations::ownerOf);
+        var result =
+            runtime.run(
+                registry.get("leaf"),
+                "summarise retained content",
+                PAYMENTS,
+                Budget.of(10),
+                () -> false,
+                null,
+                JobWatch.UNWATCHED,
+                owned);
+        assertEquals(Outcome.Ending.ANSWERED, result.ending());
+        project(harness);
+        assertEquals(
+            "SYSTEM",
+            jdbc.queryForObject("SELECT attribution_status FROM inference_calls", String.class));
+        assertNull(jdbc.queryForObject("SELECT account_handle FROM inference_calls", String.class));
+        assertEquals(
+            system.runs().id(),
+            jdbc.queryForObject("SELECT parent_run_id FROM inference_calls", String.class));
+        assertEquals("alice", conversations.ownerOf(child.conversationId()).orElseThrow());
+        var escalation =
+            new AgentDefinition(
+                "leaf",
+                "illegal internal delegate",
+                "fast",
+                List.of("agent_run"),
+                List.of("leaf"),
+                List.of(),
+                1,
+                1,
+                "Delegate the work.");
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                runtime.run(
+                    escalation,
+                    "attempt escalation",
+                    PAYMENTS,
+                    Budget.of(10),
+                    () -> false,
+                    null,
+                    JobWatch.UNWATCHED,
+                    owned));
+        project(harness);
+        assertEquals(1, count("inference_calls"));
+        assertThrows(LlmException.class, () -> owners.start(PAYMENTS, owned, "leaf", "bob"));
+        var foreign =
+            logs.logFor(
+                Origin.DELEGATION,
+                PAYMENTS,
+                registry.get("leaf"),
+                pipeline.id(),
+                null,
+                Speaker.harness(),
+                "bob");
+        assertThrows(
+            LlmException.class,
+            () ->
+                logs.own(
+                    PAYMENTS,
+                    new AttributedTranscript(foreign, UsageAttribution.LEGACY, system),
+                    registry.get("leaf"),
+                    "bob"));
+      } finally {
+        logs.close();
+      }
+    }
+    var user = conversations.open(PAYMENTS, Budget.of(10), TurnCap.none(), "alice");
+    assertThrows(
+        IllegalStateException.class,
+        () -> owners.processing(user.id(), UsageAttribution.Operation.DOCUMENT_SUMMARY));
+  }
+
+  @Test
+  void system_processing_refuses_to_reassign_an_existing_user_execution() {
+    var pipeline =
+        conversations.log(
+            Origin.SUBMISSION, PAYMENTS, "document_pipeline", null, Budget.of(10), "alice");
+    var admitted =
+        owners.start(PAYMENTS, transcript(pipeline.id(), 1, null), "document_pipeline", "alice");
+    assertThrows(
+        IllegalStateException.class,
+        () -> owners.processing(pipeline.id(), UsageAttribution.Operation.DOCUMENT_SUMMARY));
+    assertEquals(admitted.usage(), owners.source(pipeline.id(), 1, admitted.usage().operation()));
+  }
+
+  @Test
+  void replacing_a_legacy_processing_log_preserves_historical_ownership() {
+    var old =
+        conversations.log(
+            Origin.SUBMISSION, PAYMENTS, "document_pipeline", null, Budget.of(10), "alice");
+    var admitted =
+        owners.start(PAYMENTS, transcript(old.id(), 1, null), "document_pipeline", "alice");
+    java.util.UUID resource = java.util.UUID.randomUUID();
+    java.util.UUID revision = java.util.UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO information_resources(id,namespace,source_name,owner_handle,kind)"
+            + " VALUES(?,'personal:alice','fixture','alice','source')",
+        resource);
+    jdbc.update(
+        "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,"
+            + "content_hash,byte_size,processing_log) VALUES(?,?,1,'Fixture','text/plain','fixture',1,?)",
+        revision,
+        resource,
+        old.id());
+    var stages = new io.aeyer.plowshare.server.information.JdbcInformationStageRepository(jdbc);
+    assertFalse(stages.logState(revision, null).systemCompatible());
+    var fresh =
+        conversations.log(
+            Origin.SUBMISSION, PAYMENTS, "document_pipeline", null, Budget.of(10), "alice");
+    assertTrue(stages.replaceLog(revision, old.id(), fresh.id()));
+    assertFalse(stages.replaceLog(revision, old.id(), "losing-replacement"));
+    assertEquals(fresh.id(), stages.logState(revision, null).log());
+    assertTrue(stages.logState(revision, null).systemCompatible());
+    assertEquals(admitted.usage(), owners.source(old.id(), 1, admitted.usage().operation()));
+    assertEquals(
+        UsageAttribution.Status.SYSTEM,
+        owners.processing(fresh.id(), UsageAttribution.Operation.DOCUMENT_SUMMARY).status());
+  }
+
+  @Test
   void enabled_accounting_refuses_a_new_unattributed_request_before_any_inference()
       throws Exception {
     var invoked = new AtomicInteger();
@@ -872,7 +1028,7 @@ class RunAttributionTest {
     AgentTool tool =
         new AgentTool() {
           public ToolSchema schema() {
-            return new ToolSchema("owned_tool", "fixture", Map.of("type", "object"));
+            return ToolSchema.from("owned_tool", "fixture", Map.of("type", "object"));
           }
 
           public String run(String json, Home home) {

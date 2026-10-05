@@ -106,7 +106,7 @@ class ArchiveTest {
     clock = NOW;
     minted = 0;
     store = new MemoryStore(jdbc);
-    reasons = new ReasonLog(jdbc);
+    reasons = new JdbcReasonLog(jdbc);
     // Stubbed, never live. Nothing in this file asserts on what a vector
     // means; the writes here need an embedding client only because the write
     // path has one, and a real model would make every test in the class

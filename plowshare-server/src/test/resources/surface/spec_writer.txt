@@ -40,16 +40,18 @@ Navigate authorized workspace code by verified raw content hash. files selects a
 
 parameters:
 {
+  "type": "object",
   "properties": {
     "limit": {
-      "minimum": 1,
-      "type": "integer"
+      "type": "integer",
+      "minimum": 1
     },
     "offset": {
-      "minimum": 0,
-      "type": "integer"
+      "type": "integer",
+      "minimum": 0
     },
     "operation": {
+      "type": "string",
       "enum": [
         "files",
         "overview",
@@ -57,8 +59,7 @@ parameters:
         "symbols",
         "read",
         "unwatch"
-      ],
-      "type": "string"
+      ]
     },
     "path": {
       "type": "string"
@@ -75,8 +76,7 @@ parameters:
   },
   "required": [
     "operation"
-  ],
-  "type": "object"
+  ]
 }
 
 === tool: file_roots ===
@@ -241,11 +241,11 @@ parameters:
   "properties": {
     "ids": {
       "type": "array",
+      "description": "The memories to read, by id.",
       "items": {
         "type": "string",
         "description": "A memory id, exactly as memory_recall showed it."
-      },
-      "description": "The memories to read, by id."
+      }
     }
   },
   "required": [

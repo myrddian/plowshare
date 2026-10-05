@@ -7,7 +7,9 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Noticing;
 import io.aeyer.plowshare.server.agents.Turn;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.relay.Relay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.Executors;
@@ -46,22 +48,27 @@ public class EventsConfig {
 
   @Bean
   public ScheduleStore scheduleStore(JdbcTemplate jdbc) {
-    return new ScheduleStore(jdbc);
+    return new JdbcScheduleStore(jdbc);
   }
 
   @Bean
   public TriggerStore triggerStore(JdbcTemplate jdbc) {
-    return new TriggerStore(jdbc);
+    return new JdbcTriggerStore(jdbc);
   }
 
   @Bean
+  @org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
   public FiringStore firingStore(JdbcTemplate jdbc) {
-    return new FiringStore(jdbc);
+    var repository = new JdbcFiringStore(jdbc);
+    // Refuse cutover before the ticker, event transport or any recovery listener can claim work.
+    // Operators must first run this inventory against a restored deployment database copy.
+    repository.preflight().requireCompatible();
+    return repository;
   }
 
   @Bean
   public InboxStore inboxStore(JdbcTemplate jdbc) {
-    return new InboxStore(jdbc);
+    return new JdbcInboxStore(jdbc);
   }
 
   @Bean
@@ -104,10 +111,16 @@ public class EventsConfig {
       Callers callers,
       JobStore jobs,
       Turn turns,
-      Inbox inbox) {
-    Dispatcher dispatcher =
-        new Dispatcher(
-            firings, triggers, new AgentRunner(callers, jobs, turns), inbox, Instant::now);
+      Inbox inbox,
+      ObjectProvider<ScheduleDefinitions> definitions,
+      ObjectProvider<ScheduleDefinitions.Authority> authority,
+      ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messages,
+      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal) {
+    AgentRunner runner = new AgentRunner(callers, jobs, turns);
+    runner.useSchedules(
+        definitions::getIfAvailable, authority::getIfAvailable, messages::getIfAvailable);
+    if (personal.getIfAvailable() != null) runner.usePersonalSpaces(personal.getIfAvailable());
+    Dispatcher dispatcher = new Dispatcher(firings, triggers, runner, inbox, Instant::now);
     turns.whenFree(conversation -> dispatcher.drain("conversation:" + conversation));
     return dispatcher;
   }
@@ -131,8 +144,33 @@ public class EventsConfig {
   }
 
   @Bean
-  public Ticker ticker(ScheduleStore schedules, Intake intake) {
-    return new Ticker(schedules, intake);
+  public ScheduledPublication scheduledPublication(
+      ScheduleStore schedules, Relay relay, ScheduledArrival arrivals, UnitOfWork transactions) {
+    return new RelayScheduledPublication(
+        schedules,
+        relay,
+        arrivals,
+        transactions,
+        () -> {
+          if (org.springframework.transaction.support.TransactionSynchronizationManager
+              .isActualTransactionActive())
+            throw new IllegalStateException(
+                "scheduled publication must start outside a database transaction");
+        });
+  }
+
+  @Bean
+  public Ticker ticker(
+      ScheduleStore schedules,
+      ScheduledPublication publications,
+      ObjectProvider<ScheduleDefinitions> definitions) {
+    Ticker ticker = new Ticker(schedules, publications);
+    ticker.useReconciliation(
+        () -> {
+          var service = definitions.getIfAvailable();
+          if (service != null) service.poll();
+        });
+    return ticker;
   }
 
   @Bean(destroyMethod = "shutdownNow")
@@ -162,11 +200,13 @@ public class EventsConfig {
       Dispatcher dispatcher,
       Ticker ticker,
       EventsProperties properties,
-      ScheduledExecutorService eventsTickerThread) {
+      ScheduledExecutorService eventsTickerThread,
+      io.aeyer.plowshare.server.relay.RelayInternalWorkers relayInternalWorkers) {
     return ready -> {
       if (properties.isRecoverAtBoot()) {
         Instant now = Instant.now();
         firings.abandonUnfinished("the server restarted during this run", now);
+        ticker.reconcile();
         ticker.rollForward(now, properties.tickIntervalNow().multipliedBy(2));
       } else {
         log.info(
@@ -176,6 +216,7 @@ public class EventsConfig {
       // Its own switch is independent of event recovery. Claims must be abandoned
       // before the board creates or starts any replacement wake.
       dispatcher.recoverWakes();
+      relayInternalWorkers.start();
       if (properties.isRecoverAtBoot()) {
         firings.targetsWaiting().forEach(dispatcher::drain);
       }

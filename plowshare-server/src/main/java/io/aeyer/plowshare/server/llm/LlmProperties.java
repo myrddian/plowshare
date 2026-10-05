@@ -88,6 +88,16 @@ public class LlmProperties {
    */
   private TokenizerProperties tokenizer = new TokenizerProperties();
 
+  private io.aeyer.plowshare.server.llm.tokens.TokenizerFile embeddingTokenizer;
+
+  public io.aeyer.plowshare.server.llm.tokens.TokenizerFile getEmbeddingTokenizer() {
+    return embeddingTokenizer;
+  }
+
+  public void setEmbeddingTokenizer(io.aeyer.plowshare.server.llm.tokens.TokenizerFile value) {
+    embeddingTokenizer = value;
+  }
+
   public TokenizerProperties getTokenizer() {
     return tokenizer;
   }
@@ -238,22 +248,14 @@ public class LlmProperties {
    * there was nothing on that side at all: {@code DispatchingEmbeddingClient} verifies the width of
    * every vector that comes back and verified nothing about what went out.
    *
-   * <p>Measured against the reference node 2026-09-03, {@code nomic-embed-text} reports {@code
-   * loaded_context_length} 2048 and {@code max_context_length} 2048 — no headroom to be bought by
-   * configuration. The shipped value sits a quarter below that because the shipped tokenizer
-   * estimates, and an estimate can be low; {@code application.yml} carries the arithmetic beside
-   * the key.
-   *
-   * <p><b>Tokens and not bytes.</b> This key was {@code embedding-max-input-bytes}, on the argument
-   * that no tokenizer emits more tokens than its input has bytes. That made it a bound, and a
-   * quarter of the window for English prose: it refused every 300-word digest summary the archive
-   * wrote. The count is now the {@code Tokenizer} bean's, the one every surface on this server
-   * counts with, so a real tokenizer replacing the heuristic moves this ceiling with nothing else
-   * to edit.
+   * <p>Counted by the pinned embedding tokenizer, including its special tokens. Chat context
+   * estimates are a separate capability and cannot enforce this allowance. In dual mode each
+   * encoder supplies its own allowance and preprocessing contract; shared chunks fit both.
    *
    * <p><b>Changing this is a re-chunk and a re-embed of the corpus, not a setting</b>, for the
    * reason {@link #embeddingModel} carries: every stored chunk was cut under the rule in force when
-   * it was written, and a re-ingest will not repair a chunk whose paragraph did not change.
+   * it was written, and changed search layouts must be re-derived even when paragraph text did not
+   * change.
    *
    * <p>No initializer, for the reason {@link #embeddingModel} sets out. An unbound instance answers
    * {@code 0}, {@code LlmConfig.requireEmbeddingMaxInputTokens} refuses that at boot, and {@code

@@ -308,7 +308,9 @@ class OrchestrationsTest {
         changed,
         cancelledJobs::add,
         MAX_DEPTH,
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+        new JdbcOrchestrationRecovery(jdbc, work),
+        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc));
   }
 
   @Test
@@ -326,6 +328,61 @@ class OrchestrationsTest {
     assertEquals(announced, changes.size());
     org.mockito.Mockito.verify(logs, org.mockito.Mockito.times(1))
         .opened(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void resume_keeps_progress_records_the_transition_and_waits_for_failure_cleanup() {
+    var current = new AtomicReference<Orchestrations>();
+    var refusedDuringCleanup = new ArrayList<String>();
+    var engine =
+        engine(
+            UnaryOperator.identity(),
+            run -> {
+              changes.add(run);
+              if (run.state() == OrchestrationState.FAILED) {
+                assertThrows(
+                    io.aeyer.plowshare.server.faults.CallerFault.class,
+                    () ->
+                        current
+                            .get()
+                            .resume(
+                                new io.aeyer.plowshare.protocol.Orchestration.Resume(
+                                    run.id(), java.util.UUID.randomUUID()),
+                                "enzo"));
+                refusedDuringCleanup.add(run.id());
+              }
+            });
+    current.set(engine);
+    engine.useRecorder(new RecordKeeper(new RecordStore(jdbc, () -> T0, work), store, () -> null));
+    var notified = new ArrayList<java.util.UUID>();
+    engine.useResumeListener((run, key) -> notified.add(key));
+    var run = started(engine);
+    markStagesDone(run.conductorConversation(), "goal");
+    var progress = board.list(run.conductorConversation());
+    var callsSpent = conversations.find(run.conductorConversation()).orElseThrow().budget().spent();
+    voice.end(0, Ending.UNAVAILABLE, "temporary provider outage");
+    assertEquals(List.of(run.id()), refusedDuringCleanup);
+    assertEquals(OrchestrationState.FAILED, store.find(run.id()).orElseThrow().state());
+    var ask =
+        new io.aeyer.plowshare.protocol.Orchestration.Resume(run.id(), java.util.UUID.randomUUID());
+    var resumed = engine.resume(ask, "enzo");
+    assertEquals(run.id(), resumed.id());
+    assertEquals(OrchestrationState.RUNNING, resumed.state());
+    assertEquals(progress, board.list(run.conductorConversation()));
+    assertEquals(
+        callsSpent, conversations.find(run.conductorConversation()).orElseThrow().budget().spent());
+    assertEquals(2, voice.calls.size());
+    assertEquals(run.conductorConversation(), voice.calls.get(1).conversation());
+    assertEquals(List.of(ask.requestId()), notified);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM orchestration_record WHERE root=? AND kind='run_resumed'",
+            Integer.class,
+            run.id()));
+    engine.resume(ask, "enzo");
+    assertEquals(2, voice.calls.size());
+    assertEquals(1, notified.size());
   }
 
   private Orchestrations.Start start(String callerConversation, String callerHandle) {
@@ -560,7 +617,7 @@ class OrchestrationsTest {
 
   private static final ObjectMapper JSON = new ObjectMapper();
 
-  private static final String STORE_QUESTION =
+  private static final io.aeyer.plowshare.protocol.Orchestration.Structure STORE_QUESTION =
       StructuredQuestions.structure(
           new StructuredQuestions.Asked(
               "First:",
@@ -582,13 +639,14 @@ class OrchestrationsTest {
 
     assertEquals(Optional.empty(), engine.ask(run.id(), "First: …", STORE_QUESTION));
     assertEquals(
-        JSON.readTree(STORE_QUESTION),
-        JSON.readTree(store.openQuestion(run.id()).orElseThrow().structure()));
+        JSON.valueToTree(STORE_QUESTION),
+        JSON.valueToTree(store.openQuestion(run.id()).orElseThrow().structure()));
 
     Orchestrations.Chosen chosen =
         engine.answerChosen(
             run.id(),
-            JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]"),
+            io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]")),
             "thanks",
             "enzo",
             true);
@@ -604,7 +662,7 @@ class OrchestrationsTest {
     assertEquals(text, answer.text());
     assertEquals(
         JSON.readTree("{\"choices\":[{\"header\":\"Store\",\"chosen\":[\"SQLite\"]}]}"),
-        JSON.readTree(answer.structure()));
+        JSON.valueToTree(answer.structure()));
     assertTrue(recorder.told.contains("answered " + run.id() + " " + text + " by enzo"));
   }
 
@@ -617,7 +675,8 @@ class OrchestrationsTest {
     Orchestrations.Chosen chosen =
         engine.answerChosen(
             run.id(),
-            JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"MySQL\"]}]"),
+            io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"MySQL\"]}]")),
             null,
             "enzo",
             true);
@@ -638,7 +697,8 @@ class OrchestrationsTest {
     Orchestrations.Chosen chosen =
         engine.answerChosen(
             run.id(),
-            JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"Postgres\"]}]"),
+            io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"Postgres\"]}]")),
             null,
             "enzo",
             true);
@@ -657,34 +717,21 @@ class OrchestrationsTest {
    * refuses — threw out of the answer path as a server error, where the person needs a sentence.
    */
   @Test
-  void choices_to_a_stored_structure_that_no_longer_reads_are_refused_in_a_sentence()
-      throws Exception {
+  void malformed_structures_are_refused_before_recording_a_question() throws Exception {
     Orchestrations engine = engine();
     OrchestrationRecord run = started(engine);
-    engine.ask(
-        run.id(),
-        "First: …",
-        "{\"lead\":\"First:\",\"questions\":[{\"header\":\"Store\","
-            + "\"question\":\"Which database?\",\"multi\":false,\"options\":["
-            + "{\"label\":\"Postgres\",\"description\":\"p\"}]}]}");
-
-    Orchestrations.Chosen chosen =
-        engine.answerChosen(
-            run.id(),
-            JSON.readTree("[{\"header\":\"Store\",\"chosen\":[\"Postgres\"]}]"),
-            null,
-            "enzo",
-            true);
-
-    assertEquals(
-        new Orchestrations.Chosen.Refused(
-            "Orchestration "
-                + run.id()
-                + "'s question"
-                + " could not be read as options; answer it in words."),
-        chosen);
-    assertEquals(OrchestrationState.ASKING, row(run.id()).state());
-    assertTrue(engine.answer(run.id(), "Postgres", "enzo"), "words still answer it");
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            engine.ask(
+                run.id(),
+                "First: …",
+                OrchestrationStructures.decode(
+                    "{\"lead\":\"First:\",\"questions\":[{\"header\":\"Store\","
+                        + "\"question\":\"Which database?\",\"multi\":false,\"options\":["
+                        + "{\"label\":\"Postgres\",\"description\":\"p\"}]}]}")));
+    assertEquals(OrchestrationState.RUNNING, row(run.id()).state());
+    assertTrue(store.openQuestion(run.id()).isEmpty());
   }
 
   @Test
@@ -694,7 +741,12 @@ class OrchestrationsTest {
 
     assertEquals(
         new Orchestrations.Chosen.Lost(),
-        engine.answerChosen(run.id(), JSON.readTree("[]"), null, "enzo", true));
+        engine.answerChosen(
+            run.id(),
+            io.aeyer.plowshare.server.agents.StructuredAnswers.decode(JSON.readTree("[]")),
+            null,
+            "enzo",
+            true));
   }
 
   @Test
@@ -1088,8 +1140,8 @@ class OrchestrationsTest {
 
   /** An install question's structure, holding the draft the engine hands its installer. */
   private static final String INSTALL_STRUCTURE =
-      "{\"lead\":\"Install?\",\"questions\":[],"
-          + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\"}";
+      "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],"
+          + "\"name\":\"triage\",\"path\":\"artifacts/triage.md\",\"text\":\"---\",\"sha256\":\"sha256:cb3f91d54eee30e53e35b2b99905f70f169ed549fd78909d3dac2defc9ed8d3b\"}";
 
   /** A fake Studio: records what it was asked to settle and answers a fixed sentence. */
   static final class FakeInstaller implements Orchestrations.Installer {
@@ -1111,7 +1163,12 @@ class OrchestrationsTest {
     OrchestrationRecord run = started(engine);
 
     assertEquals(
-        Optional.empty(), engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE));
+        Optional.empty(),
+        engine.askInstall(
+            run.id(),
+            "Install triage?",
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                INSTALL_STRUCTURE)));
     voice.end(0, Ending.AWAITING, "Install triage?");
     assertTrue(engine.personOnlyQuestion(run.id()).isPresent());
     assertFalse(engine.answerAsModel(run.id(), "Install", "interlocutor"));
@@ -1136,7 +1193,12 @@ class OrchestrationsTest {
     engine.useInstaller(installer);
     OrchestrationRecord run = started(engine);
     assertEquals(
-        Optional.empty(), engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE));
+        Optional.empty(),
+        engine.askInstall(
+            run.id(),
+            "Install triage?",
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                INSTALL_STRUCTURE)));
     voice.end(0, Ending.AWAITING, "Install triage?");
     voice.refusal = "conversation is already speaking";
     voice.speaking = true;
@@ -1168,7 +1230,12 @@ class OrchestrationsTest {
     engine.useInstaller(installer);
     OrchestrationRecord run = started(engine);
     assertEquals(
-        Optional.empty(), engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE));
+        Optional.empty(),
+        engine.askInstall(
+            run.id(),
+            "Install triage?",
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                INSTALL_STRUCTURE)));
     voice.end(0, Ending.AWAITING, "Install triage?");
     voice.refusal = "conversation is already speaking";
     voice.speaking = true;
@@ -1194,7 +1261,10 @@ class OrchestrationsTest {
     FakeRecorder recorder = new FakeRecorder();
     engine.useRecorder(recorder);
     OrchestrationRecord run = started(engine);
-    engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE);
+    engine.askInstall(
+        run.id(),
+        "Install triage?",
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(INSTALL_STRUCTURE));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Install", "enzo"));
@@ -1217,7 +1287,10 @@ class OrchestrationsTest {
     FakeRecorder recorder = new FakeRecorder();
     engine.useRecorder(recorder);
     OrchestrationRecord run = started(engine);
-    engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE);
+    engine.askInstall(
+        run.id(),
+        "Install triage?",
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(INSTALL_STRUCTURE));
     voice.end(0, Ending.AWAITING, "Install triage?");
     setSpent(run.conductorConversation(), 400);
 
@@ -1257,7 +1330,11 @@ class OrchestrationsTest {
     OrchestrationRecord run = engine.start(start(null, null));
 
     Optional<String> refused =
-        engine.askInstall(run.id(), "Install triage?", "{\"lead\":\"Install?\",\"questions\":[]}");
+        engine.askInstall(
+            run.id(),
+            "Install triage?",
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+                "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}]}"));
 
     assertEquals(Optional.of(Orchestrations.NOBODY_TO_ASK_ABOUT_INSTALL), refused);
     assertEquals(OrchestrationState.RUNNING, row(run.id()).state());
@@ -1275,7 +1352,11 @@ class OrchestrationsTest {
     FakeInstaller installer = new FakeInstaller();
     engine.useInstaller(installer);
     OrchestrationRecord run = started(engine);
-    engine.askInstall(run.id(), "Install triage?", "{\"lead\":\"Install?\",\"questions\":[]}");
+    engine.askInstall(
+        run.id(),
+        "Install triage?",
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(
+            "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}]}"));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Install", "enzo"));
@@ -1290,7 +1371,10 @@ class OrchestrationsTest {
   void without_an_installer_an_install_answer_installs_nothing_and_says_so() {
     Orchestrations engine = engine();
     OrchestrationRecord run = started(engine);
-    engine.askInstall(run.id(), "Install triage?", INSTALL_STRUCTURE);
+    engine.askInstall(
+        run.id(),
+        "Install triage?",
+        io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(INSTALL_STRUCTURE));
     voice.end(0, Ending.AWAITING, "Install triage?");
 
     assertTrue(engine.answer(run.id(), "Install", "enzo"));
@@ -1404,7 +1488,8 @@ class OrchestrationsTest {
         Orchestrations.Chosen.Answered.class,
         engine.answerChosen(
             run.id(),
-            JSON.readTree("[{\"header\":\"Install\",\"chosen\":[\"Install\"]}]"),
+            io.aeyer.plowshare.server.agents.StructuredAnswers.decode(
+                JSON.readTree("[{\"header\":\"Install\",\"chosen\":[\"Install\"]}]")),
             null,
             "enzo",
             true));
@@ -2785,7 +2870,9 @@ class OrchestrationsTest {
         changes::add,
         cancelledJobs::add,
         MAX_DEPTH,
-        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class),
+        new JdbcOrchestrationRecovery(jdbc, work),
+        new io.aeyer.plowshare.server.orchestrations.scripted.JdbcScriptStore(jdbc));
   }
 
   private static ProjectCaps timeCap(int minutes, Integer autoContinue) {
@@ -5635,8 +5722,8 @@ class OrchestrationsTest {
   @Test
   void a_run_that_ends_withdraws_the_approvals_it_still_has_asked() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
-    OrchestrationAcceptance acceptance = new OrchestrationAcceptance(jdbc, work);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
+    OrchestrationAcceptance acceptance = new JdbcOrchestrationAcceptance(jdbc, work);
     List<String> withdrawn = new ArrayList<>();
     engine.useChecks(checks, consent, this::approvalById);
     engine.useAcceptance(acceptance);
@@ -5671,10 +5758,10 @@ class OrchestrationsTest {
   @Test
   void a_phase_cancelled_with_its_root_withdraws_its_own_approvals() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     List<String> withdrawn = new ArrayList<>();
     engine.useChecks(checks, consent, this::approvalById);
-    engine.useAcceptance(new OrchestrationAcceptance(jdbc, work));
+    engine.useAcceptance(new JdbcOrchestrationAcceptance(jdbc, work));
     engine.useWithdrawal(withdrawn::add);
     OrchestrationRecord parent = started(engine);
     OrchestrationRecord kid =
@@ -5703,7 +5790,7 @@ class OrchestrationsTest {
   @Test
   void a_check_asked_about_as_its_run_ends_is_withdrawn_and_refused() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     List<String> withdrawn = new ArrayList<>();
     AtomicReference<String> running = new AtomicReference<>();
@@ -5735,7 +5822,7 @@ class OrchestrationsTest {
   @Test
   void the_check_s_question_passes_approval_pre_first_and_a_denial_sets_nothing() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     List<String> whys = new ArrayList<>();
     CheckConsent heard =
@@ -5793,7 +5880,7 @@ class OrchestrationsTest {
   @Test
   void an_open_check_asks_nobody_so_approval_pre_is_not_asked() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(checks, consent, this::approvalById);
     OrchestrationRecord run = startedChecked(engine);
@@ -5816,7 +5903,7 @@ class OrchestrationsTest {
   @Test
   void a_check_nobody_can_be_asked_about_asks_approval_pre_nothing() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(
         checks,
@@ -5859,7 +5946,7 @@ class OrchestrationsTest {
   @Test
   void a_run_that_ends_while_approval_pre_runs_asks_nobody_about_its_check() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(
         checks,
@@ -5953,8 +6040,8 @@ class OrchestrationsTest {
   private Orchestrations judgedEngine(List<String> covered) {
     Orchestrations engine = engine();
     jdbc.update("DELETE FROM orchestration_checks");
-    engine.useChecks(new OrchestrationChecks(jdbc), judging, this::approvalById);
-    engine.useAcceptance(new OrchestrationAcceptance(jdbc, work));
+    engine.useChecks(new JdbcOrchestrationChecks(jdbc), judging, this::approvalById);
+    engine.useAcceptance(new JdbcOrchestrationAcceptance(jdbc, work));
     engine.useJudge(
         commands -> {
           judgeShown.add(commands);
@@ -5987,7 +6074,7 @@ class OrchestrationsTest {
   void a_second_phase_setting_the_same_check_as_the_first_is_not_asked() {
     List<String> covered = new ArrayList<>();
     Orchestrations engine = judgedEngine(covered);
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord root = started(engine);
     OrchestrationRecord first = checkedPhase(engine, root);
     OrchestrationRecord second = checkedPhase(engine, root);
@@ -6030,7 +6117,7 @@ class OrchestrationsTest {
   void only_the_same_command_side_and_directory_the_person_allowed_covers_a_check() {
     List<String> covered = new ArrayList<>();
     Orchestrations engine = judgedEngine(covered);
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord root = started(engine);
     OrchestrationRecord first = checkedPhase(engine, root);
     engine.setCheck(first.id(), List.of("pytest", "-q"), "local", "/repo", "ask", false);
@@ -6066,7 +6153,7 @@ class OrchestrationsTest {
     List<String> covered = new ArrayList<>();
     Orchestrations engine = judgedEngine(covered);
     OrchestrationRecord root = started(engine);
-    new OrchestrationAcceptance(jdbc, work)
+    new JdbcOrchestrationAcceptance(jdbc, work)
         .replace(
             root.id(),
             "the requirements",
@@ -6114,7 +6201,7 @@ class OrchestrationsTest {
 
     assertEquals(List.of(), consentDid);
     assertEquals(
-        "apr_standing", new OrchestrationChecks(jdbc).find(run.id()).orElseThrow().approval());
+        "apr_standing", new JdbcOrchestrationChecks(jdbc).find(run.id()).orElseThrow().approval());
     assertTrue(covered.get(0).endsWith("a standing project approval covers it"), covered.get(0));
   }
 
@@ -6138,7 +6225,8 @@ class OrchestrationsTest {
         List.of(new CommandJudge.Command(List.of("pytest", "-q"), null, "/repo", "local")),
         judgeShown.get(0));
     assertEquals(
-        "apr_judged_1", new OrchestrationChecks(jdbc).find(clear.id()).orElseThrow().approval());
+        "apr_judged_1",
+        new JdbcOrchestrationChecks(jdbc).find(clear.id()).orElseThrow().approval());
 
     judgeSays = new CommandJudge.Verdict(false, "it deletes the build directory");
     OrchestrationRecord unclear = startedChecked(engine);
@@ -6204,7 +6292,7 @@ class OrchestrationsTest {
   void a_second_phase_s_reused_check_asks_approval_pre_nothing() {
     List<String> covered = new ArrayList<>();
     Orchestrations engine = judgedEngine(covered);
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord root = started(engine);
     OrchestrationRecord first = checkedPhase(engine, root);
     OrchestrationRecord second = checkedPhase(engine, root);
@@ -6254,7 +6342,7 @@ class OrchestrationsTest {
   @Test
   void a_check_the_judge_does_not_clear_passes_approval_pre_before_the_person() {
     Orchestrations engine = judgedEngine(new ArrayList<>());
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     judgeSays = new CommandJudge.Verdict(false, "it deletes the build directory");
     OrchestrationRecord denied = startedChecked(engine);
     List<String> shown = new ArrayList<>();
@@ -6336,7 +6424,7 @@ class OrchestrationsTest {
   @Test
   void a_check_is_set_once_with_one_approval_and_refused_the_second_time() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(checks, consent, this::approvalById);
     OrchestrationRecord run = startedChecked(engine);
@@ -6357,7 +6445,7 @@ class OrchestrationsTest {
   @Test
   void a_check_cannot_be_set_once_a_checked_stage_is_already_done() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(checks, consent, this::approvalById);
     OrchestrationRecord run = startedChecked(engine);
@@ -6378,7 +6466,7 @@ class OrchestrationsTest {
   @Test
   void a_check_nobody_can_be_asked_to_allow_is_refused_and_nothing_is_stored() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     // A project with no id on this server: on OrchestrationsConfig's own wiring this is
     // exactly what environments.projectId(run.project()) returns when the server keeps no
@@ -6399,7 +6487,7 @@ class OrchestrationsTest {
   @Test
   void under_mode_open_the_check_is_set_without_asking() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(checks, consent, this::approvalById);
     OrchestrationRecord run = startedChecked(engine);
@@ -6448,7 +6536,7 @@ class OrchestrationsTest {
   @Test
   void an_allowed_check_is_spoken_to_the_conductor_in_its_own_words() {
     Orchestrations engine = engine();
-    OrchestrationRecord run = checkAsked(engine, new OrchestrationChecks(jdbc));
+    OrchestrationRecord run = checkAsked(engine, new JdbcOrchestrationChecks(jdbc));
 
     assertTrue(
         engine.continueApproved(
@@ -6465,7 +6553,7 @@ class OrchestrationsTest {
   @Test
   void a_denied_check_is_spoken_to_the_conductor_in_its_own_words() {
     Orchestrations engine = engine();
-    OrchestrationRecord run = checkAsked(engine, new OrchestrationChecks(jdbc));
+    OrchestrationRecord run = checkAsked(engine, new JdbcOrchestrationChecks(jdbc));
 
     assertTrue(
         engine.continueApproved(
@@ -6484,7 +6572,7 @@ class OrchestrationsTest {
   @Test
   void an_approval_that_is_not_the_check_s_keeps_its_own_words() {
     Orchestrations engine = engine();
-    OrchestrationRecord run = checkAsked(engine, new OrchestrationChecks(jdbc));
+    OrchestrationRecord run = checkAsked(engine, new JdbcOrchestrationChecks(jdbc));
 
     engine.continueApproved(
         checkApproval(run, "apr_other", RunApproval.ALLOWED), "[approval] allowed");
@@ -6495,7 +6583,7 @@ class OrchestrationsTest {
   @Test
   void a_denied_check_may_be_replaced_with_a_new_approval() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord run = checkAsked(engine, checks);
     approvalStates.put("apr_check", RunApproval.DENIED);
 
@@ -6517,7 +6605,7 @@ class OrchestrationsTest {
   @Test
   void an_approval_pre_denial_leaves_a_person_refused_check_in_place() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord run = checkAsked(engine, checks);
     approvalStates.put("apr_check", RunApproval.DENIED);
 
@@ -6545,7 +6633,7 @@ class OrchestrationsTest {
       consentAsked.clear();
       voice.calls.clear();
       Orchestrations engine = engine();
-      OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+      OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
       OrchestrationRecord run = checkAsked(engine, checks);
       if (state == null) {
         approvalStates.remove("apr_check");
@@ -6567,7 +6655,7 @@ class OrchestrationsTest {
       consentAsked.clear();
       voice.calls.clear();
       Orchestrations engine = engine();
-      OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+      OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
       OrchestrationRecord run = checkAsked(engine, checks);
       approvalStates.put("apr_check", state);
 
@@ -6579,7 +6667,7 @@ class OrchestrationsTest {
     }
     voice.calls.clear();
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     jdbc.update("DELETE FROM orchestration_checks");
     engine.useChecks(checks, consent, this::approvalById);
     OrchestrationRecord open = startedChecked(engine);
@@ -6593,7 +6681,7 @@ class OrchestrationsTest {
   @Test
   void a_denied_check_is_not_replaced_once_a_checked_stage_is_done() {
     Orchestrations engine = engine();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     OrchestrationRecord run = checkAsked(engine, checks);
     approvalStates.put("apr_check", RunApproval.DENIED);
     move(run, "code", TodoStatus.DONE, null);
@@ -6610,7 +6698,7 @@ class OrchestrationsTest {
   @Test
   void a_run_with_no_checked_stage_has_no_check_to_set() {
     Orchestrations engine = engine();
-    engine.useChecks(new OrchestrationChecks(jdbc), consent, this::approvalById);
+    engine.useChecks(new JdbcOrchestrationChecks(jdbc), consent, this::approvalById);
     OrchestrationRecord run = started(engine);
 
     assertTrue(
@@ -6663,7 +6751,7 @@ class OrchestrationsTest {
                 null,
                 0));
     String conductor = run.conductorConversation();
-    OrchestrationChecks checks = new OrchestrationChecks(jdbc);
+    OrchestrationChecks checks = new JdbcOrchestrationChecks(jdbc);
     checks.set(
         new OrchestrationChecks.Check(
             run.id(),
@@ -6958,8 +7046,8 @@ class OrchestrationsTest {
   /** A root run whose spec stage registered two commands, each asked of the person. */
   private OrchestrationRecord acceptanceAsked(Orchestrations engine) {
     jdbc.update("DELETE FROM orchestration_acceptance");
-    OrchestrationAcceptance acceptance = new OrchestrationAcceptance(jdbc, work);
-    engine.useChecks(new OrchestrationChecks(jdbc), consent, this::approvalById);
+    OrchestrationAcceptance acceptance = new JdbcOrchestrationAcceptance(jdbc, work);
+    engine.useChecks(new JdbcOrchestrationChecks(jdbc), consent, this::approvalById);
     engine.useAcceptance(acceptance);
     OrchestrationDefinition accepting =
         OrchestrationRegistry.parsePinned(

@@ -1,8 +1,9 @@
-import { api } from '../api'
-import type { ConversationView } from '../repl/wire'
-import { button, el, nothing, problemText, trouble } from './dom'
-import type { Transport } from './screen'
-import { GLOBAL_TIER, type ProjectView } from './wire'
+import { consoleTransport } from '../transport';
+import { background } from '../background.ts';
+import type { ConversationView } from '../repl/wire';
+import { button, el, nothing, problemText, trouble } from './dom';
+import type { Transport } from './screen';
+import { GLOBAL_TIER, type ProjectView } from './wire';
 
 /**
  * The conversation picker: every project as a node, and a project's
@@ -60,12 +61,12 @@ import { GLOBAL_TIER, type ProjectView } from './wire'
  * carry a guard against exactly that confusion, each having met it.
  */
 interface Tier {
-    /** What a person is shown. */
-    readonly name: string
-    /** The project this tier is, or the empty string for the global one. */
-    readonly project: string
-    /** The `project=` clause of a listing, trailing `&`, or nothing at all. */
-    readonly query: string
+  /** What a person is shown. */
+  readonly name: string;
+  /** The project this tier is, or the empty string for the global one. */
+  readonly project: string;
+  /** The `project=` clause of a listing, trailing `&`, or nothing at all. */
+  readonly query: string;
 }
 
 /**
@@ -81,124 +82,131 @@ interface Tier {
  * First in the list and never conditional on there being any projects: on most
  * deployments it holds everything.
  */
-const GLOBAL: Tier = { name: GLOBAL_TIER, project: '', query: '' }
+const GLOBAL: Tier = { name: GLOBAL_TIER, project: '', query: '' };
 
 /** A project, as a row of the same tree. */
 function named(project: ProjectView): Tier {
-    return {
-        name: project.kind === 'personal' ? 'Personal' : project.name,
-        project: project.name,
-        query: `project=${encodeURIComponent(project.name)}&`,
-    }
+  return {
+    name: project.kind === 'personal' ? 'Personal' : project.name,
+    project: project.name,
+    query: `project=${encodeURIComponent(project.name)}&`,
+  };
 }
 
 export interface PickerOptions {
-    readonly root: HTMLElement
-    readonly transport?: Transport
-    /** The lifecycle a project's conversations are asked for in. Defaults to `active`. */
-    readonly lifecycle?: string
-    readonly onPick: (conversationId: string) => void
+  readonly root: HTMLElement;
+  readonly transport?: Transport;
+  /** The lifecycle a project's conversations are asked for in. Defaults to `active`. */
+  readonly lifecycle?: string;
+  readonly onPick: (conversationId: string) => void;
 }
 
 export interface Picker {
-    element(): HTMLElement
-    load(): Promise<void>
-    /** The last conversation id a click reported, or null before one has been. */
-    picked(): string | null
-    destroy(): void
+  element(): HTMLElement;
+  load(): Promise<void>;
+  /** The last conversation id a click reported, or null before one has been. */
+  picked(): string | null;
+  destroy(): void;
 }
 
 export function createPicker(options: PickerOptions): Picker {
-    const transport: Transport = options.transport ?? api
-    const lifecycle = options.lifecycle ?? 'active'
-    const tree = el('div', 'picker')
-    let selected: string | null = null
+  const transport: Transport = options.transport ?? consoleTransport;
+  const lifecycle = options.lifecycle ?? 'active';
+  const tree = el('div', 'picker');
+  let selected: string | null = null;
 
-    /**
-     * One project's conversations, read once per expand and drawn under it.
-     *
-     * `host.replaceChildren()` first, so a second click on an already-open
-     * project re-asks the server rather than piling a second copy of its rows
-     * under the first -- the toggle below is not disabled after use, and
-     * nothing stops a person clicking it twice.
-     */
-    async function expand(tier: Tier, host: HTMLElement): Promise<void> {
-        host.replaceChildren()
-        let rows: readonly ConversationView[] = []
-        try {
-            // Typed to tolerate a server that answers `null`: `Transport.get`
-            // is generic and hands back exactly what it is told to expect,
-            // and nothing between here and the socket checks that the body
-            // actually matched.
-            const listing = await transport.get<readonly ConversationView[] | null>(
-                `/v1/conversations?${tier.query}lifecycle=${encodeURIComponent(lifecycle)}`)
-            rows = listing ?? []
-        } catch (problem) {
-            host.append(trouble(problemText(problem, 'That listing could not be read.')))
-            return
-        }
-        if (rows.length === 0) {
-            // nothing(), not a host left empty: a tier with no conversations in
-            // this lifecycle is an answer, and an empty host would look
-            // identical to a picker that had not asked yet.
-            host.append(nothing(`Nothing ${lifecycle} in ${tier.name}.`))
-            return
-        }
-        for (const row of rows) {
-            const control = button('conversation', row.id)
-            control.dataset['conversation'] = row.id
-            control.addEventListener('click', () => {
-                selected = row.id
-                for (const each of tree.querySelectorAll('[data-conversation]')) {
-                    each.removeAttribute('aria-current')
-                }
-                control.setAttribute('aria-current', 'true')
-                options.onPick(row.id)
-            })
-            host.append(control)
-            // The slot this file's javadoc names. Built as a node with its
-            // own children host, rather than as a flat row, precisely so that
-            // the route naming a root's children is a fill-in here and not a
-            // rewrite -- see the class doc above for why it is empty today.
-            const children = el('div', 'children')
-            children.dataset['children'] = row.id
-            host.append(children)
-        }
+  /**
+   * One project's conversations, read once per expand and drawn under it.
+   *
+   * `host.replaceChildren()` first, so a second click on an already-open
+   * project re-asks the server rather than piling a second copy of its rows
+   * under the first -- the toggle below is not disabled after use, and
+   * nothing stops a person clicking it twice.
+   */
+  async function expand(tier: Tier, host: HTMLElement): Promise<void> {
+    host.replaceChildren();
+    let rows: readonly ConversationView[];
+    try {
+      // Typed to tolerate a server that answers `null`: `Transport.get`
+      // is generic and hands back exactly what it is told to expect,
+      // and nothing between here and the socket checks that the body
+      // actually matched.
+      const listing = await transport.get(
+        `/v1/conversations?${tier.query}lifecycle=${encodeURIComponent(lifecycle)}`,
+      );
+      rows = listing ?? [];
+    } catch (problem) {
+      host.append(
+        trouble(problemText(problem, 'That listing could not be read.')),
+      );
+      return;
     }
+    if (rows.length === 0) {
+      // nothing(), not a host left empty: a tier with no conversations in
+      // this lifecycle is an answer, and an empty host would look
+      // identical to a picker that had not asked yet.
+      host.append(nothing(`Nothing ${lifecycle} in ${tier.name}.`));
+      return;
+    }
+    for (const row of rows) {
+      const control = button('conversation', row.id);
+      control.dataset['conversation'] = row.id;
+      control.addEventListener('click', () => {
+        selected = row.id;
+        for (const each of tree.querySelectorAll('[data-conversation]')) {
+          each.removeAttribute('aria-current');
+        }
+        control.setAttribute('aria-current', 'true');
+        options.onPick(row.id);
+      });
+      host.append(control);
+      // The slot this file's javadoc names. Built as a node with its
+      // own children host, rather than as a flat row, precisely so that
+      // the route naming a root's children is a fill-in here and not a
+      // rewrite -- see the class doc above for why it is empty today.
+      const children = el('div', 'children');
+      children.dataset['children'] = row.id;
+      host.append(children);
+    }
+  }
 
-    async function draw(): Promise<void> {
-        let projects: readonly ProjectView[] = []
-        try {
-            const listing = await transport.get<readonly ProjectView[] | null>('/v1/projects')
-            projects = listing ?? []
-        } catch (problem) {
-            tree.replaceChildren(
-                trouble(problemText(problem, 'The projects could not be read.')))
-            return
-        }
-        tree.replaceChildren()
-        const personal = projects.filter(row => row.kind === 'personal');
-        const ordinary = projects.filter(row => row.kind !== 'personal');
-        // Personal is separate from the project tree. Legacy servers retain their history tier.
-        for (const tier of [...(personal.length ? personal.map(named) : [GLOBAL]), ...ordinary.map(named)]) {
-            const node = el('div', 'project-node')
-            node.dataset['project'] = tier.project
-            const host = el('div', 'conversations')
-            const toggle = button('project-open', tier.name)
-            toggle.dataset['tier'] = tier.project
-            toggle.addEventListener('click', () => {
-                void expand(tier, host)
-            })
-            node.append(toggle, host)
-            tree.append(node)
-        }
+  async function draw(): Promise<void> {
+    let projects: readonly ProjectView[];
+    try {
+      const listing = await transport.get('/v1/projects');
+      projects = listing ?? [];
+    } catch (problem) {
+      tree.replaceChildren(
+        trouble(problemText(problem, 'The projects could not be read.')),
+      );
+      return;
     }
+    tree.replaceChildren();
+    const personal = projects.filter((row) => row.kind === 'personal');
+    const ordinary = projects.filter((row) => row.kind !== 'personal');
+    // Personal is separate from the project tree. Legacy servers retain their history tier.
+    for (const tier of [
+      ...(personal.length ? personal.map(named) : [GLOBAL]),
+      ...ordinary.map(named),
+    ]) {
+      const node = el('div', 'project-node');
+      node.dataset['project'] = tier.project;
+      const host = el('div', 'conversations');
+      const toggle = button('project-open', tier.name);
+      toggle.dataset['tier'] = tier.project;
+      toggle.addEventListener('click', () => {
+        background(expand(tier, host));
+      });
+      node.append(toggle, host);
+      tree.append(node);
+    }
+  }
 
-    options.root.replaceChildren(tree)
-    return {
-        element: () => tree,
-        load: draw,
-        picked: () => selected,
-        destroy: () => tree.replaceChildren(),
-    }
+  options.root.replaceChildren(tree);
+  return {
+    element: () => tree,
+    load: draw,
+    picked: () => selected,
+    destroy: () => tree.replaceChildren(),
+  };
 }

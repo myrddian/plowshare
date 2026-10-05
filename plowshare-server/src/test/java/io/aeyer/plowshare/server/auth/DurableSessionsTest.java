@@ -49,7 +49,7 @@ class DurableSessionsTest {
     Clock clock = Clock.fixed(time, ZoneOffset.UTC);
     return new TokenStore(clock, Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofSeconds(10))
         .withDurableSessions(
-            new DurableSessions(
+            new JdbcDurableSessions(
                 jdbc,
                 new DataSourceTransactionManager(source),
                 clock,

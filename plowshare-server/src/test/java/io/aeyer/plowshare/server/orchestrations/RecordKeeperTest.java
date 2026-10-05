@@ -95,7 +95,8 @@ class RecordKeeperTest {
     conversations = new ConversationStore(jdbc, () -> T0, null);
     AccountPushes told =
         (handle, body) -> {
-          Map<?, ?> said = (Map<?, ?>) body;
+          Map<?, ?> said =
+              new com.fasterxml.jackson.databind.ObjectMapper().convertValue(body, Map.class);
           pushed.add(
               handle
                   + " "

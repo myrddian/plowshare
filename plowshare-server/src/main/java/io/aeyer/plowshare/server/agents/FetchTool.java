@@ -134,7 +134,7 @@ public final class FetchTool implements AgentTool {
 
   public FetchTool(FetchService fetch) {
     this.fetch = Objects.requireNonNull(fetch, "fetch");
-    this.schema = new ToolSchema(NAME, DESCRIPTION, schemaMap());
+    this.schema = ToolSchema.from(NAME, DESCRIPTION, schemaMap());
   }
 
   @Override

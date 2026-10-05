@@ -107,7 +107,7 @@ public class BoardConfig {
       ProjectMessageRouting routing) {
     BoardMessaging messaging =
         new BoardMessaging(
-            jdbc,
+            new JdbcBoardMessagingRepository(jdbc),
             store,
             conversations,
             firings,

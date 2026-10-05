@@ -44,7 +44,7 @@ class TriggerStoreTest {
   void fresh() {
     jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h'), ('mara', 'h')");
-    store = new TriggerStore(jdbc);
+    store = new JdbcTriggerStore(jdbc);
   }
 
   private static TriggerRecord trigger(String name, String event, boolean paused) {

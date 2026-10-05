@@ -3,42 +3,101 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { personalDirectory, readPersonal } from 'plowshare-client-node/personal';
+import {
+  personalDirectory,
+  readPersonal,
+} from 'plowshare-client-node/personal';
 
-test('personal mount is idempotent and refuses another account or server', async () => {
+await test('personal mount is idempotent and refuses another account or server', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
   try {
-    const root = await personalDirectory('http://server', 'alice', 'personal:alice', home);
-    assert.equal(await personalDirectory('http://server/', 'alice', 'personal:alice', home), root);
-    await assert.rejects(personalDirectory('http://server', 'bob', 'personal:bob', home), /another server or account/);
-    await assert.rejects(personalDirectory('http://other', 'alice', 'personal:alice', home), /another server or account/);
-  } finally { await rm(home, { recursive: true, force: true }); }
+    const root = await personalDirectory(
+      'http://server',
+      'alice',
+      'personal:alice',
+      home,
+    );
+    assert.equal(
+      await personalDirectory(
+        'http://server/',
+        'alice',
+        'personal:alice',
+        home,
+      ),
+      root,
+    );
+    await assert.rejects(
+      personalDirectory('http://server', 'bob', 'personal:bob', home),
+      /another server or account/,
+    );
+    await assert.rejects(
+      personalDirectory('http://other', 'alice', 'personal:alice', home),
+      /another server or account/,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
-test('personal browser reads notes and refuses section traversal and escaping symlinks', async () => {
+await test('personal browser reads notes and refuses section traversal and escaping symlinks', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
   try {
-    const root = await personalDirectory('http://server', 'alice', 'personal:alice', home);
-    await mkdir(join(root, 'Planning')); await writeFile(join(root, 'Planning', 'plan.md'), 'A useful plan');
+    const root = await personalDirectory(
+      'http://server',
+      'alice',
+      'personal:alice',
+      home,
+    );
+    await mkdir(join(root, 'Planning'));
+    await writeFile(join(root, 'Planning', 'plan.md'), 'A useful plan');
     const rows = await readPersonal(root, 'Planning');
     assert.equal(rows.entries[0]?.name, 'plan.md');
-    assert.equal((await readPersonal(root, 'Planning', 'Planning/plan.md')).text, 'A useful plan');
-    await writeFile(join(home, 'private'), 'private'); await symlink(join(home, 'private'), join(root, 'Planning', 'escape'));
-    await assert.rejects(readPersonal(root, 'Planning', 'Planning/escape'), /leaves personal/);
-    await assert.rejects(readPersonal(root, 'Planning', 'Bots/default'), /section/);
-    await mkdir(join(root, 'Bots')); await writeFile(join(root, 'Bots', 'default'), 'bot');
-    await assert.rejects(readPersonal(root, 'Planning', 'Planning/../Bots/default'), /section/);
+    assert.equal(
+      (await readPersonal(root, 'Planning', 'Planning/plan.md')).text,
+      'A useful plan',
+    );
+    await writeFile(join(home, 'private'), 'private');
+    await symlink(join(home, 'private'), join(root, 'Planning', 'escape'));
+    await assert.rejects(
+      readPersonal(root, 'Planning', 'Planning/escape'),
+      /leaves personal/,
+    );
+    await assert.rejects(
+      readPersonal(root, 'Planning', 'Bots/default'),
+      /section/,
+    );
+    await mkdir(join(root, 'Bots'));
+    await writeFile(join(root, 'Bots', 'default'), 'bot');
+    await assert.rejects(
+      readPersonal(root, 'Planning', 'Planning/../Bots/default'),
+      /section/,
+    );
     await symlink(join(root, 'Bots', 'default'), join(root, 'Planning', 'bot'));
-    await assert.rejects(readPersonal(root, 'Planning', 'Planning/bot'), /section/);
-  } finally { await rm(home, { recursive: true, force: true }); }
+    await assert.rejects(
+      readPersonal(root, 'Planning', 'Planning/bot'),
+      /section/,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
-test('personal ownership cannot be redirected through metadata symlinks', async () => {
+await test('personal ownership cannot be redirected through metadata symlinks', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
   try {
-    const root = await personalDirectory('http://server', 'alice', 'personal:alice', home);
+    const root = await personalDirectory(
+      'http://server',
+      'alice',
+      'personal:alice',
+      home,
+    );
     await mkdir(join(home, 'elsewhere'));
     await rm(join(root, '.plowshare'), { recursive: true });
     await symlink(join(home, 'elsewhere'), join(root, '.plowshare'));
-    await assert.rejects(personalDirectory('http://server', 'alice', 'personal:alice', home), /metadata.*symbolic link/);
-  } finally { await rm(home, { recursive: true, force: true }); }
+    await assert.rejects(
+      personalDirectory('http://server', 'alice', 'personal:alice', home),
+      /metadata.*symbolic link/,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

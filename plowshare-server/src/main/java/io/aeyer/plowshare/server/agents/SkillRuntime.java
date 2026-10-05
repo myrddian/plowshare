@@ -475,7 +475,7 @@ public final class SkillRuntime {
   }
 
   private static final ToolSchema RUN_SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           RUN,
           "Run a granted skill from the available skills catalog when it helps complete the user's task. "
               + "Model-selected invocation requires effective agentVisible=true and a configured mode. "
@@ -496,7 +496,7 @@ public final class SkillRuntime {
                   ToolArguments.string("The context mode, when not declared by the package.")),
               List.of("name", "arguments", "invocation")));
   private static final ToolSchema READ_SCHEMA =
-      new ToolSchema(
+      ToolSchema.from(
           READ,
           "Read a supporting text file from the active skill's pinned package through the existing filesystem channel.",
           ToolArguments.object(

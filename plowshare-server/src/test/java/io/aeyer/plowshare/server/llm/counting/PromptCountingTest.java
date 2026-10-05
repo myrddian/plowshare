@@ -46,7 +46,7 @@ class PromptCountingTest {
     try (var server = new MockWebServer()) {
       server.start();
       var p = settings(server);
-      p.setChatTemplateKwargs(Map.of("enable_thinking", false));
+      p.setChatTemplateKwargs(new io.aeyer.plowshare.server.llm.ChatTemplateOptions(false));
       server.enqueue(count(42));
       server.enqueue(
           new MockResponse()
@@ -56,7 +56,8 @@ class PromptCountingTest {
                     {"choices":[{"message":{"content":"answer"},"finish_reason":"stop"}],
                     "usage":{"prompt_tokens":42,"completion_tokens":2,"total_tokens":44}}
                     """));
-      var tool = new ToolSchema("lookup", "find", Map.of("type", "object", "properties", Map.of()));
+      var tool =
+          ToolSchema.from("lookup", "find", Map.of("type", "object", "properties", Map.of()));
       var r = request().withTools(List.of(tool));
       try (var transport = new OpenAiTransport(p, JSON)) {
         var counted = transport.countChat("model", r);
@@ -132,7 +133,7 @@ class PromptCountingTest {
       try (var t = new OpenAiTransport(settings(server), JSON)) {
         var r =
             request()
-                .withTools(List.of(new ToolSchema("lookup", "find", Map.of("type", "object"))))
+                .withTools(List.of(ToolSchema.from("lookup", "find", Map.of("type", "object"))))
                 .withToolChoice(ToolChoice.REQUIRED);
         assertEquals(PromptCount.Basis.UNKNOWN, t.countChat("model", r).basis());
         assertEquals(
@@ -167,7 +168,7 @@ class PromptCountingTest {
         assertTrue(t.countChat("model", request()).cached());
         assertEquals(11L, t.countChat("model", changed).tokens());
         assertEquals(12L, t.countChat("model", request()).tokens());
-        p.setChatTemplateKwargs(Map.of("enable_thinking", false));
+        p.setChatTemplateKwargs(new io.aeyer.plowshare.server.llm.ChatTemplateOptions(false));
         assertEquals(13L, t.countChat("model", request()).tokens());
         p.setApiKey("changed-fixture-key");
         assertEquals(14L, t.countChat("model", request()).tokens());

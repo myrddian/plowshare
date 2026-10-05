@@ -51,8 +51,6 @@
     "outDir": "../../build/types/view",
     "tsBuildInfoFile": "../../build/types/view/.tsbuildinfo"
   },
-  "references": [
-    { "path": "../logic" }
-  ],
+  "references": [{ "path": "../logic" }],
   "include": ["**/*.ts"]
 }

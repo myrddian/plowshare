@@ -15,58 +15,7 @@ import org.apache.commons.logging.LogFactory;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-/**
- * The containment test for the dependency this slice added.
- *
- * <h2>What is at stake, and it is not the same stake as on the client</h2>
- *
- * <p>PDFBox logs through {@code commons-logging}, and it is the chattiest thing in this process: a
- * font it cannot map or a stream that ends a byte early is a WARN per occurrence, on reads that
- * otherwise succeed. {@code commons-logging} has no configuration of its own — it
- * <em>discovers</em> a backend at runtime and whatever it finds decides where the line goes.
- *
- * <p>{@code plowshare-client}'s {@code ConvertedTextStaysOffStdoutTest} guards the same library
- * against a harder consequence: there, stdout is the MCP protocol channel and a stray line
- * desynchronises the session. <b>Here the consequence is quieter and the mechanism is
- * different.</b> This server already has a jar providing {@code org.apache.commons.logging} —
- * {@code spring-jcl}, which {@code spring-core} depends on, and which is a bridge onto slf4j and
- * therefore onto logback. Adding PDFBox's own {@code commons-logging} would put <b>two jars on one
- * package</b>, resolved by class path order, which no file in this repository states. On the day
- * the real jar won, PDFBox's warnings would stop obeying any level or appender this server sets and
- * would land in {@code java.util.logging} instead — losing them from every log the operator reads,
- * without one line of this repository changing.
- *
- * <p>So the build excludes it and leaves {@code spring-jcl} as the only provider, and this file is
- * what makes that a fact rather than a comment in a build file.
- *
- * <h2>Three assertions, and each covers the others' blind spot</h2>
- *
- * <ul>
- *   <li>the real jar is gone — otherwise the rest can pass for the wrong reason, since a class path
- *       where both are present resolves to one of them and the test would simply be recording
- *       today's ordering;
- *   <li>whatever <em>does</em> provide the package routes to slf4j;
- *   <li>a warning from a real read of a real document arrives in logback — otherwise the two above
- *       are facts about class names and not about where a log line goes;
- *   <li>and the read that produced it succeeded, because a warning on a <em>failed</em> read is one
- *       somebody would notice anyway.
- * </ul>
- *
- * <h2>What this test class path has that the server's does not</h2>
- *
- * <p><b>Measured, because the obvious assertion was wrong.</b> {@code LogFactory} here resolves to
- * {@code org.apache.commons.logging.impl.SLF4JLocationAwareLog}, which is <em> jcl-over-slf4j</em>
- * and not spring-jcl — it arrives from {@code testImplementation(project(":plowshare-client"))},
- * because the client declares that bridge {@code runtimeOnly} for its own stdout rule. So the test
- * class path has two providers of this package where the server's has one, which is why the
- * assertion below is about <em>routing to slf4j</em> rather than about which of the two answered.
- * The production shape is measured in the build file from the resolved {@code runtimeClasspath}:
- * spring-jcl, and nothing else.
- *
- * <p>That difference cannot hide a failure, and it is worth saying why: the thing being guarded
- * against is the <b>real</b> commons-logging appearing and discovering a backend of its own, and
- * the first assertion sees that jar whichever class path it is on.
- */
+/** PDFBox must resolve through the server's single spring-jcl provider to slf4j/logback. */
 class PdfWarningsGoThroughLogbackTest {
 
   /**

@@ -81,9 +81,14 @@ public final class InformationFrames implements FrameArea {
             .resolve(
                 asking.requireHandle("information." + verb),
                 verb.startsWith("migration.") ? null : InformationScopes.from(payload))
-            .withCorpus(payload.get("corpus"));
+            .withCorpus(
+                io.aeyer.plowshare.server.information.InformationInputs.corpus(
+                    payload.get("corpus")));
     if (List.of("list", "facets", "search", "rank").contains(verb))
-      context = context.withFacets(payload.get("filter"));
+      context =
+          context.withFacets(
+              io.aeyer.plowshare.server.information.InformationInputs.facets(
+                  payload.get("filter")));
     if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
             != io.aeyer.plowshare.server.archive.ProjectRole.VIEWER
         && !verb.startsWith("migration.")) access.requireWork(context);
@@ -161,7 +166,7 @@ public final class InformationFrames implements FrameArea {
         if (verb.equals("refresh")) catalogue.revisionName(context, uuid(payload, "revision"));
         String url =
             verb.equals("refresh")
-                ? (String) catalogue.status(context, uuid(payload, "revision")).get("source_uri")
+                ? catalogue.status(context, uuid(payload, "revision")).sourceUri()
                 : required(payload, "url");
         if (url == null || url.isBlank())
           throw new CallerFault("this revision has no acquisition URL");
@@ -189,12 +194,21 @@ public final class InformationFrames implements FrameArea {
           throw new CallerFault(
               "tagGroups requires groups (an object or null for automatic grouping)");
         catalogue.tagGroups(
-            context, uuid(payload, "revision"), payload.get("groups"), uuid(payload, "requestId"));
+            context,
+            uuid(payload, "revision"),
+            payload.get("groups") == null
+                ? null
+                : io.aeyer.plowshare.server.information.InformationTagGroups.from(
+                    payload.get("groups"), null),
+            uuid(payload, "requestId"));
         result = Map.of("changed", true);
       }
       case "tags" -> {
         catalogue.tags(
-            context, uuid(payload, "revision"), payload.get("tags"), uuid(payload, "requestId"));
+            context,
+            uuid(payload, "revision"),
+            io.aeyer.plowshare.server.information.InformationFacets.tags(payload.get("tags")),
+            uuid(payload, "requestId"));
         result = Map.of("changed", true);
       }
       case "facets" ->
@@ -218,7 +232,8 @@ public final class InformationFrames implements FrameArea {
               InformationReadiness.await(
                   catalogue,
                   context,
-                  InformationReadiness.sources(payload.get("sources")),
+                  io.aeyer.plowshare.server.information.InformationReadinessDecoder.sources(
+                      payload.get("sources")),
                   number(payload, "waitMs", 30000));
       case "read" ->
           result =
@@ -300,7 +315,7 @@ public final class InformationFrames implements FrameArea {
                 uuids(payload, "evidence"),
                 payload.containsKey("feedback") ? uuid(payload, "feedback") : null,
                 asking.sessionId(),
-                InformationReportDetails.from(payload),
+                io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(payload),
                 null);
         catalogue.callerSession(admitted, asking.sessionId());
         return new Outcome(Code.ACCEPTED, null, admitted);

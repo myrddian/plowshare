@@ -14,7 +14,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Lifecycle gates use the ordinary hook engine and an owner-pinned, durable processing log. */
 public final class InformationStageHooks implements InformationLifecycle.Gates, UsageAware {
@@ -25,7 +24,7 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
     usageOwners = java.util.Objects.requireNonNull(source);
   }
 
-  private final JdbcTemplate jdbc;
+  private final InformationStageRepository stages;
   private final InformationCatalogue catalogue;
   private final ConversationStore conversations;
   private final LogStages logStages;
@@ -36,7 +35,7 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
   private final Map<UUID, HarnessRun> runs = new ConcurrentHashMap<>();
 
   public InformationStageHooks(
-      JdbcTemplate jdbc,
+      InformationStageRepository stages,
       InformationCatalogue catalogue,
       ConversationStore conversations,
       LogStages logStages,
@@ -45,7 +44,7 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
       Harness harness,
       Supplier<AgentRegistry> agents) {
     this.catalogue = catalogue;
-    this.jdbc = jdbc;
+    this.stages = stages;
     this.conversations = conversations;
     this.logStages = logStages;
     this.inputs = inputs;
@@ -55,26 +54,14 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
   }
 
   private HookContext context(InformationLifecycle.Lease lease) {
-    String project =
-        lease.project() == null
-            ? null
-            : jdbc.queryForObject(
-                "SELECT name FROM projects WHERE id=?", String.class, lease.project());
+    var state = stages.logState(lease.revision(), lease.project());
+    String project = state.project();
     Home home = project == null ? Home.global() : Home.of(project);
-    String log =
-        jdbc.queryForObject(
-            "SELECT processing_log FROM information_revisions WHERE id=?",
-            String.class,
-            lease.revision());
-    if (log == null) {
-      var allowance =
-          jdbc.queryForMap(
-              "SELECT allowance_total,allowance_spent FROM information_revisions WHERE id=?",
-              lease.revision());
+    String log = state.log();
+    if (log == null || !state.systemCompatible()) {
+      String previous = log;
       var budget =
-          io.aeyer.plowshare.server.agents.Budget.resumed(
-              ((Number) allowance.get("allowance_total")).intValue(),
-              ((Number) allowance.get("allowance_spent")).intValue());
+          io.aeyer.plowshare.server.agents.Budget.resumed(state.allowance(), state.spent());
       log =
           conversations
               .log(Origin.SUBMISSION, home, "document_pipeline", null, budget, lease.owner(), null)
@@ -87,29 +74,22 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
                   ? InformationContext.Selection.personal()
                   : InformationAccess.projectSelection(lease.owner(), project)),
           List.of(lease.revision()));
-      if (jdbc.update(
-              "UPDATE information_revisions SET processing_log=? WHERE id=? AND processing_log IS NULL",
-              log,
-              lease.revision())
-          != 1)
-        log =
-            jdbc.queryForObject(
-                "SELECT processing_log FROM information_revisions WHERE id=?",
-                String.class,
-                lease.revision());
+      // Retained usage stays immutable. A legacy user-owned pipeline gets a new log for future
+      // work, with the same owner, source binding, allowance and hook snapshot policy.
+      boolean pinned =
+          previous == null
+              ? stages.pinLog(lease.revision(), log)
+              : stages.replaceLog(lease.revision(), previous, log);
+      if (!pinned) log = stages.logState(lease.revision(), lease.project()).log();
       else {
-        String session =
-            jdbc.queryForObject(
-                "SELECT caller_session FROM information_revisions WHERE id=?",
-                String.class,
-                lease.revision());
+        String session = state.session();
         logStages.opened(
             new LogStages.LogOpened(
                 log, Origin.SUBMISSION, home, "document_pipeline", false, null, session, null));
       }
     }
     return HookContext.forLog("submission", "document_pipeline", false, project, log)
-        .withUsage(usageOwners.conversation(log, 0, UsageAttribution.Operation.HOOK_MODEL))
+        .withUsage(usageOwners.processing(log, UsageAttribution.Operation.HOOK_MODEL))
         .about(
             new HookContext.Document(
                 (InformationCatalogue.STAGES.contains(lease.stage())

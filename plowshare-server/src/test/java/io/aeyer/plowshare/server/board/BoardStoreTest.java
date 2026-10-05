@@ -12,6 +12,7 @@ import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.events.JdbcFiringStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,7 +69,7 @@ class BoardStoreTest {
     jdbc.update("INSERT INTO admins (handle, password_hash) VALUES ('enzo', 'h')");
     conversations = new ConversationStore(jdbc);
     store = new BoardStore(jdbc, clock);
-    firings = new FiringStore(jdbc);
+    firings = new JdbcFiringStore(jdbc);
   }
 
   private BoardTopic root() {
@@ -358,8 +359,26 @@ class BoardStoreTest {
   void closing_refuses_a_topics_queued_wakes_and_nothing_else() {
     BoardTopic topic = root();
     BoardTopic other = root();
-    String one = firings.owe(topic.id(), "conversation:c1", "{}", clock.get()).orElseThrow().id();
-    String two = firings.owe(other.id(), "conversation:c2", "{}", clock.get()).orElseThrow().id();
+    String one =
+        firings
+            .owe(
+                topic.id(),
+                "conversation:c1",
+                new io.aeyer.plowshare.server.events.EventPayload.Seat(
+                    new SeatWake(null, null, null, null)),
+                clock.get())
+            .orElseThrow()
+            .id();
+    String two =
+        firings
+            .owe(
+                other.id(),
+                "conversation:c2",
+                new io.aeyer.plowshare.server.events.EventPayload.Seat(
+                    new SeatWake(null, null, null, null)),
+                clock.get())
+            .orElseThrow()
+            .id();
     assertEquals(1, firings.refuseWakes(topic.id(), "topic closed"));
     assertEquals("refused", firings.find(one).orElseThrow().status());
     assertEquals("topic closed", firings.find(one).orElseThrow().reason());

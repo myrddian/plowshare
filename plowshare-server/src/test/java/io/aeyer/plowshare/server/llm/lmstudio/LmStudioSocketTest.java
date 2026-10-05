@@ -474,7 +474,7 @@ class LmStudioSocketTest {
   @Test
   void offering_tools_sets_the_prediction_tools_key_with_the_schema() throws Exception {
     try (Wiring wiring = wire(List.of(success("{\"stopReason\":\"eosFound\"}"), CLOSE))) {
-      ToolSchema tool = new ToolSchema("get_weather", "Get weather", Map.of("type", "object"));
+      ToolSchema tool = ToolSchema.from("get_weather", "Get weather", Map.of("type", "object"));
       wiring.transport().stream(
           "qwen3.5-9b",
           hello(),

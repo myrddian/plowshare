@@ -35,7 +35,7 @@ class CodeTrackingConfigTest {
                   Duration.ofSeconds(10), context.getBean(CodeWorkspaceStore.class).interval());
               assertEquals(
                   "disabled",
-                  monitor.observations("coder", "s", "alice").status(Home.global()).get("state"));
+                  monitor.observations("coder", "s", "alice").status(Home.global()).state());
               assertFalse(monitor.pollOnce());
             });
   }

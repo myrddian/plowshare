@@ -5,6 +5,7 @@ import io.aeyer.plowshare.protocol.Invalidation;
 import io.aeyer.plowshare.protocol.Memory;
 import io.aeyer.plowshare.protocol.MemoryState;
 import io.aeyer.plowshare.protocol.Provenance;
+import io.aeyer.plowshare.server.embedding.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -45,6 +46,12 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class MemoryStore {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   private boolean informationProtected;
 
   public void protectInformation() {
@@ -344,6 +351,78 @@ public class MemoryStore {
                 limit));
   }
 
+  /** Same tier/state/information fences as legacy recall, with explicit slot identity. */
+  public List<Memory> searchByVector(EmbeddingQuery query, Home home, int limit) {
+    if (limit <= 0) return List.of();
+    var plan = new EmbeddingIndexPlan(query.profile());
+    String sql =
+        "SELECT "
+            + COLUMNS
+            + ","
+            + plan.denseDistance("m." + plan.column())
+            + " AS distance"
+            + FROM_MEMORIES
+            + " WHERE "
+            + safe(true)
+            + HOME_MATCHES
+            + " AND state IN "
+            + LIVE_STATES
+            + " AND "
+            + plan.present("m");
+    List<Object> args = new java.util.ArrayList<>();
+    args.add(query.vectorText());
+    args.add(ProjectIds.toRead(jdbc, home));
+    if (plan.exact()) {
+      sql += " ORDER BY distance,m.id LIMIT ?";
+      args.add(Math.min(2000, limit));
+    } else {
+      sql =
+          "SELECT candidates.* FROM ("
+              + sql
+              + " ORDER BY "
+              + plan.candidateDistance("m." + plan.column())
+              + " LIMIT ?) candidates ORDER BY distance,id LIMIT ?";
+      args.add(query.vectorText());
+      args.add(plan.candidates(Math.min(2000, limit)));
+      args.add(Math.min(2000, limit));
+    }
+    String ranked = sql;
+    return ArchiveUnavailableException.translating(
+        "search a tier in an embedding space",
+        () -> jdbc.query(ranked, ROW_MAPPER, args.toArray()));
+  }
+
+  public int countUnsearchable(EmbeddingProfile profile, Home home) {
+    Integer count =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM memories m WHERE "
+                + safe(true)
+                + HOME_MATCHES
+                + " AND state IN "
+                + LIVE_STATES
+                + " AND NOT ("
+                + new EmbeddingIndexPlan(profile).present("m")
+                + ")",
+            Integer.class,
+            ProjectIds.toRead(jdbc, home));
+    return count == null ? 0 : count;
+  }
+
+  private String searchable(boolean aliased) {
+    String prefix = aliased ? "m." : "memories.";
+    return dualEmbeddings == null
+        ? prefix + "embedding IS NOT NULL"
+        : "EXISTS(SELECT 1 FROM embedding_slots selected WHERE selected.slot='prose' AND selected.active_space_id="
+            + prefix
+            + "prose_space_id AND "
+            + prefix
+            + "prose_embedding IS NOT NULL AND "
+            + prefix
+            + "prose_source_revision="
+            + prefix
+            + "embedding_source_revision)";
+  }
+
   /**
    * pgvector's text form, {@code [0.1,0.2,…]}.
    *
@@ -408,7 +487,9 @@ public class MemoryStore {
         "index a tier",
         () ->
             jdbc.query(
-                "SELECT id, summary, scope, (embedding IS NULL) AS unsearchable FROM memories"
+                "SELECT id, summary, scope, (NOT ("
+                    + searchable(false)
+                    + ")) AS unsearchable FROM memories"
                     + " WHERE "
                     + safe(false)
                     + HOME_MATCHES
@@ -449,7 +530,9 @@ public class MemoryStore {
                         + HOME_MATCHES
                         + " AND state IN "
                         + LIVE_STATES
-                        + " AND embedding IS NULL",
+                        + " AND NOT ("
+                        + searchable(false)
+                        + ")",
                     Integer.class,
                     ProjectIds.toRead(jdbc, home)));
     return count == null ? 0 : count;
@@ -476,7 +559,9 @@ public class MemoryStore {
                     + HOME_MATCHES
                     + " AND state IN "
                     + LIVE_STATES
-                    + " AND embedding IS NULL"
+                    + " AND NOT ("
+                    + searchable(true)
+                    + ")"
                     + " ORDER BY m.id",
                 ROW_MAPPER,
                 ProjectIds.toRead(jdbc, home)));

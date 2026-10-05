@@ -368,7 +368,7 @@ class MemoryControllerTest {
    * beside it: a mutation deleting the controller's own check left this one green.
    */
   @Test
-  void write_with_an_invalid_proposal_is_422() throws Exception {
+  void write_with_an_invalid_proposal_is_400() throws Exception {
     when(archive.applyVerdict(any(), any(), any(), any()))
         .thenThrow(new ValidationException("summary must be a single line"));
 
@@ -378,7 +378,7 @@ class MemoryControllerTest {
                                "formedBy": "scribe", "formedWhere": ""}}""";
 
     mvc.perform(post("/v1/memories").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(status().isUnprocessableEntity());
+        .andExpect(status().isBadRequest());
   }
 
   /**
@@ -402,7 +402,7 @@ class MemoryControllerTest {
                                "formedBy": "scribe", "formedWhere": ""}}""";
 
     mvc.perform(post("/v1/memories").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(status().isUnprocessableEntity());
+        .andExpect(status().isBadRequest());
 
     verify(scribe, never()).judge(any(), any());
     verify(archive, never()).applyVerdict(any(), any(), any(), any());
@@ -548,7 +548,7 @@ class MemoryControllerTest {
 
   /**
    * An explicit {@code null} is a client serialising an absent field, which claims nothing.
-   * Refusing it would refuse a caller already doing the right thing — and {@code HttpServerClient}
+   * Refusing it would refuse a caller already doing the right thing — and {@code ControllerPeer}
    * writes exactly this shape for the {@code project} key one line above, so it is not a
    * hypothetical.
    */

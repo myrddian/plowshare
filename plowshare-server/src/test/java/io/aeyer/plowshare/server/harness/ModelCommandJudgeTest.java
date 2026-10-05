@@ -231,4 +231,16 @@ class ModelCommandJudgeTest {
       assertEquals(CommandJudge.Verdict.NOT_JUDGED, CommandJudge.safely(judge, TESTS));
     }
   }
+
+  @Test
+  void unknown_fields_bad_reason_and_duplicate_decisions_are_refused() {
+    for (String answer :
+        List.of(
+            "{\"clear\":true,\"why\":7}",
+            "{\"clear\":true,\"grants\":[\"run\"]}",
+            "{\"clear\":false,\"clear\":true}",
+            "{\"clear\":true,\"why\":\"bad\\u0000reason\"}")) {
+      assertThrows(IllegalStateException.class, () -> ModelCommandJudge.parse(answer));
+    }
+  }
 }

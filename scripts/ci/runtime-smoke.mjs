@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { signIn, changePassword, openSocket, ticket } from '../../plowshare-client-ts/build/binding/auth.js';
-import { connect } from '../../plowshare-client-ts/build/binding/connection.js';
+import { signIn, changePassword, openSocket, ticket } from '../../sdk/typescript/build/binding/auth.js';
+import { connect } from '../../sdk/typescript/build/binding/connection.js';
 
 const base = process.env.PLOWSHARE_URL;
 assert.ok(base, 'Supply PLOWSHARE_URL');
@@ -38,12 +38,24 @@ if (process.argv.includes('--operator')) {
   assert.equal(signed.mustChangePassword, true, 'Fresh admin must change its password');
   assert.equal((await door.fetch(base + '/v1/auth/ticket', {
     method: 'POST', headers: { Authorization: `Bearer ${signed.tokens.access}` },
-  })).status, 403, 'Flagged admin must not receive a WS ticket');
+  })).status, 401, 'Restricted admin must be refused by the authentication filter');
   const next = (await readFile(process.env.PLOWSHARE_NEXT_PASSWORD_FILE, 'utf8')).trim();
   await changePassword(door, signed.tokens.access, password, next);
   signed = await signIn(door, handle, next);
  }
  assert.equal(signed.mustChangePassword, false, 'Use an existing account whose first password change is complete');
+ if (disposable) {
+  // First-run mode has no startup operator grant. Register only after the
+  // disposable administrator completes its required password change.
+  const provider = process.env.PLOWSHARE_SEARCH_PROVIDER_URL;
+  assert.ok(provider, 'Supply the disposable search provider URL');
+  const registration = await door.fetch(base + '/v1/search/providers', {
+    method: 'POST', headers: { Authorization: `Bearer ${signed.tokens.access}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({baseUrl: provider}),
+  });
+  assert.equal(registration.status, 201, 'Authenticated provider registration failed');
+  console.log('provider registration: OK');
+ }
  ({ connection } = await openSocket(door, signed.tokens));
 }
 deadline.addEventListener('abort', () => connection.close(), { once: true });

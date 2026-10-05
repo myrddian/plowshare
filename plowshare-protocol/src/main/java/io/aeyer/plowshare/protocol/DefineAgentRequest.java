@@ -4,14 +4,9 @@ package io.aeyer.plowshare.protocol;
  * The body of {@code POST /v1/agents} — what a caller hands the server to create or replace one
  * agent or bot definition.
  *
- * <p>Lives here rather than beside {@code RunAgentRequest} in {@code plowshare-server}'s own {@code
- * api} package, unlike every other request body that controller reads. That is deliberate rather
- * than an inconsistency: a run or a curator pass is submitted only from inside this server's own
- * HTTP layer, but a definition is authored — this is the one door an operator's own tooling writes
- * through rather than merely calls. The CLI verb and the MCP tool that later front this same
- * endpoint live in {@code plowshare-client}, which depends on this module and not on {@code
- * plowshare-server}; putting the wire shape here is what lets them serialise the identical request
- * rather than each inventing their own record that has to be kept in step with this one by hand.
+ * <p>The public Java SDK consumes this shared contract without importing server internals.
+ * TypeScript clients mirror the request through their generated operation contracts. Keep request
+ * ownership in this module so transport and domain code agree on the authored shape.
  *
  * <p><b>This is an operator surface and not an agent-facing one.</b> Nothing about this record
  * changes that — {@code plowshare-protocol} is read by both sides of every wire format this

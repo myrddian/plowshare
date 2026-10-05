@@ -67,8 +67,7 @@ class ConversationRetrievalTest {
             });
     index =
         new PassageIndex(
-            jdbc,
-            transactions,
+            new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
             new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
             "fixture:1",
@@ -150,8 +149,7 @@ class ConversationRetrievalTest {
     assertTrue(index.coverage(project, "entry").pending() > 0);
     var resumed =
         new PassageIndex(
-            jdbc,
-            transactions,
+            new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
             new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
             "fixture:1",
@@ -235,8 +233,7 @@ class ConversationRetrievalTest {
     fill();
     var next =
         new PassageIndex(
-            jdbc,
-            transactions,
+            new io.aeyer.plowshare.server.archive.JdbcPassageRepository(jdbc, transactions),
             embeddings,
             new Chunking(RatioTokenizer.anchoredOn(400, 100), 80, 100),
             "fixture:2",
@@ -256,10 +253,16 @@ class ConversationRetrievalTest {
             "SELECT source_hash FROM retrieval_sources WHERE source_id=?",
             String.class,
             first + ":1");
-    index.publish(
-        new PassageIndex.Source("entry", first + ":1", hash, "orchard first", 0),
-        Collections.nCopies(220, "orchard passage"),
-        Collections.nCopies(220, vector("orchard")));
+    // Production publication checkpoints at most sixteen passages per transaction.
+    for (int start = 0; start < 220; start += 16) {
+      int count = Math.min(16, 220 - start);
+      assertTrue(
+          index.publish(
+              new PassageIndex.Source("entry", first + ":1", hash, "orchard first", start),
+              Collections.nCopies(count, "orchard passage"),
+              Collections.nCopies(count, vector("orchard")),
+              start + count == 220));
+    }
     index.repair();
     var matches = index.rank(project, "entry", vector("orchard"), 2);
     assertEquals(2, matches.size());

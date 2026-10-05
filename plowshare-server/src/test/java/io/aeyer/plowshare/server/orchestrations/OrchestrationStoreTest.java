@@ -105,6 +105,91 @@ class OrchestrationStoreTest {
   }
 
   @Test
+  void resume_receipt_preserves_progress_and_never_replays_after_another_failure() {
+    var run = store.insert(newOrchestration(conductorConversation(), 2));
+    store.restarted(run.id());
+    store.nudged(run.id());
+    store.stop(run.id(), OrchestrationState.FAILED, "temporary outage");
+    var recovery = new JdbcOrchestrationRecovery(jdbc, unitOfWork);
+    var key = java.util.UUID.randomUUID();
+    assertTrue(recovery.claim(run.id(), "enzo", key, T0));
+    var resumed = store.find(run.id()).orElseThrow();
+    assertEquals(OrchestrationState.RUNNING, resumed.state());
+    assertEquals(run.definitionSource(), resumed.definitionSource());
+    assertEquals(run.conductorConversation(), resumed.conductorConversation());
+    assertEquals(run.returnsUsed(), resumed.returnsUsed());
+    assertNull(resumed.failure());
+    assertNull(resumed.endedAt());
+    assertEquals(0, resumed.nudges());
+    assertFalse(store.resultDelivered(run.id(), T0));
+    clock.set(T0.plusSeconds(1));
+    assertFalse(new JdbcOrchestrationRecovery(jdbc, unitOfWork).claim(run.id(), "enzo", key, T0));
+    store.stop(run.id(), OrchestrationState.FAILED, "second outage");
+    assertFalse(recovery.claim(run.id(), "enzo", key, T0));
+    assertEquals(OrchestrationState.FAILED, store.find(run.id()).orElseThrow().state());
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> recovery.claim(run.id(), "enzo", java.util.UUID.randomUUID(), T0));
+    assertFalse(store.resultDelivered(run.id(), T0));
+    assertTrue(
+        recovery.claim(
+            run.id(),
+            "enzo",
+            java.util.UUID.randomUUID(),
+            store.find(run.id()).orElseThrow().endedAt()));
+    var other = store.insert(newOrchestration(conductorConversation(), 2));
+    store.stop(other.id(), OrchestrationState.FAILED, "outage");
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            recovery.claim(
+                other.id(), "enzo", key, store.find(other.id()).orElseThrow().endedAt()));
+  }
+
+  @Test
+  void competing_resume_keys_claim_the_failure_once_and_refuse_foreign_owner() throws Exception {
+    var run = store.insert(newOrchestration(conductorConversation(), 2));
+    store.stop(run.id(), OrchestrationState.FAILED, "temporary outage");
+    var recovery = new JdbcOrchestrationRecovery(jdbc, unitOfWork);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            recovery.claim(
+                run.id(),
+                "other",
+                java.util.UUID.randomUUID(),
+                store.find(run.id()).orElseThrow().endedAt()));
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var tasks =
+          java.util.stream.IntStream.range(0, 2)
+              .mapToObj(
+                  n ->
+                      pool.submit(
+                          () -> {
+                            start.await();
+                            try {
+                              return recovery.claim(
+                                  run.id(), "enzo", java.util.UUID.randomUUID(), T0);
+                            } catch (io.aeyer.plowshare.server.faults.CallerFault refused) {
+                              return false;
+                            }
+                          }))
+              .toList();
+      start.countDown();
+      int claimed = 0;
+      for (var task : tasks) if (task.get(10, java.util.concurrent.TimeUnit.SECONDS)) claimed++;
+      assertEquals(1, claimed);
+    }
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM orchestration_resume_receipts WHERE run_id=?",
+            Integer.class,
+            run.id()));
+  }
+
+  @Test
   void lost_start_acknowledgment_recovers_one_durable_run_and_refuses_changed_payload() {
     var key = java.util.UUID.randomUUID();
     var effects = new java.util.concurrent.atomic.AtomicInteger();
@@ -987,15 +1072,22 @@ class OrchestrationStoreTest {
   void an_install_question_is_the_person_s_and_keeps_what_it_would_install() throws Exception {
     String conductor = conductorConversation();
     String id = store.insert(newOrchestration(conductor, 2)).id();
-    String structure = "{\"lead\":\"Install?\",\"questions\":[],\"text\":\"---\\nname: t\"}";
+    String structure =
+        "{\"lead\":\"Install?\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}],\"name\":\"t\",\"path\":\"artifacts/t.md\",\"sha256\":\"sha256:2a50ff7eb58912fe2e5bb9018dcd8b8e5fb366f4b3f23b354b8003bfeab360aa\",\"text\":\"---\\nname: t\"}";
 
-    assertTrue(store.askInstall(id, "Install triage?", structure).isPresent());
+    assertTrue(
+        store
+            .askInstall(
+                id,
+                "Install triage?",
+                io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(structure))
+            .isPresent());
 
     OrchestrationRecord row = store.find(id).orElseThrow();
     assertEquals("install", row.pendingCap());
     OrchestrationMessage question = store.openQuestion(id).orElseThrow();
     assertEquals("harness", question.author());
-    assertEquals(JSON.readTree(structure), JSON.readTree(question.structure()));
+    assertEquals(JSON.readTree(structure), JSON.valueToTree(question.structure()));
     assertFalse(
         store.answerUnlessPersonOnly(id, "Install", "interlocutor"), "a model may not answer it");
     assertTrue(store.answer(id, "Install", "enzo"));
@@ -1049,23 +1141,35 @@ class OrchestrationStoreTest {
   void a_question_and_its_answer_keep_their_structure() throws Exception {
     String conductor = conductorConversation();
     String id = store.insert(newOrchestration(conductor, 2)).id();
-    String asked = "{\"lead\":\"First:\",\"questions\":[]}";
+    String asked =
+        "{\"lead\":\"First:\",\"questions\":[{\"header\":\"Store\",\"question\":\"Choose?\",\"multi\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Use Postgres\"},{\"label\":\"SQLite\",\"description\":\"Use SQLite\"}]}]}";
 
     OrchestrationMessage question =
-        store.ask(id, "First: …", "code_implementation", asked).orElseThrow();
-    assertEquals(asked, question.structure());
+        store
+            .ask(
+                id,
+                "First: …",
+                "code_implementation",
+                io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(asked))
+            .orElseThrow();
+    assertEquals(OrchestrationStructures.decode(asked), question.structure());
     assertEquals(
-        JSON.readTree(asked), JSON.readTree(store.openQuestion(id).orElseThrow().structure()));
+        JSON.readTree(asked), JSON.valueToTree(store.openQuestion(id).orElseThrow().structure()));
 
     String chose = "{\"choices\":[{\"header\":\"Store\",\"chosen\":[\"Postgres\"]}]}";
-    assertTrue(store.answer(id, "1. [Store] chose \"Postgres\"", "enzo", chose));
+    assertTrue(
+        store.answer(
+            id,
+            "1. [Store] chose \"Postgres\"",
+            "enzo",
+            io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode(chose)));
 
     OrchestrationMessage answer =
         store.messages(id).stream().filter(m -> m.kind() == Kind.ANSWER).findFirst().orElseThrow();
-    assertEquals(JSON.readTree(chose), JSON.readTree(answer.structure()));
+    assertEquals(JSON.readTree(chose), JSON.valueToTree(answer.structure()));
     assertEquals(
         JSON.readTree(chose),
-        JSON.readTree(
+        JSON.valueToTree(
             store.undeliveredMessages().stream()
                 .filter(m -> m.kind() == Kind.ANSWER)
                 .findFirst()
@@ -1085,13 +1189,18 @@ class OrchestrationStoreTest {
   }
 
   @Test
-  void a_structure_that_is_not_an_object_is_refused_by_the_table() {
+  void a_structure_that_is_not_an_object_is_refused_before_persistence() {
     String conductor = conductorConversation();
     String id = store.insert(newOrchestration(conductor, 2)).id();
 
     assertThrows(
-        DataIntegrityViolationException.class,
-        () -> store.ask(id, "which?", "code_implementation", "[1, 2]"));
+        IllegalStateException.class,
+        () ->
+            store.ask(
+                id,
+                "which?",
+                "code_implementation",
+                io.aeyer.plowshare.server.orchestrations.OrchestrationStructures.decode("[1, 2]")));
   }
 
   // --- delivery bookkeeping ---------------------------------------------------------------

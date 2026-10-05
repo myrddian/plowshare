@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
@@ -107,7 +108,7 @@ public final class ConductorTools {
     private static final String EXAMPLE = "{\"question\": \"Which database should I use?\"}";
 
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             ASK_NAME, ASK_DESCRIPTION, ToolArguments.object(askFields(), List.of("question")));
 
     private static Map<String, Object> askFields() {
@@ -193,7 +194,7 @@ public final class ConductorTools {
               args, "question", ASK_NAME, "what you cannot go on without the caller's decision on");
       JsonNode questions = args.get("questions");
       String text = question;
-      String structure = null;
+      Structure structure = null;
       if (questions != null && !questions.isNull()) {
         List<StructuredQuestions.Question> read;
         try {
@@ -235,7 +236,7 @@ public final class ConductorTools {
     private static final String EXAMPLE = "{\"result\": \"the summary of what was done\"}";
 
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             FINISH_NAME,
             FINISH_DESCRIPTION,
             ToolArguments.object(
@@ -299,7 +300,7 @@ public final class ConductorTools {
         "{\"command\": [\"<the program>\", \"<its first argument>\", \"<the next>\"]}";
 
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             CHECK_NAME,
             CHECK_DESCRIPTION,
             ToolArguments.object(
@@ -439,7 +440,7 @@ public final class ConductorTools {
             + " `check:` line 2 has the person look at the window\"}";
 
     private static final ToolSchema SCHEMA =
-        new ToolSchema(
+        ToolSchema.from(
             CHECKER_ANSWER_NAME,
             CHECKER_ANSWER_DESCRIPTION,
             ToolArguments.object(checkerFields(), List.of("concern", "reason")));

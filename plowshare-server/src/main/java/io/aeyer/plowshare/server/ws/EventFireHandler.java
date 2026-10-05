@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.events.EventPayloadCodec;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.Intake;
@@ -35,8 +36,9 @@ public final class EventFireHandler implements FrameHandler {
         Payloads.required(
             payload, "event", FrameTypes.EVENT_FIRE, "the event name triggers listen for");
     Body body = Payloads.as(payload, Body.class, FrameTypes.EVENT_FIRE);
-    List<FiringRecord> created = intake.emit(event, body.data() == null ? Map.of() : body.data());
+    List<FiringRecord> created = intake.emit(event, EventPayloadCodec.manual(body.data()));
     // Re-read: emit answers each firing as it arrived, before dispatch moved it.
-    return Outcome.ok(created.stream().map(f -> firings.find(f.id()).orElse(f)).toList());
+    return Outcome.ok(
+        created.stream().map(f -> FiringView.of(firings.find(f.id()).orElse(f))).toList());
   }
 }

@@ -31,7 +31,7 @@
     "highlight.js": "^11.12.0",
     "ink": "^7.1.1",
     "react": "^19.3.0",
-    "plowshare-client-ts": "link:../plowshare-client-ts",
-    "plowshare-client-node": "link:../plowshare-client-node"
+    "plowshare-client-ts": "link:../sdk/typescript",
+    "plowshare-client-node": "link:../sdk/node"
   }
 }

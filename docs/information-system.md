@@ -215,8 +215,7 @@ information command preserve JSON and quoted project names. The headless TypeScr
 CLI accepts all 34 controls as `information <operation> '<JSON payload>'` with an
 explicit `scope` in the payload. Source/report admission receipts remain pending;
 `--wait information ask` waits only for the returned document-answer job.
-The Java CLI accepts
-`information <operation> '<JSON payload>'`. The MCP `information` tool offers the
+Java consumers use the public SDK’s typed information client. The MCP `information` tool offers the
 source/evidence/report subset and refuses publication/migration before transport.
 Internal `information_read`/`information_write` bind the root account and run home,
 never model-supplied ownership. The Librarian holds read only; `deep_research`

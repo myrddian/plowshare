@@ -120,7 +120,7 @@ public class SearchConfig {
   @Bean
   public SearchProvider searchProvider(
       OkHttpClient http, ObjectMapper mapper, SearchProperties props) {
-    return new RemoteSearchProvider(http, mapper, props.getTimeout());
+    return new RemoteSearchProvider(http, props.getTimeout());
   }
 
   /** Not built until this task, on {@link SearchLadder}'s own javadoc. */

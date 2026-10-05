@@ -47,10 +47,7 @@ class ConversationAppendedTest {
     appended.appended("cnv_x");
 
     assertEquals(
-        Map.of(
-            "s-x",
-            List.of(
-                Map.of("kind", "conversation.appended", "conversation", "cnv_x", "through", 12))),
+        Map.of("s-x", List.of(new io.aeyer.plowshare.protocol.ConversationGrowth("cnv_x", 12))),
         told);
   }
 
@@ -76,8 +73,8 @@ class ConversationAppendedTest {
     appended.appended("cnv_x");
     appended.appended("cnv_y");
 
-    Object x = Map.of("kind", "conversation.appended", "conversation", "cnv_x", "through", 3);
-    Object y = Map.of("kind", "conversation.appended", "conversation", "cnv_y", "through", 8);
+    Object x = new io.aeyer.plowshare.protocol.ConversationGrowth("cnv_x", 3);
+    Object y = new io.aeyer.plowshare.protocol.ConversationGrowth("cnv_y", 8);
     assertEquals(Map.of("desktop", List.of(x, y), "terminal", List.of(x)), told);
   }
 
@@ -92,10 +89,7 @@ class ConversationAppendedTest {
 
     verify(entries, never()).through("cnv_x");
     assertEquals(
-        Map.of(
-            "desktop",
-            List.of(
-                Map.of("kind", "conversation.appended", "conversation", "cnv_y", "through", 8))),
+        Map.of("desktop", List.of(new io.aeyer.plowshare.protocol.ConversationGrowth("cnv_y", 8))),
         told);
   }
 

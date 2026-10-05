@@ -349,7 +349,7 @@ class ScriptResearchTest {
             return JSON.createObjectNode().put("evidence", args.path("requestId").asText());
           case "report":
             // Use the actual information-domain contract, not only a permissive fake write.
-            io.aeyer.plowshare.server.information.InformationReportDetails.from(
+            io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
                 JSON.convertValue(
                     args,
                     new com.fasterxml.jackson.core.type.TypeReference<

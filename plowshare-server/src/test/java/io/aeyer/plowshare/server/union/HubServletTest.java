@@ -58,7 +58,7 @@ class HubServletTest {
     app =
         new SpringApplicationBuilder(Wiring.class)
             .web(WebApplicationType.SERVLET)
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((ServletWebServerApplicationContext) app).getWebServer().getPort();
   }
 

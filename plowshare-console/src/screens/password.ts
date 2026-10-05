@@ -1,6 +1,6 @@
-import { ApiError } from '../api'
-import { button, el, labelled, problemText, trouble } from './dom'
-import type { Screen, Transport } from './screen'
+import { ApiError } from '../api';
+import { button, el, labelled, problemText, trouble } from './dom';
+import type { Screen, Transport } from './screen';
 
 /**
  * The one door out of `must_change_password`: current password, new
@@ -101,215 +101,222 @@ import type { Screen, Transport } from './screen'
  */
 
 /** What this screen says when the new password does not match its confirmation. */
-export const PASSWORDS_DO_NOT_MATCH = 'New password and confirmation do not match.'
+export const PASSWORDS_DO_NOT_MATCH =
+  'New password and confirmation do not match.';
 
 /** What this screen says for the endpoint's 401: the current password is wrong. */
-export const WRONG_CURRENT_PASSWORD = 'That current password is wrong.'
+export const WRONG_CURRENT_PASSWORD = 'That current password is wrong.';
 
 /** What this screen says for the endpoint's 400: the new password is not acceptable. */
-export const UNACCEPTABLE_NEW_PASSWORD = 'That is not an acceptable password.'
+export const UNACCEPTABLE_NEW_PASSWORD = 'That is not an acceptable password.';
 
 /** What this screen says for anything else: a transport failure, or a status neither above. */
-export const SOMETHING_WENT_WRONG = 'The password could not be changed. Try again.'
+export const SOMETHING_WENT_WRONG =
+  'The password could not be changed. Try again.';
 
 /** Said once, before anyone has typed anything, so the demand does not read as a bug. */
 export const WHY_HERE =
-    'This account still has the password it was created with, and the console will keep'
-    + ' signing you out every fifteen minutes until it changes.'
+  'This account still has the password it was created with, and the console will keep' +
+  ' signing you out every fifteen minutes until it changes.';
 
 /** Said once, so a successful change is not mistaken for being thrown out. */
 export const SESSION_WILL_END =
-    'Changing the password ends this session on purpose, so the new one is proven right away.'
-    + ' You will land back on the sign-in screen -- sign in there with the new password.'
+  'Changing the password ends this session on purpose, so the new one is proven right away.' +
+  ' You will land back on the sign-in screen -- sign in there with the new password.';
 
 export interface PasswordOptions {
-    /** Where the form is built. Its children are replaced. */
-    readonly root: HTMLElement
-    /**
-     * Called once the server has revoked this session over the change --
-     * see this file's header on why that revocation happens. The caller is
-     * expected to mount `login.ts`'s screen in response.
-     */
-    readonly onChanged: () => void
-    /** Unused by this screen today; carried for the shape every screen shares. */
-    readonly transport?: Transport
-    /**
-     * How the change reaches the server, so a test can replace the one call
-     * that distinguishes a 400 from a 401 without stubbing `fetch`. Defaults
-     * to {@link changePassword}. See this file's header for why
-     * `transport.post` and `api.request` cannot be used here.
-     *
-     * @throws an {@link ApiError} whose message is one of
-     *     {@link WRONG_CURRENT_PASSWORD}, {@link UNACCEPTABLE_NEW_PASSWORD}
-     *     or {@link SOMETHING_WENT_WRONG} -- never the server's own words,
-     *     for `login.ts`'s reason: a server that later starts writing a
-     *     sentence for one of these codes must not have it leak past a
-     *     screen that already decided what to say for that status.
-     */
-    readonly changePassword?:
-        (currentPassword: string, newPassword: string) => Promise<void>
+  /** Where the form is built. Its children are replaced. */
+  readonly root: HTMLElement;
+  /**
+   * Called once the server has revoked this session over the change --
+   * see this file's header on why that revocation happens. The caller is
+   * expected to mount `login.ts`'s screen in response.
+   */
+  readonly onChanged: () => void;
+  /** Unused by this screen today; carried for the shape every screen shares. */
+  readonly transport?: Transport;
+  /**
+   * How the change reaches the server, so a test can replace the one call
+   * that distinguishes a 400 from a 401 without stubbing `fetch`. Defaults
+   * to {@link changePassword}. See this file's header for why
+   * `transport.post` and `api.request` cannot be used here.
+   *
+   * @throws an {@link ApiError} whose message is one of
+   *     {@link WRONG_CURRENT_PASSWORD}, {@link UNACCEPTABLE_NEW_PASSWORD}
+   *     or {@link SOMETHING_WENT_WRONG} -- never the server's own words,
+   *     for `login.ts`'s reason: a server that later starts writing a
+   *     sentence for one of these codes must not have it leak past a
+   *     screen that already decided what to say for that status.
+   */
+  readonly changePassword?: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
 }
 
 /**
  * `POST /v1/auth/password`, cookies only: the same direct `fetch` `login.ts`
  * uses and for the reasons this file's header gives.
  */
-async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    let response: Response
-    try {
-        response = await fetch('/v1/auth/password', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ currentPassword, newPassword }),
-        })
-    } catch {
-        throw new ApiError(SOMETHING_WENT_WRONG, 0)
-    }
-    if (response.status === 204) {
-        return
-    }
-    if (response.status === 401) {
-        throw new ApiError(WRONG_CURRENT_PASSWORD, 401)
-    }
-    if (response.status === 400) {
-        throw new ApiError(UNACCEPTABLE_NEW_PASSWORD, 400)
-    }
-    throw new ApiError(SOMETHING_WENT_WRONG, response.status)
+async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch('/v1/auth/password', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  } catch {
+    throw new ApiError(SOMETHING_WENT_WRONG, 0);
+  }
+  if (response.status === 204) {
+    return;
+  }
+  if (response.status === 401) {
+    throw new ApiError(WRONG_CURRENT_PASSWORD, 401);
+  }
+  if (response.status === 400) {
+    throw new ApiError(UNACCEPTABLE_NEW_PASSWORD, 400);
+  }
+  throw new ApiError(SOMETHING_WENT_WRONG, response.status);
 }
 
 export function createPassword(options: PasswordOptions): Screen {
-    const submit = options.changePassword ?? changePassword
+  const submit = options.changePassword ?? changePassword;
 
-    const shell = el('section', 'screen password')
-    const head = el('header', 'screen-head')
-    const title = el('h2', 'screen-title', 'change password')
-    head.append(title)
+  const shell = el('section', 'screen password');
+  const head = el('header', 'screen-head');
+  const title = el('h2', 'screen-title', 'change password');
+  head.append(title);
 
-    const why = el('p', 'why', WHY_HERE)
+  const why = el('p', 'why', WHY_HERE);
 
-    const body = el('div', 'password-form')
-    body.dataset['password'] = ''
+  const body = el('div', 'password-form');
+  body.dataset['password'] = '';
 
-    const currentField = document.createElement('input')
-    currentField.type = 'password'
-    currentField.autocomplete = 'current-password'
-    currentField.dataset['input'] = 'current'
+  const currentField = document.createElement('input');
+  currentField.type = 'password';
+  currentField.autocomplete = 'current-password';
+  currentField.dataset['input'] = 'current';
 
-    const newField = document.createElement('input')
-    newField.type = 'password'
-    newField.autocomplete = 'new-password'
-    newField.dataset['input'] = 'new'
+  const newField = document.createElement('input');
+  newField.type = 'password';
+  newField.autocomplete = 'new-password';
+  newField.dataset['input'] = 'new';
 
-    const confirmField = document.createElement('input')
-    confirmField.type = 'password'
-    confirmField.autocomplete = 'new-password'
-    confirmField.dataset['input'] = 'confirm'
+  const confirmField = document.createElement('input');
+  confirmField.type = 'password';
+  confirmField.autocomplete = 'new-password';
+  confirmField.dataset['input'] = 'confirm';
 
-    const notice = el('p', 'notice', SESSION_WILL_END)
-    const change = button('submit', 'change password')
+  const notice = el('p', 'notice', SESSION_WILL_END);
+  const change = button('submit', 'change password');
 
-    body.append(
-        labelled('current password', currentField),
-        labelled('new password', newField),
-        labelled('confirm new password', confirmField),
-        notice,
-        change,
-    )
-    shell.append(head, why, body)
-    options.root.replaceChildren(shell)
+  body.append(
+    labelled('current password', currentField),
+    labelled('new password', newField),
+    labelled('confirm new password', confirmField),
+    notice,
+    change,
+  );
+  shell.append(head, why, body);
+  options.root.replaceChildren(shell);
 
-    let problem: HTMLElement | null = null
+  let problem: HTMLElement | null = null;
 
-    function clearProblem(): void {
-        if (problem !== null) {
-            problem.remove()
-            problem = null
-        }
+  function clearProblem(): void {
+    if (problem !== null) {
+      problem.remove();
+      problem = null;
+    }
+  }
+
+  /**
+   * Every field, back to empty. Called whenever a request actually left
+   * this tab and its answer has settled -- see this file's header on the
+   * password's lifetime for why this runs on every such path out of
+   * {@link attempt}, not only the successful one. The one path that never
+   * reaches the network, the mismatch check below, uses {@link
+   * clearMismatchedFields} instead.
+   */
+  function clearFields(): void {
+    currentField.value = '';
+    newField.value = '';
+    confirmField.value = '';
+  }
+
+  /**
+   * The new and confirm fields, back to empty -- not the current password
+   * field. Used only by the mismatch check below: nothing has left this
+   * tab on that path, so the current password typed a moment ago is still
+   * exactly what it was, and wiping it too would cost a retype it did
+   * nothing to earn. Leaving it in `currentField.value` is not a new
+   * exposure -- it is the same DOM property this file's header already
+   * counts as the password's rightful home while an attempt is in flight,
+   * and it is cleared the same as everything else the moment any attempt
+   * actually reaches the server.
+   */
+  function clearMismatchedFields(): void {
+    newField.value = '';
+    confirmField.value = '';
+  }
+
+  function attempt(): void {
+    if (change.disabled) {
+      return;
+    }
+    clearProblem();
+    const current = currentField.value;
+    const next = newField.value;
+    const confirm = confirmField.value;
+
+    // The typo check this file's header describes: it runs before
+    // `submit` is ever called, and it exists only to catch a mistyped
+    // new password before it becomes one nobody can reproduce. It is not
+    // a substitute for the server's own checks, both of which still run
+    // on every request that gets past it.
+    if (next !== confirm) {
+      clearMismatchedFields();
+      problem = trouble(PASSWORDS_DO_NOT_MATCH);
+      body.append(problem);
+      return;
     }
 
-    /**
-     * Every field, back to empty. Called whenever a request actually left
-     * this tab and its answer has settled -- see this file's header on the
-     * password's lifetime for why this runs on every such path out of
-     * {@link attempt}, not only the successful one. The one path that never
-     * reaches the network, the mismatch check below, uses {@link
-     * clearMismatchedFields} instead.
-     */
-    function clearFields(): void {
-        currentField.value = ''
-        newField.value = ''
-        confirmField.value = ''
-    }
+    change.disabled = true;
+    void submit(current, next)
+      .then(() => {
+        clearFields();
+        options.onChanged();
+      })
+      .catch((err: unknown) => {
+        clearFields();
+        change.disabled = false;
+        problem = trouble(problemText(err, SOMETHING_WENT_WRONG));
+        body.append(problem);
+      });
+  }
 
-    /**
-     * The new and confirm fields, back to empty -- not the current password
-     * field. Used only by the mismatch check below: nothing has left this
-     * tab on that path, so the current password typed a moment ago is still
-     * exactly what it was, and wiping it too would cost a retype it did
-     * nothing to earn. Leaving it in `currentField.value` is not a new
-     * exposure -- it is the same DOM property this file's header already
-     * counts as the password's rightful home while an attempt is in flight,
-     * and it is cleared the same as everything else the moment any attempt
-     * actually reaches the server.
-     */
-    function clearMismatchedFields(): void {
-        newField.value = ''
-        confirmField.value = ''
-    }
+  change.addEventListener('click', () => attempt());
+  for (const field of [currentField, newField, confirmField]) {
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        attempt();
+      }
+    });
+  }
 
-    function attempt(): void {
-        if (change.disabled) {
-            return
-        }
-        clearProblem()
-        const current = currentField.value
-        const next = newField.value
-        const confirm = confirmField.value
-
-        // The typo check this file's header describes: it runs before
-        // `submit` is ever called, and it exists only to catch a mistyped
-        // new password before it becomes one nobody can reproduce. It is not
-        // a substitute for the server's own checks, both of which still run
-        // on every request that gets past it.
-        if (next !== confirm) {
-            clearMismatchedFields()
-            problem = trouble(PASSWORDS_DO_NOT_MATCH)
-            body.append(problem)
-            return
-        }
-
-        change.disabled = true
-        void submit(current, next)
-            .then(() => {
-                clearFields()
-                options.onChanged()
-            })
-            .catch((err: unknown) => {
-                clearFields()
-                change.disabled = false
-                problem = trouble(problemText(err, SOMETHING_WENT_WRONG))
-                body.append(problem)
-            })
-    }
-
-    change.addEventListener('click', () => attempt())
-    for (const field of [currentField, newField, confirmField]) {
-        field.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                attempt()
-            }
-        })
-    }
-
-    return {
-        element: () => shell,
-        async load(): Promise<void> {
-            // Nothing to read on mount: the form has no state the server owns
-            // until somebody submits it.
-        },
-        destroy(): void {
-            // Nothing running: no socket, no timer, no in-flight poll.
-        },
-    }
+  return {
+    element: () => shell,
+    async load(): Promise<void> {
+      // Nothing to read on mount: the form has no state the server owns
+      // until somebody submits it.
+    },
+    destroy(): void {
+      // Nothing running: no socket, no timer, no in-flight poll.
+    },
+  };
 }

@@ -109,6 +109,13 @@ class TransactionBoundaryTest {
 
   @DynamicPropertySource
   static void datasource(DynamicPropertyRegistry registry) {
+    registry.add(
+        "plowshare.projects.workspace-directory",
+        () ->
+            java.nio.file.Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "plowshare-test-workspaces-" + java.util.UUID.randomUUID())
+                .toString());
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -329,7 +336,10 @@ class TransactionBoundaryTest {
 
       DispatchingEmbeddingClient client =
           new DispatchingEmbeddingClient(
-              dispatcher, llm, new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
+              dispatcher,
+              llm,
+              new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+                  RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN));
 
       // The fixture is still unparseable, and this is what says so —
       // otherwise every expectation below is satisfied by an embedding

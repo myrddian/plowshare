@@ -26,7 +26,11 @@ class InformationAccessTest {
     InformationAccess access = new InformationAccess(members);
     InformationContext context =
         access.resolve("alice", InformationContext.Selection.project("research"));
-    assertThrows(CallerFault.class, () -> access.filter(context, "d"));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(context), "d"));
     verify(members, times(2)).mayUse("research", "alice");
     verify(members, never()).isMember(anyString(), anyString());
   }
@@ -39,15 +43,22 @@ class InformationAccessTest {
             new InformationContext.Selection(InformationContext.Scope.PERSONAL, "research", true));
     assertThrows(IllegalArgumentException.class, () -> InformationContext.Selection.project(" "));
     InformationAccess access = new InformationAccess(mock(ProjectMembers.class));
-    var filter = access.filter(access.resolve("alice' OR true --", null), "d");
+    var filter =
+        io.aeyer.plowshare.server.information.InformationSql.read(
+            access.admitted(access.resolve("alice' OR true --", null)), "d");
     assertFalse(filter.sql().contains("alice"));
     assertEquals(
         java.util.Arrays.asList("alice' OR true --", "personal", null, true), filter.arguments());
     assertThrows(
         IllegalArgumentException.class,
-        () -> access.filter(access.resolve("alice", null), "d) OR true --"));
+        () ->
+            io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(access.resolve("alice", null)), "d) OR true --"));
     assertThrows(
-        IllegalArgumentException.class, () -> access.filter(access.resolve("alice", null), "ip"));
+        IllegalArgumentException.class,
+        () ->
+            io.aeyer.plowshare.server.information.InformationSql.read(
+                access.admitted(access.resolve("alice", null)), "ip"));
     assertThrows(UnsupportedOperationException.class, () -> filter.arguments().add("bob"));
   }
 }

@@ -806,7 +806,7 @@ class RemoteProviderTest {
     // and be reported as "the tool failed; you may try something else" about
     // a client that will send the same list every time.
     //
-    // ClientEnforcer has carried the mirror-image guard on the other end of
+    // NodeFiles has carried the mirror-image guard on the other end of
     // this same wire since it was written; this end had the list and not the
     // guard.
     // The record directly, not FileReply.listed: that factory copies with

@@ -1,7 +1,11 @@
 package io.aeyer.plowshare.server.api;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import io.aeyer.plowshare.protocol.MemoryProposal;
+import java.io.IOException;
 import java.util.Objects;
 
 /**
@@ -52,14 +56,31 @@ import java.util.Objects;
  * @param proposal the claim being proposed
  * @param verdict <b>a tripwire, not a field.</b> Present only so that a stale client's {@code
  *     verdict} key is a refusal instead of a silent drop. Nothing reads its contents; {@code
- *     RequestedProposal.toFile} refuses any value but null. Typed as a {@link JsonNode} so that
- *     whatever shape an old client sends binds rather than failing at Jackson with a message about
- *     enum constants, which would refuse the request for the wrong reason and tell the caller
+ *     RequestedProposal.toFile} refuses any value but null. Decoded only as a presence marker so
+ *     that whatever shape an old client sends binds rather than failing at Jackson with a message
+ *     about enum constants, which would refuse the request for the wrong reason and tell the caller
  *     nothing about why.
  */
-public record WriteMemoryRequest(String project, MemoryProposal proposal, JsonNode verdict) {
+public record WriteMemoryRequest(
+    String project,
+    MemoryProposal proposal,
+    @JsonDeserialize(using = VerdictPresenceDecoder.class) VerdictPresence verdict) {
 
   public WriteMemoryRequest {
     Objects.requireNonNull(proposal, "proposal");
+  }
+
+  /** The discarded value never crosses the HTTP/WS transport boundary. */
+  public enum VerdictPresence {
+    PRESENT
+  }
+
+  public static final class VerdictPresenceDecoder extends JsonDeserializer<VerdictPresence> {
+    @Override
+    public VerdictPresence deserialize(JsonParser parser, DeserializationContext context)
+        throws IOException {
+      parser.skipChildren();
+      return VerdictPresence.PRESENT;
+    }
   }
 }

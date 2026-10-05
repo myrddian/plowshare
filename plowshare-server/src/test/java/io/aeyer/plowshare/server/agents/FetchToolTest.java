@@ -156,7 +156,8 @@ class FetchToolTest {
         .thenAnswer(
             invocation -> {
               int offset = invocation.getArgument(1);
-              return new FetchWindow(null, null, null, offset, offset, 0, false, message);
+              return new FetchWindow(
+                  invocation.getArgument(0), null, null, offset, offset, 0, false, message);
             });
     return fake;
   }

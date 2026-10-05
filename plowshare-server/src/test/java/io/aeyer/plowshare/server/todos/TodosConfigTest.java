@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,7 +40,7 @@ class TodosConfigTest {
     AccountPushes broken = mock(AccountPushes.class);
     org.mockito.Mockito.doThrow(new RuntimeException("socket gone"))
         .when(broken)
-        .push("enzo", Map.of("kind", TodosConfig.CHANGED, "conversation", "cnv_1"));
+        .push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.TodosChanged("cnv_1"));
     when(pushes.getIfAvailable(org.mockito.ArgumentMatchers.any())).thenReturn(broken);
 
     assertDoesNotThrow(
@@ -49,6 +48,6 @@ class TodosConfigTest {
         "the batch already committed; a client that could not be told must not turn a"
             + " successful write into a thrown exception");
 
-    verify(broken).push("enzo", Map.of("kind", TodosConfig.CHANGED, "conversation", "cnv_1"));
+    verify(broken).push("enzo", new io.aeyer.plowshare.protocol.AccountEvent.TodosChanged("cnv_1"));
   }
 }

@@ -1,10 +1,145 @@
 // Explicit complete WS fixtures. These constructors are used only by tests and the native protocol fixture.
-import type { AgentView, ConversationView, ContextView, EntryView, EntryPageView, Prefix, ProjectView } from 'plowshare-client-ts/operations/conversation-replies';
+import type {
+  AgentView,
+  ConversationView,
+  ContextView,
+  EntryView,
+  EntryPageView,
+  Prefix,
+  ProjectView,
+} from 'plowshare-client-ts/operations/conversation-replies';
 import type { ApprovalView } from 'plowshare-client-ts/operations/administrative-replies';
-export const agentWire = (extra: Partial<AgentView> = {}): AgentView => ({ name: 'bot', tools: [], calls: [], scopes: [], served: true, withheld: [], bot: true, description: '', preferred: true, model: null, orchestrations: [], ...extra });
-export const conversationWire = (id: string, extra: Partial<ConversationView> = {}): ConversationView => ({ id, project: null, maxModelCalls: null, modelCallsSpent: null, maxTurns: null, noTurnCap: false, noBudget: false, title: null, ...extra });
-export const projectWire = (name: string, extra: Partial<ProjectView> = {}): ProjectView => ({ name, workspace: '/fixture', lent: [], exclusions: [], machine: null, members: [], ...extra });
-export const entryWire = (ordinal: number, kind = 'answer', excerpt = `Entry ${ordinal}`, extra: Partial<EntryView> = {}): EntryView => ({ ordinal, turnOrdinal: ordinal, kind, excerpt, length: excerpt.length, cut: false, ejectedAt: null, supersededBy: null, toolCallId: null, toolCalls: [], handle: null, recordedAt: null, tookMillis: null, dispatch: null, wireModel: null, completion: null, speaker: null, speakerName: null, outcome: null, ...extra });
-export const entryPageWire = (entries: readonly EntryView[] = [], through = 0, extra: Partial<EntryPageView> = {}): EntryPageView => ({ entries, total: entries.length, offset: 0, limit: 100, through, oldest: entries.length ? Math.min(...entries.map(row => row.ordinal)) : null, more: false, ...extra });
-export const contextWire = (sent: number | null = null, extra: Partial<ContextView> = {}, prefixExtra?: Partial<Prefix>): ContextView => ({ sent, sentAtTurn: null, turns: 0, turnsMeasured: 0, measuredTurns: [], systemPromptTokens: null, toolTokens: null, messageTokens: null, cacheHitRate: null, unavailable: [], prefix: prefixExtra ? { agent: 'bot', model: 'fixture-model', systemPromptCharacters: 0, toolCharacters: 0, systemPromptTokens: { tokens: 0, basis: 'estimated', how: 'fixture' }, toolTokens: { tokens: 0, basis: 'estimated', how: 'fixture' }, tools: [], contextLength: null, ...prefixExtra } : null, ...extra });
-export const approvalWire = (extra: Partial<ApprovalView> = {}): ApprovalView => ({ id: 'approval-one', conversation: 'first', askedIn: '', agent: 'bot', side: 'server', command: ['echo','fixture'], cwd: '/fixture', reason: '', state: 'asked', scope: null, prefix: null, defaultPrefix: ['echo'], createdAt: '2026-10-01T00:00:00Z', answeredAt: null, commands: null, judged: null, ...extra });
+export const agentWire = (extra: Partial<AgentView> = {}): AgentView => ({
+  name: 'bot',
+  tools: [],
+  calls: [],
+  scopes: [],
+  served: true,
+  withheld: [],
+  bot: true,
+  description: '',
+  preferred: true,
+  model: null,
+  orchestrations: [],
+  ...extra,
+});
+export const conversationWire = (
+  id: string,
+  extra: Partial<ConversationView> = {},
+): ConversationView => ({
+  id,
+  project: null,
+  maxModelCalls: null,
+  modelCallsSpent: null,
+  maxTurns: null,
+  noTurnCap: false,
+  noBudget: false,
+  title: null,
+  ...extra,
+});
+export const projectWire = (
+  name: string,
+  extra: Partial<ProjectView> = {},
+): ProjectView => ({
+  name,
+  workspace: '/fixture',
+  lent: [],
+  exclusions: [],
+  machine: null,
+  members: [],
+  ...extra,
+});
+export const entryWire = (
+  ordinal: number,
+  kind = 'answer',
+  excerpt = `Entry ${ordinal}`,
+  extra: Partial<EntryView> = {},
+): EntryView => ({
+  ordinal,
+  turnOrdinal: ordinal,
+  kind,
+  excerpt,
+  length: excerpt.length,
+  cut: false,
+  ejectedAt: null,
+  supersededBy: null,
+  toolCallId: null,
+  toolCalls: [],
+  handle: null,
+  recordedAt: null,
+  tookMillis: null,
+  dispatch: null,
+  wireModel: null,
+  completion: null,
+  speaker: null,
+  speakerName: null,
+  outcome: null,
+  ...extra,
+});
+export const entryPageWire = (
+  entries: readonly EntryView[] = [],
+  through = 0,
+  extra: Partial<EntryPageView> = {},
+): EntryPageView => ({
+  entries,
+  total: entries.length,
+  offset: 0,
+  limit: 100,
+  through,
+  oldest: entries.length
+    ? Math.min(...entries.map((row) => row.ordinal))
+    : null,
+  more: false,
+  ...extra,
+});
+export const contextWire = (
+  sent: number | null = null,
+  extra: Partial<ContextView> = {},
+  prefixExtra?: Partial<Prefix>,
+): ContextView => ({
+  sent,
+  sentAtTurn: null,
+  turns: 0,
+  turnsMeasured: 0,
+  measuredTurns: [],
+  systemPromptTokens: null,
+  toolTokens: null,
+  messageTokens: null,
+  cacheHitRate: null,
+  unavailable: [],
+  prefix: prefixExtra
+    ? {
+        agent: 'bot',
+        model: 'fixture-model',
+        systemPromptCharacters: 0,
+        toolCharacters: 0,
+        systemPromptTokens: { tokens: 0, basis: 'estimated', how: 'fixture' },
+        toolTokens: { tokens: 0, basis: 'estimated', how: 'fixture' },
+        tools: [],
+        contextLength: null,
+        ...prefixExtra,
+      }
+    : null,
+  ...extra,
+});
+export const approvalWire = (
+  extra: Partial<ApprovalView> = {},
+): ApprovalView => ({
+  id: 'approval-one',
+  conversation: 'first',
+  askedIn: '',
+  agent: 'bot',
+  side: 'server',
+  command: ['echo', 'fixture'],
+  cwd: '/fixture',
+  reason: '',
+  state: 'asked',
+  scope: null,
+  prefix: null,
+  defaultPrefix: ['echo'],
+  createdAt: '2026-10-01T00:00:00Z',
+  answeredAt: null,
+  commands: null,
+  judged: null,
+  ...extra,
+});

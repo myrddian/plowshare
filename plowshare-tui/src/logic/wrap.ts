@@ -7,7 +7,7 @@
  */
 
 /** The width a body is wrapped to when the surface cannot say how wide it is. */
-export const DEFAULT_COLUMNS = 80
+export const DEFAULT_COLUMNS = 80;
 
 /**
  * `text` as rows no wider than `width`: broken at spaces, a word wider than a row broken across
@@ -16,45 +16,48 @@ export const DEFAULT_COLUMNS = 80
  * are code points, as `tints.ts` counts them; a width below one is one.
  */
 export function wrapText(text: string, width: number): string[] {
-    const room = Math.max(1, Math.floor(width))
-    const rows: string[] = []
-    for (const line of text.replace(/\r\n?/gu, '\n').split('\n')) {
-        const indent = /^ */u.exec(line)?.[0] ?? ''
-        const words = line.slice(indent.length).split(/ +/u).filter((word) => word !== '')
-        if (words.length === 0) {
-            rows.push('')
-            continue
-        }
-        // An indent as wide as the row would leave no room for a word after it.
-        let row = indent.length < room ? indent : ''
-        let used = row.length
-        let empty = true
-        for (const word of words) {
-            let points = [...word]
-            const needed = empty ? points.length : 1 + points.length
-            if (used + needed <= room) {
-                row += empty ? word : ` ${word}`
-                used += needed
-                empty = false
-                continue
-            }
-            if (!empty) {
-                rows.push(row)
-                row = ''
-                used = 0
-            }
-            while (used + points.length > room) {
-                const taken = room - used
-                rows.push(row + points.slice(0, taken).join(''))
-                points = points.slice(taken)
-                row = ''
-                used = 0
-            }
-            row += points.join('')
-            used += points.length
-            empty = false
-        }
-        rows.push(row)
+  const room = Math.max(1, Math.floor(width));
+  const rows: string[] = [];
+  for (const line of text.replace(/\r\n?/gu, '\n').split('\n')) {
+    const indent = /^ */u.exec(line)?.[0] ?? '';
+    const words = line
+      .slice(indent.length)
+      .split(/ +/u)
+      .filter((word) => word !== '');
+    if (words.length === 0) {
+      rows.push('');
+      continue;
     }
-    return rows
+    // An indent as wide as the row would leave no room for a word after it.
+    let row = indent.length < room ? indent : '';
+    let used = row.length;
+    let empty = true;
+    for (const word of words) {
+      let points = [...Array.from(word)];
+      const needed = empty ? points.length : 1 + points.length;
+      if (used + needed <= room) {
+        row += empty ? word : ` ${word}`;
+        used += needed;
+        empty = false;
+        continue;
+      }
+      if (!empty) {
+        rows.push(row);
+        row = '';
+        used = 0;
+      }
+      while (used + points.length > room) {
+        const taken = room - used;
+        rows.push(row + points.slice(0, taken).join(''));
+        points = points.slice(taken);
+        row = '';
+        used = 0;
+      }
+      row += points.join('');
+      used += points.length;
+      empty = false;
+    }
+    rows.push(row);
+  }
+  return rows;
 }

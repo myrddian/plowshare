@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/swarm'
+export * from 'plowshare-client-ts/operations/swarm';

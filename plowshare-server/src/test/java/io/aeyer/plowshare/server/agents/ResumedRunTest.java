@@ -809,7 +809,7 @@ class ResumedRunTest {
 
       @Override
       public ToolSchema schema() {
-        return new ToolSchema(TOOL, "reads the deploy script", Map.of());
+        return ToolSchema.from(TOOL, "reads the deploy script", Map.of());
       }
 
       @Override

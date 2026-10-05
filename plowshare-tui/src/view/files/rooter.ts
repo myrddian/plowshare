@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/rooter'
+export * from 'plowshare-client-node/rooter';

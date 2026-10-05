@@ -179,7 +179,11 @@ public final class FrameRouter {
     }
     try {
       if (authorization != null)
-        authorization.require(request.type(), request.payload(), asking.handle());
+        authorization.require(
+            request.type(),
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                request.type(), request.payload()),
+            asking.handle());
       if (accounts != null
           && ((request.type().startsWith("admin.") && !request.type().equals("admin.status"))
               || (request.type().startsWith("project.")
@@ -189,20 +193,17 @@ public final class FrameRouter {
                   && !request.type().startsWith("project.member."))
               || request.type().equals("provider.deregister")))
         accounts.requireServerAdmin(asking.handle());
-      io.aeyer.plowshare.server.archive.ClientProjects.requirePayload(
-          request.payload(), asking.sessionId(), asking.handle());
-      Object project = request.payload().get("project");
-      if (project instanceof String name)
+      var scope = io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
+      for (String project : scope.clientProjects())
         io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
-            name, asking.sessionId(), asking.handle());
-      if (project instanceof String name)
-        io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(name, asking.handle());
-      if (personalAccess != null)
-        personalAccess.payload(request.payload(), asking.handle(), asking.sessionId());
+            project, asking.sessionId(), asking.handle());
+      for (String project : scope.projects())
+        io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(project, asking.handle());
+      if (personalAccess != null) personalAccess.check(scope, asking.handle(), asking.sessionId());
       Outcome answer = handler.handle(request.payload(), asking);
       return authorization == null
           ? answer
-          : authorization.filter(request.type(), answer, asking.handle());
+          : new ProjectListingFilter(authorization).filter(request.type(), answer, asking.handle());
     } catch (RuntimeException thrown) {
       Fault fault = Faults.of(thrown);
       return Outcome.failed(fault.code(), fault.detail());

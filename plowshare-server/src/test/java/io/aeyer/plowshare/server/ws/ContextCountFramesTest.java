@@ -37,7 +37,7 @@ class ContextCountFramesTest {
             "talker", "fixture", "fast", List.of(), List.of(), List.of(), 2, 4, "system");
     var caller = new DefinitionResolver.Caller(null, "session");
     var messages = List.of(ChatMessage.system("system"), ChatMessage.user("stored question"));
-    var tools = List.of(new ToolSchema("lookup", "actual offered tool", Map.of("type", "object")));
+    var tools = List.of(ToolSchema.from("lookup", "actual offered tool", Map.of("type", "object")));
     var owner =
         UsageAttribution.global("alice", UsageAttribution.Operation.AGENT_CHAT)
             .withExecution(
@@ -149,7 +149,7 @@ class ContextCountFramesTest {
                     new io.aeyer.plowshare.protocol.ToolCall(
                         "call-1", "lookup", "{\"q\":\"stored\"}"))),
             ChatMessage.tool("call-1", "exact result"));
-    var tools = List.of(new ToolSchema("lookup", "offered tool", Map.of("type", "object")));
+    var tools = List.of(ToolSchema.from("lookup", "offered tool", Map.of("type", "object")));
     when(callers.callerForConversation("conversation", "session")).thenReturn(caller);
     when(callers.readAgent("talker", caller)).thenReturn(agent);
     when(compaction.projectionFor("conversation", agent)).thenReturn(messages);

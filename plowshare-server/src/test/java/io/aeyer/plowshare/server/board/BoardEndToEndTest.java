@@ -21,9 +21,9 @@ import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.events.AccountPushes;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.Inbox;
-import io.aeyer.plowshare.server.events.InboxStore;
+import io.aeyer.plowshare.server.events.JdbcInboxStore;
+import io.aeyer.plowshare.server.events.JdbcTriggerStore;
 import io.aeyer.plowshare.server.events.TriggerRecord;
-import io.aeyer.plowshare.server.events.TriggerStore;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
@@ -209,9 +209,9 @@ class BoardEndToEndTest {
     Dispatcher dispatcher =
         new Dispatcher(
             fixture.firings,
-            new TriggerStore(fixture.jdbc),
+            new JdbcTriggerStore(fixture.jdbc),
             NO_TRIGGERS,
-            new Inbox(new InboxStore(fixture.jdbc), AccountPushes.NONE, Instant::now),
+            new Inbox(new JdbcInboxStore(fixture.jdbc), AccountPushes.NONE, Instant::now),
             Instant::now);
     turn.whenFree(conversation -> dispatcher.drain("conversation:" + conversation));
 

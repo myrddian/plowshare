@@ -60,32 +60,9 @@ import java.util.List;
  *
  * <h2>Why this lives in {@code plowshare-protocol} and not beside the providers</h2>
  *
- * <p><b>Because two processes have to mean the same thing by "inside".</b> This class shipped in
- * {@code plowshare-server/files/} while there was one process that enforced anything. Task 7 makes
- * the client module an enforcement point of its own — {@code ClientEnforcer} answers a server's
- * file request against the workspace that session currently holds — and {@code plowshare-client}
- * must not depend on {@code plowshare-server}. The two available shapes were one class both modules
- * see, or two implementations of {@link #permits} and {@link #canonical}, and <b>that is the pair
- * this project can least afford to let drift</b>: a client whose {@code canonical} follows a
- * different number of links from the server's is a client that permits what the server refused,
- * with nothing anywhere to say so.
- *
- * <p>{@link #canonical}'s own javadoc has listed "the client module's own check" among its callers
- * since it was written. This move is what makes that sentence true rather than aspirational.
- *
- * <p><b>The independence the spec asks of the client is not a second implementation.</b> It is a
- * second <em>execution</em>, in the process that owns the disk, against state only that process has
- * — the client's live workspace, which the server's copy can be a round trip out of date about.
- * Excalibur's {@code file_grep} child process re-runs the same containment code for the same
- * reason; what makes it a second check is where it runs and what it runs against, not that somebody
- * wrote it twice.
- *
- * <p>This module's build file says it carries Jackson annotations and nothing else, on the argument
- * that anything reachable from here is reachable from a stdio client process that holds no durable
- * state. That argument is about a capability the client should not have — a JDBC driver — and the
- * client is now exactly the process that must be able to answer a question about its own disk.
- * {@link Home} is the precedent for a shared <em>rule</em> rather than a shared record: it refuses
- * a blank tier identically in both processes because there is one copy of that refusal.
+ * <p>Server providers use this canonical containment policy. The Node platform provider
+ * independently enforces its own disk fence before answering requests. Protocol and cross-runtime
+ * tests keep the two policies aligned; Java SDK consumers do not serve files.
  *
  * <p>The roots and exclusions are resolved when this object is built, so it is a snapshot: a root
  * that is replaced by a symlink afterwards is still compared as the directory it was. That is the

@@ -1,6 +1,7 @@
 # Plowshare MCP over WebSocket
 
-The development stdio adapter preserves the 35-tool Java MCP menu and schemas.
+The TypeScript stdio adapter is the supported MCP server. It preserves the reviewed
+35-tool compatibility menu and schemas; the superseded Java MCP server is removed.
 All 34 server-facing tools use typed requests through `plowshare-client-ts` and
 `/v1/events`. `client_root_project_here` explicitly opens `/v1/files` through
 `plowshare-client-node`. HTTP is used only for login, refresh and socket tickets;
@@ -79,7 +80,7 @@ retirement remain separate work.
 
 ## Compatibility evidence
 
-The 176 [legacy fixtures](../plowshare-client/src/test/resources/compatibility/legacy-mcp.json)
+The [retained compatibility fixtures](../test-support/contracts/mcp-compatibility.json)
 pin output, defaults, errors and effective Java backend arguments. Tests translate
 those arguments independently to WS payloads rather than treating Java DTOs as
 wire requests. All normal fixture renderings match, with documented transport

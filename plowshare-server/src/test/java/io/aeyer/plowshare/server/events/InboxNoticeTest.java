@@ -47,7 +47,7 @@ class InboxNoticeTest {
 
   @Test
   void a_notice_is_listed_for_its_account_with_its_kind_and_no_conversation() {
-    InboxStore store = new InboxStore(jdbc);
+    InboxStore store = new JdbcInboxStore(jdbc);
     store.notice("enzo", InboxStore.KIND_SYNC_CONFLICT, "ledger: src/a.ts conflicted", AT);
     List<InboxItem> items = store.list("enzo", true, 0, 10);
     assertEquals(1, items.size());
@@ -59,7 +59,7 @@ class InboxNoticeTest {
 
   @Test
   void a_run_result_is_still_kind_run() {
-    InboxStore store = new InboxStore(jdbc);
+    InboxStore store = new JdbcInboxStore(jdbc);
     store.deliver("enzo", null, "cnv_1", "DONE", "answer", AT);
     assertEquals("run", store.list("enzo", true, 0, 10).get(0).kind());
   }
@@ -67,7 +67,7 @@ class InboxNoticeTest {
   @Test
   void notifying_pushes_the_new_unread_count() {
     AccountPushes pushes = mock(AccountPushes.class);
-    Inbox inbox = new Inbox(new InboxStore(jdbc), pushes, () -> AT);
+    Inbox inbox = new Inbox(new JdbcInboxStore(jdbc), pushes, () -> AT);
     inbox.notify("enzo", InboxStore.KIND_SYNC_CONFLICT, "text");
     verify(pushes).push("enzo", Inbox.changed(1));
   }

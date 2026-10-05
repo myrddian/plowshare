@@ -2,7 +2,8 @@
 """Source-backed legacy CLI migration audit; --check refuses stale evidence.
 
 This inventories dispatch and spelling. Runtime parity is measured separately
-by Java CommandsTest and the real-socket client acceptance suites.
+by the TypeScript real-socket client acceptance suites. The retired command
+baseline is frozen data; no executable Java client is required.
 """
 import argparse
 import hashlib
@@ -12,10 +13,9 @@ import re
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-JAVA = 'plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Commands.java'
-FRONTEND = 'plowshare-client/src/main/java/io/aeyer/plowshare/client/cli/Plowshare.java'
-CATALOG = 'plowshare-client-ts/src/operations/catalog.ts'
-DIRECT = 'plowshare-client-ts/src/operations/direct.ts'
+BASELINE = 'test-support/contracts/legacy-cli-baseline.json'
+CATALOG = 'sdk/typescript/src/operations/catalog.ts'
+DIRECT = 'sdk/typescript/src/operations/direct.ts'
 RUN = 'plowshare-cli/src/run.ts'
 # Every exceptional spelling is explicit. Adding a Java command without a TS
 # mapping fails the audit, rather than silently accepting missing functionality.
@@ -47,26 +47,18 @@ PAYLOADS = {
 
 def build():
     read = lambda path: (ROOT / path).read_text()
-    source = read(JAVA)
+    baseline = json.loads(read(BASELINE))["commands"]
     catalog = read(CATALOG).split('export const CLI_OPERATIONS = {', 1)[1].split('} as const', 1)[0]
     mappings = dict(re.findall(r"'([^']+)': '([^']+)'", catalog))
     direct = read(DIRECT).split('export const MEMORY_OPERATIONS = {', 1)[1].split('} as const', 1)[0]
     mappings.update({'memory '+verb: frame for verb, frame in re.findall(r"(\w+): '([^']+)'", direct)})
     mappings.update({'conversation search': 'conversation.search', 'job status': 'job.status', 'job cancel': 'job.cancel'})
-    # Google Java formatting may wrap either argument list onto the next line.
-    declarations = list(re.finditer(r'add\(\s*all,\s*new Command\(\s*"([^"\n]+)",\s*"([^"\n]*)"', source))
     rows = []
-    for i, match in enumerate(declarations):
-        name = (match[1]+' '+match[2]).strip()
-        block = source[match.start(): declarations[i+1].start() if i+1<len(declarations) else source.index('// An unmodifiable *copy*', match.end())]
+    for declaration in baseline:
+        name = declaration['legacy']
         target = ALIASES.get(name, name)
-        flags = re.search(r'Set\.of\(([^)]*)\)', block)
-        frame = 'information.*' if name=='information' else mappings[target]
-        rows.append({'legacy': name, 'typescript': target, 'frame': frame,
-                     'legacyFlags': re.findall(r'"(--[^"\n]+)"', flags[1]),
-                     'payload': PAYLOADS[name], 'sourceLine': source[:match.start()].count('\n')+1})
-    own = set(re.findall(r'"([^"\n]+)"', re.search(r'OWN\s*=\s*Set.of\(([^)]*)\)', source)[1]))
-    assert own=={'run','talk'}
+        frame = 'information.*' if name == 'information' else mappings[target]
+        rows.append({**declaration, 'typescript': target, 'frame': frame, 'payload': PAYLOADS[name]})
     assert set(PAYLOADS)=={row['legacy'] for row in rows}, 'Legacy command audit is incomplete/stale'
     rows.extend([
         {'legacy':'run','typescript':'agent run / conversation open + agent run', 'frame':'agent.run',
@@ -77,7 +69,7 @@ def build():
          'difference':'Recover explicit conversation and accepted job handles; uncertain submissions are never replayed.'},
     ])
     return {'formatVersion':1, 'kind':'source-audit-not-runtime-proof', 'commands':rows,
-            'counts':{'legacyCommands':len(rows),'legacyTableCommands':len(declarations)},
+            'counts':{'legacyCommands':len(rows),'legacyTableCommands':len(baseline)},
             'legacyExplicitDefaults':{'web.search':{'pageSize':10,'max':30,'page':1},'web.fetch':{'offset':0},'provenance':{'formedBy':'OS user unless --by','formedWhere':'empty unless --where'}},
             'reviewedDifferences':[
                 'Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --server and --url select the explicit server origin, --root replaces --workspace, and global options may precede or follow the command.',
@@ -88,9 +80,8 @@ def build():
                 'Auth/bootstrap stays HTTP; operational reads, mutations and observers are WS. Existing sync Git bytes retain their documented HTTP transport.',
                 'PDF/image conversion is server-side; clients stream bytes and read cached text windows.',
             ],
-            'evidence':{'sources': {path:hashlib.sha256((ROOT/path).read_bytes()).hexdigest() for path in [JAVA,FRONTEND,CATALOG,DIRECT,RUN]},
-                        'runtime':['plowshare-client/src/test/java/io/aeyer/plowshare/client/cli/CommandsTest.java',
-                                   'plowshare-cli/src/socket.test.ts','plowshare-mcp/src/socket.test.ts',
+            'evidence':{'sources': {path:hashlib.sha256((ROOT/path).read_bytes()).hexdigest() for path in [BASELINE,CATALOG,DIRECT,RUN]},
+                        'runtime':['plowshare-cli/src/socket.test.ts','plowshare-mcp/src/socket.test.ts',
                                    'plowshare-tui/src/view/composition.test.ts','plowshare-desktop/scripts/transport-smoke.mjs']}}
 
 if __name__=='__main__':

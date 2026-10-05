@@ -79,10 +79,32 @@ public class RemoteSearchProvider implements SearchProvider {
    *     deadline on the one call this method is making and touches nothing else {@code http} is
    *     shared with.
    */
-  public RemoteSearchProvider(OkHttpClient http, ObjectMapper json, Duration timeout) {
-    this.http = http;
-    this.json = json;
-    this.timeout = timeout;
+  public RemoteSearchProvider(OkHttpClient http, Duration timeout) {
+    this.http = java.util.Objects.requireNonNull(http, "http");
+    // The external provider contract owns strict parsing; the shared application mapper is
+    // untouched.
+    this.json =
+        com.fasterxml.jackson.databind.json.JsonMapper.builder()
+            .findAndAddModules()
+            .disable(com.fasterxml.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .disable(com.fasterxml.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .enable(
+                com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+            .build();
+    for (var shape :
+        new com.fasterxml.jackson.databind.cfg.CoercionInputShape[] {
+          com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer,
+          com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float,
+          com.fasterxml.jackson.databind.cfg.CoercionInputShape.Boolean
+        })
+      this.json
+          .coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Textual)
+          .setCoercion(shape, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
+    this.timeout = java.util.Objects.requireNonNull(timeout, "timeout");
+    if (timeout.isNegative() || timeout.isZero())
+      throw new IllegalArgumentException("positive search timeout required");
   }
 
   @Override
@@ -110,7 +132,12 @@ public class RemoteSearchProvider implements SearchProvider {
         if (!response.isSuccessful() || response.body() == null) {
           return failed(ask, at, "HTTP " + response.code(), startedAt);
         }
-        return json.readValue(response.body().string(), SearchAnswer.class);
+        SearchAnswer answer = json.readValue(response.body().string(), SearchAnswer.class);
+        if (!ask.requestId().equals(answer.requestId())
+            || !at.providerKey().equals(answer.providerKey())
+            || answer.hits().size() > ask.max())
+          return failed(ask, at, "foreign or oversized provider answer", startedAt);
+        return answer;
       }
     } catch (Exception e) {
       String detail =

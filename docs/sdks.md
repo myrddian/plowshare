@@ -1,5 +1,10 @@
 # Plowshare SDKs
 
+All variants live under [sdk/](../sdk/README.md). External adapters live under
+[integrations/](../integrations/README.md); `extensions/` contains services that
+extend platform capabilities. Published package names and Gradle task names
+remain stable.
+
 The implementation order is JavaScript/TypeScript, the Java/JVM SDK, Python,
 C#, then Go. These are clients of Plowshare's `plowshare-v1` WebSocket protocol.
 The A2A adapter is a separate process on the Java SDK. Follow the
@@ -8,17 +13,17 @@ The A2A adapter is a separate process on the Java SDK. Follow the
 | Language | Package | Runtime | Scope |
 | --- | --- | --- | --- |
 | JavaScript/TypeScript | `plowshare-client-ts`, `plowshare-client-node` | Node 22.12+ for the Node transport | Neutral typed operation catalog plus a ready-to-connect Node SDK |
-| Java/JVM | `io.aeyer:plowshare-sdk` | Java 21+ | Generic transport and typed conversation/run/job/outgoing clients |
-| Python | `plowshare-sdk` / import `plowshare` | Python 3.11+ | Async generic client and convenience methods |
-| C# | `Plowshare.Sdk` | .NET 8+ | Async generic client and convenience methods |
-| Go | `io.aeyer/plowshare/sdk` | Go 1.23+ | Context-aware generic client and convenience methods |
+| Java/JVM | `io.aeyer:plowshare-sdk` | Java 21+ | Validated DTO clients for server operations; private WebSocket transport |
+| Python | `plowshare-sdk` / import `plowshare` | Python 3.11+ | Async generated DTO requests and results |
+| C# | `Plowshare.Sdk` | .NET 8+ | Async generated DTO requests and results |
+| Go | `io.aeyer/plowshare/sdk` | Go 1.23+ | Context-aware generated DTO operations |
 
-The new generic clients expose all registered operations from
-the generated catalog. That means wire access;
-it doesn't mean every response has a language-specific DTO, every operation has
-a convenience method, or the SDK supplies a local filesystem/process provider.
-Typed Java and TypeScript helpers coexist with the generic interface. The generic
-Python, C# and Go APIs preserve JSON rather than recreating every domain model.
+Every registered operation in the generated catalog
+has a native request and response contract. Java provides validated DTO facades;
+TypeScript and the native SDKs provide typed operation APIs. Raw wire envelopes
+remain private to their owning transports and codecs. Follow the
+[native SDK standard](native-sdk-standards.md) for Python, Go and .NET changes.
+Filesystem/process providers remain separate platform integrations.
 
 ## Shared contract
 
@@ -28,8 +33,9 @@ Python, C# and Go APIs preserve JSON rather than recreating every domain model.
   refresh them. Existing Node platform credential/file adapters are separate exports.
 - Each request has an ID, type and protocol version. Replies are correlated by ID
   and checked for matching type/version and a known outcome code.
-- `Reply.raw` / `Reply.Raw` retains the complete envelope, future fields and JSON
-  nulls. Refusal codes remain replies until `requirePayload` / `require_payload` /
+- Native Python/C#/Go replies contain a known code, optional text and a validated
+  operation-specific payload. Unknown output fields are projected away; omitted
+  fields remain distinct from explicit null. Refusal codes remain replies until `requirePayload` / `require_payload` /
   `RequirePayload` is explicitly called. `ACCEPTED` is pending work.
 - At most 64 requests are pending. Network clients have a 30-second default deadline.
   Neutral TS transports must inject their own deadline scheduler when needed.
@@ -46,8 +52,15 @@ request UUID before submitting; recovery using the same UUID and identical paylo
 is an explicit caller decision, never a transport retry. Cancellation of a waiting
 SDK call doesn't cancel remote work; `job.cancel` / `outgoing.cancel` are explicit.
 
+`information.search` returns a list of passages, each carrying cosine `distance`
+and a `chunk` with paragraph identity and section/chapter placement. Synthetic
+structural titles carry `synthetic: true` and no title; an unplaced passage has
+an empty placement. This scoped WebSocket result differs from the legacy HTTP
+document retrieval wrapper. All SDKs decode the scoped result before returning
+it to application code.
+
 Filesystem lending, process execution, binary uploads and Git transfers remain
-platform integrations. Calling a frame generically does not install its provider
+platform integrations. Calling an operation does not install its provider
 or assert that a remote system has an accessible filesystem.
 
 ## Build and verify
@@ -57,15 +70,18 @@ Prepare the Python environment from the repository root:
 
 ```sh
 python3 -m venv build/sdk-python-env
-build/sdk-python-env/bin/python -m pip install 'websockets>=17,<18' 'setuptools>=77' build
+build/sdk-python-env/bin/python -m pip install 'websockets>=17,<18' 'setuptools>=77' 'build==1.6.1' 'mypy==2.4.0' 'ruff==0.16.10'
 ./gradlew --no-daemon sdkCheck
 ./gradlew --no-daemon sdkDistributions
 ./gradlew --no-daemon sdkPackageCheck
 ```
 
-`sdkCheck` compiles the native clients and exercises real WebSocket upgrades,
+`sdkCheck` runs strict Python mypy, .NET nullable/warnings-as-errors compilation,
+Go vet and race-enabled DTO tests against shared canonical boundary examples.
+It compiles the native clients and exercises real WebSocket upgrades,
 bearer headers, redirect refusal, concurrent out-of-order replies, refusals,
-future fields/nulls, malformed envelopes, push delivery, deadlines, disconnects,
+projection of future output fields, omitted/null fields, malformed nested DTOs and
+envelopes, validated push delivery, deadlines, disconnects,
 and caller cancellation/close after submission. The fixture counts wire requests
 to reject replay. Go conformance runs with the race detector. Java's separate SDK
 checks also run. `sdkPackageCheck` installs the npm, Python, NuGet and Go
@@ -90,17 +106,17 @@ node scripts/generate-sdk-contracts.mjs
 
 Local npm archives, Python wheel/sdist, NuGet package/symbols and the Go source
 archive are written to `build/distributions`. Java's jar, sources and javadoc are
-under `plowshare-sdk/build/libs`; its Maven POM is under
-`plowshare-sdk/build/publications/sdk`; its companion protocol artifacts are
+under `sdk/java/build/libs`; its Maven POM is under
+`sdk/java/build/publications/sdk`; its companion protocol artifacts are
 under `plowshare-protocol/build/libs` and `plowshare-protocol/build/publications/protocol`.
 Nothing is published remotely. Go discovery hosting is not configured: use the
-[documented local replace directive](../plowshare-sdk-go/README.md) until release
+[documented local replace directive](../sdk/go/README.md) until release
 hosting is selected.
 
 ## External integration runtime
 
-The [shared external integration runtime](../plowshare-integrations/README.md)
-and [first HA adapter](../plowshare-integration-home-assistant/README.md) are implemented
+The [shared external integration runtime](../integrations/runtime/README.md)
+and [first HA adapter](../integrations/home-assistant/README.md) are implemented
 as separate processes above the current SDK. The runtime owns
 binding configuration, optional JavaScript routing, permissions, journals and
 Plowshare delivery. Home Assistant is its first adapter, supplying selected states,
@@ -133,3 +149,7 @@ listing, push notifications and binary/data inputs remain deferred.
 ## Machine identity
 
 Integrations can authenticate with an expiring `pss_` bearer issued to a [Plowshare service account](server-administration.md#service-accounts-and-scoped-tokens). Grant the service account the required server project roles and issue a token with project ceilings. Use the same token identity across integration restarts and rotate it to retain owned work and ingress receipts. Service tokens have no password login, refresh credential or Personal space; send an explicit project or an existing resource in an allowed project. Information requests use `includeShared:false`. Project grants, scope ceilings, expiry and revocation apply to subsequent execution as well as SDK requests.
+
+Event producers use the [explicit event payload contracts](event-payloads.md).
+Deployments must pass the restored-copy compatibility preflight before typed
+event reads are enabled; arbitrary manual event objects are no longer accepted.

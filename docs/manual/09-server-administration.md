@@ -29,7 +29,13 @@ and permissions required by the shipped service UID. Replacing an image should
 not replace the data tree or erase a pipeline's independent checkout.
 
 The top-level configuration uses `plowshare.*` properties and the documented
-environment variables. `PLOWSHARE_DATA_DIR` supplies persistent storage. The
+environment variables. Configure `PLOWSHARE_DB_URL`, `PLOWSHARE_DB_USER`,
+`PLOWSHARE_DB_PASSWORD`, `PLOWSHARE_PORT`, `PLOWSHARE_BIND` and
+`PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY` explicitly. The workspace directory must
+be absolute. `PLOWSHARE_DATA_DIR` supplies persistent storage; the server chooses
+no conventional data or credential path. If operator-token handoff is enabled,
+configure `PLOWSHARE_AUTH_TOKEN_FILE` and `plowshare.auth.console-origin` together;
+the protected file carries the bootstrap URL, and logs carry no credentials. The
 database URL is PostgreSQL JDBC configuration, and provider URLs/model IDs must
 match what the configured service actually serves. Private local overlays stay
 outside tracked source and packaged images.

@@ -1,4 +1,4 @@
-import { isPayloadCommand } from 'plowshare-client-ts/operations/commands'
+import { isPayloadCommand } from 'plowshare-client-ts/operations/commands';
 
 export const HELP = `First-run setup: plowshare-cli --server <server-origin> setup
 Usage: plowshare-cli [options] setup|login|logout
@@ -24,7 +24,7 @@ Information: all scoped source/evidence/report/lifecycle/migration operations.
      Supply scope:{kind:"personal"|"shared"} or {kind:"project",project:NAME}.
      Mutations retain a stable UUID requestId. --wait supports information ask.
 Approval: list, answer, revoke. Orchestration: definitions, list, status, answer,
-     start, receipt, wait, cancel, caps, record. Inbox: list, read. Todos: read.
+     start, receipt, wait, resume, cancel, caps, record. Inbox: list, read. Todos: read.
 Schedule: list, define, read, pause, forget. Trigger: list, define, pause, forget.
 Event: fire. Firing: list. Provider: list, deregister. Board: topup.
 Buffer: purge. Retention: sweep. Union: status, conflicts (reads only).
@@ -74,102 +74,226 @@ Setup and login prompt. PLOWSHARE_HANDLE/PLOWSHARE_PASSWORD remain ephemeral ove
 JSON project:null selects global; omitted budgets and paging stay server-owned.
 Exit: 0 completed, 1 refused/failed, 2 usage/auth, 3 accepted/running/cancelling,
       4 incomplete/cancelled/awaiting, 5 unknown/transport/deadline/protocol.
-Disconnect, timeout or Ctrl-C never replays or cancels a server mutation.`
+Disconnect, timeout or Ctrl-C never replays or cancels a server mutation.`;
 
 export interface Options {
-    readonly json: boolean
-    readonly help: boolean
-    readonly version?: boolean
-    readonly validate: boolean
-    readonly newConversation: boolean
-    readonly standalone: boolean
-    readonly base: string | undefined
-    readonly project?: string
-    readonly command: string
-    readonly inputPayload: boolean
-    readonly wait: boolean
-    readonly watch: boolean
-    readonly pollMs: number
-    readonly timeoutMs: number
-    readonly root?: string
-    readonly sync: boolean
+  readonly json: boolean;
+  readonly help: boolean;
+  readonly version?: boolean;
+  readonly validate: boolean;
+  readonly newConversation: boolean;
+  readonly standalone: boolean;
+  readonly base: string | undefined;
+  readonly project?: string;
+  readonly command: string;
+  readonly inputPayload: boolean;
+  readonly wait: boolean;
+  readonly watch: boolean;
+  readonly pollMs: number;
+  readonly timeoutMs: number;
+  readonly root?: string;
+  readonly sync: boolean;
 }
 export class Usage extends Error {}
 
-export function options(args: readonly string[], env: Readonly<Record<string, string | undefined>>): Options {
-    let json = false, help = false, validate = false, wait = false, watch = false, inputPayload = false
-    let newConversation = false, standalone = false, version = false
-    let root: string | undefined, sync = false
-    let url = env['PLOWSHARE_URL']
-    let project = env['PLOWSHARE_PROJECT'] || undefined
-    let pollMs = 1000, timeoutMs = 30000, cursor = 0, scopeChosen = false
-    const value = (flag: string): string => {
-        const next = args[++cursor]
-        if (next === undefined || next === '' || next.startsWith('--')) throw new Usage(`${flag} needs a value`)
-        return next
+export function options(
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+): Options {
+  let json = false,
+    help = false,
+    validate = false,
+    wait = false,
+    watch = false,
+    inputPayload = false;
+  let newConversation = false,
+    standalone = false,
+    version = false;
+  let root: string | undefined,
+    sync = false;
+  let url = env['PLOWSHARE_URL'];
+  let project = env['PLOWSHARE_PROJECT'] || undefined;
+  let pollMs = 1000,
+    timeoutMs = 30000,
+    cursor = 0,
+    scopeChosen = false;
+  const value = (flag: string): string => {
+    const next = args[++cursor];
+    if (next === undefined || next === '' || next.startsWith('--'))
+      throw new Usage(`${flag} needs a value`);
+    return next;
+  };
+  const duration = (flag: string): number => {
+    const raw = value(flag),
+      number = Number(raw);
+    if (
+      !/^\d+$/.test(raw) ||
+      !Number.isSafeInteger(number) ||
+      number < 1 ||
+      number > 2147483647
+    ) {
+      throw new Usage(`${flag} needs an integer between 1 and 2147483647`);
     }
-    const duration = (flag: string): number => {
-        const raw = value(flag), number = Number(raw)
-        if (!/^\d+$/.test(raw) || !Number.isSafeInteger(number) || number < 1 || number > 2147483647) {
-            throw new Usage(`${flag} needs an integer between 1 and 2147483647`)
-        }
-        return number
+    return number;
+  };
+  const parts: string[] = [];
+  for (; cursor < args.length; cursor++) {
+    const flag = args[cursor]!;
+    if (flag === '--') {
+      parts.push(...args.slice(cursor + 1));
+      break;
     }
-    const parts: string[] = []
-    for (; cursor < args.length; cursor++) {
-        const flag = args[cursor]!
-        if (flag === '--') { parts.push(...args.slice(cursor + 1)); break }
-        if (!flag.startsWith('-')) { parts.push(flag); continue }
-        switch (flag) {
-            case '--new-conversation': newConversation = true; break
-            case '--standalone': standalone = true; break
-            case '--validate': validate = true; break
-            case '--json': json = true; break
-            case '--help': case '-h': help = true; break
-            case '--version': version = true; break
-            case '--wait': wait = true; break
-            case '--watch': watch = true; wait = true; break
-            case '--root': root = value(flag); break
-            case '--sync': sync = true; break
-            case '--server': case '--url': url = value(flag); break
-            case '--project':
-                if (scopeChosen) throw new Usage('choose --project or --global once')
-                project = value(flag); scopeChosen = true; break
-            case '--global':
-                if (scopeChosen) throw new Usage('choose --project or --global once')
-                project = undefined; scopeChosen = true; break
-            case '--payload':
-                if (value(flag) !== '-') throw new Usage('--payload accepts - for stdin')
-                inputPayload = true; break
-            case '--poll-ms': pollMs = duration(flag); break
-            case '--timeout-ms': timeoutMs = duration(flag); break
-            default: throw new Usage('unknown option; see --help')
-        }
+    if (!flag.startsWith('-')) {
+      parts.push(flag);
+      continue;
     }
-    if (help || version) return { json, help, version, validate, newConversation, standalone, base: undefined, command: parts.join(' ').trim(), inputPayload: false, wait: false, watch: false, pollMs, timeoutMs, sync: false }
-    if (newConversation && standalone) throw new Usage('choose --new-conversation or --standalone')
-    if (project !== undefined && project.trim() === '') throw new Usage('project must be a nonblank name; use --global explicitly')
-    let base: string | undefined
-    if (url !== undefined) {
-        try {
-            const parsed = new URL(url)
-            if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password
-                || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error()
-            base = parsed.origin
-        } catch { throw new Usage('--server/--url must be an HTTP(S) origin without credentials, path, query or fragment') }
+    switch (flag) {
+      case '--new-conversation':
+        newConversation = true;
+        break;
+      case '--standalone':
+        standalone = true;
+        break;
+      case '--validate':
+        validate = true;
+        break;
+      case '--json':
+        json = true;
+        break;
+      case '--help':
+      case '-h':
+        help = true;
+        break;
+      case '--version':
+        version = true;
+        break;
+      case '--wait':
+        wait = true;
+        break;
+      case '--watch':
+        watch = true;
+        wait = true;
+        break;
+      case '--root':
+        root = value(flag);
+        break;
+      case '--sync':
+        sync = true;
+        break;
+      case '--server':
+      case '--url':
+        url = value(flag);
+        break;
+      case '--project':
+        if (scopeChosen) throw new Usage('choose --project or --global once');
+        project = value(flag);
+        scopeChosen = true;
+        break;
+      case '--global':
+        if (scopeChosen) throw new Usage('choose --project or --global once');
+        project = undefined;
+        scopeChosen = true;
+        break;
+      case '--payload':
+        if (value(flag) !== '-')
+          throw new Usage('--payload accepts - for stdin');
+        inputPayload = true;
+        break;
+      case '--poll-ms':
+        pollMs = duration(flag);
+        break;
+      case '--timeout-ms':
+        timeoutMs = duration(flag);
+        break;
+      default:
+        throw new Usage('unknown option; see --help');
     }
-    if (parts[0] === 'job' && parts[1] === 'watch') { watch = true; wait = true; parts[1] = 'status' }
-    if (parts[0] === 'job' && ['wait', 'poll', 'result'].includes(parts[1] ?? '')) {
-        wait ||= parts[1] === 'wait'
-        parts[1] = 'status'
+  }
+  if (help || version)
+    return {
+      json,
+      help,
+      version,
+      validate,
+      newConversation,
+      standalone,
+      base: undefined,
+      command: parts.join(' ').trim(),
+      inputPayload: false,
+      wait: false,
+      watch: false,
+      pollMs,
+      timeoutMs,
+      sync: false,
+    };
+  if (newConversation && standalone)
+    throw new Usage('choose --new-conversation or --standalone');
+  if (project !== undefined && project.trim() === '')
+    throw new Usage('project must be a nonblank name; use --global explicitly');
+  let base: string | undefined;
+  if (url !== undefined) {
+    try {
+      const parsed = new URL(url);
+      if (
+        !['http:', 'https:'].includes(parsed.protocol) ||
+        parsed.username ||
+        parsed.password ||
+        parsed.pathname !== '/' ||
+        parsed.search ||
+        parsed.hash
+      )
+        throw new Error();
+      base = parsed.origin;
+    } catch {
+      throw new Usage(
+        '--server/--url must be an HTTP(S) origin without credentials, path, query or fragment',
+      );
     }
-    if (parts[0] === 'orchestration' && parts[1] === 'wait') { wait = true; parts[1] = 'status' }
-    const command = parts.join(' ')
-    if (command === '') throw new Usage('a command is required; see --help')
-    if (inputPayload && !isPayloadCommand(command)) {
-        throw new Usage('--payload - replaces the entire payload; do not also supply an argument')
-    }
-    if (sync && root === undefined) throw new Usage('--sync requires --root')
-    if ((command === 'client root' || command.startsWith('sync ')) && root === undefined) throw new Usage('client root and sync require --root and a named project')
-    return { json, help, validate, newConversation, standalone, base, ...(project === undefined ? {} : { project }), ...(root === undefined ? {} : { root }), sync, command, inputPayload, wait, watch, pollMs, timeoutMs }
+  }
+  if (parts[0] === 'job' && parts[1] === 'watch') {
+    watch = true;
+    wait = true;
+    parts[1] = 'status';
+  }
+  if (
+    parts[0] === 'job' &&
+    ['wait', 'poll', 'result'].includes(parts[1] ?? '')
+  ) {
+    wait ||= parts[1] === 'wait';
+    parts[1] = 'status';
+  }
+  if (parts[0] === 'orchestration' && parts[1] === 'wait') {
+    wait = true;
+    parts[1] = 'status';
+  }
+  const command = parts.join(' ');
+  if (command === '') throw new Usage('a command is required; see --help');
+  if (inputPayload && !isPayloadCommand(command)) {
+    throw new Usage(
+      '--payload - replaces the entire payload; do not also supply an argument',
+    );
+  }
+  if (sync && root === undefined) throw new Usage('--sync requires --root');
+  if (
+    (command === 'client root' || command.startsWith('sync ')) &&
+    root === undefined
+  )
+    throw new Usage('client root and sync require --root and a named project');
+  return {
+    json,
+    help,
+    validate,
+    newConversation,
+    standalone,
+    base,
+    ...(project === undefined ? {} : { project }),
+    ...(root === undefined ? {} : { root }),
+    sync,
+    command,
+    inputPayload,
+    wait,
+    watch,
+    pollMs,
+    timeoutMs,
+  };
 }

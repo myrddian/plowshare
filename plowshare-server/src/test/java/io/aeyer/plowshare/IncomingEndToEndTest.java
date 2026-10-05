@@ -58,6 +58,14 @@ class IncomingEndToEndTest {
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
+    registry.add("server.address", () -> "127.0.0.1");
+    registry.add(
+        "plowshare.projects.workspace-directory",
+        () ->
+            java.nio.file.Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "plowshare-test-workspaces-" + java.util.UUID.randomUUID())
+                .toString());
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -98,14 +106,14 @@ class IncomingEndToEndTest {
             "interlocutor",
             Map.of("remote", "fixture-token", "other", "other-token"),
             1000);
-    var input = Map.<String, Object>of("parts", List.of(Map.of("text", "Please review this")));
+    var input = io.aeyer.plowshare.protocol.ExternalMessage.text("Please review this");
     try (var sdk = sdk("incoming-owner")) {
       projects.define(
           project, Files.createTempDirectory("incoming-workspace-"), List.of(), "incoming-owner");
       try (var receiver = new Receiver(config, sdk);
           var client = new A2aClient(endpoint, "fixture-token", Duration.ofSeconds(3))) {
         assertEquals(httpPort, receiver.port());
-        assertEquals("interlocutor", client.agentCard().get("name"));
+        assertEquals("interlocutor", client.agentCard().name());
         var sent = client.send(request, input);
         taskId = sent.task();
         contextId = sent.context();
@@ -127,7 +135,8 @@ class IncomingEndToEndTest {
         }
         assertThrows(
             java.io.IOException.class,
-            () -> client.send(request, Map.of("parts", List.of(Map.of("text", "Changed")))));
+            () ->
+                client.send(request, io.aeyer.plowshare.protocol.ExternalMessage.text("Changed")));
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
         var observed = client.status(taskId, contextId);
         while (observed.state().equals("WORKING")) {
@@ -152,39 +161,38 @@ class IncomingEndToEndTest {
           jdbc.queryForObject(
               "SELECT count(*) FROM firings WHERE topic IN (SELECT topic FROM board_message_instances WHERE account='incoming-owner')",
               Integer.class));
+      var incoming = new IncomingClient(sdk);
       assertEquals(
           "BAD_REQUEST",
-          sdk.request(
-                  "incoming.receive",
-                  Map.of(
-                      "project",
-                      project,
-                      "client",
-                      "remote",
-                      "agent",
-                      "scribe",
-                      "requestId",
-                      UUID.randomUUID(),
-                      "body",
-                      "Bypass private agent"))
+          assertThrows(
+                  IncomingClient.Refused.class,
+                  () ->
+                      incoming.receive(
+                          new Incoming.Receive(
+                              project,
+                              "remote",
+                              "scribe",
+                              UUID.randomUUID(),
+                              null,
+                              "Bypass private agent",
+                              null,
+                              null)))
               .code());
       assertEquals(
           "BAD_REQUEST",
-          sdk.request(
-                  "incoming.receive",
-                  Map.of(
-                      "project",
-                      project,
-                      "client",
-                      "remote",
-                      "agent",
-                      "interlocutor",
-                      "requestId",
-                      UUID.randomUUID(),
-                      "body",
-                      "Bypass grant",
-                      "command",
-                      "/skill:ungranted"))
+          assertThrows(
+                  IncomingClient.Refused.class,
+                  () ->
+                      incoming.receive(
+                          new Incoming.Receive(
+                              project,
+                              "remote",
+                              "interlocutor",
+                              UUID.randomUUID(),
+                              null,
+                              "Bypass grant",
+                              "/skill:ungranted",
+                              null)))
               .code());
     }
     try (var foreign = sdk("incoming-foreign")) {
@@ -200,7 +208,7 @@ class IncomingEndToEndTest {
   void scoped_machine_ingress_retains_its_receipt_across_rotation_and_obeys_live_grants()
       throws Exception {
     try (var operator = sdk("incoming-owner")) {
-      assertEquals("OK", operator.request("admin.status", Map.of()).code());
+      assertTrue(new AdministrationClient(operator).status().serverAdmin());
       String project = "machine-ingress-" + UUID.randomUUID(),
           handle = "adapter-" + UUID.randomUUID();
       projects.define(
@@ -223,37 +231,30 @@ class IncomingEndToEndTest {
               30);
       UUID request = UUID.randomUUID();
       var payload =
-          Map.<String, Object>of(
-              "project",
+          new Incoming.Receive(
               project,
-              "client",
               "machine-client",
-              "agent",
               "interlocutor",
-              "requestId",
               request,
-              "body",
-              "Retain this integration receipt");
+              null,
+              "Retain this integration receipt",
+              null,
+              null);
       String id;
       try (var machine =
           Plowshare.connect(
               "http://127.0.0.1:" + port, issued.credential(), Duration.ofSeconds(5), null)) {
-        assertEquals(
-            "OK",
-            machine
-                .request("incoming.catalog", Map.of("project", project, "agent", "interlocutor"))
-                .code());
-        var accepted = machine.request("incoming.receive", payload);
-        assertEquals("OK", accepted.code());
-        id = accepted.requirePayload().get("id").asText();
-        assertEquals("BAD_REQUEST", machine.request("admin.accounts", Map.of()).code());
+        var incoming = new IncomingClient(machine);
+        assertTrue(incoming.catalog(new Incoming.CatalogQuery(project, "interlocutor")).served());
+        var accepted = incoming.receive(payload);
+        id = accepted.id().toString();
+        assertThrows(java.io.IOException.class, () -> new AdministrationClient(machine).accounts());
       }
       var rotated = services.rotate("incoming-owner", handle, issued.token().id(), 30);
       try (var machine =
           Plowshare.connect(
               "http://127.0.0.1:" + port, rotated.credential(), Duration.ofSeconds(5), null)) {
-        assertEquals(
-            id, machine.request("incoming.receive", payload).requirePayload().get("id").asText());
+        assertEquals(id, new IncomingClient(machine).receive(payload).id().toString());
         assertEquals(
             1,
             jdbc.queryForObject(
@@ -266,34 +267,28 @@ class IncomingEndToEndTest {
             io.aeyer.plowshare.server.archive.ProjectRole.VIEWER,
             "incoming-owner",
             false);
+        var incoming = new IncomingClient(machine);
         assertEquals(
             "BAD_REQUEST",
-            machine
-                .request(
-                    "incoming.receive",
-                    Map.of(
-                        "project",
-                        project,
-                        "client",
-                        "machine-client",
-                        "agent",
-                        "interlocutor",
-                        "requestId",
-                        UUID.randomUUID(),
-                        "body",
-                        "Do not start"))
+            assertThrows(
+                    IncomingClient.Refused.class,
+                    () ->
+                        incoming.receive(
+                            new Incoming.Receive(
+                                project,
+                                "machine-client",
+                                "interlocutor",
+                                UUID.randomUUID(),
+                                null,
+                                "Do not start",
+                                null,
+                                null)))
                 .code());
-        assertEquals(
-            "OK",
-            machine
-                .request("incoming.catalog", Map.of("project", project, "agent", "interlocutor"))
-                .code());
+        assertTrue(incoming.catalog(new Incoming.CatalogQuery(project, "interlocutor")).served());
         members.remove(project, handle, "incoming-owner");
-        assertEquals(
-            "BAD_REQUEST",
-            machine
-                .request("incoming.catalog", Map.of("project", project, "agent", "interlocutor"))
-                .code());
+        assertThrows(
+            java.io.IOException.class,
+            () -> incoming.catalog(new Incoming.CatalogQuery(project, "interlocutor")));
       }
     }
   }

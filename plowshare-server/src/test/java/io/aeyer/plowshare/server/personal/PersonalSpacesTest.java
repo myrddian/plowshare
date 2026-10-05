@@ -6,7 +6,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.DefinitionResolver.Caller;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier;
 import io.aeyer.plowshare.server.agents.SkillResolver;
-import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -55,7 +55,14 @@ class PersonalSpacesTest {
   @BeforeEach
   void setup() {
     data = new DataLayout(temporary.resolve("data")).initialise();
-    personal = new PersonalSpaces(jdbc, data);
+    personal =
+        new PersonalSpaces(
+            new io.aeyer.plowshare.server.personal.JdbcPersonalSpaceRepository(jdbc),
+            new io.aeyer.plowshare.server.archive.ArchiveConfig()
+                .unitOfWork(
+                    new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                        jdbc.getDataSource())),
+            data);
     projects =
         new ProjectStore(
             jdbc,
@@ -94,7 +101,7 @@ class PersonalSpacesTest {
     assertFalse(Files.exists(hub.tree().resolve("In/.keep")));
     assertFalse(Files.exists(hub.tree().resolve("Resources/skills/personal-capture/SKILL.md")));
     assertEquals(id, personal.id(alice).orElseThrow());
-    var members = new ProjectMembers(jdbc);
+    var members = new JdbcProjectMembers(jdbc);
     assertTrue(members.mayUse(PersonalSpaces.name(alice), alice));
     assertFalse(members.mayUse(PersonalSpaces.name(alice), bob));
     assertThrows(RuntimeException.class, () -> members.add(PersonalSpaces.name(alice), bob));
@@ -165,7 +172,7 @@ class PersonalSpacesTest {
                 "Resources/skills/review/SKILL.md",
                 Files.readString(data.skillsFor(id).resolve("review/SKILL.md"))),
             Tier.PERSONAL);
-    var receipts = new io.aeyer.plowshare.server.agents.SkillExecutions(jdbc);
+    var receipts = new io.aeyer.plowshare.server.agents.JdbcSkillExecutionsRepository(jdbc);
     UUID invocation = UUID.randomUUID();
     assertTrue(
         receipts.claim(
@@ -232,12 +239,18 @@ class PersonalSpacesTest {
             null,
             alice);
     var access = new PersonalAccess(conversations);
-    access.payload(java.util.Map.of("conversation", row.id()), alice);
-    assertThrows(
-        CallerFault.class, () -> access.payload(java.util.Map.of("conversation", row.id()), bob));
+    access.check(PersonalScopeDecoder.decode(java.util.Map.of("conversation", row.id())), alice);
     assertThrows(
         CallerFault.class,
-        () -> access.payload(java.util.Map.of("conversations", List.of(row.id())), bob));
+        () ->
+            access.check(
+                PersonalScopeDecoder.decode(java.util.Map.of("conversation", row.id())), bob));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            access.check(
+                PersonalScopeDecoder.decode(java.util.Map.of("conversations", List.of(row.id()))),
+                bob));
   }
 
   @Test
@@ -259,7 +272,7 @@ class PersonalSpacesTest {
     assertThrows(
         CallerFault.class, () -> PersonalSpaces.resolveAddress(PersonalSpaces.address(bob), alice));
     var listing =
-        new io.aeyer.plowshare.server.ws.ProjectListHandler(projects, new ProjectMembers(jdbc));
+        new io.aeyer.plowshare.server.ws.ProjectListHandler(projects, new JdbcProjectMembers(jdbc));
     var outcome =
         listing.handle(
             java.util.Map.of(), new io.aeyer.plowshare.server.ws.Asking("client", alice));

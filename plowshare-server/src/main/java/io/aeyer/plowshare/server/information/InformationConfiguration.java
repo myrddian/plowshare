@@ -86,6 +86,35 @@ public final class InformationConfiguration {
         embedding(llm.getEmbeddingModel(), llm.getEmbeddingDim()));
   }
 
+  public static Map<String, String> fingerprints(
+      LlmProperties llm,
+      DocumentsProperties documents,
+      AgentRegistry agents,
+      io.aeyer.plowshare.server.embedding.DualEmbeddings dual) {
+    var result = new HashMap<>(fingerprints(llm, documents, agents));
+    if (dual != null) {
+      String spaces = hash(dual.fingerprint());
+      result.put("embed", spaces);
+      result.put("summary_embed", spaces);
+    }
+    return Map.copyOf(result);
+  }
+
+  /**
+   * Chunk derivation must be invalidated when either encoder's tokenizer or input contract changes.
+   */
+  public static Map<String, String> fingerprints(
+      LlmProperties llm,
+      DocumentsProperties documents,
+      AgentRegistry agents,
+      io.aeyer.plowshare.server.embedding.DualEmbeddings dual,
+      io.aeyer.plowshare.server.embedding.EmbeddingTokenizers tokenizers) {
+    var result = new HashMap<>(fingerprints(llm, documents, agents, dual));
+    if (tokenizers != null)
+      result.put("derive", hash(result.get("derive") + ":" + tokenizers.fingerprint()));
+    return Map.copyOf(result);
+  }
+
   private static String hash(String value) {
     return InformationCatalogue.sha256(value.getBytes(StandardCharsets.UTF_8));
   }

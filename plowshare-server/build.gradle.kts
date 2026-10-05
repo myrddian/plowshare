@@ -15,7 +15,11 @@ val jgitVersion: String by project
 val graalPolyglotVersion: String by project
 val swc4jVersion: String by project
 
+val huggingFaceTokenizersVersion: String by project
+
 dependencies {
+    // Only the tokenizer runtime; model files are explicit local, checksum-pinned configuration.
+    implementation("ai.djl.huggingface:tokenizers:$huggingFaceTokenizersVersion")
     testImplementation(project(":plowshare-a2a"))
     implementation(project(":plowshare-protocol"))
 
@@ -35,9 +39,8 @@ dependencies {
     // which is the whole reason this is not polling: every file request
     // outstanding on a session fails the moment the session goes, rather than
     // waiting out a deadline that exists for a different failure. The client
-    // half of the same socket is okhttp's, because plowshare-client is
-    // deliberately Spring-free and okhttp ships a WebSocket client — see that
-    // module's build file, which has no Spring in it and must not gain any.
+    // half is the Node platform provider; test-only raw sockets additionally
+    // inject malformed frames and controlled disconnects using OkHttp.
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     // starter-jdbc, not starter-data-jpa: the archive is a handful of hand-written
     // statements over one table, and the vector column is a type JPA has no
@@ -135,13 +138,8 @@ dependencies {
     // recreate the same two-providers-one-package problem it was excluded to
     // avoid, because spring-jcl already is that bridge.
     //
-    // MEASURED, and it caught a wrong assertion: the TEST class path does have
-    // both, because testImplementation(project(":plowshare-client")) below
-    // carries that module's runtimeOnly jcl-over-slf4j across, and it is what
-    // answers LogFactory there. Both route to slf4j, so the guarded property
-    // holds either way -- but it is why PdfWarningsGoThroughLogbackTest asks
-    // whether the resolution routes to slf4j rather than which jar answered.
-    // That class asserts the resolution rather than trusting this comment.
+    // Tests use the same single spring-jcl provider; PDF warnings must route
+    // through slf4j/logback. PdfWarningsGoThroughLogbackTest checks actual resolution.
     implementation("org.apache.pdfbox:pdfbox:$pdfboxVersion") {
         exclude(group = "commons-logging", module = "commons-logging")
     }
@@ -192,17 +190,15 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter:$testcontainersVersion")
     testImplementation("org.testcontainers:postgresql:$testcontainersVersion")
 
-    // The end-to-end test drives the real MCP client against a real server, so
-    // it needs both halves on one classpath. Test-only, and in this direction
-    // only: nothing in this module's src/main can reach the client, so the
-    // compiler still enforces that the server knows nothing about MCP — and the
-    // client still never sees Spring Boot or a JDBC driver.
-    testImplementation(project(":plowshare-client"))
+    // Controller/session fixtures use typed SDK contracts; actual file and MCP
+    // behavior is exercised through the TypeScript replacement, never a shipped legacy client.
+    testImplementation(project(":plowshare-sdk"))
+
 }
 
 // InvariantsTest asserts over the whole repository, and until this block existed
 // Gradle had no idea that was its subject. Measured, with a violating comment
-// sitting in plowshare-client/src/main/.../Schemas.java and nothing else changed:
+// sitting in sdk/java/src/main/.../Schemas.java and nothing else changed:
 //
 //     > Task :plowshare-server:test UP-TO-DATE
 //     BUILD SUCCESSFUL in 1s
@@ -210,7 +206,7 @@ dependencies {
 // InvariantsTest did not appear in the output at all. The guard re-ran only by
 // classpath accident — when a violation happened to change bytecode — and that
 // accident does not happen for three of the four invariants in their most likely
-// shape. `org.springframework` cannot reach plowshare-client/src/main as a real
+// shape. `org.springframework` cannot reach sdk/java/src/main as a real
 // import at all, because the module has no Spring on its compile classpath, so
 // the ONLY possible violation there is a comment. The reference box's address
 // arrives in a build file, a shell script, a .gitignore or a README outside
@@ -278,7 +274,7 @@ val invariants = tasks.register<Test>("invariants") {
                 // second to run. dist/ is Vite's output and lives beside the
                 // sources rather than under build/, so the pattern above does
                 // not already cover it.
-                "**/node_modules/**", "plowshare-console/dist/**",
+                "**/node_modules/**", "plowshare-console/dist/**", "sdk/dotnet/**/bin/**", "sdk/dotnet/**/obj/**",
                 // CLI/MCP TypeScript test outputs are ignored generated files, just like build/.
                 // Reading them here also creates undeclared dependencies on their typecheck tasks.
                 "plowshare-cli/build-tests/**", "plowshare-mcp/build-tests/**"
@@ -287,7 +283,7 @@ val invariants = tasks.register<Test>("invariants") {
     )
         .withPropertyName("repositoryTree")
         // RELATIVE, not NAME_ONLY: every scope in that class is a path pattern,
-        // so the same file under plowshare-client/src/main and under
+        // so the same file under sdk/java/src/main and under
         // plowshare-server/src/main are different answers. Not ABSOLUTE, which
         // would defeat the build cache across checkouts and buy nothing.
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -301,6 +297,8 @@ tasks.named("check") { dependsOn(invariants) }
 // XML tally of the suite counts its five assertions and its class twice.
 tasks.named<Test>("test") {
     filter { excludeTestsMatching("io.aeyer.plowshare.server.InvariantsTest") }
+    dependsOn(":plowshare-client-node:nodeBuild", ":plowshare-mcp:mcpBuild")
+    inputs.dir("src/test/node").withPathSensitivity(PathSensitivity.RELATIVE)
     // ScriptDocumentationTest executes the copyable example outside the source set.
     inputs.file(rootProject.file("docs/examples/scripted-orchestrations/catalogue_inventory.js"))
     useJUnitPlatform { excludeTags("node-source") }
@@ -315,11 +313,11 @@ val nodeSourceTest by tasks.registering(Test::class) {
     classpath = sourceSets["test"].runtimeClasspath
     useJUnitPlatform { includeTags("node-source") }
     include("**/FileChannelTest.class")
-    systemProperty("plowshare.node.project", rootProject.file("plowshare-client-node").absolutePath)
-    inputs.dir(rootProject.file("plowshare-client-node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file("plowshare-client-ts/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("plowshare.node.project", project(":plowshare-client-node").projectDir.absolutePath)
+    inputs.dir(rootProject.file("sdk/node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/typescript/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(listOf("plowshare-client-node", "plowshare-client-ts").flatMap { project ->
-        listOf("package.json", "tsconfig.json", "pnpm-lock.yaml").map { rootProject.file("$project/$it") }
+        listOf("package.json", "tsconfig.json", "pnpm-lock.yaml").map { rootProject.project(":$project").file("$it") }
     }).withPathSensitivity(PathSensitivity.RELATIVE)
     shouldRunAfter(tasks.named("test"))
 }
@@ -378,4 +376,13 @@ tasks.named<ProcessResources>("processResources") {
     from(project(":plowshare-console").tasks.named("pnpmBuild")) {
         into("static")
     }
+}
+
+// Explicit maintenance command; never included in check or automatic application startup.
+tasks.register<JavaExec>("eventDtoPreflight") {
+    group = "verification"
+    description = "Read-only event DTO inventory against an explicitly configured restored database copy"
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("io.aeyer.plowshare.server.events.EventPreflightConfiguration")
 }

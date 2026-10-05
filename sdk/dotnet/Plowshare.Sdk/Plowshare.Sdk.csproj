@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PackageId>Plowshare.Sdk</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Asynchronous Plowshare WebSocket SDK</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup><InternalsVisibleTo Include="Plowshare.Sdk.ContractTests" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Schemas.json" /></ItemGroup>
+  <ItemGroup><None Include="../README.md" Pack="true" PackagePath="/" /></ItemGroup>
+</Project>

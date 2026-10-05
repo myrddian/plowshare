@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.board;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.ws.Asking;
@@ -43,9 +44,11 @@ class BoardPostingTest {
     f = new BoardFixture(source);
     board = f.board(BoardFixture.TWO);
     topic = f.openByBot(board).topic();
-    members = new ProjectMembers(f.jdbc);
+    members = new JdbcProjectMembers(f.jdbc);
     members.add("payments", "enzo");
-    frames = new BoardPostingFrames(board, f.store, members, f.work, f.jdbc);
+    frames =
+        new BoardPostingFrames(
+            board, f.store, members, f.work, new JdbcBoardPostRepository(f.jdbc));
   }
 
   BoardPostingFrames.Receipt post(UUID key, String body) throws Exception {

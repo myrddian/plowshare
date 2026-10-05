@@ -44,6 +44,9 @@ class AccountingConfigTest {
         .withBean(ObjectMapper.class, ObjectMapper::new)
         .withBean(JdbcTemplate.class, () -> new JdbcTemplate(offline))
         .withBean(
+            UsageScopeRepository.class,
+            () -> new JdbcUsageScopeRepository(new JdbcTemplate(offline)))
+        .withBean(
             PlatformTransactionManager.class, () -> new DataSourceTransactionManager(offline));
   }
 

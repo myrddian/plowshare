@@ -5,16 +5,9 @@ import java.util.Objects;
 /**
  * A caller's request to write a memory, before the archive has decided anything about it.
  *
- * <p>Nothing here is validated and nothing here is a {@link Memory} yet: no id, no {@link
- * MemoryState}, no {@link Home}. Assigning those is the archive's job, once {@code
- * Validation.check} has passed the proposal and a {@code Verdict} has said whether it is new, a
- * supersession, or a merge. A proposal that carried its own id or state would let a caller dictate
- * the archive's semantics instead of asking for them.
- *
- * <p>Ported from Excalibur's {@code archive/validation.py}, minus one field: Python's {@code pin}
- * defaults a proposal straight to the pinned working set. Plowshare has no such shortcut yet —
- * {@link Memory#pinned} is set by the archive's write path, not requested by the caller — so this
- * record carries only the fields validation itself needs.
+ * <p>All structural fields are bounded and validated before this value can enter application code.
+ * The archive assigns identity, home and state, enforces its configured body limit, and decides the
+ * verdict under its existing ownership rules. A proposal cannot choose a target to retire.
  *
  * @param summary the claim, stated so it stands alone; must be a single line
  * @param scope prose saying when this memory is worth recalling
@@ -26,17 +19,18 @@ import java.util.Objects;
 public record MemoryProposal(
     String summary, String scope, String body, String formedBy, String formedWhere) {
 
-  /**
-   * Rejects {@code null}, and only {@code null}. Blank is a shape the server's {@code
-   * Validation.check} decides on, with a message naming the field; a {@code null} here would
-   * instead surface as an NPE with no field name, out of whichever method first called {@code
-   * .isBlank()} on it.
-   */
+  /** Normalizes the summary and author identity; narrative fields retain their content. */
   public MemoryProposal {
-    Objects.requireNonNull(summary, "summary");
-    Objects.requireNonNull(scope, "scope");
-    Objects.requireNonNull(body, "body");
-    Objects.requireNonNull(formedBy, "formedBy");
-    Objects.requireNonNull(formedWhere, "formedWhere");
+    summary = ContractValues.text(summary, "summary", 32768, true).strip();
+    if (summary
+        .codePoints()
+        .anyMatch(code -> Character.isISOControl(code) || code == 0x2028 || code == 0x2029))
+      throw new IllegalArgumentException("field 'summary' must be a single line");
+    scope = ContractValues.text(scope, "scope", 32768, true);
+    body = ContractValues.text(body, "body", 1048576, true);
+    formedBy = ContractValues.identity(formedBy, "formedBy", 1024);
+    formedWhere =
+        Objects.requireNonNull(
+            ContractValues.text(formedWhere, "formedWhere", 32768, false), "formedWhere");
   }
 }

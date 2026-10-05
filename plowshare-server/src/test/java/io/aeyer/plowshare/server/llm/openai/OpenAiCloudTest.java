@@ -108,7 +108,7 @@ class OpenAiCloudTest {
               ChatRequest.of("deployment-alias", "system", "question")
                   .withTools(
                       List.of(
-                          new ToolSchema(
+                          ToolSchema.from(
                               "lookup",
                               "find",
                               Map.of(
@@ -178,7 +178,7 @@ class OpenAiCloudTest {
                 .withTopK(20)
                 .withReasoningEffort(Sampling.Effort.LOW)
                 .withResponseFormat(
-                    new JsonSchema(
+                    JsonSchema.from(
                         "answer",
                         Map.of(
                             "type",
@@ -255,14 +255,14 @@ class OpenAiCloudTest {
                     "deployment-alias",
                     ChatMessage.conversation(null, "question"),
                     high,
-                    List.of(new ToolSchema("lookup", "find", Map.of("type", "object")))));
+                    List.of(ToolSchema.from("lookup", "find", Map.of("type", "object")))));
         assertEquals(0, server.getRequestCount());
         server.enqueue(answer());
         t.complete(
             "deployment-alias",
             ChatMessage.conversation(null, "question"),
             Sampling.NONE.withReasoningEffort(Sampling.Effort.NONE),
-            List.of(new ToolSchema("lookup", "find", Map.of("type", "object"))));
+            List.of(ToolSchema.from("lookup", "find", Map.of("type", "object"))));
         assertEquals(
             "none",
             JSON.readTree(server.takeRequest().getBody().readUtf8())

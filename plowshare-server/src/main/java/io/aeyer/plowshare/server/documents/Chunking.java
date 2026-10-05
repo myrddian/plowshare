@@ -11,9 +11,9 @@ import java.util.Objects;
  * that charges a token per character than under one that charges a token per four. Travelling
  * together, the bounds cannot be handed to a chunker counting with something else.
  *
- * <p>The tokenizer is the interface and never a named implementation. The one that ships is {@code
- * RatioTokenizer}, a heuristic; it is there to be replaced by a real tokenizer behind the same
- * interface, and nothing that chunks may depend on which one it was given.
+ * <p>The tokenizer is the interface and never a named implementation. The {@code RatioTokenizer}
+ * chat estimate is not accepted. Composition supplies the embedding-specific measured counter or a
+ * conservative bound across both measured document inputs.
  *
  * @param tokenizer what every bound here is counted with
  * @param targetTokens what packing aims at. Whole sentences are added while they fit under this, so
@@ -52,6 +52,10 @@ public record Chunking(Tokenizer tokenizer, int targetTokens, int maxTokens) {
 
   /** What {@code text} costs, in the unit both bounds are in. */
   int tokens(String text) {
-    return tokenizer.count(text).tokens();
+    var count = tokenizer.count(text);
+    if (count.basis() == io.aeyer.plowshare.server.llm.tokens.TokenCount.Basis.ESTIMATED)
+      throw new IllegalArgumentException(
+          "chunk limits require model tokenizers or a proven bound; estimates are refused");
+    return count.tokens();
   }
 }

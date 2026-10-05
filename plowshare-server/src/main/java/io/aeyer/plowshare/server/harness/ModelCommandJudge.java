@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.harness;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -170,34 +169,7 @@ public final class ModelCommandJudge implements CommandJudge, AutoCloseable, Usa
    * @throws IllegalStateException when the answer is not {@code {"clear": <boolean>, ...}}
    */
   static Verdict parse(String content) {
-    String body = content == null ? "" : content.strip();
-    int open = body.indexOf('{');
-    int close = body.lastIndexOf('}');
-    if (open < 0 || close < open) {
-      throw new IllegalStateException("the judge answered no JSON object");
-    }
-    JsonNode node;
-    try {
-      node = JSON.readTree(body.substring(open, close + 1));
-    } catch (JsonProcessingException unreadable) {
-      throw new IllegalStateException("the judge's answer is not JSON", unreadable);
-    }
-    JsonNode clear = node.path("clear");
-    if (!clear.isBoolean()) {
-      throw new IllegalStateException("the judge's answer has no 'clear' true or false");
-    }
-    JsonNode why = node.path("why");
-    return new Verdict(clear.booleanValue(), why.isTextual() ? oneLine(why.asText()) : null);
-  }
-
-  /** The first non-blank line, cut at {@link #WHY_KEPT}; null for none. */
-  private static String oneLine(String text) {
-    String first =
-        text.lines().map(String::strip).filter(each -> !each.isEmpty()).findFirst().orElse(null);
-    if (first == null) {
-      return null;
-    }
-    return first.length() <= WHY_KEPT ? first : first.substring(0, WHY_KEPT - 1) + "…";
+    return CommandVerdictCodec.read(content);
   }
 
   @Override

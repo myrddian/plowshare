@@ -218,7 +218,7 @@ class LlmConfigTest {
               assertTrue(pool.getCounting().isAutomatic());
               assertEquals(java.time.Duration.ofMillis(500), pool.getCounting().getTimeout());
               assertEquals(2, pool.getCounting().getCacheEntries());
-              assertTrue(pool.getChatTemplateKwargs().containsKey("enable_thinking"));
+              assertEquals(Boolean.FALSE, pool.getChatTemplateKwargs().enableThinking());
             });
   }
 

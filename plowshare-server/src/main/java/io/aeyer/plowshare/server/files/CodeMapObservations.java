@@ -1,9 +1,9 @@
 package io.aeyer.plowshare.server.files;
 
+import io.aeyer.plowshare.protocol.CodeTrackingStatus;
 import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.CodeProjection;
-import java.util.Map;
 
 /** Optional durable observations beside a run's code navigation cache. */
 public interface CodeMapObservations {
@@ -29,7 +29,7 @@ public interface CodeMapObservations {
 
   default void completed(Home home) {}
 
-  Map<String, Object> status(Home home);
+  CodeTrackingStatus status(Home home);
 
   default void stop(Home home) {}
 
@@ -43,8 +43,8 @@ public interface CodeMapObservations {
 
         public void invalidate(Home home) {}
 
-        public Map<String, Object> status(Home home) {
-          return Map.of("state", "disabled");
+        public CodeTrackingStatus status(Home home) {
+          return CodeTrackingStatus.state("disabled");
         }
       };
 }

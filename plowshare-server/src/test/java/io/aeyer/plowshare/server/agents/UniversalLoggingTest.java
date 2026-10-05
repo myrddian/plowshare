@@ -986,7 +986,7 @@ class UniversalLoggingTest {
 
     private Probe(String name, Function<String, String> behaviour) {
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               name, "a probe called " + name, Map.of("type", "object", "properties", Map.of()));
       this.behaviour = behaviour;
     }

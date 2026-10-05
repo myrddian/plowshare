@@ -230,7 +230,7 @@ does not create a draft needing a separate activate operation. Inspect it with
 `trigger list`. Fire one named event when ready:
 
 ```sh
-bin/plowshare-cli event fire '{"event":"manual_demo.audit_requested","data":{"subject":"A small manual demonstration"}}'
+bin/plowshare-cli event fire '{"event":"manual_demo.audit_requested","data":{"text":"A small manual demonstration"}}'
 bin/plowshare-cli firing list '{}'
 bin/plowshare-cli trigger pause '{"trigger":"manual_event_demo","paused":true}'
 ```

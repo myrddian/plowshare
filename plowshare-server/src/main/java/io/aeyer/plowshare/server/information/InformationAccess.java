@@ -2,7 +2,6 @@ package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -65,31 +64,9 @@ public final class InformationAccess {
           "This account needs CONTRIBUTOR access to change the selected project's information");
   }
 
-  /**
-   * Apply in WHERE before ordering, LIMIT, totals or coverage. Membership is also checked in SQL so
-   * a removal between admission and the query cannot reveal project material.
-   */
-  public ReadFilter filter(InformationContext context, String documentAlias) {
+  /** Returns the typed criteria only after rechecking live selection admission. */
+  public InformationContext admitted(InformationContext context) {
     requireSelection(context);
-    if (documentAlias == null
-        || !documentAlias.matches("[a-z][a-z0-9_]*")
-        || List.of("ip", "p", "m").contains(documentAlias)) {
-      throw new IllegalArgumentException("document alias must be a simple internal SQL identifier");
-    }
-    return new ReadFilter(
-        "information_readable(" + documentAlias + ".id, ?, ?, ?, ?)",
-        java.util.Collections.unmodifiableList(
-            java.util.Arrays.asList(
-                context.account(),
-                context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-                context.selection().project(),
-                context.selection().includeShared())));
-  }
-
-  public record ReadFilter(String sql, List<Object> arguments) {
-    public ReadFilter {
-      Objects.requireNonNull(sql, "sql");
-      arguments = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(arguments));
-    }
+    return context;
   }
 }

@@ -99,22 +99,46 @@ class TickerTest {
 
   @BeforeEach
   void wire() {
-    jdbc.execute("TRUNCATE TABLE user_inbox, firings, triggers, schedules, admins CASCADE");
+    jdbc.execute(
+        "TRUNCATE TABLE relay_topics, user_inbox, firings, triggers, schedules, admins CASCADE");
     jdbc.update(
         "INSERT INTO admins (handle, password_hash, server_admin) VALUES ('enzo', 'h', TRUE)");
-    schedules = new ScheduleStore(jdbc);
-    triggers = new TriggerStore(jdbc);
-    firings = new FiringStore(jdbc);
+    schedules = new JdbcScheduleStore(jdbc);
+    triggers = new JdbcTriggerStore(jdbc);
+    firings = new JdbcFiringStore(jdbc);
     runner = new FakeRunner();
     Dispatcher dispatcher =
         new Dispatcher(
             firings,
             triggers,
             runner,
-            new Inbox(new InboxStore(jdbc), AccountPushes.NONE, clock),
+            new Inbox(new JdbcInboxStore(jdbc), AccountPushes.NONE, clock),
             clock);
     intake = new Intake(triggers, firings, dispatcher, clock);
-    ticker = new Ticker(schedules, intake);
+    ticker = new Ticker(schedules, publications(schedules));
+  }
+
+  private ScheduledPublication publications(ScheduleStore store) {
+    var template =
+        new org.springframework.transaction.support.TransactionTemplate(
+            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource()));
+    var transactions =
+        new io.aeyer.plowshare.server.archive.UnitOfWork() {
+          public <T> T inTransaction(java.util.function.Supplier<T> work) {
+            return java.util.Objects.requireNonNull(template.execute(status -> work.get()));
+          }
+        };
+    return new RelayScheduledPublication(
+        store,
+        new io.aeyer.plowshare.server.relay.DurableRelay(
+            new io.aeyer.plowshare.server.relay.JdbcRelayRepository(jdbc, transactions), clock),
+        intake,
+        transactions,
+        () -> {
+          if (org.springframework.transaction.support.TransactionSynchronizationManager
+              .isActualTransactionActive())
+            throw new IllegalStateException("dispatch held a transaction");
+        });
   }
 
   @Test
@@ -143,7 +167,8 @@ class TickerTest {
         "daily",
         "enzo",
         Instant.parse("2026-09-13T08:00:00Z"));
-    Ticker other = new Ticker(new ScheduleStore(jdbc), intake);
+    Ticker other =
+        new Ticker(new JdbcScheduleStore(jdbc), publications(new JdbcScheduleStore(jdbc)));
     Instant at = Instant.parse("2026-09-13T09:00:05Z");
     assertEquals(1, ticker.tick(at) + other.tick(at));
   }

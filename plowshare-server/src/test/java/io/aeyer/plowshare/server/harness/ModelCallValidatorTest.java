@@ -35,7 +35,7 @@ import org.junit.jupiter.api.Test;
 class ModelCallValidatorTest {
 
   private static final ToolSchema TODO_WRITE =
-      new ToolSchema(
+      ToolSchema.from(
           "todo_write",
           "Change the todo list.",
           Map.of(

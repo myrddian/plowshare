@@ -146,14 +146,9 @@ class SearchLadderTest {
     throwingKeys.add(providerKey);
   }
 
-  /**
-   * The next dial for {@code providerKey} returns a non-null {@link SearchAnswer} whose {@code
-   * status} is null — the shape a body missing its status field deserialises to, bypassing {@link
-   * SearchAnswer#success} and {@link SearchAnswer#failed} entirely.
-   */
+  /** Invalid provider data is refused by its DTO decoder before a domain answer exists. */
   private void malformedNoStatus(String providerKey) {
-    cannedAnswers.put(
-        providerKey, new SearchAnswer("placeholder", providerKey, null, List.of(), 1L, null));
+    throwsOn(providerKey);
   }
 
   /**

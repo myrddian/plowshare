@@ -1,8 +1,9 @@
-import { bootstrapFromUrl, type BootstrapOutcome } from './auth'
-import { createLogin } from './screens/login'
-import { createPassword } from './screens/password'
-import { createShell } from './screens/shell'
-import { mountStyles } from './repl/styles'
+import { background } from './background.ts';
+import { bootstrapFromUrl, type BootstrapOutcome } from './auth';
+import { createLogin } from './screens/login';
+import { createPassword } from './screens/password';
+import { createShell } from './screens/shell';
+import { mountStyles } from './repl/styles';
 
 /**
  * The entry point: spend the bootstrap token, then gate the console behind a
@@ -48,15 +49,16 @@ import { mountStyles } from './repl/styles'
  * `createElement` and `textContent`.
  */
 const MESSAGES: Readonly<Record<BootstrapOutcome, string>> = {
-    exchanged: '',
-    absent: '',
-    refused: 'That bootstrap token was refused — it is single-use, so a reload spends nothing.'
-        + ' If this console cannot reach the server below, restart it and open the URL it'
-        + ' prints.',
-}
+  exchanged: '',
+  absent: '',
+  refused:
+    'That bootstrap token was refused — it is single-use, so a reload spends nothing.' +
+    ' If this console cannot reach the server below, restart it and open the URL it' +
+    ' prints.',
+};
 
 /** `GET /v1/auth/session`'s two questions, folded into one answer for {@link gate}. */
-export type SessionState = 'signed-out' | 'signed-in' | 'flagged'
+export type SessionState = 'signed-out' | 'signed-in' | 'flagged';
 
 /**
  * `GET /v1/auth/session`: is there a session, and must it still change its
@@ -75,24 +77,27 @@ export type SessionState = 'signed-out' | 'signed-in' | 'flagged'
  * the sign-in form it would show a browser with no cookie at all.
  */
 export async function probeSession(): Promise<SessionState> {
-    let response: Response
-    try {
-        response = await fetch('/v1/auth/session', { method: 'GET', credentials: 'same-origin' })
-    } catch {
-        return 'signed-out'
-    }
-    if (response.status !== 204) {
-        return 'signed-out'
-    }
-    return response.headers.get('X-Plowshare-Must-Change-Password') === 'true'
-        ? 'flagged'
-        : 'signed-in'
+  let response: Response;
+  try {
+    response = await fetch('/v1/auth/session', {
+      method: 'GET',
+      credentials: 'same-origin',
+    });
+  } catch {
+    return 'signed-out';
+  }
+  if (response.status !== 204) {
+    return 'signed-out';
+  }
+  return response.headers.get('X-Plowshare-Must-Change-Password') === 'true'
+    ? 'flagged'
+    : 'signed-in';
 }
 
 /** The shell, built the same way regardless of which branch of {@link gate} reached it. */
 function mountShell(host: HTMLElement): void {
-    const shell = createShell({ root: host })
-    void shell.start()
+  const shell = createShell({ root: host });
+  background(shell.start());
 }
 
 /**
@@ -101,11 +106,11 @@ function mountShell(host: HTMLElement): void {
  * why that is the correct outcome rather than a bug to route around.
  */
 function mountPassword(host: HTMLElement): void {
-    const password = createPassword({
-        root: host,
-        onChanged: () => mountLogin(host),
-    })
-    void password.load()
+  const password = createPassword({
+    root: host,
+    onChanged: () => mountLogin(host),
+  });
+  background(password.load());
 }
 
 /**
@@ -113,20 +118,20 @@ function mountPassword(host: HTMLElement): void {
  * `password.ts`'s screen for a flagged one.
  */
 function afterSignIn(host: HTMLElement, mustChangePassword: boolean): void {
-    if (mustChangePassword) {
-        mountPassword(host)
-    } else {
-        mountShell(host)
-    }
+  if (mustChangePassword) {
+    mountPassword(host);
+  } else {
+    mountShell(host);
+  }
 }
 
 /** `login.ts`'s form, wired to {@link afterSignIn} on success. */
 function mountLogin(host: HTMLElement): void {
-    const login = createLogin({
-        root: host,
-        onSignedIn: (mustChangePassword) => afterSignIn(host, mustChangePassword),
-    })
-    void login.load()
+  const login = createLogin({
+    root: host,
+    onSignedIn: (mustChangePassword) => afterSignIn(host, mustChangePassword),
+  });
+  background(login.load());
 }
 
 /**
@@ -137,13 +142,18 @@ function mountLogin(host: HTMLElement): void {
  * `Response` for every one of its four outcomes.
  */
 export interface GateDeps {
-    readonly probe: () => Promise<SessionState>
-    readonly mountShell: (host: HTMLElement) => void
-    readonly mountLogin: (host: HTMLElement) => void
-    readonly mountPassword: (host: HTMLElement) => void
+  readonly probe: () => Promise<SessionState>;
+  readonly mountShell: (host: HTMLElement) => void;
+  readonly mountLogin: (host: HTMLElement) => void;
+  readonly mountPassword: (host: HTMLElement) => void;
 }
 
-const REAL_DEPS: GateDeps = { probe: probeSession, mountShell, mountLogin, mountPassword }
+const REAL_DEPS: GateDeps = {
+  probe: probeSession,
+  mountShell,
+  mountLogin,
+  mountPassword,
+};
 
 /**
  * Route `host` to one of the three screens this file's header describes, per
@@ -158,35 +168,38 @@ const REAL_DEPS: GateDeps = { probe: probeSession, mountShell, mountLogin, mount
  *     wanting to observe which screen would be mounted, without paying for
  *     what `createShell` and `createLogin` actually do, supplies fakes here
  */
-export async function gate(host: HTMLElement, deps: GateDeps = REAL_DEPS): Promise<void> {
-    const state = await deps.probe()
-    if (state === 'signed-out') {
-        deps.mountLogin(host)
-    } else if (state === 'flagged') {
-        deps.mountPassword(host)
-    } else {
-        deps.mountShell(host)
-    }
+export async function gate(
+  host: HTMLElement,
+  deps: GateDeps = REAL_DEPS,
+): Promise<void> {
+  const state = await deps.probe();
+  if (state === 'signed-out') {
+    deps.mountLogin(host);
+  } else if (state === 'flagged') {
+    deps.mountPassword(host);
+  } else {
+    deps.mountShell(host);
+  }
 }
 
 function render(outcome: BootstrapOutcome): void {
-    const root = document.getElementById('console')
-    if (root === null) {
-        return
-    }
-    mountStyles(root.ownerDocument)
-    const host = document.createElement('div')
-    host.className = 'host'
-    const message = MESSAGES[outcome]
-    if (message === '') {
-        root.replaceChildren(host)
-    } else {
-        const banner = document.createElement('p')
-        banner.className = 'banner'
-        banner.textContent = message
-        root.replaceChildren(banner, host)
-    }
-    void gate(host)
+  const root = document.getElementById('console');
+  if (root === null) {
+    return;
+  }
+  mountStyles(root.ownerDocument);
+  const host = document.createElement('div');
+  host.className = 'host';
+  const message = MESSAGES[outcome];
+  if (message === '') {
+    root.replaceChildren(host);
+  } else {
+    const banner = document.createElement('p');
+    banner.className = 'banner';
+    banner.textContent = message;
+    root.replaceChildren(banner, host);
+  }
+  background(gate(host));
 }
 
-void bootstrapFromUrl().then(render)
+background(bootstrapFromUrl().then(render));

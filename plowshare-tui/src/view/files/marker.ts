@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/marker'
+export * from 'plowshare-client-node/marker';

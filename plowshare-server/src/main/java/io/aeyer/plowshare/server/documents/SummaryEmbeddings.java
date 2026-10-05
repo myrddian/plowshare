@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.documents;
 
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -39,6 +40,12 @@ import org.slf4j.LoggerFactory;
  * /v1/documents/rank} reports the count rather than answering as though the corpus were smaller.
  */
 public final class SummaryEmbeddings implements UsageAware {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -108,6 +115,11 @@ public final class SummaryEmbeddings implements UsageAware {
       return false;
     }
     try {
+      if (dualEmbeddings != null)
+        return dualEmbeddings.repair(
+            EmbeddingWorkRepository.Key.of(
+                EmbeddingWorkRepository.Store.DOCUMENTS, documentId.toString()),
+            owner);
       float[] vector =
           EmbeddingClient.owned(
               embeddings,
@@ -140,6 +152,7 @@ public final class SummaryEmbeddings implements UsageAware {
    * @return how many vectors were written
    */
   public int fill() {
+    if (dualEmbeddings != null) return 0; // The durable all-store worker owns repair in dual mode.
     List<DocumentStore.UnembeddedSummary> waiting = store.summariesAwaitingAVector(true);
     if (waiting.isEmpty()) {
       return 0;

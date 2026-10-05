@@ -10,12 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.aeyer.plowshare.client.HttpServerClient;
-import io.aeyer.plowshare.client.mcp.StdioTransport;
-import io.aeyer.plowshare.client.mcp.ToolRegistry;
-import io.aeyer.plowshare.client.tools.AgentTools;
-import io.aeyer.plowshare.client.tools.MemoryTools;
-import io.aeyer.plowshare.client.tools.ProjectTools;
+import io.aeyer.plowshare.sdk.WsServerClient;
 import io.aeyer.plowshare.server.PlowshareServerApplication;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.JobRuntime;
@@ -30,8 +25,7 @@ import io.aeyer.plowshare.server.llm.LlmProperties;
 import io.aeyer.plowshare.server.llm.PoolProperties;
 import io.aeyer.plowshare.server.orchestrations.Orchestrations;
 import io.aeyer.plowshare.server.orchestrations.Studio;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
+import io.aeyer.plowshare.testpeer.NodeMcp;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
@@ -130,6 +124,13 @@ class EndToEndTest {
   static void datasource(DynamicPropertyRegistry registry) {
     // The container's port is chosen when it starts, so it cannot be a
     // static value in application.yml or a properties file.
+    registry.add(
+        "plowshare.projects.workspace-directory",
+        () ->
+            java.nio.file.Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "plowshare-test-workspaces-" + java.util.UUID.randomUUID())
+                .toString());
     registry.add("plowshare.data.dir", () -> serverData.resolve("data").toString());
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
@@ -247,7 +248,7 @@ class EndToEndTest {
    */
   private String access;
 
-  private ToolRegistry registry;
+  private NodeMcp registry;
 
   private final ObjectMapper json = new ObjectMapper();
 
@@ -273,14 +274,7 @@ class EndToEndTest {
             + " ON CONFLICT DO NOTHING");
     access = tokens.issuePair("test-user", false).access();
 
-    registry = new ToolRegistry();
-    // One client for both families, exactly as PlowshareClient.main wires
-    // them: the whole surface a harness would be shown, over one base URL —
-    // and one credential, which is also how that method wires it.
-    HttpServerClient server = new HttpServerClient("http://localhost:" + port, access);
-    new MemoryTools(server).registerOn(registry);
-    new AgentTools(server).registerOn(registry);
-    new ProjectTools(server).registerOn(registry);
+    registry = new NodeMcp("http://localhost:" + port, access);
   }
 
   /**
@@ -848,9 +842,7 @@ class EndToEndTest {
   }
 
   /**
-   * The whole surface a harness would show the model, over the real protocol. Seventeen tools: four
-   * over the archive, four over a run, three over the promotion queue, and six over a project —
-   * five about what it reaches and one about the project itself.
+   * The maintained TypeScript MCP menu must preserve the complete reviewed compatibility contract.
    */
   @Test
   void tools_list_advertises_the_whole_surface() throws Exception {
@@ -864,26 +856,15 @@ class EndToEndTest {
           "a tool with no description is a tool the model cannot decide about");
       assertEquals("object", tool.path("inputSchema").path("type").asText());
     }
-    assertEquals(
-        List.of(
-            "memory_index",
-            "memory_read",
-            "memory_recall",
-            "memory_write",
-            "agent_run",
-            "agent_poll",
-            "agent_result",
-            "agent_cancel",
-            "memory_curate",
-            "memory_proposals",
-            "memory_resolve",
-            "project_define",
-            "project_workspace_set",
-            "project_lend",
-            "project_unlend",
-            "project_move",
-            "project_forget"),
-        names);
+    List<String> expected = new ArrayList<>();
+    JsonNode retained =
+        json.readTree(Path.of("../test-support/contracts/mcp-compatibility.json").toFile());
+    retained
+        .path("toolsList")
+        .path("result")
+        .path("tools")
+        .forEach(tool -> expected.add(tool.path("name").asText()));
+    assertEquals(expected, names);
   }
 
   /**
@@ -1380,117 +1361,152 @@ class EndToEndTest {
   /** Real authenticated sockets: code intake -> syntax projection -> exact retained source. */
   @Test
   void code_symbols_navigate_exact_source_over_authenticated_websockets() throws Exception {
-    var client = new HttpServerClient("http://localhost:" + port, access);
-    var personal = Map.<String, Object>of("kind", "personal");
-    String source = "// 😀 function fake() {}\nexport function load() { return '😀'; }\n";
-    var upload =
-        json.valueToTree(
-            client.information(
-                "upload",
-                Map.of(
-                    "scope",
-                    personal,
-                    "corpus",
-                    "code",
-                    "requestId",
-                    java.util.UUID.randomUUID().toString(),
-                    "name",
-                    "src/load-" + java.util.UUID.randomUUID() + ".ts",
-                    "text",
-                    source)));
-    String revision = upload.path("revision").asText();
-    assertFalse(revision.isBlank());
-    boolean derived = false;
-    for (int poll = 0; poll < 100; poll++) {
-      var status =
+    try (var client = new WsServerClient("http://localhost:" + port, access)) {
+      var personal = Map.<String, Object>of("kind", "personal");
+      String source = "// 😀 function fake() {}\nexport function load() { return '😀'; }\n";
+      var upload =
           json.valueToTree(
               client.information(
-                  "status", Map.of("scope", personal, "corpus", "code", "revision", revision)));
-      for (var step : status.path("steps"))
-        if (step.path("stage").asText().equals("derive")
-            && step.path("state").asText().equals("ready")) derived = true;
-      if (derived) break;
-      Thread.sleep(50);
-    }
-    assertTrue(derived);
-    var outline =
-        json.valueToTree(
-            client.information(
-                "outline", Map.of("scope", personal, "corpus", "code", "revision", revision)));
-    assertEquals("ready", outline.path("status").asText());
-    assertEquals("retained_revision", outline.path("source_kind").asText());
-    assertEquals(1, outline.path("symbol_count").asInt());
-    var symbols =
-        json.valueToTree(
-            client.information(
-                "symbols",
-                Map.of(
-                    "scope", personal, "corpus", "code", "query", "load", "revision", revision)));
-    var hit = symbols.path("symbols").get(0);
-    assertEquals(revision, hit.path("revision").asText());
-    assertEquals("load", hit.path("name").asText());
-    int start = hit.path("start_offset").asInt(), end = hit.path("end_offset").asInt();
-    var read =
-        json.valueToTree(
-            client.information(
-                "read",
-                Map.of(
-                    "scope",
-                    personal,
-                    "corpus",
-                    "code",
-                    "revision",
-                    revision,
-                    "offset",
-                    start,
-                    "limit",
-                    end - start)));
-    assertEquals("function load() { return '😀'; }", read.path("text").asText());
-    assertEquals(source.substring(start, end), read.path("text").asText());
-    var evidence =
-        json.valueToTree(
-            client.information(
-                "evidence.record",
-                Map.of(
-                    "scope",
-                    personal,
-                    "revision",
-                    revision,
-                    "requestId",
-                    java.util.UUID.randomUUID().toString(),
-                    "start",
-                    start,
-                    "end",
-                    end,
-                    "quote",
-                    read.path("text").asText(),
-                    "locator",
-                    "extracted-text:utf16")));
-    assertFalse(evidence.path("evidence").asText().isBlank());
-    assertThrows(
-        io.aeyer.plowshare.client.ServerClient.ServerError.class,
-        () -> client.information("outline", Map.of("scope", personal, "revision", revision)));
-    client.information(
-        "withdraw",
-        Map.of(
-            "scope",
-            personal,
-            "revision",
-            revision,
-            "requestId",
-            java.util.UUID.randomUUID().toString()));
-    assertThrows(
-        io.aeyer.plowshare.client.ServerClient.ServerError.class,
-        () ->
-            client.information(
-                "outline", Map.of("scope", personal, "corpus", "code", "revision", revision)));
-    assertTrue(
-        json.valueToTree(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "upload",
+                      json.writeValueAsString(
+                          Map.of(
+                              "scope",
+                              personal,
+                              "corpus",
+                              "code",
+                              "requestId",
+                              java.util.UUID.randomUUID().toString(),
+                              "name",
+                              "src/load-" + java.util.UUID.randomUUID() + ".ts",
+                              "text",
+                              source)))));
+      String revision = upload.path("revision").asText();
+      assertFalse(revision.isBlank());
+      boolean derived = false;
+      for (int poll = 0; poll < 100; poll++) {
+        var status =
+            json.valueToTree(
                 client.information(
-                    "symbols",
-                    Map.of("scope", personal, "corpus", "code", "query", "load", "limit", 1)))
-            .path("symbols")
-            .isEmpty());
+                    io.aeyer.plowshare.sdk.InformationCodec.decode(
+                        "status",
+                        json.writeValueAsString(
+                            Map.of("scope", personal, "corpus", "code", "revision", revision)))));
+        for (var step : status.path("steps"))
+          if (step.path("stage").asText().equals("derive")
+              && step.path("state").asText().equals("ready")) derived = true;
+        if (derived) break;
+        Thread.sleep(50);
+      }
+      assertTrue(derived);
+      var outline =
+          json.valueToTree(
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "outline",
+                      json.writeValueAsString(
+                          Map.of("scope", personal, "corpus", "code", "revision", revision)))));
+      assertEquals("ready", outline.path("status").asText());
+      assertEquals("retained_revision", outline.path("source_kind").asText());
+      assertEquals(1, outline.path("symbol_count").asInt());
+      var symbols =
+          json.valueToTree(
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "symbols",
+                      json.writeValueAsString(
+                          Map.of(
+                              "scope",
+                              personal,
+                              "corpus",
+                              "code",
+                              "query",
+                              "load",
+                              "revision",
+                              revision)))));
+      var hit = symbols.path("symbols").get(0);
+      assertEquals(revision, hit.path("revision").asText());
+      assertEquals("load", hit.path("name").asText());
+      int start = hit.path("start_offset").asInt(), end = hit.path("end_offset").asInt();
+      var read =
+          json.valueToTree(
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "read",
+                      json.writeValueAsString(
+                          Map.of(
+                              "scope",
+                              personal,
+                              "corpus",
+                              "code",
+                              "revision",
+                              revision,
+                              "offset",
+                              start,
+                              "limit",
+                              end - start)))));
+      assertEquals("function load() { return '😀'; }", read.path("text").asText());
+      assertEquals(source.substring(start, end), read.path("text").asText());
+      var evidence =
+          json.valueToTree(
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "evidence.record",
+                      json.writeValueAsString(
+                          Map.of(
+                              "scope",
+                              personal,
+                              "revision",
+                              revision,
+                              "requestId",
+                              java.util.UUID.randomUUID().toString(),
+                              "start",
+                              start,
+                              "end",
+                              end,
+                              "quote",
+                              read.path("text").asText(),
+                              "locator",
+                              "extracted-text:utf16")))));
+      assertFalse(evidence.path("evidence").asText().isBlank());
+      assertThrows(
+          io.aeyer.plowshare.sdk.ServerClient.ServerError.class,
+          () ->
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "outline",
+                      json.writeValueAsString(Map.of("scope", personal, "revision", revision)))));
+      client.information(
+          io.aeyer.plowshare.sdk.InformationCodec.decode(
+              "withdraw",
+              json.writeValueAsString(
+                  Map.of(
+                      "scope",
+                      personal,
+                      "revision",
+                      revision,
+                      "requestId",
+                      java.util.UUID.randomUUID().toString()))));
+      assertThrows(
+          io.aeyer.plowshare.sdk.ServerClient.ServerError.class,
+          () ->
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "outline",
+                      json.writeValueAsString(
+                          Map.of("scope", personal, "corpus", "code", "revision", revision)))));
+      assertTrue(
+          json.valueToTree(
+                  client.information(
+                      io.aeyer.plowshare.sdk.InformationCodec.decode(
+                          "symbols",
+                          json.writeValueAsString(
+                              Map.of(
+                                  "scope", personal, "corpus", "code", "query", "load", "limit",
+                                  1)))))
+              .path("symbols")
+              .isEmpty());
+    }
   }
 
   /**
@@ -1499,36 +1515,41 @@ class EndToEndTest {
   @Test
   void a_scripted_orchestration_reads_a_ws_source_and_retains_a_policy_bound_draft()
       throws Exception {
-    var client = new HttpServerClient("http://localhost:" + port, access);
-    var personal = Map.<String, Object>of("kind", "personal");
-    var upload =
-        json.valueToTree(
-            client.information(
-                "upload",
-                Map.of(
-                    "scope",
-                    personal,
-                    "requestId",
-                    java.util.UUID.randomUUID().toString(),
-                    "name",
-                    "script-source-" + java.util.UUID.randomUUID(),
-                    "text",
-                    "Immutable evidence about Example.")));
-    String revision = upload.path("revision").asText();
-    boolean extracted = false;
-    for (int poll = 0; poll < 100; poll++) {
-      var status =
+    try (var client = new WsServerClient("http://localhost:" + port, access)) {
+      var personal = Map.<String, Object>of("kind", "personal");
+      var upload =
           json.valueToTree(
-              client.information("status", Map.of("scope", personal, "revision", revision)));
-      for (var step : status.path("steps"))
-        if (step.path("stage").asText().equals("extract")
-            && step.path("state").asText().equals("ready")) extracted = true;
-      if (extracted) break;
-      Thread.sleep(50);
-    }
-    assertTrue(extracted);
-    String script =
-        """
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "upload",
+                      json.writeValueAsString(
+                          Map.of(
+                              "scope",
+                              personal,
+                              "requestId",
+                              java.util.UUID.randomUUID().toString(),
+                              "name",
+                              "script-source-" + java.util.UUID.randomUUID(),
+                              "text",
+                              "Immutable evidence about Example.")))));
+      String revision = upload.path("revision").asText();
+      boolean extracted = false;
+      for (int poll = 0; poll < 100; poll++) {
+        var status =
+            json.valueToTree(
+                client.information(
+                    io.aeyer.plowshare.sdk.InformationCodec.decode(
+                        "status",
+                        json.writeValueAsString(Map.of("scope", personal, "revision", revision)))));
+        for (var step : status.path("steps"))
+          if (step.path("stage").asText().equals("extract")
+              && step.path("state").asText().equals("ready")) extracted = true;
+        if (extracted) break;
+        Thread.sleep(50);
+      }
+      assertTrue(extracted);
+      String script =
+          """
             // plowshare-script v1
             export const manifest={name:'information_script_fixture',description:'Bounded scripted source/report integration',model:'fast',
               tools:['information_read','information_write'],calls:[],scopes:[],stages:[{id:'research'}],'max-turns':20,'max-model-calls':5};
@@ -1552,89 +1573,100 @@ class EndToEndTest {
               return {state:s,command};
             }
             """
-            .replace("SOURCE_UUID", revision);
-    var definition =
-        io.aeyer.plowshare.server.agents.OrchestrationRegistry.parsePinned(
-            "information_script_fixture",
-            "fixture.js",
-            script,
-            runtime.knownTools(),
-            io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.SHIPPED);
-    var started =
-        orchestrations.start(
-            new Orchestrations.Start(
-                definition,
-                io.aeyer.plowshare.protocol.Home.global(),
-                "Test the scripted information path",
-                null,
-                null,
-                "test-user",
-                "test-user",
-                null,
-                null,
-                0));
-    String ending = null, result = null;
-    for (int poll = 0; poll < 100; poll++) {
-      var row =
-          jdbc.queryForMap(
-              "SELECT state,result,failure FROM orchestrations WHERE id=?", started.id());
-      ending = (String) row.get("state");
-      result = (String) row.get("result");
-      if (ending.equals("finished") || ending.equals("failed")) {
-        assertEquals("finished", ending, row.toString());
-        break;
+              .replace("SOURCE_UUID", revision);
+      var definition =
+          io.aeyer.plowshare.server.agents.OrchestrationRegistry.parsePinned(
+              "information_script_fixture",
+              "fixture.js",
+              script,
+              runtime.knownTools(),
+              io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.SHIPPED);
+      var started =
+          orchestrations.start(
+              new Orchestrations.Start(
+                  definition,
+                  io.aeyer.plowshare.protocol.Home.global(),
+                  "Test the scripted information path",
+                  null,
+                  null,
+                  "test-user",
+                  "test-user",
+                  null,
+                  null,
+                  0));
+      String ending = null, result = null;
+      for (int poll = 0; poll < 100; poll++) {
+        var row =
+            jdbc.queryForMap(
+                "SELECT state,result,failure FROM orchestrations WHERE id=?", started.id());
+        ending = (String) row.get("state");
+        result = (String) row.get("result");
+        if (ending.equals("finished") || ending.equals("failed")) {
+          assertEquals("finished", ending, row.toString());
+          break;
+        }
+        Thread.sleep(50);
       }
-      Thread.sleep(50);
+      assertEquals("finished", ending);
+      var retained =
+          json.valueToTree(
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "status",
+                      json.writeValueAsString(Map.of("scope", personal, "revision", result)))));
+      assertEquals("report", retained.path("kind").asText());
+      assertEquals(
+          definition.hash(),
+          jdbc.queryForObject(
+              "SELECT definition_hash FROM information_reports WHERE revision_id=?::uuid",
+              String.class,
+              result));
+      assertEquals(
+          started.conductorConversation(),
+          jdbc.queryForObject(
+              "SELECT produced_by FROM information_reports WHERE revision_id=?::uuid",
+              String.class,
+              result));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM information_inputs WHERE derived_revision=?::uuid AND input_revision=?::uuid",
+              Integer.class,
+              result,
+              revision));
+      assertEquals(
+          6,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM orchestration_script_steps WHERE conversation_id=? AND completed_at IS NOT NULL",
+              Integer.class,
+              started.conductorConversation()));
+      assertEquals(
+          "draft",
+          jdbc.queryForObject(
+              "SELECT status FROM information_reports WHERE revision_id=?::uuid",
+              String.class,
+              result));
+      client.information(
+          io.aeyer.plowshare.sdk.InformationCodec.decode(
+              "withdraw",
+              json.writeValueAsString(
+                  Map.of(
+                      "scope",
+                      personal,
+                      "revision",
+                      revision,
+                      "requestId",
+                      java.util.UUID.randomUUID().toString()))));
+      final String reportRevision = result;
+      assertThrows(
+          io.aeyer.plowshare.sdk.ServerClient.ServerError.class,
+          () ->
+              client.information(
+                  io.aeyer.plowshare.sdk.InformationCodec.decode(
+                      "read",
+                      json.writeValueAsString(
+                          Map.of("scope", personal, "revision", reportRevision)))));
     }
-    assertEquals("finished", ending);
-    var retained =
-        json.valueToTree(
-            client.information("status", Map.of("scope", personal, "revision", result)));
-    assertEquals("report", retained.path("kind").asText());
-    assertEquals(
-        definition.hash(),
-        jdbc.queryForObject(
-            "SELECT definition_hash FROM information_reports WHERE revision_id=?::uuid",
-            String.class,
-            result));
-    assertEquals(
-        started.conductorConversation(),
-        jdbc.queryForObject(
-            "SELECT produced_by FROM information_reports WHERE revision_id=?::uuid",
-            String.class,
-            result));
-    assertEquals(
-        1,
-        jdbc.queryForObject(
-            "SELECT count(*) FROM information_inputs WHERE derived_revision=?::uuid AND input_revision=?::uuid",
-            Integer.class,
-            result,
-            revision));
-    assertEquals(
-        6,
-        jdbc.queryForObject(
-            "SELECT count(*) FROM orchestration_script_steps WHERE conversation_id=? AND completed_at IS NOT NULL",
-            Integer.class,
-            started.conductorConversation()));
-    assertEquals(
-        "draft",
-        jdbc.queryForObject(
-            "SELECT status FROM information_reports WHERE revision_id=?::uuid",
-            String.class,
-            result));
-    client.information(
-        "withdraw",
-        Map.of(
-            "scope",
-            personal,
-            "revision",
-            revision,
-            "requestId",
-            java.util.UUID.randomUUID().toString()));
-    final String reportRevision = result;
-    assertThrows(
-        io.aeyer.plowshare.client.ServerClient.ServerError.class,
-        () -> client.information("read", Map.of("scope", personal, "revision", reportRevision)));
   }
 
   /** Unsupported source bytes survive for inspection and an explicit converter/retry. */
@@ -1739,8 +1771,7 @@ class EndToEndTest {
   void an_unreachable_server_reaches_the_model_as_an_error_and_not_as_an_empty_archive()
       throws Exception {
 
-    ToolRegistry dead = new ToolRegistry();
-    new MemoryTools(new HttpServerClient("http://localhost:" + closedPort())).registerOn(dead);
+    NodeMcp dead = new NodeMcp("http://localhost:" + closedPort(), access);
 
     JsonNode response =
         exchange(
@@ -2028,7 +2059,7 @@ class EndToEndTest {
     return text;
   }
 
-  private JsonNode exchange(ToolRegistry tools, String tool, Map<String, Object> arguments)
+  private JsonNode exchange(NodeMcp tools, String tool, Map<String, Object> arguments)
       throws Exception {
     ObjectNode request = json.createObjectNode();
     request.put("jsonrpc", "2.0");
@@ -2044,14 +2075,9 @@ class EndToEndTest {
     return exchange(registry, request);
   }
 
-  private JsonNode exchange(ToolRegistry tools, String request) throws Exception {
-    var out = new ByteArrayOutputStream();
-    new StdioTransport("end-to-end")
-        .serve(
-            new ByteArrayInputStream((request + "\n").getBytes(StandardCharsets.UTF_8)),
-            out,
-            tools);
-    return json.readTree(out.toString(StandardCharsets.UTF_8));
+  private JsonNode exchange(NodeMcp tools, String request) throws Exception {
+    String response = tools.exchange(request);
+    return response.isBlank() ? null : json.readTree(response);
   }
 
   /** The id out of a memory_write result, so a later call can name it. */

@@ -47,15 +47,15 @@ class ConversationTrajectoryToolTest {
   @Test
   void the_schema_names_the_bounded_paged_log_read() {
     assertEquals(ConversationTrajectoryTool.NAME, tool.schema().name());
-    assertEquals(List.of("conversation"), tool.schema().parameters().get("required"));
+    assertEquals(List.of("conversation"), tool.schema().parameters().required());
     @SuppressWarnings("unchecked")
-    var properties = (java.util.Map<String, Object>) tool.schema().parameters().get("properties");
+    var properties = tool.schema().parameters().properties();
     assertEquals(
         List.of("conversation", "handle", "ordinal", "tail", "offset", "limit"),
         properties.keySet().stream().toList());
     @SuppressWarnings("unchecked")
-    var limit = (java.util.Map<String, Object>) properties.get("limit");
-    assertEquals(ConversationTrajectoryTool.MOST_ENTRIES, limit.get("maximum"));
+    var limit = properties.get("limit");
+    assertEquals(ConversationTrajectoryTool.MOST_ENTRIES, limit.maximum().intValueExact());
   }
 
   @Test

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.todos.StageRules;
@@ -638,7 +639,7 @@ public class OrchestrationStore {
   }
 
   /** {@link #answer(String, String, String)}, recording the choices it made (V70). */
-  public boolean answer(String orchestration, String text, String author, String structure) {
+  public boolean answer(String orchestration, String text, String author, Structure structure) {
     return answer(orchestration, text, author, structure, true);
   }
 
@@ -656,12 +657,12 @@ public class OrchestrationStore {
 
   /** {@link #answerUnlessPersonOnly(String, String, String)}, recording the choices (V70). */
   public boolean answerUnlessPersonOnly(
-      String orchestration, String text, String author, String structure) {
+      String orchestration, String text, String author, Structure structure) {
     return answer(orchestration, text, author, structure, false);
   }
 
   private boolean answer(
-      String orchestration, String text, String author, String structure, boolean byPerson) {
+      String orchestration, String text, String author, Structure structure, boolean byPerson) {
     if (unitOfWork == null) {
       throw new IllegalStateException(
           "answer() needs the UnitOfWork constructor; this store was built with the"
@@ -716,7 +717,7 @@ public class OrchestrationStore {
               author,
               utc(at),
               capKind,
-              structure);
+              OrchestrationStructures.encode(structure));
           return true;
         });
   }
@@ -743,7 +744,7 @@ public class OrchestrationStore {
    * @param structure the question's {@code StructuredQuestions.structure}, or null for a plain one
    */
   public Optional<OrchestrationMessage> ask(
-      String orchestration, String question, String author, String structure) {
+      String orchestration, String question, String author, Structure structure) {
     if (unitOfWork == null) {
       throw new IllegalStateException(
           "ask() needs the UnitOfWork constructor; this store was built with the"
@@ -775,7 +776,7 @@ public class OrchestrationStore {
               question,
               author,
               utc(at),
-              structure);
+              OrchestrationStructures.encode(structure));
           return Optional.of(
               new OrchestrationMessage(
                   id,
@@ -902,7 +903,7 @@ public class OrchestrationStore {
    * @return the question, or empty if the compare-and-set lost
    */
   public Optional<OrchestrationMessage> askInstall(
-      String orchestration, String question, String structure) {
+      String orchestration, String question, Structure structure) {
     return askCap(
         orchestration,
         Orchestrations.INSTALL,
@@ -923,7 +924,7 @@ public class OrchestrationStore {
       String question,
       String digest,
       String digestColumn,
-      String structure) {
+      Structure structure) {
     if (unitOfWork == null) {
       throw new IllegalStateException(
           "askCap() needs the UnitOfWork constructor; this store was built with the"
@@ -970,7 +971,7 @@ public class OrchestrationStore {
               question,
               author,
               utc(at),
-              structure);
+              OrchestrationStructures.encode(structure));
           return Optional.of(
               new OrchestrationMessage(
                   id,
@@ -1041,6 +1042,17 @@ public class OrchestrationStore {
                 + " WHERE id = ? AND result_delivered_at IS NULL",
             utc(now()),
             id)
+        == 1;
+  }
+
+  /** Marks only the named terminal attempt, so delayed delivery cannot settle a resumed run. */
+  public boolean resultDelivered(String id, Instant endedAt) {
+    Objects.requireNonNull(endedAt, "endedAt");
+    return jdbc.update(
+            "UPDATE orchestrations SET result_delivered_at=? WHERE id=? AND ended_at=? AND result_delivered_at IS NULL",
+            utc(now()),
+            id,
+            utc(endedAt))
         == 1;
   }
 
@@ -1505,7 +1517,7 @@ public class OrchestrationStore {
               instant(rs, "created_at"),
               instant(rs, "delivered_at"),
               rs.getString("cap_kind"),
-              rs.getString("structure"));
+              OrchestrationStructures.decode(rs.getString("structure")));
 
   /**
    * What starts a run. {@code stages} is pinned onto the row at this moment, so an edited

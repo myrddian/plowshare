@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.search.AnswerStatus;
 import io.aeyer.plowshare.protocol.search.CostClass;
 import io.aeyer.plowshare.protocol.search.NetworkTier;
@@ -34,7 +33,7 @@ import org.junit.jupiter.api.Test;
 class RemoteSearchProviderTest {
 
   private final RemoteSearchProvider provider =
-      new RemoteSearchProvider(new OkHttpClient(), new ObjectMapper(), Duration.ofSeconds(2));
+      new RemoteSearchProvider(new OkHttpClient(), Duration.ofSeconds(2));
 
   private static MockResponse ok(String body) {
     return new MockResponse().addHeader("Content-Type", "application/json").setBody(body);
@@ -75,7 +74,7 @@ class RemoteSearchProviderTest {
       remote.enqueue(
           ok(
               """
-                {"requestId":"r1","providerKey":"searxng","status":"SUCCESS","elapsedMs":12,
+                {"requestId":"r1","providerKey":"p","status":"SUCCESS","elapsedMs":12,
                  "hits":[{"url":"https://a.example","title":"A","snippet":"s"}]}"""));
       remote.start();
 
@@ -136,6 +135,28 @@ class RemoteSearchProviderTest {
           new SearchAsk("r1", "q", 10, List.of("foxnews.com")));
 
       assertFalse(remote.takeRequest().getBody().readUtf8().contains("foxnews.com"));
+    }
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {
+        "{\"requestId\":\"foreign\",\"providerKey\":\"p\",\"status\":\"SUCCESS\",\"elapsedMs\":0,\"hits\":[]}",
+        "{\"requestId\":\"r1\",\"providerKey\":\"foreign\",\"status\":\"SUCCESS\",\"elapsedMs\":0,\"hits\":[]}",
+        "{\"requestId\":\"r1\",\"providerKey\":\"p\",\"status\":\"SUCCESS\",\"elapsedMs\":\"0\",\"hits\":[]}",
+        "{\"requestId\":\"r1\",\"providerKey\":\"p\",\"status\":\"SUCCESS\",\"elapsedMs\":0.5,\"hits\":[]}",
+        "{\"requestId\":\"r1\",\"providerKey\":\"p\",\"status\":\"SUCCESS\",\"elapsedMs\":0,\"hits\":[{\"url\":\"https://user:secret@example.test\",\"title\":\"x\",\"snippet\":\"x\"}]}",
+        "{\"requestId\":\"r1\",\"requestId\":\"foreign\",\"providerKey\":\"p\",\"status\":\"SUCCESS\",\"elapsedMs\":0,\"hits\":[]}"
+      })
+  void invalid_or_foreign_answers_are_failed_without_retaining_any_hit(String body)
+      throws Exception {
+    try (var remote = new MockWebServer()) {
+      remote.enqueue(ok(body));
+      remote.start();
+      var answer = provider.search(registrationAt(remote), new SearchAsk("r1", "q", 1, List.of()));
+      assertEquals(AnswerStatus.FAILED, answer.status());
+      assertTrue(answer.hits().isEmpty());
+      assertEquals(1, remote.getRequestCount());
     }
   }
 }

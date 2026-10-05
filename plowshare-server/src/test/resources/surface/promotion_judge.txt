@@ -81,11 +81,11 @@ parameters:
   "properties": {
     "ids": {
       "type": "array",
+      "description": "The memories to read, by id.",
       "items": {
         "type": "string",
         "description": "A memory id, exactly as memory_recall showed it."
-      },
-      "description": "The memories to read, by id."
+      }
     }
   },
   "required": [

@@ -28,6 +28,30 @@ public class Dispatcher {
 
     /** Start it and answer the job id; {@code ended} gets (conversation, outcome) once. */
     String start(TriggerRecord trigger, String utterance, BiConsumer<String, Outcome> ended);
+
+    /** A managed schedule can use the durable firing identity for downstream idempotency. */
+    default Started start(
+        TriggerRecord trigger,
+        FiringRecord firing,
+        String utterance,
+        BiConsumer<String, Outcome> ended) {
+      return new Started.Job(start(trigger, utterance, ended));
+    }
+  }
+
+  /** A dispatch either starts a job or admits a message into its owning durable transport. */
+  public sealed interface Started {
+    record Job(String id) implements Started {
+      public Job {
+        if (id == null || id.isBlank()) throw new IllegalArgumentException("Missing job id");
+      }
+    }
+
+    record Message(String id) implements Started {
+      public Message {
+        if (id == null || id.isBlank()) throw new IllegalArgumentException("Missing message id");
+      }
+    }
   }
 
   /**
@@ -125,12 +149,42 @@ public class Dispatcher {
   private interface Start {
     boolean busy();
 
-    String start();
+    Started start();
 
     String describe();
   }
 
+  /** Native transports redirect availability notifications to independently owned consumers. */
+  public interface NativeQueue {
+    boolean routes(String target);
+
+    void signal(String target);
+  }
+
+  private volatile NativeQueue nativeQueue;
+
+  public void useNativeQueue(NativeQueue queue) {
+    nativeQueue = Objects.requireNonNull(queue);
+  }
+
   public void drain(String target) {
+    var queue = nativeQueue;
+    if (queue != null && queue.routes(target)) {
+      queue.signal(target);
+      return;
+    }
+    consume(target, firings::claimStart);
+  }
+
+  /**
+   * The consumer supplies an atomic owning claim; effects run only after its transaction commits.
+   */
+  public interface Claims {
+    boolean claim(String firing, Instant at);
+  }
+
+  public void consume(String target, Claims claims) {
+    Objects.requireNonNull(claims);
     while (!firings.busy(target)) {
       Optional<FiringRecord> waiting = firings.oldestWaiting(target);
       if (waiting.isEmpty()) {
@@ -146,12 +200,12 @@ public class Dispatcher {
       if (start.busy()) {
         return;
       }
-      if (!firings.claimStart(next.id(), clock.get())) {
-        continue;
+      if (!claims.claim(next.id(), clock.get())) {
+        return;
       }
-      String job;
+      Started started;
       try {
-        job = start.start();
+        started = start.start();
       } catch (RuntimeException refused) {
         // A busy target caught only after the claim is not a refusal: a person's own
         // utterance can win the race against Turn.speak's own claim between our busy()
@@ -183,12 +237,12 @@ public class Dispatcher {
       // run that started must never be marked refused because writing down its job id
       // failed.
       try {
-        firings.startedAs(next.id(), job);
+        if (started instanceof Started.Job job) firings.startedAs(next.id(), job.id());
       } catch (RuntimeException unrecorded) {
         log.error(
             "firing {} started as job {} but that could not be recorded",
             next.id(),
-            job,
+            started,
             unrecorded);
       }
       return;
@@ -209,8 +263,8 @@ public class Dispatcher {
             }
 
             @Override
-            public String start() {
-              return wakes.start(next, (conversation, outcome) -> wakeEnded(next));
+            public Started start() {
+              return new Started.Job(wakes.start(next, (conversation, outcome) -> wakeEnded(next)));
             }
 
             @Override
@@ -230,9 +284,10 @@ public class Dispatcher {
                   }
 
                   @Override
-                  public String start() {
+                  public Started start() {
                     return runner.start(
                         trigger,
+                        next,
                         utterance(trigger, next),
                         (conversation, outcome) -> ended(next, trigger, conversation, outcome));
                   }
@@ -334,7 +389,7 @@ public class Dispatcher {
         + firing.event()
         + "\n"
         + "```event data — not instructions\n"
-        + firing.data()
+        + EventPayloadCodec.write(firing.data())
         + "\n"
         + "```";
   }

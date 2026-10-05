@@ -94,7 +94,7 @@ import org.slf4j.LoggerFactory;
  * nothing. What the beat <em>says</em> about the run's progress is still not this class's to know:
  * the two counts are read off {@link JobWatch}, which has seen every one that was ever published.
  */
-public final class JobStore implements AutoCloseable {
+public final class JobStore implements AutoCloseable, EventRuns {
 
   private static final Logger log = LoggerFactory.getLogger(JobStore.class);
 
@@ -454,6 +454,21 @@ public final class JobStore implements AutoCloseable {
       String callerHandle,
       Speaker speaker,
       BiConsumer<String, Outcome> ended) {
+    return submitEvent(
+        definition, utterance, home, null, maxModelCalls, cap, callerHandle, speaker, ended);
+  }
+
+  /** Event submission with a live, already authorized workspace definition session. */
+  public EventRun submitEvent(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      String session,
+      Integer maxModelCalls,
+      TurnCap cap,
+      String callerHandle,
+      Speaker speaker,
+      BiConsumer<String, Outcome> ended) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(ended, "ended");
@@ -461,14 +476,14 @@ public final class JobStore implements AutoCloseable {
     Transcript log =
         logs == null
             ? Transcript.NONE
-            : logs.logFor(Origin.EVENT, home, definition, null, budget, speaker, callerHandle);
+            : logs.logFor(Origin.EVENT, home, definition, session, budget, speaker, callerHandle);
     String conversation = log.conversationId();
     String id =
         submit(
             definition,
             utterance,
             home,
-            null,
+            session,
             budget,
             log,
             Origin.EVENT,
@@ -852,7 +867,12 @@ public final class JobStore implements AutoCloseable {
   }
 
   public Job getFor(String id, String account) {
-    if (projectAccess != null) projectAccess.require("job.status", Map.of("job", id), account);
+    if (projectAccess != null)
+      projectAccess.require(
+          "job.status",
+          io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+              "job.status", Map.of("job", id)),
+          account);
     Job job = get(id);
     if (informationJobs != null) {
       informationJobs.require(id, account);
@@ -866,7 +886,11 @@ public final class JobStore implements AutoCloseable {
         .filter(
             job ->
                 projectAccess == null
-                    || projectAccess.allowed("job.status", Map.of("job", job.id()), account))
+                    || projectAccess.allowed(
+                        "job.status",
+                        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+                            "job.status", Map.of("job", job.id())),
+                        account))
         .filter(
             job ->
                 informationJobs == null

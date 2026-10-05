@@ -1,7 +1,5 @@
 package io.aeyer.plowshare.server.board;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
@@ -21,9 +19,6 @@ import org.springframework.stereotype.Component;
 /** Server workspace policy, re-read for each new message; a checkout cannot grant server access. */
 @Component
 public final class ProjectMessageRouting implements BoardMessaging.Routing {
-  private static final ObjectMapper JSON =
-      new ObjectMapper()
-          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
   private static final int FILE_BYTES = 65536;
   private final ProjectStore projects;
   private final ProjectMembers members;
@@ -124,65 +119,25 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
       }
       if (text == null || text.isBlank() || !text.stripLeading().startsWith("{"))
         return Policy.CLOSED;
-      JsonNode manifest = JSON.readTree(text);
-      if (!manifest.isObject()
-          || !manifest.path("version").isIntegralNumber()
-          || !manifest.path("version").canConvertToInt()
-          || manifest.path("version").asInt() != 1
-          || !manifest.path("name").isTextual()
-          || !(manifest.path("name").asText().equals(project)
-              || manifest.path("name").asText().equals(identify(project)))) {
+      var manifest = RoutingConfigurationCodec.manifest(text);
+      if (!(manifest.name().equals(project) || manifest.name().equals(identify(project))))
         throw new Board.Refused("Invalid project routing manifest identity or version.");
-      }
-      JsonNode routing = manifest.get("routing");
+      var routing = manifest.routing();
       if (routing == null) return Policy.CLOSED;
-      if (!routing.isObject()) throw new Board.Refused("Project routing must be an object.");
-      List<String> inbound = strings(routing, "acceptFrom"), outbound = strings(routing, "sendTo");
       Map<String, BoardMessaging.Address> routes = new LinkedHashMap<>();
       int bytes = text.getBytes(StandardCharsets.UTF_8).length;
-      for (String file : strings(routing, "routeFiles")) {
-        if (!validFile(file))
-          throw new Board.Refused(
-              "Route files must be relative paths inside the project workspace.");
+      for (String file : routing.routeFiles()) {
         String contents = read(row, root, file, false);
         bytes += contents.getBytes(StandardCharsets.UTF_8).length;
         if (bytes > 1048576)
           throw new Board.Refused("Project routing files exceed the total size limit.");
-        JsonNode config = JSON.readTree(contents);
-        if (config == null
-            || !config.isObject()
-            || !config.path("version").isIntegralNumber()
-            || !config.path("version").canConvertToInt()
-            || config.path("version").asInt() != 1
-            || !config.path("routes").isArray()) {
-          throw new Board.Refused("Use route file version 1 with a routes array.");
-        }
-        for (JsonNode entry : config.path("routes")) {
-          String name = text(entry, "name"),
-              target = text(entry, "project"),
-              agent = text(entry, "agent");
-          String conversation = entry.has("conversation") ? text(entry, "conversation") : null;
-          JsonNode retain = entry.get("retainConversation");
-          if (retain != null && !retain.isBoolean())
-            throw new Board.Refused("Named route retainConversation must be true or false.");
-          if (conversation != null && retain != null)
-            throw new Board.Refused(
-                "Choose conversation or retainConversation for a named route, not both.");
-          if (conversation != null && !conversation.matches("cnv_[A-Za-z0-9]+"))
-            throw new Board.Refused("Named route conversation must be a conversation ID.");
-          if (agent.startsWith("ins_")
-              || routes.putIfAbsent(
-                      name,
-                      new BoardMessaging.Address(
-                          target, agent, conversation, retain != null && retain.asBoolean()))
-                  != null) {
-            throw new Board.Refused(
-                "Named routes need unique names and an agent definition destination.");
-          }
+        for (var entry : RoutingConfigurationCodec.routes(contents).routes()) {
+          if (routes.putIfAbsent(entry.name(), entry.address()) != null)
+            throw new Board.Refused("Named routes need unique names.");
           if (routes.size() > 256) throw new Board.Refused("Too many named project routes.");
         }
       }
-      return new Policy(inbound, outbound, Map.copyOf(routes));
+      return new Policy(routing.acceptFrom(), routing.sendTo(), Map.copyOf(routes));
     } catch (IOException invalid) {
       throw new Board.Refused("The project routing configuration could not be read.");
     }
@@ -224,43 +179,5 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
       if (optional) return null;
       throw missing;
     }
-  }
-
-  private static List<String> strings(JsonNode parent, String field) {
-    JsonNode entries = parent.get(field);
-    if (entries == null) return List.of();
-    if (!entries.isArray() || entries.size() > 256)
-      throw new Board.Refused("Invalid project routing " + field + ".");
-    var values = new java.util.ArrayList<String>();
-    for (JsonNode entry : entries) {
-      if (!entry.isTextual() || !validName(entry.asText()) || values.contains(entry.asText()))
-        throw new Board.Refused("Invalid project routing " + field + ".");
-      values.add(entry.asText());
-    }
-    return List.copyOf(values);
-  }
-
-  private static String text(JsonNode parent, String field) {
-    JsonNode value = parent.get(field);
-    if (value == null || !value.isTextual() || !validName(value.asText()))
-      throw new Board.Refused("Invalid named project route " + field + ".");
-    return value.asText();
-  }
-
-  private static boolean validName(String value) {
-    return !value.isBlank()
-        && value.equals(value.strip())
-        && value.length() <= 512
-        && value.indexOf('\n') < 0
-        && value.indexOf('\r') < 0
-        && value.indexOf('\0') < 0;
-  }
-
-  private static boolean validFile(String value) {
-    return validName(value)
-        && !value.contains("\\")
-        && !value.contains(":")
-        && java.util.Arrays.stream(value.split("/", -1))
-            .noneMatch(part -> part.isEmpty() || part.equals(".") || part.equals(".."));
   }
 }

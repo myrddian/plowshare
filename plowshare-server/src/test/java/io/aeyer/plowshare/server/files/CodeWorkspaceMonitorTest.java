@@ -70,7 +70,7 @@ class CodeWorkspaceMonitorTest {
     root = temp.toRealPath();
     file = Files.writeString(root.resolve("A.java"), "class Before {}");
     clock = Clock.fixed(Instant.parse("2026-10-03T01:00:00Z"), ZoneOffset.UTC);
-    store = new CodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 64);
+    store = new JdbcCodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 64);
     provider =
         spy(
             LocalProvider.over(
@@ -126,12 +126,13 @@ class CodeWorkspaceMonitorTest {
     Files.writeString(file, "class After {}");
     clearInvocations(provider);
     due();
-    var restarted = monitor(new CodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 64));
+    var restarted =
+        monitor(new JdbcCodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 64));
     assertTrue(restarted.pollOnce());
     assertNotEquals(old, hash());
     assertEquals(FileContents.sha256(Files.readAllBytes(file)), hash());
     verify(provider, never()).snapshot(any(), any(), anyInt());
-    assertEquals("observed", store.status(scope()).get("state"));
+    assertEquals("observed", store.status(scope()).state());
     Files.move(file, root.resolve("Moved.java"));
     Files.writeString(root.resolve("Extra.py"), "def added(): pass");
     due();
@@ -170,14 +171,14 @@ class CodeWorkspaceMonitorTest {
     clearInvocations(provider);
     due();
     assertTrue(monitor.pollOnce());
-    assertEquals("unavailable", store.status(scope()).get("state"));
+    assertEquals("unavailable", store.status(scope()).state());
     assertEquals(
         0, jdbc.queryForObject("SELECT count(*) FROM code_workspace_sources", Integer.class));
     verifyNoInteractions(provider);
     permitted.set(true);
     due();
     assertTrue(monitor.pollOnce());
-    assertEquals("observed", store.status(scope()).get("state"));
+    assertEquals("observed", store.status(scope()).state());
   }
 
   @Test
@@ -210,12 +211,12 @@ class CodeWorkspaceMonitorTest {
         new WorkspaceCodeMap(new ProviderRouter(home -> List.of(provider)), () -> false)
             .observing(monitor.observations("coder", "session-a", "alice"));
     separate.beforeMutation(HOME);
-    assertEquals("dirty", store.status(scope()).get("state"));
+    assertEquals("dirty", store.status(scope()).state());
     assertTrue(store.claim().isEmpty());
     separate.afterMutation(HOME, List.of(file));
-    assertEquals("dirty", store.status(scope()).get("state"));
+    assertEquals("dirty", store.status(scope()).state());
     assertTrue(monitor.pollOnce());
-    assertEquals("observed", store.status(scope()).get("state"));
+    assertEquals("observed", store.status(scope()).state());
   }
 
   @Test
@@ -228,11 +229,11 @@ class CodeWorkspaceMonitorTest {
             .observing(observer);
     map.beforeMutation(HOME);
     assertTrue(store.claim().isEmpty());
-    assertEquals("dirty", store.status(scope()).get("state"));
+    assertEquals("dirty", store.status(scope()).state());
     map.afterMutation(HOME, List.of());
     map.reconcile(HOME, "**");
     assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM code_workspaces", Integer.class));
-    assertEquals("disabled", observer.status(HOME).get("state"));
+    assertEquals("disabled", observer.status(HOME).state());
     assertTrue(monitor.pollOnce());
   }
 
@@ -269,7 +270,7 @@ class CodeWorkspaceMonitorTest {
     assertNotEquals(before, hash());
     assertEquals(
         0, jdbc.queryForObject("SELECT count(*) FROM code_workspace_mutations", Integer.class));
-    assertEquals("observed", store.status(scope()).get("state"));
+    assertEquals("observed", store.status(scope()).state());
   }
 
   @Test
@@ -294,7 +295,7 @@ class CodeWorkspaceMonitorTest {
 
   @Test
   void registration_capacity_unwatch_and_accounts_are_independent() throws Exception {
-    var limited = new CodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 1);
+    var limited = new JdbcCodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 1);
     var monitor = monitor(limited);
     var map = enrolled(monitor);
     assertNotEquals(
@@ -325,7 +326,7 @@ class CodeWorkspaceMonitorTest {
     assertEquals(
         0, jdbc.queryForObject("SELECT count(*) FROM code_workspace_sources", Integer.class));
     limited.begin(new CodeWorkspaceStore.Scope(HOME, "bob", "coder", null), "**");
-    assertEquals("disabled", monitor.observations("coder", null, null).status(HOME).get("state"));
+    assertEquals("disabled", monitor.observations("coder", null, null).status(HOME).state());
   }
 
   @Test
@@ -354,7 +355,7 @@ class CodeWorkspaceMonitorTest {
           two.get(5, TimeUnit.SECONDS).ticket().workspace());
     }
     jdbc.execute("TRUNCATE code_workspaces CASCADE");
-    var limited = new CodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 1);
+    var limited = new JdbcCodeWorkspaceStore(jdbc, work, clock, Duration.ofSeconds(30), 1);
     try (var pool = Executors.newFixedThreadPool(2)) {
       java.util.function.Function<String, Boolean> enroll =
           owner -> {
@@ -392,7 +393,7 @@ class CodeWorkspaceMonitorTest {
               HOME);
       assertTrue(result.startsWith("exit 7 after"), result);
       assertEquals("x", Files.readString(root.resolve("once.txt")));
-      assertEquals("unavailable", map.trackingStatus(HOME).get("state"));
+      assertEquals("unavailable", map.trackingStatus(HOME).state());
     } finally {
       jdbc.execute("ALTER TABLE code_workspaces_outage RENAME TO code_workspaces");
     }
@@ -416,6 +417,6 @@ class CodeWorkspaceMonitorTest {
     }
     // DELETE/INSERT and the status update roll back as a single transaction.
     assertEquals(original, hash());
-    assertNotEquals("observed", store.status(scope()).get("state"));
+    assertNotEquals("observed", store.status(scope()).state());
   }
 }

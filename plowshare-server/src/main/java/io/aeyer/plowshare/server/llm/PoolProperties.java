@@ -37,14 +37,14 @@ public class PoolProperties {
   /** How this pool is named in a log line and in a saturation message. */
   private String name;
 
-  private Map<String, Object> chatTemplateKwargs = new LinkedHashMap<>();
+  private ChatTemplateOptions chatTemplateKwargs = ChatTemplateOptions.NONE;
 
-  public Map<String, Object> getChatTemplateKwargs() {
-    return Map.copyOf(chatTemplateKwargs);
+  public ChatTemplateOptions getChatTemplateKwargs() {
+    return chatTemplateKwargs;
   }
 
-  public void setChatTemplateKwargs(Map<String, Object> value) {
-    chatTemplateKwargs = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value);
+  public void setChatTemplateKwargs(ChatTemplateOptions value) {
+    chatTemplateKwargs = java.util.Objects.requireNonNull(value, "chatTemplateKwargs");
   }
 
   private CountingProperties counting = new CountingProperties();

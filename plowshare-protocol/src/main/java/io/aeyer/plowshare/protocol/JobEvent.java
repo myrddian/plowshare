@@ -57,8 +57,8 @@ package io.aeyer.plowshare.protocol;
  *       surface a cross-origin page could read without reaching that endpoint at all</b>, and it
  *       carries nothing. Who can reach the port is bounded elsewhere, and there are now three
  *       bounds rather than two: {@code EventChannelConfig}'s absent {@code setAllowedOrigins} for a
- *       page, {@code application.yml}'s {@code server.address:} {@code ${PLOWSHARE_BIND:127.0.0.1}}
- *       for everyone else, and — since slice 4 — {@code AuthFilter}, which refuses the upgrade to
+ *       page, {@code application.yml}'s {@code server.address:} {@code ${PLOWSHARE_BIND}} for
+ *       everyone else, and — since slice 4 — {@code AuthFilter}, which refuses the upgrade to
  *       {@code /v1/events} and every {@code /v1} route to a caller with no access token. <b>That
  *       does not make this record's emptiness less load-bearing.</b> The console this stream was
  *       opened for renders model output and file contents, so a page holding the operator's cookie
@@ -120,7 +120,36 @@ package io.aeyer.plowshare.protocol;
  *     call rather than a run that is stuck, and the two are the same thing seen from here
  */
 public record JobEvent(
-    String job, String kind, String agent, String tool, String ending, int steps, int modelCalls) {
+    String job, String kind, String agent, String tool, String ending, int steps, int modelCalls)
+    implements ServerPush {
+  public JobEvent {
+    if (job == null
+        || job.isBlank()
+        || job.length() > 1024
+        || agent == null
+        || agent.isBlank()
+        || agent.length() > 256
+        || job.codePoints()
+            .anyMatch(code -> Character.isISOControl(code) || code == 0x2028 || code == 0x2029)
+        || agent
+            .codePoints()
+            .anyMatch(code -> Character.isISOControl(code) || code == 0x2028 || code == 0x2029)
+        || kind == null
+        || !kind.matches("[a-z][a-z0-9_]{0,63}")
+        || steps < 0
+        || modelCalls < 0) throw new IllegalArgumentException("invalid job notification");
+    if (tool != null
+        && (tool.isBlank()
+            || tool.length() > 256
+            || tool.codePoints()
+                .anyMatch(
+                    code -> Character.isISOControl(code) || code == 0x2028 || code == 0x2029)))
+      throw new IllegalArgumentException("invalid tool identity");
+    if (ending != null && !ending.matches("[A-Z_]{1,64}"))
+      throw new IllegalArgumentException("invalid job ending");
+    if ("tool_called".equals(kind) && tool == null || "ended".equals(kind) && ending == null)
+      throw new IllegalArgumentException("job notification fields do not match kind");
+  }
 
   /** The run has begun. Sent before the first model call. */
   public static final String STARTED = "started";

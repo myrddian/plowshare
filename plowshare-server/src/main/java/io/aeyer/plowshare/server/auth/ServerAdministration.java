@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.auth;
 
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.time.OffsetDateTime;
@@ -7,27 +8,27 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /** Human operator account lifecycle. Every mutation and its audit entry commit together. */
 @Service
 public class ServerAdministration {
-  private final JdbcTemplate jdbc;
+  private final AccountAdministrationRepository repository;
+  private final UnitOfWork transactions;
   private final AdminStore accounts;
   private final PasswordHasher passwords;
   private final TokenStore tokens;
   private final ApplicationEventPublisher events;
 
   public ServerAdministration(
-      JdbcTemplate jdbc,
+      AccountAdministrationRepository repository,
+      UnitOfWork transactions,
       AdminStore accounts,
       PasswordHasher passwords,
       TokenStore tokens,
       ApplicationEventPublisher events) {
-    this.jdbc = jdbc;
+    this.repository = repository;
+    this.transactions = transactions;
     this.accounts = accounts;
     this.passwords = passwords;
     this.tokens = tokens;
@@ -67,57 +68,26 @@ public class ServerAdministration {
   public record SessionsRevoked(String handle) {}
 
   private Account account(String handle) {
-    return jdbc
-        .query(
-            "SELECT handle, enabled, server_admin, must_change_password, created_at FROM admins WHERE handle=? AND NOT bootstrap AND account_kind='USER'",
-            (rs, n) ->
-                new Account(
-                    rs.getString(1),
-                    rs.getBoolean(2),
-                    rs.getBoolean(3),
-                    rs.getBoolean(4),
-                    rs.getObject(5, OffsetDateTime.class)),
-            handle)
-        .stream()
-        .findFirst()
-        .orElseThrow(() -> new CallerFault("No permanent account has that handle"));
+    return repository.account(handle);
   }
 
   public List<Account> list(String actor) {
     accounts.requireServerAdmin(actor);
-    return jdbc.query(
-        "SELECT handle, enabled, server_admin, must_change_password, created_at FROM admins WHERE NOT bootstrap AND account_kind='USER' ORDER BY handle",
-        (rs, n) ->
-            new Account(
-                rs.getString(1),
-                rs.getBoolean(2),
-                rs.getBoolean(3),
-                rs.getBoolean(4),
-                rs.getObject(5, OffsetDateTime.class)));
+    return repository.list();
   }
 
   private <T> T change(String actor, Supplier<T> work) {
-    return new TransactionTemplate(
-            new DataSourceTransactionManager(
-                java.util.Objects.requireNonNull(jdbc.getDataSource())))
-        .execute(
-            status -> {
-              // Shared with initial setup; two administrators cannot concurrently remove the last
-              // administrator.
-              jdbc.execute("SELECT pg_advisory_xact_lock(734921865)");
-              accounts.requireServerAdmin(actor);
-              return work.get();
-            });
+    return transactions.inTransaction(
+        () -> {
+          // Shared with setup: concurrent administrators cannot remove the last administrator.
+          repository.lockAdministrators();
+          accounts.requireServerAdmin(actor);
+          return work.get();
+        });
   }
 
   private void audit(String actor, String action, Account target) {
-    jdbc.update(
-        "INSERT INTO admin_audit(actor,action,target,enabled,server_admin) VALUES (?,?,?,?,?)",
-        actor,
-        action,
-        target.handle(),
-        target.enabled(),
-        target.serverAdmin());
+    repository.audit(actor, action, target);
   }
 
   public Credential create(String actor, String handle, boolean serverAdmin) {
@@ -132,11 +102,7 @@ public class ServerAdministration {
         () -> {
           if (accounts.byHandle(handle).isPresent())
             throw new CallerFault("That account handle already exists");
-          jdbc.update(
-              "INSERT INTO admins(handle,password_hash,server_admin) VALUES (?,?,?)",
-              handle,
-              hash,
-              serverAdmin);
+          repository.create(handle, hash, serverAdmin);
           events.publishEvent(new PersonalSpaces.AccountCreated(handle));
           Account created = account(handle);
           audit(actor, "account.create", created);
@@ -156,27 +122,17 @@ public class ServerAdministration {
           if (previous.enabled()
               && previous.serverAdmin()
               && !(nextEnabled && nextAdmin)
-              && jdbc.queryForObject(
-                      "SELECT count(*) FROM admins WHERE enabled AND server_admin AND NOT bootstrap",
-                      Long.class)
-                  <= 1)
+              && repository.enabledAdministrators(false) <= 1)
             throw new CallerFault(
                 "The last enabled server administrator cannot be disabled or demoted");
           if (previous.enabled()
               && previous.serverAdmin()
               && !previous.mustChangePassword()
               && !(nextEnabled && nextAdmin)
-              && jdbc.queryForObject(
-                      "SELECT count(*) FROM admins WHERE enabled AND server_admin AND NOT bootstrap AND NOT must_change_password",
-                      Long.class)
-                  <= 1)
+              && repository.enabledAdministrators(true) <= 1)
             throw new CallerFault(
                 "Keep an enabled administrator with a completed password setup before removing this role");
-          jdbc.update(
-              "UPDATE admins SET enabled=?,server_admin=? WHERE handle=?",
-              nextEnabled,
-              nextAdmin,
-              handle);
+          repository.update(handle, nextEnabled, nextAdmin);
           if (!nextEnabled || previous.serverAdmin() != nextAdmin) revoke(handle);
           Account updated = account(handle);
           audit(actor, "account.update", updated);
@@ -185,8 +141,7 @@ public class ServerAdministration {
   }
 
   private void revoke(String handle) {
-    jdbc.update("UPDATE admins SET session_version=session_version+1 WHERE handle=?", handle);
-    jdbc.update("UPDATE auth_session_chains SET revoked=TRUE WHERE handle=?", handle);
+    repository.revokeSessions(handle);
     // Local transient credentials and sockets are retired only after the database commit.
     events.publishEvent(new SessionsRevoked(handle));
   }
@@ -201,10 +156,7 @@ public class ServerAdministration {
         actor,
         () -> {
           Account target = account(handle);
-          jdbc.update(
-              "UPDATE admins SET password_hash=?,must_change_password=TRUE WHERE handle=?",
-              hash,
-              handle);
+          repository.resetPassword(handle, hash);
           revoke(handle);
           audit(actor, "account.password.reset", target);
           return new Credential(account(handle), password);
@@ -225,39 +177,14 @@ public class ServerAdministration {
   public List<Session> sessions(String actor, String handle) {
     accounts.requireServerAdmin(actor);
     account(handle);
-    return jdbc.query(
-        "SELECT id,restricted,created_at,expires_at FROM auth_session_chains WHERE handle=? AND NOT revoked AND expires_at>now() ORDER BY created_at DESC,id",
-        (rs, n) ->
-            new Session(
-                rs.getObject(1, UUID.class),
-                rs.getBoolean(2),
-                rs.getObject(3, OffsetDateTime.class),
-                rs.getObject(4, OffsetDateTime.class)),
-        handle);
+    return repository.sessions(handle);
   }
 
   public AuditPage history(String actor, String handle, long before, int limit) {
     accounts.requireServerAdmin(actor);
     if (before < 0 || limit < 1 || limit > 100)
       throw new CallerFault("Audit limit must be 1–100 and before must be nonnegative");
-    var entries =
-        jdbc.query(
-            "SELECT id,occurred_at,actor,action,target,enabled,server_admin FROM admin_audit WHERE (?=0 OR id<?) AND (?='' OR target=?) ORDER BY id DESC LIMIT ?",
-            (rs, n) ->
-                new Audit(
-                    rs.getLong(1),
-                    rs.getObject(2, OffsetDateTime.class),
-                    rs.getString(3),
-                    rs.getString(4),
-                    rs.getString(5),
-                    rs.getObject(6, Boolean.class),
-                    rs.getObject(7, Boolean.class)),
-            before,
-            before,
-            handle,
-            handle,
-            limit);
-    return new AuditPage(entries, entries.size() == limit ? entries.getLast().id() : 0);
+    return repository.history(handle, before, limit);
   }
 
   @org.springframework.transaction.event.TransactionalEventListener(

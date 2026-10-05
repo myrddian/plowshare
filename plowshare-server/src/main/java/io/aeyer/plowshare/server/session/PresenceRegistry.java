@@ -79,7 +79,7 @@ import org.slf4j.LoggerFactory;
  * measured on this build's JVM: a virtual thread that blocks inside a monitor pins its carrier, and
  * the readers here are the virtual threads running jobs.
  */
-public final class PresenceRegistry {
+public final class PresenceRegistry implements ProjectPresences {
 
   private static final Logger log = LoggerFactory.getLogger(PresenceRegistry.class);
 

@@ -602,6 +602,11 @@ public final class FrameTypes {
   public static final String BUFFER_PURGE = "buffer.purge";
 
   /** Define or replace a schedule by name. {@link ScheduleDefineHandler}. No HTTP twin. */
+  public static final String SCHEDULE_SAVE = "schedule.save";
+
+  public static final String SCHEDULE_SYNC = "schedule.sync";
+  public static final String SCHEDULE_FILES = "schedule.files";
+
   public static final String SCHEDULE_DEFINE = "schedule.define";
 
   /** Every schedule, with its next fire time. {@link ScheduleListHandler}. */
@@ -677,6 +682,12 @@ public final class FrameTypes {
   /**
    * The orchestrations a project can reach, served and refused alike. {@link OrchestrationFrames}.
    */
+  public static final String RELAY_TOPICS = "relay.topics";
+
+  public static final String RELAY_OPERATE = "relay.operate";
+  public static final String RELAY_PROCESS = "relay.process";
+  public static final String RELAY_LOG = "relay.log";
+
   public static final String ORCHESTRATION_START = "orchestration.start";
 
   public static final String ORCHESTRATION_RECEIPT = "orchestration.receipt";
@@ -694,6 +705,9 @@ public final class FrameTypes {
 
   /** Cancel a run. {@link OrchestrationFrames}. */
   public static final String ORCHESTRATION_CANCEL = "orchestration.cancel";
+
+  /** Explicit recovery of a failed orchestration root. */
+  public static final String ORCHESTRATION_RESUME = "orchestration.resume";
 
   /**
    * A project's caps, read and applied to its live runs — spec 2026-09-29 §2. {@link CapsFrames}.

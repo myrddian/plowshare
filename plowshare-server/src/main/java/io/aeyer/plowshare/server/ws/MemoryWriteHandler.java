@@ -51,7 +51,8 @@ public final class MemoryWriteHandler implements FrameHandler {
   public Outcome handle(Map<String, Object> payload, Asking asking) {
     WriteMemoryRequest request =
         Payloads.as(payload, WriteMemoryRequest.class, FrameTypes.MEMORY_WRITE);
-    MemoryProposal proposal = RequestedProposal.toFile(request.proposal(), request.verdict());
+    MemoryProposal proposal =
+        RequestedProposal.toFile(request.proposal(), request.verdict() != null);
     Home home = RequestedHome.in(request.project());
     Validation.check(proposal, archive.maxBodyChars());
 

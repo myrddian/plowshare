@@ -1,14 +1,11 @@
 package io.aeyer.plowshare.server.harness;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.ModelJson;
 import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
 import io.aeyer.plowshare.server.llm.accounting.*;
 import io.aeyer.plowshare.server.orchestrations.AcceptanceChecker;
 import io.aeyer.plowshare.server.orchestrations.Concerns;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -231,112 +228,15 @@ public final class ModelAcceptanceChecker implements AcceptanceChecker, UsageAwa
 
   // --- what it answers ------------------------------------------------------------------------
 
-  /** {@code {"concerns": [{"about", "why", "ask"?}]}}. */
   static List<Raised> parsePlan(String content) {
-    JsonNode node = object(content);
-    JsonNode list = node.path("concerns");
-    if (!list.isArray()) {
-      throw new Unreadable("its answer has no 'concerns' list");
-    }
-    List<Raised> raised = new ArrayList<>();
-    for (JsonNode each : list) {
-      raised.add(new Raised(required(each, "about"), required(each, "why"), optional(each, "ask")));
-    }
-    return List.copyOf(raised);
+    return AcceptanceAnswerCodec.parsePlan(content);
   }
 
-  /** {@code {"resolved": true|false, "objection"?, "ask"?}}. */
   static Judged parseJudged(String content) {
-    JsonNode node = object(content);
-    JsonNode resolved = node.path("resolved");
-    if (!resolved.isBoolean()) {
-      throw new Unreadable("its answer has no true or false 'resolved'");
-    }
-    if (resolved.asBoolean()) {
-      return new Judged(true, null, null);
-    }
-    return new Judged(false, required(node, "objection"), optional(node, "ask"));
+    return AcceptanceAnswerCodec.parseJudged(content);
   }
 
-  private static final Set<String> VERDICTS =
-      Set.of(Concerns.HOLDS, Concerns.DOES_NOT_HOLD, Concerns.CANNOT_CHECK);
-
-  /**
-   * {@code {"verdicts": [{"concern", "verdict", "finding", "person_check"?}], "found": [{"about",
-   * "why", "verdict", "finding", "person_check"?}]}}. A verdict for a concern it was not shown is
-   * dropped; one it left out is the person's ({@code Checking}).
-   */
   static End parseEnd(String content, Set<String> known) {
-    JsonNode node = object(content);
-    JsonNode verdicts = node.path("verdicts");
-    if (!verdicts.isArray()) {
-      throw new Unreadable("its answer has no 'verdicts' list");
-    }
-    List<Verdict> read = new ArrayList<>();
-    for (JsonNode each : verdicts) {
-      String concern = required(each, "concern");
-      if (known.contains(concern)) {
-        read.add(new Verdict(concern, verdict(each), required(each, "finding"), personCheck(each)));
-      }
-    }
-    List<Found> found = new ArrayList<>();
-    JsonNode raised = node.path("found");
-    if (!raised.isMissingNode() && !raised.isNull()) {
-      if (!raised.isArray()) {
-        throw new Unreadable("its 'found' is not a list");
-      }
-      for (JsonNode each : raised) {
-        found.add(
-            new Found(
-                required(each, "about"),
-                required(each, "why"),
-                verdict(each),
-                required(each, "finding"),
-                personCheck(each)));
-      }
-    }
-    return new End(read, found);
-  }
-
-  private static String verdict(JsonNode each) {
-    String verdict = required(each, "verdict");
-    if (!VERDICTS.contains(verdict)) {
-      throw new Unreadable(
-          "its verdict '" + verdict + "' is not holds, does_not_hold or" + " cannot_check");
-    }
-    return verdict;
-  }
-
-  /** What the person is to check: required with {@code cannot_check}, ignored otherwise. */
-  private static String personCheck(JsonNode each) {
-    if (!Concerns.CANNOT_CHECK.equals(each.path("verdict").asText())) {
-      return null;
-    }
-    return required(each, "person_check");
-  }
-
-  private static JsonNode object(String content) {
-    try {
-      return ModelJson.object(content);
-    } catch (ModelJson.Unreadable unreadable) {
-      throw new Unreadable("its answer could not be read: " + unreadable.getMessage(), unreadable);
-    }
-  }
-
-  private static String required(JsonNode node, String field) {
-    String value = optional(node, field);
-    if (value == null) {
-      throw new Unreadable("its answer has no '" + field + "' text where one is needed");
-    }
-    return value;
-  }
-
-  private static String optional(JsonNode node, String field) {
-    JsonNode value = node.path(field);
-    if (!value.isTextual() || value.asText().isBlank()) {
-      return null;
-    }
-    String text = value.asText().strip();
-    return text.length() <= MOST_FIELD ? text : text.substring(0, MOST_FIELD - 1) + "…";
+    return AcceptanceAnswerCodec.parseEnd(content, known);
   }
 }

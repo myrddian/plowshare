@@ -69,7 +69,13 @@ public interface AcceptanceChecker {
    * @param why why it is a concern
    * @param question the WHY to put to the conductor, or null to keep it for the end
    */
-  record Raised(String about, String why, String question) {}
+  record Raised(String about, String why, String question) {
+    public Raised {
+      about = text(about, "about", true);
+      why = text(why, "why", true);
+      question = text(question, "question", false);
+    }
+  }
 
   /**
    * The checker's verdict on the conductor's answer to a WHY.
@@ -78,7 +84,12 @@ public interface AcceptanceChecker {
    * @param objection why it does not, or null when it does
    * @param question what it asks next, or null for nothing more
    */
-  record Judged(boolean resolved, String objection, String question) {}
+  record Judged(boolean resolved, String objection, String question) {
+    public Judged {
+      objection = text(objection, "objection", !resolved);
+      question = text(question, "question", false);
+    }
+  }
 
   /**
    * One concern as the end pass found it.
@@ -89,7 +100,14 @@ public interface AcceptanceChecker {
    * @param finding what it found
    * @param personCheck for {@link Concerns#CANNOT_CHECK}, what the person should do and see
    */
-  record Verdict(String concern, String verdict, String finding, String personCheck) {}
+  record Verdict(String concern, String verdict, String finding, String personCheck) {
+    public Verdict {
+      concern = identity(concern, "concern");
+      checkVerdict(verdict);
+      finding = text(finding, "finding", true);
+      personCheck = text(personCheck, "personCheck", Concerns.CANNOT_CHECK.equals(verdict));
+    }
+  }
 
   /**
    * A concern the end pass raised itself, with its verdict.
@@ -97,7 +115,15 @@ public interface AcceptanceChecker {
    * @param about the requirement or plan item it is about
    * @param why why it is a concern
    */
-  record Found(String about, String why, String verdict, String finding, String personCheck) {}
+  record Found(String about, String why, String verdict, String finding, String personCheck) {
+    public Found {
+      about = text(about, "about", true);
+      why = text(why, "why", true);
+      checkVerdict(verdict);
+      finding = text(finding, "finding", true);
+      personCheck = text(personCheck, "personCheck", Concerns.CANNOT_CHECK.equals(verdict));
+    }
+  }
 
   /**
    * What the end pass came to.
@@ -109,7 +135,34 @@ public interface AcceptanceChecker {
     public End {
       verdicts = List.copyOf(verdicts);
       found = List.copyOf(found);
+      if (verdicts.size() > 1000 || found.size() > 1000)
+        throw new Unreadable("too many acceptance entries");
+      if (verdicts.stream().map(Verdict::concern).distinct().count() != verdicts.size())
+        throw new Unreadable("duplicate concern verdict");
     }
+  }
+
+  private static String identity(String value, String field) {
+    if (value == null
+        || value.isBlank()
+        || value.length() > 1024
+        || value.codePoints().anyMatch(Character::isISOControl))
+      throw new Unreadable("invalid " + field);
+    return value.strip();
+  }
+
+  private static String text(String value, String field, boolean required) {
+    if (value == null && !required) return null;
+    if (value == null
+        || required && value.isBlank()
+        || value.length() > 1500
+        || value.indexOf('\0') >= 0) throw new Unreadable("invalid " + field);
+    return value;
+  }
+
+  private static void checkVerdict(String value) {
+    if (!java.util.Set.of(Concerns.HOLDS, Concerns.DOES_NOT_HOLD, Concerns.CANNOT_CHECK)
+        .contains(value)) throw new Unreadable("invalid verdict");
   }
 
   /** An answer that is not the checker's JSON, or no answer at all. */

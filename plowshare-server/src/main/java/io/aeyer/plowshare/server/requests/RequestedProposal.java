@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.requests;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.MemoryProposal;
 import io.aeyer.plowshare.server.faults.CallerFault;
 
@@ -20,9 +19,9 @@ import io.aeyer.plowshare.server.faults.CallerFault;
  * refusal one line away in the controller. Splitting the question from the answer across two
  * packages is what lets the two drift, so both halves are here — including the rule that an
  * explicit {@code null} is <b>not</b> a named verdict. That one is not a nicety: a client
- * serialising an absent field writes {@code "verdict": null}, {@code HttpServerClient} writes
- * exactly that shape one key over, and refusing it would refuse a caller that is already doing the
- * right thing.
+ * serialising an absent field writes {@code "verdict": null}, a typed SDK caller writes exactly
+ * that shape one key over, and refusing it would refuse a caller that is already doing the right
+ * thing.
  */
 public final class RequestedProposal {
 
@@ -35,12 +34,12 @@ public final class RequestedProposal {
    * a write that half happened is worse off than one told nothing.
    *
    * @param proposal the claim being proposed, handed straight back
-   * @param verdict the request's own {@code verdict} field — a tripwire and not a field, per {@code
-   *     api.WriteMemoryRequest}'s own javadoc
+   * @param verdictPresent whether the boundary found a non-null {@code verdict} field — a tripwire
+   *     and not a field, per {@code api.WriteMemoryRequest}'s own javadoc
    * @throws CallerFault if {@code verdict} carries anything but JSON null
    */
-  public static MemoryProposal toFile(MemoryProposal proposal, JsonNode verdict) {
-    if (verdict != null && !verdict.isNull()) {
+  public static MemoryProposal toFile(MemoryProposal proposal, boolean verdictPresent) {
+    if (verdictPresent) {
       throw new CallerFault(
           "this write names a verdict, and this server does not take one. A verdict"
               + " naming a memory to supersede would retire a memory the caller"

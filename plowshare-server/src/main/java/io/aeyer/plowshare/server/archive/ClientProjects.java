@@ -51,18 +51,6 @@ public final class ClientProjects {
       throw new ArchiveRefusedException("This project belongs to a different client session");
   }
 
-  public static void requirePayload(java.util.Map<?, ?> payload, String session, String handle) {
-    for (var entry : payload.entrySet()) {
-      Object value = entry.getValue();
-      if ((entry.getKey().equals("project") || entry.getKey().equals("collectionProject"))
-          && value instanceof String name) requireOwn(name, session, handle);
-      if (value instanceof java.util.Map<?, ?> nested) requirePayload(nested, session, handle);
-      if (value instanceof Iterable<?> list)
-        for (Object item : list)
-          if (item instanceof java.util.Map<?, ?> nested) requirePayload(nested, session, handle);
-    }
-  }
-
   public static String label(String name) {
     if (!privateProject(name)) return name;
     try {

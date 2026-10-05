@@ -44,9 +44,9 @@ public class PersonalWebAccess extends RequestBodyAdviceAdapter implements WebMv
                 Object variables =
                     request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
                 if (variables instanceof Map<?, ?> path) {
-                  access.payload(path, handle);
+                  access.check(PersonalScopeDecoder.decode(path), handle);
                   if (request.getServletPath().startsWith("/v1/conversations/"))
-                    access.conversation(path.get("id"), handle);
+                    access.conversation(PersonalScopeDecoder.identity(path.get("id")), handle);
                 }
                 return true;
               }
@@ -70,7 +70,8 @@ public class PersonalWebAccess extends RequestBodyAdviceAdapter implements WebMv
     if (!(RequestContextHolder.getRequestAttributes()
         instanceof ServletRequestAttributes attributes)) return body;
     String handle = handle(attributes.getRequest());
-    if (body instanceof Map<?, ?> payload) access.payload(payload, handle);
+    if (body instanceof Map<?, ?> payload)
+      access.check(PersonalScopeDecoder.decode(payload), handle);
     else if (body.getClass().isRecord()) {
       for (var component : body.getClass().getRecordComponents()) {
         if (!component.getName().equals("project") && !component.getName().equals("conversation"))
@@ -79,8 +80,9 @@ public class PersonalWebAccess extends RequestBodyAdviceAdapter implements WebMv
           var accessor = component.getAccessor();
           accessor.trySetAccessible();
           Object value = accessor.invoke(body);
-          if (component.getName().equals("project")) access.project(value, handle);
-          else access.conversation(value, handle);
+          if (component.getName().equals("project"))
+            access.project(PersonalScopeDecoder.identity(value), handle);
+          else access.conversation(PersonalScopeDecoder.identity(value), handle);
         } catch (ReflectiveOperationException failure) {
           throw new IllegalStateException("Could not check Personal request scope", failure);
         }

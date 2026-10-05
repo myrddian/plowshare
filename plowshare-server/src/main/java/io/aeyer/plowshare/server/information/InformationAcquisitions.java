@@ -12,7 +12,6 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.IntSupplier;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Durable URL intake. A failed fetch is inspectable and retryable; a denied post gate retains its
@@ -26,7 +25,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
     usageOwners = java.util.Objects.requireNonNull(source);
   }
 
-  private final JdbcTemplate jdbc;
+  private final AcquisitionRepository repository;
   private final UnitOfWork work;
   private final InformationAccess access;
   private final InformationCatalogue catalogue;
@@ -37,11 +36,10 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   private final LogStages logStages;
   private final Hooks configured;
   private final Harness harness;
-  private final Clock clock;
   private ScheduledExecutorService worker;
 
   public InformationAcquisitions(
-      JdbcTemplate jdbc,
+      AcquisitionRepository repository,
       UnitOfWork work,
       InformationAccess access,
       InformationCatalogue catalogue,
@@ -51,10 +49,9 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
       LogStages logStages,
       Hooks configured,
       Harness harness,
-      Clock clock,
       InformationJobs inputs) {
     this.inputs = inputs;
-    this.jdbc = jdbc;
+    this.repository = Objects.requireNonNull(repository);
     this.work = work;
     this.access = access;
     this.catalogue = catalogue;
@@ -64,10 +61,9 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
     this.logStages = logStages;
     this.configured = configured;
     this.harness = harness;
-    this.clock = clock;
   }
 
-  public Map<String, Object> submit(
+  public AcquisitionRepository.Status submit(
       InformationContext context, UUID request, String url, String name, String session) {
     access.requireWork(context);
     if (context.selection().scope() == InformationContext.Scope.SHARED)
@@ -88,110 +84,42 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
     UUID id =
         work.inTransaction(
-            () -> {
-              jdbc.queryForObject(
-                  "SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",
-                  Boolean.class,
-                  context.account() + ":acquire:" + request);
-              var prior =
-                  jdbc.queryForList(
-                      "SELECT id,fingerprint FROM information_acquisitions WHERE account=? AND request_id=?",
-                      context.account(),
-                      request);
-              if (!prior.isEmpty()) {
-                if (!fingerprint.equals(prior.getFirst().get("fingerprint")))
-                  throw new CallerFault("requestId was already used for a different acquisition");
-                return (UUID) prior.getFirst().get("id");
-              }
-              if (jdbc.queryForObject(
-                      "SELECT count(*) FROM information_requests WHERE account=? AND request_id=?",
-                      Integer.class,
-                      context.account(),
-                      request)
-                  != 0) throw new CallerFault("requestId was already used for information intake");
-              UUID ticket = UUID.randomUUID();
-              jdbc.update(
-                  "INSERT INTO information_acquisitions(id,account,request_id,scope,project_name,fingerprint,url,source_name,caller_session,allowance_total,corpus) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                  ticket,
-                  context.account(),
-                  request,
-                  context.selection().scope().name().toLowerCase(Locale.ROOT),
-                  context.selection().project(),
-                  fingerprint,
-                  url,
-                  name,
-                  session,
-                  total,
-                  corpus);
-              return ticket;
-            });
+            () ->
+                repository.submit(
+                    context, request, fingerprint, url, name, session, total, corpus));
     return status(context, id);
   }
 
-  private Map<String, Object> owned(InformationContext context, UUID ticket) {
+  private AcquisitionRepository.Ticket owned(InformationContext context, UUID ticket) {
     access.requireSelection(context);
-    var rows =
-        jdbc.queryForList(
-            "SELECT * FROM information_acquisitions WHERE id=? AND account=?",
-            ticket,
-            context.account());
-    if (rows.isEmpty()) throw new NotFoundFault("acquisition is unavailable to this account");
-    var row = rows.getFirst();
-    if (!Objects.equals(context.selection().project(), row.get("project_name"))
+    var row = repository.owned(context.account(), ticket);
+    if (!Objects.equals(context.selection().project(), row.project())
         || context.selection().scope() == InformationContext.Scope.SHARED)
       throw new NotFoundFault("select the acquisition's original namespace");
     return row;
   }
 
-  public Map<String, Object> status(InformationContext context, UUID ticket) {
-    var row = owned(context, ticket);
-    var result = new LinkedHashMap<String, Object>();
-    for (String key :
-        List.of(
-            "id",
-            "url",
-            "source_name",
-            "corpus",
-            "state",
-            "revision_id",
-            "attempt",
-            "error",
-            "allowance_total",
-            "created_at",
-            "pre_gate",
-            "post_gate")) {
-      Object value = row.get(key);
-      if (value != null && (key.equals("pre_gate") || key.equals("post_gate"))) {
-        try {
-          value = new com.fasterxml.jackson.databind.ObjectMapper().readTree(value.toString());
-        } catch (java.io.IOException invalid) {
-          throw new IllegalStateException(invalid);
-        }
-      }
-      result.put(key, value);
-    }
-    return result;
+  public AcquisitionRepository.Status status(InformationContext context, UUID ticket) {
+    return owned(context, ticket).status();
   }
 
-  public List<Map<String, Object>> list(InformationContext context, int limit, int offset) {
+  public List<AcquisitionRepository.Status> list(
+      InformationContext context, int limit, int offset) {
     access.requireSelection(context);
     if (context.selection().scope() == InformationContext.Scope.SHARED) return List.of();
     if (limit < 1 || limit > 100 || offset < 0)
       throw new CallerFault("acquisition list needs limit 1..100 and nonnegative offset");
-    return jdbc.queryForList(
-        "SELECT id,url,source_name,corpus,state,revision_id,attempt,error,allowance_total,created_at FROM information_acquisitions WHERE account=? AND project_name IS NOT DISTINCT FROM ? AND corpus=? ORDER BY created_at DESC,id OFFSET ? LIMIT ?",
+    return repository.list(
         context.account(),
         context.selection().project(),
         context.corpus() == InformationContext.Corpus.CODE ? "code" : "documents",
-        offset,
-        limit);
+        limit,
+        offset);
   }
 
   public void retry(InformationContext context, UUID ticket) {
     owned(context, ticket);
-    jdbc.update(
-        "UPDATE information_acquisitions SET state='queued',error=NULL WHERE id=? AND state IN ('failed','blocked')",
-        ticket);
+    repository.retry(ticket, context.account());
   }
 
   public synchronized void start() {
@@ -214,30 +142,11 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
   }
 
   public boolean drainOne() {
-    var row =
-        work.inTransaction(
-            () -> {
-              var rows =
-                  jdbc.queryForList(
-                      "SELECT * FROM information_acquisitions WHERE state='queued' OR (state='running' AND lease_until<?) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
-                      now());
-              if (rows.isEmpty()) return null;
-              var found = new LinkedHashMap<>(rows.getFirst());
-              UUID token = UUID.randomUUID();
-              found.put("token", token);
-              found.put("attempt", ((Number) found.get("attempt")).intValue() + 1);
-              jdbc.update(
-                  "UPDATE information_acquisitions SET state='running',token=?,lease_until=?,attempt=? WHERE id=?",
-                  token,
-                  clock.instant().plusSeconds(300).atOffset(ZoneOffset.UTC),
-                  found.get("attempt"),
-                  found.get("id"));
-              return found;
-            });
+    var row = work.inTransaction(() -> repository.claim()).orElse(null);
     if (row == null) return false;
     HarnessRun run = harness.begin();
     try {
-      String account = (String) row.get("account"), project = (String) row.get("project_name");
+      String account = row.account(), project = row.project();
       var context =
           access
               .resolve(
@@ -245,9 +154,11 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                   project == null
                       ? InformationContext.Selection.personal()
                       : InformationAccess.projectSelection(account, project))
-              .withCorpus(row.get("corpus"));
+              .withCorpus(
+                  io.aeyer.plowshare.server.information.InformationContext.Corpus.valueOf(
+                      row.status().corpus().toUpperCase(Locale.ROOT)));
       access.requireWork(context);
-      String log = (String) row.get("log_id");
+      String log = row.log();
       if (log == null) {
         Home home = project == null ? Home.global() : Home.of(project);
         log =
@@ -257,7 +168,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                     home,
                     "document_pipeline",
                     null,
-                    Budget.of(((Number) row.get("allowance_total")).intValue()),
+                    Budget.of(row.status().allowanceTotal()),
                     account,
                     null)
                 .id();
@@ -265,8 +176,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
         work.inTransaction(
             () -> {
               fence(row);
-              jdbc.update(
-                  "UPDATE information_acquisitions SET log_id=? WHERE id=?", opened, row.get("id"));
+              repository.opened(row, opened);
               return null;
             });
         logStages.opened(
@@ -277,7 +187,7 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                 "document_pipeline",
                 false,
                 null,
-                (String) row.get("caller_session"),
+                row.session(),
                 null));
       }
       var hookContext =
@@ -290,28 +200,25 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                       null,
                       1,
                       "acquire",
-                      ((Number) row.get("attempt")).intValue(),
-                      (String) row.get("url")));
+                      row.status().attempt(),
+                      row.status().url()));
       Hooks hooks = Hooks.chain(run.forModel(null), configured);
       var shown = new StageShown("acquire", "acquire", 0, 1);
       Gate pre = hooks.stagePre(hookContext, new StageStart(shown, null, null));
       work.inTransaction(
           () -> {
             fence(row);
-            jdbc.update(
-                "UPDATE information_acquisitions SET pre_gate=CAST(? AS jsonb) WHERE id=?",
-                json(pre),
-                row.get("id"));
+            repository.preGate(row, pre);
             return null;
           });
       if (pre.isDenied()) {
         finish(row, "blocked", pre.denied());
         return true;
       }
-      UUID revision = (UUID) row.get("revision_id");
+      UUID revision = row.status().revisionId();
       String processingLog = log;
       if (revision == null) {
-        var fetched = fetcher.fetch((String) row.get("url"));
+        var fetched = fetcher.fetch(row.status().url());
         if (!fetched.isOk())
           throw new CallerFault(
               "acquisition failed: " + fetched.failure() + ": " + fetched.message());
@@ -325,43 +232,37 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                   var admitted =
                       catalogue.acquired(
                           context,
-                          (UUID) row.get("request_id"),
-                          (String) row.get("source_name"),
+                          row.requestId(),
+                          row.status().sourceName(),
                           fetched.sourceBytes(),
                           fetched.mediaType(),
                           fetched.finalUrl(),
-                          (String) row.get("caller_session"),
-                          ((Number) row.get("allowance_total")).intValue());
+                          row.session(),
+                          row.status().allowanceTotal());
                   inputs.bind(processingLog, context, List.of(admitted.revision()));
-                  jdbc.update(
-                      "UPDATE information_acquisitions SET revision_id=? WHERE id=?",
-                      admitted.revision(),
-                      row.get("id"));
+                  repository.admitted(row, admitted.revision());
                   return admitted.revision();
                 });
       }
       catalogue.requireReadable(context, revision);
       inputs.requireLog(log, account);
-      var retained = catalogue.row(revision);
+      var retained = repository.retained(revision);
       Gate post =
           hooks.stagePost(
               hookContext.about(
                   new HookContext.Document(
                       "acquire",
-                      retained.get("resource_id").toString(),
+                      retained.resource().toString(),
                       revision.toString(),
                       1,
                       "acquire",
-                      ((Number) row.get("attempt")).intValue(),
-                      (String) retained.get("source_uri"))),
+                      row.status().attempt(),
+                      retained.sourceUri())),
               new StageDone(shown, "original response bytes retained", null));
       work.inTransaction(
           () -> {
             fence(row);
-            jdbc.update(
-                "UPDATE information_acquisitions SET post_gate=CAST(? AS jsonb) WHERE id=?",
-                json(post),
-                row.get("id"));
+            repository.postGate(row, post);
             return null;
           });
       finish(row, post.isDenied() ? "blocked" : "succeeded", post.denied());
@@ -374,35 +275,17 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
           failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
     } finally {
       var records = run.finish();
-      jdbc.update(
-          "UPDATE information_acquisitions SET finish_records=CAST(? AS jsonb) WHERE id=? AND token=?",
-          json(records),
-          row.get("id"),
-          row.get("token"));
+      repository.finishRecords(row, records);
     }
     return true;
   }
 
-  private void fence(Map<String, Object> row) {
-    if (jdbc.queryForList(
-            "SELECT id FROM information_acquisitions WHERE id=? AND token=? AND state='running' AND lease_until>=? FOR UPDATE",
-            row.get("id"),
-            row.get("token"),
-            now())
-        .isEmpty()) throw new InformationLifecycle.StaleLease();
+  private void fence(AcquisitionRepository.Ticket row) {
+    repository.fence(row);
   }
 
-  private void finish(Map<String, Object> row, String state, String error) {
-    jdbc.update(
-        "UPDATE information_acquisitions SET state=?,error=?,token=NULL,lease_until=NULL WHERE id=? AND token=? AND state='running'",
-        state,
-        error,
-        row.get("id"),
-        row.get("token"));
-  }
-
-  private OffsetDateTime now() {
-    return clock.instant().atOffset(ZoneOffset.UTC);
+  private void finish(AcquisitionRepository.Ticket row, String state, String error) {
+    repository.finish(row, state, error);
   }
 
   private static String json(Object value) {

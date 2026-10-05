@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.ws;
 
+import io.aeyer.plowshare.protocol.Usage;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.accounting.UsageQueryService;
+import io.aeyer.plowshare.server.llm.accounting.UsageReports;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.*;
@@ -23,29 +25,23 @@ public class UsageSubscriptions {
 
   private static final class Subscription {
     final String id;
-    final UsageQueryService.Resolved query;
-    Object signature;
+    final Usage.Resolved query;
+    Signature signature;
     long revision;
     boolean ready;
 
-    Subscription(String id, UsageQueryService.Resolved query, Object signature) {
+    Subscription(String id, Usage.Resolved query, Signature signature) {
       this.id = id;
       this.query = query;
       this.signature = signature;
     }
   }
 
-  public record Initial(
-      String subscription,
-      long revision,
-      UsageQueryService.Resolved filters,
-      UsageQueryService.Report report) {}
-
-  private final UsageQueryService queries;
+  private final UsageReports queries;
   private final Map<String, Connection> connections = new HashMap<>();
   private ScheduledExecutorService timer;
 
-  public UsageSubscriptions(UsageQueryService queries) {
+  public UsageSubscriptions(UsageReports queries) {
     this.queries = queries;
   }
 
@@ -78,7 +74,7 @@ public class UsageSubscriptions {
     return c;
   }
 
-  public synchronized Initial subscribe(Asking asking, UsageQueryService.Resolved query) {
+  public synchronized Usage.Initial subscribe(Asking asking, Usage.Resolved query) {
     if (!UsageQueryService.REPORTS.contains(query.type()) || query.filter().cursor() != null)
       throw new CallerFault("usage.subscribe takes an aggregate report without a cursor");
     Connection c = connection(asking);
@@ -87,7 +83,7 @@ public class UsageSubscriptions {
     var report = queries.report(c.account, query);
     String id = UUID.randomUUID().toString();
     c.active.put(id, new Subscription(id, query, signature(report)));
-    return new Initial(id, 0, query, report);
+    return new Usage.Initial(id, 0, query, report);
   }
 
   public synchronized void unsubscribe(Asking asking, String id) {
@@ -113,7 +109,7 @@ public class UsageSubscriptions {
         }
         try {
           var report = queries.report(entry.getValue().account, sub.query);
-          Object signature = signature(report);
+          Signature signature = signature(report);
           synchronized (this) {
             Connection current = connections.get(entry.getKey());
             if (current != entry.getValue() || current.active.get(sub.id) != sub) continue;
@@ -125,7 +121,7 @@ public class UsageSubscriptions {
                     null,
                     UPDATED,
                     Envelope.CURRENT_VERSION,
-                    Map.of("subscription", sub.id, "revision", ++sub.revision, "report", report)));
+                    pushPayload(new Usage.Updated(sub.id, ++sub.revision, report))));
           }
         } catch (CallerFault revoked) {
           synchronized (this) {
@@ -137,7 +133,7 @@ public class UsageSubscriptions {
                     null,
                     CLOSED,
                     Envelope.CURRENT_VERSION,
-                    Map.of("subscription", sub.id, "code", "BAD_REQUEST")));
+                    pushPayload(new Usage.Closed(sub.id, "BAD_REQUEST"))));
           }
         } catch (RuntimeException unavailable) {
           // A transient query outage preserves the subscription and retries next tick. No error
@@ -147,11 +143,57 @@ public class UsageSubscriptions {
     }
   }
 
-  private static Object signature(UsageQueryService.Report report) {
-    var health = new LinkedHashMap<>(report.health());
-    health.remove("as_of");
-    health.remove("last_projected_at");
-    return Arrays.asList(report.totals(), report.groups(), health);
+  private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+      new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+
+  // Envelope is the transport's raw representation; subscriptions and consumers use DTOs.
+  private static Map<String, Object> pushPayload(io.aeyer.plowshare.protocol.ServerPush update) {
+    return JSON.convertValue(update, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+  }
+
+  private record HealthSignal(
+      java.time.Instant trackingStartedAt,
+      String watermark,
+      String historicalUsage,
+      boolean captureEnabled,
+      String pendingEvents,
+      String journalBytes,
+      String journalCapacityBytes,
+      String journalProblem,
+      String projectionLagMillis,
+      java.time.Instant oldestPendingAt,
+      Integer bufferedTerminalEvents,
+      String lostTerminalEvents,
+      Boolean projectionConflict,
+      String projectionProblem) {}
+
+  private record Signature(
+      Usage.Aggregate totals, List<Usage.Aggregate> groups, HealthSignal health) {
+    private Signature {
+      groups = List.copyOf(groups);
+    }
+  }
+
+  private static Signature signature(Usage.Report report) {
+    var h = report.health();
+    return new Signature(
+        report.totals(),
+        report.groups(),
+        new HealthSignal(
+            h.trackingStartedAt(),
+            h.watermark(),
+            h.historicalUsage(),
+            h.captureEnabled(),
+            h.pendingEvents(),
+            h.journalBytes(),
+            h.journalCapacityBytes(),
+            h.journalProblem(),
+            h.projectionLagMillis(),
+            h.oldestPendingAt(),
+            h.bufferedTerminalEvents(),
+            h.lostTerminalEvents(),
+            h.projectionConflict(),
+            h.projectionProblem()));
   }
 
   @PreDestroy

@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.documents;
 
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
@@ -81,6 +82,12 @@ import org.slf4j.LoggerFactory;
  * discover that is the shape {@code Summariser} declines one paragraph at a time.
  */
 public final class IngestService implements UsageAware {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -292,15 +299,36 @@ public final class IngestService implements UsageAware {
       }
       List<DocumentStore.UnembeddedChunk> batch =
           waiting.subList(from, Math.min(from + embedBatchSize, waiting.size()));
-      calls++;
+      if (dualEmbeddings == null) calls++;
       List<float[]> vectors;
       try {
-        vectors =
-            EmbeddingClient.owned(
-                embeddings,
-                batch.stream().map(DocumentStore.UnembeddedChunk::text).toList(),
-                owner.forOperation(UsageAttribution.Operation.EMBEDDING_WRITE, owner.agentName()));
+        if (dualEmbeddings != null) {
+          var result =
+              dualEmbeddings.repairAll(
+                  batch.stream()
+                      .map(
+                          chunk ->
+                              EmbeddingWorkRepository.Key.of(
+                                  EmbeddingWorkRepository.Store.CHUNKS, chunk.id().toString()))
+                      .toList(),
+                  owner.forOperation(
+                      UsageAttribution.Operation.EMBEDDING_WRITE, owner.agentName()));
+          calls += result.modelCalls();
+          embedded += result.completeSources();
+          if (result.completeSources() != batch.size())
+            throw new EmbeddingException(
+                "chunk changed during embedding; current source remains queued");
+          continue;
+        } else
+          vectors =
+              EmbeddingClient.owned(
+                  embeddings,
+                  batch.stream().map(DocumentStore.UnembeddedChunk::text).toList(),
+                  owner.forOperation(
+                      UsageAttribution.Operation.EMBEDDING_WRITE, owner.agentName()));
       } catch (EmbeddingException down) {
+        if (down instanceof EmbeddingRepairException batchFailure)
+          calls += batchFailure.modelCalls();
         // The text is committed and stays committed. Logged whole here
         // because the outcome carries only a message, and the endpoint's
         // own account of the failure is what an operator needs.

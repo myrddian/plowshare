@@ -46,7 +46,7 @@ import java.util.Map;
  * its session declares, so a fake declaring none is a client that can see nothing and no absolute
  * hit is contained. {@link #withRoots} is what a test uses to be the client a production client
  * actually is — one whose glob answers with root-prefixed absolute paths, because {@code
- * ClientEnforcer.glob} walks {@code FileAccess.roots()} and those are canonicalised absolute.
+ * NodeFiles.glob} walks {@code FileAccess.roots()} and those are canonicalised absolute.
  *
  * <p>{@link #withPagedFile} is the one that is not. It is keyed by the <em>requested</em> offset
  * rather than call order, and on purpose: a fake that just returns its next canned page regardless
@@ -214,7 +214,7 @@ public final class FakeFiles implements SessionChannel {
     }
     List<String> lines = files.get(request.path());
     if (lines == null) {
-      // As every real client words it (ClientEnforcer, the TUI's enforcer): the opening
+      // As every real client words it (NodeFiles, the TUI's enforcer): the opening
       // ChannelDefinitions.environmentFileRead tells an absent file from a failed read by.
       return FileReply.refused(
           request.id(), "there is no file at " + request.path() + " on this machine");

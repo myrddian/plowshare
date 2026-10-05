@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents.learner;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.MemoryProposal;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
@@ -26,7 +25,6 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.LlmSaturatedException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -483,50 +481,18 @@ public final class Learner implements Learning, UsageAware {
     };
   }
 
-  /**
-   * The memories in an answer, bounded and validated for the shape this class can build a proposal
-   * from.
-   *
-   * <p>An object with no {@code memories} key at all is read as none rather than as a failure: it
-   * is the shape a model reaches for when the answer is "nothing", and the ordinary answer is
-   * nothing. What <em>is</em> a failure is content that is not JSON, which {@link ModelJson#object}
-   * reports and this class turns into a pass that marked nothing.
-   */
+  /** Decode the entire bounded answer before any proposal is filed. */
   private static List<MemoryProposal> read(String content, LearningWindow window) {
-    JsonNode answered = ModelJson.object(content);
-    JsonNode memories = answered.path("memories");
-    List<MemoryProposal> proposed = new ArrayList<>();
-    if (!memories.isArray()) {
-      return proposed;
-    }
-    for (JsonNode memory : memories) {
-      if (proposed.size() == MOST_PROPOSED) {
-        log.warn(
-            "conversation {}: the learner proposed {} memories from one window and"
-                + " the first {} were taken. A window that produces more than"
-                + " that has been summarised rather than mined.",
-            window.conversationId(),
-            memories.size(),
-            MOST_PROPOSED);
-        break;
-      }
-      String summary = memory.path("summary").asText("").strip();
-      String scope = memory.path("scope").asText("").strip();
-      String body = memory.path("body").asText("").strip();
-      if (summary.isEmpty() || scope.isEmpty() || body.isEmpty()) {
-        // Skipped rather than refused. A half-filled entry beside three
-        // good ones is one candidate lost, and Validation.check would
-        // refuse it a moment later anyway with a message about a field
-        // nobody can go back and ask for.
-        log.warn(
-            "conversation {}: a memory the learner proposed had no {}, and was not" + " filed.",
-            window.conversationId(),
-            summary.isEmpty() ? "summary" : scope.isEmpty() ? "scope" : "body");
-        continue;
-      }
-      proposed.add(new MemoryProposal(summary, scope, body, BY, formedWhere(window)));
-    }
-    return proposed;
+    return io.aeyer.plowshare.server.agents.ModelAnswers.learning(content).memories().stream()
+        .map(
+            candidate ->
+                new MemoryProposal(
+                    candidate.summary(),
+                    candidate.scope(),
+                    candidate.body(),
+                    BY,
+                    formedWhere(window)))
+        .toList();
   }
 
   /**
@@ -552,9 +518,8 @@ public final class Learner implements Learning, UsageAware {
    * Which archive this conversation's memories belong to, in the words {@code Scribe} uses for the
    * same fact.
    *
-   * <p>Flattened for {@code Scribe.describe}'s reason: {@code Home.of} refuses a blank project name
-   * and checks nothing else, so a line break in one would otherwise reach column zero of a rendered
-   * window, which is where this class's own lines are.
+   * <p>Home validates project identities. Flattening additionally protects the renderer's own
+   * heading lines if another input source is introduced.
    */
   private static String describe(Home home) {
     return home.isGlobal()

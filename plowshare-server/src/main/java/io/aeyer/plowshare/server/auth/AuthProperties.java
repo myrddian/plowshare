@@ -42,9 +42,8 @@ public class AuthProperties {
   /**
    * Whether {@link AuthFilter} refuses anything at all.
    *
-   * <p>True by default, and the default is the whole of the mechanism — the same shape as {@code
-   * server.address}, which defaults to loopback for the same reason. See the class note for the one
-   * thing turning it off is for.
+   * <p>Enabled by default. Listener addresses are explicit deployment configuration, independently
+   * of whether authentication is enabled.
    */
   private boolean enabled = true;
 
@@ -90,59 +89,26 @@ public class AuthProperties {
   private String refreshCookie = "ps_refresh";
 
   /**
-   * Where this server writes the operator token, or blank for "mint nothing and announce nothing at
-   * startup".
+   * Explicit operator-token handoff path, or blank to disable that startup handoff. The entrypoint
+   * supplies no conventional local path. Configure {@code plowshare.auth.token-file} or {@code
+   * PLOWSHARE_AUTH_TOKEN_FILE}, and the advertised console origin, deliberately.
    *
-   * <h2>Blank is the default, and that is the load-bearing part</h2>
-   *
-   * <p>{@code PlowshareServerApplication.main} sets this to {@code
-   * ~/.config/plowshare/console-token} as a <em>default property</em>, which is Spring's
-   * lowest-precedence source — so an environment variable, a command line {@code
-   * --plowshare.auth.token-file=...}, or a YAML key all still win over it. <b>A context that did
-   * not come through {@code main} therefore leaves this blank</b>, and every full-application test
-   * context in this repository is such a context — the three classes carrying
-   * {@code @SpringBootTest}, and the {@code SpringApplicationBuilder} and
-   * {@code @ImportAutoConfiguration} boots that raise a real web server without it.
-   *
-   * <p>That is the whole mechanism, and it lives here rather than in a {@code @Profile} or a
-   * test-only YAML because of what the alternative does: this file is a real path on the machine
-   * running the build, holding the live credential of whatever server its operator is actually
-   * using. A suite that announced by default would overwrite it once per full-application context —
-   * a running server made unreachable by running the tests, with nothing anywhere saying so. {@code
-   * AuthControllerTest} asserts both directions: that a context with this set writes the file and
-   * prints the line, and that a context without it writes and prints nothing.
-   *
-   * <p>And the whole suite is the other instrument, which is the one that covers a
-   * {@code @SpringBootTest} nobody thought to check: {@code ./gradlew check} was run on a machine
-   * whose {@code ~/.config/plowshare/} held only {@code lm-key}, and it still held only {@code
-   * lm-key} afterwards.
-   *
-   * <h2>It also decides a fence, and that is the other reason it is one key</h2>
-   *
-   * <p>{@code AgentsConfig.projectStore} reads this property and hands the path to {@code
-   * ProjectStore.mandatoryExclusions}, so no project's workspace can reach the file this server
-   * writes — wherever an operator points it. The <em>configured</em> value and never {@link
-   * AuthConfig#defaultTokenFile()}: a fence built from the default would name a path this
-   * deployment may never touch and leave the one it does touch readable, and in a context where
-   * this is blank it would name the running operator's real credential in a list of things this
-   * server claims to own.
-   *
-   * <p>That fence is not the only protection and is not the first one. {@code
-   * io.aeyer.plowshare.protocol.FileAccess#permits} refuses any path with a dot-prefixed component
-   * below its root, which covers the default {@code ~/.config/plowshare/console-token} on both
-   * machines because of where it sits. <b>The exclusion is for the operator who moves this key
-   * somewhere unhidden</b>, which is a change that would otherwise remove a protection with nothing
-   * anywhere saying so.
-   *
-   * <p>Deliberately <b>not</b> given a value in {@code application.yml}. A key there would beat
-   * {@code main}'s default property and would be read by every test as well, which is the state
-   * this default exists to avoid; the YAML carries a comment pointing here instead.
-   *
-   * <p>A blank value costs a server that mints no bootstrap token either, so {@code POST /v1/auth}
-   * has nothing to spend and the only credentials are the ones a caller issues from {@link
-   * TokenStore} directly. That is exactly what the full-application tests do.
+   * <p>The configured path is also a mandatory workspace exclusion. A blank value neither writes
+   * local credentials nor invents an exclusion for a filesystem location this server does not own.
+   * The protected file carries the operator token and one-time browser URL; neither is logged.
    */
   private String tokenFile = "";
+
+  private String consoleOrigin = "";
+
+  /** Explicit advertised HTTP(S) origin, required when an operator token file is enabled. */
+  public String getConsoleOrigin() {
+    return consoleOrigin;
+  }
+
+  public void setConsoleOrigin(String consoleOrigin) {
+    this.consoleOrigin = consoleOrigin;
+  }
 
   /**
    * The login this server's one admin account is created under, or blank for "no admin has been
@@ -162,11 +128,9 @@ public class AuthProperties {
    * for.
    *
    * <p>Bound from {@code PLOWSHARE_ADMIN_HANDLE} in {@code application.yml}, unlike {@link
-   * #tokenFile}, which is deliberately absent from that file. The difference is what "off" costs to
-   * spell: {@code tokenFile}'s off value is a real path with a side effect if written down naively,
-   * so it is set only by {@code PlowshareServerApplication.main}, which a test context never calls.
-   * This key's off value is the empty string, which is safe to write as the YAML placeholder's own
-   * default and therefore needs no such indirection.
+   * #tokenFile}, which is configured explicitly by the deployment. This key's off value is the
+   * empty string, which is safe to write as the YAML placeholder's own default and therefore needs
+   * no such indirection.
    *
    * <p>Set this, and {@code PLOWSHARE_ADMIN_PASSWORD} in the environment, to opt in — but the
    * password is deliberately <b>not</b> a field on this class. See {@code AdminSeed} for where and

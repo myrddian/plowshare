@@ -40,7 +40,20 @@ public final class UsageExecutionStore implements RunUsage {
   @Override
   public Transcript start(Home home, Transcript transcript, String agent, String account) {
     if (transcript.usage().status() != UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
-      if (account != null && !Objects.equals(account, transcript.usage().accountHandle())) {
+      String authority = transcript.usage().accountHandle();
+      if (transcript.usage().status() == UsageAttribution.Status.SYSTEM && account != null) {
+        // SYSTEM is accounting identity, never an authorization bypass. An admitted owner may
+        // inspect a processing log, but another account cannot adopt that internal execution.
+        var recorded = conversation(transcript.conversationId());
+        require(
+            Objects.equals(home.project(), recorded.projectName()),
+            "SYSTEM execution cannot change project");
+        require(
+            Objects.equals(agent, transcript.usage().agentName()),
+            "SYSTEM execution cannot change agent");
+        authority = recorded.account();
+      }
+      if (account != null && !Objects.equals(account, authority)) {
         throw new LlmException("inference accounting cannot change an admitted account");
       }
       return transcript;
@@ -59,6 +72,35 @@ public final class UsageExecutionStore implements RunUsage {
       // Do not expose SQL parameters, row contents, or credential-bearing exception text.
       throw new LlmException("inference accounting could not resolve immutable run ownership");
     }
+  }
+
+  /** Freeze the root's first execution before children; no model tool call is fabricated. */
+  public UsageAttribution processing(String id, UsageAttribution.Operation operation) {
+    return transaction.execute(
+        ignored -> {
+          Conversation root = conversation(id);
+          require(
+              root.parent() == null && "document_pipeline".equals(root.agent()),
+              "SYSTEM processing requires an internal pipeline root");
+          var saved = read(id, 1);
+          if (saved != null) {
+            require(
+                saved.status() == UsageAttribution.Status.SYSTEM,
+                "existing execution cannot be reassigned to SYSTEM");
+            return saved.withOperation(operation);
+          }
+          var owner =
+              UsageAttribution.system(root.projectId(), operation)
+                  .withExecution(
+                      conversations(root),
+                      UsageLineage.root(runId(id, 1)),
+                      UsageLineage.NONE,
+                      root.agent(),
+                      1L,
+                      null);
+          register(new Transcript.Spoken(id, 1), owner);
+          return owner;
+        });
   }
 
   /** Read the execution owning source material, rather than the unrelated trigger's run. */
@@ -120,13 +162,19 @@ public final class UsageExecutionStore implements RunUsage {
       }
       require(Objects.equals(saved.agentName(), agent), "execution cannot change agent");
       require(
-          account == null || Objects.equals(account, saved.accountHandle()),
+          account == null
+              || Objects.equals(
+                  account,
+                  saved.status() == UsageAttribution.Status.SYSTEM
+                      ? conversation.account()
+                      : saved.accountHandle()),
           "execution cannot change actor");
       require(
           Objects.equals(saved.projectId(), conversation.projectId()),
           "execution cannot change project");
       require(
-          conversation.account() == null
+          saved.status() == UsageAttribution.Status.SYSTEM
+              || conversation.account() == null
               || Objects.equals(saved.accountHandle(), conversation.account()),
           "execution cannot change account");
       owner =
@@ -161,7 +209,9 @@ public final class UsageExecutionStore implements RunUsage {
         require(
             Objects.equals(
                 conversation.account() != null ? conversation.account() : account,
-                parent.accountHandle()),
+                parent.status() == UsageAttribution.Status.SYSTEM
+                    ? conversation(conversation.parent()).account()
+                    : parent.accountHandle()),
             "delegation cannot change account");
         require(
             lineage.equals(parent.conversations().child(conversation.id())),
@@ -178,7 +228,7 @@ public final class UsageExecutionStore implements RunUsage {
                   : UsageAttribution.Operation.AGENT_CHAT
               : parent.operation();
       var identity =
-          handle == null
+          parent.status() == UsageAttribution.Status.SYSTEM || handle == null
               ? UsageAttribution.system(conversation.projectId(), operation)
               : conversation.projectId() == null
                   ? UsageAttribution.global(handle, operation)

@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Found;
@@ -15,6 +13,8 @@ import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.agents.FileTools;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,7 +42,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>Every javadoc in this slice says the same thing — {@code Window} lives in {@code
  * plowshare-protocol} so that a remote read and a local one cannot disagree, {@code
  * FileProvider.read} says both implementations cut with {@link Window#cut} and neither works out a
- * range of its own, {@code ClientEnforcer} and {@code LocalProvider} each say it about themselves.
+ * range of its own, {@code NodeFiles} and {@code LocalProvider} each say it about themselves.
  * <b>None of that was a test.</b> Each half was measured against {@code Window.cut} inside its own
  * module, which is the strongest statement either module can make on its own and is not the
  * statement the design rests on: the two could each be right about {@code cut} and still be reached
@@ -82,7 +82,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * container is per-class and shared by every test here, and {@code LocalProviderTest} already pays
  * the same cost for the same reason.
  *
- * <p>The client half needs nothing of the sort — a {@link Workspace} is a field — and that
+ * <p>The client half needs nothing of the sort — a {@link TestWorkspace} is a field — and that
  * asymmetry is the two designs and not an accident: a client's workspace is set over its own socket
  * and a server's comes out of a table an operator writes.
  */
@@ -144,7 +144,7 @@ class WindowAgreementTest {
   private Path bundle;
 
   private LocalProvider local;
-  private ClientEnforcer client;
+  private NodeFiles client;
 
   @BeforeAll
   static void migrate() {
@@ -188,9 +188,9 @@ class WindowAgreementTest {
     local =
         new LocalProvider(store, Home.of(PROJECT), List.of(new Grant(Scope.WORKSPACE, Mode.READ)));
 
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    client = new ClientEnforcer(workspace);
+    client = new NodeFiles(workspace);
   }
 
   /**
@@ -382,10 +382,10 @@ class WindowAgreementTest {
   /**
    * The other half of the pair, and the one written twice by hand.
    *
-   * <p>{@code LocalProvider.stat} and {@code ClientEnforcer.stat} are two separately typed copies
-   * of one expression — the empty span, the total, and the {@link Span#LINES}-or-{@link Span#END}
-   * choice that keeps {@code Window.cut}'s invariant. There is no shared method behind them to make
-   * them agree, so this is the only thing that does.
+   * <p>{@code LocalProvider.stat} and {@code NodeFiles.stat} are two separately typed copies of one
+   * expression — the empty span, the total, and the {@link Span#LINES}-or-{@link Span#END} choice
+   * that keeps {@code Window.cut}'s invariant. There is no shared method behind them to make them
+   * agree, so this is the only thing that does.
    */
   @Test
   void a_stat_of_one_file_is_the_same_answer_on_both_machines() {

@@ -145,7 +145,7 @@ public final class ResultTools {
 
     public Read(Transcript transcript) {
       this.transcript = Objects.requireNonNull(transcript, "transcript");
-      this.schema = new ToolSchema(READ_NAME, READ_DESCRIPTION, handleSchema());
+      this.schema = ToolSchema.from(READ_NAME, READ_DESCRIPTION, handleSchema());
     }
 
     @Override
@@ -377,7 +377,7 @@ public final class ResultTools {
 
     public Listing(Transcript transcript) {
       this.transcript = Objects.requireNonNull(transcript, "transcript");
-      this.schema = new ToolSchema(LIST_NAME, LIST_DESCRIPTION, offsetSchema());
+      this.schema = ToolSchema.from(LIST_NAME, LIST_DESCRIPTION, offsetSchema());
     }
 
     @Override

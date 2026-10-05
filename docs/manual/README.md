@@ -57,8 +57,8 @@ chapters. These are the canonical references rather than duplicated copies:
 - [Model usage and accounting](../model-usage-accounting.md)
 - [SDKs](../sdks.md)
 - [A2A receiving](../a2a-receiving.md) and [A2A sending](../a2a-sending.md)
-- [Integration runtime](../../plowshare-integrations/README.md)
-- [Home Assistant](../../plowshare-integration-home-assistant/README.md)
+- [Integration runtime](../../integrations/runtime/README.md)
+- [Home Assistant](../../integrations/home-assistant/README.md)
 - [Distributions](../distributions.md) and [Docker deployment](../../deploy/docker/README.md)
 
 ## Read inside Plowshare

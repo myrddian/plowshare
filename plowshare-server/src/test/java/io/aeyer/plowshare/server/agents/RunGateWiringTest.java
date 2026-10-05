@@ -866,7 +866,7 @@ class RunGateWiringTest {
     return new AgentTool() {
       @Override
       public ToolSchema schema() {
-        return new ToolSchema(
+        return ToolSchema.from(
             "judge_probe", "judges a command", Map.of("type", "object", "properties", Map.of()));
       }
 

@@ -45,6 +45,11 @@ and keep it faithful. Do not add steps, detail, or conditions the person did not
 ask for, and leave out the schedule and the agent's name, which are said
 elsewhere.
 
+If the person explicitly supplies a qualified /skill:name or /orchestration:name
+command, preserve that command, its optional --mode= value and its arguments
+verbatim in task. Never invent a command name or context mode. The schedule
+save boundary validates the agent's command grants before writing the file.
+
 Set intoConversation to true only when the sentence asks for the result here or
 in this conversation. Otherwise it is false, and the result goes to the person's
 inbox.

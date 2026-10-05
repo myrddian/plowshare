@@ -2,7 +2,6 @@ package io.aeyer.plowshare.server.events;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,26 +15,36 @@ public class Ticker {
   private static final Logger log = LoggerFactory.getLogger(Ticker.class);
 
   private final ScheduleStore schedules;
-  private final Intake intake;
+  private final ScheduledPublication publications;
 
-  public Ticker(ScheduleStore schedules, Intake intake) {
+  public Ticker(ScheduleStore schedules, ScheduledPublication publications) {
     this.schedules = Objects.requireNonNull(schedules, "schedules");
-    this.intake = Objects.requireNonNull(intake, "intake");
+    this.publications = Objects.requireNonNull(publications, "scheduled publications");
+  }
+
+  private Runnable reconciliation = () -> {};
+
+  /**
+   * File projection completes before due work is selected; an unavailable scan suspends its source.
+   */
+  public void useReconciliation(Runnable reconciliation) {
+    this.reconciliation = Objects.requireNonNull(reconciliation);
+  }
+
+  public void reconcile() {
+    reconciliation.run();
   }
 
   public int tick(Instant now) {
+    reconcile();
+    publications.recover();
     int fired = 0;
     for (ScheduleRecord due : schedules.due(now)) {
       try {
         Instant following = CronSchedule.parse(due.cron(), due.zone()).nextAfter(now);
-        if (!schedules.claim(due.name(), due.nextFireAt(), following)) {
+        if (!publications.publish(due, following, now)) {
           continue;
         }
-        intake.emit(
-            due.emits(),
-            Map.of("schedule", due.name(), "fire_at", due.nextFireAt().toString()),
-            due.name(),
-            due.nextFireAt());
         fired++;
       } catch (RuntimeException broken) {
         log.warn(

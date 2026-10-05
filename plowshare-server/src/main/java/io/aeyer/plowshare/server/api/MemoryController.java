@@ -110,7 +110,8 @@ public class MemoryController {
     // surface refuses the same body in the same words rather than in a
     // second copy of this paragraph. See WriteMemoryRequest.verdict, which
     // exists only to make that sentence reachable.
-    MemoryProposal proposal = RequestedProposal.toFile(request.proposal(), request.verdict());
+    MemoryProposal proposal =
+        RequestedProposal.toFile(request.proposal(), request.verdict() != null);
     Home home = RequestedHome.in(request.project());
     Validation.check(proposal, archive.maxBodyChars());
     // One embedding call, not two, and it used to be two. Scribe.judge

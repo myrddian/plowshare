@@ -64,18 +64,59 @@ public class EventFrames implements FrameArea {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
+  private org.springframework.beans.factory.ObjectProvider<
+          io.aeyer.plowshare.server.events.ScheduleDefinitions>
+      definitions;
+
+  @Autowired
+  public void useScheduleDefinitions(
+      org.springframework.beans.factory.ObjectProvider<
+              io.aeyer.plowshare.server.events.ScheduleDefinitions>
+          definitions) {
+    this.definitions = definitions;
+  }
+
+  private FrameHandler managedControl(String kind, boolean pause, FrameHandler legacy) {
+    return (payload, asking) -> {
+      var service = definitions == null ? null : definitions.getIfAvailable();
+      String name =
+          Payloads.required(
+              payload, kind, kind + "." + (pause ? "pause" : "forget"), "the displayed name");
+      String account = asking.requireHandle(kind + "." + (pause ? "pause" : "forget"));
+      if (service != null && service.managed(name, account).isPresent()) {
+        if (pause) {
+          Object value = payload.get("paused");
+          if (!(value instanceof Boolean paused))
+            throw new io.aeyer.plowshare.server.faults.CallerFault("paused must be true or false");
+          service.pause(name, paused, account);
+        } else service.forget(name, account);
+        return new io.aeyer.plowshare.protocol.frames.Outcome(
+            io.aeyer.plowshare.protocol.frames.Code.NO_CONTENT, null, null);
+      }
+      return legacy.handle(payload, asking);
+    };
+  }
+
   @Override
   public Map<String, FrameHandler> frames() {
     return Map.ofEntries(
         Map.entry(FrameTypes.SCHEDULE_DEFINE, new ScheduleDefineHandler(schedules, clock)),
         Map.entry(FrameTypes.SCHEDULE_LIST, new ScheduleListHandler(schedules)),
-        Map.entry(FrameTypes.SCHEDULE_PAUSE, new SchedulePauseHandler(schedules)),
-        Map.entry(FrameTypes.SCHEDULE_FORGET, new ScheduleForgetHandler(schedules)),
+        Map.entry(
+            FrameTypes.SCHEDULE_PAUSE,
+            managedControl("schedule", true, new SchedulePauseHandler(schedules))),
+        Map.entry(
+            FrameTypes.SCHEDULE_FORGET,
+            managedControl("schedule", false, new ScheduleForgetHandler(schedules))),
         Map.entry(FrameTypes.SCHEDULE_READ, new ScheduleReadHandler(reader)),
         Map.entry(FrameTypes.TRIGGER_DEFINE, new TriggerDefineHandler(triggers, callers)),
         Map.entry(FrameTypes.TRIGGER_LIST, new TriggerListHandler(triggers)),
-        Map.entry(FrameTypes.TRIGGER_PAUSE, new TriggerPauseHandler(triggers, firings)),
-        Map.entry(FrameTypes.TRIGGER_FORGET, new TriggerForgetHandler(triggers, firings)),
+        Map.entry(
+            FrameTypes.TRIGGER_PAUSE,
+            managedControl("trigger", true, new TriggerPauseHandler(triggers, firings))),
+        Map.entry(
+            FrameTypes.TRIGGER_FORGET,
+            managedControl("trigger", false, new TriggerForgetHandler(triggers, firings))),
         Map.entry(FrameTypes.EVENT_FIRE, new EventFireHandler(intake, firings)),
         Map.entry(FrameTypes.FIRING_LIST, new FiringListHandler(firings)));
   }

@@ -54,9 +54,11 @@ Clients get the caller token; the adapter's account password stays on the host.
 The adapter logs in on each container start and uses the returned token for WS.
 Rotating a mounted secret requires recreating/restarting the adapter.
 
-Set `PLOWSHARE_A2A_HANDLE` in the private deployment environment. The listener
-defaults to publishing on host loopback; set `PLOWSHARE_A2A_LISTEN_ADDRESS` and
-`PLOWSHARE_A2A_PUBLISHED_PORT` for your intended network access. Use your TLS proxy
+Set `PLOWSHARE_A2A_HANDLE`, `PLOWSHARE_A2A_LISTEN_ADDRESS`,
+`PLOWSHARE_A2A_PUBLISHED_PORT` and `PLOWSHARE_A2A_PORT` in the private deployment
+environment. The last must match `receive.port`. Also set
+`PLOWSHARE_A2A_HEALTH_URL` to the full HTTP(S) Agent Card URL reachable inside the
+adapter container. Addresses and ports have no deployment defaults. Use your TLS proxy
 for external access. Forward `/rpc`, `/.well-known/agent-card.json`, `Authorization`,
 `A2A-Version`, and `A2A-Extensions`. The configured public URL must match the
 address used by clients, including its port.
@@ -97,7 +99,7 @@ Release builds should use a clean checkout.
 
 When building directly on a Docker host without Java/Node, copy the two compiled
 jars into their normal `build/libs` paths, the A2A distribution into
-`plowshare-a2a/build/install/plowshare-a2a`, and the `deploy/docker` directory,
+`integrations/a2a/build/install/plowshare-a2a`, and the `deploy/docker` directory,
 preserving their checkout-relative layout. Set `PLOWSHARE_SOURCE_REVISION` to the
 revision that produced those jars, then use `docker compose ... build` below.
 There is no Gradle, Node or Java installation required on the runtime host.
@@ -118,11 +120,19 @@ chmod 600 /srv/plowshare/deployment/deployment.env
 Edit `deployment.env` for your host. Put model endpoints and API keys in
 `/srv/plowshare/config/models.env`, using one literal `NAME=value` per line
 (without shell quoting or `export`). Compose reads it in raw mode, preserving
-dollar signs in keys. Use the server's existing `LLM_*`, `LM_STUDIO_*`,
-`SPARK_*` and `FALLBACK_*` environment names. An existing Spring provider overlay
-can be saved as `/srv/plowshare/config/application.yml`. Keep both files mode
-600, owned by the deployment user. The server reads the overlay on top of its
-packaged settings; the Docker-specific database/data settings live in Compose.
+dollar signs in keys. For the generic single endpoint, set `LLM_BASE_URL`,
+`LLM_CHAT_MODEL`, `LLM_EMBEDDING_MODEL`, `LLM_API_KEY` and `LLM_PROVIDER`.
+Set `LLM_CHAT_SLOTS`, `LLM_EMBEDDING_SLOTS` and `LLM_SWARM_SLOTS` for your
+service capacity; the conservative defaults disable swarm work. No second
+inference host is required. For any other topology, save a complete Spring
+overlay as `/srv/plowshare/config/application.yml`; the
+[example overlay](../../bin/application-local.example.yml) separates chat and
+embeddings. Put its `MODEL_*` variables in `models.env`. Keep both files mode
+600, owned by the deployment user. Existing deployments must move their full
+pool declarations, model IDs, capabilities and capacity settings into this
+private overlay; packaged `studio`/`spark` pools and `SPARK_*` defaults were
+removed. The server reads the overlay on top of its packaged settings; the
+Docker-specific database/data settings live in Compose.
 Review any paths in an imported overlay for the container's filesystem.
 
 State stays on plain host disk:
@@ -197,13 +207,17 @@ After the server and adapter are healthy, register the adapter:
 
 ```sh
 # Change this URL if the published address/port differs from loopback.
-PLOWSHARE_URL=http://127.0.0.1:8091 sh deploy/docker/register-search.sh
+PLOWSHARE_URL=http://127.0.0.1:8091 \
+  PLOWSHARE_SEARCH_PROVIDER_URL=http://searxng-provider:8086 \
+  sh deploy/docker/register-search.sh
 ```
 
 Build the CLI and complete `plowshare-cli setup` (or `login`) for the same
 server first. Registration uses that administrator's saved session, renewing it
 through the shared private credential store, and registers
-`http://searxng-provider:8086` on the private Compose network. This operational
+the explicitly supplied provider URL on the private Compose network. Operator
+verification may instead set `PLOWSHARE_TOKEN_FILE` to an existing private token
+file; the helper reads its first line without printing it. This operational
 registration remains HTTP because it has no WebSocket contract; it does not
 fall back or replay a failed mutation. Re-registering updates the provider row.
 Normal search calls stay on their existing WS/tool surfaces.

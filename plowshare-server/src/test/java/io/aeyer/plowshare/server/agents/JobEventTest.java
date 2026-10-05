@@ -1263,7 +1263,7 @@ class JobEventTest {
 
     Probe(String name) {
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               name, "a probe called " + name, Map.of("type", "object", "properties", Map.of()));
     }
 

@@ -481,7 +481,7 @@ class ModelSurfaceTest {
         .formatted(agent);
   }
 
-  private static String json(Map<String, Object> parameters) {
+  private static String json(io.aeyer.plowshare.server.llm.dispatch.SchemaDefinition parameters) {
     try {
       return JSON.writeValueAsString(parameters);
     } catch (IOException unwritable) {

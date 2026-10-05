@@ -422,7 +422,7 @@ public final class AgentRunTool implements AgentTool {
     this.store = Objects.requireNonNull(store, "store");
     this.end = end;
     this.callerHandle = callerHandle;
-    this.schema = new ToolSchema(NAME, describe(agents, this.callable), parameters());
+    this.schema = ToolSchema.from(NAME, describe(agents, this.callable), parameters());
   }
 
   @Override

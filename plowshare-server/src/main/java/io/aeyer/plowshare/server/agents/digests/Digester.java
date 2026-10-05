@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +14,12 @@ import org.slf4j.LoggerFactory;
 
 /** Fold leaves are copied transactionally; this pass builds and repairs their parents. */
 public final class Digester {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   public static final int FANOUT = 8;
   private static final Logger log = LoggerFactory.getLogger(Digester.class);
   private final DigestStore store;
@@ -141,6 +148,8 @@ public final class Digester {
 
   private float[] embed(
       String summary, io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
+    if (dualEmbeddings != null)
+      return null; // Both source-fenced vectors are repaired after the digest commits.
     try {
       return EmbeddingClient.owned(
           embeddings,

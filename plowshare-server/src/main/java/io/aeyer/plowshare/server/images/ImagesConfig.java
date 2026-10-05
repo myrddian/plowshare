@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.images;
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ImageDirectories;
+import io.aeyer.plowshare.server.archive.ProjectDirectories;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.data.DataLayout;
@@ -11,7 +12,6 @@ import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Wires {@link ImageStore}, and decides in one place whether this deployment holds images at all.
@@ -33,10 +33,13 @@ public class ImagesConfig {
 
   @Bean
   public ImageStore imageStore(
-      DataLayout data, JdbcTemplate jdbc, ImagesProperties props, ProjectStore projects) {
+      DataLayout data,
+      ProjectDirectories directories,
+      ImagesProperties props,
+      ProjectStore projects) {
     return data.keepsAnything()
         ? new ImageStore(
-            ImageDirectories.under(data, jdbc), props.getMaxBytes(), fenceOver(projects))
+            ImageDirectories.under(data, directories), props.getMaxBytes(), fenceOver(projects))
         : ImageStore.NONE;
   }
 

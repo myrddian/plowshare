@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
+import io.aeyer.plowshare.protocol.CodeTrackingStatus;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.CodeProjection;
 import java.util.*;
@@ -115,7 +116,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
     // registration.
     String writerOwner = attributed ? owner : "@unattributed";
     return new CodeMapObservations() {
-      private volatile Map<String, Object> failure;
+      private volatile CodeTrackingStatus failure;
       private volatile boolean watching = true;
 
       record Mutation(CodeWorkspaceStore.Scope scope, String token) {}
@@ -161,10 +162,8 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
         } catch (RuntimeException refused) {
           boolean capacity = refused instanceof CodeWorkspaceStore.CapacityReached;
           failure =
-              Map.of(
-                  "state",
+              CodeTrackingStatus.failure(
                   capacity ? "limited" : "unavailable",
-                  "reason",
                   capacity ? "registration_capacity" : "tracking_registration_unavailable");
           return null;
         }
@@ -176,7 +175,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
           store.publish(ticket, view);
           failure = null;
         } catch (RuntimeException unavailable) {
-          failure = Map.of("state", "unavailable", "reason", "tracking_storage_unavailable");
+          failure = CodeTrackingStatus.failure("unavailable", "tracking_storage_unavailable");
         }
       }
 
@@ -185,7 +184,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
         try {
           mutations.add(new Mutation(scope(home), store.mutationStarted(scope(home))));
         } catch (RuntimeException unavailable) {
-          failure = Map.of("state", "unavailable", "reason", "tracking_storage_unavailable");
+          failure = CodeTrackingStatus.failure("unavailable", "tracking_storage_unavailable");
         }
       }
 
@@ -196,17 +195,17 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
           if (mutation != null) store.mutationFinished(mutation.scope(), mutation.token());
           else store.invalidate(scope(home));
         } catch (RuntimeException unavailable) {
-          failure = Map.of("state", "unavailable", "reason", "tracking_storage_unavailable");
+          failure = CodeTrackingStatus.failure("unavailable", "tracking_storage_unavailable");
         }
       }
 
-      public Map<String, Object> status(Home home) {
-        if (!attributed) return Map.of("state", "disabled", "reason", "unattributed");
+      public CodeTrackingStatus status(Home home) {
+        if (!attributed) return CodeTrackingStatus.failure("disabled", "unattributed");
         if (failure != null) return failure;
         try {
           return store.status(scope(home));
         } catch (RuntimeException unavailable) {
-          return Map.of("state", "unavailable", "reason", "tracking_storage_unavailable");
+          return CodeTrackingStatus.failure("unavailable", "tracking_storage_unavailable");
         }
       }
 
@@ -217,7 +216,7 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
           watching = false;
           failure = null;
         } catch (RuntimeException unavailable) {
-          failure = Map.of("state", "unavailable", "reason", "tracking_storage_unavailable");
+          failure = CodeTrackingStatus.failure("unavailable", "tracking_storage_unavailable");
         }
       }
     };
@@ -238,8 +237,8 @@ public final class CodeWorkspaceMonitor implements AutoCloseable {
 
       public void invalidate(Home home) {}
 
-      public Map<String, Object> status(Home home) {
-        return Map.of("state", "background");
+      public CodeTrackingStatus status(Home home) {
+        return CodeTrackingStatus.state("background");
       }
 
       public CodeProjection cached(

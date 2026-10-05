@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/markdown'
+export * from 'plowshare-client-ts/operations/markdown';

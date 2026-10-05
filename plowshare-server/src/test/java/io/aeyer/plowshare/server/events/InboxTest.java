@@ -5,11 +5,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.AccountEvent;
 import io.aeyer.plowshare.server.agents.Outcome;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class InboxTest {
@@ -33,7 +33,7 @@ class InboxTest {
     verify(store).deliver("enzo", "fir_1", "cnv_1", "ANSWERED", "three PRs need review", T0);
     assertEquals(1, pushed.size());
     assertEquals("enzo", pushed.get(0)[0]);
-    assertEquals(Map.of("kind", "inbox.changed", "unread", 3), pushed.get(0)[1]);
+    assertEquals(new AccountEvent.InboxChanged(3), pushed.get(0)[1]);
   }
 
   @Test
@@ -45,7 +45,7 @@ class InboxTest {
     Inbox inbox = new Inbox(store, (handle, body) -> pushed.add(body), () -> T0);
 
     assertEquals(1, inbox.read("enzo", List.of("inb_1")));
-    assertEquals(List.of(Map.of("kind", "inbox.changed", "unread", 0)), pushed);
+    assertEquals(List.of(new AccountEvent.InboxChanged(0)), pushed);
   }
 
   @Test
@@ -58,7 +58,7 @@ class InboxTest {
     inbox.notify("enzo", "approval", "Approve running make? [apr_1]", "approval:apr_1");
 
     verify(store).notice("enzo", "approval", "Approve running make? [apr_1]", "approval:apr_1", T0);
-    assertEquals(List.of(Map.of("kind", "inbox.changed", "unread", 1)), pushed);
+    assertEquals(List.of(new AccountEvent.InboxChanged(1)), pushed);
   }
 
   /** A settled question leaves the inbox at once: every account it left is told its count. */
@@ -75,7 +75,7 @@ class InboxTest {
 
     assertEquals(1, pushed.size());
     assertEquals("enzo", pushed.get(0)[0]);
-    assertEquals(Map.of("kind", "inbox.changed", "unread", 2), pushed.get(0)[1]);
+    assertEquals(new AccountEvent.InboxChanged(2), pushed.get(0)[1]);
   }
 
   @Test

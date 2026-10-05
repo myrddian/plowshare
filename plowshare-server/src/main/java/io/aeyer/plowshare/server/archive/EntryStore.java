@@ -1628,14 +1628,15 @@ public final class EntryStore {
   /**
    * Immutable complete log data for skill handoff; prefix/system blocks live in turns, not entries.
    */
-  public String snapshotForSkill(String conversationId) {
+  public io.aeyer.plowshare.server.agents.SkillContextLog snapshotForSkill(String conversationId) {
     requireInformation(conversationId);
     String conversation = ConversationStore.named(conversationId);
-    return jdbc.queryForObject(
-        "SELECT COALESCE(jsonb_agg(to_jsonb(e) ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text "
-            + "FROM entries e WHERE conversation_id = ?",
-        String.class,
-        conversation);
+    return io.aeyer.plowshare.server.agents.SkillContextLogs.read(
+        jdbc.queryForObject(
+            "SELECT COALESCE(jsonb_agg(to_jsonb(e)-'text_search' ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text "
+                + "FROM entries e WHERE conversation_id = ?",
+            String.class,
+            conversation));
   }
 
   /**

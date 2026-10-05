@@ -1092,7 +1092,7 @@ class LlmDispatcherTest {
         new LlmDispatcher(
             List.of(pool("studio", List.of("m"), Map.of(), Duration.ofSeconds(5), transport)),
             new NoOpTokenLedger());
-    ToolSchema tool = new ToolSchema("memory_recall", "Search by meaning.", Map.of());
+    ToolSchema tool = ToolSchema.from("memory_recall", "Search by meaning.", Map.of());
     try {
       dispatcher.complete(ChatRequest.of("m", null, "hello").withTools(List.of(tool)));
       assertEquals(List.of(List.of(tool)), transport.toolsSeen());
@@ -1125,7 +1125,7 @@ class LlmDispatcherTest {
             List.of(pool("studio", List.of("m"), Map.of(), Duration.ofSeconds(5), transport)),
             new NoOpTokenLedger());
     try {
-      ToolSchema recall = new ToolSchema("memory_recall", "d", Map.of());
+      ToolSchema recall = ToolSchema.from("memory_recall", "d", Map.of());
       ChatRequest request = ChatRequest.of("m", null, "hello").withTools(List.of(recall));
 
       dispatcher.stream(request, token -> {});

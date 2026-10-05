@@ -14,13 +14,12 @@ rootProject.name = "plowshare"
 
 // Client modules participate in Gradle so check reaches their TypeScript
 // tests/type checks and the server consumes a declared console bundle output.
-// Java SDK/client support lives alongside the shared TypeScript WS client;
+// Java SDK support lives alongside the shared TypeScript WS client;
 // CLI and MCP are TypeScript entry points. HTTP remains for protocol boundaries
 // such as authentication, uploads and Git, not general operation dispatch.
 include(
     "plowshare-protocol",
     "plowshare-server",
-    "plowshare-client",
     "plowshare-client-ts",
     "plowshare-cli",
     "plowshare-console",
@@ -61,3 +60,11 @@ dependencyResolutionManagement {
 include("plowshare-client-node", "plowshare-mcp")
 include("plowshare-sdk", "plowshare-a2a")
 include("plowshare-integrations", "plowshare-integration-home-assistant")
+
+// Source layout is independent of published coordinates and Gradle task names.
+project(":plowshare-sdk").projectDir = file("sdk/java")
+project(":plowshare-client-ts").projectDir = file("sdk/typescript")
+project(":plowshare-client-node").projectDir = file("sdk/node")
+project(":plowshare-integrations").projectDir = file("integrations/runtime")
+project(":plowshare-a2a").projectDir = file("integrations/a2a")
+project(":plowshare-integration-home-assistant").projectDir = file("integrations/home-assistant")

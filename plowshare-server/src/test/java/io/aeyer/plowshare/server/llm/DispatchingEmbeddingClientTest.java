@@ -107,9 +107,12 @@ class DispatchingEmbeddingClientTest {
         new NoOpTokenLedger());
   }
 
-  /** The shipped tokenizer: the ratio heuristic at its default. */
+  /**
+   * Deterministic fixture vocabulary for transport behavior; real tokenizer coverage is separate.
+   */
   private static final Tokenizer TOKENIZER =
-      new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN);
+      new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+          RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN);
 
   /** The shipped ceiling, {@code plowshare.llm.embedding-max-input-tokens}. */
   private static final int MAX = 1536;
@@ -410,11 +413,25 @@ class DispatchingEmbeddingClientTest {
     }
   }
 
+  @Test
+  void an_estimate_below_the_ceiling_cannot_authorize_an_embedding_call() {
+    StubTransport transport = new StubTransport(768);
+    LlmDispatcher dispatcher = dispatcherOver(transport);
+    try {
+      assertThrows(
+          EmbeddingException.class,
+          () -> clientOver(dispatcher, 768, new RatioTokenizer(4)).embed("a:2 ".repeat(1000)));
+      assertTrue(transport.modelsSeen.isEmpty());
+    } finally {
+      dispatcher.close();
+    }
+  }
+
   private static Tokenizer flat(int tokens) {
     return new Tokenizer() {
       @Override
       public TokenCount count(String text) {
-        return TokenCount.estimated(tokens, "a flat " + tokens + ", for a test");
+        return TokenCount.measured(tokens, "fixture vocabulary");
       }
 
       @Override

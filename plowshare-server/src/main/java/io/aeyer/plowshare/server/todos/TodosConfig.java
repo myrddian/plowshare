@@ -8,7 +8,6 @@ import io.aeyer.plowshare.server.events.SpeakerHandles;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationState;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import java.time.Instant;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -138,7 +137,9 @@ public class TodosConfig {
               handle ->
                   pushes
                       .getIfAvailable(() -> AccountPushes.NONE)
-                      .push(handle, Map.of("kind", CHANGED, "conversation", conversation)));
+                      .push(
+                          handle,
+                          new io.aeyer.plowshare.protocol.AccountEvent.TodosChanged(conversation)));
     } catch (RuntimeException failed) {
       log.error(
           "todo list for conversation {} changed but its clients could not be told",

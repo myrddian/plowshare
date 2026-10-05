@@ -1,5 +1,5 @@
-import { answeringApproval } from './session.ts'
-import type { Approval, Ask } from './session.ts'
+import { answeringApproval } from './session.ts';
+import type { Approval } from './session.ts';
 
 /**
  * One question a run asked, answered a key at a time. Spec 2026-09-15, asking a
@@ -30,41 +30,49 @@ import type { Approval, Ask } from './session.ts'
 
 /** One key, in the words this module reads. */
 export type Stroke =
-    /** A printable character: `o`, `c`, `p` or `d` mean something, the rest nothing. */
-    | { readonly kind: 'text'; readonly text: string }
-    | { readonly kind: 'left' }
-    | { readonly kind: 'right' }
-    | { readonly kind: 'enter' }
-    | { readonly kind: 'escape' }
+  /** A printable character: `o`, `c`, `p` or `d` mean something, the rest nothing. */
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'left' }
+  | { readonly kind: 'right' }
+  | { readonly kind: 'enter' }
+  | { readonly kind: 'escape' };
 
 /** Where one question stands. */
 export type Asking =
-    /** Waiting for `o`, `c`, `p` or `d`. */
-    | { readonly kind: 'choosing'; readonly approval: Approval }
-    /**
-     * `p` was pressed: choosing how much of the command a project approval covers.
-     *
-     * @param length how many leading arguments, from 1 to the whole command
-     */
-    | { readonly kind: 'prefixing'; readonly approval: Approval; readonly length: number }
-    /** Decided. The view sends `ask` and reads what comes back. */
-    | { readonly kind: 'answered'; readonly approval: Approval; readonly ask: Ask }
-    /** Escape at the choice: nothing is sent and the question stays open. */
-    | { readonly kind: 'left'; readonly approval: Approval }
+  /** Waiting for `o`, `c`, `p` or `d`. */
+  | { readonly kind: 'choosing'; readonly approval: Approval }
+  /**
+   * `p` was pressed: choosing how much of the command a project approval covers.
+   *
+   * @param length how many leading arguments, from 1 to the whole command
+   */
+  | {
+      readonly kind: 'prefixing';
+      readonly approval: Approval;
+      readonly length: number;
+    }
+  /** Decided. The view sends `ask` and reads what comes back. */
+  | {
+      readonly kind: 'answered';
+      readonly approval: Approval;
+      readonly ask: ReturnType<typeof answeringApproval>;
+    }
+  /** Escape at the choice: nothing is sent and the question stays open. */
+  | { readonly kind: 'left'; readonly approval: Approval };
 
 /** Whether a question asks about an acceptance set — several commands, one answer (V67). */
 export function isSet(approval: Approval): boolean {
-    return approval.commands !== undefined
+  return approval.commands !== undefined;
 }
 
 /** A question, before any key. */
 export function askingAbout(approval: Approval): Asking {
-    return { kind: 'choosing', approval }
+  return { kind: 'choosing', approval };
 }
 
 /** Whether nothing more is read for this question. */
 export function settledAsking(state: Asking): boolean {
-    return state.kind === 'answered' || state.kind === 'left'
+  return state.kind === 'answered' || state.kind === 'left';
 }
 
 /**
@@ -76,67 +84,93 @@ export function settledAsking(state: Asking): boolean {
  * were shown should not be told their answer was malformed.
  */
 export function startingLength(approval: Approval): number {
-    const suggested = approval.defaultPrefix
-    const leads = suggested.length > 0 && suggested.length <= approval.command.length
-        && suggested.every((word, at) => approval.command[at] === word)
-    return leads ? suggested.length : 1
+  const suggested = approval.defaultPrefix;
+  const leads =
+    suggested.length > 0 &&
+    suggested.length <= approval.command.length &&
+    suggested.every((word, at) => approval.command[at] === word);
+  return leads ? suggested.length : 1;
 }
 
 /** The leading arguments a project approval would cover, at this length. */
-export function prefixAt(approval: Approval, length: number): readonly string[] {
-    return approval.command.slice(0, length)
+export function prefixAt(
+  approval: Approval,
+  length: number,
+): readonly string[] {
+  return approval.command.slice(0, length);
 }
 
 /** This question after one key. A key that means nothing here leaves it as it was. */
 export function pressingOn(state: Asking, stroke: Stroke): Asking {
-    const { approval } = state
-    if (state.kind === 'choosing') {
-        if (stroke.kind === 'escape') {
-            return { kind: 'left', approval }
-        }
-        if (stroke.kind !== 'text') {
-            return state
-        }
-        // CASE-BLIND, BECAUSE CAPS LOCK IS NOT A DIFFERENT ANSWER. Anything
-        // longer than one character is not a key at all — a paste — and a
-        // paste that began with `d` must not deny a command.
-        switch (stroke.text.toLowerCase()) {
-            case 'o':
-                return { kind: 'answered', approval, ask: answeringApproval(approval.id, 'once') }
-            case 'c':
-                return { kind: 'answered', approval, ask: answeringApproval(approval.id, 'conversation') }
-            case 'd':
-                return { kind: 'answered', approval, ask: answeringApproval(approval.id, 'deny') }
-            case 'p':
-                // A SET IS SEVERAL COMMANDS, and a project prefix covers one: it takes once,
-                // conversation or deny (V67), and the server refuses a project answer to it.
-                return isSet(approval) ? state
-                    : { kind: 'prefixing', approval, length: startingLength(approval) }
-            default:
-                return state
-        }
+  const { approval } = state;
+  if (state.kind === 'choosing') {
+    if (stroke.kind === 'escape') {
+      return { kind: 'left', approval };
     }
-    if (state.kind === 'prefixing') {
-        // WHOLE ARGUMENTS, NEVER CHARACTERS. The server matches a prefix
-        // argument by argument, so a half-argument is not a prefix it could
-        // hold; at least the program, at most the whole command.
-        switch (stroke.kind) {
-            case 'left':
-                return { ...state, length: Math.max(1, state.length - 1) }
-            case 'right':
-                return { ...state, length: Math.min(approval.command.length, state.length + 1) }
-            case 'enter':
-                return {
-                    kind: 'answered', approval,
-                    ask: answeringApproval(approval.id, 'project', prefixAt(approval, state.length)),
-                }
-            case 'escape':
-                return { kind: 'choosing', approval }
-            default:
-                return state
-        }
+    if (stroke.kind !== 'text') {
+      return state;
     }
-    return state
+    // CASE-BLIND, BECAUSE CAPS LOCK IS NOT A DIFFERENT ANSWER. Anything
+    // longer than one character is not a key at all — a paste — and a
+    // paste that began with `d` must not deny a command.
+    switch (stroke.text.toLowerCase()) {
+      case 'o':
+        return {
+          kind: 'answered',
+          approval,
+          ask: answeringApproval(approval.id, 'once'),
+        };
+      case 'c':
+        return {
+          kind: 'answered',
+          approval,
+          ask: answeringApproval(approval.id, 'conversation'),
+        };
+      case 'd':
+        return {
+          kind: 'answered',
+          approval,
+          ask: answeringApproval(approval.id, 'deny'),
+        };
+      case 'p':
+        // A SET IS SEVERAL COMMANDS, and a project prefix covers one: it takes once,
+        // conversation or deny (V67), and the server refuses a project answer to it.
+        return isSet(approval)
+          ? state
+          : { kind: 'prefixing', approval, length: startingLength(approval) };
+      default:
+        return state;
+    }
+  }
+  if (state.kind === 'prefixing') {
+    // WHOLE ARGUMENTS, NEVER CHARACTERS. The server matches a prefix
+    // argument by argument, so a half-argument is not a prefix it could
+    // hold; at least the program, at most the whole command.
+    switch (stroke.kind) {
+      case 'left':
+        return { ...state, length: Math.max(1, state.length - 1) };
+      case 'right':
+        return {
+          ...state,
+          length: Math.min(approval.command.length, state.length + 1),
+        };
+      case 'enter':
+        return {
+          kind: 'answered',
+          approval,
+          ask: answeringApproval(
+            approval.id,
+            'project',
+            prefixAt(approval, state.length),
+          ),
+        };
+      case 'escape':
+        return { kind: 'choosing', approval };
+      default:
+        return state;
+    }
+  }
+  return state;
 }
 
 /**
@@ -148,15 +182,17 @@ export function pressingOn(state: Asking, stroke: Stroke): Asking {
  * which means nothing, so a sentence typed by mistake answers nothing.
  */
 export function strokesOf(line: string): Stroke[] {
-    const text = line.trim()
-    if (text === '') {
-        return [{ kind: 'enter' }]
-    }
-    if (text.toLowerCase() === 'esc') {
-        return [{ kind: 'escape' }]
-    }
-    if (/^[<>]+$/u.test(text)) {
-        return [...text].map((arrow) => (arrow === '<' ? { kind: 'left' } : { kind: 'right' }))
-    }
-    return [{ kind: 'text', text }]
+  const text = line.trim();
+  if (text === '') {
+    return [{ kind: 'enter' }];
+  }
+  if (text.toLowerCase() === 'esc') {
+    return [{ kind: 'escape' }];
+  }
+  if (/^[<>]+$/u.test(text)) {
+    return [...Array.from(text)].map((arrow) =>
+      arrow === '<' ? { kind: 'left' } : { kind: 'right' },
+    );
+  }
+  return [{ kind: 'text', text }];
 }

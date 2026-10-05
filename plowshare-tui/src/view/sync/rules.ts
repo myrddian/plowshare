@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/rules'
+export * from 'plowshare-client-node/sync/rules';

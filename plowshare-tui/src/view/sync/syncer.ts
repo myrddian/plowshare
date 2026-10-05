@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/syncer'
+export * from 'plowshare-client-node/sync/syncer';

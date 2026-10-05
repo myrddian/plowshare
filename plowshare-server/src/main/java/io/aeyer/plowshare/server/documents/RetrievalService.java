@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.documents;
 
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationContext;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
@@ -92,6 +93,13 @@ import java.util.UUID;
  * a vector-only answer.
  */
 public final class RetrievalService implements UsageAware {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+    store.useDualEmbeddings(embeddings);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
   private InformationContext usageContext;
 
@@ -250,12 +258,18 @@ public final class RetrievalService implements UsageAware {
   }
 
   public RetrievalService audited(java.util.function.Consumer<UUID> audit) {
-    return new RetrievalService(store.audited(audit), embeddings, model, expectedDim);
+    RetrievalService copy =
+        new RetrievalService(store.audited(audit), embeddings, model, expectedDim);
+    copy.dualEmbeddings = dualEmbeddings;
+    copy.usageOwners = usageOwners;
+    copy.usageContext = usageContext;
+    return copy;
   }
 
   public RetrievalService scoped(InformationAccess access, InformationContext context) {
     RetrievalService copy =
         new RetrievalService(store.scoped(access, context), embeddings, model, expectedDim);
+    copy.dualEmbeddings = dualEmbeddings;
     copy.usageOwners = usageOwners;
     copy.usageContext = context;
     return copy;
@@ -265,6 +279,7 @@ public final class RetrievalService implements UsageAware {
     RetrievalService copy =
         new RetrievalService(
             store.embeddingSpace(model, expectedDim), embeddings, model, expectedDim);
+    copy.dualEmbeddings = dualEmbeddings;
     copy.usageOwners = usageOwners;
     copy.usageContext = usageContext;
     return copy;
@@ -332,6 +347,14 @@ public final class RetrievalService implements UsageAware {
               + " hits; it must be at least 1. Asking"
               + " for none is not the same as finding none, and this returns an"
               + " empty answer only for a corpus that really held nothing close");
+    }
+    if (dualEmbeddings != null) {
+      var profile = dualEmbeddings.active(querySlot());
+      var coverage = dualEmbeddings.read(profile, () -> store.profiled(profile).coverage());
+      if (coverage.searchable() == 0)
+        return new Found(query, limit, Math.min(limit, MAX_HITS), mode, List.of(), coverage);
+      return dualRead(
+          profile, owner, List.of(query), reader -> reader.search(query, limit, mode, owner));
     }
     int applied = Math.min(limit, MAX_HITS);
 
@@ -427,6 +450,9 @@ public final class RetrievalService implements UsageAware {
               + " passages; it must be at least 1. Asking"
               + " for none is not the same as finding none");
     }
+    if (dualEmbeddings != null)
+      return dualRead(
+          query, owner, List.of(query), reader -> reader.within(documentId, query, limit, owner));
     float[] vector =
         EmbeddingClient.owned(
             embeddings,
@@ -519,6 +545,9 @@ public final class RetrievalService implements UsageAware {
               + " chunks; it must be at least 1."
               + " Asking for none is not the same as finding none");
     }
+    if (dualEmbeddings != null)
+      return dualRead(
+          query, owner, List.of(query), reader -> reader.retrieve(query, documentId, limit, owner));
     float[] vector =
         EmbeddingClient.owned(
             embeddings,
@@ -591,6 +620,8 @@ public final class RetrievalService implements UsageAware {
               + " documents; it must be at least 1."
               + " Asking for none is not the same as finding none");
     }
+    if (dualEmbeddings != null)
+      return dualRead(query, owner, List.of(query), reader -> reader.rank(query, limit, owner));
     return new Ranking(
         store.rankBySummary(embedded(query, "ranked", owner), limit), store.ranking());
   }
@@ -653,6 +684,12 @@ public final class RetrievalService implements UsageAware {
           "a stance needs a claim to score; this one is blank. Nothing was scored,"
               + " which is not the same as scoring zero");
     }
+    if (dualEmbeddings != null)
+      return dualRead(
+          query,
+          owner,
+          List.of(query, "not " + query),
+          reader -> reader.stance(documentId, query, owner));
     // One batch and not two calls, which is what `embedAll` exists for and
     // what Anchor's own comment on this path says: two round trips for two
     // strings that are asked together.
@@ -677,6 +714,53 @@ public final class RetrievalService implements UsageAware {
       }
     }
     return store.stanceOf(documentId, both.get(0), both.get(1));
+  }
+
+  /** Captures one slot before dispatch; the fenced read rejects a concurrent activation. */
+  private <T> T dualRead(
+      String text,
+      UsageAttribution owner,
+      List<String> inputs,
+      java.util.function.Function<RetrievalService, T> work) {
+    return dualRead(dualEmbeddings.active(querySlot()), owner, inputs, work);
+  }
+
+  private EmbeddingSlot querySlot() {
+    return usageContext != null && usageContext.corpus() == InformationContext.Corpus.CODE
+        ? EmbeddingSlot.CODE
+        : EmbeddingSlot.PROSE;
+  }
+
+  private <T> T dualRead(
+      EmbeddingProfile profile,
+      UsageAttribution owner,
+      List<String> inputs,
+      java.util.function.Function<RetrievalService, T> work) {
+    List<EmbeddingQuery> queries = dualEmbeddings.queries(profile, inputs, owner);
+    // The legacy private ranking methods retain their result/lexical-fusion contracts. Their
+    // immutable repository view carries the typed space; this local adapter never dispatches.
+    EmbeddingClient captured =
+        new EmbeddingClient() {
+          public float[] embed(String value) {
+            int index = inputs.indexOf(value);
+            if (index < 0)
+              throw new IllegalArgumentException("query differs from captured embedding input");
+            return queries.get(index).values();
+          }
+
+          public List<float[]> embedAll(List<String> values) {
+            return values.stream().map(this::embed).toList();
+          }
+        };
+    RetrievalService reader =
+        new RetrievalService(
+            store.queried(queries.getFirst()),
+            captured,
+            profile.space().definition().modelId(),
+            profile.space().definition().dimensions());
+    reader.usageOwners = usageOwners;
+    reader.usageContext = usageContext;
+    return dualEmbeddings.read(profile, () -> work.apply(reader));
   }
 
   /**

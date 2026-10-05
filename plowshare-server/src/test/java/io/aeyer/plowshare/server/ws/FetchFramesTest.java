@@ -56,7 +56,7 @@ class FetchFramesTest {
             new FetchWindow(
                 "https://example.test/a",
                 "A title",
-                "the next few thousand characters",
+                "x".repeat(2048),
                 2048,
                 4096,
                 9000,
@@ -89,7 +89,7 @@ class FetchFramesTest {
     when(service.read(anyString(), anyInt()))
         .thenReturn(
             new FetchWindow(
-                "https://example.test/a", null, "", 0, 0, 0, false, "that host did not answer"));
+                "https://example.test/a", null, null, 0, 0, 0, false, "that host did not answer"));
 
     String asked =
         """

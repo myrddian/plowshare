@@ -10,7 +10,6 @@ import io.aeyer.plowshare.server.hooks.*;
 import io.aeyer.plowshare.server.llm.accounting.*;
 import java.util.*;
 import java.util.function.Function;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Tier and deliberation gates preserve paid responses across denial/retry without widening evidence
@@ -25,7 +24,7 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
   }
 
   private static final ObjectMapper JSON = new ObjectMapper();
-  private final JdbcTemplate jdbc;
+  private final InformationStageRepository stages;
   private final UnitOfWork transactions;
   private final InformationCatalogue catalogue;
   private final InformationJobs inputs;
@@ -33,13 +32,13 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
   private final Harness harness;
 
   public InformationModelStages(
-      JdbcTemplate jdbc,
+      InformationStageRepository stages,
       UnitOfWork transactions,
       InformationCatalogue catalogue,
       InformationJobs inputs,
       Hooks configured,
       Harness harness) {
-    this.jdbc = jdbc;
+    this.stages = stages;
     this.transactions = transactions;
     this.catalogue = catalogue;
     this.inputs = inputs;
@@ -107,7 +106,7 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
     HarnessRun run = harness.begin();
     try {
       if (log != null) inputs.requireLog(log, owner);
-      var row = catalogue.row(revision);
+      UUID resource = stages.resource(revision);
       var context =
           HookContext.forLog("delegation", definition.name(), false, home.project(), log)
               .withUsage(usageOwners.conversation(log, 0, UsageAttribution.Operation.HOOK_MODEL))
@@ -120,7 +119,7 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
                                   ? "tagGroups"
                                   : "summarise")
                           : "ask",
-                      row.get("resource_id").toString(),
+                      resource.toString(),
                       revision.toString(),
                       generation,
                       definition.name(),
@@ -144,13 +143,7 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
                       definition.prompt(),
                       asked))
                   .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-      var cached =
-          jdbc.queryForList(
-              "SELECT response FROM information_model_steps WHERE revision_id=? AND generation=? AND stage_key=? AND owner_handle=?",
-              revision,
-              generation,
-              key,
-              owner);
+      var cached = stages.paid(revision, generation, key, owner);
       Outcome response;
       if (cached.isEmpty()) {
         response = work.apply(asked);
@@ -160,19 +153,11 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
         transactions.inTransaction(
             () -> {
               fence.run();
-              jdbc.update(
-                  "INSERT INTO information_model_steps(revision_id,generation,stage_key,stage,owner_handle,response,state,log_id) VALUES(?,?,?,?,?,CAST(? AS jsonb),'blocked',?) ON CONFLICT DO NOTHING",
-                  revision,
-                  generation,
-                  key,
-                  definition.name(),
-                  owner,
-                  json(paid),
-                  log);
+              stages.remember(revision, generation, key, definition.name(), owner, paid, log);
               return null;
             });
       } else {
-        Outcome paid = read(cached.getFirst().get("response").toString());
+        Outcome paid = cached.orElseThrow();
         response = new Outcome(paid.ending(), paid.text(), paid.steps(), 0, paid.detail());
       }
       if (log != null) inputs.requireLog(log, owner);
@@ -182,11 +167,7 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
       transactions.inTransaction(
           () -> {
             fence.run();
-            jdbc.update(
-                "UPDATE information_model_steps SET state='ready' WHERE revision_id=? AND generation=? AND stage_key=?",
-                revision,
-                generation,
-                key);
+            stages.ready(revision, generation, key);
             return null;
           });
       return response;
@@ -206,14 +187,6 @@ public final class InformationModelStages implements DocumentStages, UsageAware 
   private static String json(Object value) {
     try {
       return JSON.writeValueAsString(value);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException(invalid);
-    }
-  }
-
-  private static Outcome read(String value) {
-    try {
-      return JSON.readValue(value, Outcome.class);
     } catch (java.io.IOException invalid) {
       throw new IllegalStateException(invalid);
     }

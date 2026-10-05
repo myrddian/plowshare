@@ -1,9 +1,6 @@
 package io.aeyer.plowshare.server.orchestrations;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.CallerOrchestrationTools;
@@ -72,7 +69,7 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
   /** Records an install question on a run; empty when asked, else why not. */
   @FunctionalInterface
   public interface Asker {
-    Optional<String> ask(String run, String question, String structure);
+    Optional<String> ask(String run, String question, Structure structure);
   }
 
   static final String INSTALL = "Install";
@@ -83,7 +80,6 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
       " Runs already started keep the definition they started with.";
   private static final String NOT_GRANTED =
       " Nothing starts it until an agent's `orchestrations:` grant names it.";
-  private static final ObjectMapper JSON = new ObjectMapper();
 
   /**
    * Tools a run hands its conductor and a definition never declares: {@code OrchestrationParser}
@@ -208,7 +204,7 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
             "Not installed; nothing was asked.\n\n" + trialled.report().render());
       }
       String question = "Install " + name + " into this project?\n\n" + trialled.report().summary();
-      String structure = installQuestion(artifactsDir(run), name, path, text, trialled);
+      Structure structure = installQuestion(artifactsDir(run), name, path, text, trialled);
       Optional<String> unasked;
       try {
         unasked = asker.ask(run.id(), question, structure);
@@ -247,10 +243,10 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
 
   private String outcome(
       OrchestrationRecord run, OrchestrationMessage question, OrchestrationMessage answer) {
-    JsonNode held = tree(question.structure());
-    String name = held.path("name").asText(null);
-    String path = held.path("path").asText(null);
-    String text = held.path("text").asText(null);
+    var held = question.structure();
+    String name = held == null ? null : held.name();
+    String path = held == null ? null : held.path();
+    String text = held == null ? null : held.text();
     if (name == null || path == null || text == null) {
       return "Nothing was installed: the install question holds no draft.";
     }
@@ -260,7 +256,7 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
     }
     // THE BYTES THE QUESTION WAS ASKED WITH: a stored text its stored digest does not match
     // is not what the person was shown the summary of.
-    if (!digest(text).equals(held.path("sha256").asText(null))) {
+    if (!digest(text).equals(held.sha256())) {
       return "The install question's draft does not match its digest; nothing was"
           + " installed."
           + stays;
@@ -544,7 +540,7 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
    * The modal always draws a description, if cut to one row on a short terminal, and drops the
    * preview first; a grant the person is giving must be where it is never lost.
    */
-  private static String installQuestion(
+  private static Structure installQuestion(
       String dir, String name, String path, String text, Trialled trialled) {
     OrchestrationResolver.Trial trial = trialled.trial();
     String effect =
@@ -585,12 +581,9 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
                             install,
                             preview(trialled.report().summary(), trial, text, path)),
                         new Option(DONT_INSTALL, leave, null)))));
-    ObjectNode root = (ObjectNode) tree(StructuredQuestions.structure(asked));
-    root.put("name", name);
-    root.put("path", path);
-    root.put("text", text);
-    root.put("sha256", trial.draft().hash());
-    return root.toString();
+    var structure = StructuredQuestions.structure(asked);
+    return new Structure(
+        structure.lead(), structure.questions(), null, name, path, text, trial.draft().hash());
   }
 
   /**
@@ -662,15 +655,15 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
    * {@code yes} or {@code y}.
    */
   private static boolean chosenInstall(OrchestrationMessage answer) {
-    JsonNode choice = tree(answer.structure()).path("choices").path(0);
-    JsonNode chosen = choice.path("chosen");
-    if (chosen.isArray() && chosen.size() == 1 && INSTALL.equals(chosen.get(0).asText())) {
+    var structure = answer.structure();
+    var choice =
+        structure == null || structure.choices() == null || structure.choices().isEmpty()
+            ? null
+            : structure.choices().getFirst();
+    if (choice != null && choice.chosen().size() == 1 && INSTALL.equals(choice.chosen().getFirst()))
       return true;
-    }
-    if (chosen.isArray() && !chosen.isEmpty()) {
-      return false;
-    }
-    return installs(answer.text()) || installs(choice.path("other").asText(null));
+    if (choice != null && !choice.chosen().isEmpty()) return false;
+    return installs(answer.text()) || installs(choice == null ? null : choice.other());
   }
 
   /**
@@ -681,20 +674,19 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
   private static List<String> wordsOf(OrchestrationMessage answer) {
     List<String> words = new ArrayList<>();
     String text = answer.text() == null ? "" : answer.text();
-    JsonNode choices = tree(answer.structure()).path("choices");
-    if (!choices.isArray() || choices.isEmpty()) {
+    var choices = answer.structure() == null ? null : answer.structure().choices();
+    if (choices == null || choices.isEmpty()) {
       if (!onlyChooses(text)) {
         words.add(text.strip());
       }
       return words;
     }
     List<StructuredAnswers.Choice> read = new ArrayList<>();
-    for (JsonNode node : choices) {
-      List<String> chosen = new ArrayList<>();
-      node.path("chosen").forEach(label -> chosen.add(label.asText()));
-      String other = node.path("other").isTextual() ? node.path("other").asText() : null;
-      String note = node.path("note").isTextual() ? node.path("note").asText() : null;
-      read.add(new StructuredAnswers.Choice(node.path("header").asText(""), chosen, other, note));
+    for (var choice : choices) {
+      var chosen = choice.chosen();
+      String other = choice.other();
+      String note = choice.note();
+      read.add(new StructuredAnswers.Choice(choice.header(), chosen, other, note));
       if (other != null && !(chosen.isEmpty() && onlyChooses(other))) {
         words.add(other);
       }
@@ -720,19 +712,6 @@ public final class Studio implements StudioTools.Port, Orchestrations.Installer 
 
   private static boolean installs(String words) {
     return words != null && WORDS_THAT_INSTALL.contains(words.strip().toLowerCase(Locale.ROOT));
-  }
-
-  /** A stored structure as JSON; a missing or unreadable one is an empty object. */
-  private static JsonNode tree(String structure) {
-    if (structure == null) {
-      return JSON.createObjectNode();
-    }
-    try {
-      JsonNode read = JSON.readTree(structure);
-      return read == null ? JSON.createObjectNode() : read;
-    } catch (JsonProcessingException unreadable) {
-      return JSON.createObjectNode();
-    }
   }
 
   /** {@code text}'s digest as a loaded definition's hash reads: {@code sha256:} and hex. */

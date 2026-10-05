@@ -15,11 +15,11 @@ importers:
         specifier: ^7.1.1
         version: 7.1.1(@types/react@19.3.0)(react@19.3.0)
       plowshare-client-node:
-        specifier: link:../plowshare-client-node
-        version: link:../plowshare-client-node
+        specifier: link:../sdk/node
+        version: link:../sdk/node
       plowshare-client-ts:
-        specifier: link:../plowshare-client-ts
-        version: link:../plowshare-client-ts
+        specifier: link:../sdk/typescript
+        version: link:../sdk/typescript
       react:
         specifier: ^19.3.0
         version: 19.3.0

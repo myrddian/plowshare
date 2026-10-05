@@ -39,34 +39,35 @@
   },
   "information.search": {
     "code": "OK",
-    "payload": {
-      "query": "question",
-      "document": "00000000-0000-0000-0000-000000000001",
-      "limit": 10,
-      "hits": [
-        {
-          "score": 0.5,
-          "chunk": {
-            "chunkId": "00000000-0000-0000-0000-000000000003",
-            "text": "passage\nnext line",
-            "paragraphId": "00000000-0000-0000-0000-000000000002",
-            "paragraphOrdinal": 1,
-            "paragraphSummary": null,
-            "section": {
-              "id": "00000000-0000-0000-0000-000000000003",
-              "title": null,
-              "synthetic": true,
-              "summary": null
+    "payload": [
+      {
+        "chunk": {
+          "chunkId": "00000000-0000-0000-0000-000000000003",
+          "chunkText": "passage\nnext line",
+          "paragraphId": "00000000-0000-0000-0000-000000000002",
+          "paragraphOrdinal": 1,
+          "paragraphSummary": null,
+          "placement": {
+            "sectionId": "00000000-0000-0000-0000-000000000004",
+            "sectionTitle": {
+              "synthetic": true
             },
-            "chapter": null,
-            "documentId": "00000000-0000-0000-0000-000000000001",
-            "sourceName": "paper.pdf",
-            "title": "A paper",
-            "documentSummary": null
-          }
-        }
-      ]
-    }
+            "sectionSummary": null,
+            "chapterId": "00000000-0000-0000-0000-000000000005",
+            "chapterTitle": {
+              "synthetic": false,
+              "title": "Chapter"
+            },
+            "chapterSummary": null
+          },
+          "documentId": "00000000-0000-0000-0000-000000000001",
+          "sourceName": "paper.pdf",
+          "documentTitle": "A paper",
+          "documentSummary": null
+        },
+        "distance": 0.5
+      }
+    ]
   },
   "information.rank": {
     "code": "OK",

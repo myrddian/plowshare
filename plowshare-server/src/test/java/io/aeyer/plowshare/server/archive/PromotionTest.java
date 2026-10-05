@@ -130,7 +130,7 @@ class PromotionTest {
   private Archive archiveWithThreshold(int threshold) {
     return new Archive(
         store,
-        new ReasonLog(jdbc),
+        new JdbcReasonLog(jdbc),
         embeddings,
         MAX_BODY_CHARS,
         threshold,
@@ -835,7 +835,7 @@ class PromotionTest {
   private Archive watchedArchive(TrackingUnitOfWork tracking, WatchingEmbeddings watching) {
     return new Archive(
         store,
-        new ReasonLog(jdbc),
+        new JdbcReasonLog(jdbc),
         watching,
         tracking,
         MAX_BODY_CHARS,

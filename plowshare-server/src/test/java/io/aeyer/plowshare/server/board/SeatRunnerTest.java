@@ -17,9 +17,9 @@ import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringRecord;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.Inbox;
-import io.aeyer.plowshare.server.events.InboxStore;
+import io.aeyer.plowshare.server.events.JdbcInboxStore;
+import io.aeyer.plowshare.server.events.JdbcTriggerStore;
 import io.aeyer.plowshare.server.events.TriggerRecord;
-import io.aeyer.plowshare.server.events.TriggerStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -303,16 +303,15 @@ class SeatRunnerTest {
     BoardSeat seat = store.seat(opened.topic().id(), "researcher").orElseThrow();
     // Owed directly, bypassing Board/WakeRules, which never write a reason this server does
     // not know: this is the shape a corrupt or forward-incompatible row would take.
-    FiringRecord bogus =
-        firings
-            .owe(
-                opened.topic().id(),
-                "conversation:" + seat.conversation(),
-                "{\"reason\":\"bogus\"}",
-                fixture.clock.get())
-            .orElseThrow();
-    assertThrows(
-        IllegalArgumentException.class, () -> runner.start(bogus, (conversation, outcome) -> {}));
+    fixture.jdbc.update(
+        "INSERT INTO firings(id,event,data,target,status,arrived_at,topic) VALUES(?, ?, ?::jsonb, ?, 'queued', ?, ?)",
+        "fir_bad",
+        "board.wake",
+        "{\"reason\":\"bogus\"}",
+        "conversation:" + seat.conversation(),
+        java.sql.Timestamp.from(fixture.clock.get()),
+        opened.topic().id());
+    assertThrows(IllegalArgumentException.class, () -> firings.find("fir_bad"));
     assertEquals(0, pot.leased(opened.topic().id()));
     assertTrue(voice.calls.isEmpty());
   }
@@ -363,9 +362,9 @@ class SeatRunnerTest {
     Dispatcher dispatcher =
         new Dispatcher(
             firings,
-            new TriggerStore(jdbc),
+            new JdbcTriggerStore(jdbc),
             NO_TRIGGERS,
-            new Inbox(new InboxStore(jdbc), AccountPushes.NONE, Instant::now),
+            new Inbox(new JdbcInboxStore(jdbc), AccountPushes.NONE, Instant::now),
             fixture.clock);
     Board three =
         new Board(
@@ -687,7 +686,15 @@ class SeatRunnerTest {
             .id();
     store.seatIfAbsent(child, "critic", chat);
     store.exhaust(opened.topic().id());
-    var wake = firings.owe(child, "conversation:" + chat, "{}", fixture.clock.get()).orElseThrow();
+    var wake =
+        firings
+            .owe(
+                child,
+                "conversation:" + chat,
+                new io.aeyer.plowshare.server.events.EventPayload.Seat(
+                    new SeatWake(null, null, null, null)),
+                fixture.clock.get())
+            .orElseThrow();
     assertThrows(IllegalStateException.class, () -> runner.start(wake, (c, o) -> {}));
     assertEquals(0, pot.leased(opened.topic().id()));
   }

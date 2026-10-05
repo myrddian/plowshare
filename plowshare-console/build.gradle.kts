@@ -159,7 +159,7 @@ val pnpmInstall by tasks.registering(Exec::class) {
 
 /** Everything the TypeScript build and the Vitest run both read. */
 fun Exec.declareSources() {
-    inputs.dir(rootProject.file("plowshare-client-ts/src/operations")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("sdk/typescript/src/operations")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src")
         .withPropertyName("sources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -188,7 +188,7 @@ val pnpmBuild by tasks.registering(Exec::class) {
 
     // Imported TUI logic resolves the shared client through the TUI dependency links.
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-tui:pnpmInstall")
-    inputs.dir(rootProject.file("plowshare-client-ts/build/operations"))
+    inputs.dir(rootProject.file("sdk/typescript/build/operations"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("plowshare-tui/src/logic"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -215,7 +215,7 @@ val pnpmTest by tasks.registering(Exec::class) {
 
     // Imported TUI logic resolves the shared client through the TUI dependency links.
     dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-tui:pnpmInstall")
-    inputs.dir(rootProject.file("plowshare-client-ts/build/operations"))
+    inputs.dir(rootProject.file("sdk/typescript/build/operations"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("plowshare-tui/src/logic"))
         .withPathSensitivity(PathSensitivity.RELATIVE)

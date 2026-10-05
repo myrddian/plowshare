@@ -108,7 +108,8 @@ public class ProjectHttpAuthorization extends RequestBodyAdviceAdapter
     if (resource != null && path.containsKey("id")) payload.put(resource, path.get("id"));
     authorization.require(
         operation(request.getMethod(), pattern),
-        payload,
+        io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
+            operation(request.getMethod(), pattern), payload),
         (String) request.getAttribute(AuthFilter.HANDLE_ATTRIBUTE));
   }
 

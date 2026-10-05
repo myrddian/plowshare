@@ -193,7 +193,7 @@ class ArchiveUnavailableTest {
    */
   @Test
   void the_reason_log_against_an_unreachable_database_says_so() {
-    ReasonLog reasons = new ReasonLog(deadJdbc);
+    ReasonLog reasons = new JdbcReasonLog(deadJdbc);
 
     assertThrows(ArchiveUnavailableException.class, () -> reasons.forMemory("mem_000001"));
     assertThrows(

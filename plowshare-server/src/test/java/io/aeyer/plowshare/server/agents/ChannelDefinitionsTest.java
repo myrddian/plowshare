@@ -345,13 +345,12 @@ class ChannelDefinitionsTest {
    * client — silently, logged at debug, with 3 400 green tests, because every fixture in this suite
    * spells its hits relative.
    *
-   * <p>Traced rather than assumed. {@code ClientEnforcer.glob} walks {@code FileAccess.roots()};
-   * {@code FileAccess.of} canonicalises every root through {@code toRealPath()}/{@code
-   * toAbsolutePath()}; {@code FileSearch.matching} collects candidates from {@code
-   * Files.walk(root)}, which prefixes each with that absolute root; and {@code
-   * ClientEnforcer.strings} hands them over as {@code Path::toString}. The pattern stays relative —
-   * {@code glob} refuses an absolute one and matches against {@code root.relativize(candidate)} —
-   * but the ANSWER is not.
+   * <p>Traced rather than assumed. {@code NodeFiles.glob} walks {@code FileAccess.roots()}; {@code
+   * FileAccess.of} canonicalises every root through {@code toRealPath()}/{@code toAbsolutePath()};
+   * {@code FileSearch.matching} collects candidates from {@code Files.walk(root)}, which prefixes
+   * each with that absolute root; and {@code NodeFiles.strings} hands them over as {@code
+   * Path::toString}. The pattern stays relative — {@code glob} refuses an absolute one and matches
+   * against {@code root.relativize(candidate)} — but the ANSWER is not.
    *
    * <p>So this is the shape no other fixture here has: a session declaring the root it walks, and a
    * hit under it, spelled the way the wire really spells it.
@@ -422,9 +421,9 @@ class ChannelDefinitionsTest {
 
   /**
    * A session that declares no roots anchors no absolute hit. Empty is a real answer to {@code
-   * roots} — {@code ClientEnforcer.roots} says so — and the safe reading of it is "this client can
-   * see nothing", not "there is no rule". Every other fixture in this file relies on it: they
-   * answer with relative hits and never declare a root, and their relative hits still read.
+   * roots} — {@code NodeFiles.roots} says so — and the safe reading of it is "this client can see
+   * nothing", not "there is no rule". Every other fixture in this file relies on it: they answer
+   * with relative hits and never declare a root, and their relative hits still read.
    */
   @Test
   void a_session_that_declares_no_roots_anchors_no_absolute_hit() {
@@ -517,8 +516,8 @@ class ChannelDefinitionsTest {
   /**
    * C3 at the level above one file. {@link ChannelDefinitions#MAX_DEFINITION_BYTES} bounds one
    * definition, and one definition is not what this source returns: a listing may name as many as
-   * {@code ClientEnforcer.MAX_MATCHES} allows, every one of them read to its own ceiling and every
-   * one of them KEPT in the list handed back. A ceiling that is only per-file leaves the source
+   * {@code NodeFiles.MAX_MATCHES} allows, every one of them read to its own ceiling and every one
+   * of them KEPT in the list handed back. A ceiling that is only per-file leaves the source
    * unbounded by exactly the argument that made the per-reply ceiling insufficient — the number of
    * files is a number the client picks too.
    *

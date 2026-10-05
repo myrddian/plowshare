@@ -38,11 +38,10 @@ import java.util.Objects;
  * tokenizer is the one place a count is made</b>, so a real tokenizer replacing the heuristic
  * behind the interface changes every chunk bound at once, with nothing here to edit.
  *
- * <p>What that costs, stated so it is not discovered: the shipped tokenizer is {@code
- * RatioTokenizer}, which estimates, and an estimate can be low. The ceiling is held below the
- * model's window to leave room for that error ({@code application.yml} carries the arithmetic), and
- * text that tokenizes far denser than prose — a script without spaces most of all — can still be
- * under-counted past that margin. The embedding endpoint is the backstop there.
+ * <p>Embedding chunk bounds use pinned model tokenizers, including preprocessing and special
+ * tokens. Estimates are refused: a safety margin around an estimate is not a hard input bound. With
+ * two encoders, the chunking capability counts both complete document inputs and uses a
+ * conservative shared ceiling. The embedding boundary independently rechecks each model.
  *
  * <h2>The overflow branch has a ceiling, and a cut is recorded</h2>
  *
@@ -111,7 +110,7 @@ public final class Chunker {
       // Longer than the ceiling on its own: flush what is packed, then
       // cut the run into ceiling-sized pieces. Anchor emits it whole.
       if (bounds.tokens(sentence) > bounds.maxTokens()) {
-        flush(current, chunks);
+        flush(current, bounds, chunks);
         current = "";
         cut(sentence, bounds, chunks);
         continue;
@@ -119,12 +118,12 @@ public final class Chunker {
 
       String joined = current.isEmpty() ? sentence : current + ' ' + sentence;
       if (!current.isEmpty() && bounds.tokens(joined) > bounds.targetTokens()) {
-        flush(current, chunks);
+        flush(current, bounds, chunks);
         joined = sentence;
       }
       current = joined;
     }
-    flush(current, chunks);
+    flush(current, bounds, chunks);
     return List.copyOf(chunks);
   }
 
@@ -143,12 +142,14 @@ public final class Chunker {
       if (to < run.length()) {
         int space = lastSpace(run, from, to);
         if (space > from
+            && bounds.tokens(run.substring(from, space)) <= bounds.maxTokens()
             && bounds.tokens(run.substring(from, to)) - bounds.tokens(run.substring(from, space))
                 < bounds.maxTokens() / 8) {
           to = space;
         }
       }
       String piece = run.substring(from, to);
+      requireFits(piece, bounds);
       chunks.add(new Chunk(piece, utf8Length(piece), true));
       from = to;
       // The whitespace a cut landed on belongs to neither side; skipping
@@ -164,16 +165,16 @@ public final class Chunker {
    * the ceiling, always on a code point boundary.
    *
    * <p>A gallop and then a bisection, so a piece costs a handful of counts whatever the run's
-   * length — counting the window a code point at a time would be a count per character, and a real
-   * tokenizer is not cheap. Both assume a longer prefix never counts fewer tokens than a shorter
-   * one, which holds of any tokenizer that covers its input.
+   * length. Token counts need not be monotonic as vocabulary pieces merge. Probes therefore seek a
+   * fitting boundary rather than guaranteeing the largest one; final slices are always checked.
    *
    * <p><b>One code point always goes in</b>, so every piece advances and the loop in {@link #cut}
-   * terminates. A single code point that counts past the ceiling on its own cannot be made smaller;
-   * a ceiling that low is a misconfiguration, and the embedding client refuses what it produces.
+   * terminates. A single code point that cannot fit after preprocessing is refused immediately;
+   * neither chunking nor submission may emit an oversized input.
    */
   private static int longestFitting(String run, int from, Chunking bounds) {
     int fits = run.offsetByCodePoints(from, 1);
+    requireFits(run.substring(from, fits), bounds);
     int over = -1;
     for (long width = 64; fits < run.length(); width *= 2) {
       int probe = boundary(run, (int) Math.min(run.length(), from + width));
@@ -227,11 +228,18 @@ public final class Chunker {
     return -1;
   }
 
-  private static void flush(String packed, List<Chunk> chunks) {
+  private static void flush(String packed, Chunking bounds, List<Chunk> chunks) {
     if (packed.isEmpty()) {
       return;
     }
+    requireFits(packed, bounds);
     chunks.add(new Chunk(packed, utf8Length(packed), false));
+  }
+
+  private static void requireFits(String text, Chunking bounds) {
+    if (bounds.tokens(text) > bounds.maxTokens())
+      throw new IllegalArgumentException(
+          "document input cannot fit the configured embedding allowance after preprocessing");
   }
 
   /**

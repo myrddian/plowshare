@@ -128,13 +128,9 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
   private final int maxInputTokens;
 
   /**
-   * What {@link #maxInputTokens} is counted with: the server's one {@code Tokenizer} bean, and the
-   * same one {@code documents.Chunker} packs by, so a chunk the chunker let through is never one
-   * this class refuses.
-   *
-   * <p>The interface and not a named implementation. The one that ships is a heuristic kept so it
-   * can be replaced; this class must go on refusing by whatever replaces it, and never by a length
-   * it works out for itself.
+   * The embedding model's exact tokenizer. Document chunking uses this same capability, while chat
+   * context estimates remain independent. Model-specific prefixes and special tokens count toward
+   * the input allowance; missing or estimated counters are refused.
    */
   private final Tokenizer tokenizer;
 
@@ -273,9 +269,9 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
    * and discovers exactly that, after the summarisation cascade has been paid for. The index is
    * named for the same reason.
    *
-   * <p><b>Counted by the tokenizer, and the refusal says how it knows.</b> The shipped tokenizer
-   * estimates, so a refusal reports the count's own account of itself: an operator reading "1750
-   * tokens" should be told it is 7000 characters at four to a token, and not a measurement.
+   * <p>Only the embedding encoder's exact counter may enforce this boundary. Chat estimates are
+   * refused, even when the estimated count is below the allowance. Tokenizer artifacts are local
+   * and checksum-pinned; counting includes special tokens without truncating the input.
    */
   private void refuseOversized(List<String> texts) {
     if (maxInputTokens < 1) {
@@ -304,6 +300,9 @@ public final class DispatchingEmbeddingClient implements EmbeddingClient {
         continue;
       }
       TokenCount count = tokenizer.count(text);
+      if (!count.isMeasured())
+        throw new EmbeddingException(
+            "embedding limits require the encoder's exact tokenizer; estimates are refused");
       if (count.tokens() > maxInputTokens) {
         throw new EmbeddingException(
             "input at index "

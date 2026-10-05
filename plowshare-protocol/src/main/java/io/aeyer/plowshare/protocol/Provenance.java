@@ -15,4 +15,10 @@ import java.time.Instant;
  * @param by the agent that formed it
  * @param where the situation it was formed in, in prose
  */
-public record Provenance(Instant at, String by, String where) {}
+public record Provenance(Instant at, String by, String where) {
+  public Provenance {
+    java.util.Objects.requireNonNull(at, "at");
+    by = ContractValues.identity(by, "by", 1024);
+    where = ContractValues.text(where, "where", 32768, false);
+  }
+}

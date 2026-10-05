@@ -43,7 +43,7 @@ class InformationReportDetailsTest {
                         "Review incomplete"))
             .toList();
     var details =
-        InformationReportDetails.from(
+        io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
             Map.of("objectives", List.of("Topic"), "findings", findings, "reviews", reviews));
     assertEquals(120, details.findings().size());
     assertEquals(120, details.reviews().size());

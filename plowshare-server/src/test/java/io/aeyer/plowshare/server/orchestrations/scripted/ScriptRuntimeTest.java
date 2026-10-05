@@ -70,7 +70,7 @@ class ScriptRuntimeTest {
         new ConversationStore(jdbc)
             .log(Origin.ORCHESTRATION, Home.global(), "fixture", null, Budget.of(10), "alice")
             .id();
-    store = new ScriptStore(jdbc);
+    store = new JdbcScriptStore(jdbc);
     definition =
         OrchestrationRegistry.parsePinned(
                 "fixture",
@@ -98,7 +98,7 @@ class ScriptRuntimeTest {
     AgentTool probe =
         new AgentTool() {
           public ToolSchema schema() {
-            return new ToolSchema("probe", "fixture", Map.of("type", "object"));
+            return ToolSchema.from("probe", "fixture", Map.of("type", "object"));
           }
 
           public String run(String arguments, Home home) {
@@ -123,7 +123,7 @@ class ScriptRuntimeTest {
   AgentTool endingTool(String name, Outcome.Ending ending, TurnEnd end) {
     return new AgentTool() {
       public ToolSchema schema() {
-        return new ToolSchema(name, "fixture", Map.of("type", "object"));
+        return ToolSchema.from(name, "fixture", Map.of("type", "object"));
       }
 
       public String run(String arguments, Home home) {
@@ -173,7 +173,11 @@ class ScriptRuntimeTest {
   @Test
   void native_question_receipt_and_saved_plan_resume_without_repeating_the_question() {
     var actions = mock(ConductorActions.class);
-    when(actions.ask(anyString(), anyString(), anyString())).thenReturn(java.util.Optional.empty());
+    when(actions.ask(
+            anyString(),
+            anyString(),
+            any(io.aeyer.plowshare.protocol.Orchestration.Structure.class)))
+        .thenReturn(java.util.Optional.empty());
     when(actions.finish(anyString(), anyString())).thenReturn(java.util.Optional.empty());
     runtime.useRunExtras(
         context ->
@@ -204,7 +208,13 @@ class ScriptRuntimeTest {
     assertEquals(Outcome.Ending.AWAITING, run(10).ending());
     assertEquals(0, effects.get());
     var paused = store.latest(conversation).orElseThrow();
-    assertEquals("review", paused.state().path("phase").asText());
+    assertEquals(
+        "review",
+        jdbc.queryForObject(
+            "SELECT state->>'phase' FROM orchestration_script_steps WHERE conversation_id=? AND sequence=?",
+            String.class,
+            conversation,
+            paused.sequence()));
     assertTrue(paused.result().startsWith("Asked."));
     var resumed =
         runtime.run(
@@ -221,7 +231,11 @@ class ScriptRuntimeTest {
             "alice");
     assertEquals(Outcome.Ending.ANSWERED, resumed.ending());
     assertEquals(1, effects.get());
-    verify(actions, times(1)).ask(eq("orc_fixture"), contains("retained objectives"), anyString());
+    verify(actions, times(1))
+        .ask(
+            eq("orc_fixture"),
+            contains("retained objectives"),
+            any(io.aeyer.plowshare.protocol.Orchestration.Structure.class));
     verify(actions).finish("orc_fixture", "retained objectives");
     assertEquals(paused.hash(), store.latest(conversation).orElseThrow().hash());
   }
@@ -381,9 +395,7 @@ class ScriptRuntimeTest {
   @Test
   void uncertain_side_effect_is_not_replayed() {
     var output = ScriptProgram.step(SOURCE, JSON.createObjectNode().put("requestId", "fixture"));
-    store.prepare(
-        conversation,
-        new ScriptStore.Step(0, hash(), output.path("state"), output.path("command"), null, null));
+    prepared(hash(), output.path("state"), output.path("command"));
     store.started(conversation, 0, "{\"value\":\"requested\"}");
     assertTrue(
         assertThrows(IllegalStateException.class, () -> run(10))
@@ -411,7 +423,7 @@ class ScriptRuntimeTest {
     AgentTool observer =
         new AgentTool() {
           public ToolSchema schema() {
-            return new ToolSchema(
+            return ToolSchema.from(
                 InformationTool.READ, "fixture readiness", Map.of("type", "object"));
           }
 
@@ -431,10 +443,7 @@ class ScriptRuntimeTest {
                 context.end(),
                 false));
     var output = ScriptProgram.step(source, JSON.createObjectNode().put("requestId", "fixture"));
-    store.prepare(
-        conversation,
-        new ScriptStore.Step(
-            0, parsed.hash(), output.path("state"), output.path("command"), null, null));
+    prepared(parsed.hash(), output.path("state"), output.path("command"));
     store.started(conversation, 0, output.path("command").path("arguments").toString());
     assertEquals(Outcome.Ending.ANSWERED, run(10).ending());
     assertEquals(1, effects.get());
@@ -444,9 +453,7 @@ class ScriptRuntimeTest {
   void readiness_recovery_cannot_replay_other_commands_or_changed_effective_operations() {
     var command = JSON.createObjectNode().put("tool", InformationTool.READ);
     command.putObject("arguments").put("operation", "await");
-    store.prepare(
-        conversation,
-        new ScriptStore.Step(0, hash(), JSON.createObjectNode(), command, null, null));
+    prepared(hash(), JSON.createObjectNode(), command);
     store.started(conversation, 0, "{\"operation\":\"read\"}");
     assertThrows(IllegalStateException.class, () -> store.retryReadinessObserver(conversation, 0));
     assertTrue(store.latest(conversation).orElseThrow().started());
@@ -467,6 +474,41 @@ class ScriptRuntimeTest {
             .getMessage()
             .contains("ungranted tool"));
     assertEquals(1, effects.get());
+  }
+
+  @Test
+  void explicit_resume_recovers_only_a_recorded_transient_delegate_failure() {
+    jdbc.update(
+        "INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command,started_at) VALUES (?,0,'hash','{}'::jsonb,?::jsonb,now())",
+        conversation,
+        "{\"tool\":\"agent_run\",\"arguments\":{\"agent\":\"research_analyst\",\"task\":\"research\"}}");
+    var child =
+        new ConversationStore(jdbc)
+            .log(
+                Origin.DELEGATION,
+                Home.global(),
+                "research_analyst",
+                conversation,
+                null,
+                "alice",
+                "script_0");
+    assertTrue(store.failedDelegate(conversation).isEmpty());
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> store.requireRecoverable(conversation));
+    jdbc.update(
+        "INSERT INTO turns(conversation_id,ordinal,utterance,answer,ending,agent) VALUES(?,1,'task','transient','UNAVAILABLE','research_analyst')",
+        child.id());
+    assertEquals(
+        new ScriptStore.FailedDelegate(child.id(), "research_analyst", 0),
+        store.failedDelegate(conversation).orElseThrow());
+    assertDoesNotThrow(() -> store.requireRecoverable(conversation));
+    jdbc.update(
+        "INSERT INTO turns(conversation_id,ordinal,utterance,answer,ending,agent) VALUES(?,2,'retry','paid answer','ANSWERED','research_analyst')",
+        child.id());
+    assertTrue(store.failedDelegate(conversation).isEmpty());
+    assertEquals("paid answer", store.delegateResult(conversation, 0).orElseThrow());
+    assertDoesNotThrow(() -> store.requireRecoverable(conversation));
   }
 
   @Test
@@ -493,5 +535,53 @@ class ScriptRuntimeTest {
     return OrchestrationRegistry.parsePinned(
             "fixture", "fixture.js", SOURCE, Set.of("probe"), OrchestrationDefinition.Tier.SHIPPED)
         .hash();
+  }
+
+  private void prepared(
+      String hash,
+      com.fasterxml.jackson.databind.JsonNode state,
+      com.fasterxml.jackson.databind.JsonNode command) {
+    jdbc.update(
+        "INSERT INTO orchestration_script_steps(conversation_id,sequence,source_hash,state,command) VALUES (?,0,?,?::jsonb,?::jsonb)",
+        conversation,
+        hash,
+        state.toString(),
+        command.toString());
+  }
+
+  @Test
+  void an_unaffordable_delegation_does_not_advance_the_journal() throws Exception {
+    String source =
+        ScriptProgram.MARKER
+            + "\nexport const manifest={}; export function step(input) {return {state:{done:true},command:{tool:'agent_run',arguments:{agent:'worker',task:'work'}}};}";
+    String sourceHash =
+        "sha256:"
+            + java.util.HexFormat.of()
+                .formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    var input =
+        new ScriptStore.Input(
+            conversation,
+            "task",
+            0,
+            java.util.UUID.randomUUID(),
+            null,
+            null,
+            List.of(),
+            sourceHash);
+    assertInstanceOf(ScriptStore.NeedsCall.class, store.prepareNext(source, input, false));
+    assertTrue(store.latest(conversation).isEmpty());
+    var prepared =
+        assertInstanceOf(ScriptStore.Prepared.class, store.prepareNext(source, input, true));
+    assertEquals(
+        "agent_run", assertInstanceOf(ScriptStore.Tool.class, prepared.step().command()).name());
+    assertEquals(prepared.step(), store.latest(conversation).orElseThrow());
+    assertEquals(
+        true,
+        jdbc.queryForObject(
+            "SELECT (state->>'done')::boolean FROM orchestration_script_steps WHERE conversation_id=?",
+            Boolean.class,
+            conversation));
   }
 }

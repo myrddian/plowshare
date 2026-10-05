@@ -145,7 +145,7 @@ class AuthFilterTest {
     context =
         new SpringApplicationBuilder(Wiring.class)
             .web(WebApplicationType.SERVLET)
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((WebServerApplicationContext) context).getWebServer().getPort();
     registry = context.getBean(SessionRegistry.class);
     tokens = context.getBean(TokenStore.class);
@@ -726,7 +726,13 @@ class AuthFilterTest {
     RuntimeException refused =
         assertThrows(
             RuntimeException.class,
-            () -> booting.run("--server.port=0", "--spring.mvc.servlet.path=/api").close(),
+            () ->
+                booting
+                    .run(
+                        "--server.port=0",
+                        "--server.address=127.0.0.1",
+                        "--spring.mvc.servlet.path=/api")
+                    .close(),
             "the context started with the dispatcher mapped under /api. AuthFilter is then"
                 + " handed /api/v1/jobs where its rule expects /v1/jobs, and an"
                 + " anonymous GET /api/v1/jobs was measured reaching the controller with"
@@ -1617,16 +1623,10 @@ class AuthFilterTest {
       org.mockito.Mockito.when(
               authorization.allowed(
                   org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.anyMap(),
+                  org.mockito.ArgumentMatchers.any(
+                      io.aeyer.plowshare.server.access.AccessRequest.class),
                   org.mockito.ArgumentMatchers.nullable(String.class)))
           .thenReturn(true);
-      org.mockito.Mockito.when(
-              authorization.filter(
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(
-                      io.aeyer.plowshare.protocol.frames.Outcome.class),
-                  org.mockito.ArgumentMatchers.nullable(String.class)))
-          .thenAnswer(call -> call.getArgument(1));
       return authorization;
     }
 

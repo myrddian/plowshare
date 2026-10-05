@@ -144,7 +144,7 @@ class HookedRunTest {
 
     @Override
     public ToolSchema schema() {
-      return new ToolSchema(name, "a probe", Map.of("type", "object", "properties", Map.of()));
+      return ToolSchema.from(name, "a probe", Map.of("type", "object", "properties", Map.of()));
     }
 
     @Override
@@ -743,7 +743,8 @@ class HookedRunTest {
         new io.aeyer.plowshare.server.harness.HarnessProperties();
     properties.setProfiles(Map.of("guided", List.of(Map.of("hook", "harness:noting"))));
     return new io.aeyer.plowshare.server.harness.Harness(
-        properties, Map.of(model, "guided"), List.of(noting));
+        io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+            properties, Map.of(model, "guided"), List.of(noting)));
   }
 
   @Test
@@ -872,7 +873,8 @@ class HookedRunTest {
     properties.setProfiles(Map.of("guided", List.of(Map.of("hook", "harness:fails-to-build"))));
     runtime.useHarness(
         new io.aeyer.plowshare.server.harness.Harness(
-            properties, Map.of("model-fast", "guided"), List.of(failing)));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("model-fast", "guided"), List.of(failing))));
     Recorded log = new Recorded();
 
     Outcome outcome = run(runtime, "contrarian", log);
@@ -909,7 +911,8 @@ class HookedRunTest {
             List.of(Map.of("hook", "harness:noting"), Map.of("hook", "harness:finish-fails"))));
     runtime.useHarness(
         new io.aeyer.plowshare.server.harness.Harness(
-            properties, Map.of("model-fast", "guided"), List.of(noting, finishFails)));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("model-fast", "guided"), List.of(noting, finishFails))));
     Recorded log = new Recorded();
 
     Outcome outcome = run(runtime, "contrarian", log);
@@ -989,7 +992,8 @@ class HookedRunTest {
     // ever be one built for the model the reroute actually sent the call to.
     runtime.useHarness(
         new io.aeyer.plowshare.server.harness.Harness(
-            properties, Map.of("small-fallback", "guided"), List.of(noting)));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("small-fallback", "guided"), List.of(noting))));
     Recorded log = new Recorded();
 
     Outcome outcome =
@@ -1108,7 +1112,8 @@ class HookedRunTest {
     // Only the fallback's model has a profile, so the trap is built after prompt.pre fired.
     runtime.useHarness(
         new io.aeyer.plowshare.server.harness.Harness(
-            properties, Map.of("small-fallback", "guided"), List.of(stuck)));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("small-fallback", "guided"), List.of(stuck))));
     Recorded log = new Recorded();
 
     Outcome outcome =
@@ -1173,7 +1178,8 @@ class HookedRunTest {
         Map.of("guided", List.of(Map.of("hook", "harness:stuck", "failure-streak", "1"))));
     runtime.useHarness(
         new io.aeyer.plowshare.server.harness.Harness(
-            properties, Map.of("model-fast", "guided"), List.of(stuck)));
+            io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                properties, Map.of("model-fast", "guided"), List.of(stuck))));
 
     run(runtime, "contrarian", log);
     return model;

@@ -194,10 +194,10 @@ points, extension choices and contribution checks.
 | Swarm and direct messaging | `server/board`, `server/swarm`, `server/agents/Messaging` |
 | Workflows and external work | `server/orchestrations`, `server/outgoing` |
 | Accounts, projects and files | `server/auth`, `server/personal`, `server/files`, `server/union` |
-| Shared TS transport and operations | `plowshare-client-ts` |
-| Node file presence and credentials | `plowshare-client-node` |
-| Java SDK and A2A adapter | `plowshare-sdk`, `plowshare-a2a` |
-| Integration policies and HA binding | `plowshare-integrations`, `plowshare-integration-home-assistant` |
+| Shared TS transport and operations | `sdk/typescript` |
+| Node file presence and credentials | `sdk/node` |
+| Java SDK and A2A adapter | `sdk/java`, `integrations/a2a` |
+| Integration policies and HA binding | `integrations/runtime`, `integrations/home-assistant` |
 
 Use the coding standards for contributions. The architecture is the implemented
 system; a proposed plan in the repository is not evidence that a capability ships.

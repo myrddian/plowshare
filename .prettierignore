@@ -1,0 +1,8 @@
+# Generated contracts have deterministic formatting owned by their generators.
+sdk/typescript/src/operations/operation-schemas.ts
+**/build/**
+**/node_modules/**
+
+plowshare-desktop/src/request-schemas.ts
+
+plowshare-console/src/transport-schemas.ts

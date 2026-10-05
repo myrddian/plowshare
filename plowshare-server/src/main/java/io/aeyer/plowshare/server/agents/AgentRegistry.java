@@ -245,11 +245,8 @@ public final class AgentRegistry {
    * holds {@code agent_run} — and <em>"this runtime does not bind it"</em> sends that person
    * looking for a wiring bug.
    *
-   * <p>Written out because {@code plowshare-server} does not and must not depend on {@code
-   * plowshare-client}, where these are registered; {@code FileWiringTest} pays the same price and
-   * says so. What stops it going stale is that the day one is renamed the tool leaves the client's
-   * surface and {@code EndToEndTest.tools_list_advertises_the_whole_surface}, which drives the real
-   * registry, fails on the name.
+   * <p>The server cannot import the external TypeScript MCP adapter. Tests compare the maintained
+   * MCP menu with agent bindings and their explicit operator-only exceptions.
    *
    * <p><b>Four of that surface's seventeen are deliberately absent from here</b> — {@code
    * memory_index}, {@code memory_curate}, {@code memory_proposals}, {@code memory_resolve}. They
@@ -1543,7 +1540,7 @@ public final class AgentRegistry {
               + " fail on its first call");
     }
     try {
-      return Sampling.NONE.withResponseFormat(new JsonSchema(name, schema));
+      return Sampling.NONE.withResponseFormat(JsonSchema.from(name, schema));
     } catch (IllegalArgumentException unusable) {
       throw new IllegalStateException(
           refusal(entry)

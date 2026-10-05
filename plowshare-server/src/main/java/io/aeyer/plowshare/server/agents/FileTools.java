@@ -382,7 +382,7 @@ public final class FileTools {
                   + "; a larger number is brought"
                   + " down to it rather than refused, and the answer says so."));
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               READ_NAME, READ_DESCRIPTION, ToolArguments.object(properties, List.of("path")));
     }
 
@@ -705,7 +705,7 @@ public final class FileTools {
     public Stat(ProviderRouter router) {
       this.router = Objects.requireNonNull(router, "router");
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               STAT_NAME,
               STAT_DESCRIPTION,
               pathSchema("The absolute path of the file to measure, as file_roots spells it."));
@@ -777,7 +777,7 @@ public final class FileTools {
           "pattern",
           ToolArguments.string("A glob relative to a root, like src/**/*.java. Never absolute."));
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               GLOB_NAME, GLOB_DESCRIPTION, ToolArguments.object(properties, List.of("pattern")));
     }
 
@@ -985,7 +985,7 @@ public final class FileTools {
           ToolArguments.flag(
               "Whether a finds A. Omit for a search that matches the case you typed."));
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               GREP_NAME, GREP_DESCRIPTION, ToolArguments.object(properties, List.of("text")));
     }
 
@@ -1243,7 +1243,7 @@ public final class FileTools {
           ToolArguments.string("The exact text to replace. It must occur in the file once."));
       properties.put("new", ToolArguments.string("The text to put in its place. May be empty."));
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               EDIT_NAME, EDIT_DESCRIPTION, ToolArguments.object(properties, List.of("path")));
     }
 
@@ -1415,7 +1415,7 @@ public final class FileTools {
       this.router = Objects.requireNonNull(router, "router");
       this.reads = Objects.requireNonNull(reads, "reads");
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               DELETE_NAME,
               DELETE_DESCRIPTION,
               pathSchema("The absolute path of the file to delete, as file_roots spells it."));
@@ -1472,7 +1472,7 @@ public final class FileTools {
           ToolArguments.string(
               "The absolute path it should have afterwards. Nothing may be there already."));
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               MOVE_NAME, MOVE_DESCRIPTION, ToolArguments.object(properties, List.of("path", "to")));
     }
 
@@ -1559,7 +1559,7 @@ public final class FileTools {
     public Roots(ProviderRouter router) {
       this.router = Objects.requireNonNull(router, "router");
       this.schema =
-          new ToolSchema(
+          ToolSchema.from(
               ROOTS_NAME,
               ROOTS_DESCRIPTION,
               ToolArguments.object(new LinkedHashMap<>(), List.of()));

@@ -1,77 +1,38 @@
-# Copy to ~/.config/plowshare/application-local.yml and edit.
-#
-#   cp bin/application-local.example.yml ~/.config/plowshare/application-local.yml
-#
-# bin/plowshare-deployment hands this file to Spring as an additional config
-# location (SPRING_CONFIG_ADDITIONAL_LOCATION), so it is read ON TOP OF the
-# shipped application.yml: a key here wins, and a key not here keeps the
-# shipped value. Delete the file and the server boots exactly as it did.
-#
-# What this example adds: REFUSAL FALLBACK. A pool serving a low-refusal
-# model, and a class naming it, so an agent can declare
-#
-#     fallback:
-#       when: [refusal]
-#       model: low_refusal_osint
-#       max-attempts: 1
-#
-# in its frontmatter ($PLOWSHARE_DATA_DIR/global/agents/<name>.md for your own
-# agents). Only agents that declare it are ever rerouted.
-#
-# Addresses and model names come from ~/.config/plowshare/deployment.env
-# (FALLBACK_BASE_URL, FALLBACK_CHAT_MODEL) and the API key from secrets.env
-# (FALLBACK_API_KEY). Keep real addresses out of this file for the reason
-# deployment.env.example gives.
-#
-# LlmPropertiesBindingTest boots the shipped application.yml with this file on
-# top, so the example cannot drift into a shape the server refuses.
-
+# Copy outside Git and set all required MODEL_* variables in your environment.
+# Launch with bin/plowshare --config /absolute/path/application-local.yml.
+# Legacy single-embedder compatibility example. For two slots, use
+# application-dual-embeddings.example.yml and docs/embedding-evolution.md.
+# This complete pool list replaces the packaged generic single-pool shape.
+# Names are operator choices; no hardware, provider or model is assumed.
+# Models must match the wire IDs served by your endpoints. This example places
+# chat and embeddings on separate endpoints; they can also share one pool.
+# Size chat/swarm slots for your service. swarm: 0 explicitly disables swarms.
 plowshare:
   llm:
-    # A map, so this ADDS a class and leaves `fast` and `reasoning` as shipped.
+    embedding-model: ${MODEL_EMBEDDING_ID}
+    embedding-dim: 768 # Legacy column width; dual slots have unconstrained storage.
     classes:
-      low_refusal_osint: ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
-
-    # A list, and Spring REPLACES a list from a higher-precedence source rather
-    # than merging it. So the two shipped pools are restated here as shipped --
-    # same placeholders, same defaults -- with the fallback pool after them.
-    # If application.yml's pools change, change them here too.
-    # Omitted `swarm` defaults to half of each pool's `chat` slots, rounded down.
-    # Set `swarm: 0` on a pool to exclude it from swarm work.
+      fast: ${MODEL_CHAT_ID}
+      reasoning: ${MODEL_CHAT_ID}
+    system: reasoning
     pools:
-      - name: studio
-        base-url: ${LLM_BASE_URL:http://localhost:1234/v1}
-        api-key: ${LM_STUDIO_API_KEY:}
-        prefill-progress: ${LM_STUDIO_PREFILL_PROGRESS:false}
+      - name: inference
+        base-url: ${MODEL_CHAT_URL}
+        api-key: ${MODEL_CHAT_API_KEY:}
+        provider: ${MODEL_CHAT_PROVIDER:openai}
         models:
-          - ${LLM_EMBEDDING_MODEL:nomic-embed-text}
-          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
-        vision:
-          - ${LLM_CHAT_MODEL:mlx-community/gemma-4-e4b-it}
-        provider: ${LLM_PROVIDER:lmstudio}
-        chat: 1
-        embedding: 2
+          - ${MODEL_CHAT_ID}
+        chat: ${MODEL_CHAT_SLOTS:2}
+        swarm: ${MODEL_SWARM_SLOTS:1}
         submit-timeout: 30s
-
-      - name: spark
-        base-url: ${SPARK_BASE_URL:http://localhost:30000/v1}
-        api-key: ${SPARK_API_KEY:}
+      - name: embeddings
+        base-url: ${MODEL_EMBEDDING_URL}
+        api-key: ${MODEL_EMBEDDING_API_KEY:}
+        provider: ${MODEL_EMBEDDING_PROVIDER:openai}
         models:
-          - ${SPARK_CHAT_MODEL:openai/gpt-oss-120b}
-        provider: openai
-        context-lengths:
-          "[openai/gpt-oss-120b]": 131072
-        chat: 8
+          - ${MODEL_EMBEDDING_ID}
+        embedding: ${MODEL_EMBEDDING_SLOTS:1}
         submit-timeout: 30s
-
-      # The low-refusal model. Any OpenAI-compatible endpoint: vLLM or
-      # llama.cpp on the Spark, LM Studio on a Mac, another server. Moving it is
-      # a change to these two lines and never to an agent.
-      - name: refusal-fallback
-        base-url: ${FALLBACK_BASE_URL:http://localhost:8001/v1}
-        api-key: ${FALLBACK_API_KEY:}
-        models:
-          - ${FALLBACK_CHAT_MODEL:your-low-refusal-model}
-        provider: openai
-        chat: 2
-        submit-timeout: 30s
+# Add more pools/classes explicitly for separate reasoning, vision or refusal
+# fallback models. Declare model-specific capabilities/context lengths only
+# when supported by the endpoint. No LM Studio or vLLM extension is implied.

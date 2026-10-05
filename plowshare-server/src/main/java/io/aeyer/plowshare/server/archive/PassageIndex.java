@@ -3,14 +3,20 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.documents.Chunker;
 import io.aeyer.plowshare.server.documents.Chunking;
+import io.aeyer.plowshare.server.embedding.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.*;
 import java.util.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Committed-source queue, shared by retained entries and durable digest summaries. */
 public final class PassageIndex implements UsageAware {
+  private DualEmbeddings dualEmbeddings;
+
+  public void useDualEmbeddings(DualEmbeddings embeddings) {
+    dualEmbeddings = java.util.Objects.requireNonNull(embeddings);
+  }
+
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -29,30 +35,26 @@ public final class PassageIndex implements UsageAware {
     }
   }
 
-  record Source(String type, String id, String hash, String text, int next) {}
+  public record Source(String type, String id, String hash, String text, int next) {}
 
   public record Match(String id, int position, String text, double similarity, String revision) {}
 
-  private final JdbcTemplate jdbc;
-  private final UnitOfWork transactions;
+  private final PassageRepository repository;
   private final EmbeddingClient embeddings;
   private final Chunking bounds;
   private final String generation;
   private final int width;
-  private boolean informationScoped;
-  private String informationAccount;
+  private PassageRepository.ReadScope scope = PassageRepository.ReadScope.UNRESTRICTED;
 
   public PassageIndex(
-      JdbcTemplate jdbc,
-      UnitOfWork transactions,
+      PassageRepository repository,
       EmbeddingClient embeddings,
       Chunking bounds,
       String generation,
       int width) {
     if (width != 768)
       throw new IllegalArgumentException("Retrieval passages require the schema's 768 dimensions");
-    this.jdbc = jdbc;
-    this.transactions = transactions;
+    this.repository = repository;
     this.embeddings = embeddings;
     this.bounds = bounds;
     this.generation = generation;
@@ -60,30 +62,43 @@ public final class PassageIndex implements UsageAware {
   }
 
   public PassageIndex forAccount(String account) {
-    PassageIndex copy = new PassageIndex(jdbc, transactions, embeddings, bounds, generation, width);
-    copy.informationScoped = true;
-    copy.informationAccount = account;
+    PassageIndex copy = new PassageIndex(repository, embeddings, bounds, generation, width);
+    copy.scope = new PassageRepository.ReadScope(true, account);
+    copy.usageOwners = usageOwners;
+    copy.dualEmbeddings = dualEmbeddings;
     return copy;
   }
 
-  private <T> List<T> informationRows(
-      String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... args) {
-    String marker = "/*information*/";
-    int at = sql.indexOf(marker);
-    List<Object> bound = new ArrayList<>(Arrays.asList(args));
-    if (informationScoped && at >= 0) {
-      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      bound.add(before, informationAccount);
-    }
-    return jdbc.query(
-        sql.replace(
-            marker, informationScoped ? " AND information_log_readable(s.conversation_id,?)" : ""),
-        mapper,
-        bound.toArray());
+  public String searchDescription() {
+    if (dualEmbeddings == null) return "Exact scoped cosine passage ranking";
+    var profile = dualEmbeddings.active(EmbeddingSlot.PROSE);
+    return "Scoped prose passage ranking: "
+        + profile.search().mode().configurationName()
+        + ", "
+        + profile.search().distance().name().toLowerCase(java.util.Locale.ROOT)
+        + (profile.search().mode() == EmbeddingSearchPolicy.Mode.EXACT
+            ? ""
+            : "; approximate candidates reranked at full precision");
   }
 
   public String generation() {
     return generation;
+  }
+
+  /** A captured query can safely be reused across home tiers, never across activation versions. */
+  public record Query(float[] legacy, EmbeddingQuery typed) {}
+
+  public Query capture(String text, UsageAttribution owner) {
+    if (dualEmbeddings == null) return new Query(query(text, owner), null);
+    return new Query(
+        null, dualEmbeddings.query(dualEmbeddings.active(EmbeddingSlot.PROSE), text, owner));
+  }
+
+  public List<Match> rank(Home home, String type, Query query, int most) {
+    if (query.typed() == null) return rank(home, type, query.legacy(), most);
+    return dualEmbeddings.read(
+        query.typed().profile(),
+        () -> repository.rank(home, type, query.typed(), most, generation, scope));
   }
 
   public float[] query(String text) {
@@ -113,47 +128,27 @@ public final class PassageIndex implements UsageAware {
 
   /** At most eight sources per pass; successes survive restart, failures back off. */
   public int repair() {
-    List<Source> pending =
-        jdbc.query(
-            """
-            SELECT s.source_type,s.source_id,s.source_hash,CASE WHEN s.generation=? THEN s.next_position ELSE 0 END AS next_position,
-                   CASE WHEN s.source_type='entry' THEN e.content ELSE d.summary END AS text
-            FROM retrieval_sources s
-            LEFT JOIN entries e ON s.source_type='entry' AND e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal
-            LEFT JOIN digests d ON s.source_type='digest' AND d.id=s.source_id
-            WHERE (s.status<>'ready' OR s.generation IS DISTINCT FROM ?) AND s.retry_at<=CURRENT_TIMESTAMP
-            ORDER BY s.retry_at,s.source_type,s.source_id LIMIT 8
-            """,
-            (r, n) ->
-                new Source(
-                    r.getString(1),
-                    r.getString(2),
-                    r.getString(3),
-                    r.getString("text"),
-                    r.getInt("next_position")),
-            generation,
-            generation);
+    List<Source> pending = repository.pending(generation);
     int written = 0;
     for (Source source : pending) {
       if (source.text() == null || source.text().isBlank()) continue;
       try {
         var chunks = passages(source.text());
+        if (dualEmbeddings != null) {
+          int start = source.next(), end = Math.min(start + 16, chunks.size());
+          if (repository.publishText(
+              source, chunks.subList(start, end), end == chunks.size(), generation)) written++;
+          continue;
+        }
         // Reuse existing digest vectors only when their embedding generation is known.
         if (source.type().equals("digest")
             && source.next() == 0
             && source.text().length() <= EntryStore.MOST_CHARACTERS_PER_SNIPPET
             && bounds.tokenizer().count(source.text()).tokens() <= bounds.maxTokens()) {
-          var existing =
-              jdbc.queryForList(
-                  "SELECT embedding::text FROM digests WHERE id=? AND embedding_generation=? AND embedding IS NOT NULL",
-                  String.class,
-                  source.id(),
-                  generation);
-          if (!existing.isEmpty()) {
-            var cells = existing.get(0).substring(1, existing.get(0).length() - 1).split(",");
-            float[] vector = new float[cells.length];
-            for (int i = 0; i < cells.length; i++) vector[i] = Float.parseFloat(cells[i]);
-            if (publish(source, List.of(source.text()), List.of(checked(vector)))) written++;
+          var existing = repository.digestVector(source.id(), generation);
+          if (existing.isPresent()) {
+            if (publish(source, List.of(source.text()), List.of(checked(existing.orElseThrow()))))
+              written++;
             continue;
           }
         }
@@ -169,14 +164,7 @@ public final class PassageIndex implements UsageAware {
 
       } catch (RuntimeException failure) {
         // A source changed/ejected during dispatch is not resurrected, even as a failure.
-        jdbc.update(
-            "UPDATE retrieval_sources SET status='failed',attempts=attempts+1,last_error=?,"
-                + " retry_at=CURRENT_TIMESTAMP + LEAST(3600,30*power(2,LEAST(attempts,7))) * interval '1 second'"
-                + " WHERE source_type=? AND source_id=? AND source_hash=?",
-            failure.getClass().getSimpleName(),
-            source.type(),
-            source.id(),
-            source.hash());
+        repository.failed(source, failure.getClass().getSimpleName());
       }
     }
     return written;
@@ -184,25 +172,20 @@ public final class PassageIndex implements UsageAware {
 
   private UsageAttribution repairOwner(Source source) {
     if (source.type().equals("entry")) {
-      var rows =
-          jdbc.query(
-              "SELECT e.conversation_id,e.turn_ordinal FROM retrieval_sources s JOIN entries e "
-                  + "ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal WHERE s.source_type='entry' AND s.source_id=?",
-              (r, n) ->
-                  usageOwners.conversation(
-                      r.getString(1), r.getInt(2), UsageAttribution.Operation.EMBEDDING_REPAIR),
-              source.id());
-      if (!rows.isEmpty()) return rows.getFirst();
-    } else {
-      var homes =
-          jdbc.query(
-              "SELECT p.name FROM digests d LEFT JOIN projects p ON p.id=d.project_id WHERE d.id=?",
-              (r, n) -> r.getString(1) == null ? Home.global() : Home.of(r.getString(1)),
-              source.id());
-      if (!homes.isEmpty())
-        return usageOwners.in(homes.getFirst(), null, UsageAttribution.Operation.EMBEDDING_REPAIR);
+      var owner =
+          repository
+              .logOwner(source.id())
+              .orElseThrow(
+                  () -> new IllegalStateException("Retrieval source has no accounting owner"));
+      return usageOwners.conversation(
+          owner.conversation(), owner.turn(), UsageAttribution.Operation.EMBEDDING_REPAIR);
     }
-    throw new IllegalStateException("Retrieval source has no accounting owner");
+    Home home =
+        repository
+            .digestHome(source.id())
+            .orElseThrow(
+                () -> new IllegalStateException("Retrieval source has no accounting owner"));
+    return usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_REPAIR);
   }
 
   /** Keep the entire matched passage visible inside the existing snippet contract. */
@@ -226,179 +209,36 @@ public final class PassageIndex implements UsageAware {
   }
 
   boolean publish(Source expected, List<String> texts, List<float[]> vectors, boolean complete) {
-    return transactions.inTransaction(
-        () -> {
-          // Same lock order as source writes: owner first, derived queue second.
-          var owners =
-              expected.type().equals("entry")
-                  ? jdbc.queryForList(
-                      "SELECT e.ordinal FROM entries e JOIN retrieval_sources s ON s.conversation_id=e.conversation_id AND s.ordinal=e.ordinal WHERE s.source_type='entry' AND s.source_id=? FOR UPDATE OF e",
-                      expected.id())
-                  : jdbc.queryForList(
-                      "SELECT id FROM digests WHERE id=? FOR UPDATE", expected.id());
-          if (owners.isEmpty()) return false;
-          var current =
-              jdbc.queryForList(
-                  "SELECT source_hash,generation,next_position,status FROM retrieval_sources WHERE source_type=? AND source_id=? FOR UPDATE",
-                  expected.type(),
-                  expected.id());
-          if (current.isEmpty() || !current.get(0).get("source_hash").equals(expected.hash()))
-            return false;
-          var row = current.get(0);
-          if (generation.equals(row.get("generation"))
-              && ("ready".equals(row.get("status"))
-                  || ((Number) row.get("next_position")).intValue() != expected.next()))
-            return false;
-          if (!generation.equals(row.get("generation")) && expected.next() != 0) return false;
-          if (expected.next() == 0)
-            jdbc.update(
-                "DELETE FROM retrieval_passages WHERE source_type=? AND source_id=?",
-                expected.type(),
-                expected.id());
-          for (int i = 0; i < texts.size(); i++)
-            jdbc.update(
-                "INSERT INTO retrieval_passages VALUES(?,?,?,?,CAST(? AS vector))",
-                expected.type(),
-                expected.id(),
-                expected.next() + i,
-                texts.get(i),
-                Arrays.toString(vectors.get(i)));
-          jdbc.update(
-              "UPDATE retrieval_sources SET status=?,generation=?,next_position=?,attempts=0,last_error=NULL,retry_at=CURRENT_TIMESTAMP WHERE source_type=? AND source_id=?",
-              complete ? "ready" : "pending",
-              generation,
-              expected.next() + texts.size(),
-              expected.type(),
-              expected.id());
-          if (complete
-              && expected.type().equals("digest")
-              && expected.next() == 0
-              && texts.size() == 1
-              && texts.get(0).equals(expected.text()))
-            jdbc.update(
-                "UPDATE digests SET embedding=CAST(? AS vector),embedding_generation=? WHERE id=?",
-                Arrays.toString(vectors.get(0)),
-                generation,
-                expected.id());
-          return true;
-        });
+    return repository.publish(expected, texts, vectors, complete, generation);
   }
 
   /**
    * Query-time home joins remain authoritative after a home move. Exact top-k, no ANN post-filter.
    */
   public List<Match> rank(Home home, String type, float[] query, int most) {
-    String join =
-        type.equals("entry")
-            ? " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal JOIN conversations owner ON owner.id=e.conversation_id "
-            : " JOIN digests owner ON owner.id=s.source_id ";
-    String eligible =
-        type.equals("entry")
-            ? " AND e.content IS NOT NULL AND e.role IS NOT NULL AND e.ejected_at IS NULL "
-            : " AND owner.stale_at IS NULL ";
-    return informationRows(
-        "SELECT source_id,position,passage,source_hash,similarity FROM (SELECT DISTINCT ON (s.source_id) s.source_id,p.position,p.passage,s.source_hash,1-(p.embedding <=> CAST(? AS vector)) AS similarity"
-            + " FROM retrieval_passages p JOIN retrieval_sources s USING(source_type,source_id)"
-            + join
-            + " WHERE s.source_type=? AND s.status='ready' AND s.generation=?"
-            + " AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
-            + eligible
-            + (type.equals("entry") ? " /*information*/" : "")
-            + " AND 1-(p.embedding <=> CAST(? AS vector))>=0.35 ORDER BY s.source_id,similarity DESC,p.position) best ORDER BY similarity DESC,source_id LIMIT ?",
-        (r, n) ->
-            new Match(
-                r.getString(1),
-                r.getInt(2),
-                r.getString(3),
-                r.getDouble("similarity"),
-                r.getString("source_hash")),
-        Arrays.toString(query),
-        type,
-        generation,
-        ProjectIds.toRead(jdbc, home),
-        Arrays.toString(query),
-        most);
+    return repository.rank(home, type, checked(query), most, generation, scope);
   }
 
   public Coverage coverage(Home home, String type) {
-    String join =
-        type.equals("entry")
-            ? " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal JOIN conversations owner ON owner.id=e.conversation_id "
-            : " JOIN digests owner ON owner.id=s.source_id ";
-    String fresh = type.equals("digest") ? " AND owner.stale_at IS NULL" : "";
-    String stale =
-        type.equals("digest") ? "count(*) FILTER(WHERE owner.stale_at IS NOT NULL)" : "0";
-    return informationRows(
-            "SELECT count(*) AS eligible,"
-                + " count(*) FILTER(WHERE s.status='ready' AND s.generation=?"
-                + fresh
-                + ") AS indexed,"
-                + " COALESCE(sum((SELECT count(*) FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND s.generation=?)),0) AS passages,"
-                + " count(*) FILTER(WHERE s.status='failed'"
-                + fresh
-                + ") AS failed,"
-                + stale
-                + " AS stale FROM retrieval_sources s"
-                + join
-                + " WHERE s.source_type=? AND owner.project_id IS NOT DISTINCT FROM CAST(? AS bigint)"
-                + (type.equals("entry") ? " /*information*/" : ""),
-            (r, n) ->
-                new Coverage(
-                    r.getInt("eligible"),
-                    r.getInt("indexed"),
-                    r.getInt("passages"),
-                    r.getInt("eligible")
-                        - r.getInt("indexed")
-                        - r.getInt("failed")
-                        - r.getInt("stale"),
-                    r.getInt("failed"),
-                    r.getInt("stale")),
-            generation,
-            generation,
-            type,
-            ProjectIds.toRead(jdbc, home))
-        .getFirst();
+    if (dualEmbeddings != null) {
+      EmbeddingProfile profile;
+      try {
+        profile = dualEmbeddings.active(EmbeddingSlot.PROSE);
+      } catch (EmbeddingException unavailable) {
+        return repository.coverage(home, type, generation, scope, Optional.empty());
+      }
+      return dualEmbeddings.read(
+          profile, () -> repository.coverage(home, type, generation, scope, Optional.of(profile)));
+    }
+    return repository.coverage(home, type, generation, scope);
   }
 
   /** Read the current source metadata, never trusting cached passage content after retention. */
   public LogSearch.Hit hit(Home home, String id, String revision, double rank, String snippet) {
-    return informationRows(
-            "SELECT e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,e.superseded_by,e.handle,e.recorded_at,length(e.content) AS source_length FROM retrieval_sources s JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal"
-                + " JOIN conversations c ON c.id=e.conversation_id WHERE s.source_type='entry' AND s.source_id=? AND s.source_hash=?"
-                + " AND e.content IS NOT NULL AND e.role IS NOT NULL AND c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) /*information*/",
-            (r, n) ->
-                new LogSearch.Hit(
-                    r.getString("conversation_id"),
-                    r.getInt("ordinal"),
-                    r.getInt("turn_ordinal"),
-                    io.aeyer.plowshare.server.agents.EntryKind.of(r.getString("kind")),
-                    rank,
-                    snippet.length() > EntryStore.MOST_CHARACTERS_PER_SNIPPET
-                        ? snippet.substring(0, EntryStore.MOST_CHARACTERS_PER_SNIPPET)
-                        : snippet,
-                    r.getInt("source_length"),
-                    (Integer) r.getObject("superseded_by"),
-                    r.getObject("handle", UUID.class),
-                    r.getTimestamp("recorded_at") == null
-                        ? null
-                        : r.getTimestamp("recorded_at").toInstant()),
-            id,
-            revision,
-            ProjectIds.toRead(jdbc, home))
-        .stream()
-        .findFirst()
-        .orElse(null);
+    return repository.hit(home, id, revision, rank, snippet, scope);
   }
 
   public String revision(Home home, String id) {
-    return informationRows(
-            "SELECT s.source_hash FROM retrieval_sources s JOIN conversations c ON c.id=s.conversation_id"
-                + " WHERE s.source_type='entry' AND s.source_id=? AND c.project_id IS NOT DISTINCT FROM CAST(? AS bigint) /*information*/",
-            (r, n) -> r.getString(1),
-            id,
-            ProjectIds.toRead(jdbc, home))
-        .stream()
-        .findFirst()
-        .orElse(null);
+    return repository.revision(home, id, scope);
   }
 }

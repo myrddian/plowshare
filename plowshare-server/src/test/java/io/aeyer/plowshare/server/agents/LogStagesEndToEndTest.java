@@ -14,6 +14,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.events.InboxItem;
 import io.aeyer.plowshare.server.events.InboxStore;
+import io.aeyer.plowshare.server.events.JdbcInboxStore;
 import io.aeyer.plowshare.server.hooks.ApprovalAnswer;
 import io.aeyer.plowshare.server.hooks.Approving;
 import io.aeyer.plowshare.server.hooks.Gate;
@@ -118,7 +119,7 @@ class LogStagesEndToEndTest {
     conversations = new ConversationStore(jdbc);
     turns = new TurnStore(jdbc);
     entries = new EntryStore(jdbc);
-    inbox = new InboxStore(jdbc);
+    inbox = new JdbcInboxStore(jdbc);
     Path directory = data.resolve("projects").resolve("7").resolve("hooks");
     Files.createDirectories(directory);
     Files.writeString(directory.resolve("10-house.ts"), HOUSE);

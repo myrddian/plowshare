@@ -3,7 +3,6 @@ package io.aeyer.plowshare.server.archive;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.data.DataLayout;
 import java.nio.file.Path;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Which directory an ejected payload belongs in, given whose conversation it came out of.
@@ -19,7 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <p>Under {@code DataLayout} an export is {@code projects/<project-id>/exports/<root conversation
  * id>/…}, so the question has a directory-shaped answer. Getting there means an export must learn
  * its project, and a project is a <em>name</em> everywhere above the archive and an <em>id</em> in
- * it — so somebody has to translate, and that somebody has a {@code JdbcTemplate}. {@link
+ * it — so somebody has to translate, and that somebody owns a project repository. {@link
  * PayloadExport} does not, and should not: it is the class that turns bytes into files, driven from
  * inside a retention sweep, and giving it a database connection so it can resolve a name would make
  * every test of the file format need one.
@@ -62,8 +61,8 @@ public interface ExportDirectories {
    * the failure this whole file is against — a directory scheme is exactly the kind of thing that
    * gets edited in one place.
    */
-  static ExportDirectories under(DataLayout data, JdbcTemplate jdbc) {
-    return home -> data.exportsFor(ProjectIds.forDirectory(jdbc, home));
+  static ExportDirectories under(DataLayout data, ProjectDirectories projects) {
+    return home -> data.exportsFor(projects.existing(home));
   }
 
   /**
@@ -74,7 +73,7 @@ public interface ExportDirectories {
    * here", and keeping that would make "which project is this export of" answerable on one
    * deployment and not on another.
    */
-  static ExportDirectories into(Path named, JdbcTemplate jdbc) {
-    return home -> DataLayout.exportsUnder(named, ProjectIds.forDirectory(jdbc, home));
+  static ExportDirectories into(Path named, ProjectDirectories projects) {
+    return home -> DataLayout.exportsUnder(named, projects.existing(home));
   }
 }

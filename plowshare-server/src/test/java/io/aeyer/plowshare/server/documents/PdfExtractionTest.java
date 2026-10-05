@@ -33,7 +33,11 @@ class PdfExtractionTest {
    * Small bounds, a quarter of the shipped ones, so these short fixtures still exercise packing.
    */
   private static final Chunking SMALL =
-      new Chunking(new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN), 100, 200);
+      new Chunking(
+          new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+              RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN),
+          100,
+          200);
 
   private static final Page ONE_PAGE_OF_PROSE =
       Page.of(

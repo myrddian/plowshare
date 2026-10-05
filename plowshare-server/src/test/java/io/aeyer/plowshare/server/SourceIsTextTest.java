@@ -110,7 +110,7 @@ class SourceIsTextTest {
             + ROOT);
     assertTrue(
         modules.contains("plowshare-server")
-            && modules.contains("plowshare-client")
+            && modules.contains("sdk/java")
             && modules.contains("plowshare-protocol"),
         "the three that exist today are among them — " + modules);
     for (String module : modules) {
@@ -191,10 +191,18 @@ class SourceIsTextTest {
 
   private static List<String> modules() throws IOException {
     List<String> modules = new ArrayList<>();
-    Matcher included = INCLUDED.matcher(Files.readString(ROOT.resolve("settings.gradle.kts")));
+    String settings = Files.readString(ROOT.resolve("settings.gradle.kts"));
+    // Gradle identities remain stable when physical source directories move.
+    java.util.Map<String, String> directories = new java.util.HashMap<>();
+    Matcher locations =
+        Pattern.compile("project\\(\":([^\"]+)\"\\)\\.projectDir = file\\(\"([^\"]+)\"\\)")
+            .matcher(settings);
+    while (locations.find()) directories.put(locations.group(1), locations.group(2));
+    Matcher included = INCLUDED.matcher(settings);
     while (included.find()) {
-      if (!modules.contains(included.group(1))) {
-        modules.add(included.group(1));
+      String directory = directories.getOrDefault(included.group(1), included.group(1));
+      if (!modules.contains(directory)) {
+        modules.add(directory);
       }
     }
     return modules;

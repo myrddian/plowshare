@@ -30,22 +30,14 @@ public class AccountingConfig {
 
   @Bean
   public UsageOwners usageOwners(
-      JdbcTemplate jdbc, ObjectProvider<UsageExecutionStore> executions) {
+      UsageScopeRepository scopes, ObjectProvider<UsageExecutionStore> executions) {
     return new UsageOwners() {
       @Override
       public UsageAttribution in(
           io.aeyer.plowshare.protocol.Home home,
           String account,
           UsageAttribution.Operation operation) {
-        String project = null;
-        if (!home.isGlobal()) {
-          project =
-              jdbc.queryForObject(
-                  "INSERT INTO projects(name) VALUES (?) "
-                      + "ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name RETURNING id::text",
-                  String.class,
-                  home.project());
-        }
+        String project = scopes.project(home);
         return account == null
             ? UsageAttribution.system(project, operation)
             : project == null
@@ -55,9 +47,7 @@ public class AccountingConfig {
 
       @Override
       public UsageAttribution orchestration(String id, UsageAttribution.Operation operation) {
-        String conversation =
-            jdbc.queryForObject(
-                "SELECT conductor_conversation FROM orchestrations WHERE id=?", String.class, id);
+        String conversation = scopes.conductorConversation(id);
         return executions.getObject().source(conversation, 0, operation);
       }
 
@@ -65,6 +55,11 @@ public class AccountingConfig {
       public UsageAttribution conversation(
           String id, int turn, UsageAttribution.Operation operation) {
         return executions.getObject().source(id, turn, operation);
+      }
+
+      @Override
+      public UsageAttribution processing(String id, UsageAttribution.Operation operation) {
+        return executions.getObject().processing(id, operation);
       }
     };
   }

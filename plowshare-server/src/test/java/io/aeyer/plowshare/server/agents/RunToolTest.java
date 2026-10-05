@@ -491,7 +491,7 @@ class RunToolTest {
     assertTrue(shown.path("command").isArray(), SHAPE);
     shown.path("command").forEach(item -> assertTrue(item.isTextual(), SHAPE));
     assertTrue(shown.path("stdin").isTextual(), SHAPE);
-    Map<?, ?> properties = (Map<?, ?>) tool().schema().parameters().get("properties");
+    Map<?, ?> properties = (Map<?, ?>) tool().schema().parameters().properties();
     shown.fieldNames().forEachRemaining(key -> assertTrue(properties.containsKey(key), key));
     assertFalse(out.contains("touch"), "the refusal names no program: " + out);
   }

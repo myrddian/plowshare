@@ -37,11 +37,13 @@
  */
 
 /** The wire field a grant for this ending would carry, or `null` if none is known. */
-export type GrantField = 'maxTurns' | 'maxModelCalls' | null
+export type GrantField = 'maxTurns' | 'maxModelCalls' | null;
 
 /** Which field of a grant raises the ceiling that stopped this ending, if either does. */
 export function grantFieldFor(ending: string): GrantField {
-    return ending === 'TURN_CAP' ? 'maxTurns'
-        : ending === 'CALL_BUDGET' ? 'maxModelCalls'
-        : null
+  return ending === 'TURN_CAP'
+    ? 'maxTurns'
+    : ending === 'CALL_BUDGET'
+      ? 'maxModelCalls'
+      : null;
 }

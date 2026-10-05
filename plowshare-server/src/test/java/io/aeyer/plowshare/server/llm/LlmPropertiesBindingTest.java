@@ -7,17 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.aeyer.plowshare.server.files.LocalProvider;
-import io.aeyer.plowshare.server.files.RemoteProvider;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -110,7 +104,7 @@ class LlmPropertiesBindingTest {
   }
 
   @Test
-  void the_defaults_are_the_serial_box_the_project_actually_runs_on() {
+  void conservative_pool_defaults_bind_without_deployment_configuration() {
     runner
         .withPropertyValues(
             "plowshare.llm.pools[0].name=studio",
@@ -224,8 +218,8 @@ class LlmPropertiesBindingTest {
    * invisible here because every assertion above is a <em>scalar</em> read alone, and the fault was
    * a <em>relation</em> between two keys that were each individually fine. Adding {@code classes}
    * to the list above would not have caught it either, for the same reason. See {@link
-   * #every_class_in_the_shipped_yaml_names_a_model_some_pool_serves}, which asserts the relation
-   * and is the guard this one could not be.
+   * #generic_single_pool_routes_both_chat_classes}, which asserts the relation and is the guard
+   * this one could not be.
    */
   @Test
   void the_archive_wide_defaults_come_from_the_shipped_yaml_and_nowhere_else() {
@@ -236,7 +230,8 @@ class LlmPropertiesBindingTest {
         .run(
             context -> {
               LlmProperties props = context.getBean(LlmProperties.class);
-              assertEquals("nomic-embed-text", props.getEmbeddingModel());
+              assertEquals(
+                  "", props.getEmbeddingModel(), "a deployment must choose its embedding model");
               assertEquals(
                   768, props.getEmbeddingDim(), "must match vector(768) in V1__memories.sql");
               assertNull(
@@ -251,42 +246,9 @@ class LlmPropertiesBindingTest {
             });
   }
 
-  /**
-   * Every class the shipped {@code application.yml} declares names a model some pool in that same
-   * file serves.
-   *
-   * <h2>This is the regression guard for the bug the change was written for, and until it existed
-   * the guard needed Docker</h2>
-   *
-   * <p>{@code 773c063} moved the pool's chat model default to {@code qwen3.8-27b} and left both
-   * class values at {@code qwen3.5-9b}, so a default boot sent a model the box did not serve and
-   * got a 404 at the first turn. {@code LlmConfig.requireClassesResolvable} now refuses that — but
-   * only when it runs, and it runs only inside a context that has both the shipped YAML and {@code
-   * LlmConfig} in it. {@code LlmConfigTest} has {@code LlmConfig} and synthetic properties; this
-   * file has the shipped YAML and no {@code LlmConfig}. The tests that have both are the end-to-end
-   * ones, and every one of those is {@code @Testcontainers} — so on a machine or a CI leg without a
-   * Docker daemon, re-introducing that exact drift went green. The commit's claim that
-   * "re-introducing it turns every end-to-end test red" was true and rested on the heaviest tests
-   * in the suite.
-   *
-   * <p><b>{@link #the_archive_wide_defaults_come_from_the_shipped_yaml_and_nowhere_else} is the
-   * test that should have caught the live bug and did not.</b> It is the pin over shipped defaults
-   * against drift, it runs Docker-free on the real file, and it pins {@code embedding-model},
-   * {@code embedding-dim} and {@code default-context-length} — every archive-wide scalar, and no
-   * relation between two keys. The fault was a relation: the class map and the pool's model list,
-   * each correct read alone. That is what this asserts, and it is why it is a second test rather
-   * than three more lines in that one — the assertion is not "this key is still 64000" but "these
-   * two keys still agree", which is a different kind of claim about the file.
-   *
-   * <p><b>Deliberately a re-derivation and not a call into {@code LlmConfig}.</b> Standing the
-   * whole configuration class up here would pull in an {@code ObjectMapper}, a token ledger and an
-   * {@code OkHttpClient} per pool, which is the weight this file exists without. The cost is that
-   * the rule is written twice, and the two could drift: what stops that mattering is that {@code
-   * LlmConfigTest} owns the refusal's behaviour on arbitrary configurations and this owns only the
-   * shipped file. If they ever disagree, the refusal is the one that is right.
-   */
+  /** A packaged configuration must never identify an operator's hardware or model fleet. */
   @Test
-  void every_class_in_the_shipped_yaml_names_a_model_some_pool_serves() {
+  void shipped_configuration_requires_explicit_models_and_endpoint() {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(Binding.class)
@@ -294,132 +256,53 @@ class LlmPropertiesBindingTest {
         .run(
             context -> {
               LlmProperties props = context.getBean(LlmProperties.class);
-              assertFalse(
-                  props.getClasses().isEmpty(),
-                  "the shipped configuration declares no classes, so this guard is"
-                      + " asserting nothing");
-
-              Set<String> servedAnywhere =
-                  props.getPools().stream()
-                      .flatMap(pool -> pool.getModels().stream())
-                      .collect(Collectors.toSet());
-              String fleet =
-                  props.getPools().stream()
-                      .map(pool -> pool.getName() + "=" + pool.getModels())
-                      .collect(Collectors.joining(", "));
-
-              props
-                  .getClasses()
-                  .forEach(
-                      (className, wireModel) ->
-                          assertTrue(
-                              servedAnywhere.contains(wireModel),
-                              "plowshare.llm.classes maps '"
-                                  + className
-                                  + "' to '"
-                                  + wireModel
-                                  + "', which no pool in the shipped application.yml serves ("
-                                  + fleet
-                                  + "). A default boot would send that name to a box"
-                                  + " that does not have it and take a 404 at the first turn,"
-                                  + " which is what 773c063 shipped. If the two placeholders"
-                                  + " have drifted apart again, they are the fix"));
+              assertEquals(1, props.getPools().size());
+              PoolProperties pool = props.getPools().get(0);
+              assertEquals("primary", pool.getName());
+              assertEquals("", pool.getBaseUrl());
+              assertEquals(List.of("", ""), pool.getModels());
+              assertEquals(PoolProperties.Provider.OPENAI, pool.getProvider());
+              assertTrue(pool.getVision().isEmpty());
+              assertTrue(pool.getContextLengths().isEmpty());
+              assertEquals(0, pool.getSwarm());
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      new LlmConfig()
+                          .llmDispatcher(
+                              props,
+                              new com.fasterxml.jackson.databind.ObjectMapper(),
+                              new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger()));
             });
   }
 
-  /**
-   * No pool in the shipped {@code application.yml} is named for a property of the pool rather than
-   * for the machine it is.
-   *
-   * <h2>What is being guarded, and why a deny-list of bad names would not do it</h2>
-   *
-   * <p>The pool now named {@code studio} was called {@code local} until 2026-09-07. That is a
-   * property wearing a name — two local instances can exist, and both of this fleet's nodes are on
-   * the operator's own network, so calling one of them {@code local} implied the other was not. Its
-   * neighbour was named {@code spark} after the hardware from the start, which is what made the
-   * mismatch visible.
-   *
-   * <p><b>A list of forbidden words is the obvious test and it is weak in the exact place it
-   * matters: it only knows the mistakes already made.</b> Someone adding a third pool called {@code
-   * gpu}, {@code fast} or {@code remote} would sail past a list containing {@code local}. So the
-   * three checks below all read their forbidden set out of something that grows on its own, and
-   * each one names a way a pool has already been misnamed or nearly was:
-   *
-   * <ol>
-   *   <li><b>Not a name for a kind in another subsystem.</b> Read from {@link LocalProvider#NAME}
-   *       and {@link RemoteProvider#NAME}, the file providers — the server's own disk against a
-   *       client machine's. That is a real binary with two values and no third, so {@code local}
-   *       there is a name for a kind and earns the word; a pool using it makes one string mean two
-   *       unrelated things in two subsystems, which is what a grep cannot tell apart. Reading the
-   *       constants rather than repeating the strings is what makes a rename over there move this
-   *       guard with it.
-   *   <li><b>Not the software the box happens to run.</b> Read from {@link
-   *       PoolProperties.Provider}, so a third backend extends the guard by existing. {@code name:
-   *       lmstudio} would be the same category error a third time, coupling an identity to software
-   *       that can change without the box changing — and {@code name: studio} sits two lines above
-   *       {@code provider: lmstudio} precisely so a reader sees they are different things.
-   *   <li><b>Not a role the pool happens to serve.</b> Read from the shipped {@code
-   *       plowshare.llm.classes}, so a class added tomorrow is a name forbidden tomorrow. A pool
-   *       called {@code fast} would be the same error a fourth time: a class is what a pool serves,
-   *       not what it is.
-   * </ol>
-   *
-   * <p><b>What it still cannot catch, said plainly.</b> None of the three knows that {@code gpu} or
-   * {@code nearby} is a property; "names a machine" is not a predicate this configuration can
-   * evaluate. What the test buys is that every word this server already uses for something else is
-   * closed off without anyone remembering to close it, and that the next person to add a pool reads
-   * this list of four errors before they name it. That is a guard over a habit rather than a proof,
-   * and it is the honest size of the claim.
-   */
+  /** A single explicitly configured endpoint serves both classes without another host. */
   @Test
-  void no_pool_is_named_for_a_property_of_the_pool() {
+  void generic_single_pool_routes_both_chat_classes() {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(Binding.class)
         .withInitializer(new ConfigDataApplicationContextInitializer())
+        .withPropertyValues(
+            "LLM_BASE_URL=http://192.0.2.10:9000/v1",
+            "LLM_CHAT_MODEL=test-chat",
+            "LLM_EMBEDDING_MODEL=test-embedding",
+            "LLM_API_KEY=test-key")
         .run(
             context -> {
               LlmProperties props = context.getBean(LlmProperties.class);
-              assertFalse(
-                  props.getPools().isEmpty(),
-                  "the shipped configuration declares no pools, so this guard is"
-                      + " asserting nothing");
-
-              Set<String> kinds = Set.of(LocalProvider.NAME, RemoteProvider.NAME);
-              Set<String> backends =
-                  Arrays.stream(PoolProperties.Provider.values())
-                      .map(provider -> provider.name().toLowerCase(Locale.ROOT))
-                      .collect(Collectors.toSet());
-              Set<String> roles = props.getClasses().keySet();
-
-              for (PoolProperties pool : props.getPools()) {
-                String name = pool.getName().toLowerCase(Locale.ROOT);
-                assertFalse(
-                    kinds.contains(name),
-                    "pool '"
-                        + pool.getName()
-                        + "' takes a word that already names a"
-                        + " kind elsewhere in this server "
-                        + kinds
-                        + ": one"
-                        + " string would mean two unrelated things in two"
-                        + " subsystems. Name it after the machine");
-                assertFalse(
-                    backends.contains(name),
-                    "pool '"
-                        + pool.getName()
-                        + "' is named for the software it runs "
-                        + backends
-                        + ", which can change without the box changing."
-                        + " Name it after the machine");
-                assertFalse(
-                    roles.contains(name),
-                    "pool '"
-                        + pool.getName()
-                        + "' is named for a role it serves "
-                        + roles
-                        + ". A class is what a pool serves, not what it"
-                        + " is. Name it after the machine");
+              assertEquals(
+                  Map.of("fast", "test-chat", "reasoning", "test-chat"), props.getClasses());
+              assertEquals("test-key", props.getPools().get(0).getApiKey());
+              try (var dispatcher =
+                  new LlmConfig()
+                      .llmDispatcher(
+                          props,
+                          new com.fasterxml.jackson.databind.ObjectMapper(),
+                          new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger())) {
+                assertEquals("test-chat", dispatcher.wireModelFor("fast"));
+                assertEquals("test-chat", dispatcher.wireModelFor("reasoning"));
+                dispatcher.requireServed("test-embedding");
               }
             });
   }
@@ -731,93 +614,69 @@ class LlmPropertiesBindingTest {
   /** Where the example overlay is, from this module's working directory. */
   private static final String OVERLAY = "file:../bin/application-local.example.yml";
 
-  /**
-   * The overlay example, on top of the shipped YAML, is a configuration this server boots: every
-   * refusal {@code LlmConfig} makes at startup is asked of it, and the class it adds routes to the
-   * pool it adds.
-   *
-   * <p>A call into {@code LlmConfig} and not a re-derivation, against the choice {@link
-   * #every_class_in_the_shipped_yaml_names_a_model_some_pool_serves} makes: an example an operator
-   * copies has to pass the real boot, and the only way to know it does is to run that boot's
-   * checks.
-   */
+  /** The example replaces the whole fleet and boots without the packaged pool's variables. */
   @Test
-  void the_example_overlay_boots_and_routes_its_fallback_class_to_its_own_pool() {
+  void example_overlay_routes_separate_chat_and_embedding_endpoints() {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(Binding.class)
         .withInitializer(new ConfigDataApplicationContextInitializer())
-        .withPropertyValues("spring.config.additional-location=" + OVERLAY)
+        .withPropertyValues(
+            "spring.config.additional-location=" + OVERLAY,
+            "MODEL_CHAT_URL=http://192.0.2.10:9000/v1",
+            "MODEL_CHAT_ID=overlay-chat",
+            "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1",
+            "MODEL_EMBEDDING_ID=overlay-embedding")
         .run(
             context -> {
+              assertNull(context.getStartupFailure());
               LlmProperties props = context.getBean(LlmProperties.class);
               assertEquals(
-                  List.of("studio", "spark", "refusal-fallback"),
+                  List.of("inference", "embeddings"),
                   props.getPools().stream().map(PoolProperties::getName).toList());
+              assertEquals("overlay-embedding", props.getEmbeddingModel());
               assertEquals(
-                  "mlx-community/gemma-4-e4b-it",
-                  props.getClasses().get("fast"),
-                  "classes is a map: the overlay adds one and keeps the shipped two");
-
-              try (io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher dispatcher =
+                  Map.of("fast", "overlay-chat", "reasoning", "overlay-chat"), props.getClasses());
+              try (var dispatcher =
                   new LlmConfig()
                       .llmDispatcher(
                           props,
                           new com.fasterxml.jackson.databind.ObjectMapper(),
                           new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger())) {
+                assertEquals("overlay-chat", dispatcher.wireModelFor("reasoning"));
+                dispatcher.requireServed("overlay-embedding");
                 var swarm = new io.aeyer.plowshare.server.swarm.DispatcherPools(dispatcher);
-                assertEquals(
-                    List.of("spark"),
-                    swarm.serving("reasoning"),
-                    "replacing the pool list must retain capacity for the shipped swarm");
-                assertEquals(4, swarm.slots("spark"));
-                assertEquals(1, swarm.slots("refusal-fallback"));
-                assertEquals(0, swarm.slots("studio"));
-                dispatcher.requireServed("low_refusal_osint");
-                assertEquals(
-                    "your-low-refusal-model", dispatcher.wireModelFor("low_refusal_osint"));
+                assertEquals(List.of("inference"), swarm.serving("reasoning"));
+                assertEquals(1, swarm.slots("inference"));
               }
             });
   }
 
-  /**
-   * The two pools the overlay restates are the two pools {@code application.yml} ships, key for
-   * key.
-   *
-   * <p>They have to be written out: Spring replaces a list from a higher-precedence source rather
-   * than merging it, so an overlay that added a third pool alone would delete the other two. That
-   * makes the example a second copy of the shipped pools, which is exactly the kind of copy this
-   * file keeps finding drifted — so the drift is what fails here.
-   */
   @Test
-  void the_example_overlay_restates_the_shipped_pools_as_shipped() {
-    List<String> shipped = new ArrayList<>();
-    List<String> restated = new ArrayList<>();
-    ApplicationContextRunner base =
-        new ApplicationContextRunner()
-            .withConfiguration(
-                AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
-            .withUserConfiguration(Binding.class)
-            .withInitializer(new ConfigDataApplicationContextInitializer());
-    base.run(
-        context ->
-            context
-                .getBean(LlmProperties.class)
-                .getPools()
-                .forEach(pool -> shipped.add(described(pool))));
-    base.withPropertyValues("spring.config.additional-location=" + OVERLAY)
+  void example_overlay_refuses_an_omitted_endpoint() {
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
+        .withUserConfiguration(Binding.class)
+        .withInitializer(new ConfigDataApplicationContextInitializer())
+        .withPropertyValues(
+            "spring.config.additional-location=" + OVERLAY,
+            "MODEL_CHAT_ID=overlay-chat",
+            "MODEL_EMBEDDING_ID=overlay-embedding",
+            "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1")
         .run(
-            context ->
-                context.getBean(LlmProperties.class).getPools().stream()
-                    .limit(shipped.size())
-                    .forEach(pool -> restated.add(described(pool))));
-
-    assertEquals(
-        shipped,
-        restated,
-        "bin/application-local.example.yml no longer restates the pools application.yml"
-            + " ships. An operator who copies it would run on the old ones. Change"
-            + " the example to match");
+            context -> {
+              assertNull(context.getStartupFailure());
+              // The binder may retain an unresolved placeholder in a String.
+              // The dispatcher must reject it before opening any connection.
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      new LlmConfig()
+                          .llmDispatcher(
+                              context.getBean(LlmProperties.class),
+                              new com.fasterxml.jackson.databind.ObjectMapper(),
+                              new io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger()));
+            });
   }
 
   @Test
@@ -840,7 +699,12 @@ class LlmPropertiesBindingTest {
                                   "120s",
                                   "PLOWSHARE_LLM_FOLDTIMEOUT",
                                   "160s"))))
-          .withPropertyValues("spring.config.additional-location=" + location)
+          .withPropertyValues(
+              "spring.config.additional-location=" + location,
+              "MODEL_CHAT_URL=http://192.0.2.10:9000/v1",
+              "MODEL_CHAT_ID=overlay-chat",
+              "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1",
+              "MODEL_EMBEDDING_ID=overlay-embedding")
           .run(
               context -> {
                 assertNull(context.getStartupFailure());
@@ -849,29 +713,5 @@ class LlmPropertiesBindingTest {
                 assertEquals(Duration.ofSeconds(160), props.getFoldTimeout());
               });
     }
-  }
-
-  private static String described(PoolProperties pool) {
-    return String.join(
-        " | ",
-        pool.getName(),
-        pool.getBaseUrl(),
-        pool.getApiKey(),
-        String.valueOf(pool.getModels()),
-        String.valueOf(pool.getVision()),
-        String.valueOf(pool.getProvider()),
-        String.valueOf(pool.getContextLengths()),
-        String.valueOf(pool.getMaxContextLengths()),
-        String.valueOf(pool.getCompactionThresholds()),
-        String.valueOf(pool.isPrefillProgress()),
-        String.valueOf(pool.getChat()),
-        String.valueOf(pool.getEmbedding()),
-        String.valueOf(pool.getSubmitTimeout()),
-        String.valueOf(pool.getChatTimeout()),
-        String.valueOf(pool.getStreamingTimeout()),
-        String.valueOf(pool.getMaxStreamDuration()),
-        String.valueOf(pool.getEmbeddingTimeout()),
-        String.valueOf(pool.getRetryMaxAttempts()),
-        String.valueOf(pool.getRetryInitialBackoff()));
   }
 }

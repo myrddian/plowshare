@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.harness;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.server.agents.ModelJson;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -86,21 +85,17 @@ final class StuckVerdict {
     if (answer == null || answer.isBlank()) {
       return swallowed("the advisor said nothing");
     }
-    JsonNode object;
+    io.aeyer.plowshare.server.agents.ModelAnswers.Advice answerDto;
     try {
-      object = ModelJson.object(answer);
+      answerDto = io.aeyer.plowshare.server.agents.ModelAnswers.advice(answer);
     } catch (ModelJson.Unreadable unreadable) {
+      if ("the note is not text".equals(unreadable.getMessage()))
+        return swallowed(unreadable.getMessage());
       return swallowed(
           "the answer is not a JSON object with a note (" + unreadable.getMessage() + ")");
     }
-    JsonNode note = object.get("note");
-    if (note == null || note.isNull()) {
-      return swallowed("the advisor had nothing to say");
-    }
-    if (!note.isTextual()) {
-      return swallowed("the note is not text");
-    }
-    String text = note.asText().strip();
+    if (answerDto.note() == null) return swallowed("the advisor had nothing to say");
+    String text = answerDto.note().strip();
     if (text.isEmpty()) {
       return swallowed("the note is empty");
     }

@@ -193,6 +193,23 @@ public class LlmConfig implements EnvironmentAware {
         accounting.getIfAvailable(() -> InferenceAccounting.NONE));
   }
 
+  /** Own local tokenizer resources separately from chat's explicitly estimated context meter. */
+  @Bean(destroyMethod = "close")
+  public io.aeyer.plowshare.server.embedding.ConfiguredEmbeddingTokenizers embeddingTokenizers(
+      LlmProperties props) {
+    var dual =
+        environment == null
+            ? null
+            : Binder.get(environment)
+                .bind(
+                    "plowshare.embeddings",
+                    Bindable.of(io.aeyer.plowshare.server.embedding.EmbeddingProperties.class))
+                .orElse(null);
+    if (dual != null) dual.validate();
+    return new io.aeyer.plowshare.server.embedding.ConfiguredEmbeddingTokenizers(
+        dual, props.getEmbeddingTokenizer());
+  }
+
   /** Compatibility for fixtures that explicitly supply the old success-only ledger. */
   public LlmDispatcher llmDispatcher(LlmProperties props, ObjectMapper mapper, TokenLedger ledger) {
     return buildDispatcher(props, mapper, ledger, InferenceAccounting.NONE);
@@ -204,13 +221,29 @@ public class LlmConfig implements EnvironmentAware {
       TokenLedger ledger,
       InferenceAccounting accounting) {
 
+    var dual =
+        environment == null
+            ? null
+            : Binder.get(environment)
+                .bind(
+                    "plowshare.embeddings",
+                    Bindable.of(io.aeyer.plowshare.server.embedding.EmbeddingProperties.class))
+                .orElse(null);
+    if (dual != null && dual.enabled()) {
+      dual.validate();
+      // Shared chunks use complete, model-specific document token counts, including prefixes.
+      props.setEmbeddingModel(dual.prose().modelId());
+      props.setEmbeddingDim(dual.prose().dimensions());
+      int ceiling = Math.min(dual.code().maxInputTokens(), dual.prose().maxInputTokens());
+      props.setEmbeddingMaxInputTokens(ceiling);
+    }
     List<PoolProperties> declared = props.getPools();
     if (declared.isEmpty()) {
       throw new IllegalStateException(
           "plowshare.llm.pools is empty: the server has no endpoint to call and every"
               + " memory it stores would be written without an embedding."
               + " Declare one pool with a name, a base-url and at least one model —"
-              + " application.yml ships that shape, and LLM_BASE_URL retargets it");
+              + " configure the complete fleet in an external Spring configuration overlay");
     }
     Set<String> names = new LinkedHashSet<>();
     for (int index = 0; index < declared.size(); index++) {
@@ -322,6 +355,7 @@ public class LlmConfig implements EnvironmentAware {
               props.getPromptTimeout(),
               props.getFoldTimeout());
       requireEmbeddingModelIsServed(dispatcher, props);
+      if (dual != null && dual.enabled()) dispatcher.requireServed(dual.code().modelId());
       log.info(
           "LLM dispatcher: {} pool(s) {}, embedding model '{}' at {} dimensions",
           pools.size(),
@@ -487,8 +521,10 @@ public class LlmConfig implements EnvironmentAware {
    */
   @Bean
   public DispatchingEmbeddingClient dispatchingEmbeddingClient(
-      LlmDispatcher dispatcher, LlmProperties props, Tokenizer tokenizer) {
-    return new DispatchingEmbeddingClient(dispatcher, props, tokenizer);
+      LlmDispatcher dispatcher,
+      LlmProperties props,
+      io.aeyer.plowshare.server.embedding.EmbeddingTokenizers tokenizers) {
+    return new DispatchingEmbeddingClient(dispatcher, props, tokenizers.legacy());
   }
 
   /**
@@ -557,16 +593,6 @@ public class LlmConfig implements EnvironmentAware {
             || pool.getCounting().getUrl() != null))
       throw new IllegalArgumentException(
           "cloud pools use OpenAI transport without local template or tokenization extensions");
-    if (pool.getChatTemplateKwargs().size() > 32
-        || pool.getChatTemplateKwargs().entrySet().stream()
-            .anyMatch(
-                e ->
-                    !e.getKey().matches("[A-Za-z0-9_]{1,64}")
-                        || !(e.getValue() instanceof String s && s.length() <= 1024
-                            || e.getValue() instanceof Boolean
-                            || e.getValue() instanceof Number n
-                                && Double.isFinite(n.doubleValue()))))
-      throw new IllegalArgumentException("invalid pool chat-template-kwargs");
     if (pool.getBaseUrl() != null) pool.getCounting().validate(pool.getBaseUrl());
     if (pool.getBaseUrl() == null || pool.getBaseUrl().isBlank()) {
       throw new IllegalStateException(
@@ -1545,11 +1571,8 @@ public class LlmConfig implements EnvironmentAware {
    * red. That is not a fault an operator can be expected to notice later, which is why it is
    * refused before the server starts.
    *
-   * <p><b>In tokens, counted by the {@link Tokenizer} bean.</b> This key was {@code
-   * embedding-max-input-bytes}, a byte bound that could not be wrong and was a quarter of the
-   * window for English prose. The shipped tokenizer estimates, so the shipped ceiling sits below
-   * the model's window to leave room for an estimate that comes in low; a real tokenizer behind the
-   * same interface can take that margin back.
+   * <p>Counted by the embedding model's pinned tokenizer, independently of chat context estimates.
+   * Exact counting disables truncation and includes preprocessing and special tokens.
    *
    * <h2>KNOWN GAP: "no tokenizer emits more tokens than its input has bytes" is false for an image
    * </h2>

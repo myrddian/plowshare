@@ -18,12 +18,12 @@
  * visited once and replaced once, and no replacement is ever re-read.
  */
 const REPLACEMENTS: Readonly<Record<string, string>> = Object.freeze({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-})
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+});
 
 /**
  * Render `value` as text that cannot become markup.
@@ -61,5 +61,8 @@ const REPLACEMENTS: Readonly<Record<string, string>> = Object.freeze({
  * `textContent`, and the escaping was the wrong half of the fix.
  */
 export function escape(value: unknown): string {
-    return String(value).replace(/[&<>"']/g, (character) => REPLACEMENTS[character] as string)
+  return String(value).replace(
+    /[&<>"']/g,
+    (character) => REPLACEMENTS[character] as string,
+  );
 }

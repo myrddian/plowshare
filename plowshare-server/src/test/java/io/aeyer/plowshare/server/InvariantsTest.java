@@ -111,8 +111,8 @@ import org.junit.jupiter.api.io.TempDir;
  * it, and then went stale the moment the prediction was overtaken and nothing came back to correct
  * the prose. Fixed here rather than left as the tripwire it had become.
  *
- * <p>{@link #an_http_client_is_held_by_exactly_seven_files_in_main()} therefore names its scope in
- * the assertion message and <b>computes</b> every wider number beside it, rather than this javadoc
+ * <p>{@link #an_http_client_is_held_by_declared_files_in_main()} therefore names its scope in the
+ * assertion message and <b>computes</b> every wider number beside it, rather than this javadoc
  * keeping a copy of any of them. It also asserts the seven by name and not by count, so a swap —
  * one holder deleted, a different file gaining the import — cannot net out to seven and pass.
  *
@@ -143,8 +143,8 @@ import org.junit.jupiter.api.io.TempDir;
  * including this file — so the narrow needle is a deliberate trade and not an oversight.
  *
  * <p><b>The Spring and {@code OkHttpClient} scans are {@code .java} only</b>, because the shell
- * commands they replace were. A {@code plowshare-client/src/main/resources} file naming Spring is
- * not covered. The two scans that were not restricted to Java — the address and the key — are not
+ * commands they replace were. A {@code sdk/java/src/main/resources} file naming Spring is not
+ * covered. The two scans that were not restricted to Java — the address and the key — are not
  * restricted here either.
  *
  * <p><b>It searches bytes in this process rather than lines through {@code grep}</b>, which matters
@@ -160,7 +160,7 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>This class asserts over the whole repository, and the build originally had no idea that was
  * its subject. <b>Measured on the commit that first shipped this file</b>, with a violating comment
- * sitting in {@code plowshare-client/src/main} and nothing else changed:
+ * sitting in {@code sdk/java/src/main} and nothing else changed:
  *
  * <pre>    &gt; Task :plowshare-server:test UP-TO-DATE
  *     BUILD SUCCESSFUL in 1s</pre>
@@ -222,13 +222,17 @@ class InvariantsTest {
    */
   private static final List<String> TRACKED = tracked();
 
-  private static final Pattern CLIENT_MAIN_JAVA =
-      Pattern.compile("^plowshare-client/src/main/.*\\.java$");
+  private static final Pattern CLIENT_MAIN_JAVA = Pattern.compile("^sdk/java/src/main/.*\\.java$");
   private static final Pattern SERVER_MAIN_JAVA =
       Pattern.compile("^plowshare-server/src/main/.*\\.java$");
-  private static final Pattern MAIN_JAVA = Pattern.compile("^plowshare-[^/]+/src/main/.*\\.java$");
-  private static final Pattern ANY_JAVA = Pattern.compile("^plowshare-[^/]+/src/.*\\.java$");
-  private static final Pattern UNDER_SRC = Pattern.compile("^plowshare-[^/]+/src/.*");
+  // Preserve the original core/client/adapter scope after relocation. Search
+  // extensions own their HTTP clients in separate service processes.
+  private static final Pattern MAIN_JAVA =
+      Pattern.compile("^(?:plowshare-[^/]+|sdk/[^/]+|integrations/[^/]+)/src/main/.*\\.java$");
+  private static final Pattern ANY_JAVA =
+      Pattern.compile("^(?:plowshare-[^/]+|sdk/[^/]+|integrations/[^/]+)/src/.*\\.java$");
+  private static final Pattern UNDER_SRC =
+      Pattern.compile("^(?:plowshare-[^/]+|sdk/[^/]+|integrations/[^/]+)/src/.*");
 
   /**
    * Server {@code main} sources outside {@code api/} itself.
@@ -302,7 +306,7 @@ class InvariantsTest {
    * SearchConfig.searchHttpClient()}, injected into both {@code RemoteSearchProvider} and {@code
    * SearchRegistrar}, and it dials a different class of endpoint than either of the original two
    * anyway: the LLM vendor ({@code OpenAiTransport}), this server's own file and event sockets
-   * ({@code ChannelClient}, {@code HttpServerClient}), and now, third, whatever provider process an
+   * ({@code SocketPeer}, {@code ControllerPeer}), and now, third, whatever provider process an
    * operator has registered — a destination this server does not know the shape of in advance,
    * unlike the first two. {@code SearchConfig} and {@code SearchRegistrar} each import the type —
    * one to build the shared bean, one to receive it and apply its own probe timeout per call
@@ -353,8 +357,6 @@ class InvariantsTest {
   private static final List<String> HTTP_CLIENT_HOLDERS =
       List.of(
           "BuiltinFetcher.java",
-          "ChannelClient.java",
-          "HttpServerClient.java",
           "OpenAiTransport.java",
           "RemoteSearchProvider.java",
           "SearchConfig.java",
@@ -365,7 +367,7 @@ class InvariantsTest {
     assertEquals(
         List.of(),
         scan(SPRING, within(CLIENT_MAIN_JAVA)),
-        "these files under plowshare-client/src/main name "
+        "these files under sdk/java/src/main name "
             + SPRING
             + ", and the"
             + " client module is deliberately Spring-free — its build file has no"
@@ -376,7 +378,7 @@ class InvariantsTest {
   }
 
   @Test
-  void an_http_client_is_held_by_exactly_seven_files_in_main() throws IOException {
+  void an_http_client_is_held_by_declared_files_in_main() throws IOException {
     List<String> inMain = scan(HTTP_CLIENT, within(MAIN_JAVA));
     List<String> elsewhere = scan(HTTP_CLIENT, outsideMain());
     // Every tracked file, with no .java restriction, because the sentence
@@ -389,7 +391,7 @@ class InvariantsTest {
     assertEquals(
         HTTP_CLIENT_HOLDERS,
         simpleNames(inMain),
-        "the scope of this count is plowshare-*/src/main, and nothing wider. Held in"
+        "the scope of this count is core, SDK and integration src/main. Held in"
             + " main by "
             + inMain
             + ". Held under src but outside main by "
@@ -445,14 +447,14 @@ class InvariantsTest {
    *
    * <p><b>Which made one sentence in {@code ApiExceptionHandler} too broad, and still does.</b> It
    * says "The reader of these statuses is a model, and what it does next is decided by them". That
-   * is true of the MCP route — {@code HttpServerClient} turns a non-2xx into {@code
-   * ServerError(code, detail)} and a tool renders it for a foreign harness's model — and it was
-   * never true of the five agent- and service-side holders, where there was no status on the path
-   * to be read. {@code BadRequestException}'s own recorded incident is the first kind: a base URL
-   * with no scheme made a <em>memory write</em> come back {@code 400 bad_request}, and a memory
-   * write is the adapter's route, not an agent's. Correcting that sentence is a separate change
-   * from this one; it is recorded here and in the auth spec's §3.3 rather than done as a side
-   * effect of this guard shrinking.
+   * is true of the MCP route — {@code ControllerPeer} turns a non-2xx into {@code ServerError(code,
+   * detail)} and a tool renders it for a foreign harness's model — and it was never true of the
+   * five agent- and service-side holders, where there was no status on the path to be read. {@code
+   * BadRequestException}'s own recorded incident is the first kind: a base URL with no scheme made
+   * a <em>memory write</em> come back {@code 400 bad_request}, and a memory write is the adapter's
+   * route, not an agent's. Correcting that sentence is a separate change from this one; it is
+   * recorded here and in the auth spec's §3.3 rather than done as a side effect of this guard
+   * shrinking.
    *
    * <p><b>This guard does not say one holder is permanent.</b> It says the set may not widen
    * without somebody arguing for it. A second holder is a claim that some new place sits on the
@@ -892,7 +894,7 @@ class InvariantsTest {
 
     assertFalse(
         matching(within(CLIENT_MAIN_JAVA)).isEmpty(),
-        "no tracked .java file matched plowshare-client/src/main, so the Spring"
+        "no tracked .java file matched sdk/java/src/main, so the Spring"
             + " invariant asserted over nothing");
     assertFalse(
         matching(within(MAIN_JAVA)).isEmpty(),

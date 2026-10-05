@@ -1,1 +1,1 @@
-export * from 'plowshare-client-node/sync/shadow'
+export * from 'plowshare-client-node/sync/shadow';

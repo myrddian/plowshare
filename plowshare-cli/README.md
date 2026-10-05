@@ -71,7 +71,7 @@ and exit semantics. Human help lists every implemented ordinary command from the
 command catalog. `--validate` parses and resolves the effective operation and scope
 without credentials or a server; grants and retained-reference semantics remain
 server checks. To regenerate contracts after changing types, run
-`pnpm --dir plowshare-client-ts schemas`; a coverage test rejects stale schemas.
+`pnpm --dir sdk/typescript schemas`; a coverage test rejects stale schemas.
 
 ```sh
 bin/plowshare-cli information acquire '{"scope":{"kind":"personal"},"requestId":"00000000-0000-0000-0000-000000000001","url":"https://example.com/source"}' --json --validate
@@ -216,7 +216,7 @@ bin/plowshare-cli orchestration record '{"root":"run_1","tail":true,"limit":20}'
 bin/plowshare-cli schedule read '{"text":"every weekday at nine","zone":"UTC"}'
 bin/plowshare-cli schedule define '{"schedule":"weekday","cron":"0 0 9 * * MON-FRI","zone":"UTC","emits":"daily"}'
 bin/plowshare-cli trigger pause '{"trigger":"daily-check","paused":false}'
-bin/plowshare-cli event fire '{"event":"daily","data":{"reason":"manual"}}'
+bin/plowshare-cli event fire '{"event":"daily","data":{"text":"Manual observation"}}'
 bin/plowshare-cli inbox read '{"items":["item_1"]}'
 bin/plowshare-cli --project repo union conflicts
 ```

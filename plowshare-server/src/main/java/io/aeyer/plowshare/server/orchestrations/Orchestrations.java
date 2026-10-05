@@ -1,10 +1,10 @@
 package io.aeyer.plowshare.server.orchestrations;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Orchestration;
+import io.aeyer.plowshare.protocol.Orchestration.Structure;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRunTool;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -26,10 +26,13 @@ import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.Gate;
 import io.aeyer.plowshare.server.llm.accounting.*;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage.Kind;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
+import io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore;
 import io.aeyer.plowshare.server.todos.StageRules;
 import io.aeyer.plowshare.server.todos.StageSeeding;
 import io.aeyer.plowshare.server.todos.TodoItem;
@@ -49,7 +52,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -112,7 +117,7 @@ import org.slf4j.LoggerFactory;
  * back through, and every ending cancels the live descendants below it, deepest first — each row
  * stopped and then its conductor's own live job cancelled.
  */
-public final class Orchestrations implements ConductorActions, UsageAware {
+public final class Orchestrations implements ConductorActions, UsageAware, OrchestrationStarts {
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -341,6 +346,8 @@ public final class Orchestrations implements ConductorActions, UsageAware {
    *     winding down needs that turn to deliver its result
    * @param maxDepth how deep a tree of runs may go — {@code plowshare.orchestrations.max-depth}. A
    *     root is depth 0, so this is the last depth a child may be started at
+   * @param recovery atomic resume receipts and failed-attempt claims
+   * @param scripts the same durable journal used by the conductor runtime
    */
   public Orchestrations(
       OrchestrationStore store,
@@ -357,8 +364,12 @@ public final class Orchestrations implements ConductorActions, UsageAware {
       Consumer<OrchestrationRecord> changed,
       Consumer<String> cancelJobsIn,
       int maxDepth,
-      CallerAccess access) {
+      CallerAccess access,
+      OrchestrationRecovery recovery,
+      ScriptStore scripts) {
     this.access = access;
+    this.recovery = Objects.requireNonNull(recovery, "recovery");
+    this.scripts = Objects.requireNonNull(scripts, "scripts");
     this.store = Objects.requireNonNull(store, "store");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
     this.seeding = Objects.requireNonNull(seeding, "seeding");
@@ -633,6 +644,99 @@ public final class Orchestrations implements ConductorActions, UsageAware {
     return start(start, null, null);
   }
 
+  private final Set<String> settlingFailures = ConcurrentHashMap.newKeySet();
+  private BiConsumer<OrchestrationRecord, UUID> resumedListener = (run, requestId) -> {};
+
+  /** An optional account notification sink, invoked only after a winning recovery commits. */
+  public void useResumeListener(BiConsumer<OrchestrationRecord, UUID> listener) {
+    this.resumedListener = Objects.requireNonNull(listener);
+  }
+
+  private final OrchestrationRecovery recovery;
+  private final ScriptStore scripts;
+
+  /**
+   * Explicitly continue a failed root on its pinned source and existing allowance. Ownership and
+   * current project authority are rechecked. Receipts suppress duplicate dispatch across later
+   * failures. Uncertain script mutations remain protected by the script journal, never replayed.
+   */
+  public OrchestrationRecord resume(Orchestration.Resume ask, String account) {
+    var run =
+        store
+            .find(ask.id())
+            .filter(row -> Objects.equals(account, row.callerHandle()))
+            .orElseThrow(
+                () -> new CallerFault("No orchestration with that id is owned by this account."));
+    access.requireWork(run.project(), account);
+    if (recovery.received(run.id(), account, ask.requestId())) return run;
+    if (run.state() != OrchestrationState.FAILED || run.parent() != null)
+      throw new CallerFault(
+          "Only a failed root orchestration can be resumed; refresh its state or resume its root.");
+    if (settlingFailures.contains(run.id()) || voice.isSpeaking(run.conductorConversation()))
+      throw new CallerFault(
+          "The failed turn is still stopping; retry after it releases the conversation.");
+    Rebuilt rebuilt = rebuild(run);
+    if (rebuilt.conductor() == null) throw new CallerFault(rebuilt.failure());
+    if (budgetExhausted(run))
+      throw new CallerFault(
+          "The run has no model calls left; resume requires remaining allowance.");
+    // A known failed delegation can be continued in its own conversation. The journal only admits
+    // a recorded transient ending; a command without such evidence remains uncertain and refused.
+    String notice =
+        "The person explicitly resumed this failed orchestration. Continue from its existing history and todos. The previous failure was: "
+            + run.failure();
+    if (ScriptProgram.isScript(run.definitionSource())) {
+      notice =
+          scripts
+              .resumeMessage(run.conductorConversation())
+              .orElseThrow(
+                  () -> new CallerFault("The failed script has no recorded input to continue."));
+    }
+    final String continuation = notice;
+    var delegate = scripts.failedDelegate(run.conductorConversation());
+    scripts.requireRecoverable(run.conductorConversation());
+    if (!recovery.claim(run.id(), account, ask.requestId(), run.endedAt()))
+      return store.find(run.id()).orElseThrow();
+    var resumed = store.find(run.id()).orElseThrow();
+    todos.forget(run.conductorConversation());
+    recorder.runResumed(resumed, account, run.failure());
+    announce(run.id());
+    try {
+      resumedListener.accept(resumed, ask.requestId());
+    } catch (RuntimeException notificationFailed) {
+      log.warn(
+          "orchestration {}: notifying its resume listener failed", run.id(), notificationFailed);
+    }
+    if (delegate.isPresent()) {
+      var child = delegate.get();
+      try {
+        voice.resumeDelegate(
+            child.conversation(),
+            child.agent(),
+            run.conductorConversation(),
+            "The person explicitly requested a retry after the transient failure. Continue the original task from its recorded history.",
+            account,
+            outcome -> {
+              if (outcome.ending() == Outcome.Ending.ANSWERED) {
+                try {
+                  scripts.executed(run.conductorConversation(), child.sequence(), outcome.text());
+                  speakOrFail(resumed, rebuilt.conductor(), continuation, null);
+                } catch (RuntimeException failedReceipt) {
+                  failOnException(resumed, failedReceipt);
+                }
+              } else {
+                stopAndTell(run.id(), OrchestrationState.FAILED, failure(outcome));
+              }
+            });
+      } catch (RuntimeException failed) {
+        failOnException(resumed, failed);
+      }
+    } else {
+      speakOrFail(resumed, rebuilt.conductor(), continuation, null);
+    }
+    return store.find(run.id()).orElseThrow();
+  }
+
   private record CommittedStart(OrchestrationRecord run, boolean created) {}
 
   /** A caller-supplied durable key; repeated submissions never speak another first turn. */
@@ -740,8 +844,7 @@ public final class Orchestrations implements ConductorActions, UsageAware {
     // Before the first turn, so the story opens with the run and not with its first call.
     recorder.runStarted(run, start.request(), phase);
     String utterance =
-        io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
-                definition.source())
+        ScriptProgram.isScript(definition.source())
             ? JSON.createObjectNode()
                 .put("request", start.request())
                 .put("context", start.context())
@@ -1095,7 +1198,7 @@ public final class Orchestrations implements ConductorActions, UsageAware {
   }
 
   @Override
-  public Optional<String> ask(String orchestration, String question, String structure) {
+  public Optional<String> ask(String orchestration, String question, Structure structure) {
     if (store.ask(orchestration, question, CONDUCTOR, structure).isPresent()) {
       announce(orchestration);
       store.find(orchestration).ifPresent(run -> recorder.questionAsked(run, question));
@@ -1118,7 +1221,7 @@ public final class Orchestrations implements ConductorActions, UsageAware {
    * parent conductor — so on a run with no account it would sit on its row with nobody ever able to
    * answer it. {@link #askAboutStuck} and {@link #checkFailed} draw the same line.
    */
-  public Optional<String> askInstall(String orchestration, String question, String structure) {
+  public Optional<String> askInstall(String orchestration, String question, Structure structure) {
     if (store.find(orchestration).filter(run -> run.callerHandle() == null).isPresent()) {
       return Optional.of(NOBODY_TO_ASK_ABOUT_INSTALL);
     }
@@ -1994,7 +2097,11 @@ public final class Orchestrations implements ConductorActions, UsageAware {
    *     parent's answer counts as its progress, as {@link #answerAsModel}'s does
    */
   public Chosen answerChosen(
-      String orchestration, JsonNode choices, String note, String author, boolean byPerson) {
+      String orchestration,
+      List<io.aeyer.plowshare.server.agents.StructuredAnswers.Choice> choices,
+      String note,
+      String author,
+      boolean byPerson) {
     Optional<OrchestrationMessage> open = store.openQuestion(orchestration);
     if (open.isEmpty()) {
       return new Chosen.Lost();
@@ -2020,12 +2127,12 @@ public final class Orchestrations implements ConductorActions, UsageAware {
     }
     List<StructuredAnswers.Choice> read;
     try {
-      read = StructuredAnswers.read(choices, asked.questions());
+      read = StructuredAnswers.validate(choices, asked.questions());
     } catch (StructuredQuestions.Refused refused) {
       return new Chosen.Refused(refused.getMessage());
     }
     String text = StructuredAnswers.render(read, note);
-    String structure = StructuredAnswers.structure(read);
+    Structure structure = StructuredAnswers.structure(read);
     boolean won =
         byPerson
             ? store.answer(orchestration, text, author, structure)
@@ -3738,15 +3845,8 @@ public final class Orchestrations implements ConductorActions, UsageAware {
   }
 
   /** Whether a question's stored structure holds a draft's text, as an install question's does. */
-  private static boolean holdsDraft(String structure) {
-    if (structure == null) {
-      return false;
-    }
-    try {
-      return JSON.readTree(structure).path("text").isTextual();
-    } catch (JsonProcessingException unreadable) {
-      return false;
-    }
+  private static boolean holdsDraft(Structure structure) {
+    return structure != null && structure.text() != null;
   }
 
   // --- rebuilding the conductor -------------------------------------------------------------
@@ -3960,24 +4060,31 @@ public final class Orchestrations implements ConductorActions, UsageAware {
    */
   private boolean stopAndTell(
       String orchestration, OrchestrationState terminal, String failure, boolean unlessRunning) {
-    boolean stopped =
-        unlessRunning
-            ? store.stopUnlessRunning(orchestration, terminal, failure)
-            : store.stop(orchestration, terminal, failure);
-    if (!stopped) {
-      store
-          .find(orchestration)
-          .filter(run -> run.endedAt() != null && run.resultDeliveredAt() == null)
-          .ifPresent(delivery::runEnded);
-      return false;
+    // The failed state is visible before descendant cancellation and log cleanup finish. A client
+    // reacting to the push must wait for that cleanup before reviving the same durable run.
+    boolean settling = terminal == OrchestrationState.FAILED && settlingFailures.add(orchestration);
+    try {
+      boolean stopped =
+          unlessRunning
+              ? store.stopUnlessRunning(orchestration, terminal, failure)
+              : store.stop(orchestration, terminal, failure);
+      if (!stopped) {
+        store
+            .find(orchestration)
+            .filter(run -> run.endedAt() != null && run.resultDeliveredAt() == null)
+            .ifPresent(delivery::runEnded);
+        return false;
+      }
+      announce(orchestration);
+      recordEnded(orchestration);
+      // Before the caller is told, so a descendant's own CANCELLED ending finds its row already
+      // stopped and routes to nothing — Decision 6.
+      cancelDescendants(orchestration, new HashSet<>());
+      store.find(orchestration).ifPresent(delivery::runEnded);
+      return true;
+    } finally {
+      if (settling) settlingFailures.remove(orchestration);
     }
-    announce(orchestration);
-    recordEnded(orchestration);
-    // Before the caller is told, so a descendant's own CANCELLED ending finds its row already
-    // stopped and routes to nothing — Decision 6.
-    cancelDescendants(orchestration, new HashSet<>());
-    store.find(orchestration).ifPresent(delivery::runEnded);
-    return true;
   }
 
   /**
@@ -4155,7 +4262,7 @@ public final class Orchestrations implements ConductorActions, UsageAware {
   }
 
   private static String failure(Outcome outcome) {
-    return outcome.ending() + ": " + outcome.text();
+    return outcome.ending() + ": " + outcome.failureText();
   }
 
   private String liveSession(String session) {

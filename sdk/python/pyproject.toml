@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plowshare-sdk"
+version = "0.1.0"
+description = "Asynchronous Plowshare WebSocket SDK"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["websockets>=17,<18"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+plowshare = ["py.typed", "_schemas.json"]
+
+[project.optional-dependencies]
+check = ["mypy==2.4.0", "build==1.6.1", "ruff==0.16.10"]
+
+[tool.mypy]
+strict = true
+files = ["src/plowshare", "tests"]
+
+[tool.ruff]
+exclude = ["contracts.py", "_protocol.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

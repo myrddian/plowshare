@@ -119,7 +119,7 @@ public final class SendMessageTool implements AgentTool {
             604800,
             "description",
             "Optional handling deadline, including approval waits, in seconds. Expiry cancels handling and supplies an expected terminal reply."));
-    return new ToolSchema(
+    return ToolSchema.from(
         NAME,
         "Send a message to an agent or bot instance in this project or an explicitly permitted destination project. Sending durably queues a wake and returns a receipt; it does not wait for an answer. Incoming messages include an ID and return address. Reply with reply_to. A final reply satisfies an expected response; progress does not. Only the harness supplies sender identity and scope.",
         ToolArguments.object(properties, List.of("body")));

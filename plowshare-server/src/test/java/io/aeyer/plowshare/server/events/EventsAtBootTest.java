@@ -23,6 +23,7 @@ class EventsAtBootTest {
 
   private FiringStore firings;
   private Dispatcher dispatcher;
+  private io.aeyer.plowshare.server.relay.RelayInternalWorkers internal;
   private Ticker ticker;
   private ScheduledExecutorService thread;
   private EventsProperties properties;
@@ -31,6 +32,7 @@ class EventsAtBootTest {
   void mocks() {
     firings = mock(FiringStore.class);
     dispatcher = mock(Dispatcher.class);
+    internal = mock(io.aeyer.plowshare.server.relay.RelayInternalWorkers.class);
     ticker = mock(Ticker.class);
     thread = mock(ScheduledExecutorService.class);
     properties = new EventsProperties();
@@ -39,7 +41,7 @@ class EventsAtBootTest {
 
   private void boot() {
     new EventsConfig()
-        .eventsAtBoot(firings, dispatcher, ticker, properties, thread)
+        .eventsAtBoot(firings, dispatcher, ticker, properties, thread, internal)
         .onApplicationEvent(null);
   }
 
@@ -50,10 +52,11 @@ class EventsAtBootTest {
     verify(firings).abandonUnfinished(any(), any());
     verify(ticker).rollForward(any(), any());
     verify(dispatcher).drain("trigger:morning");
-    var ordered = org.mockito.Mockito.inOrder(firings, ticker, dispatcher);
+    var ordered = org.mockito.Mockito.inOrder(firings, ticker, dispatcher, internal);
     ordered.verify(firings).abandonUnfinished(any(), any());
     ordered.verify(ticker).rollForward(any(), any());
     ordered.verify(dispatcher).recoverWakes();
+    ordered.verify(internal).start();
     ordered.verify(dispatcher).drain("trigger:morning");
     verifyNoInteractions(thread);
   }

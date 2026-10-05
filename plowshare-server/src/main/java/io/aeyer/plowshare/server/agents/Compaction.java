@@ -3183,7 +3183,7 @@ public final class Compaction {
         // no answer for this ending, since the text is a tool's and not a model's reply.
         record(LoggedEntry.answer(outcome.text(), List.of()));
       } else {
-        record(LoggedEntry.attemptFailed(outcome.ending(), outcome.text()));
+        record(LoggedEntry.attemptFailed(outcome.ending(), outcome.failureText()));
         // The runtime's own sentence, and it is deliberately untimed: it
         // names an ending and lists the tools the run called, and no
         // single model call produced it.

@@ -8,9 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.client.files.ChannelClient;
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.Found;
@@ -36,6 +33,9 @@ import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.Role;
 import io.aeyer.plowshare.server.session.SessionRegistry;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.SocketPeer;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import jakarta.servlet.Filter;
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -94,7 +94,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
  *
  * <p>Both halves of Plowshare are on this module's test classpath — the build file says so and says
  * it is test-only and one-directional — so the client that connects here is the real {@link
- * ChannelClient}, okhttp and all, and not a stand-in for it.
+ * SocketPeer}, okhttp and all, and not a stand-in for it.
  *
  * <h2>Loopback and nothing else</h2>
  *
@@ -107,7 +107,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
  * <h2>Two handlers, because one constant cannot be measured from both sides</h2>
  *
  * <p>The production handler is on {@link FileChannelHandler#PATH} with its real deadline, and is
- * what {@link ChannelClient} connects to. A second one, on a path only this file knows, carries a
+ * what {@link SocketPeer} connects to. A second one, on a path only this file knows, carries a
  * deadline of {@link #FAST} so that the refused side can be measured without adding thirty seconds
  * to every run of the suite.
  *
@@ -235,7 +235,7 @@ class FileChannelTest {
       throws Exception {
     Path pdf = tmp.resolve("streamed.pdf");
     Files.write(pdf, io.aeyer.plowshare.server.documents.Pdfs.of("Converted on server"));
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(tmp));
     String session = "server-conversion-" + java.util.UUID.randomUUID();
     client(session, workspace);
@@ -305,7 +305,7 @@ class FileChannelTest {
             .web(WebApplicationType.SERVLET)
             // A command-line argument, not properties(...): measured, the
             // latter is default properties and application.yml wins.
-            .run("--server.port=0");
+            .run("--server.port=0", "--server.address=127.0.0.1");
     port = ((WebServerApplicationContext) context).getWebServer().getPort();
     // The one FileChannelConfig built, so this file drives the production
     // wiring rather than a copy of it.
@@ -483,8 +483,8 @@ class FileChannelTest {
     // It is also a measurement of both send paths, and neither half is forty.
     // The answers really do go out from forty virtual threads, but they are
     // the SILENT FIXTURE'S — it starts one per request in its own onMessage,
-    // exactly as ChannelClient does, which is why the fixture is built that
-    // way. This test does not exercise ChannelClient at all, and crediting it
+    // exactly as SocketPeer does, which is why the fixture is built that
+    // way. This test does not exercise SocketPeer at all, and crediting it
     // here was a claim about a class this method never constructs.
     //
     // The server side is smaller still: supplyAsync uses the common pool,
@@ -593,7 +593,7 @@ class FileChannelTest {
     Files.writeString(repo.resolve("A.java"), "class A {}\n");
 
     String session = "moving";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -607,8 +607,10 @@ class FileChannelTest {
             WorkspaceRefusedException.class, () -> provider.read(repo.resolve("A.java"), FIRST));
 
     assertTrue(
-        refused.getMessage().contains("moved"),
-        "the model is told the workspace moved, which it can act on — " + refused.getMessage());
+        refused.getMessage().contains("outside")
+            && refused.getMessage().contains(elsewhere.toRealPath().toString()),
+        "the model is told the current root and cannot read the withdrawn workspace — "
+            + refused.getMessage());
     // Correctable rather than an ending — every other path on this run still
     // works — and the types carry that: WorkspaceRefusedException and
     // WorkspaceUnavailableException share no supertype, which is what lets
@@ -627,7 +629,7 @@ class FileChannelTest {
     Path second = Files.createDirectory(tmp.resolve("second"));
 
     String session = "readvertising";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(first));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -646,7 +648,7 @@ class FileChannelTest {
     Files.writeString(repo.resolve("Read.java"), "class Read {}\n");
 
     String session = "endtoend";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -670,7 +672,7 @@ class FileChannelTest {
     Files.writeString(secret.resolve("keys.txt"), "not yours");
 
     String session = "refusing";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -692,7 +694,7 @@ class FileChannelTest {
     Path repo = Files.createDirectory(tmp.resolve("repo"));
 
     String session = "deleted";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -736,9 +738,9 @@ class FileChannelTest {
   void what_a_run_wrote_before_the_session_died_is_still_on_the_clients_disk() throws Exception {
     Path repo = Files.createDirectory(tmp.resolve("repo"));
     String session = "half-done";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    ChannelClient client = client(session, workspace);
+    SocketPeer client = client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
 
     provider.write(repo.resolve("Half.java"), "class Half {}\n");
@@ -776,9 +778,9 @@ class FileChannelTest {
     Path repo = Files.createDirectory(tmp.resolve("repo"));
     Files.writeString(repo.resolve("A.java"), "class A {}\n");
     String session = "through-the-stack";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    ChannelClient client = client(session, workspace);
+    SocketPeer client = client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
     ProviderRouter router = new ProviderRouter(home -> List.of(provider));
     FileTools.Read read = new FileTools.Read(router);
@@ -808,7 +810,7 @@ class FileChannelTest {
     // in — a real round trip, which is the case task 4's own note corrected
     // itself about when it said the probe "costs nothing".
     String session = "empty";
-    Workspace nothingSet = new Workspace();
+    TestWorkspace nothingSet = new TestWorkspace();
     client(session, nothingSet);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
 
@@ -826,7 +828,7 @@ class FileChannelTest {
     // a state the client was never asked about. Both routes end in a
     // WorkspaceRefusedException, which is the whole of what absence needs.
     String session = "ungranted";
-    Workspace anywhere = new Workspace();
+    TestWorkspace anywhere = new TestWorkspace();
     anywhere.set(List.of(tmp));
     client(session, anywhere);
 
@@ -1120,8 +1122,8 @@ class FileChannelTest {
    * &#92;uXXXX} escape and that is the largest expansion it has — a quote or a backslash costs two
    * chars, an accented or CJK character costs none at all and is <em>cheaper</em> here than its
    * UTF-8 length. Nothing on either side of this wire rejects a file for holding them: {@code
-   * ClientEnforcer} refuses a file only for not decoding as UTF-8, and a C0 byte decodes. A
-   * captured terminal log is the ordinary spelling of it, one {@code ESC} per colour change.
+   * NodeFiles} refuses a file only for not decoding as UTF-8, and a C0 byte decodes. A captured
+   * terminal log is the ordinary spelling of it, one {@code ESC} per colour change.
    *
    * <p>Built through {@code Window.cut} rather than assembled by hand, so it is the real ceiling
    * and moves if {@code MAX_WINDOW_BYTES} does.
@@ -1341,7 +1343,7 @@ class FileChannelTest {
   @Test
   void the_file_that_killed_a_run_crosses_this_wire_whole() throws Exception {
     // THE REGRESSION IN ITS ORIGINAL SHAPE, and the one this class did not
-    // have: a real ChannelClient with a real ClientEnforcer reads a real
+    // have: a real SocketPeer with a real NodeFiles reads a real
     // file off a real disk and answers over a real socket. The other
     // real-client reads in this file carry one line each; the large payloads
     // in it are frames built by hand and sent from a raw socket to an id
@@ -1368,7 +1370,7 @@ class FileChannelTest {
         "the fixture is the size of the file that found this, or it is a different test");
 
     String session = "the-file-that-found-it";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -1423,7 +1425,7 @@ class FileChannelTest {
     List<String> all = written.lines().toList();
 
     String session = "a-window-the-cap-stopped";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -1464,7 +1466,7 @@ class FileChannelTest {
   @Test
   void a_stat_answers_over_this_wire_about_a_file_no_one_window_carries() throws Exception {
     // file_stat is new on this channel and nothing had driven it end to end:
-    // ClientEnforcer.stat is measured on the client's side and RemoteProvider
+    // NodeFiles.stat is measured on the client's side and RemoteProvider
     // .stat on the server's, and neither of those tests has a socket between
     // them. Its reply is tiny, which is the point of it — it is what lets a
     // model decide whether to read at all — so this measures the small frame
@@ -1477,7 +1479,7 @@ class FileChannelTest {
     Files.writeString(wide, written);
 
     String session = "asking-before-reading";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -1511,9 +1513,9 @@ class FileChannelTest {
    * a_line_wider_than_the_buffer_still_ends_the_session_it_arrives_on}</b>, and it pinned the
    * failure rather than endorsing it: a minified bundle is one line, {@code Window.cut} took its
    * first line whatever it cost, and the frame for such a file was bounded by {@code
-   * ClientEnforcer.MAX_FILE_BYTES} rather than by {@code MAX_WINDOW_BYTES}. Its javadoc said it
-   * would go red the day somebody fixed that, and this is that day; the fixture is kept exactly,
-   * because the fixture was never the thing in doubt.
+   * NodeFiles.MAX_FILE_BYTES} rather than by {@code MAX_WINDOW_BYTES}. Its javadoc said it would go
+   * red the day somebody fixed that, and this is that day; the fixture is kept exactly, because the
+   * fixture was never the thing in doubt.
    *
    * <p><b>The two assertions that matter are that the session is still there and that the caller
    * was told something it can act on.</b> A refusal is an ordinary tool error a model reads and
@@ -1535,7 +1537,7 @@ class FileChannelTest {
     Files.writeString(bundle, oneLine + "\n");
 
     String session = "one-enormous-line";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -1592,7 +1594,7 @@ class FileChannelTest {
     Files.writeString(bundle, oneLine + "\n");
 
     String session = "searchable-after-all";
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
     client(session, workspace);
     RemoteProvider provider = new RemoteProvider(production, session, WRITE);
@@ -1735,7 +1737,7 @@ class FileChannelTest {
     // claim about the two literals agreeing across two modules. Every other
     // test in this file would pass with both of them wrong in the same way,
     // because they all reach the server through the same pair.
-    assertEquals("/" + ChannelClient.PATH, FileChannelHandler.PATH);
+    assertEquals("/" + SocketPeer.PATH, FileChannelHandler.PATH);
     assertNotEquals(FAST_PATH, FileChannelHandler.PATH);
   }
 
@@ -2041,7 +2043,7 @@ class FileChannelTest {
   }
 
   /**
-   * A client that did not ask — every Java {@code ChannelClient} — is sent nothing it would try to
+   * A client that did not ask — every Java {@code SocketPeer} — is sent nothing it would try to
    * read as a request.
    */
   @Test
@@ -2219,14 +2221,14 @@ class FileChannelTest {
   // --- fixtures ------------------------------------------------------------
 
   /**
-   * A real {@link ChannelClient} over a real workspace, closed after the test. Returned so a test
-   * can close it early — a client going away mid-run is what the session-gone tests are about, and
-   * the only way to produce one here is to be holding it.
+   * A real {@link SocketPeer} over a real workspace, closed after the test. Returned so a test can
+   * close it early — a client going away mid-run is what the session-gone tests are about, and the
+   * only way to produce one here is to be holding it.
    */
-  private ChannelClient client(String session, Workspace workspace) throws Exception {
+  private SocketPeer client(String session, TestWorkspace workspace) throws Exception {
     Object incumbent = attachment(productionSessions, session).orElse(null);
-    ChannelClient client =
-        new ChannelClient("http://localhost:" + port, session, new ClientEnforcer(workspace));
+    SocketPeer client =
+        new SocketPeer("http://localhost:" + port, session, new NodeFiles(workspace));
     opened.add(client);
     client.open();
     awaitAttachmentOtherThan(productionSessions, session, incumbent);
@@ -2318,8 +2320,8 @@ class FileChannelTest {
   }
 
   /**
-   * The close is asynchronous too, and in the other direction: {@code ChannelClient.close} returns
-   * as soon as it has asked, so a request sent straight afterwards can still find the session
+   * The close is asynchronous too, and in the other direction: {@code SocketPeer.close} returns as
+   * soon as it has asked, so a request sent straight afterwards can still find the session
    * registered and wait out a deadline instead of failing on the close.
    */
   private void awaitDisconnected(String session) throws InterruptedException {
@@ -2556,16 +2558,10 @@ class FileChannelTest {
       org.mockito.Mockito.when(
               authorization.allowed(
                   org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.anyMap(),
+                  org.mockito.ArgumentMatchers.any(
+                      io.aeyer.plowshare.server.access.AccessRequest.class),
                   org.mockito.ArgumentMatchers.nullable(String.class)))
           .thenReturn(true);
-      org.mockito.Mockito.when(
-              authorization.filter(
-                  org.mockito.ArgumentMatchers.anyString(),
-                  org.mockito.ArgumentMatchers.any(
-                      io.aeyer.plowshare.protocol.frames.Outcome.class),
-                  org.mockito.ArgumentMatchers.nullable(String.class)))
-          .thenAnswer(call -> call.getArgument(1));
       return authorization;
     }
 

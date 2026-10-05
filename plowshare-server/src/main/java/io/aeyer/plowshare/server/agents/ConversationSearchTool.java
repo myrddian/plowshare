@@ -23,7 +23,7 @@ public final class ConversationSearchTool implements AgentTool {
         "snapshot", ToolArguments.string("Snapshot from the first page for subsequent pages"));
     parameters.put("offset", new TreeMap<>(Map.of("type", "integer", "minimum", 0)));
     parameters.put("limit", new TreeMap<>(Map.of("type", "integer", "minimum", 1, "maximum", 20)));
-    return new ToolSchema(
+    return ToolSchema.from(
         NAME,
         "Search retained conversation evidence in this run's home. Defaults to hybrid; lexical is available without embeddings. "
             + "Semantic/hybrid retrieval uses query embeddings; this does not run memory navigation. "

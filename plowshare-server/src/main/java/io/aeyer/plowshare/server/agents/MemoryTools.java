@@ -155,7 +155,7 @@ public final class MemoryTools {
 
     public Recall(Archive archive) {
       this.archive = Objects.requireNonNull(archive, "archive");
-      this.schema = new ToolSchema(RECALL_NAME, RECALL_DESCRIPTION, recallSchema());
+      this.schema = ToolSchema.from(RECALL_NAME, RECALL_DESCRIPTION, recallSchema());
     }
 
     @Override
@@ -313,7 +313,7 @@ public final class MemoryTools {
 
     public Read(Archive archive) {
       this.archive = Objects.requireNonNull(archive, "archive");
-      this.schema = new ToolSchema(READ_NAME, READ_DESCRIPTION, readSchema());
+      this.schema = ToolSchema.from(READ_NAME, READ_DESCRIPTION, readSchema());
     }
 
     @Override
@@ -462,7 +462,7 @@ public final class MemoryTools {
     public Write(Archive archive, Supplier<Scribe> scribe) {
       this.archive = Objects.requireNonNull(archive, "archive");
       this.scribe = Objects.requireNonNull(scribe, "scribe");
-      this.schema = new ToolSchema(WRITE_NAME, WRITE_DESCRIPTION, writeSchema());
+      this.schema = ToolSchema.from(WRITE_NAME, WRITE_DESCRIPTION, writeSchema());
     }
 
     private java.util.function.BooleanSupplier restricted = () -> false;
@@ -513,16 +513,22 @@ public final class MemoryTools {
               "{\"summary\": \"payments authenticate with mTLS\","
                   + " \"scope\": \"the payments service\","
                   + " \"body\": \"The gateway pins a client cert.\"}");
-      MemoryProposal proposal =
-          RequestedProposal.toFile(
-              new MemoryProposal(
-                  ToolArguments.requireText(args, "summary", WRITE_NAME, "the claim, in one line"),
-                  ToolArguments.requireText(args, "scope", WRITE_NAME, "when this applies"),
-                  ToolArguments.requireText(
-                      args, "body", WRITE_NAME, "the whole of it, and why it is true"),
-                  author(args),
-                  where(args)),
-              args.get("verdict"));
+      MemoryProposal proposal;
+      try {
+        proposal =
+            RequestedProposal.toFile(
+                new MemoryProposal(
+                    ToolArguments.requireText(
+                        args, "summary", WRITE_NAME, "the claim, in one line"),
+                    ToolArguments.requireText(args, "scope", WRITE_NAME, "when this applies"),
+                    ToolArguments.requireText(
+                        args, "body", WRITE_NAME, "the whole of it, and why it is true"),
+                    author(args),
+                    where(args)),
+                args.hasNonNull("verdict"));
+      } catch (IllegalArgumentException invalid) {
+        throw new BadArguments(invalid.getMessage());
+      }
       Validation.check(proposal, archive.maxBodyChars());
       Scribe.Judgement judged =
           owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
@@ -830,16 +836,8 @@ public final class MemoryTools {
    * multi-line scope reads as one long line, which is the right trade — a scope is documented as
    * one sentence saying when a memory applies.
    *
-   * <p><b>"The whole system" above means this module.</b> There is a second copy of this rule in
-   * {@code io.aeyer.plowshare.client.tools.MemoryTools}, and it cannot be this one: {@code
-   * plowshare-client} depends on {@code plowshare-protocol} and never on the server, deliberately,
-   * so that the client cannot see a JDBC driver or a dispatcher. The two are kept in step by hand,
-   * and by the tests on each side.
-   *
-   * <p>That is not a hypothetical cost. Task 6 read <em>this</em> renderer, concluded that {@code
-   * formed().where()} was already flattened before it reached a model, and was right about this
-   * file and wrong about the other one, which appended it raw until Task 10. <b>Do not reason about
-   * one from the other; open both.</b>
+   * <p>The TypeScript MCP renderer applies the equivalent display rule at its own output boundary.
+   * Server rendering and MCP rendering have independent compatibility tests.
    */
   public static String oneLine(String value) {
     return LINE_BREAK.matcher(value).replaceAll(" ").strip();

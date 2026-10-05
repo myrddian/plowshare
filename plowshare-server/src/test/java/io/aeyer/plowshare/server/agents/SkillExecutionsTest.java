@@ -65,7 +65,7 @@ class SkillExecutionsTest {
         conversations
             .log(Origin.DELEGATION, Home.global(), "interlocutor", parent, null, "alice")
             .id();
-    executions = new SkillExecutions(jdbc);
+    executions = new JdbcSkillExecutionsRepository(jdbc);
   }
 
   @Test
@@ -88,7 +88,8 @@ class SkillExecutionsTest {
     executions.running("alice", id, child);
     assertThrows(IllegalStateException.class, () -> executions.running("alice", id, child));
     assertEquals(
-        skill.source(), new SkillExecutions(jdbc).active(child).getFirst().skill().source());
+        skill.source(),
+        new JdbcSkillExecutionsRepository(jdbc).active(child).getFirst().skill().source());
     assertEquals(skill.hash(), executions.active(child).getFirst().skill().hash());
     executions.closed(child, new Outcome(Outcome.Ending.AWAITING, "Approval needed", 1, 1, ""));
     assertEquals("awaiting", executions.active(child).getFirst().state());
@@ -194,7 +195,7 @@ class SkillExecutionsTest {
         new SkillRuntime(resolver, callers, executions, modelRuntime, ImageStore.NONE);
     var commands =
         new BoundCommands(
-            new CommandInvocations(jdbc),
+            new JdbcCommandInvocationsRepository(jdbc),
             resolver,
             mock(OrchestrationResolver.class),
             callers,
@@ -251,7 +252,8 @@ class SkillExecutionsTest {
     assertEquals("running", accepted.state());
     assertNotNull(skillRuntime.refusal(parent, "file_write"));
     assertNull(skillRuntime.refusal(parent, "file_read"));
-    assertTrue(new CommandInvocations(jdbc).pending("alice", parent, "worker").isEmpty());
+    assertTrue(
+        new JdbcCommandInvocationsRepository(jdbc).pending("alice", parent, "worker").isEmpty());
     var inspected =
         commands.prepare(
             true,
@@ -301,7 +303,7 @@ class SkillExecutionsTest {
 
   @Test
   void command_binding_is_durable_scoped_and_claimed_once() throws Exception {
-    var commands = new CommandInvocations(jdbc);
+    var commands = new JdbcCommandInvocationsRepository(jdbc);
     var entry =
         new CommandCatalog.Entry(
             "/skill:review",
@@ -335,7 +337,7 @@ class SkillExecutionsTest {
     assertEquals("dispatching", commands.pending("alice", parent, "bot").getFirst().state());
     assertEquals(
         "dispatching",
-        new CommandInvocations(jdbc)
+        new JdbcCommandInvocationsRepository(jdbc)
             .find("alice", parent, "bot", first.id())
             .orElseThrow()
             .state());

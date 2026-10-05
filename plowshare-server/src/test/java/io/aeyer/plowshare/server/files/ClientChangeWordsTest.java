@@ -6,10 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aeyer.plowshare.client.files.ClientEnforcer;
-import io.aeyer.plowshare.client.files.Workspace;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
+import io.aeyer.plowshare.testpeer.NodeFiles;
+import io.aeyer.plowshare.testpeer.TestWorkspace;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -40,9 +40,9 @@ class ClientChangeWordsTest {
   @BeforeEach
   void aClientOverOneTree() throws IOException {
     repo = Files.createDirectory(tmp.resolve("repo")).toRealPath();
-    Workspace workspace = new Workspace();
+    TestWorkspace workspace = new TestWorkspace();
     workspace.set(List.of(repo));
-    ClientEnforcer client = new ClientEnforcer(workspace);
+    NodeFiles client = new NodeFiles(workspace);
     provider =
         new RemoteProvider(
             (session, request) -> {

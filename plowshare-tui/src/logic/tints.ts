@@ -1,1 +1,1 @@
-export * from 'plowshare-client-ts/operations/tints'
+export * from 'plowshare-client-ts/operations/tints';

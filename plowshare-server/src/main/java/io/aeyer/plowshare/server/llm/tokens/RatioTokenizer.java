@@ -12,9 +12,8 @@ package io.aeyer.plowshare.server.llm.tokens;
  *
  * <p>English prose runs near four characters a token; dense identifiers, JSON, base64 and any
  * script without spaces run far denser, and a CJK line can be more tokens than it has characters.
- * {@code Chunker}'s UTF-8 ceiling exists precisely because a ratio has no safe direction, and it
- * stays a {@link TokenCount.Basis#BOUND} for that reason: the two are different claims and this
- * class does not replace it.
+ * Embedding chunking and submission must use model-specific measured counters. This estimator
+ * remains useful for displaying chat context budgets, but cannot enforce a hard model limit.
  *
  * <h2>Anchoring</h2>
  *

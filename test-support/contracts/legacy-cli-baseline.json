@@ -1,0 +1,198 @@
+{
+  "commands": [
+    {
+      "legacy": "information",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "memory navigate",
+      "legacyFlags": [
+        "--project"
+      ]
+    },
+    {
+      "legacy": "memory digest",
+      "legacyFlags": [
+        "--project"
+      ]
+    },
+    {
+      "legacy": "memory index",
+      "legacyFlags": [
+        "--project"
+      ]
+    },
+    {
+      "legacy": "memory read",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "memory recall",
+      "legacyFlags": [
+        "--project",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "memory write",
+      "legacyFlags": [
+        "--summary",
+        "--scope",
+        "--body",
+        "--project",
+        "--by",
+        "--where"
+      ]
+    },
+    {
+      "legacy": "memory curate",
+      "legacyFlags": [
+        "--max-model-calls"
+      ]
+    },
+    {
+      "legacy": "memory proposals",
+      "legacyFlags": [
+        "--project"
+      ]
+    },
+    {
+      "legacy": "memory resolve",
+      "legacyFlags": [
+        "--reason",
+        "--by"
+      ]
+    },
+    {
+      "legacy": "conversation list",
+      "legacyFlags": [
+        "--project"
+      ]
+    },
+    {
+      "legacy": "conversation search",
+      "legacyFlags": [
+        "--project",
+        "--offset",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "conversation chat",
+      "legacyFlags": [
+        "--offset",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "conversation trajectory",
+      "legacyFlags": [
+        "--offset",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "conversation context",
+      "legacyFlags": [
+        "--agent"
+      ]
+    },
+    {
+      "legacy": "document retrieve",
+      "legacyFlags": [
+        "--document",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "document rank",
+      "legacyFlags": [
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "document stance",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "document list",
+      "legacyFlags": [
+        "--naming",
+        "--limit",
+        "--offset"
+      ]
+    },
+    {
+      "legacy": "document show",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "document search",
+      "legacyFlags": [
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "document ask",
+      "legacyFlags": [
+        "--max-model-calls"
+      ]
+    },
+    {
+      "legacy": "document citations",
+      "legacyFlags": [
+        "--conversation",
+        "--document",
+        "--limit"
+      ]
+    },
+    {
+      "legacy": "search",
+      "legacyFlags": [
+        "--page-size",
+        "--max",
+        "--page"
+      ]
+    },
+    {
+      "legacy": "fetch",
+      "legacyFlags": [
+        "--offset"
+      ]
+    },
+    {
+      "legacy": "project define",
+      "legacyFlags": [
+        "--exclude"
+      ]
+    },
+    {
+      "legacy": "project workspace",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "project lend",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "project unlend",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "project rename",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "project forget",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "job status",
+      "legacyFlags": []
+    },
+    {
+      "legacy": "job cancel",
+      "legacyFlags": []
+    }
+  ]
+}

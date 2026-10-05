@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { gate, probeSession, type GateDeps, type SessionState } from './main'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { gate, probeSession, type GateDeps, type SessionState } from './main';
 
 /**
  * `gate`'s branching, held apart from `render`/`bootstrapFromUrl` and from
@@ -26,55 +26,57 @@ import { gate, probeSession, type GateDeps, type SessionState } from './main'
  * `probeSession` and `gate` were not exported.
  */
 function fakeDeps(probe: () => Promise<SessionState>): GateDeps & {
-    readonly mountShell: ReturnType<typeof vi.fn>
-    readonly mountLogin: ReturnType<typeof vi.fn>
-    readonly mountPassword: ReturnType<typeof vi.fn>
+  readonly mountShell: ReturnType<typeof vi.fn>;
+  readonly mountLogin: ReturnType<typeof vi.fn>;
+  readonly mountPassword: ReturnType<typeof vi.fn>;
 } {
-    return {
-        probe,
-        mountShell: vi.fn(),
-        mountLogin: vi.fn(),
-        mountPassword: vi.fn(),
-    }
+  return {
+    probe,
+    mountShell: vi.fn(),
+    mountLogin: vi.fn(),
+    mountPassword: vi.fn(),
+  };
 }
 
-let host: HTMLElement
+let host: HTMLElement;
 
 beforeEach(() => {
-    host = document.createElement('div')
-})
+  host = document.createElement('div');
+});
 
 describe('gate', () => {
-    it('mounts the shell for a session that is not flagged', async () => {
-        const deps = fakeDeps(async () => 'signed-in')
-        await gate(host, deps)
+  it('mounts the shell for a session that is not flagged', async () => {
+    const deps = fakeDeps(async () => 'signed-in');
+    await gate(host, deps);
 
-        expect(deps.mountShell).toHaveBeenCalledWith(host)
-        expect(deps.mountLogin).not.toHaveBeenCalled()
-        expect(deps.mountPassword).not.toHaveBeenCalled()
-    })
+    expect(deps.mountShell).toHaveBeenCalledWith(host);
+    expect(deps.mountLogin).not.toHaveBeenCalled();
+    expect(deps.mountPassword).not.toHaveBeenCalled();
+  });
 
-    it('mounts the password-change screen unconditionally for a session flagged ' +
-        'must_change_password',
-        async () => {
-            const deps = fakeDeps(async () => 'flagged')
-            await gate(host, deps)
+  it(
+    'mounts the password-change screen unconditionally for a session flagged ' +
+      'must_change_password',
+    async () => {
+      const deps = fakeDeps(async () => 'flagged');
+      await gate(host, deps);
 
-            expect(deps.mountPassword).toHaveBeenCalledTimes(1)
-            expect(deps.mountPassword).toHaveBeenCalledWith(host)
-            expect(deps.mountShell).not.toHaveBeenCalled()
-            expect(deps.mountLogin).not.toHaveBeenCalled()
-        })
+      expect(deps.mountPassword).toHaveBeenCalledTimes(1);
+      expect(deps.mountPassword).toHaveBeenCalledWith(host);
+      expect(deps.mountShell).not.toHaveBeenCalled();
+      expect(deps.mountLogin).not.toHaveBeenCalled();
+    },
+  );
 
-    it('mounts the login form when there is no session at all', async () => {
-        const deps = fakeDeps(async () => 'signed-out')
-        await gate(host, deps)
+  it('mounts the login form when there is no session at all', async () => {
+    const deps = fakeDeps(async () => 'signed-out');
+    await gate(host, deps);
 
-        expect(deps.mountLogin).toHaveBeenCalledWith(host)
-        expect(deps.mountShell).not.toHaveBeenCalled()
-        expect(deps.mountPassword).not.toHaveBeenCalled()
-    })
-})
+    expect(deps.mountLogin).toHaveBeenCalledWith(host);
+    expect(deps.mountShell).not.toHaveBeenCalled();
+    expect(deps.mountPassword).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * `probeSession`'s own mapping from a real `fetch` response to a
@@ -86,68 +88,73 @@ describe('gate', () => {
  * exercised here doing exactly that.
  */
 describe('probeSession, and gate acting on what it reports', () => {
-    let fetchMock: ReturnType<typeof vi.fn>
+  let fetchMock: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => {
-        fetchMock = vi.fn()
-        vi.stubGlobal('fetch', fetchMock)
-    })
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
 
-    afterEach(() => {
-        vi.unstubAllGlobals()
-    })
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    it('a 204 with no flag reads as signed in, and gates to the shell', async () => {
-        fetchMock.mockResolvedValue(new Response(null, {
-            status: 204,
-            headers: { 'X-Plowshare-Must-Change-Password': 'false' },
-        }))
+  it('a 204 with no flag reads as signed in, and gates to the shell', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(null, {
+        status: 204,
+        headers: { 'X-Plowshare-Must-Change-Password': 'false' },
+      }),
+    );
 
-        expect(await probeSession()).toBe('signed-in')
+    expect(await probeSession()).toBe('signed-in');
 
-        const deps = fakeDeps(probeSession)
-        await gate(host, deps)
-        expect(deps.mountShell).toHaveBeenCalledWith(host)
-    })
+    const deps = fakeDeps(probeSession);
+    await gate(host, deps);
+    expect(deps.mountShell).toHaveBeenCalledWith(host);
+  });
 
-    it('a 204 flagged must_change_password reads as flagged, and gates to the password ' +
-        'screen',
-        async () => {
-            fetchMock.mockResolvedValue(new Response(null, {
-                status: 204,
-                headers: { 'X-Plowshare-Must-Change-Password': 'true' },
-            }))
+  it(
+    'a 204 flagged must_change_password reads as flagged, and gates to the password ' +
+      'screen',
+    async () => {
+      fetchMock.mockResolvedValue(
+        new Response(null, {
+          status: 204,
+          headers: { 'X-Plowshare-Must-Change-Password': 'true' },
+        }),
+      );
 
-            expect(await probeSession()).toBe('flagged')
+      expect(await probeSession()).toBe('flagged');
 
-            const deps = fakeDeps(probeSession)
-            await gate(host, deps)
-            expect(deps.mountPassword).toHaveBeenCalledWith(host)
-        })
+      const deps = fakeDeps(probeSession);
+      await gate(host, deps);
+      expect(deps.mountPassword).toHaveBeenCalledWith(host);
+    },
+  );
 
-    it('a 401 reads as signed out, and gates to the login form', async () => {
-        fetchMock.mockResolvedValue(new Response(null, { status: 401 }))
+  it('a 401 reads as signed out, and gates to the login form', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
 
-        expect(await probeSession()).toBe('signed-out')
+    expect(await probeSession()).toBe('signed-out');
 
-        const deps = fakeDeps(probeSession)
-        await gate(host, deps)
-        expect(deps.mountLogin).toHaveBeenCalledWith(host)
-    })
+    const deps = fakeDeps(probeSession);
+    await gate(host, deps);
+    expect(deps.mountLogin).toHaveBeenCalledWith(host);
+  });
 
-    it('a transport failure reads as signed out, and gates to login rather than a blank page',
-        async () => {
-            fetchMock.mockRejectedValue(new TypeError('offline'))
+  it('a transport failure reads as signed out, and gates to login rather than a blank page', async () => {
+    fetchMock.mockRejectedValue(new TypeError('offline'));
 
-            await expect(probeSession()).resolves.toBe('signed-out')
+    await expect(probeSession()).resolves.toBe('signed-out');
 
-            const deps = fakeDeps(probeSession)
-            await gate(host, deps)
-            expect(deps.mountLogin).toHaveBeenCalledWith(host)
-            expect(deps.mountShell).not.toHaveBeenCalled()
-            expect(deps.mountPassword).not.toHaveBeenCalled()
-        })
-})
+    const deps = fakeDeps(probeSession);
+    await gate(host, deps);
+    expect(deps.mountLogin).toHaveBeenCalledWith(host);
+    expect(deps.mountShell).not.toHaveBeenCalled();
+    expect(deps.mountPassword).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * End to end through the real screens rather than `fakeDeps`: `gate(host)`
@@ -158,40 +165,46 @@ describe('probeSession, and gate acting on what it reports', () => {
  * that no handle travels between the two.
  */
 describe('a real password change, end to end through gate', () => {
-    let fetchMock: ReturnType<typeof vi.fn>
+  let fetchMock: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => {
-        fetchMock = vi.fn(async (path: string) => {
-            if (path === '/v1/auth/session') {
-                return new Response(null, {
-                    status: 204,
-                    headers: { 'X-Plowshare-Must-Change-Password': 'true' },
-                })
-            }
-            if (path === '/v1/auth/password') {
-                return new Response(null, { status: 204 })
-            }
-            throw new Error(`this test did not expect a fetch to ${path}`)
-        })
-        vi.stubGlobal('fetch', fetchMock)
-    })
+  beforeEach(() => {
+    fetchMock = vi.fn(async (path: string) => {
+      if (path === '/v1/auth/session') {
+        return new Response(null, {
+          status: 204,
+          headers: { 'X-Plowshare-Must-Change-Password': 'true' },
+        });
+      }
+      if (path === '/v1/auth/password') {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`this test did not expect a fetch to ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  });
 
-    afterEach(() => {
-        vi.unstubAllGlobals()
-    })
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    it('returns to login once the change goes through', async () => {
-        await gate(host)
+  it('returns to login once the change goes through', async () => {
+    await gate(host);
 
-        const current = host.querySelector('[data-input="current"]') as HTMLInputElement
-        const next = host.querySelector('[data-input="new"]') as HTMLInputElement
-        const confirm = host.querySelector('[data-input="confirm"]') as HTMLInputElement
-        const submit = host.querySelector('.submit') as HTMLButtonElement
-        current.value = 'old-secret'
-        next.value = 'new-secret'
-        confirm.value = 'new-secret'
-        submit.click()
+    const current = host.querySelector(
+      '[data-input="current"]',
+    ) as HTMLInputElement;
+    const next = host.querySelector('[data-input="new"]') as HTMLInputElement;
+    const confirm = host.querySelector(
+      '[data-input="confirm"]',
+    ) as HTMLInputElement;
+    const submit = host.querySelector('.submit') as HTMLButtonElement;
+    current.value = 'old-secret';
+    next.value = 'new-secret';
+    confirm.value = 'new-secret';
+    submit.click();
 
-        await vi.waitFor(() => expect(host.querySelector('[data-login]')).not.toBeNull())
-    })
-})
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-login]')).not.toBeNull(),
+    );
+  });
+});

@@ -13,8 +13,8 @@ import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.ConversationTrajectoryTool;
 import io.aeyer.plowshare.server.agents.MemoryTools;
 import io.aeyer.plowshare.server.archive.Archive;
+import io.aeyer.plowshare.server.archive.JdbcReasonLog;
 import io.aeyer.plowshare.server.archive.MemoryStore;
-import io.aeyer.plowshare.server.archive.ReasonLog;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
@@ -86,7 +86,7 @@ class ReminderTest {
     archive =
         new Archive(
             new MemoryStore(jdbc),
-            new ReasonLog(jdbc),
+            new JdbcReasonLog(jdbc),
             embeddings,
             MAX_BODY_CHARS,
             INDEX_THRESHOLD,

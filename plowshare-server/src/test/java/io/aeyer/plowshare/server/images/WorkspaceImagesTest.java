@@ -44,10 +44,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *
  * <ul>
  *   <li><b>only a named file, never a walk.</b> {@code LocalProvider.NAMING} and {@code AS_IT_LIES}
- *       own the argument, which is {@code ClientEnforcer.CONVERTING}'s word for word: a walk must
- *       not pay a per-file cost the caller did not choose, on the socket a job is blocked on.
- *       Making the walk name too reddens {@code
- *       a_walk_names_nothing_and_a_read_of_the_same_file_does};
+ *       own the argument, which is {@code NodeFiles.CONVERTING}'s word for word: a walk must not
+ *       pay a per-file cost the caller did not choose, on the socket a job is blocked on. Making
+ *       the walk name too reddens {@code a_walk_names_nothing_and_a_read_of_the_same_file_does};
  *   <li><b>{@link ImageFormat} is the allow-list.</b> Sniffing anything image-shaped instead
  *       reddens {@code a_format_this_server_cannot_show_a_model_is_still_not_utf8_text};
  *   <li><b>no copy for a server project.</b> Writing bytes beside the record reddens {@code
@@ -253,11 +252,10 @@ class WorkspaceImagesTest {
    * <b>A walk names nothing, and a read of the very same file names an id.</b>
    *
    * <p>The asymmetry, asserted from both sides in one test so that it cannot be half-kept. {@code
-   * LocalProvider.NAMING} owns the argument and it is {@code ClientEnforcer.CONVERTING}'s,
-   * unchanged: a walk over a workspace holding two hundred pictures would turn one {@code
-   * file_grep} into two hundred hashes and two hundred sidecar writes nobody asked for, and it
-   * would do it on the socket a job is blocked on. <b>A file the caller named is a cost the caller
-   * chose.</b>
+   * LocalProvider.NAMING} owns the argument and it is {@code NodeFiles.CONVERTING}'s, unchanged: a
+   * walk over a workspace holding two hundred pictures would turn one {@code file_grep} into two
+   * hundred hashes and two hundred sidecar writes nobody asked for, and it would do it on the
+   * socket a job is blocked on. <b>A file the caller named is a cost the caller chose.</b>
    *
    * <p>It is the containment half as well, read the other way: a walk that minted ids would be the
    * closest thing to an enumeration of a tree's pictures that an agent could reach, which is
@@ -376,7 +374,7 @@ class WorkspaceImagesTest {
    * <p><b>Refused, and it must not say gone.</b> The file is sitting right there and an operator
    * can put the root back; telling a run the picture had disappeared would send whoever reads the
    * transcript looking for a file that never moved. The two are separate types with no shared
-   * supertype for exactly this reason, which is {@code ClientEnforcer.Vanished}'s argument.
+   * supertype for exactly this reason, which is {@code NodeFiles.Vanished}'s argument.
    *
    * <p><b>And nothing comes back.</b> Asserted, because a fence that refused in words and returned
    * the picture anyway is the failure that produces no error at all.
@@ -434,7 +432,7 @@ class WorkspaceImagesTest {
    * are still there — and touching the path is where the fence already is. The liveness check and
    * the permission check are one act, and this is the half that is liveness.
    *
-   * <p><b>Absence before containment</b>, which is {@code ClientEnforcer.Vanished}'s order and its
+   * <p><b>Absence before containment</b>, which is {@code NodeFiles.Vanished}'s order and its
    * argument: a session whose workspace has been deleted is not a session that should be told a
    * path is outside every root. Here the permission is still perfectly good, so a refusal would be
    * false as well as unhelpful.
@@ -465,7 +463,7 @@ class WorkspaceImagesTest {
    * state where exactly one check fails, so either order produces the same sentence, and the mutant
    * that swaps them survives both.
    *
-   * <p>{@code ClientEnforcer.Vanished} is the precedent and owns the argument — it is raised
+   * <p>{@code NodeFiles.Vanished} is the precedent and owns the argument — it is raised
    * <em>before</em> containment, because <i>"a session whose workspace has been deleted is not a
    * session that should be told a path is 'outside every root'"</i>. Same here: an operator whose
    * picture and whose root are both gone is told the picture is gone, because that is the fact that
@@ -485,7 +483,7 @@ class WorkspaceImagesTest {
         ImageVanishedException.class,
         () -> images.dataUri(payments, id),
         "with both wrong, the containment answer won; absence is asked first, on"
-            + " ClientEnforcer.Vanished's argument");
+            + " NodeFiles.Vanished's argument");
   }
 
   /**

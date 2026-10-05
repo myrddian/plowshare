@@ -10,9 +10,18 @@ def violations(root: Path) -> list[Path]:
     """Return test sources importing Testcontainers without the opt-in tag."""
     container_import = re.compile(r"^import (?:static )?org\.testcontainers\.", re.MULTILINE)
     database_tag = re.compile(r'^\s*@Tag\("full-db"\)\s*$', re.MULTILINE)
+    sources = (
+        source
+        for pattern in (
+            "*/src/test/java/**/*.java",
+            "sdk/*/src/test/java/**/*.java",
+            "integrations/*/src/test/java/**/*.java",
+        )
+        for source in root.glob(pattern)
+    )
     return sorted(
         source.relative_to(root)
-        for source in root.glob("*/src/test/java/**/*.java")
+        for source in sources
         if container_import.search(text := source.read_text()) and not database_tag.search(text)
     )
 

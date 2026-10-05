@@ -32,5 +32,17 @@ public record SearchPage(
 
   public SearchPage {
     hits = hits == null ? List.of() : List.copyOf(hits);
+    if (page < 1
+        || pageSize < 1
+        || total < 0
+        || hits.size() > 10000
+        || hits.size() > pageSize
+        || hits.size() > total) throw new IllegalArgumentException("invalid search page bounds");
+    refusal =
+        io.aeyer.plowshare.protocol.WebContractValues.text(refusal, "search refusal", 32768, false);
+    if (refusal != null && (!hits.isEmpty() || total != 0 || hasMore))
+      throw new IllegalArgumentException("search refusal cannot include results");
+    if (hasMore != ((long) (page - 1) * pageSize + hits.size() < total))
+      throw new IllegalArgumentException("search continuation differs from its page bounds");
   }
 }

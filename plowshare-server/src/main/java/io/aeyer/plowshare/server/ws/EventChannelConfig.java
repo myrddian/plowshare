@@ -33,10 +33,10 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
  * bounds on a session id being a capability; that is a fact about how it is run and not one this
  * repository establishes — {@code application.yml} sets a port and no {@code server.address}."
  * <b>Both halves of that are now out of date.</b> That file sets {@code server.address:
- * ${PLOWSHARE_BIND:127.0.0.1}}, and {@code BindAddressTest} fails if the line goes; and slice 4
- * added {@code AuthFilter}, which refuses an upgrade to this path with a 401 unless the request
- * carries the operator's access token — measured, over a real socket, by {@code AuthFilterTest} and
- * by {@code ConversationEndToEndTest.an_unauthenticated_session_attaches_neither_role}.
+ * ${PLOWSHARE_BIND}}, and {@code BindAddressTest} fails if the line goes; and slice 4 added {@code
+ * AuthFilter}, which refuses an upgrade to this path with a 401 unless the request carries the
+ * operator's access token — measured, over a real socket, by {@code AuthFilterTest} and by {@code
+ * ConversationEndToEndTest.an_unauthenticated_session_attaches_neither_role}.
  *
  * <p><b>None of that makes this absence less load-bearing, and the reason is specific to a
  * browser.</b> The credential a page presents on an upgrade is a cookie, because a page cannot set

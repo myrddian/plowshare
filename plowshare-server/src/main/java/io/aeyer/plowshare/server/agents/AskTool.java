@@ -194,7 +194,7 @@ public final class AskTool implements AgentTool {
     // that schemasOfferedTo and a real run compare equal by identity as well
     // as by value. ModelSurfaceTest's
     // what_a_context_prices_is_what_a_run_is_offered is what would notice.
-    this.schema = schema != null ? schema : new ToolSchema(NAME, DESCRIPTION, askSchema());
+    this.schema = schema != null ? schema : ToolSchema.from(NAME, DESCRIPTION, askSchema());
   }
 
   /**

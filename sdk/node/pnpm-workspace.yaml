@@ -1,0 +1,4 @@
+packages:
+  - '.'
+overrides:
+  plowshare-client-ts: link:../typescript

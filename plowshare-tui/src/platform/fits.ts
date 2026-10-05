@@ -1,5 +1,5 @@
-import type { Socket } from 'plowshare-client-ts/binding/connection'
-import type { Fetching } from 'plowshare-client-ts/binding/auth'
+import type { Socket } from 'plowshare-client-ts/binding/connection';
+import type { Fetching } from 'plowshare-client-ts/binding/auth';
 
 /**
  * The one place in this module where the platform's own types are named, and
@@ -52,9 +52,9 @@ import type { Fetching } from 'plowshare-client-ts/binding/auth'
  * added to {@link Socket} that a `WebSocket` does not have, this line stops
  * compiling.
  */
-export type RealSocketFits = (url: string) => Socket
+export type RealSocketFits = (url: string) => Socket;
 
-export const opener: RealSocketFits = (url) => new WebSocket(url)
+export const opener: RealSocketFits = (url) => new WebSocket(url);
 
 /**
  * <b>A real `fetch` is a {@link Fetching}.</b>
@@ -67,4 +67,4 @@ export const opener: RealSocketFits = (url) => new WebSocket(url)
  * answers 204 with `Set-Cookie` and no body at all, so a client with no cookie
  * jar has nowhere else to read the rotated pair from.
  */
-export const fetching: Fetching = fetch
+export const fetching: Fetching = fetch;

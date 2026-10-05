@@ -832,7 +832,7 @@ body {
    means a fold and only a fold. */
 .hit [data-citation] .value { color: var(--cite); }
 .mode-note, .reach { margin: .2rem 0; color: var(--dim); }
-`
+`;
 
 /**
  * Put the stylesheet on the page once.
@@ -842,12 +842,12 @@ body {
  * accumulate copies.
  */
 export function mountStyles(doc: Document = document): void {
-    const id = 'plowshare-console-styles'
-    if (doc.getElementById(id) !== null) {
-        return
-    }
-    const style = doc.createElement('style')
-    style.id = id
-    style.textContent = STYLES
-    doc.head.appendChild(style)
+  const id = 'plowshare-console-styles';
+  if (doc.getElementById(id) !== null) {
+    return;
+  }
+  const style = doc.createElement('style');
+  style.id = id;
+  style.textContent = STYLES;
+  doc.head.appendChild(style);
 }

@@ -36,15 +36,9 @@ import java.util.Locale;
  * carries an <em>outline</em>, which {@code ChapterDetector}'s second precedence branch reads and
  * which nothing downstream can reconstruct from text.
  *
- * <p><b>This does not replace the client-side adaptor and does not duplicate it</b>, and the two
- * answer different questions. {@code plowshare-client}'s {@code files.PdfConverter} converts a file
- * the client already holds, for {@code file_read}'s line-based windows, and collects no outline; it
- * also, deliberately, does not preserve paragraph breaks, because a window is supposed to be the
- * file's own lines. This one runs where multipart bytes arrive, collects the outline, and preserves
- * paragraph breaks because {@link Derivation} splits on them. Sharing them would mean a converter
- * with a flag whose two settings are that disagreement, in a module — {@code plowshare-protocol} —
- * whose build file says it holds Jackson annotations and nothing else. See {@link PdfExtraction}
- * for the measurements.
+ * <p>Whole-document ingest preserves paragraph breaks and outlines for derivation. File-source
+ * window conversion is also server-owned, but serves bounded line windows rather than admitting an
+ * entire document to the corpus. Neither path executes on the client.
  *
  * <p><b>What every other format still needs</b>, stated here because this class is the seam a
  * client-side adaptor would deliver into: whole text in one delivery rather than windows, the

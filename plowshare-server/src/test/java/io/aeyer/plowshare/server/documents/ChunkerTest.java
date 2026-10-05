@@ -25,7 +25,8 @@ import org.junit.jupiter.api.Test;
 class ChunkerTest {
 
   private static final Tokenizer TOKENIZER =
-      new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN);
+      new io.aeyer.plowshare.server.llm.tokens.FixtureTokenizer(
+          RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN);
 
   private static final int MAX = ShippedChunking.MAX;
 
@@ -183,7 +184,7 @@ class ChunkerTest {
         new Tokenizer() {
           @Override
           public TokenCount count(String text) {
-            return TokenCount.estimated(text.length() * 10, "ten a character, for a test");
+            return TokenCount.measured(text.length() * 10, "fixture vocabulary");
           }
 
           @Override

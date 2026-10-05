@@ -35,7 +35,7 @@
  * "in global". The difference is grammar, not drift, and a later reader tidying
  * it into one constant would be introducing the bug rather than removing one.
  */
-export const GLOBAL_TIER = 'global'
+export const GLOBAL_TIER = 'global';
 
 /**
  * One project: `GET /v1/projects` and `POST /v1/projects/{name}/workspace`.
@@ -66,11 +66,11 @@ export const GLOBAL_TIER = 'global'
  *   rather than guessing.
  */
 export interface ProjectView {
-    readonly kind?: 'project' | 'personal'
-    readonly name: string
-    readonly workspace: string
-    readonly lent: readonly string[] | null | undefined
-    readonly exclusions: readonly string[] | null | undefined
+  readonly kind?: 'project' | 'personal';
+  readonly name: string;
+  readonly workspace: string;
+  readonly lent: readonly string[] | null | undefined;
+  readonly exclusions: readonly string[] | null | undefined;
 }
 
 /**
@@ -86,24 +86,24 @@ export interface ProjectView {
  * readable by id.
  */
 export interface TocEntry {
-    readonly id: string
-    readonly summary: string
-    readonly scope: string
-    readonly unsearchable: boolean
+  readonly id: string;
+  readonly summary: string;
+  readonly scope: string;
+  readonly unsearchable: boolean;
 }
 
 /** Where and when a memory came from. */
 export interface Provenance {
-    readonly at: string
-    readonly by: string
-    readonly where: string
+  readonly at: string;
+  readonly by: string;
+  readonly where: string;
 }
 
 /** A tombstone: why a memory stopped being true, and who said so. */
 export interface Invalidation {
-    readonly at: string
-    readonly by: string
-    readonly reason: string
+  readonly at: string;
+  readonly by: string;
+  readonly reason: string;
 }
 
 /**
@@ -119,19 +119,19 @@ export interface Invalidation {
  * that have no meaning.
  */
 export interface MemoryView {
-    readonly id: string
-    readonly summary: string
-    readonly scope: string
-    readonly formed: Provenance | null | undefined
-    readonly state: string
-    readonly pinned: boolean
-    readonly uses: number | null | undefined
-    readonly lastUsed: string | null | undefined
-    readonly body: string
-    readonly supersedes: string | null | undefined
-    readonly supersededBy: string | null | undefined
-    readonly invalidation: Invalidation | null | undefined
-    readonly home: { readonly project: string | null } | null | undefined
+  readonly id: string;
+  readonly summary: string;
+  readonly scope: string;
+  readonly formed: Provenance | null | undefined;
+  readonly state: string;
+  readonly pinned: boolean;
+  readonly uses: number | null | undefined;
+  readonly lastUsed: string | null | undefined;
+  readonly body: string;
+  readonly supersedes: string | null | undefined;
+  readonly supersededBy: string | null | undefined;
+  readonly invalidation: Invalidation | null | undefined;
+  readonly home: { readonly project: string | null } | null | undefined;
 }
 
 /**
@@ -144,10 +144,10 @@ export interface MemoryView {
  * partial and the screen has to say so.
  */
 export interface RecallResponse {
-    readonly question: string
-    readonly limit: number
-    readonly memories: readonly MemoryView[] | null | undefined
-    readonly unsearchable: number | null | undefined
+  readonly question: string;
+  readonly limit: number;
+  readonly memories: readonly MemoryView[] | null | undefined;
+  readonly unsearchable: number | null | undefined;
 }
 
 /**
@@ -165,17 +165,17 @@ export interface RecallResponse {
  * `proposedBy` is absent only on a row written before the column existed.
  */
 export interface ProposalView {
-    readonly id: string
-    readonly memoryId: string
-    readonly project: string | null
-    readonly action: string
-    readonly reason: string
-    readonly state: string
-    readonly createdAt: string
-    readonly proposedBy: string | null | undefined
-    readonly resolvedAt: string | null | undefined
-    readonly resolvedBy: string | null | undefined
-    readonly resolution: string | null | undefined
+  readonly id: string;
+  readonly memoryId: string;
+  readonly project: string | null;
+  readonly action: string;
+  readonly reason: string;
+  readonly state: string;
+  readonly createdAt: string;
+  readonly proposedBy: string | null | undefined;
+  readonly resolvedAt: string | null | undefined;
+  readonly resolvedBy: string | null | undefined;
+  readonly resolution: string | null | undefined;
 }
 
 /**
@@ -187,9 +187,9 @@ export interface ProposalView {
  * caller could see. Cold, not deleted.
  */
 export interface ResolvedProposal {
-    readonly proposal: ProposalView | null | undefined
-    readonly promotedId: string | null | undefined
-    readonly demoted: readonly string[] | null | undefined
+  readonly proposal: ProposalView | null | undefined;
+  readonly promotedId: string | null | undefined;
+  readonly demoted: readonly string[] | null | undefined;
 }
 
 /**
@@ -200,8 +200,8 @@ export interface ResolvedProposal {
  * with nothing to re-open from one where every row was blocked.
  */
 export interface Reconsidered {
-    readonly reopened: readonly string[] | null | undefined
-    readonly refused: readonly string[] | null | undefined
+  readonly reopened: readonly string[] | null | undefined;
+  readonly refused: readonly string[] | null | undefined;
 }
 
 /**
@@ -224,13 +224,16 @@ export interface Reconsidered {
  * ran in it, null for a call that opened none.
  */
 export interface AskedView {
-    readonly id: string
-    readonly name: string
-    readonly arguments: string
-    readonly length: number
-    readonly cut: boolean
-    readonly salient: string | null | undefined
-    readonly opened: { readonly conversation: string, readonly agent: string } | null | undefined
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+  readonly length: number;
+  readonly cut: boolean;
+  readonly salient: string | null | undefined;
+  readonly opened:
+    | { readonly conversation: string; readonly agent: string }
+    | null
+    | undefined;
 }
 
 /**
@@ -278,23 +281,23 @@ export interface AskedView {
  * it -- null for every other kind and for a result older than the column.
  */
 export interface EntryView {
-    readonly ordinal: number
-    readonly turnOrdinal: number
-    readonly kind: string
-    readonly excerpt: string | null | undefined
-    readonly length: number
-    readonly cut: boolean
-    readonly ejectedAt: string | null | undefined
-    readonly supersededBy: number | null | undefined
-    readonly toolCallId: string | null | undefined
-    readonly toolCalls: readonly AskedView[] | null | undefined
-    readonly handle: string | null | undefined
-    readonly recordedAt: string | null | undefined
-    readonly tookMillis: number | null | undefined
-    readonly dispatch: string | null | undefined
-    readonly wireModel: string | null | undefined
-    readonly completion: string | null | undefined
-    readonly outcome: string | null | undefined
+  readonly ordinal: number;
+  readonly turnOrdinal: number;
+  readonly kind: string;
+  readonly excerpt: string | null | undefined;
+  readonly length: number;
+  readonly cut: boolean;
+  readonly ejectedAt: string | null | undefined;
+  readonly supersededBy: number | null | undefined;
+  readonly toolCallId: string | null | undefined;
+  readonly toolCalls: readonly AskedView[] | null | undefined;
+  readonly handle: string | null | undefined;
+  readonly recordedAt: string | null | undefined;
+  readonly tookMillis: number | null | undefined;
+  readonly dispatch: string | null | undefined;
+  readonly wireModel: string | null | undefined;
+  readonly completion: string | null | undefined;
+  readonly outcome: string | null | undefined;
 }
 
 /**
@@ -315,10 +318,10 @@ export interface EntryView {
  * same reason.
  */
 export interface EntryPageView {
-    readonly entries: readonly EntryView[] | null | undefined
-    readonly total: number
-    readonly offset: number
-    readonly limit: number
+  readonly entries: readonly EntryView[] | null | undefined;
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
 }
 
 /**
@@ -330,14 +333,14 @@ export interface EntryPageView {
  * rather than summarised** here.
  */
 export interface Unavailable {
-    readonly component: string
-    readonly reason: string
+  readonly component: string;
+  readonly reason: string;
 }
 
 /** One tool's share of the fixed block, in characters of the JSON sent. */
 export interface ToolCost {
-    readonly name: string
-    readonly characters: number
+  readonly name: string;
+  readonly characters: number;
 }
 
 /**
@@ -361,11 +364,11 @@ export interface ToolCost {
  * difference is the array's commas, which belong to no tool.
  */
 export interface Prefix {
-    readonly agent: string
-    readonly model: string
-    readonly systemPromptCharacters: number
-    readonly toolCharacters: number
-    readonly tools: readonly ToolCost[] | null | undefined
+  readonly agent: string;
+  readonly model: string;
+  readonly systemPromptCharacters: number;
+  readonly toolCharacters: number;
+  readonly tools: readonly ToolCost[] | null | undefined;
 }
 
 /**
@@ -390,17 +393,17 @@ export interface Prefix {
  * an agent -- a conversation opened and never spoken into.
  */
 export interface ContextView {
-    readonly sent: number | null | undefined
-    readonly sentAtTurn: number | null | undefined
-    readonly turns: number
-    readonly turnsMeasured: number
-    readonly measuredTurns: readonly MeasuredTurn[] | null | undefined
-    readonly systemPromptTokens: TokenCount | null | undefined
-    readonly toolTokens: TokenCount | null | undefined
-    readonly messageTokens: TokenCount | null | undefined
-    readonly cacheHitRate: number | null | undefined
-    readonly unavailable: readonly Unavailable[] | null | undefined
-    readonly prefix: Prefix | null | undefined
+  readonly sent: number | null | undefined;
+  readonly sentAtTurn: number | null | undefined;
+  readonly turns: number;
+  readonly turnsMeasured: number;
+  readonly measuredTurns: readonly MeasuredTurn[] | null | undefined;
+  readonly systemPromptTokens: TokenCount | null | undefined;
+  readonly toolTokens: TokenCount | null | undefined;
+  readonly messageTokens: TokenCount | null | undefined;
+  readonly cacheHitRate: number | null | undefined;
+  readonly unavailable: readonly Unavailable[] | null | undefined;
+  readonly prefix: Prefix | null | undefined;
 }
 
 /**
@@ -413,9 +416,9 @@ export interface ContextView {
  * confusion this whole surface was built to refuse.
  */
 export interface TokenCount {
-    readonly tokens: number
-    readonly basis: 'MEASURED' | 'BOUND' | 'ESTIMATED'
-    readonly how: string
+  readonly tokens: number;
+  readonly basis: 'MEASURED' | 'BOUND' | 'ESTIMATED';
+  readonly how: string;
 }
 
 /**
@@ -427,10 +430,10 @@ export interface TokenCount {
  * attribute all of it to the wrong turn.
  */
 export interface MeasuredTurn {
-    readonly turn: number
-    readonly promptTokens: number
-    readonly grewBy: number | null | undefined
-    readonly since: number | null | undefined
+  readonly turn: number;
+  readonly promptTokens: number;
+  readonly grewBy: number | null | undefined;
+  readonly since: number | null | undefined;
 }
 
 /**
@@ -455,15 +458,15 @@ export interface MeasuredTurn {
  * Every id is a Java `UUID` on the far side and arrives as its string form.
  */
 export interface DocumentHit {
-    readonly chunkId: string
-    readonly text: string
-    readonly similarity: number
-    readonly paragraphId: string
-    readonly paragraphText: string
-    readonly paragraphOrdinal: number
-    readonly documentId: string
-    readonly sourceName: string
-    readonly title: string
+  readonly chunkId: string;
+  readonly text: string;
+  readonly similarity: number;
+  readonly paragraphId: string;
+  readonly paragraphText: string;
+  readonly paragraphOrdinal: number;
+  readonly documentId: string;
+  readonly sourceName: string;
+  readonly title: string;
 }
 
 /**
@@ -484,12 +487,12 @@ export interface DocumentHit {
  * Zero means the answer is complete.
  */
 export interface DocumentSearchResponse {
-    readonly query: string
-    readonly limit: number
-    readonly mode: string
-    readonly hits: readonly DocumentHit[] | null | undefined
-    readonly searchable: number
-    readonly unsearchable: number
+  readonly query: string;
+  readonly limit: number;
+  readonly mode: string;
+  readonly hits: readonly DocumentHit[] | null | undefined;
+  readonly searchable: number;
+  readonly unsearchable: number;
 }
 
 /**
@@ -516,11 +519,11 @@ export interface DocumentSearchResponse {
  * rather than assume away.
  */
 export interface Setting {
-    readonly key: string
-    readonly value: string | null | undefined
-    readonly updatedAt: string | null | undefined
-    readonly updatedBy: string | null | undefined
-    readonly pinned: boolean
+  readonly key: string;
+  readonly value: string | null | undefined;
+  readonly updatedAt: string | null | undefined;
+  readonly updatedBy: string | null | undefined;
+  readonly pinned: boolean;
 }
 
 /**
@@ -545,27 +548,27 @@ export interface Setting {
  * that.
  */
 export interface ProjectionView {
-    readonly agent: string | null | undefined
-    /**
-     * The turn this was computed as of, or absent for the conversation's next
-     * prompt. Never zero — there is no turn zero — so the absence is the whole
-     * of "this is the next prompt".
-     */
-    readonly turn?: number | null
-    /**
-     * Whether the system block at the front is the one that turn was actually
-     * sent, rather than the agent's prompt as the file stands now. Only a past
-     * turn that recorded its block can be true; every turn written before the
-     * server started recording them is false, permanently.
-     */
-    readonly systemBlockAsSent?: boolean | null
-    readonly messages: readonly ProjectionMessage[] | null | undefined
+  readonly agent: string | null | undefined;
+  /**
+   * The turn this was computed as of, or absent for the conversation's next
+   * prompt. Never zero — there is no turn zero — so the absence is the whole
+   * of "this is the next prompt".
+   */
+  readonly turn?: number | null;
+  /**
+   * Whether the system block at the front is the one that turn was actually
+   * sent, rather than the agent's prompt as the file stands now. Only a past
+   * turn that recorded its block can be true; every turn written before the
+   * server started recording them is false, permanently.
+   */
+  readonly systemBlockAsSent?: boolean | null;
+  readonly messages: readonly ProjectionMessage[] | null | undefined;
 }
 
 /** One message of a projection: who it is from, and what it holds. */
 export interface ProjectionMessage {
-    readonly role: string | null | undefined
-    readonly content: string | null | undefined
+  readonly role: string | null | undefined;
+  readonly content: string | null | undefined;
 }
 
 /**
@@ -577,41 +580,41 @@ export interface ProjectionMessage {
  * draws `[data-unread]` from.
  */
 export interface InboxItemView {
-    readonly id: string
-    readonly handle: string
-    readonly firing: string | null
-    readonly conversation: string
-    readonly ending: string
-    readonly answer: string
-    readonly arrivedAt: string
-    readonly readAt: string | null
+  readonly id: string;
+  readonly handle: string;
+  readonly firing: string | null;
+  readonly conversation: string;
+  readonly ending: string;
+  readonly answer: string;
+  readonly arrivedAt: string;
+  readonly readAt: string | null;
 }
 
 /** What `inbox.list` answers with. */
 export interface InboxPage {
-    readonly items: readonly InboxItemView[]
-    readonly unread: number
+  readonly items: readonly InboxItemView[];
+  readonly unread: number;
 }
 
 /** What `inbox.read` answers with. */
 export interface InboxMarked {
-    readonly marked: number
-    readonly unread: number
+  readonly marked: number;
+  readonly unread: number;
 }
 
 /** The bare push `EventChannelHandler` sends every socket of the account. */
 export interface InboxChanged {
-    readonly kind: 'inbox.changed'
-    readonly unread: number
+  readonly kind: 'inbox.changed';
+  readonly unread: number;
 }
 
 /** Whether a frame off the socket is the inbox's bare push, read tolerantly. */
 export function asInboxChanged(frame: unknown): InboxChanged | null {
-    if (typeof frame !== 'object' || frame === null) {
-        return null
-    }
-    const f = frame as { kind?: unknown, unread?: unknown }
-    return f.kind === 'inbox.changed' && typeof f.unread === 'number'
-        ? { kind: 'inbox.changed', unread: f.unread }
-        : null
+  if (typeof frame !== 'object' || frame === null) {
+    return null;
+  }
+  const f = frame as { kind?: unknown; unread?: unknown };
+  return f.kind === 'inbox.changed' && typeof f.unread === 'number'
+    ? { kind: 'inbox.changed', unread: f.unread }
+    : null;
 }

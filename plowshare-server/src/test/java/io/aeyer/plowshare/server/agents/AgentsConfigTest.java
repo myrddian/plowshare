@@ -36,7 +36,6 @@ import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.PromotionQueue;
 import io.aeyer.plowshare.server.archive.ProposalStore;
 import io.aeyer.plowshare.server.archive.TurnStore;
-import io.aeyer.plowshare.server.auth.AuthConfig;
 import io.aeyer.plowshare.server.data.DataConfig;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.documents.DocumentStore;
@@ -977,8 +976,7 @@ class AgentsConfigTest {
             Files.readString(Path.of("../test-support/contracts/client-capabilities.json")));
     var fixture =
         json.readTree(
-            Files.readString(
-                Path.of("../plowshare-client/src/test/resources/compatibility/legacy-mcp.json")));
+            Files.readString(Path.of("../test-support/contracts/mcp-compatibility.json")));
     java.util.Set<String> mcp = new java.util.TreeSet<>(), mapped = new java.util.TreeSet<>();
     fixture
         .path("toolsList")
@@ -1130,7 +1128,8 @@ class AgentsConfigTest {
   }
 
   /**
-   * Workspace management is never a tool an agent can hold, and the boot is where that is enforced.
+   * TestWorkspace management is never a tool an agent can hold, and the boot is where that is
+   * enforced.
    *
    * <p>{@code project_define}, {@code project_workspace_set}, {@code project_move} and {@code
    * project_forget} live on the client's MCP surface, where the caller is a person deciding what
@@ -1308,7 +1307,8 @@ class AgentsConfigTest {
 
   /**
    * And the operator token file the fence names is the one {@code plowshare.auth.token-file} points
-   * at — never {@code AuthConfig.defaultTokenFile()}.
+   * at — never {@code Path.of(System.getProperty("user.home"), ".config", "plowshare",
+   * "console-token")}.
    *
    * <p><b>Both halves, because the claim has two ends and each fails differently.</b> The wiring
    * reads a key from a layer this configuration otherwise knows nothing about, on the same one-key
@@ -1362,7 +1362,12 @@ class AgentsConfigTest {
                         .getBean(ProjectStore.class)
                         .effectiveExclusions(
                             new ProjectRecord("payments", dir, List.of(), List.of()))
-                        .contains(AuthConfig.defaultTokenFile()),
+                        .contains(
+                            Path.of(
+                                System.getProperty("user.home"),
+                                ".config",
+                                "plowshare",
+                                "console-token")),
                     "a deployment that writes no token names no path for one, and"
                         + " certainly not this machine's real one"));
   }

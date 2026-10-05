@@ -16,6 +16,15 @@ package io.aeyer.plowshare.protocol;
  */
 public record Home(String project) {
 
+  public Home {
+    if (project != null) {
+      ContractValues.identity(project, "project", 1024);
+      if (!project.equals(project.strip())) {
+        throw new IllegalArgumentException("project must not have edge whitespace");
+      }
+    }
+  }
+
   private static final Home GLOBAL = new Home(null);
 
   /** The global tier: the memories that hold everywhere, for every project. */

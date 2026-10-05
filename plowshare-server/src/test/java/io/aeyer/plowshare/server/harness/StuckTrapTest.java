@@ -118,7 +118,8 @@ class StuckTrapTest {
   private static StuckTrap trap(
       Map<String, Object> set, StuckTrap.Advisor advisor, Executor executor) {
     return new StuckTrap(
-        Parameters.read(StuckTrap.NAME, StuckTrapFactory.PARAMETERS, set),
+        io.aeyer.plowshare.server.harness.ParameterValues.decode(
+            StuckTrap.NAME, StuckTrapFactory.PARAMETERS, set),
         advisor,
         executor,
         () -> NOW,
@@ -700,7 +701,9 @@ class StuckTrapTest {
 
   @Test
   void the_signal_keys_parse_with_their_defaults() {
-    Parameters defaults = Parameters.read(StuckTrap.NAME, StuckTrapFactory.PARAMETERS, Map.of());
+    Parameters defaults =
+        io.aeyer.plowshare.server.harness.ParameterValues.decode(
+            StuckTrap.NAME, StuckTrapFactory.PARAMETERS, Map.of());
     assertEquals(3, defaults.integer("repeat-failures"));
     assertEquals(4, defaults.integer("failure-streak"));
     assertEquals(3, defaults.integer("repeat-calls"));
@@ -708,7 +711,9 @@ class StuckTrapTest {
     assertEquals(1, defaults.integer("most-per-turn"));
     assertEquals(600, defaults.integer("advice-most"));
 
-    Parameters guided = Parameters.read(StuckTrap.NAME, StuckTrapFactory.PARAMETERS, GUIDED);
+    Parameters guided =
+        io.aeyer.plowshare.server.harness.ParameterValues.decode(
+            StuckTrap.NAME, StuckTrapFactory.PARAMETERS, GUIDED);
     assertEquals(2, guided.integer("repeat-failures"));
     assertEquals(10, guided.integer("read-only-steps"));
   }
@@ -750,9 +755,11 @@ class StuckTrapTest {
           };
       HarnessRun run =
           new Harness(
-                  shipped,
-                  Map.of("m-guided", "guided", "m-standard", "standard", "m-minimal", "minimal"),
-                  List.of(capturing))
+                  io.aeyer.plowshare.server.harness.HarnessConfiguration.decode(
+                      shipped,
+                      Map.of(
+                          "m-guided", "guided", "m-standard", "standard", "m-minimal", "minimal"),
+                      List.of(capturing)))
               .begin();
       run.forModel("m-guided");
       run.forModel("m-standard");
@@ -786,7 +793,7 @@ class StuckTrapTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                Parameters.read(
+                io.aeyer.plowshare.server.harness.ParameterValues.decode(
                     StuckTrap.NAME, StuckTrapFactory.PARAMETERS, Map.of("after-steps", "4")));
 
     assertTrue(refused.getMessage().contains("'after-steps'"), refused.getMessage());
@@ -1180,7 +1187,8 @@ class StuckTrapTest {
     Held executor = new Held();
     StuckTrap trap =
         new StuckTrap(
-            Parameters.read(StuckTrap.NAME, StuckTrapFactory.PARAMETERS, ON_ANY_FAILURE),
+            io.aeyer.plowshare.server.harness.ParameterValues.decode(
+                StuckTrap.NAME, StuckTrapFactory.PARAMETERS, ON_ANY_FAILURE),
             advisor,
             executor,
             () -> NOW,
@@ -1203,7 +1211,8 @@ class StuckTrapTest {
     Held executor = new Held();
     StuckTrap trap =
         new StuckTrap(
-            Parameters.read(StuckTrap.NAME, StuckTrapFactory.PARAMETERS, ON_ANY_FAILURE),
+            io.aeyer.plowshare.server.harness.ParameterValues.decode(
+                StuckTrap.NAME, StuckTrapFactory.PARAMETERS, ON_ANY_FAILURE),
             new Scripted(),
             executor,
             () -> NOW,

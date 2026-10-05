@@ -97,7 +97,7 @@ class StudioTest {
             new OrchestrationWriter(layout),
             TOOLS,
             (run, question, structure) -> {
-              asked.add(List.of(run, question, structure));
+              asked.add(List.of(run, question, OrchestrationStructures.encode(structure)));
               return Optional.empty();
             });
   }
@@ -168,7 +168,7 @@ class StudioTest {
         Instant.EPOCH,
         null,
         "install",
-        structure);
+        OrchestrationStructures.decode(structure));
   }
 
   private static OrchestrationMessage chose(String label) {
@@ -261,6 +261,20 @@ class StudioTest {
   /** A structure as install would build it, for a tier install itself cannot trial. */
   private static String askedStructureOf(String text) {
     com.fasterxml.jackson.databind.node.ObjectNode root = JSON.createObjectNode();
+    root.put("lead", "Install?");
+    root.set(
+        "questions",
+        JSON.valueToTree(
+            java.util.List.of(
+                new io.aeyer.plowshare.protocol.Orchestration.Question(
+                    "Install",
+                    "Install?",
+                    false,
+                    java.util.List.of(
+                        new io.aeyer.plowshare.protocol.Orchestration.Option(
+                            "Install", "Install it", null),
+                        new io.aeyer.plowshare.protocol.Orchestration.Option(
+                            "Leave", "Leave it", null))))));
     root.put("name", "triage");
     root.put("path", PATH);
     root.put("text", text);

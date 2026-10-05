@@ -547,7 +547,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     String type = text(correlation.get("type"));
     delivery.answer(text(correlation.get("id")), type == null ? FrameTypes.REFUSED : type, outcome);
     if (usageSubscriptions != null
-        && outcome.payload() instanceof UsageSubscriptions.Initial initial)
+        && outcome.payload() instanceof io.aeyer.plowshare.protocol.Usage.Initial initial)
       usageSubscriptions.ready(socket.getId(), initial.subscription());
   }
 
@@ -680,7 +680,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   private boolean projectDelivery(String session, String operation, Map<String, Object> payload) {
     return projectAuthorization == null
-        || projectAuthorization.allowed(operation, payload, handleOf(session).orElse(null));
+        || projectAuthorization.allowed(
+            operation,
+            io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(operation, payload),
+            handleOf(session).orElse(null));
   }
 
   // --- delivery ------------------------------------------------------------
@@ -765,7 +768,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * may have more than one socket open across more than one session.
    */
   @Override
-  public void push(String handle, Object body) {
+  public void push(String handle, io.aeyer.plowshare.protocol.AccountEvent body) {
     if (handle == null || body == null) {
       return;
     }
@@ -799,14 +802,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * account, if any, that session is signed in as.
    */
   @Override
-  public void tell(String session, Object body) {
+  public void tell(String session, io.aeyer.plowshare.protocol.ConversationGrowth body) {
     if (session == null || body == null) {
       return;
     }
-    if (body instanceof Map<?, ?> map
-        && map.get("conversation") instanceof String conversation
-        && !projectDelivery(session, "conversation.turns", Map.of("conversation", conversation)))
-      return;
+    if (!projectDelivery(
+        session, "conversation.turns", Map.of("conversation", body.conversation()))) return;
     sessions
         .find(session)
         .flatMap(live -> live.attached(Role.LISTENER, WebSocketSession.class))

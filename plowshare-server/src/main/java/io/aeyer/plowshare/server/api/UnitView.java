@@ -25,7 +25,7 @@ import java.util.UUID;
  * loud, and passing through JSON as {@code null} is what makes it quiet again. So every renderer
  * downstream of this record is expected to name the absence in its own words — {@code
  * StructuralRef.UNNAMED} is the wording for prose a person reads — and the CLI and MCP surfaces in
- * {@code plowshare-client} do.
+ * {@code external clients} do.
  *
  * @param id the row, which is present whether or not the unit has a name
  * @param title the document's own words, or {@code null} for a unit the parser invented

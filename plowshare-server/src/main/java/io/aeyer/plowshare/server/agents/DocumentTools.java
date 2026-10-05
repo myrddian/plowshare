@@ -198,7 +198,7 @@ public final class DocumentTools {
 
     public Search(RetrievalService retrieval) {
       this.retrieval = Objects.requireNonNull(retrieval, "retrieval");
-      this.schema = new ToolSchema(SEARCH_NAME, SEARCH_DESCRIPTION, searchSchema());
+      this.schema = ToolSchema.from(SEARCH_NAME, SEARCH_DESCRIPTION, searchSchema());
     }
 
     AgentTool forRun(io.aeyer.plowshare.server.information.InformationAccess access, String owner) {
@@ -483,7 +483,7 @@ public final class DocumentTools {
 
     public AgentList(DocumentStore documents) {
       this.documents = Objects.requireNonNull(documents, "documents");
-      this.schema = new ToolSchema(LIST_NAME, LIST_DESCRIPTION, listSchema());
+      this.schema = ToolSchema.from(LIST_NAME, LIST_DESCRIPTION, listSchema());
     }
 
     AgentTool forRun(io.aeyer.plowshare.server.information.InformationAccess access, String owner) {

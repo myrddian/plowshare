@@ -54,10 +54,16 @@ public record StoredImage(
     String id, Home home, ImageFormat format, String filename, long bytes, Instant at, Path path) {
 
   public StoredImage {
-    Objects.requireNonNull(id, "id");
+    if (!ImageStore.isUid(id)) throw new IllegalArgumentException("invalid image id");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(format, "format");
     Objects.requireNonNull(at, "at");
+    if (filename != null
+        && (filename.length() > 1024 || filename.codePoints().anyMatch(Character::isISOControl)))
+      throw new IllegalArgumentException(
+          "image filename must be bounded display text without controls");
+    if (path != null && (!path.isAbsolute() || !path.equals(path.normalize())))
+      throw new IllegalArgumentException("image workspace path must be absolute and normalized");
     if (bytes <= 0) {
       throw new IllegalArgumentException(
           "an image of "
