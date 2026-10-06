@@ -6,7 +6,9 @@ val pnpmInstall by tasks.registering(Exec::class) {
     inputs.files("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file("node_modules/.modules.yaml")
-    commandLine("pnpm", "install", "--frozen-lockfile")
+    // Gradle has no TTY for pnpm's prompt when an incompatible node_modules
+    // layout needs rebuilding (for example, after moving the checkout).
+    commandLine("pnpm", "install", "--frozen-lockfile", "--config.confirmModulesPurge=false")
 }
 
 fun Exec.desktopSources() {

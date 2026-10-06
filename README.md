@@ -356,10 +356,18 @@ origin; passwords are not saved. See [shared login](docs/client-login.md).
 The terminal talks to the configured default bot; `--agent NAME` selects another
 served definition, and `/help` lists terminal commands.
 
-To open the development desktop, run `./gradlew :plowshare-desktop:assemble`,
-then `bin/plowshare-desktop`. Choose **Connect server**; it starts with an offline
-demo. See the [desktop guide](plowshare-desktop/README.md). For an MCP host, follow
-the [MCP adapter guide](plowshare-mcp/README.md).
+To build and open the development desktop, run these from the repository root:
+
+```sh
+./gradlew :plowshare-desktop:assemble
+bin/plowshare-desktop
+```
+
+The build installs desktop and shared SDK dependencies automatically. Its pnpm
+install can recreate an incompatible `node_modules` directory without a terminal
+prompt, using the committed lockfile. Choose **Connect server**; the app starts
+with an offline demo. See the [desktop guide](plowshare-desktop/README.md). For an
+MCP host, follow the [MCP adapter guide](plowshare-mcp/README.md).
 
 ### 4. Work in a project
 
