@@ -40,9 +40,10 @@ public final class ProjectListingFilter {
               .filter(row -> account.equals(row.definedBy()))
               .toList();
     } else if (payload instanceof List<?> rows && operation.equals("firing.list")) {
+      // FiringListHandler has already projected records into the v1 response shape.
       payload =
           rows.stream()
-              .map(io.aeyer.plowshare.server.events.FiringRecord.class::cast)
+              .map(FiringView.class::cast)
               .filter(
                   row -> {
                     return authorization.triggerOwnedBy(row.trigger(), account)
