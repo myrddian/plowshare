@@ -77,7 +77,7 @@ Authentication and setup use HTTP before a WebSocket can be opened; the status-o
 `/ready` probe is an operational HTTP exception. Project
 administration uses the authenticated WebSocket. The search-provider helpers
 use the saved administrator login for operational HTTP endpoints that have no
-WebSocket contracts. Build the CLI before running `bin/plowshare-searxng`. First-run setup is enabled by
+WebSocket contracts. Build the CLI before using `deploy/docker/register-search.mjs`; `bin/plowshare-searxng` only starts the adapter. First-run setup is enabled by
 the server entrypoint (`plowshare.auth.first-run-setup`). It replaces the legacy
 startup operator-token bypass. Deployments explicitly opting out retain the
 legacy bootstrap mechanism; configured `PLOWSHARE_ADMIN_HANDLE` and
@@ -262,27 +262,27 @@ connection and listener values have no production fallback. Use
 `LLM_PROVIDER=lmstudio` only for an LM Studio endpoint. The single-embedder
 compatibility example uses 768-dimensional legacy vectors. For independent code
 and prose embedders, use the [dual embedding configuration](docs/embedding-evolution.md#enabling-the-two-slots)
-and [complete pool example](bin/application-dual-embeddings.example.yml).
+and [optional single-pool dual-embedding example](bin/application-dual-embeddings.example.yml).
 Both slots support 1–16,000 dimensions in the same permanent layout, with seven
 fixed retrieval modes and background re-embedding when their model changes.
 
 Supply `PLOWSHARE_DB_PASSWORD` and any
-`LLM_API_KEY` (or API-key variables named by your overlay) through your deployment environment or the
-launcher's mode-0600 `~/.config/plowshare/secrets.env` file. This file is sourced
-as shell assignments and belongs outside the checkout. Leave the admin seed
+`LLM_API_KEY` (or API-key variables named by your overlay) through your deployment environment or a protected external configuration file. The public launcher does not discover
+or execute environment/credential files. Leave the admin seed
 variables unset to use first-run CLI setup. Explicit environment provisioning
 with `PLOWSHARE_ADMIN_HANDLE` and `PLOWSHARE_ADMIN_PASSWORD` remains available;
 those accounts must change their password on first login.
 
 The [shipped application configuration](plowshare-server/src/main/resources/application.yml)
-is the source of truth for defaults. Use a Spring configuration overlay for a
-different pool layout or advanced settings; the
-[example overlay](bin/application-local.example.yml) demonstrates separate chat
-and embedding endpoints. Launch it with `bin/plowshare --config /absolute/path/application-local.yml`.
-Existing deployments should move their complete `studio`/`spark` pool declarations,
-model IDs, capabilities and capacity settings into their private overlay. Hardware
-pool names and the old `SPARK_*` variables are no longer packaged defaults;
-`--spark-url` and `--spark-model` report the configuration-file replacement.
+is the source of truth for defaults. The
+[minimal configuration example](bin/application-local.example.yml) uses one pool
+for chat and embeddings. Launch it with
+`bin/plowshare --config /absolute/path/application.yml`. Different model endpoints
+or capacities belong in your own configuration. Spring replaces pool lists, so a
+custom list must contain every pool you intend to serve. Multi-pool configuration
+is optional and is never chosen by a shell script. Installation-specific
+configuration discovery, credential-file loading and host provisioning belong
+in your deployment tooling or private overlay.
 
 To tune prompt latency for your hardware, set `max-context-lengths` inside each
 pool, keyed by its served wire model name. For example, add this to a pool that
@@ -332,11 +332,12 @@ bin/plowshare --no-build
 
 The server binds to `127.0.0.1:8091` with authentication enabled. The web console
 is included in the server jar and served at `http://127.0.0.1:8091/`. The launcher
-uses `plowshare-server/data` for persistent filesystem state by default; use
-`--data-dir /absolute/path` to choose another location. PostgreSQL holds the
+uses the explicitly configured `PLOWSHARE_DATA_DIR` for persistent filesystem state. PostgreSQL holds the
 durable database state. Preserve both when upgrading.
 
-`bin/plowshare --help` lists server flags. Remote clients need a reachable bind
+`bin/plowshare --help` lists launcher options. Use `--` to pass Spring arguments.
+The `bin/plowshare-deployment` name is a compatibility alias; it does not load
+a personal deployment file. Remote clients need a reachable bind
 address and a secured deployment endpoint; use the deployment guide to configure
 that installation.
 

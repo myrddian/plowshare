@@ -6,8 +6,9 @@ default server publishes only on loopback; select the host LAN address in your
 deployment environment for remote clients. Authentication remains enabled.
 
 Requirements: Docker Engine, Compose 2.30 or newer, and a deployment user with
-UID 1000 (the UID used by both Java images). `bootstrap-host.sh USER` prepares a
-new Debian 12/13 host. See [distribution instructions](../../docs/distributions.md).
+UID 1000 (the UID used by both Java images). Prepare the host using
+[Docker's installation instructions](https://docs.docker.com/engine/install/);
+host provisioning belongs to your installation tooling. See [distribution instructions](../../docs/distributions.md).
 
 ## A2A general-purpose receiver
 
@@ -126,12 +127,11 @@ Set `LLM_CHAT_SLOTS`, `LLM_EMBEDDING_SLOTS` and `LLM_SWARM_SLOTS` for your
 service capacity; the conservative defaults disable swarm work. No second
 inference host is required. For any other topology, save a complete Spring
 overlay as `/srv/plowshare/config/application.yml`; the
-[example overlay](../../bin/application-local.example.yml) separates chat and
-embeddings. Put its `MODEL_*` variables in `models.env`. Keep both files mode
+[minimal example](../../bin/application-local.example.yml) uses one pool. Put
+its `LLM_*` variables in `models.env`. Add other pools only when required. Keep both files mode
 600, owned by the deployment user. Existing deployments must move their full
 pool declarations, model IDs, capabilities and capacity settings into this
-private overlay; packaged `studio`/`spark` pools and `SPARK_*` defaults were
-removed. The server reads the overlay on top of its packaged settings; the
+private overlay. The server reads the overlay on top of its packaged settings; the
 Docker-specific database/data settings live in Compose.
 Review any paths in an imported overlay for the container's filesystem.
 

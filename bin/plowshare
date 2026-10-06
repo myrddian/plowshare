@@ -1,180 +1,66 @@
 #!/usr/bin/env bash
-# Launch from a checkout using explicit operator configuration. Endpoint, model
-# and database defaults never identify a developer's deployment. The immutable
-# jar snapshot below lets an existing process survive rebuilding its checkout.
-
+# Launch using an explicit environment or external Spring configuration.
+# Pool/model selection belongs to configuration, never to this launcher.
 set -euo pipefail
-
 readonly REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECRETS="${PLOWSHARE_SECRETS:-$HOME/.config/plowshare/secrets.env}"
 BUILD=1
-PRINT=0
-OVERLAY_FLAG=0
-
-usage() {
-    cat <<'USAGE'
-plowshare -- start the Plowshare server.
-
-  bin/plowshare [flags]
-
-Endpoints
-  --llm-url URL          base URL for the generic single inference pool
-  --llm-model NAME       chat model for the `fast` class
-  --config PATH          external Spring YAML file; declares any pool topology
-
-Server
-  --port N               HTTP port
-  --bind ADDR            interface to bind (127.0.0.1 keeps it off the LAN)
-  --data-dir PATH        explicit persistent directory for images, tokens, exports
-  --db-url URL           Postgres JDBC URL
-
-Behaviour
-  --no-auth              disable the bearer check (loopback development only)
-  --secrets PATH         where to read API keys from
-  --no-build             skip the rebuild and run the existing jar
-  --print                show the resolved configuration and exit
-  -h, --help             this
-
-Set LLM_BASE_URL, LLM_CHAT_MODEL, LLM_EMBEDDING_MODEL and LLM_API_KEY for
-the generic single pool, or use --config for your complete provider topology.
-No inference endpoint or model is assumed. Secrets are read from a file,
-never from a flag. Flags override values loaded from that secrets file.
-The server runs a content-addressed jar copy in
-${XDG_CACHE_HOME:-$HOME/.cache}/plowshare/server. PLOWSHARE_RUNTIME_DIR overrides
-that directory. Rebuilds cannot replace a running server's jar; old copies remain
-until removed by the operator after the corresponding server has stopped.
-USAGE
-}
-
-# Resolve the credential-file option before loading it; parse the full argument
-# list afterwards so flags keep precedence over file assignments.
-arguments=("$@")
-for ((index=0; index<${#arguments[@]}; index++)); do
-    case "${arguments[index]}" in
-        -h|--help) usage; exit 0 ;;
-        --secrets)
-            if ((index+1 >= ${#arguments[@]})) || [[ -z "${arguments[index+1]}" ]]; then
-                echo 'plowshare: --secrets requires a value.' >&2; exit 2
-            fi
-            SECRETS="${arguments[index+1]}"
-            ((index+=1)) ;;
-    esac
-done
-
-# Load credentials before parsing flags so explicit command-line values win.
-if [[ -f "$SECRETS" ]]; then
-    perms="$(stat -c '%a' "$SECRETS" 2>/dev/null || stat -f '%Lp' "$SECRETS")"
-    if [[ "$perms" != "600" ]]; then
-        echo "plowshare: $SECRETS is mode $perms; expected 600." >&2
-        exit 1
-    fi
-    set -a
-    source "$SECRETS"
-    set +a
-fi
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --llm-url|--llm-model|--config|--port|--bind|--data-dir|--db-url|--secrets)
+        --config)
             if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-                echo "plowshare: $1 requires a value." >&2; exit 2
-            fi ;;
-    esac
-    case "$1" in
-        --llm-url)      LLM_BASE_URL="$2";          shift 2 ;;
-        --llm-model)    LLM_CHAT_MODEL="$2";        shift 2 ;;
-        --config)      PLOWSHARE_CONFIG_OVERLAY="$2"; OVERLAY_FLAG=1; shift 2 ;;
-        --spark-url|--spark-model)
-            echo 'plowshare: hardware-specific pool flags were removed; declare your pools with --config PATH.' >&2
-            exit 2 ;;
-        --port)         PLOWSHARE_PORT="$2";        shift 2 ;;
-        --bind)         PLOWSHARE_BIND="$2";        shift 2 ;;
-        --data-dir)     PLOWSHARE_DATA_DIR="$2";    shift 2 ;;
-        --db-url)       PLOWSHARE_DB_URL="$2";      shift 2 ;;
-        --no-auth)      PLOWSHARE_AUTH_ENABLED=false; shift ;;
-        --secrets)      SECRETS="$2";               shift 2 ;;
-        --no-build)     BUILD=0;                    shift ;;
-        --print)        PRINT=1;                    shift ;;
-        -h|--help)      usage; exit 0 ;;
-        *) echo "plowshare: unknown flag '$1'" >&2; echo >&2; usage >&2; exit 2 ;;
+                echo 'plowshare: --config requires an external Spring configuration file.' >&2
+                exit 2
+            fi
+            if [[ ! -f "$2" ]]; then
+                echo 'plowshare: configuration file does not exist.' >&2
+                exit 2
+            fi
+            config="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+            export SPRING_CONFIG_ADDITIONAL_LOCATION="file:$config"
+            shift 2 ;;
+        --no-build) BUILD=0; shift ;;
+        --) shift; break ;;
+        -h|--help)
+            cat <<'USAGE'
+Usage: bin/plowshare [--config FILE] [--no-build] [-- SPRING_ARGUMENTS...]
+
+Supply server, database, storage and model settings through the environment or
+an external Spring configuration file. No environment/credential file is loaded.
+The packaged configuration supports one pool; a supplied file can declare any
+pool topology. Missing settings are validated by the server at startup.
+Use -- to pass Spring arguments, for example -- --server.port=18091.
+
+Running servers use an immutable jar copy in the user cache. Set
+PLOWSHARE_RUNTIME_DIR to choose its location; retain copies while in use.
+USAGE
+            exit 0 ;;
+        *) echo 'plowshare: unknown launcher option; see --help.' >&2; exit 2 ;;
     esac
 done
-
-# An exported Spring location wins over a deployment-file overlay; --config
-# explicitly overrides both. Resolve paths before changing the working directory.
-if [[ -n "${PLOWSHARE_CONFIG_OVERLAY:-}" ]] && { [[ "$OVERLAY_FLAG" == 1 ]] || [[ -z "${SPRING_CONFIG_ADDITIONAL_LOCATION:-}" ]]; }; then
-    if [[ ! -f "$PLOWSHARE_CONFIG_OVERLAY" ]]; then
-        echo "plowshare: configuration file does not exist: $PLOWSHARE_CONFIG_OVERLAY" >&2
-        exit 1
-    fi
-    overlay_path="$(cd "$(dirname "$PLOWSHARE_CONFIG_OVERLAY")" && pwd)/$(basename "$PLOWSHARE_CONFIG_OVERLAY")"
-    export SPRING_CONFIG_ADDITIONAL_LOCATION="file:$overlay_path"
+if [[ "${PLOWSHARE_AUTH_ENABLED:-true}" == false && "${PLOWSHARE_BIND:-}" != 127.0.0.1 ]]; then
+    echo 'plowshare: disabling authentication requires an explicit loopback bind.' >&2
+    exit 2
 fi
-
-# Required server settings can also come from the Spring overlay. Spring's
-# existing configuration validation reports missing settings at startup.
-export LLM_BASE_URL LLM_CHAT_MODEL LLM_EMBEDDING_MODEL LLM_API_KEY
-export PLOWSHARE_DATA_DIR PLOWSHARE_PORT PLOWSHARE_BIND PLOWSHARE_DB_URL PLOWSHARE_AUTH_ENABLED
-
-if [[ "$PRINT" == 1 ]]; then
-    # URLs can carry credentials. Report configuration presence, never values.
-    present() { [[ -n "${1:-}" ]] && echo set || echo unset; }
-    cat <<PRINTED
-inference-url $(present "${LLM_BASE_URL:-}")
-chat-model    $(present "${LLM_CHAT_MODEL:-}")
-embedding-model $(present "${LLM_EMBEDDING_MODEL:-}")
-api-key       $(present "${LLM_API_KEY:-}")
-port          ${PLOWSHARE_PORT:-<from Spring configuration>}
-bind          ${PLOWSHARE_BIND:-<from Spring configuration>}
-data-dir      ${PLOWSHARE_DATA_DIR:-<from Spring configuration>}
-db-url        $(present "${PLOWSHARE_DB_URL:-}")
-auth          ${PLOWSHARE_AUTH_ENABLED:-true}
-overlay       ${SPRING_CONFIG_ADDITIONAL_LOCATION:-<none>}
-secrets       $SECRETS
-PRINTED
-    exit 0
-fi
-
-if [[ "${PLOWSHARE_BIND:-}" != "127.0.0.1" && "${PLOWSHARE_AUTH_ENABLED:-true}" == "false" ]]; then
-    echo "plowshare: refusing --no-auth while bound to $PLOWSHARE_BIND." >&2
-    echo "           An unauthenticated server reachable from the LAN lends" >&2
-    echo "           every project it holds to anyone who can route to it." >&2
-    exit 1
-fi
-
-# plowshare-server/ and not the repo root: bootRun ran here, so every relative
-# default in application.yml -- `data`, the sampling directory -- is written
-# against THIS directory. Running from the root would resolve `data` to a fresh
-# empty one beside the real state and look like a server that had never run.
 cd "$REPO/plowshare-server"
 if [[ "$BUILD" == 1 ]]; then
     "$REPO/gradlew" --quiet :plowshare-server:bootJar
 fi
-
-# bootJar produces two: the executable one, and a `-plain.jar` holding only this
-# module's classes. Selecting by mtime would pick whichever was written last and
-# exec a jar with no Main-Class about one time in two, so name what is wanted.
 jar=""
 for candidate in build/libs/*.jar; do
-    [[ -e "$candidate" ]]           || continue
-    [[ "$candidate" == *-plain.jar ]] && continue
+    [[ -f "$candidate" && "$candidate" != *-plain.jar ]] || continue
+    if [[ -n "$jar" ]]; then
+        echo 'plowshare: multiple executable jars; clean and rebuild the server.' >&2
+        exit 1
+    fi
     jar="$candidate"
 done
 if [[ -z "$jar" ]]; then
-    echo "plowshare: no executable jar in plowshare-server/build/libs." >&2
-    echo "           Run without --no-build, or ./gradlew :plowshare-server:bootJar" >&2
+    echo 'plowshare: build the server with ./gradlew :plowshare-server:bootJar.' >&2
     exit 1
 fi
 
-# exec, not a subshell: the server gets this shell's PID, so Ctrl-C and any
-# supervisor signal reach the JVM rather than a wrapper that would outlive it.
-# The jar and not `gradlew bootRun`, because bootRun forks from the Gradle
-# daemon and inherits the daemon's environment, which is not necessarily this
-# one -- the whole point of this script is the environment it sets.
-# A running Boot loader lazily reads this archive. Gradle may replace build/libs
-# during another build, leaving that loader's cached ZIP offsets inconsistent
-# with its bytes. Publish a launch snapshot outside the build tree, never replace
-# an existing snapshot, and retain exec so signals still reach the JVM directly.
+# Boot loads classes lazily. An atomic, content-addressed copy keeps an existing
+# JVM safe when another build replaces build/libs. exec preserves signal delivery.
 runtime_dir="${PLOWSHARE_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/plowshare/server}"
 mkdir -p "$runtime_dir"
 runtime_dir="$(cd "$runtime_dir" && pwd)"
@@ -186,16 +72,14 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
     digest="$(shasum -a 256 "$snapshot")"
 else
-    echo "plowshare: sha256sum or shasum is required to cache a server launch." >&2
+    echo 'plowshare: sha256sum or shasum is required.' >&2
     exit 1
 fi
-digest="${digest%% *}"
-runtime_jar="$runtime_dir/$digest.jar"
-# Hard-link publication is atomic and cannot overwrite a jar another JVM uses.
+runtime_jar="$runtime_dir/${digest%% *}.jar"
 if ! ln "$snapshot" "$runtime_jar" 2>/dev/null && [[ ! -f "$runtime_jar" ]]; then
-    echo "plowshare: could not publish the server launch snapshot." >&2
+    echo 'plowshare: could not publish the server launch snapshot.' >&2
     exit 1
 fi
 rm -f "$snapshot"
 trap - EXIT
-exec java -jar "$runtime_jar"
+exec java -jar "$runtime_jar" "$@"

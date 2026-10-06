@@ -1,163 +1,46 @@
 #!/usr/bin/env bash
-#
-# bin/plowshare-talk -- open a terminal on a Plowshare server and talk to a bot.
-#
-#
-# What this is, and what it is not
-# -------------------------------
-# `bin/plowshare` starts a server. This starts a client, and the difference is
-# the whole point of the client design: the server needs Postgres and a model
-# configuration and is meant to be somewhere else. Nothing here starts one, and
-# a missing server is reported as a missing server rather than as a stack trace.
-#
-# The client is `plowshare-tui`, which speaks WebSocket frames and nothing else
-# once it is past sign-in. Auth is the one part still HTTP, because it happens
-# before the socket exists.
-#
-#
-# Why a script rather than `pnpm start`
-# -------------------------------------
-# Three things have to be true before the first frame goes out, and each of them
-# fails in a way that is hard to read from inside Node:
-#
-#   - Node 22 or newer, because `WebSocket` is global from 22 and absent before
-#     it. Node reports that as `ReferenceError: WebSocket is not defined`, from
-#     a stack that names none of this.
-#   - the client's dev dependencies installed, because it is run from source.
-#   - a handle and a password, which are read from the environment and are the
-#     one part of this a person has to supply.
-#
-# Each is checked here, once, with a sentence naming the remedy.
-#
-#
-# The password is an environment variable, and that is a stopgap
-# --------------------------------------------------------------
-# `readline` echoes what is typed, so asking for a password at the prompt would
-# put it on the screen and into the scrollback. An environment variable is worse
-# than a keychain and better than that. implementation rationale 17.8 is the standing note on
-# credentials reaching a remote client; this inherits it rather than solving it.
-
+# Launch the TUI or its headless retrieval commands against an explicit origin.
 set -euo pipefail
-
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-CLIENT="$(cd "$HERE/.." && pwd -P)/plowshare-tui"
-
-usage() {
-    cat >&2 <<'USAGE'
-plowshare-talk -- open a terminal on a Plowshare server.
-
-  --url URL        the server (default: $PLOWSHARE_URL, else http://127.0.0.1:8091)
-  --agent NAME     talk to a named agent instead of the server's bot
-  --project NAME   work in a project's tier rather than the global one
-  -h, --help       this
-
-Read from the environment:
-  PLOWSHARE_HANDLE     optional account override
-  PLOWSHARE_PASSWORD   optional password override
-  PLOWSHARE_URL        the server, if --url is not given
-  PLOWSHARE_AGENT      an agent, if --agent is not given
-  PLOWSHARE_PROJECT    a project, if --project is not given
-
-With no agent named it talks to the bot the server serves, which is the
-ordinary way in. `/help` at the prompt lists what else it knows.
-
-Direct commands (no agent selection or terminal UI):
-  plowshare-talk conversation search --mode hybrid --json "earlier decision"
-  plowshare-talk memory navigate "why did we change this?"
-  Add --help after either command for scope, cost and evidence-reading help.
-Exit statuses: 0 success, 1 service/auth failure, 2 usage, 3 incomplete retrieval.
-USAGE
-}
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --url)     PLOWSHARE_URL="$2";     shift 2 ;;
-        --agent)   PLOWSHARE_AGENT="$2";   shift 2 ;;
-        --project) PLOWSHARE_PROJECT="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
+        --url|--agent|--project)
+            if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                echo 'plowshare-talk: option requires a value; see --help.' >&2
+                exit 2
+            fi
+            case "$1" in
+                --url) export PLOWSHARE_URL="$2" ;;
+                --agent) export PLOWSHARE_AGENT="$2" ;;
+                --project) export PLOWSHARE_PROJECT="$2" ;;
+            esac
+            shift 2 ;;
+        -h|--help)
+            echo 'Usage: bin/plowshare-talk --url URL [--agent NAME] [--project NAME]'
+            echo 'Or: bin/plowshare-talk conversation|memory ARGS...'
+            echo 'PLOWSHARE_URL can supply the server origin. Login is shared with the CLI.'
+            exit 0 ;;
         conversation|memory) break ;;
-        *) echo "plowshare-talk: unknown option '$1'" >&2; usage; exit 2 ;;
+        *) echo 'plowshare-talk: unknown option; see --help.' >&2; exit 2 ;;
     esac
 done
-
-: "${PLOWSHARE_URL:=http://127.0.0.1:8091}"
-
-# Exported, not merely set. A value that arrived in the environment is exported
-# already; one that arrived as `--agent` is a plain shell variable, and the
-# client would not see it -- it would quietly talk to the bot instead, which
-# looks like the flag being ignored because it is.
-export PLOWSHARE_URL
-if [[ -n "${PLOWSHARE_AGENT:-}" ]];   then export PLOWSHARE_AGENT;   fi
-if [[ -n "${PLOWSHARE_PROJECT:-}" ]]; then export PLOWSHARE_PROJECT; fi
-
-# --- Node, and the version the socket needs ---------------------------------
-if ! command -v node >/dev/null 2>&1; then
-    echo "plowshare-talk: no node on PATH. This client runs from source and needs" >&2
-    echo "                Node 22 or newer -- WebSocket is a global from 22 and is" >&2
-    echo "                not there before it." >&2
-    exit 1
+if [[ $# -eq 0 && -z "${PLOWSHARE_URL:-}" ]]; then
+    echo 'plowshare-talk: supply --url or PLOWSHARE_URL.' >&2
+    exit 2
 fi
-
-major="$(node -p 'process.versions.node.split(".")[0]')"
-if (( major < 22 )); then
-    echo "plowshare-talk: node $(node -v) is too old. WebSocket became a global in" >&2
-    echo "                Node 22; on $(node -v) this client cannot open a socket at" >&2
-    echo "                all, and the error Node gives says nothing about versions." >&2
-    exit 1
+readonly REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLIENT="$REPO/plowshare-tui"
+if ! command -v node >/dev/null || ! node -e 'const [major,minor]=process.versions.node.split(".").map(Number);process.exit(major>22||(major===22&&minor>=13)?0:1)'; then
+    echo 'plowshare-talk: Node 22.13 or newer is required.' >&2
+    exit 2
 fi
-
-# --- the client's own dependencies ------------------------------------------
-# Checked rather than installed: an install is a network call, and a script that
-# silently reaches the internet is a worse surprise than one that asks.
-if [[ ! -d "$CLIENT/node_modules" ]]; then
-    echo "plowshare-talk: $CLIENT has no node_modules." >&2
-    echo "                Run:  cd $CLIENT && pnpm install --frozen-lockfile" >&2
-    exit 1
-fi
-
-if [[ $# -gt 0 && ( " $* " == *" --help "* || " $* " == *" -h "* ) ]]; then
-    cd "$CLIENT"
-    exec node src/view/retrieval-cli.ts "$@"
-fi
-
 if [[ ! -f "$CLIENT/node_modules/plowshare-client-ts/build/binding/auth.js" ]]; then
-    echo "plowshare-talk: the shared client has not been installed and built." >&2
-    echo "                Run: ./gradlew :plowshare-client-ts:assemble :plowshare-tui:pnpmInstall" >&2
-    exit 1
+    echo 'Build the client with ./gradlew :plowshare-client-ts:assemble :plowshare-tui:pnpmInstall.' >&2
+    exit 2
 fi
-
-# --- the credential, which is the part a person supplies ---------------------
-if [[ -n "${PLOWSHARE_HANDLE:-}" || -n "${PLOWSHARE_PASSWORD:-}" ]]; then
-    if [[ -z "${PLOWSHARE_HANDLE:-}" || -z "${PLOWSHARE_PASSWORD:-}" ]]; then
-        echo "plowshare-talk: supply both login variables, or use a saved plowshare-cli login." >&2
-        exit 2
-    fi
-fi
-
-# --- is anything there? ------------------------------------------------------
-# One request, so an unreachable server is one sentence here rather than a
-# failure three steps into the sign-in. `/v1/auth/session` answers 401 for a
-# caller with no credential, which is the server saying it is up and gated.
-if command -v curl >/dev/null 2>&1; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-        "$PLOWSHARE_URL/v1/auth/session" || true)"
-    if [[ "$code" == "000" ]]; then
-        echo "plowshare-talk: nothing answered at $PLOWSHARE_URL." >&2
-        echo "                The server is remote by design -- check the address, and" >&2
-        echo "                that it is running and reachable from here." >&2
-        exit 1
-    fi
-fi
-
-# exec, not a subshell: the client gets this shell's PID, so Ctrl-C reaches the
-# client's own SIGINT handler -- which asks a running job to stop -- rather than
-# killing a wrapper and leaving the run going.
-# WHERE YOU WERE, BEFORE THIS SCRIPT MOVES. The client roots the project it finds
-# by walking up from here, and the cd below would otherwise make that the
-# client's own source tree every time.
+# Preserve the caller's project root before moving into the client source tree.
 export PLOWSHARE_HERE="$PWD"
 cd "$CLIENT"
 if [[ $# -gt 0 ]]; then
-    exec node src/view/retrieval-cli.ts "$@"
+    exec node --experimental-strip-types src/view/retrieval-cli.ts "$@"
 fi
-exec node src/view/main.ts
+exec node --experimental-strip-types src/view/main.ts

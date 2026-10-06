@@ -110,22 +110,11 @@ See [Electron's signing guidance](https://www.electronjs.org/docs/latest/tutoria
 
 ## Server
 
-For a new Debian 13 or 12 Docker host, `deploy/docker/bootstrap-host.sh` installs
-Docker Engine, Buildx and Compose from Docker's official Debian repository. Run
-the reviewed script as root, passing the existing non-root deployment username:
-
-```sh
-sudo sh deploy/docker/bootstrap-host.sh YOUR_DEPLOYMENT_USER
-```
-
-The script creates `/srv/plowshare/data`, `/srv/plowshare/config` and
-`/srv/plowshare/deployment` on ordinary host storage, preserving existing directory
-ownership. It does not partition or format disks. Mount a dedicated data disk at
-`/srv/plowshare` before running it when using a separate disk. It grants the account
-Docker group membership, which provides root-equivalent host control; reconnect
-SSH before using that membership. An existing Docker repository file is left
-unchanged and requires manual review. The script verifies installation with
-`hello-world`; it prepares the host and does not deploy Plowshare containers.
+Prepare Docker Engine, Buildx and Compose using
+[Docker's installation instructions](https://docs.docker.com/engine/install/).
+Host provisioning and account/group management belong to your installation
+configuration. Choose your persistent state path explicitly; the product does
+not create a fixed host layout or alter Docker access for an account.
 
 For persistent Plowshare/PostgreSQL containers with a bundled Java runtime,
 see [the Docker deployment guide](../deploy/docker/README.md). Search is layered:

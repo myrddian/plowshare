@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run as the deployment user, not root. Existing state and credentials survive.
 set -eu
-state=${1:-/srv/plowshare}
+state=${1:?Pass an absolute state directory outside the checkout}
 case "$state" in /*) ;; *) echo "Use an absolute state directory." >&2; exit 1 ;; esac
 test "$(id -u)" = 1000 || {
     echo "This package runs as UID 1000; prepare its bind mounts as that deployment user." >&2
@@ -23,4 +23,4 @@ done
 if [ ! -e "$state/config/models.env" ]; then
     (set -C; printf '%s\n' '# Set provider endpoints and API keys here; this file stays outside Git.' > "$state/config/models.env")
 fi
-echo "Prepared $state. Use the temporary admin password in the server startup output with plowshare-cli setup. secrets/admin-password is retained for optional environment provisioning."
+echo "Prepared external state. Supply runtime model configuration before deploying."

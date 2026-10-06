@@ -1,38 +1,21 @@
-# Copy outside Git and set all required MODEL_* variables in your environment.
-# Launch with bin/plowshare --config /absolute/path/application-local.yml.
-# Legacy single-embedder compatibility example. For two slots, use
-# application-dual-embeddings.example.yml and docs/embedding-evolution.md.
-# This complete pool list replaces the packaged generic single-pool shape.
-# Names are operator choices; no hardware, provider or model is assumed.
-# Models must match the wire IDs served by your endpoints. This example places
-# chat and embeddings on separate endpoints; they can also share one pool.
-# Size chat/swarm slots for your service. swarm: 0 explicitly disables swarms.
+# Minimal single-pool example. Copy outside Git and supply the LLM_* values.
+# Launch with bin/plowshare --config /absolute/path/application.yml.
+# Chat and embeddings share an endpoint. Both chat classes use the same model.
+# Declare additional pools only when your installation needs them.
 plowshare:
   llm:
-    embedding-model: ${MODEL_EMBEDDING_ID}
-    embedding-dim: 768 # Legacy column width; dual slots have unconstrained storage.
+    embedding-model: ${LLM_EMBEDDING_MODEL}
     classes:
-      fast: ${MODEL_CHAT_ID}
-      reasoning: ${MODEL_CHAT_ID}
-    system: reasoning
+      fast: ${LLM_CHAT_MODEL}
+      reasoning: ${LLM_CHAT_MODEL}
     pools:
       - name: inference
-        base-url: ${MODEL_CHAT_URL}
-        api-key: ${MODEL_CHAT_API_KEY:}
-        provider: ${MODEL_CHAT_PROVIDER:openai}
+        base-url: ${LLM_BASE_URL}
+        api-key: ${LLM_API_KEY:}
+        provider: ${LLM_PROVIDER:openai}
         models:
-          - ${MODEL_CHAT_ID}
-        chat: ${MODEL_CHAT_SLOTS:2}
-        swarm: ${MODEL_SWARM_SLOTS:1}
-        submit-timeout: 30s
-      - name: embeddings
-        base-url: ${MODEL_EMBEDDING_URL}
-        api-key: ${MODEL_EMBEDDING_API_KEY:}
-        provider: ${MODEL_EMBEDDING_PROVIDER:openai}
-        models:
-          - ${MODEL_EMBEDDING_ID}
-        embedding: ${MODEL_EMBEDDING_SLOTS:1}
-        submit-timeout: 30s
-# Add more pools/classes explicitly for separate reasoning, vision or refusal
-# fallback models. Declare model-specific capabilities/context lengths only
-# when supported by the endpoint. No LM Studio or vLLM extension is implied.
+          - ${LLM_CHAT_MODEL}
+          - ${LLM_EMBEDDING_MODEL}
+        chat: ${LLM_CHAT_SLOTS:1}
+        embedding: ${LLM_EMBEDDING_SLOTS:1}
+        swarm: ${LLM_SWARM_SLOTS:0}

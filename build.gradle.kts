@@ -51,9 +51,13 @@ allprojects {
 val serverLaunchTest by tasks.registering(Exec::class) {
     group = "verification"
     description = "Checks explicit server configuration and immutable launch snapshots."
-    inputs.files("bin/plowshare", "bin/plowshare-deployment", "scripts/server-launch.test.mjs")
+    inputs.files(
+        "bin/plowshare", "bin/plowshare-deployment", "bin/plowshare-talk",
+        "bin/plowshare-searxng", "scripts/server-launch.test.mjs",
+        "scripts/launcher-clients.test.mjs"
+    )
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    commandLine("node", "--test", "scripts/server-launch.test.mjs")
+    commandLine("node", "--test", "scripts/server-launch.test.mjs", "scripts/launcher-clients.test.mjs")
 }
 val personalStarterInstallTest by tasks.registering(Exec::class) {
     group = "verification"

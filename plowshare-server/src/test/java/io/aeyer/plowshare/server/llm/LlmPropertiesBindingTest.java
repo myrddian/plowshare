@@ -614,25 +614,24 @@ class LlmPropertiesBindingTest {
   /** Where the example overlay is, from this module's working directory. */
   private static final String OVERLAY = "file:../bin/application-local.example.yml";
 
-  /** The example replaces the whole fleet and boots without the packaged pool's variables. */
+  /** The minimal example binds one fleet with shared chat/embedding capacity and no extra host. */
   @Test
-  void example_overlay_routes_separate_chat_and_embedding_endpoints() {
+  void example_overlay_serves_chat_and_embeddings_from_one_pool() {
     new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(Binding.class)
         .withInitializer(new ConfigDataApplicationContextInitializer())
         .withPropertyValues(
             "spring.config.additional-location=" + OVERLAY,
-            "MODEL_CHAT_URL=http://192.0.2.10:9000/v1",
-            "MODEL_CHAT_ID=overlay-chat",
-            "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1",
-            "MODEL_EMBEDDING_ID=overlay-embedding")
+            "LLM_BASE_URL=http://192.0.2.10:9000/v1",
+            "LLM_CHAT_MODEL=overlay-chat",
+            "LLM_EMBEDDING_MODEL=overlay-embedding")
         .run(
             context -> {
               assertNull(context.getStartupFailure());
               LlmProperties props = context.getBean(LlmProperties.class);
               assertEquals(
-                  List.of("inference", "embeddings"),
+                  List.of("inference"),
                   props.getPools().stream().map(PoolProperties::getName).toList());
               assertEquals("overlay-embedding", props.getEmbeddingModel());
               assertEquals(
@@ -646,8 +645,11 @@ class LlmPropertiesBindingTest {
                 assertEquals("overlay-chat", dispatcher.wireModelFor("reasoning"));
                 dispatcher.requireServed("overlay-embedding");
                 var swarm = new io.aeyer.plowshare.server.swarm.DispatcherPools(dispatcher);
-                assertEquals(List.of("inference"), swarm.serving("reasoning"));
-                assertEquals(1, swarm.slots("inference"));
+                assertEquals(List.of(), swarm.serving("reasoning"));
+                assertEquals(0, swarm.slots("inference"));
+                assertEquals(1, props.getPools().getFirst().getChat());
+                assertEquals(1, props.getPools().getFirst().getEmbedding());
+                assertEquals("http://192.0.2.10:9000/v1", props.getPools().getFirst().getBaseUrl());
               }
             });
   }
@@ -660,9 +662,8 @@ class LlmPropertiesBindingTest {
         .withInitializer(new ConfigDataApplicationContextInitializer())
         .withPropertyValues(
             "spring.config.additional-location=" + OVERLAY,
-            "MODEL_CHAT_ID=overlay-chat",
-            "MODEL_EMBEDDING_ID=overlay-embedding",
-            "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1")
+            "LLM_CHAT_MODEL=overlay-chat",
+            "LLM_EMBEDDING_MODEL=overlay-embedding")
         .run(
             context -> {
               assertNull(context.getStartupFailure());
@@ -701,10 +702,9 @@ class LlmPropertiesBindingTest {
                                   "160s"))))
           .withPropertyValues(
               "spring.config.additional-location=" + location,
-              "MODEL_CHAT_URL=http://192.0.2.10:9000/v1",
-              "MODEL_CHAT_ID=overlay-chat",
-              "MODEL_EMBEDDING_URL=http://192.0.2.11:9000/v1",
-              "MODEL_EMBEDDING_ID=overlay-embedding")
+              "LLM_BASE_URL=http://192.0.2.10:9000/v1",
+              "LLM_CHAT_MODEL=overlay-chat",
+              "LLM_EMBEDDING_MODEL=overlay-embedding")
           .run(
               context -> {
                 assertNull(context.getStartupFailure());

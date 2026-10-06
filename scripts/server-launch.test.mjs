@@ -140,12 +140,12 @@ async function launchConfiguration(args, overrides = {}) {
     );
     await writeFile(
       join(bin, 'java'),
-      '#!/bin/sh\nexec node "$(dirname "$0")/java.mjs"\n',
+      '#!/bin/sh\nexec node "$(dirname "$0")/java.mjs" "$@"\n',
       { mode: 0o755 },
     );
     await writeFile(
       join(bin, 'java.mjs'),
-      `const keys = ['LLM_BASE_URL', 'LLM_CHAT_MODEL', 'PLOWSHARE_DB_URL', 'PLOWSHARE_PORT', 'PLOWSHARE_DATA_DIR', 'SPRING_CONFIG_ADDITIONAL_LOCATION']; process.stdout.write(JSON.stringify(Object.fromEntries(keys.map(key => [key, process.env[key] ?? null]))));\n`,
+      `const keys = ['LLM_BASE_URL', 'LLM_CHAT_MODEL', 'PLOWSHARE_DB_URL', 'PLOWSHARE_PORT', 'PLOWSHARE_DATA_DIR', 'SPRING_CONFIG_ADDITIONAL_LOCATION']; process.stdout.write(JSON.stringify({...Object.fromEntries(keys.map(key => [key, process.env[key] ?? null])), args: process.argv.slice(2)}));\n`,
     );
     const env = Object.fromEntries(
       Object.entries(process.env).filter(
@@ -202,80 +202,82 @@ test('launcher does not synthesize inference, database or persistent-state setti
   }
 });
 
-test('explicit overlay reaches Java as an absolute required file and flags win over selected secrets', async () => {
+test('explicit configuration is required, absolute and topology-neutral', async () => {
   const result = await launchConfiguration([
     '--no-build',
     '--config',
     'providers.yml',
-    '--secrets',
-    '$FIXTURE/secrets.env',
-    '--llm-model',
-    'flag-chat',
   ]);
   assert.equal(result.code, 0, result.error);
   const configuration = JSON.parse(result.output);
-  assert.equal(configuration.LLM_CHAT_MODEL, 'flag-chat');
   assert.equal(
     configuration.SPRING_CONFIG_ADDITIONAL_LOCATION,
     `file:${result.directory}/providers.yml`,
   );
+  assert.equal(configuration.LLM_CHAT_MODEL, null);
 });
 
-test('missing overlays, removed hardware flags and incomplete options fail before Java', async () => {
+test('missing configuration and installation-only flags fail before Java', async () => {
   for (const args of [
     ['--no-build', '--config', 'missing.yml'],
-    ['--spark-url', 'http://fixture.invalid'],
     ['--config'],
-    ['--llm-model'],
+    ['--llm-model', 'model'],
+    ['--secrets', 'secrets.env'],
+    ['--spark-url', 'https://fixture.invalid'],
   ]) {
     const result = await launchConfiguration(args);
     assert.notEqual(result.code, 0);
     assert.equal(result.output, '');
     assert.match(
       result.error,
-      /does not exist|hardware-specific|requires a value/,
+      /does not exist|unknown launcher option|requires an external/,
     );
   }
 });
 
-test('configuration inspection never prints endpoint credentials or API keys', async () => {
-  const result = await launchConfiguration(['--print'], {
-    LLM_BASE_URL: 'https://user:fixture-secret@fixture.invalid/v1',
-    LLM_API_KEY: 'fixture-api-secret',
-    PLOWSHARE_DB_URL:
-      'jdbc:postgresql://fixture.invalid/db?password=fixture-db-secret',
-  });
-  assert.equal(result.code, 0, result.error);
-  assert.doesNotMatch(
-    result.output,
-    /fixture-secret|fixture-api-secret|fixture-db-secret/,
-  );
-  assert.match(result.output, /inference-url set/);
+test('launcher never discovers or executes personal environment files', async () => {
+  for (const launchDeployment of [false, true]) {
+    const result = await launchConfiguration(['--no-build'], {
+      launchDeployment,
+      PLOWSHARE_SECRETS: 'secrets.env',
+      PLOWSHARE_DEPLOYMENT: 'deployment.env',
+    });
+    assert.equal(result.code, 0, result.error);
+    const configuration = JSON.parse(result.output);
+    assert.equal(configuration.LLM_CHAT_MODEL, null);
+    assert.equal(configuration.LLM_BASE_URL, null);
+    assert.equal(configuration.SPRING_CONFIG_ADDITIONAL_LOCATION, null);
+  }
 });
 
-test('deployment wrapper preserves exported values and validates its selected overlay', async () => {
-  const result = await launchConfiguration(['--no-build'], {
-    launchDeployment: 'true',
-    PLOWSHARE_DEPLOYMENT: 'deployment.env',
-    LLM_BASE_URL: 'http://exported.invalid/v1',
-  });
+test('Spring arguments are forwarded literally without shell evaluation', async () => {
+  const result = await launchConfiguration([
+    '--no-build',
+    '--',
+    '--server.port=18091',
+    '--fixture=$(touch should-not-run)',
+  ]);
   assert.equal(result.code, 0, result.error);
   const configuration = JSON.parse(result.output);
-  assert.equal(configuration.LLM_BASE_URL, 'http://exported.invalid/v1');
-  assert.equal(
-    configuration.SPRING_CONFIG_ADDITIONAL_LOCATION,
-    `file:${result.directory}/providers.yml`,
-  );
-  const missing = await launchConfiguration(['--no-build'], {
-    launchDeployment: 'true',
-    PLOWSHARE_DEPLOYMENT: 'deployment.env',
-    PLOWSHARE_CONFIG_OVERLAY: 'missing.yml',
-  });
-  assert.notEqual(missing.code, 0);
-  assert.match(missing.error, /configuration file does not exist/);
+  assert.deepEqual(configuration.args.slice(2), [
+    '--server.port=18091',
+    '--fixture=$(touch should-not-run)',
+  ]);
 });
 
-test('exported Spring locations win over deployment overlays and --config wins over both', async () => {
+test('disabling authentication requires an explicit loopback bind', async () => {
+  for (const bind of ['', '0.0.0.0']) {
+    const result = await launchConfiguration(['--no-build'], {
+      PLOWSHARE_AUTH_ENABLED: 'false',
+      PLOWSHARE_BIND: bind,
+    });
+    assert.notEqual(result.code, 0);
+    assert.equal(result.output, '');
+    assert.match(result.error, /explicit loopback bind/);
+  }
+});
+
+test('exported Spring locations are preserved and explicit --config takes precedence', async () => {
   const preserved = await launchConfiguration(['--no-build'], {
     PLOWSHARE_CONFIG_OVERLAY: 'missing.yml',
     SPRING_CONFIG_ADDITIONAL_LOCATION: 'file:/operator/providers.yml',
