@@ -157,7 +157,29 @@ public final class RelayLog {
       Instant publishedAt,
       String correlationId,
       String causationId,
-      Payload payload) {
+      Payload payload,
+      RelayCausation causation) {
+    public Event(
+        String position,
+        String eventId,
+        String publisher,
+        Instant occurredAt,
+        Instant publishedAt,
+        String correlationId,
+        String causationId,
+        Payload payload) {
+      this(
+          position,
+          eventId,
+          publisher,
+          occurredAt,
+          publishedAt,
+          correlationId,
+          causationId,
+          payload,
+          null);
+    }
+
     public Event {
       positive(position);
       identity(eventId);

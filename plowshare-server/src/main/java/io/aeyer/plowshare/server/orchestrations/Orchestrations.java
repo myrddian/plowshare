@@ -5,6 +5,7 @@ import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Orchestration;
 import io.aeyer.plowshare.protocol.Orchestration.Structure;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRunTool;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -237,7 +238,32 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       String callerHandle,
       String callerSession,
       String parent,
-      int depth) {
+      int depth,
+      RelayCausation causation) {
+    public Start(
+        OrchestrationDefinition definition,
+        Home home,
+        String request,
+        String context,
+        String callerConversation,
+        String callerAgent,
+        String callerHandle,
+        String callerSession,
+        String parent,
+        int depth) {
+      this(
+          definition,
+          home,
+          request,
+          context,
+          callerConversation,
+          callerAgent,
+          callerHandle,
+          callerSession,
+          parent,
+          depth,
+          null);
+    }
 
     public Start {
       Objects.requireNonNull(definition, "definition");
@@ -790,7 +816,8 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                                 start.callerHandle(),
                                 start.callerSession(),
                                 start.parent(),
-                                start.depth()));
+                                start.depth(),
+                                start.causation()));
                     seeding.seedStages(
                         conversation.id(),
                         ownStages.stream()

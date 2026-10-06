@@ -155,7 +155,8 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
             row.getString("correlation_id"),
             row.getString("causation_id"),
             RelayPayloadCodec.read(
-                topic.kind(), row.getInt("schema_version"), row.getString("payload"))));
+                topic.kind(), row.getInt("schema_version"), row.getString("payload")),
+            RelayCausationCodec.read(row.getString("relay_causation"))));
   }
 
   private static Instant time(ResultSet row, String column) throws SQLException {

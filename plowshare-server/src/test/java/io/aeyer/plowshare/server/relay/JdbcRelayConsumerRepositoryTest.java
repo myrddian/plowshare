@@ -338,7 +338,7 @@ class JdbcRelayConsumerRepositoryTest {
   }
 
   @Test
-  void cyclic_topic_forwarding_stops_at_the_bound_and_missing_history_refuses_another_hop() {
+  void cyclic_topic_forwarding_stops_at_the_bound_after_ancestry_cleanup() {
     var relay = new DurableRelay(broker, Instant::now);
     var history = new JdbcRelayForwardingHistory(jdbc);
     var receiver = new ForwardRelayReceiver(relay, history, 8);
@@ -401,7 +401,7 @@ class JdbcRelayConsumerRepositoryTest {
         root.subscription().topic().name(),
         root.subscription().subscriber(),
         root.position());
-    assertTrue(history.depth(finalInput, 8).isEmpty());
+    assertEquals(8, history.depth(finalInput, 8).orElseThrow());
     assertThrows(RelayReceiver.Refused.class, () -> receiver.dispatch(request));
   }
 

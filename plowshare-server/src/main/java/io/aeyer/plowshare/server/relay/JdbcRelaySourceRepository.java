@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -91,7 +92,8 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
                         return new Entry(
                             row.getObject("id", UUID.class),
                             row.getObject("occurred_at", OffsetDateTime.class).toInstant(),
-                            payload);
+                            payload,
+                            RelayCausationCodec.read(row.getString("relay_causation")));
                       },
                       RelayScopeCodec.project(topic),
                       topic.name())
@@ -123,8 +125,9 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
                   "system.source",
                   entry.at(),
                   entry.id().toString(),
-                  null,
-                  entry.payload()));
+                  entry.causation() == null ? null : entry.causation().parentId(),
+                  entry.payload(),
+                  entry.causation()));
           if (jdbc.update("DELETE FROM relay_source_events WHERE id=?", entry.id()) != 1)
             throw new IllegalStateException("Relay source event changed under lock");
           return true;
@@ -135,5 +138,6 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
     return RelaySourceRepository.cursor(topic);
   }
 
-  private record Entry(UUID id, java.time.Instant at, RelayPayload payload) {}
+  private record Entry(
+      UUID id, java.time.Instant at, RelayPayload payload, RelayCausation causation) {}
 }

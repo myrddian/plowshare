@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -99,6 +101,16 @@ public final class JdbcJobLog implements JobLog {
    * @param at when it was submitted
    */
   public void started(String id, String agent, Home home, Instant at) {
+    started(id, agent, home, at, null, null);
+  }
+
+  public void started(
+      String id,
+      String agent,
+      Home home,
+      Instant at,
+      String conversation,
+      RelayCausation causation) {
     ArchiveValues.identity(id, "job id");
     ArchiveValues.identity(agent, "agent");
     Objects.requireNonNull(home, "home");
@@ -107,7 +119,7 @@ public final class JdbcJobLog implements JobLog {
         "write down that a job started",
         () ->
             jdbc.update(
-                "INSERT INTO jobs (id, agent, project_id, started_at)" + " VALUES (?, ?, ?, ?)",
+                "INSERT INTO jobs (id, agent, project_id, started_at, conversation_id, relay_causation) VALUES (?, ?, ?, ?, ?, ?::jsonb)",
                 // Registered before the row that references it, and
                 // inside this supplier so a database that is down is
                 // reported as this operation rather than as a project
@@ -116,7 +128,9 @@ public final class JdbcJobLog implements JobLog {
                 id,
                 agent,
                 ProjectIds.toWrite(jdbc, home),
-                utc(at)));
+                utc(at),
+                conversation,
+                RelayCausationCodec.write(causation)));
   }
 
   /**

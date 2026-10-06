@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -156,7 +157,18 @@ public interface Relay {
       Instant occurredAt,
       String correlationId,
       String causationId,
-      RelayPayload payload) {
+      RelayPayload payload,
+      RelayCausation causation) {
+    public Draft(
+        String eventId,
+        String publisher,
+        Instant occurredAt,
+        String correlationId,
+        String causationId,
+        RelayPayload payload) {
+      this(eventId, publisher, occurredAt, correlationId, causationId, payload, null);
+    }
+
     public Draft {
       eventId = RelayValues.identity(eventId, "event ID");
       publisher = RelayValues.identity(publisher, "publisher");

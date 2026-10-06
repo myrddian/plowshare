@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.MemoryIds;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.Outcome;
 import java.time.Instant;
 import java.util.List;
@@ -20,6 +21,15 @@ public interface JobLog {
   }
 
   void started(String id, String agent, Home home, Instant at);
+
+  /** Atomically records conversation and causation before work. Failure must prevent Relay work. */
+  void started(
+      String id,
+      String agent,
+      Home home,
+      Instant at,
+      String conversation,
+      RelayCausation causation);
 
   /** False if pruning already removed the row; counters must be nonnegative. */
   boolean ended(String id, Outcome.Ending ending, int steps, int modelCalls, Instant at);

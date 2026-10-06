@@ -23,7 +23,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
   private static final String INPUT_COLUMNS =
       """
       a.scope_key,a.topic,a.subscriber,a.publication_position,a.event_id,a.publisher,
-      a.occurred_at,a.published_at,a.correlation_id,a.causation_id,a.payload_kind,a.schema_version,
+      a.occurred_at,a.published_at,a.correlation_id,a.causation_id,a.relay_causation::text,a.payload_kind,a.schema_version,
       a.payload::text,a.routing_path,a.routing_source,a.routing_hash,a.branch_count,a.admitted_at
       """;
   private static final String BRANCH_COLUMNS =
@@ -117,7 +117,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
               jdbc
                   .query(
                       """
-          SELECT event_id,publisher,occurred_at,published_at,correlation_id,causation_id,schema_version,payload::text
+          SELECT event_id,publisher,occurred_at,published_at,correlation_id,causation_id,relay_causation::text,schema_version,payload::text
           FROM relay_publications WHERE scope_key=? AND topic=? AND position=?
           """,
                       (row, index) -> publication(row, topic, key.position(), retained.kind()),
@@ -133,9 +133,9 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
               jdbc.update(
                   """
           INSERT INTO relay_admissions(scope_key,topic,subscriber,publication_position,event_id,publisher,
-              occurred_at,published_at,correlation_id,causation_id,payload_kind,schema_version,payload,
+              occurred_at,published_at,correlation_id,causation_id,relay_causation,payload_kind,schema_version,payload,
               routing_path,routing_source,routing_hash,branch_count,admitted_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?::jsonb,?,?,?,?,?)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,1,?::jsonb,?,?,?,?,?)
           """,
                   RelayScopeCodec.write(topic),
                   topic.name(),
@@ -147,6 +147,7 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
                   timestamp(publication.publishedAt()),
                   publication.event().correlationId(),
                   publication.event().causationId(),
+                  RelayCausationCodec.write(publication.event().causation()),
                   retained.kind().name(),
                   RelayPayloadCodec.write(publication.event().payload()),
                   source.path(),
@@ -572,7 +573,8 @@ public final class JdbcRelayDeliveryRepository implements RelayDeliveryRepositor
             instant(row, "occurred_at"),
             row.getString("correlation_id"),
             row.getString("causation_id"),
-            RelayPayloadCodec.read(kind, row.getInt("schema_version"), row.getString("payload"))));
+            RelayPayloadCodec.read(kind, row.getInt("schema_version"), row.getString("payload")),
+            RelayCausationCodec.read(row.getString("relay_causation"))));
   }
 
   private static RelayDeliveries.Branch branch(ResultSet row) throws SQLException {

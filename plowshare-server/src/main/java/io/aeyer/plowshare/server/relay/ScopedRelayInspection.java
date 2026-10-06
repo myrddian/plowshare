@@ -83,7 +83,8 @@ public final class ScopedRelayInspection implements RelayInspection {
                       publication.publishedAt(),
                       draft.correlationId(),
                       draft.causationId(),
-                      encoded);
+                      encoded,
+                      draft.causation());
                 })
             .toList();
     var subscribers =

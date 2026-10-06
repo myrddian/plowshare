@@ -56,6 +56,25 @@ input(
   { scope: { kind: 'personal' }, revision: receipt },
   true,
 );
+// Relay causation is an optional response field for older peers, with strict shared invariants.
+const relayPage = {
+  scope: { project: 'fixture', system: false },
+  topic: { name: 'job.ended', kind: 'LIFECYCLE', retentionSeconds: '345600', maxRecords: null, through: '1', expiredThrough: '0' },
+  after: '0', next: '1', gapThrough: null, subscribers: [], branches: [],
+  events: [{ position: '1', eventId: 'source:event', publisher: 'system.source', occurredAt: '2026-10-06T00:00:00Z', publishedAt: '2026-10-06T00:00:00Z', correlationId: null, causationId: null,
+    payload: { kind: 'LIFECYCLE', text: null, schedule: null, emits: null, fireAt: null, lifecycle: { source: 'job.ended', subject: 'job_fixture', state: 'ANSWERED', context: null, related: null } } }],
+};
+result('relay.log', relayPage, true);
+for (const [causation, valid] of [
+  [{ rootId: 'root', parentId: null, depth: 0 }, true],
+  [{ rootId: 'root', parentId: 'parent', depth: 8 }, true],
+  [{ rootId: 'legacy', parentId: null, depth: -1 }, true],
+  [{ rootId: 'root', parentId: null, depth: 1 }, false],
+  [{ rootId: 'root', parentId: 'parent', depth: 0 }, false],
+  [{ rootId: 'root', parentId: 'parent', depth: 33 }, false],
+  [{ rootId: 'root', parentId: null, depth: -2 }, false],
+  [{ rootId: 'root', parentId: 'parent', depth: 1.5 }, false],
+]) result('relay.log', { ...relayPage, events: [{ ...relayPage.events[0], causation }] }, valid);
 const message = { parts: [{ text: 'hello' }] };
 input('outgoing.send', { requestId: receipt, peer: 'fixture', message }, true);
 for (const requestId of ['bad', ''])

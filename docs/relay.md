@@ -143,12 +143,30 @@ granted definition with `work: {agent: 'caller', definition: 'review'}`.
 `work.project` optionally selects another project through existing two-sided
 messaging route authority and destination access checks. `relay.publish` with
 `publishTo: 'another.topic'` forwards the original typed payload within the source
-project. Topic payload families cannot be changed by routing. Built-in forwarding
-has a server-configured hop bound, eight by default (`plowshare.relay.max-forwarding-hops`,
-1–32). Its durable admission ancestry survives topic expiry. A cycle reaches the
-bound and its next forwarding branch fails explicitly. Missing retained ancestry
-refuses another hop; read-only receipt reconciliation still works after ancestry
-cleanup.
+project. Topic payload families cannot be changed by routing. Forwarding and
+Relay-started `agent.run`, `script.run` and `orchestration.start`
+share one server-configured effect limit, eight by default
+(`plowshare.relay.max-forwarding-hops`, 1–32). Each effect increments immutable
+`causation: {rootId, parentId, depth}` metadata; lifecycle notices copy it without
+incrementing it. Thus `job.ended → agent.run → job.ended`, two-agent cycles and
+mixed publication/work chains cannot acquire fresh budgets by changing project,
+subscription, worker lease or server process. The next effect fails with
+`receiver.causation-limit.refused`, recorded on the branch before launching work.
+
+Causation is pinned with admission input and committed with the owning job or
+orchestration before execution. Conversation turns and nested orchestrations
+inherit it, and lifecycle capture copies it into the transactional outbox.
+Publication expiry and settled admission cleanup do not remove a live job's
+budget. New independent jobs have depth zero. Legacy work, pending pre-upgrade
+notices and missing derived ancestry have unknown depth (`-1`) or absent metadata;
+another effect fails with `receiver.causation-unavailable`. Retained legacy
+publication-forwarding ancestry can still be resolved from its admissions; missing
+links refuse work. Unknown history is never treated as a fresh root.
+
+Read-only receipt reconciliation bypasses the effect limit and never resubmits
+`UNCERTAIN` work. Old SDK peers may omit `causation`; new decoders preserve absence
+and validate known metadata. Routing may inspect causation but cannot supply or
+change it, and causation never grants destination access.
 
 Routing grants no execution authority. Dispatch checks live project access,
 exported agents, orchestration grants and any remote session ownership again.

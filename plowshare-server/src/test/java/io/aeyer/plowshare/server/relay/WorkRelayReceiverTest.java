@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.*;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.board.BoardMessaging;
@@ -29,33 +30,21 @@ class WorkRelayReceiverTest {
   private final ProjectPresences presences = mock(ProjectPresences.class);
   private final SessionOwners sessions = mock(SessionOwners.class);
   private final BoardMessaging.Routing routing = mock(BoardMessaging.Routing.class);
+  private final RelayForwardingHistory history = mock(RelayForwardingHistory.class);
   private AgentDefinition agent;
 
   @BeforeEach
   void setup() {
-    agent =
-        new AgentDefinition(
-            "worker",
-            "fixture",
-            "fast",
-            io.aeyer.plowshare.server.llm.dispatch.Sampling.Intent.DEFAULT,
-            io.aeyer.plowshare.server.llm.dispatch.Sampling.NONE,
-            List.of("probe"),
-            List.of(),
-            List.of(),
-            10,
-            5,
-            "task",
-            true,
-            true,
-            false,
-            false,
-            false,
-            AgentDefinition.Fallback.NONE,
-            List.of("review"),
-            null,
-            false,
-            List.of());
+    when(history.causation(any(), eq(8)))
+        .thenAnswer(
+            call -> {
+              Relay.Publication input = call.getArgument(0);
+              if (input.event().causation() != null) return Optional.of(input.event().causation());
+              if (input.event().payload() instanceof RelayPayload.Lifecycle)
+                return Optional.empty();
+              return Optional.of(RelayCausation.root(input.event().eventId()));
+            });
+    agent = definition("worker");
     when(projects.id("project")).thenReturn(9L);
     when(projects.find("project"))
         .thenReturn(
@@ -63,9 +52,35 @@ class WorkRelayReceiverTest {
                 new io.aeyer.plowshare.server.archive.ProjectRecord(
                     "project", java.nio.file.Path.of("/fixture"), List.of(), List.of())));
     when(callers.requireAgent(eq("worker"), any())).thenReturn(agent);
+    when(callers.requireAgent(eq("reviewer"), any())).thenReturn(definition("reviewer"));
     when(executions.begin(any())).thenReturn(true);
-    when(jobs.submitEvent(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(jobs.submitEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(new JobStore.EventRun("job_fixture", "cnv_fixture"));
+  }
+
+  private static AgentDefinition definition(String name) {
+    return new AgentDefinition(
+        name,
+        "fixture",
+        "fast",
+        io.aeyer.plowshare.server.llm.dispatch.Sampling.Intent.DEFAULT,
+        io.aeyer.plowshare.server.llm.dispatch.Sampling.NONE,
+        List.of("probe"),
+        List.of(),
+        List.of(),
+        10,
+        5,
+        "task",
+        true,
+        true,
+        false,
+        false,
+        false,
+        AgentDefinition.Fallback.NONE,
+        List.of("review"),
+        null,
+        false,
+        List.of());
   }
 
   private RelayReceiver receiver(String name) {
@@ -81,11 +96,29 @@ class WorkRelayReceiverTest {
         projects,
         presences,
         sessions,
-        routing);
+        routing,
+        history,
+        8);
   }
 
   private RelayReceiver.Request request(String name, String project, String source) {
-    var original = delivery(RelayDeliveries.State.DISPATCHING, false);
+    return request(
+        name,
+        project,
+        source,
+        delivery(RelayDeliveries.State.DISPATCHING, false).publication(),
+        RelayDeliveries.State.DISPATCHING,
+        1);
+  }
+
+  private RelayReceiver.Request request(
+      String name,
+      String project,
+      String source,
+      Relay.Publication input,
+      RelayDeliveries.State state,
+      long fence) {
+    var original = delivery(state, false);
     var branch =
         new RelayDeliveries.Branch(
             "run",
@@ -94,23 +127,34 @@ class WorkRelayReceiverTest {
                 ? null
                 : RelayDeliveries.SourcePin.of("notices/scripts/review.js", source),
             null,
-            new RelayWork("worker", project, name.equals("orchestration.start") ? "review" : null));
+            new RelayWork(
+                input.event().payload() instanceof RelayPayload.Lifecycle change
+                        && "reviewer".equals(change.context())
+                    ? "reviewer"
+                    : "worker",
+                project,
+                name.equals("orchestration.start") ? "review" : null));
+    var subscription = new Relay.SubscriptionKey(input.topic(), SUB.subscriber());
     var changed =
         new RelayDeliveries.Delivery(
-            original.key(),
-            original.admission(),
-            original.publication(),
+            new RelayDeliveries.DeliveryKey(subscription, original.key().id()),
+            new RelayDeliveries.AdmissionKey(subscription, input.position()),
+            input,
             original.routing(),
             branch,
             original.state(),
-            original.fence(),
+            fence,
             original.worker(),
             original.leaseUntil(),
             original.admittedAt(),
             original.updatedAt(),
-            null,
-            null);
-    return new RelayReceiver.Request(ACCESS, changed);
+            original.receipt(),
+            original.failureCode());
+    var access =
+        input.topic().projectId() == 10
+            ? new RelayProjectFiles.Access("operator", "other", 10)
+            : ACCESS;
+    return new RelayReceiver.Request(access, changed);
   }
 
   @Test
@@ -130,6 +174,7 @@ class WorkRelayReceiverTest {
             any(),
             eq("operator"),
             eq(Speaker.event("relay " + request.identity())),
+            any(),
             any());
     order
         .verify(executions)
@@ -148,7 +193,8 @@ class WorkRelayReceiverTest {
     receiver.dispatch(request);
     var captured = ArgumentCaptor.forClass(AgentDefinition.class);
     verify(jobs)
-        .submitEvent(captured.capture(), any(), any(), any(), any(), any(), any(), any(), any());
+        .submitEvent(
+            captured.capture(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     assertEquals(agent.withPrompt(source), captured.getValue());
     assertEquals(source, request.delivery().branch().handler().source());
   }
@@ -237,6 +283,171 @@ class WorkRelayReceiverTest {
     when(sessions.accountOf("remote-session")).thenReturn(Optional.of("operator"));
     receiver("agent.run").dispatch(request);
     verify(jobs)
-        .submitEvent(any(), any(), any(), eq("remote-session"), any(), any(), any(), any(), any());
+        .submitEvent(
+            any(), any(), any(), eq("remote-session"), any(), any(), any(), any(), any(), any());
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {"self", "two-agents", "cross-project", "mixed"})
+  void lifecycle_feedback_and_mixed_chains_share_one_limit_across_receiver_restarts(String mode) {
+    when(projects.id("other")).thenReturn(10L);
+    var availableProject = projects.find("project");
+    when(projects.find("other")).thenReturn(availableProject);
+    var relay = mock(Relay.class);
+    var forwarded = new Relay.TopicKey(9, "release.forwarded");
+    when(relay.topic(forwarded))
+        .thenReturn(
+            new Relay.Topic(
+                forwarded, RelayPayload.Kind.LIFECYCLE, Relay.Policy.systemDefault(), 0, 0));
+    var publication = new java.util.concurrent.atomic.AtomicReference<Relay.Publication>();
+    when(relay.publish(eq(forwarded), any()))
+        .thenAnswer(
+            call -> {
+              var result =
+                  new Relay.Publication(forwarded, 1, java.time.Instant.EPOCH, call.getArgument(1));
+              publication.set(result);
+              return result;
+            });
+    var submitted = new java.util.concurrent.atomic.AtomicReference<RelayCausation>();
+    when(jobs.submitEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              submitted.set(call.getArgument(9));
+              return new JobStore.EventRun("job_fixture", "cnv_fixture");
+            });
+    var input = lifecycle("independent", "worker", RelayCausation.root("independent"));
+    int effects = 0, launched = 0;
+    while (effects < 8) {
+      var next =
+          request(
+              "agent.run",
+              mode.equals("cross-project")
+                  ? (input.topic().projectId() == 9 ? "other" : "project")
+                  : null,
+              null,
+              input,
+              RelayDeliveries.State.DISPATCHING,
+              effects + 1);
+      // Recreate the adapter every turn, and change the fence: no in-memory counter survives.
+      receiver("agent.run").require(next);
+      receiver("agent.run").dispatch(next);
+      effects++;
+      launched++;
+      assertEquals(effects, submitted.get().depth());
+      assertEquals("independent", submitted.get().rootId());
+      assertEquals(input.event().eventId(), submitted.get().parentId());
+      input =
+          lifecycle(
+              "ended-" + effects,
+              mode.equals("two-agents") && launched % 2 == 1 ? "reviewer" : "worker",
+              submitted.get());
+      if (mode.equals("cross-project"))
+        input =
+            new Relay.Publication(
+                new Relay.TopicKey(launched % 2 == 1 ? 10 : 9, SUB.topic().name()),
+                input.position(),
+                input.publishedAt(),
+                input.event());
+      if (mode.equals("mixed")) {
+        var raw = delivery(RelayDeliveries.State.DISPATCHING, false);
+        var forwardRequest =
+            new RelayReceiver.Request(
+                ACCESS,
+                new RelayDeliveries.Delivery(
+                    new RelayDeliveries.DeliveryKey(
+                        new Relay.SubscriptionKey(input.topic(), SUB.subscriber()), raw.key().id()),
+                    new RelayDeliveries.AdmissionKey(
+                        new Relay.SubscriptionKey(input.topic(), SUB.subscriber()),
+                        input.position()),
+                    input,
+                    raw.routing(),
+                    raw.branch(),
+                    raw.state(),
+                    effects + 1,
+                    raw.worker(),
+                    raw.leaseUntil(),
+                    raw.admittedAt(),
+                    raw.updatedAt(),
+                    null,
+                    null));
+        var adapter = new ForwardRelayReceiver(relay, history, 8);
+        adapter.dispatch(forwardRequest);
+        effects++;
+        input = publication.get();
+      }
+    }
+    var exhausted = request("agent.run", null, null, input, RelayDeliveries.State.DISPATCHING, 99);
+    var refusal =
+        assertThrows(RelayReceiver.Refused.class, () -> receiver("agent.run").dispatch(exhausted));
+    assertEquals("receiver.causation-limit.refused", refusal.code());
+    verify(jobs, times(launched))
+        .submitEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    // Fresh independent jobs remain eligible after the exhausted chain.
+    var independent =
+        request(
+            "agent.run",
+            null,
+            null,
+            lifecycle("new-job", "worker", RelayCausation.root("new-job")),
+            RelayDeliveries.State.DISPATCHING,
+            100);
+    receiver("agent.run").dispatch(independent);
+    assertEquals(1, submitted.get().depth());
+    assertEquals("new-job", submitted.get().rootId());
+  }
+
+  private static Relay.Publication lifecycle(String id, String agent, RelayCausation cause) {
+    return new Relay.Publication(
+        SUB.topic(),
+        1,
+        java.time.Instant.EPOCH,
+        new Relay.Draft(
+            id,
+            "system.source",
+            java.time.Instant.EPOCH,
+            null,
+            cause == null ? null : cause.parentId(),
+            new RelayPayload.Lifecycle("job.ended", "job_fixture", "ANSWERED", agent, null),
+            cause));
+  }
+
+  @Test
+  void
+      missing_or_unknown_ancestry_refuses_work_and_uncertain_receipts_are_read_only_beyond_the_limit() {
+    for (var cause : java.util.Arrays.asList(null, RelayCausation.unknown("legacy"))) {
+      var missing =
+          request(
+              "agent.run",
+              null,
+              null,
+              lifecycle("old", "worker", cause),
+              RelayDeliveries.State.DISPATCHING,
+              1);
+      assertEquals(
+          "receiver.causation-unavailable",
+          assertThrows(RelayReceiver.Refused.class, () -> receiver("agent.run").dispatch(missing))
+              .code());
+    }
+    verifyNoInteractions(jobs, starts);
+    var cause = new RelayCausation("root", "parent", 8);
+    var uncertain =
+        request(
+            "agent.run",
+            null,
+            null,
+            lifecycle("end", "worker", cause),
+            RelayDeliveries.State.UNCERTAIN,
+            20);
+    when(executions.find("operator", 9, uncertain.identity()))
+        .thenReturn(
+            Optional.of(
+                new RelayExecutions.Accepted(
+                    new RelayDeliveries.Receipt("job", "job_retained"), "cnv_fixture")));
+    clearInvocations(history);
+    receiver("agent.run").require(uncertain);
+    assertTrue(receiver("agent.run").inspect(uncertain).isPresent());
+    assertThrows(IllegalArgumentException.class, () -> receiver("agent.run").dispatch(uncertain));
+    verifyNoInteractions(history, jobs, starts);
   }
 }

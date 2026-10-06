@@ -48,7 +48,10 @@ type shape struct {
 }
 
 func init() {
-	if err := json.Unmarshal(schemaBytes, &catalog); err != nil {
+	// Rule constants and frame numbers must share the same representation for comparisons.
+	decoder := json.NewDecoder(bytes.NewReader(schemaBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(&catalog); err != nil {
 		panic("invalid generated SDK catalog")
 	}
 }

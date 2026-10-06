@@ -60,6 +60,22 @@ class ReceiverRelayDispatchTest {
   }
 
   @Test
+  void causation_refusal_is_recorded_before_preparation_and_never_dispatched() {
+    for (String code :
+        List.of("receiver.causation-limit.refused", "receiver.causation-unavailable")) {
+      doThrow(new RelayReceiver.Refused(code)).when(receiver).require(any());
+      when(deliveries.failed(claimed.claim(), code))
+          .thenReturn(delivery(RelayDeliveries.State.FAILED, false));
+      assertEquals(
+          RelayDeliveries.State.FAILED,
+          dispatcher.next(ACCESS, SUB, "worker", LEASE).orElseThrow().state());
+      verify(deliveries).failed(claimed.claim(), code);
+    }
+    verify(deliveries, never()).prepareDispatch(any());
+    verify(receiver, never()).dispatch(any());
+  }
+
+  @Test
   void stopping_during_preflight_cannot_start_an_effect() {
     doAnswer(
             call -> {

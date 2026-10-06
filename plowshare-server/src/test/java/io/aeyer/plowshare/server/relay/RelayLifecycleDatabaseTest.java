@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.relay;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.board.MessageWake;
 import io.aeyer.plowshare.server.board.SeatWake;
@@ -130,6 +131,198 @@ class RelayLifecycleDatabaseTest {
     return consumers
         .acquire(binding.subscription(), "worker", binding.account(), Duration.ofMinutes(1))
         .orElseThrow();
+  }
+
+  @Test
+  void causal_job_capture_is_atomic_and_survives_completion_pruning_and_publisher_restart() {
+    var cause = RelayCausation.root("external-event").next("external-event", 8);
+    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  jobs.started(
+                      "job_rollback",
+                      "fixture",
+                      io.aeyer.plowshare.protocol.Home.of("fixture"),
+                      at,
+                      "cnv_fixture",
+                      cause);
+                  throw new IllegalStateException("rollback");
+                }));
+    assertNull(
+        jdbc.queryForObject(
+            "SELECT relay_causation::text FROM conversations WHERE id='cnv_fixture'",
+            String.class));
+    assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM relay_source_events", Integer.class));
+    work.inTransaction(
+        () -> {
+          jobs.started(
+              "job_causal",
+              "fixture",
+              io.aeyer.plowshare.protocol.Home.of("fixture"),
+              at,
+              "cnv_fixture",
+              cause);
+          assertTrue(
+              jobs.ended(
+                  "job_causal",
+                  io.aeyer.plowshare.server.agents.Outcome.Ending.ANSWERED,
+                  1,
+                  1,
+                  at.plusSeconds(1)));
+          return true;
+        });
+    assertEquals(
+        cause,
+        RelayCausationCodec.read(
+            jdbc.queryForObject(
+                "SELECT relay_causation::text FROM conversations WHERE id='cnv_fixture'",
+                String.class)));
+    assertEquals(
+        List.of(cause, cause),
+        jdbc.query(
+            "SELECT relay_causation::text FROM relay_source_events ORDER BY sequence",
+            (row, index) -> RelayCausationCodec.read(row.getString(1))));
+    // The owning job can be pruned before the stalled outbox publisher recovers.
+    jdbc.update("DELETE FROM jobs WHERE id='job_causal'");
+    sources =
+        new JdbcRelaySourceRepository(
+            jdbc,
+            work,
+            new DurableRelay(new JdbcRelayRepository(jdbc, work), Instant::now),
+            nativeInboxes);
+    publishAll();
+    var group = new Relay.SubscriptionKey(topic("job.ended"), "test.causation");
+    relay.subscribe(group, Relay.Start.OLDEST_RETAINED);
+    var event = relay.read(group, 1).publications().getFirst();
+    assertEquals(cause, event.event().causation());
+    assertEquals("external-event", event.event().causationId());
+    var admissions = new JdbcRelayDeliveryRepository(jdbc, work);
+    admissions.admit(
+        new RelayDeliveries.AdmissionKey(group, event.position()),
+        new RelayDeliveries.Decision(
+            RelayDeliveries.SourcePin.of(
+                "notices/routes.js", "export function route(){return [];}"),
+            List.of(
+                new RelayDeliveries.Branch(
+                    "work", "agent.run", null, null, new RelayWork("worker", null, null)))),
+        Instant.now());
+    var claimed =
+        admissions.claim(group, "new-worker", Duration.ofMinutes(1), Instant.now()).orElseThrow();
+    assertEquals(cause, claimed.publication().event().causation());
+    jdbc.update(
+        "DELETE FROM relay_publications WHERE scope_key=? AND topic=?",
+        RelayScopeCodec.write(group.topic()),
+        group.topic().name());
+    assertEquals(
+        1, new JdbcRelayForwardingHistory(jdbc).depth(claimed.publication(), 8).orElseThrow());
+  }
+
+  @Test
+  void orchestration_conductor_and_nested_work_inherit_the_same_causation() {
+    var cause = new RelayCausation("root", "parent-event", 4);
+    var store =
+        new io.aeyer.plowshare.server.orchestrations.OrchestrationStore(jdbc, Instant::now, work);
+    var run =
+        store.insert(
+            new io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration(
+                "fixture",
+                io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.PROJECT,
+                "a".repeat(64),
+                "fixture",
+                "fixture",
+                List.of(),
+                0,
+                "fixture",
+                "cnv_fixture",
+                null,
+                "fixture",
+                "operator",
+                null,
+                null,
+                0,
+                cause));
+    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
+    jobs.started(
+        "job_conductor",
+        "fixture",
+        io.aeyer.plowshare.protocol.Home.of("fixture"),
+        at,
+        "cnv_fixture",
+        null);
+    assertEquals(
+        cause,
+        RelayCausationCodec.read(
+            jdbc.queryForObject(
+                "SELECT relay_causation::text FROM jobs WHERE id='job_conductor'", String.class)));
+    jdbc.update(
+        "INSERT INTO conversations(id,project_id,created_at,budget_total,budget_spent,owner_handle,origin) VALUES('cnv_child',?,clock_timestamp(),100,0,'operator','turn')",
+        project);
+    var child =
+        store.insert(
+            new io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration(
+                "fixture",
+                io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.PROJECT,
+                "a".repeat(64),
+                "fixture",
+                "fixture",
+                List.of(),
+                0,
+                "fixture",
+                "cnv_child",
+                "cnv_fixture",
+                "fixture",
+                "operator",
+                null,
+                run.id(),
+                1));
+    assertEquals(
+        cause,
+        RelayCausationCodec.read(
+            jdbc.queryForObject(
+                "SELECT relay_causation::text FROM orchestrations WHERE id=?",
+                String.class,
+                child.id())));
+    jdbc.update(
+        "UPDATE orchestrations SET state='cancelled',ended_at=clock_timestamp() WHERE id=?",
+        child.id());
+    publishAll();
+    var group = new Relay.SubscriptionKey(topic("orchestration.ended"), "test.causation");
+    relay.subscribe(group, Relay.Start.OLDEST_RETAINED);
+    assertEquals(cause, relay.read(group, 1).publications().getFirst().event().causation());
+  }
+
+  @Test
+  void independent_jobs_get_roots_and_inconsistent_causation_rolls_back_without_notices() {
+    var jobs = new io.aeyer.plowshare.server.archive.JdbcJobLog(jdbc);
+    jobs.started(
+        "job_independent",
+        "fixture",
+        io.aeyer.plowshare.protocol.Home.of("fixture"),
+        at,
+        "cnv_fixture",
+        null);
+    assertEquals(
+        RelayCausation.root("job:job_independent"),
+        RelayCausationCodec.read(
+            jdbc.queryForObject(
+                "SELECT relay_causation::text FROM jobs WHERE id='job_independent'",
+                String.class)));
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            jobs.started(
+                "job_conflict",
+                "fixture",
+                io.aeyer.plowshare.protocol.Home.of("fixture"),
+                at,
+                "cnv_fixture",
+                new RelayCausation("different", "parent", 2)));
+    assertEquals(
+        0, jdbc.queryForObject("SELECT count(*) FROM jobs WHERE id='job_conflict'", Integer.class));
+    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM relay_source_events", Integer.class));
   }
 
   @Test
@@ -505,6 +698,21 @@ class RelayLifecycleDatabaseTest {
         old.queryForList(
             "SELECT subject FROM relay_source_events ORDER BY sequence", String.class));
     assertEquals("started", store.find(uncertain.id()).orElseThrow().status());
+    assertEquals(
+        -1,
+        RelayCausationCodec.read(
+                old.queryForObject(
+                    "SELECT relay_causation::text FROM jobs WHERE id='job_historical'",
+                    String.class))
+            .depth());
+    assertEquals(
+        -1,
+        RelayCausationCodec.read(
+                old.queryForObject(
+                    "SELECT relay_causation::text FROM relay_source_events WHERE subject=?",
+                    String.class,
+                    queued.id()))
+            .depth());
   }
 
   @Test
