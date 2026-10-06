@@ -38,6 +38,7 @@
     <main class="main-area">
       <div id="notice" class="notice" role="status"><span class="demo-mark">DEMO</span><span>Sample conversations and local replies. Connect your server to use real agents.</span><button id="notice-connect">Connect server <span data-icon="external"></span></button></div>
       <div id="error" class="error-banner" role="alert" hidden><span></span><button id="dismiss-error" class="icon-button" aria-label="Dismiss error" title="Dismiss error"><span data-icon="close"></span></button></div>
+      <p id="personal-recovery-warning" class="personal-recovery-warning" role="status" hidden></p>
       <section id="personal-panel" hidden aria-label="Personal space contents">
         <header><div><div class="eyebrow">PERSONAL</div><h2 id="personal-title"></h2></div><button id="personal-close" class="icon-button" aria-label="Return to conversation"><span data-icon="close"></span></button></header>
         <p id="personal-path"></p><div id="personal-content"></div>
@@ -80,11 +81,11 @@
           <section id="info-files" class="info-tab-panel" role="tabpanel" aria-labelledby="info-files-tab" hidden>
             <h3 id="files-title">Project file access</h3>
             <p id="files-description">Choose a folder to give agents access to its files.</p>
+            <div id="files-actions" class="dialog-actions"><button id="files-recreate" class="secondary-button" hidden>Recreate Personal store</button><button id="files-withdraw" class="secondary-button" hidden><span data-icon="close"></span>Disconnect files</button><button id="files-reopen" class="secondary-button" hidden><span data-icon="refresh"></span>Reconnect files</button><button id="files-forget" class="secondary-button" hidden>Forget folder</button><button id="files-choose" class="primary-button"><span data-icon="folder"></span>Choose folder</button></div>
             <p id="files-root" class="files-root"></p><p id="files-detail" role="status"></p>
             <p class="dialog-note">Agents can read and change files within this folder. Commands use its .plowshare/environment.yml settings and the server’s approval flow. Each project runs in its own session. Added folders are remembered on this computer.</p>
             <section id="project-sync" hidden></section>
             <div id="files-error" role="alert" hidden></div>
-            <div class="dialog-actions"><button id="files-withdraw" class="secondary-button" hidden><span data-icon="close"></span>Disconnect files</button><button id="files-reopen" class="secondary-button" hidden><span data-icon="refresh"></span>Reconnect files</button><button id="files-forget" class="secondary-button" hidden>Forget folder</button><button id="files-choose" class="primary-button"><span data-icon="folder"></span>Choose folder</button></div>
           </section>
         </aside>
       </div>

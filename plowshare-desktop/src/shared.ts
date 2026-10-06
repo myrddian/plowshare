@@ -168,6 +168,7 @@ export interface DesktopState {
         text?: string;
         note?: string;
         error?: string | undefined;
+        warning?: string | undefined;
         botLatest?: Record<string, string>;
         botsError?: string;
       }
@@ -390,6 +391,7 @@ export type Request =
       path?: string;
     }
   | { action: 'personal-bots' }
+  | { action: 'personal-recreate' }
   | { action: 'files-choose'; project?: string }
   | { action: 'files-withdraw'; project?: string }
   | { action: 'sync-refresh'; project: string }

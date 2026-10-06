@@ -12,6 +12,9 @@ dialog{border:1px solid #645232;border-radius:10px;padding:27px;background:var(-
 @media(max-width:1010px){.workspace{grid-template-columns:200px minmax(0,1fr)}.stage{grid-template-columns:minmax(0,1fr)}.inspector{display:none}.stage.show-inspector{grid-template-columns:minmax(0,1fr) 230px;gap:15px}.stage.show-inspector .inspector{display:flex}.stage.show-inspector .chat-footer span:last-child{display:none}.chat-header{padding:14px}.chat-heading h1{font-size:18px}.workspace-footer>span:nth-child(2){display:none}.top-actions{gap:12px}.notice>span:nth-child(2){max-width:340px}.composer-status{font-size:9px}.stage.show-inspector .composer-status{display:none}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
+.personal-recovery-warning { margin: 0 20px 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 5px; background: var(--tint); color: var(--ink); font-size: 12px; overflow-wrap: anywhere; flex-shrink: 0; }
+#files-actions { justify-content: flex-start; flex-wrap: wrap; margin: 12px 0; gap: 8px; }
+#files-actions .secondary-button:first-child { margin-right: 0; }
 .agent-identity { max-width: 32rem; max-height: 14rem; overflow: auto; font-size: .8rem; }
 .agent-identity summary { cursor: pointer; }
 .agent-identity dl { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: .35rem .7rem; }

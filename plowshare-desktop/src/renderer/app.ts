@@ -416,6 +416,9 @@ function render() {
   serverAdministration.update(state);
   projectAccess.update(state);
   if (!state) return;
+  const recoveryWarning = $('#personal-recovery-warning');
+  recoveryWarning.textContent = state.personal?.warning ?? '';
+  recoveryWarning.hidden = state.mode !== 'live' || !state.personal?.warning;
   renderFiles();
   $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
   questionPopup.update(state, scope, selected);
@@ -2241,7 +2244,7 @@ function renderFiles() {
   $('#files-description').textContent = addingProject
     ? 'Choose a folder. Its Plowshare marker or folder name identifies the project on the server.'
     : personal
-      ? 'Personal files are stored automatically in the selected connection’s default store.'
+      ? 'Personal files use the selected connection’s default store. Recreating it preserves the current store in a dated recovery directory.'
       : ready
         ? `Serving ${files.project}${files.project !== scope ? ' · another workspace' : ''}`
         : files.status === 'opening'
@@ -2277,6 +2280,9 @@ function renderFiles() {
     `${icon('refresh')}${personal ? 'Retry Personal files' : folder ? 'Reconnect files' : 'Connect recorded folder'}`;
   $('#files-forget').hidden = addingProject || personal || !folder;
   $('#files-choose').hidden = personal;
+  $('#files-recreate').hidden = addingProject || !personal;
+  $<HTMLButtonElement>('#files-recreate').disabled =
+    filePicking || files.status === 'opening' || !state.connected;
   $<HTMLButtonElement>('#files-reopen').disabled =
     filePicking || !state.connected;
   $<HTMLButtonElement>('#files-forget').disabled =
@@ -2400,6 +2406,24 @@ $('#files-withdraw').addEventListener(
       });
     } catch (error) {
       $('#files-error').textContent = errorMessage(error);
+      $('#files-error').hidden = false;
+    } finally {
+      filePicking = false;
+      renderFiles();
+    }
+  }),
+);
+
+$('#files-recreate').addEventListener(
+  'click',
+  ownedEvent(async () => {
+    filePicking = true;
+    $('#files-error').hidden = true;
+    renderFiles();
+    try {
+      await request({ action: 'personal-recreate' });
+    } catch (reason) {
+      $('#files-error').textContent = errorMessage(reason);
       $('#files-error').hidden = false;
     } finally {
       filePicking = false;

@@ -8,7 +8,11 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import {
+  personalDirectory,
+  preparePersonalStore,
+} from 'plowshare-client-node/personal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Outcome as Answer } from 'plowshare-client-ts/binding/envelope';
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
@@ -159,6 +163,47 @@ afterEach(async () => {
 });
 
 describe('syncer', () => {
+  it('Personal recovery shares the connection lock and fences the previous sync runtime', async () => {
+    const project = 'personal:enzo';
+    root = await personalDirectory('http://unused', 'enzo', project, top);
+    await writeFile(join(root, 'a.txt'), 'Old unsynced data');
+    const server = new FakeServer();
+    const { sync } = make(server, [2, 50], {
+      strict: true,
+      claim: { project, machine: 'laptop', root },
+    });
+    try {
+      await sync.run({ kind: 'on' });
+      const lock = join(dirname(root), 'personal-store.lock');
+      await mkdir(lock);
+      const before = server.sent.length;
+      const pending = sync.connect();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(server.sent).toHaveLength(before);
+      } finally {
+        await rm(lock, { recursive: true });
+        await pending;
+      }
+      await writeFile(join(root, '.plowshare', 'personal.json'), '{corrupt');
+      const recreated = await preparePersonalStore(
+        'http://unused',
+        'enzo',
+        project,
+        top,
+      );
+      expect(recreated.warning).toContain('previous store is intact');
+      await writeFile(join(root, 'a.txt'), 'Fresh replacement');
+      const after = server.sent.length;
+      await expect(sync.connect()).rejects.toThrow('local store was replaced');
+      expect(server.sent).toHaveLength(after);
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe(
+        'Fresh replacement',
+      );
+    } finally {
+      sync.stop();
+    }
+  });
   it('two independent runtimes serialize reconciliation of one checkout and preserve edits', async () => {
     const server = new FakeServer();
     const first = make(server, [2, 50], { strict: true });

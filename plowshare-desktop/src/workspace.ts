@@ -20,7 +20,8 @@ import {
 import type { Connector } from './client.ts';
 import { identifyFolder } from './files.ts';
 import {
-  personalDirectory,
+  preparePersonalStore,
+  recreatePersonalStore,
   readPersonal,
 } from 'plowshare-client-node/personal';
 import { thisMachine } from 'plowshare-client-node/marker';
@@ -469,7 +470,7 @@ export class DesktopWorkspace {
     }
     return { state: this.state, rootProject: mapping.name };
   }
-  private async mountPersonal(token: object) {
+  private async mountPersonal(token: object, recreate = false) {
     const project = this.control.state.projects.find(
       (row) => row.kind === 'personal',
     );
@@ -481,13 +482,20 @@ export class DesktopWorkspace {
     // A saved/manual folder must never override the connection-owned Personal mount.
     this.saved = this.saved.filter((row) => row.name !== project.name);
     try {
-      const root = await personalDirectory(
+      const child = this.children.get(project.name);
+      await child?.files?.withdraw();
+      await child?.sync.close();
+      this.same(token);
+      const prepare = recreate ? recreatePersonalStore : preparePersonalStore;
+      const store = await prepare(
         this.control.state.base,
         this.control.state.handle,
         project.name,
       );
       this.same(token);
+      const root = store.root;
       this.personal.root = root;
+      this.personal.warning = store.warning;
       const mapping: SavedProject = {
         server: this.control.state.base,
         account: this.control.state.handle,
@@ -845,6 +853,23 @@ export class DesktopWorkspace {
     }
     if (this.transitioning)
       throw new Error('Wait for the connection switch to finish.');
+    if (request.action === 'personal-recreate') {
+      this.requireLive();
+      const token = this.token;
+      await this.mountPersonal(token, true);
+      this.same(token);
+      const mapping = this.saved.find(
+        (row) => row.name === this.personal?.project,
+      );
+      if (!mapping)
+        throw new Error(
+          this.personal?.error || 'Personal store is unavailable.',
+        );
+      await this.startProject(mapping, token);
+      this.same(token);
+      this.emit();
+      return { state: this.state };
+    }
     if (request.action === 'select') {
       await this.followView('chat', request.conversation);
       return { state: this.state };

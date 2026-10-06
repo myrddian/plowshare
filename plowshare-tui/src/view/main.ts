@@ -16,7 +16,7 @@ import {
   authoringRequest,
 } from 'plowshare-client-ts/operations/authoring';
 import { InformationClient } from '../logic/information.ts';
-import { personalDirectory } from 'plowshare-client-node/personal';
+import { preparePersonalStore } from 'plowshare-client-node/personal';
 import {
   Credentials,
   credentialDirectory,
@@ -4879,11 +4879,13 @@ export async function converse(talking: Talking): Promise<void> {
         const personal = rows.find((row) => row.kind === 'personal');
         if (personal) {
           try {
-            const root = await personalDirectory(
+            const store = await preparePersonalStore(
               talking.door.base,
               loginHandle,
               personal.name,
             );
+            const root = store.root;
+            if (store.warning) show('trouble', store.warning);
             start = {
               project: personal.name,
               claim: { project: personal.name, machine, root },
