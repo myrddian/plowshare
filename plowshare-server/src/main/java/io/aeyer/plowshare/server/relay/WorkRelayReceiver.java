@@ -14,6 +14,8 @@ import java.util.Optional;
 /** Adapts pinned Relay work to normal event jobs and idempotent orchestration starts. */
 public final class WorkRelayReceiver implements RelayReceiver {
   private final String receiver;
+  private final RelayForwardingHistory history;
+  private final int maximum;
   private final WorkCallers callers;
   private final EventRuns jobs;
   private final GrantedOrchestrations grants;
@@ -38,10 +40,15 @@ public final class WorkRelayReceiver implements RelayReceiver {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      BoardMessaging.Routing routing) {
+      BoardMessaging.Routing routing,
+      RelayForwardingHistory history,
+      int maximum) {
     if (!java.util.Set.of("agent.run", "script.run", "orchestration.start").contains(receiver))
       throw new IllegalArgumentException("unsupported work receiver");
     this.receiver = receiver;
+    this.history = Objects.requireNonNull(history);
+    RelayValues.limit(maximum, 32);
+    this.maximum = maximum;
     this.callers = Objects.requireNonNull(callers);
     this.jobs = Objects.requireNonNull(jobs);
     this.grants = Objects.requireNonNull(grants);
@@ -60,6 +67,8 @@ public final class WorkRelayReceiver implements RelayReceiver {
 
   public void require(Request request) {
     resolve(request);
+    if (!RelayEffectBound.inspecting(request))
+      RelayEffectBound.next(history, request.delivery().publication(), maximum);
   }
 
   private Resolved resolve(Request request) {
@@ -105,11 +114,14 @@ public final class WorkRelayReceiver implements RelayReceiver {
   }
 
   public Result dispatch(Request request) {
+    if (request.delivery().state() != RelayDeliveries.State.DISPATCHING)
+      throw new IllegalArgumentException("work requires prepared dispatch intent");
     var known =
         executions.find(
             request.access().account(), request.access().projectId(), request.identity());
     if (known.isPresent()) return accepted(known.get().receipt());
     var resolved = resolve(request);
+    var causation = RelayEffectBound.next(history, request.delivery().publication(), maximum);
     if (!executions.begin(request)) return new Uncertain("execution-intent-without-receipt");
     String message = RelayRouteCodec.event(request.delivery().publication());
     RelayDeliveries.Receipt receipt;
@@ -127,7 +139,8 @@ public final class WorkRelayReceiver implements RelayReceiver {
                   request.access().account(),
                   resolved.session(),
                   null,
-                  0),
+                  0,
+                  causation),
               request.identity(),
               message);
       receipt = new RelayDeliveries.Receipt("orchestration", run.id());
@@ -143,7 +156,8 @@ public final class WorkRelayReceiver implements RelayReceiver {
               TurnCap.of(resolved.agent().maxTurns()),
               request.access().account(),
               Speaker.event("relay " + request.identity()),
-              (id, outcome) -> {});
+              (id, outcome) -> {},
+              causation);
       if (run.conversation() == null)
         throw new IllegalStateException("Relay work requires a durable conversation");
       receipt = new RelayDeliveries.Receipt("job", run.id());

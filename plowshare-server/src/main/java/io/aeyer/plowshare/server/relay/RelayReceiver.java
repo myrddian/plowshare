@@ -40,7 +40,8 @@ public interface RelayReceiver {
         throw new IllegalArgumentException("receiver request differs from its authorized project");
       if (delivery.state() != RelayDeliveries.State.CLAIMED
           && delivery.state() != RelayDeliveries.State.DISPATCHING
-          && delivery.state() != RelayDeliveries.State.UNCERTAIN)
+          && delivery.state() != RelayDeliveries.State.UNCERTAIN
+          && delivery.state() != RelayDeliveries.State.ABANDONED_UNCERTAIN)
         throw new IllegalArgumentException(
             "receiver request has no pending dispatch or uncertainty");
     }

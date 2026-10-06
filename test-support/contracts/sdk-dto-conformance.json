@@ -200,6 +200,487 @@
     "valid": true
   },
   {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": null,
+            "depth": 0
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": "parent",
+            "depth": 8
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "legacy",
+            "parentId": null,
+            "depth": -1
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": null,
+            "depth": 1
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": "parent",
+            "depth": 0
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": "parent",
+            "depth": 33
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": null,
+            "depth": -2
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.log",
+    "value": {
+      "scope": {
+        "project": "fixture",
+        "system": false
+      },
+      "topic": {
+        "name": "job.ended",
+        "kind": "LIFECYCLE",
+        "retentionSeconds": "345600",
+        "maxRecords": null,
+        "through": "1",
+        "expiredThrough": "0"
+      },
+      "after": "0",
+      "next": "1",
+      "gapThrough": null,
+      "subscribers": [],
+      "branches": [],
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          },
+          "causation": {
+            "rootId": "root",
+            "parentId": "parent",
+            "depth": 1.5
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
     "boundary": "input",
     "operation": "outgoing.send",
     "value": {

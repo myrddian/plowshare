@@ -249,7 +249,9 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing) {
+      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      RelayForwardingHistory history,
+      RelayProperties properties) {
     return workReceiver(
         "agent.run",
         callers,
@@ -262,7 +264,9 @@ public class RelayConfiguration {
         projects,
         presences,
         sessions,
-        routing);
+        routing,
+        history,
+        properties);
   }
 
   @Bean
@@ -277,7 +281,9 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing) {
+      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      RelayForwardingHistory history,
+      RelayProperties properties) {
     return workReceiver(
         "script.run",
         callers,
@@ -290,7 +296,9 @@ public class RelayConfiguration {
         projects,
         presences,
         sessions,
-        routing);
+        routing,
+        history,
+        properties);
   }
 
   @Bean
@@ -305,7 +313,9 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing) {
+      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      RelayForwardingHistory history,
+      RelayProperties properties) {
     return workReceiver(
         "orchestration.start",
         callers,
@@ -318,7 +328,9 @@ public class RelayConfiguration {
         projects,
         presences,
         sessions,
-        routing);
+        routing,
+        history,
+        properties);
   }
 
   private static RelayReceivers.Binding workReceiver(
@@ -333,7 +345,9 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       ProjectPresences presences,
       SessionOwners sessions,
-      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing) {
+      io.aeyer.plowshare.server.board.BoardMessaging.Routing routing,
+      RelayForwardingHistory history,
+      RelayProperties properties) {
     return new RelayReceivers.Binding(
         name,
         new WorkRelayReceiver(
@@ -348,7 +362,9 @@ public class RelayConfiguration {
             projects,
             presences,
             sessions,
-            routing));
+            routing,
+            history,
+            properties.getMaxForwardingHops()));
   }
 
   @Bean(destroyMethod = "close")

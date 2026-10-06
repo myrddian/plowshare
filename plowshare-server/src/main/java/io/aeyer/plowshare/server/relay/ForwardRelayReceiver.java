@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -28,12 +29,8 @@ public final class ForwardRelayReceiver implements RelayReceiver {
     if (request.delivery().branch().handler() != null)
       throw new Refused("receiver.handler.unsupported");
     // Receipt reconciliation is read-only and must survive ancestry cleanup or a policy change.
-    if (request.delivery().state() != RelayDeliveries.State.UNCERTAIN
-        && request.delivery().state() != RelayDeliveries.State.ABANDONED_UNCERTAIN) {
-      var depth = history.depth(request.delivery().publication(), maxHops);
-      if (depth.isEmpty()) throw new Refused("receiver.forwarding-history.unavailable");
-      if (depth.getAsInt() >= maxHops) throw new Refused("receiver.forwarding-limit.refused");
-    }
+    if (!RelayEffectBound.inspecting(request))
+      RelayEffectBound.next(history, request.delivery().publication(), maxHops);
     if (relay.topic(target(request)).kind()
         != request.delivery().publication().event().payload().kind())
       throw new Refused("receiver.payload-family.refused");
@@ -44,7 +41,12 @@ public final class ForwardRelayReceiver implements RelayReceiver {
     if (request.delivery().state() != RelayDeliveries.State.DISPATCHING)
       throw new IllegalArgumentException("publication requires prepared dispatch intent");
     require(request);
-    var published = relay.publish(target(request), draft(request));
+    var published =
+        relay.publish(
+            target(request),
+            draft(
+                request,
+                RelayEffectBound.next(history, request.delivery().publication(), maxHops)));
     return new Settled(new RelayDeliveries.Accepted(receipt(published)));
   }
 
@@ -54,13 +56,30 @@ public final class ForwardRelayReceiver implements RelayReceiver {
         && request.delivery().state() != RelayDeliveries.State.ABANDONED_UNCERTAIN)
       throw new IllegalArgumentException("publication inspection requires an uncertain dispatch");
     require(request);
-    Relay.Draft expected = draft(request);
+    var inherited = request.delivery().publication().event().causation();
+    Relay.Draft expected =
+        draft(
+            request,
+            inherited != null && inherited.depth() >= 0 && inherited.depth() < 32
+                ? inherited.next(request.delivery().publication().event().eventId(), 32)
+                : null);
     return relay
         .retained(target(request), expected.eventId())
         .map(
             publication -> {
-              if (!publication.event().equals(expected))
-                throw new Refused("receiver.receipt.conflict");
+              var actual = publication.event();
+              // Legacy input has no typed metadata to compare. Inspection uses retained evidence
+              // only; rebuilding ancestry would make reconciliation depend on admission cleanup.
+              if (expected.causation() == null)
+                actual =
+                    new Relay.Draft(
+                        actual.eventId(),
+                        actual.publisher(),
+                        actual.occurredAt(),
+                        actual.correlationId(),
+                        actual.causationId(),
+                        actual.payload());
+              if (!actual.equals(expected)) throw new Refused("receiver.receipt.conflict");
               return new RelayDeliveries.Accepted(receipt(publication));
             });
   }
@@ -70,7 +89,7 @@ public final class ForwardRelayReceiver implements RelayReceiver {
         request.access().projectId(), request.delivery().branch().publishTo());
   }
 
-  private static Relay.Draft draft(Request request) {
+  private static Relay.Draft draft(Request request, RelayCausation causation) {
     var original = request.delivery().publication().event();
     return new Relay.Draft(
         "relay:" + request.identity(),
@@ -78,7 +97,8 @@ public final class ForwardRelayReceiver implements RelayReceiver {
         original.occurredAt(),
         original.correlationId(),
         original.eventId(),
-        original.payload());
+        original.payload(),
+        causation);
   }
 
   private static RelayDeliveries.Receipt receipt(Relay.Publication publication) {

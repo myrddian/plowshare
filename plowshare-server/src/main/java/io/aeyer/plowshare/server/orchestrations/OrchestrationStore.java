@@ -7,8 +7,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.aeyer.plowshare.protocol.MemoryIds;
 import io.aeyer.plowshare.protocol.Orchestration.Structure;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import io.aeyer.plowshare.server.todos.StageRules;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -144,8 +146,8 @@ public class OrchestrationStore {
             + " definition_source, definition_origin, stages, max_returns, returns_used,"
             + " project, conductor_conversation, caller_conversation, caller_agent,"
             + " caller_handle, caller_session, parent, depth, state, restarts, nudges,"
-            + " created_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)",
+            + " created_at, relay_causation)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?::jsonb)",
         id,
         n.definitionName(),
         n.tier().name(),
@@ -163,7 +165,8 @@ public class OrchestrationStore {
         n.parent(),
         n.depth(),
         OrchestrationState.RUNNING.wire(),
-        utc(at));
+        utc(at),
+        RelayCausationCodec.write(n.causation()));
     return new OrchestrationRecord(
         id,
         n.definitionName(),
@@ -1544,7 +1547,42 @@ public class OrchestrationStore {
       String callerHandle,
       String callerSession,
       String parent,
-      int depth) {
+      int depth,
+      RelayCausation causation) {
+    public NewOrchestration(
+        String definitionName,
+        OrchestrationDefinition.Tier tier,
+        String definitionHash,
+        String definitionSource,
+        String definitionOrigin,
+        List<StageRules.Stage> stages,
+        int maxReturns,
+        String project,
+        String conductorConversation,
+        String callerConversation,
+        String callerAgent,
+        String callerHandle,
+        String callerSession,
+        String parent,
+        int depth) {
+      this(
+          definitionName,
+          tier,
+          definitionHash,
+          definitionSource,
+          definitionOrigin,
+          stages,
+          maxReturns,
+          project,
+          conductorConversation,
+          callerConversation,
+          callerAgent,
+          callerHandle,
+          callerSession,
+          parent,
+          depth,
+          null);
+    }
 
     public NewOrchestration {
       stages = List.copyOf(stages);

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.Origin;
@@ -469,6 +470,31 @@ public final class JobStore implements AutoCloseable, EventRuns {
       String callerHandle,
       Speaker speaker,
       BiConsumer<String, Outcome> ended) {
+    return submitEvent(
+        definition,
+        utterance,
+        home,
+        session,
+        maxModelCalls,
+        cap,
+        callerHandle,
+        speaker,
+        ended,
+        null);
+  }
+
+  /** Relay causation is persisted with the job, before any executor or lifecycle effect. */
+  public EventRun submitEvent(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      String session,
+      Integer maxModelCalls,
+      TurnCap cap,
+      String callerHandle,
+      Speaker speaker,
+      BiConsumer<String, Outcome> ended,
+      RelayCausation causation) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(ended, "ended");
@@ -503,7 +529,8 @@ public final class JobStore implements AutoCloseable, EventRuns {
             cap,
             List.of(),
             callerHandle,
-            true);
+            true,
+            causation);
     return new EventRun(id, conversation);
   }
 
@@ -680,6 +707,36 @@ public final class JobStore implements AutoCloseable, EventRuns {
       List<Content.Image> images,
       String callerHandle,
       boolean incoming) {
+    return submit(
+        definition,
+        userPrompt,
+        home,
+        sessionId,
+        budget,
+        transcript,
+        origin,
+        ended,
+        cap,
+        images,
+        callerHandle,
+        incoming,
+        null);
+  }
+
+  private String submit(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      String sessionId,
+      Budget budget,
+      Transcript transcript,
+      Origin origin,
+      Consumer<Outcome> ended,
+      TurnCap cap,
+      List<Content.Image> images,
+      String callerHandle,
+      boolean incoming,
+      RelayCausation causation) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(budget, "budget");
@@ -750,7 +807,9 @@ public final class JobStore implements AutoCloseable, EventRuns {
                 under,
                 images,
                 callerHandle,
-                incoming));
+                incoming),
+        id -> {},
+        causation);
   }
 
   /**
@@ -943,6 +1002,30 @@ public final class JobStore implements AutoCloseable, EventRuns {
       Consumer<Outcome> ended,
       BiFunction<JobWatch, BooleanSupplier, Outcome> work,
       Consumer<String> beforeStart) {
+    return start(
+        name,
+        home,
+        sessionId,
+        limits,
+        conversation,
+        conversationOrigin,
+        ended,
+        work,
+        beforeStart,
+        null);
+  }
+
+  private String start(
+      String name,
+      Home home,
+      String sessionId,
+      RunLimits limits,
+      String conversation,
+      Origin conversationOrigin,
+      Consumer<Outcome> ended,
+      BiFunction<JobWatch, BooleanSupplier, Outcome> work,
+      Consumer<String> beforeStart,
+      RelayCausation causation) {
     // ONE INSTANT, READ ONCE, and both the id and the row's `started_at`
     // come from it. MemoryIds' javadoc names what two readings would cost:
     // an id whose embedded timestamp disagrees with the timestamp beside it
@@ -966,13 +1049,14 @@ public final class JobStore implements AutoCloseable, EventRuns {
     Job job = new Job(id, name, limits, order.incrementAndGet(), conversation, conversationOrigin);
     JobWatch watch = new JobWatch(id, sessionId, events);
     beforeStart.accept(id);
-    byId.put(id, job);
+
     // BEFORE THE THREAD, so anything handed this id has a record to resolve
     // it against. Writing it when the run ended would be no record at all of
     // the case that motivated the table -- a twenty-six minute ingest whose
     // process died -- and a row that appeared halfway through would be a
     // window in which a job id resolved to nothing.
-    wroteDown(id, name, home, at);
+    wroteDown(id, name, home, at, conversation, causation);
+    byId.put(id, job);
     try {
       // execute and not submit. Measured on Java 21.0.8: an exception
       // thrown by a task passed to submit() is held in the returned
@@ -1207,20 +1291,31 @@ public final class JobStore implements AutoCloseable, EventRuns {
   /**
    * Write down that this job started, if this store keeps a record.
    *
-   * <p><b>A failure here does not stop the run</b>, which is {@code Compaction.logFor}'s position
-   * and its argument: every caller is on a path where the alternative is losing a submission that
-   * has already been accepted, over a database that blinked. What is lost is the record, and the
-   * run then behaves exactly as every run behaved before this table existed. It is logged at {@code
-   * warn} naming the id, so an operator looking for a job that is not in the table has a line
-   * saying why.
+   * <p><b>Relay work requires this write to succeed before execution</b>, because losing its
+   * causation would reset the lifecycle effect budget. For independent work, a failure here does
+   * not stop the run, which is {@code Compaction.logFor}'s position and its argument: every caller
+   * is on a path where the alternative is losing a submission that has already been accepted, over
+   * a database that blinked. What is lost is the record, and the run then behaves exactly as every
+   * run behaved before this table existed. It is logged at {@code warn} naming the id, so an
+   * operator looking for a job that is not in the table has a line saying why.
    */
-  private void wroteDown(String id, String name, Home home, Instant at) {
+  private void wroteDown(
+      String id,
+      String name,
+      Home home,
+      Instant at,
+      String conversation,
+      RelayCausation causation) {
     if (rows == null) {
+      if (causation != null)
+        throw new IllegalStateException("Relay work requires a durable job log");
       return;
     }
     try {
-      rows.started(id, name, home, at);
+      rows.started(id, name, home, at, conversation, causation);
     } catch (RuntimeException notWritten) {
+      // A causal job cannot fall back to unrecorded execution: its notices would lose the bound.
+      if (causation != null) throw notWritten;
       // First line only; see JobRuntime.describe. A constraint violation's
       // second line quotes the failing row.
       log.warn(

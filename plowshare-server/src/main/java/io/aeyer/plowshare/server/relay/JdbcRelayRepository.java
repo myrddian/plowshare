@@ -23,7 +23,7 @@ public final class JdbcRelayRepository implements RelayRepository {
   private static final String TOPIC_COLUMNS =
       "scope_key, name, payload_kind, retention_seconds, max_records, last_position, expired_through, generation";
   private static final String PUBLICATION_COLUMNS =
-      "position, event_id, publisher, occurred_at, published_at, correlation_id, causation_id, schema_version, payload::text";
+      "position, event_id, publisher, occurred_at, published_at, correlation_id, causation_id, relay_causation::text, schema_version, payload::text";
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
@@ -122,8 +122,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               jdbc.update(
                   """
           INSERT INTO relay_publications(scope_key,topic,position,event_id,publisher,occurred_at,
-              published_at,correlation_id,causation_id,schema_version,payload)
-          VALUES(?,?,?,?,?,?,?,?,?,1,?::jsonb)
+              published_at,correlation_id,causation_id,relay_causation,schema_version,payload)
+          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,1,?::jsonb)
           """,
                   RelayScopeCodec.write(key),
                   key.name(),
@@ -134,6 +134,7 @@ public final class JdbcRelayRepository implements RelayRepository {
                   timestamp(admittedAt),
                   draft.correlationId(),
                   draft.causationId(),
+                  RelayCausationCodec.write(draft.causation()),
                   payload));
           return new Relay.Publication(key, position, admittedAt, draft);
         });
@@ -418,7 +419,8 @@ public final class JdbcRelayRepository implements RelayRepository {
             row.getString("correlation_id"),
             row.getString("causation_id"),
             RelayPayloadCodec.read(
-                topic.kind(), row.getInt("schema_version"), row.getString("payload"))));
+                topic.kind(), row.getInt("schema_version"), row.getString("payload")),
+            RelayCausationCodec.read(row.getString("relay_causation"))));
   }
 
   private static Instant instant(ResultSet row, String column) throws SQLException {

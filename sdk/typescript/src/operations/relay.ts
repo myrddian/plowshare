@@ -61,6 +61,13 @@ export interface RelayTopic {
   readonly through: string;
   readonly expiredThrough: string;
 }
+/** Runtime effect ancestry. Depth -1 marks unavailable legacy history and grants no budget. */
+export interface RelayCausation {
+  readonly rootId: string;
+  readonly parentId: string | null;
+  readonly depth: number;
+}
+
 export interface RelayEvent {
   readonly position: string;
   readonly eventId: string;
@@ -69,6 +76,8 @@ export interface RelayEvent {
   readonly publishedAt: string;
   readonly correlationId: string | null;
   readonly causationId: string | null;
+  /** Older peers omit this field; absence never proves independent work. */
+  readonly causation?: RelayCausation | null;
   readonly payload: {
     readonly kind:
       'EMPTY' | 'TEXT' | 'SCHEDULE_DUE' | 'LIFECYCLE' | 'WAKE_REQUESTED';
@@ -494,6 +503,24 @@ export function validateRelayReply(type: string, value: unknown): void {
           instant(fields['publishedAt']);
           for (const optional of ['correlationId', 'causationId'])
             if (fields[optional] !== null) identity(fields[optional]);
+          const ancestry = fields['causation'];
+          if (ancestry != null) {
+            if (typeof ancestry !== 'object' || Array.isArray(ancestry))
+              return fail();
+            const cause = ancestry as Record<string, unknown>;
+            identity(cause['rootId']);
+            const depth = cause['depth'];
+            if (
+              typeof depth !== 'number' ||
+              !Number.isInteger(depth) ||
+              depth < -1 ||
+              depth > 32
+            )
+              return fail();
+            if (depth <= 0) {
+              if (cause['parentId'] !== null) return fail();
+            } else identity(cause['parentId']);
+          }
           const at = position(fields['position']);
           if (at <= previous || at > through) fail();
           previous = at;

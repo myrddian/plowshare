@@ -281,6 +281,11 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'RelayCausation') {
+      for (const k of ['rootId', 'parentId']) field(s, k, { ...identity, maxLength: 256 });
+      field(s, 'depth', integer(-1, 32));
+      rules(s, { eq: [{ gt: [g('depth'), 0] }, present('parentId')] });
+    }
     if (title === 'ExternalMessage') {
       field(s, 'parts', { minItems: 1, maxItems: 256 });
       for (const k of ['messageId', 'contextId', 'taskId'])

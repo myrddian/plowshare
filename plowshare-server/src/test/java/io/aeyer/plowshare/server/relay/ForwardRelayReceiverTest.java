@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.RelayCausation;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.OptionalInt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +19,8 @@ class ForwardRelayReceiverTest {
 
   @BeforeEach
   void registered() {
-    when(history.depth(any(), eq(8))).thenReturn(OptionalInt.of(0));
+    when(history.causation(any(), eq(8)))
+        .thenReturn(Optional.of(RelayCausation.root("release-event")));
     when(relay.topic(target))
         .thenReturn(
             new Relay.Topic(target, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault(), 0, 0));
@@ -29,9 +30,10 @@ class ForwardRelayReceiverTest {
   void exhausted_or_missing_forwarding_ancestry_refuses_effects_but_not_receipt_inspection() {
     var request =
         new RelayReceiver.Request(ACCESS, delivery(RelayDeliveries.State.DISPATCHING, false));
-    when(history.depth(any(), eq(8))).thenReturn(OptionalInt.of(8));
+    when(history.causation(any(), eq(8)))
+        .thenReturn(Optional.of(new RelayCausation("root", "parent", 8)));
     assertThrows(RelayReceiver.Refused.class, () -> forward.dispatch(request));
-    when(history.depth(any(), eq(8))).thenReturn(OptionalInt.empty());
+    when(history.causation(any(), eq(8))).thenReturn(Optional.empty());
     assertThrows(RelayReceiver.Refused.class, () -> forward.dispatch(request));
     verify(relay, never()).publish(any(), any());
     clearInvocations(history);

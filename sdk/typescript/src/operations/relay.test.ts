@@ -37,6 +37,34 @@ const page = {
   branches: [],
 };
 describe('Relay public contracts', () => {
+  it('validates effect causation and preserves legacy absence', () => {
+    for (const causation of [
+      { rootId: 'root', parentId: null, depth: 0 },
+      { rootId: 'root', parentId: 'parent', depth: 8 },
+      { rootId: 'legacy', parentId: null, depth: -1 },
+    ]) {
+      const result = decodeReply('relay.log', {
+        ...page,
+        events: [{ ...page.events[0], causation }],
+      });
+      expect(result.events[0]?.causation).toEqual(causation);
+    }
+    expect(decodeReply('relay.log', page).events[0]?.causation).toBeUndefined();
+    for (const causation of [
+      { rootId: '', parentId: null, depth: 0 },
+      { rootId: 'root', parentId: null, depth: 1 },
+      { rootId: 'root', parentId: 'parent', depth: 0 },
+      { rootId: 'root', parentId: 'parent', depth: 33 },
+      { rootId: 'root', parentId: null, depth: -2 },
+      { rootId: 'root', parentId: 'parent', depth: 1.5 },
+    ])
+      expect(() =>
+        decodeReply('relay.log', {
+          ...page,
+          events: [{ ...page.events[0], causation }],
+        }),
+      ).toThrow();
+  });
   it('decodes lifecycle and private wake references while rejecting mixed or malformed families', () => {
     for (const kind of ['LIFECYCLE', 'WAKE_REQUESTED']) {
       const payload = {
