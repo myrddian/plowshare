@@ -1,2 +1,113 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>Relay log</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="relay.css"><script src="relay.js" defer></script></head><body><main class="relay-screen"><header><h1>Relay log</h1><p id="relay-connection"></p><div class="relay-controls"><label>Scope <select id="relay-scope"></select></label><label>Topic <select id="relay-topic"></select></label><button id="relay-refresh">Refresh</button></div><p id="relay-error" role="alert"></p><p id="relay-notice" role="status"></p><p id="relay-policy"></p><div id="relay-topic-actions"></div><p id="relay-gap" role="status"></p></header><div class="relay-columns"><section><h2>Published events</h2><div id="relay-events"></div><button id="relay-more" disabled>Next page</button></section><section><h2>Subscribers</h2><p>Seen positions record availability. They do not mean processing finished.</p><p>Controls require project manager access and a reason. Removal requires inactive configuration and empty retained history. Abandonment does not cancel receiver work.</p><div id="relay-subscribers"></div><h2>Recent deliveries</h2><p>Accepted means the receiver accepted the work.</p><div id="relay-branches"></div></section></div></main></body></html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Relay</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="desktop.css" />
+    <link rel="stylesheet" href="relay.css" />
+    <script src="relay.js" defer></script>
+  </head>
+  <body class="embedded-view">
+    <main class="relay-screen">
+      <header class="relay-header">
+        <div>
+          <p class="eyebrow">MESSAGING &amp; EVENTS</p>
+          <h1>Relay</h1>
+          <p class="relay-description">
+            Follow published events and the work they reach.
+          </p>
+        </div>
+        <p id="relay-connection" class="relay-connection"></p>
+      </header>
+      <div class="relay-controls">
+        <label
+          >Project
+          <select id="relay-scope" aria-label="Relay scope"></select
+        ></label>
+        <label class="relay-topic-control"
+          >Topic
+          <select id="relay-topic" aria-label="Relay topic"></select
+        ></label>
+        <button id="relay-refresh" class="secondary-button">Refresh</button>
+        <span id="relay-loading" role="status" hidden>Loading…</span>
+      </div>
+      <p id="relay-error" class="relay-banner" role="alert"></p>
+      <p id="relay-notice" class="relay-banner" role="status"></p>
+      <p id="relay-gap" class="relay-banner" role="status"></p>
+      <div class="relay-context">
+        <p id="relay-policy">
+          Select a project to inspect its retained events.
+        </p>
+        <details id="relay-topic-management">
+          <summary>Manage topic</summary>
+          <p>
+            Requires project manager access, inactive configuration and empty
+            retained history.
+          </p>
+          <div id="relay-topic-actions"></div>
+        </details>
+      </div>
+      <div class="relay-columns">
+        <section
+          class="relay-panel relay-feed"
+          aria-labelledby="relay-events-heading"
+        >
+          <header class="relay-panel-heading">
+            <div>
+              <h2 id="relay-events-heading">Published events</h2>
+              <p>Retained publications in this topic</p>
+            </div>
+            <span id="relay-event-count" class="relay-count">0</span>
+          </header>
+          <div id="relay-events" class="relay-list">
+            <p class="relay-empty">Connect a server to inspect Relay events.</p>
+          </div>
+          <footer class="relay-page-controls">
+            <span id="relay-page-position"></span
+            ><button id="relay-more" class="secondary-button" disabled>
+              Next page
+            </button>
+          </footer>
+        </section>
+        <aside class="relay-inspector">
+          <section
+            class="relay-panel"
+            aria-labelledby="relay-deliveries-heading"
+          >
+            <header class="relay-panel-heading">
+              <div>
+                <h2 id="relay-deliveries-heading">Recent deliveries</h2>
+                <p>Accepted means the receiver accepted the work.</p>
+              </div>
+              <span id="relay-delivery-count" class="relay-count">0</span>
+            </header>
+            <div id="relay-branches" class="relay-list">
+              <p class="relay-empty">Select a topic to see deliveries.</p>
+            </div>
+          </section>
+          <section
+            class="relay-panel"
+            aria-labelledby="relay-subscribers-heading"
+          >
+            <header class="relay-panel-heading">
+              <div>
+                <h2 id="relay-subscribers-heading">Subscribers</h2>
+                <p>Seen positions record availability, not completion.</p>
+              </div>
+              <span id="relay-subscriber-count" class="relay-count">0</span>
+            </header>
+            <div id="relay-subscribers" class="relay-list">
+              <p class="relay-empty">Select a topic to see subscribers.</p>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

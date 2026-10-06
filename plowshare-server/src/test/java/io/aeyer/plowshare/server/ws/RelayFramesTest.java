@@ -20,6 +20,29 @@ class RelayFramesTest {
   private final RelayFrames frames = new RelayFrames(inspection, processing, operations);
 
   @Test
+  void project_inspection_defaults_omitted_system_flag_without_accepting_null_or_coercion() {
+    var asking = new Asking("session", "owner");
+    var topics = new RelayLog.TopicsQuery("project", false, null);
+    var log = new RelayLog.Query("project", false, "event", "0", 100);
+    when(inspection.topics("owner", topics))
+        .thenReturn(new RelayLog.Topics(new RelayLog.Scope("project", false), List.of()));
+    frames.topics(Map.of("project", "project"), asking);
+    frames.log(Map.of("project", "project", "topic", "event", "after", "0", "limit", 100), asking);
+    verify(inspection).topics("owner", topics);
+    verify(inspection).log("owner", log);
+
+    var invalid = new java.util.HashMap<String, Object>(Map.of("project", "project"));
+    for (var value : new Object[] {null, "false", 0}) {
+      invalid.put("system", value);
+      assertThrows(CallerFault.class, () -> frames.topics(invalid, asking));
+      invalid.put("topic", "event");
+      assertThrows(CallerFault.class, () -> frames.log(invalid, asking));
+      invalid.remove("topic");
+    }
+    verifyNoMoreInteractions(inspection);
+  }
+
+  @Test
   void invalid_requests_are_refused_before_business_logic() {
     for (var payload :
         List.of(

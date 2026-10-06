@@ -323,7 +323,13 @@ failure does not authorize automatic retry of processing or administration.
 The desktop Relay page selects a project or authorized system scope, displays
 retained publications, expiry gaps, seen positions, delivery status and pinned
 source hashes, and opens owned execution trajectories. Refresh and paging are
-read-only. Failed refreshes retain a clearly labeled prior snapshot.
+read-only. Event cards show typed message content, with full payloads and event
+identities under Event details. Delivery status and subscribers appear alongside
+the feed; source hashes and management controls expand on demand. The layout
+stacks these panels in narrow windows. System scope is offered to server
+administrators. Changing scope or topic clears the previous selection; failed
+refreshes of the same selection retain a clearly labeled prior snapshot with
+management controls and paging disabled.
 
 
 ## Explicit operational controls

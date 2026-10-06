@@ -15,12 +15,20 @@ public final class AccessRequestDecoder {
     if (project != null) projects.add(project);
     boolean projectScope = false;
     if (payload.get("scope") != null) {
-      if (!(payload.get("scope") instanceof Map<?, ?> scope))
-        throw new CallerFault("scope must be an object");
-      if ("project".equals(scope.get("kind"))) {
-        projectScope = true;
-        String scoped = text(scope.get("project"));
-        if (scoped != null) projects.add(scoped);
+      // Usage uses scope for lineage selection, not a project authorization object. Validate
+      // that operation-specific value without losing the explicit/resource project references.
+      if (operation.startsWith("usage.")) {
+        if (!(payload.get("scope") instanceof String scope)
+            || !Set.of("direct", "subtree").contains(scope))
+          throw new CallerFault("usage scope must be direct or subtree");
+      } else {
+        if (!(payload.get("scope") instanceof Map<?, ?> scope))
+          throw new CallerFault("scope must be an object");
+        if ("project".equals(scope.get("kind"))) {
+          projectScope = true;
+          String scoped = text(scope.get("project"));
+          if (scoped != null) projects.add(scoped);
+        }
       }
     }
     List<AccessRequest.Resource> resources = new ArrayList<>();

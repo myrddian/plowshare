@@ -14,6 +14,7 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.RelayInspection;
 import io.aeyer.plowshare.server.relay.RelayOperations;
 import io.aeyer.plowshare.server.relay.RelayProcessing;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
@@ -86,6 +87,14 @@ public final class RelayFrames implements FrameArea {
 
   private static <T> T decode(Map<String, Object> payload, Class<T> type) {
     try {
+      // The public read contract makes system optional for project scope. Jackson treats an
+      // absent record primitive like null under FAIL_ON_NULL_FOR_PRIMITIVES. Default only absence;
+      // explicit null and scalar coercion must still fail before inspection or authorization.
+      if ((type == RelayLog.TopicsQuery.class || type == RelayLog.Query.class)
+          && !payload.containsKey("system")) {
+        payload = new HashMap<>(payload);
+        payload.put("system", false);
+      }
       return JSON.convertValue(payload, type);
     } catch (IllegalArgumentException invalid) {
       throw new CallerFault("Invalid Relay request");
