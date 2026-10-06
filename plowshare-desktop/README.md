@@ -20,12 +20,17 @@ Desktop imports neither TUI source nor its transport composition.
 
 ## Run
 
-Requires Node 22.12+ and pnpm. From the repository root:
+Requires Java 21, Node.js 22.13+ and pnpm 10.34.5 on `PATH`. From the repository root:
 
 ```sh
 ./gradlew :plowshare-desktop:assemble
 ./bin/plowshare-desktop
 ```
+
+Gradle installs the desktop and shared SDK dependencies from their frozen
+lockfiles. The desktop install automatically recreates an incompatible
+`node_modules` directory when needed, including after moving a checkout. Initial
+dependency installation requires network access.
 
 Or run `pnpm start` inside this directory. The launcher builds the app before
 opening it. Electron downloads its platform runtime on first launch if it is
