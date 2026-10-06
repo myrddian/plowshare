@@ -140,7 +140,8 @@ public final class WorkRelayReceiver implements RelayReceiver {
                   resolved.session(),
                   null,
                   0,
-                  causation),
+                  causation,
+                  Speaker.relay(request.identity())),
               request.identity(),
               message);
       receipt = new RelayDeliveries.Receipt("orchestration", run.id());
@@ -155,7 +156,7 @@ public final class WorkRelayReceiver implements RelayReceiver {
               null,
               TurnCap.of(resolved.agent().maxTurns()),
               request.access().account(),
-              Speaker.event("relay " + request.identity()),
+              Speaker.relay(request.identity()),
               (id, outcome) -> {},
               causation);
       if (run.conversation() == null)
@@ -179,9 +180,15 @@ public final class WorkRelayReceiver implements RelayReceiver {
     if (!receiver.equals("orchestration.start")) return Optional.empty();
     return runs.startReceipt(request.access().account(), request.identity())
         .map(
-            found ->
-                new RelayDeliveries.Accepted(
-                    new RelayDeliveries.Receipt("orchestration", found.id())));
+            found -> {
+              var recovered = new RelayDeliveries.Receipt("orchestration", found.id());
+              // Repair only from the account-scoped atomic owning receipt, never by starting again.
+              // A concurrent inspection may repair the same link; accepted is idempotent for it.
+              runs.find(found.id())
+                  .ifPresent(
+                      run -> executions.accepted(request, recovered, run.conductorConversation()));
+              return new RelayDeliveries.Accepted(recovered);
+            });
   }
 
   private static Result accepted(RelayDeliveries.Receipt receipt) {

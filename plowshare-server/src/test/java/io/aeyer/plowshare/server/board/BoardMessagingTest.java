@@ -1526,6 +1526,14 @@ class BoardMessagingTest {
     assertEquals(List.of(job), cancelled);
     voice.calls.getFirst().ended().accept(outcome(Outcome.Ending.ANSWERED, "Late result"));
     assertEquals("stopped", messages.delivery(original, "enzo").state());
+    fixture.firings.finish(wake.id(), fixture.clock.get());
+    var historical = messages.delivery(original, "enzo");
+    assertEquals(job, historical.job());
+    assertEquals(recipient(request).conversationId(), historical.conversation());
+    assertEquals(
+        messages.instance(historical.sender()).orElseThrow().conversation(),
+        historical.sourceConversation());
+    assertEquals("stopped", historical.state());
     assertEquals(
         1,
         fixture.jdbc.queryForObject(
@@ -2090,6 +2098,27 @@ class BoardMessagingTest {
               new BoardPot(fixture.store),
               fixture.work,
               new BoardMessaging.Voice() {
+                @Override
+                public String speakFrom(
+                    BoardMessaging.Instance instance,
+                    AgentDefinition definition,
+                    String utterance,
+                    Budget lease,
+                    TurnCap cap,
+                    Consumer<Outcome> ended,
+                    Speaker source,
+                    boolean command) {
+                  return turn.speakToMessage(
+                      instance.conversation(),
+                      definition,
+                      utterance,
+                      lease,
+                      cap,
+                      source,
+                      ended,
+                      command);
+                }
+
                 public boolean busy(String conversation) {
                   return turn.isSpeaking(conversation);
                 }
@@ -2201,6 +2230,17 @@ class BoardMessagingTest {
           Home.of("payments"),
           runHomes.getLast(),
           "The return wake retains the sender's own project");
+      var delivery = messages.delivery(receipt.path("message").asText(), "enzo");
+      var trajectory = entries.pageOfLog(delivery.conversation(), 0, 100).listed();
+      var incoming =
+          trajectory.stream()
+              .filter(row -> row.kind() == io.aeyer.plowshare.server.agents.EntryKind.UTTERANCE)
+              .findFirst()
+              .orElseThrow();
+      assertEquals(Speaker.message(delivery.message()), incoming.speaker());
+      assertEquals(delivery.job(), incoming.job());
+      assertNotNull(delivery.job());
+      assertTrue(trajectory.stream().allMatch(row -> delivery.job().equals(row.job())));
       if (pinnedRoute) {
         JsonNode later =
             send(

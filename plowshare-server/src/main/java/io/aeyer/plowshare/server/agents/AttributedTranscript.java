@@ -25,6 +25,11 @@ public record AttributedTranscript(
   }
 
   @Override
+  public void startedAs(String job) {
+    delegate.startedAs(job);
+  }
+
+  @Override
   public void accounted(UsageAttribution owner) {
     delegate.accounted(owner);
   }

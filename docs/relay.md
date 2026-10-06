@@ -315,6 +315,17 @@ receipts and conversation links are returned only to their submitting owner.
 Owned conversation links carry their current project metadata so clients route
 archived handler logs through the normal authorized project session.
 
+A Relay-started agent or conductor's initial trajectory utterance records
+`source: {kind: "relay", reference: <delivery UUID>}`. This is the immediate
+delivery identity, distinct from the event ID and effect-budget ancestry; the
+utterance's event envelope holds publication and publisher details. Runtime entries
+also expose their actual owning job IDs. A recovered atomic orchestration start
+receipt repairs the retained Relay conversation link without starting work again.
+Repeating an identical repair is idempotent; conflicting receipts are refused.
+Older canonical `event relay <delivery UUID>` harness markers resolve to the same
+Relay source. Legacy unbound jobs and unknown origins remain explicit absences. These references
+do not change retention policy or grant access to another record.
+
 Java's `RelayClient` and the shared TypeScript client expose these operations.
 The CLI provides `relay topics`, `relay log`, `relay process` and `relay operate` through its normal
 JSON command payloads and explicitly configured server connection. Transport

@@ -45,6 +45,8 @@ import java.util.Objects;
  * @param ending which of {@link Outcome.Ending}'s eight, or null
  * @param steps how many turns it took, or null
  * @param modelCalls how many model calls it made, or null
+ * @param conversation owning conversation while that row remains available, or null if unrecorded
+ *     or removed; its identity alone does not authorize reads
  */
 public record JobRecord(
     String id,
@@ -54,11 +56,27 @@ public record JobRecord(
     Instant endedAt,
     Outcome.Ending ending,
     Integer steps,
-    Integer modelCalls) {
+    Integer modelCalls,
+    String conversation) {
+
+  /** Older records and non-agent work have no recorded owning conversation. */
+  public JobRecord(
+      String id,
+      String agent,
+      Home home,
+      Instant startedAt,
+      Instant endedAt,
+      Outcome.Ending ending,
+      Integer steps,
+      Integer modelCalls) {
+    this(id, agent, home, startedAt, endedAt, ending, steps, modelCalls, null);
+  }
 
   public JobRecord {
     id = ArchiveValues.identity(id, "job id");
     agent = ArchiveValues.identity(agent, "agent");
+    if (conversation != null)
+      conversation = ArchiveValues.identity(conversation, "conversation id");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(startedAt, "startedAt");
     if ((endedAt == null) != (ending == null)

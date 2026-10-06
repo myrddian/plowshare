@@ -1,4 +1,6 @@
 import { validateRelayReply } from './relay.ts';
+import { validateEntryOrigins } from './conversation-replies.ts';
+import { validateMessagingOrigins } from './messaging.ts';
 import { validateReportDetails } from './report-details.ts';
 import {
   validateExternalRequest,
@@ -236,6 +238,8 @@ export function decodeReply<K extends keyof Replies>(
     type,
   ) as unknown as Replies[K];
   validateRelayReply(type, decoded);
+  validateEntryOrigins(type, decoded);
+  validateMessagingOrigins(type, decoded);
   validateExternalResponse({ type, payload: decoded } as Parameters<
     typeof validateExternalResponse
   >[0]);

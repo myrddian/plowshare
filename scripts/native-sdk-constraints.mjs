@@ -281,6 +281,15 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'SourceView') {
+      field(s, 'kind', { pattern: '^(unknown|person|message|relay|board|event|approval|orchestration)$' });
+      field(s, 'reference', { minLength: 1, nonblank: true });
+      rules(s, { eq: [eq('kind', 'unknown'), eq('reference', null)] });
+    }
+    if (title === 'EntryView') field(s, 'job', { minLength: 1, nonblank: true });
+    if (title === 'MessageDelivery') {
+      for (const k of ['conversation', 'sourceConversation']) field(s, k, { minLength: 1, nonblank: true });
+    }
     if (title === 'RelayCausation') {
       for (const k of ['rootId', 'parentId']) field(s, k, { ...identity, maxLength: 256 });
       field(s, 'depth', integer(-1, 32));

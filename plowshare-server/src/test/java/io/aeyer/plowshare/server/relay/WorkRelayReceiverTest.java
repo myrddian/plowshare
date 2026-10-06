@@ -173,7 +173,7 @@ class WorkRelayReceiverTest {
             isNull(),
             any(),
             eq("operator"),
-            eq(Speaker.event("relay " + request.identity())),
+            eq(Speaker.relay(request.identity())),
             any(),
             any());
     order
@@ -254,11 +254,13 @@ class WorkRelayReceiverTest {
     var captured = ArgumentCaptor.forClass(Orchestrations.Start.class);
     verify(starts).start(captured.capture(), eq(request.identity()), contains("release-event"));
     assertSame(definition, captured.getValue().definition());
+    assertEquals(Speaker.relay(request.identity()), captured.getValue().source());
     assertEquals("operator", captured.getValue().callerHandle());
     assertEquals("worker", captured.getValue().callerAgent());
     assertNull(captured.getValue().callerConversation());
     assertNull(captured.getValue().parent());
     verifyNoInteractions(jobs);
+    when(runs.find("orc_fixture")).thenReturn(Optional.of(run));
     when(runs.startReceipt("operator", request.identity()))
         .thenReturn(
             Optional.of(
@@ -269,6 +271,28 @@ class WorkRelayReceiverTest {
                 new RelayDeliveries.Receipt("orchestration", "orc_fixture"))),
         receiver("orchestration.start").inspect(request));
     verify(starts, times(1)).start(any(), any(), anyString());
+  }
+
+  @Test
+  void repeated_inspection_repairs_the_owning_receipt_without_starting_work() {
+    var request = request("orchestration.start", null, null);
+    when(grants.granted(any(), any(), any(), any(), any()))
+        .thenReturn(Map.of("review", mock(OrchestrationDefinition.class)));
+    var receipt = new RelayDeliveries.Receipt("orchestration", "orc_fixture");
+    var run = mock(OrchestrationRecord.class);
+    when(run.conductorConversation()).thenReturn("cnv_fixture");
+    when(runs.find("orc_fixture")).thenReturn(Optional.of(run));
+    when(runs.startReceipt("operator", request.identity()))
+        .thenReturn(
+            Optional.of(
+                new OrchestrationStore.StartReceipt(request.identity(), "orc_fixture", false)));
+    for (int attempt = 0; attempt < 3; attempt++) {
+      assertEquals(
+          Optional.of(new RelayDeliveries.Accepted(receipt)),
+          receiver("orchestration.start").inspect(request));
+    }
+    verify(executions, times(3)).accepted(request, receipt, "cnv_fixture");
+    verifyNoInteractions(starts, jobs);
   }
 
   @Test

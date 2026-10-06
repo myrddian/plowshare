@@ -90,6 +90,38 @@ class EntryStoreTest {
   private EntryStore entries;
   private String conversation;
 
+  @Test
+  void restarted_reads_keep_distinct_jobs_on_one_continued_turn_and_unknown_legacy_entries() {
+    var jobs = new JdbcJobLog(jdbc);
+    jobs.started("job_initial", "worker", PAYMENTS, THEN, conversation, null);
+    jobs.ended(
+        "job_initial",
+        io.aeyer.plowshare.server.agents.Outcome.Ending.ANSWERED,
+        1,
+        1,
+        THEN.plusSeconds(1));
+    assertEquals(
+        conversation, new JdbcJobLog(jdbc).find("job_initial").orElseThrow().conversation());
+    entries.append(
+        conversation,
+        1,
+        LoggedEntry.utterance("incoming", Speaker.message("msg_fixture")),
+        "job_initial");
+    entries.append(conversation, 1, LoggedEntry.answer("paused", List.of()), "job_initial");
+    entries.append(conversation, 1, LoggedEntry.runtimeNote("continued"), "job_continuation");
+    entries.append(conversation, 2, LoggedEntry.utterance("legacy", Speaker.person(null)));
+    var reopened = new EntryStore(jdbc);
+    var rows = reopened.pageOfLog(conversation, 0, 10).listed();
+    assertEquals("job_initial", rows.get(0).job());
+    assertEquals(Speaker.message("msg_fixture"), rows.get(0).speaker());
+    assertEquals("job_initial", rows.get(1).job());
+    assertEquals("job_continuation", rows.get(2).job());
+    assertEquals(rows.get(0).turnOrdinal(), rows.get(2).turnOrdinal());
+    assertNull(rows.get(3).job());
+    assertEquals(
+        "job_initial", reopened.pageOfProjection(conversation, 0, 10).listed().getFirst().job());
+  }
+
   @BeforeAll
   static void migrate() {
     DriverManagerDataSource source =
@@ -106,8 +138,10 @@ class EntryStoreTest {
     // foreign key into board_topics. user_inbox: a hop past that, through
     // its pre-existing V40 foreign key into firings. Postgres refuses to
     // truncate conversations unless every one of these goes with it.
+    // All dependent projections live in this disposable container; reset newer foreign-key
+    // dependants too (including embedding staging and job conversation links).
     jdbc.execute(
-        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox");
+        "TRUNCATE TABLE board_message_route_bindings, outgoing_work, message_external_tasks, message_external_contexts, board_message_routes, board_message_instances, board_post_receipts, skill_executions, command_invocations, orchestration_start_receipts, orchestration_script_steps, board_reads, board_notices, board_decisions, digests, digest_children, digest_memories, digest_spans, digest_revisions, memory_provenance, conversations, turns, compactions, entries, citations, orchestrations, orchestration_messages, board_topics, board_messages, board_seats, firings, user_inbox CASCADE");
     conversations = new ConversationStore(jdbc);
     entries = new EntryStore(jdbc);
     conversation = conversations.open(PAYMENTS, Budget.of(20)).id();

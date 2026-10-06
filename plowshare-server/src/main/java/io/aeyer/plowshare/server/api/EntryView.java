@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.api;
 
+import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.archive.EntryPage;
 import java.time.Instant;
 import java.util.List;
@@ -68,6 +69,10 @@ import java.util.List;
  *     person whose handle nobody knew
  * @param outcome a {@code tool_result}'s outcome in a word, as the runtime told it, or null for
  *     every other kind and for a result older than {@code V62}
+ * @param job actual owning job identity, or null for an unbound entry. Resumed work may have a
+ *     different job within the same turn; the turn ordinal is not a job identity
+ * @param source the immediate origin of an utterance, or null for other kinds. Following its
+ *     reference requires the owning API's authorization
  */
 public record EntryView(
     int ordinal,
@@ -88,7 +93,55 @@ public record EntryView(
     String completion,
     String speaker,
     String speakerName,
-    String outcome) {
+    String outcome,
+    String job,
+    SourceView source) {
+
+  /**
+   * The immediate recorded origin of an utterance, not a conversation's first cause. References
+   * carry identity only: following them requires the owning API's authorization. Unknown sources
+   * have no reference; other entry kinds have no source at all.
+   */
+  public record SourceView(String kind, String reference) {
+    public SourceView {
+      if (!List.of(
+                  "unknown",
+                  "person",
+                  "message",
+                  "relay",
+                  "board",
+                  "event",
+                  "approval",
+                  "orchestration")
+              .contains(kind)
+          || ("unknown".equals(kind) != (reference == null))
+          || (reference != null && reference.isBlank())) {
+        throw new IllegalArgumentException("invalid recorded source");
+      }
+    }
+
+    static SourceView of(Speaker speaker) {
+      if (speaker == null) return null;
+      if (speaker.kind() == Speaker.Kind.PERSON) {
+        return new SourceView(speaker.name() == null ? "unknown" : "person", speaker.name());
+      }
+      // Earlier Relay agent deliveries recorded this exact harness marker. Keep its known
+      // delivery identity readable without guessing from timestamps or changing stored history.
+      if (speaker
+          .name()
+          .matches("event relay [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+        return new SourceView("relay", speaker.name().substring("event relay ".length()));
+      }
+      for (String kind :
+          List.of("message", "relay", "board", "event", "approval", "orchestration")) {
+        String prefix = kind + " ";
+        if (speaker.name().startsWith(prefix) && speaker.name().length() > prefix.length()) {
+          return new SourceView(kind, speaker.name().substring(prefix.length()));
+        }
+      }
+      return new SourceView("unknown", null);
+    }
+  }
 
   static EntryView of(EntryPage.Row row) {
     return new EntryView(
@@ -118,7 +171,9 @@ public record EntryView(
         row.completion(),
         row.speaker() == null ? null : row.speaker().kind().wireName(),
         row.speaker() == null ? null : row.speaker().name(),
-        row.outcome());
+        row.outcome(),
+        row.job(),
+        SourceView.of(row.speaker()));
   }
 
   /**

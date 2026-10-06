@@ -8,6 +8,7 @@ public interface RelayExecutions {
   /** Commits before invoking any owning work API. Only the winner may dispatch. */
   boolean begin(RelayReceiver.Request request);
 
+  /** Records or repairs a proven owning receipt. Repeating the identical link is idempotent. */
   void accepted(
       RelayReceiver.Request request, RelayDeliveries.Receipt receipt, String conversation);
 

@@ -37,6 +37,8 @@ export interface MessageDelivery {
   readonly ending: string | null;
   readonly reply: string | null;
   readonly job: string | null;
+  readonly conversation?: string;
+  readonly sourceConversation?: string;
   readonly deadlineAt: string | null;
   readonly postedAt: string;
   readonly body: string;
@@ -120,6 +122,8 @@ const delivery = record(
     ending: nullable(named),
     reply: nullable(named),
     job: nullable(named),
+    conversation: (value) => value === undefined || named(value),
+    sourceConversation: (value) => value === undefined || named(value),
     deadlineAt: nullable(named),
     postedAt: named,
     body: text,
@@ -129,6 +133,23 @@ const delivery = record(
     (!row['generated'] ||
       (row['finalReply'] === true && row['ending'] !== null)),
 );
+/** Conversation identities do not grant permission; opening one still goes through the server. */
+export function validateMessagingOrigins(type: string, value: unknown): void {
+  const links = record({
+    conversation: (found) => found === undefined || named(found),
+    sourceConversation: (found) => found === undefined || named(found),
+  });
+  if (
+    (type === 'message.delivery' || type === 'message.cancel') &&
+    !links(value)
+  )
+    throw new Error('Invalid message conversation link');
+  if (
+    type === 'message.deliveries' &&
+    !record({ deliveries: list(links) })(value)
+  )
+    throw new Error('Invalid message conversation links');
+}
 const readers = {
   'message.instances': record({
     instances: list(instance),

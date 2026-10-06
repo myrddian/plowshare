@@ -124,6 +124,7 @@ public interface BoardMessagingRepository {
 
   List<String> deliveries(String id, int offset, int limit);
 
+  /** Latest submitted job, including completed runs, while its firing record is retained. */
   Optional<String> messageJob(String message);
 
   void terminate(String message, Termination state);

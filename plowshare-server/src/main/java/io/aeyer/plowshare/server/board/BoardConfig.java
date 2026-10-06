@@ -114,6 +114,27 @@ public class BoardConfig {
             pot,
             work,
             new BoardMessaging.Voice() {
+              @Override
+              public String speakFrom(
+                  BoardMessaging.Instance instance,
+                  AgentDefinition definition,
+                  String utterance,
+                  Budget lease,
+                  TurnCap cap,
+                  Consumer<Outcome> ended,
+                  Speaker source,
+                  boolean command) {
+                return turn.speakToMessage(
+                    instance.conversation(),
+                    definition,
+                    utterance,
+                    lease,
+                    cap,
+                    source,
+                    ended,
+                    command);
+              }
+
               public boolean busy(String conversation) {
                 return turn.isSpeaking(conversation);
               }

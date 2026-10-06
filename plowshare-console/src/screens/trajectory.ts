@@ -1013,6 +1013,18 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
       ),
     );
 
+    if (entry.job) node.append(el('div', 'meta', `Job ${entry.job}`));
+    if (entry.source)
+      node.append(
+        el(
+          'div',
+          'meta',
+          entry.source.kind === 'unknown'
+            ? 'Origin not recorded'
+            : `Origin ${entry.source.kind} · ${entry.source.reference ?? ''}`,
+        ),
+      );
+
     // Which target answered, on the answers and refusals that carry it.
     // Said out loud rather than left to a colour, because a rerouted
     // refusal and the fallback answer that replaced it are the whole point

@@ -1291,6 +1291,19 @@ public class OrchestrationsConfig {
   static ConductorVoice conductorVoice(Turn turn, AgentRegistry agents) {
     return new ConductorVoice() {
       @Override
+      public String speakFrom(
+          String conversation,
+          AgentDefinition conductor,
+          String utterance,
+          String sessionId,
+          Integer maxModelCalls,
+          Consumer<Outcome> ended,
+          Speaker source) {
+        return turn.speakToConductor(
+            conversation, conductor, utterance, sessionId, maxModelCalls, ended, source);
+      }
+
+      @Override
       public boolean isSpeaking(String conversation) {
         return turn.isSpeaking(conversation);
       }

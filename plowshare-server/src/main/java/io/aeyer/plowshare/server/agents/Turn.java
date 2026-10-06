@@ -671,6 +671,19 @@ public final class Turn {
       String sessionId,
       Integer maxModelCalls,
       Consumer<Outcome> alsoEnded) {
+    return speakToConductor(
+        conversation, conductor, utterance, sessionId, maxModelCalls, alsoEnded, Speaker.harness());
+  }
+
+  /** A conductor turn with an explicit harness source supplied by its owning engine. */
+  public String speakToConductor(
+      String conversation,
+      AgentDefinition conductor,
+      String utterance,
+      String sessionId,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Speaker source) {
     Objects.requireNonNull(conductor, "conductor");
     Objects.requireNonNull(alsoEnded, "alsoEnded");
     // No turn cap: TurnCap.chosen falls back to the conductor's own
@@ -693,7 +706,7 @@ public final class Turn {
         alsoEnded,
         record -> requireConductor(record, conductor),
         false,
-        Speaker.harness(),
+        Objects.requireNonNull(source, "source"),
         null);
   }
 
