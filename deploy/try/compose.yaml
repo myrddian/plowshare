@@ -1,0 +1,56 @@
+# Local try-out only. Public release tooling supplies digest-pinned images.env.
+services:
+  postgres:
+    platform: linux/amd64
+    image: pgvector/pgvector:0.8.7-pg16-bookworm@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    env_file:
+      - path: ${PLOWSHARE_TRY_STATE:?Set external trial settings}/database.env
+        format: raw
+    environment:
+      POSTGRES_DB: plowshare
+      POSTGRES_USER: plowshare
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    restart: unless-stopped
+    mem_limit: 1g
+  init-state:
+    platform: linux/amd64
+    image: ${PLOWSHARE_SERVER_IMAGE:?Use a released server image}
+    profiles: [tools]
+    user: '0:0'
+    entrypoint: [/bin/sh, -ec]
+    command: ['chown 1000:1000 /var/lib/plowshare /var/lib/plowshare-workspaces']
+    volumes: [data:/var/lib/plowshare, workspaces:/var/lib/plowshare-workspaces]
+    network_mode: none
+  server:
+    platform: linux/amd64
+    image: ${PLOWSHARE_SERVER_IMAGE:?Use a released server image}
+    env_file:
+      - path: ${PLOWSHARE_TRY_STATE:?Set external trial settings}/server.env
+        format: raw
+    environment:
+      PLOWSHARE_DB_URL: jdbc:postgresql://postgres:5432/plowshare
+      PLOWSHARE_DB_USER: plowshare
+      PLOWSHARE_AUTH_ENABLED: 'true'
+      PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY: /var/lib/plowshare-workspaces
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx2g -Djava.awt.headless=true
+    volumes:
+      - data:/var/lib/plowshare
+      - workspaces:/var/lib/plowshare-workspaces
+      - ${PLOWSHARE_TRY_STATE:?Set external trial settings}/config:/etc/plowshare:ro
+    ports: ['127.0.0.1:${PLOWSHARE_TRY_PORT:?Choose a local port}:8091']
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 3g
+    read_only: true
+    tmpfs: ['/tmp:size=512m,mode=1777,exec']
+volumes:
+  database:
+  data:
+  workspaces:
