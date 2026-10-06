@@ -408,8 +408,12 @@ The desktop maintains Personal as an independent project client alongside other
 mounted projects. A TUI started outside a discovered project uses Personal as its
 rooted workspace; an explicitly selected project uses that project's existing
 rooting, with account resources resolved from the server's Personal replica.
-The Node helper claims the fixed directory for one normalized server/account
-pair. It refuses a nonempty unclaimed directory, a conflicting claim or symlinked
+The Node helper claims the fixed directory in the selected connection's store
+for one normalized server/account pair. Personal never asks for a local folder;
+file-access recovery retries this default mount. A proven legacy checkout moves
+only when the scoped directory is absent. Unclaimed, malformed or duplicate
+legacy data stays untouched and does not prevent creating the default mount.
+The scoped mount refuses a nonempty unclaimed directory, a conflicting claim or symlinked
 ownership metadata; it never merges two accounts into the same local directory.
 Section previews resolve canonical paths and refuse traversal or symlink escape.
 

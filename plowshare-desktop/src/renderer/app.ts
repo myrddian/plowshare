@@ -2159,11 +2159,13 @@ const deniedFileAccess = new Set<string>();
 const fileAccessKey = () => `${identity}:${scope}`;
 function renderFiles() {
   renderSync(state, scope, addingProject);
+  const personal = scope === state.personal?.project && !addingProject;
   const folder = state.projectFolders?.find((row) => row.name === scope);
   const recorded = state.projects.find((row) => row.name === scope);
-  const recordedLocation = recorded?.workspace
-    ? `${recorded.machine ?? 'Server'} · ${recorded.workspace}`
-    : '';
+  const recordedLocation =
+    !personal && recorded?.workspace
+      ? `${recorded.machine ?? 'Server'} · ${recorded.workspace}`
+      : '';
   const localLocation = folder ? `${folder.machine} · ${folder.path}` : '';
   const recoverable =
     !!recorded?.workspace &&
@@ -2184,17 +2186,29 @@ function renderFiles() {
     files.status === 'opening' || state.projectPreparing?.includes(scope);
   $('#file-access-title').textContent = connecting
     ? 'Connecting file access…'
-    : files.status === 'lost'
-      ? 'Restore file access'
-      : 'Allow file access';
-  $('#file-access-description').textContent =
-    folder || recoverable
+    : personal
+      ? 'Personal file access unavailable'
+      : files.status === 'lost'
+        ? 'Restore file access'
+        : 'Allow file access';
+  $('#file-access-description').textContent = personal
+    ? 'Personal uses the selected connection’s default store. Retry to reconnect its files.'
+    : folder || recoverable
       ? `Allow agents to read and change files in ${folder?.path ?? recorded!.workspace}. Access is remembered on this computer; disconnect it in Project files.`
       : `Choose a local folder${scope ? ` for ${scope}` : ' to add a project'}. Agents can read and change files inside it. Access is remembered on this computer.`;
   $('#file-access-error').textContent =
-    fileAccessError || folder?.error || files.detail || '';
+    fileAccessError ||
+    folder?.error ||
+    files.detail ||
+    (personal ? state.personal?.error : '') ||
+    '';
   $('#file-access-error').hidden = !$('#file-access-error').textContent;
-  $('#file-access-allow').textContent = connecting ? 'Connecting…' : 'Approve';
+  $('#file-access-allow').textContent = connecting
+    ? 'Connecting…'
+    : personal
+      ? 'Retry'
+      : 'Approve';
+  $('#file-access-deny').hidden = personal;
   $<HTMLButtonElement>('#file-access-allow').disabled =
     filePicking || !!connecting;
   $<HTMLButtonElement>('#file-access-deny').disabled =
@@ -2206,27 +2220,35 @@ function renderFiles() {
         ? files.project === scope
           ? 'Files connected'
           : `Files: ${files.project}`
-        : denied
-          ? 'File access denied'
-          : files.status === 'lost'
-            ? 'Files disconnected'
-            : 'Connect files';
+        : personal
+          ? 'Personal files unavailable'
+          : denied
+            ? 'File access denied'
+            : files.status === 'lost'
+              ? 'Files disconnected'
+              : 'Connect files';
   $('#files-open').title = files.root
     ? `${files.project} · ${files.root}${files.detail ? ` · ${files.detail}` : ''}`
-    : 'Connect a local project folder';
+    : personal
+      ? 'Personal files in this connection’s default store'
+      : 'Connect a local project folder';
   $('#files-open').dataset.status = files.status;
   $('#files-title').textContent = addingProject
     ? 'Add project'
-    : 'Project file access';
+    : personal
+      ? 'Personal file access'
+      : 'Project file access';
   $('#files-description').textContent = addingProject
     ? 'Choose a folder. Its Plowshare marker or folder name identifies the project on the server.'
-    : ready
-      ? `Serving ${files.project}${files.project !== scope ? ' · another workspace' : ''}`
-      : files.status === 'opening'
-        ? `Connecting ${files.project}…`
-        : files.status === 'lost'
-          ? `File access lost for ${files.project}. Choose the folder again.`
-          : `Choose a folder for ${scope || 'a new project'}.`;
+    : personal
+      ? 'Personal files are stored automatically in the selected connection’s default store.'
+      : ready
+        ? `Serving ${files.project}${files.project !== scope ? ' · another workspace' : ''}`
+        : files.status === 'opening'
+          ? `Connecting ${files.project}…`
+          : files.status === 'lost'
+            ? `File access lost for ${files.project}. Choose the folder again.`
+            : `Choose a folder for ${scope || 'a new project'}.`;
   $('#files-root').textContent = addingProject
     ? ''
     : [
@@ -2242,13 +2264,19 @@ function renderFiles() {
   $('#files-detail').textContent =
     state.projectConfigError ??
     state.projectListError ??
-    (addingProject ? '' : (folder?.error ?? files.detail ?? ''));
-  $('#files-withdraw').hidden = addingProject || !ready;
+    (addingProject
+      ? ''
+      : (folder?.error ??
+        files.detail ??
+        (personal ? state.personal?.error : undefined) ??
+        ''));
+  $('#files-withdraw').hidden = addingProject || personal || !ready;
   $('#files-reopen').hidden =
-    addingProject || (!folder && !recoverable) || ready;
+    addingProject || (!personal && !folder && !recoverable) || ready;
   $('#files-reopen').innerHTML =
-    `${icon('refresh')}${folder ? 'Reconnect files' : 'Connect recorded folder'}`;
-  $('#files-forget').hidden = addingProject || !folder;
+    `${icon('refresh')}${personal ? 'Retry Personal files' : folder ? 'Reconnect files' : 'Connect recorded folder'}`;
+  $('#files-forget').hidden = addingProject || personal || !folder;
+  $('#files-choose').hidden = personal;
   $<HTMLButtonElement>('#files-reopen').disabled =
     filePicking || !state.connected;
   $<HTMLButtonElement>('#files-forget').disabled =
@@ -2293,7 +2321,7 @@ $('#file-access-allow').addEventListener(
     renderFiles();
     try {
       const reply = await request(
-        saved || recoverable
+        project === state.personal?.project || saved || recoverable
           ? { action: 'project-open', project }
           : { action: 'files-choose', ...(project ? { project } : {}) },
       );

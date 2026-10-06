@@ -15,7 +15,6 @@ import {
   connectionDirectory,
   localLock,
   privateDirectory,
-  privateFile,
   userConfigDirectory,
 } from './connections.ts';
 
@@ -34,7 +33,11 @@ export interface PersonalEntry {
   directory: boolean;
 }
 
-/** A fixed mount belongs to one server/account. Never combine another account's replica with it. */
+/**
+ * Personal always mounts in the server/account store. Legacy data is moved only
+ * when its ownership is proven and this store has no checkout yet; unclaimed or
+ * duplicate legacy data remains untouched and never blocks the default mount.
+ */
 export async function personalDirectory(
   server: string,
   account: string,
@@ -50,61 +53,15 @@ export async function personalDirectory(
   return localLock(storage, 'personal-migration', async () => {
     const root = join(scope, 'personal');
     const legacy = join(storage, 'personal');
+    let exists = true;
     try {
-      const info = await lstat(legacy);
-      if (!info.isDirectory() || info.isSymbolicLink())
-        throw new Error('Legacy Personal must be a real directory.');
-      await privateFile(join(legacy, '.plowshare', 'personal.json'));
-      const metadata = await lstat(join(legacy, '.plowshare'));
-      if (!metadata.isDirectory() || metadata.isSymbolicLink())
-        throw new Error('Legacy Personal metadata must be a real directory.');
-      const owner: unknown = JSON.parse(
-        await readFile(join(legacy, '.plowshare', 'personal.json'), 'utf8'),
-      );
-      if (
-        !owner ||
-        typeof owner !== 'object' ||
-        !('server' in owner) ||
-        typeof owner.server !== 'string' ||
-        !('account' in owner) ||
-        typeof owner.account !== 'string' ||
-        !('project' in owner) ||
-        typeof owner.project !== 'string'
-      )
-        throw new Error(
-          'Legacy Personal ownership is ambiguous. Preserve the old checkout and restore its server/account/project ownership metadata before migrating.',
-        );
-      if (
-        canonicalServer(owner.server) === canonicalServer(server) &&
-        owner.account === account
-      ) {
-        if (owner.project !== project)
-          throw new Error(
-            'Legacy Personal project ownership differs. Resolve its ownership before migration.',
-          );
-        try {
-          await lstat(root);
-          throw new Error(
-            'Both legacy and scoped Personal checkouts exist. Preserve both and resolve the duplicate before migrating.',
-          );
-        } catch (error) {
-          if (errorCode(error) !== 'ENOENT') throw error;
-        }
-        await rename(legacy, root);
-      }
+      await lstat(root);
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') throw error;
-      // An existing legacy directory with missing ownership must remain untouched.
-      try {
-        await lstat(legacy);
-        throw new Error(
-          'Legacy Personal ownership is missing. Preserve the checkout and restore its personal.json ownership metadata before migrating.',
-          { cause: error },
-        );
-      } catch (missing) {
-        if (errorCode(missing) !== 'ENOENT') throw missing;
-      }
+      exists = false;
     }
+    if (!exists && (await ownsLegacyPersonal(legacy, server, account, project)))
+      await rename(legacy, root);
     await mkdir(root, { recursive: true, mode: 0o700 });
     if ((await lstat(root)).isSymbolicLink())
       throw new Error(
@@ -161,6 +118,62 @@ export async function personalDirectory(
     }
     return canonical;
   });
+}
+
+/** Never infer ownership from a folder name or follow legacy metadata symlinks. */
+async function ownsLegacyPersonal(
+  root: string,
+  server: string,
+  account: string,
+  project: string,
+): Promise<boolean> {
+  const metadata = join(root, '.plowshare');
+  const claim = join(metadata, 'personal.json');
+  let source: string;
+  try {
+    for (const directory of [root, metadata]) {
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    }
+    const info = await lstat(claim);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 2_000_000)
+      return false;
+    source = await readFile(claim, 'utf8');
+  } catch (error) {
+    // Legacy migration is optional. Missing or unreadable ownership authorizes
+    // no move; leave the source intact and initialize the connection's store.
+    const code = errorCode(error);
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM')
+      return false;
+    throw error;
+  }
+  let owner: unknown;
+  try {
+    owner = JSON.parse(source);
+  } catch (error) {
+    // Invalid legacy metadata cannot authorize moving any of its files.
+    if (error instanceof SyntaxError) return false;
+    throw error;
+  }
+  if (
+    !owner ||
+    typeof owner !== 'object' ||
+    !('server' in owner) ||
+    typeof owner.server !== 'string' ||
+    !('account' in owner) ||
+    owner.account !== account ||
+    !('project' in owner) ||
+    owner.project !== project
+  )
+    return false;
+  let origin: string;
+  try {
+    origin = canonicalServer(owner.server);
+  } catch {
+    // This is a parser boundary: a malformed legacy origin proves no ownership.
+    return false;
+  }
+  return origin === canonicalServer(server);
 }
 
 /** Canonical containment is checked on every read, including symlinks inside a section. */

@@ -9,6 +9,7 @@ import {
   rm,
   stat,
   symlink,
+  realpath,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -335,9 +336,20 @@ await test('Personal migration retains content and actual Git history, and ambig
   );
   await mkdir(legacy);
   await writeFile(join(legacy, 'unclaimed.txt'), 'Untouched');
-  await assert.rejects(
-    personalDirectory(first.server, 'bob', 'personal:bob', home),
-    /ownership.*missing/,
+  const bob = await personalDirectory(
+    first.server,
+    'bob',
+    'personal:bob',
+    home,
+  );
+  assert.equal(
+    bob,
+    await realpath(
+      join(
+        connectionDirectory(first.server, 'bob', join(home, '.plowshare')),
+        'personal',
+      ),
+    ),
   );
   assert.equal(
     await readFile(join(legacy, 'unclaimed.txt'), 'utf8'),

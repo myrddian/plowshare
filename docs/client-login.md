@@ -106,10 +106,13 @@ their sources. A legacy session moves under the credential locks only when its
 origin and account match. In the default profile, a legacy `~/.plowshare/personal` checkout moves as a whole,
 including Git history, only when `.plowshare/personal.json` proves the matching
 server/account/project. Foreign ownership stays intact and gets a separate mount.
-Missing/malformed ownership or duplicate legacy/scoped checkouts stops migration
-with an actionable error. Preserve the old directory; restore its original ownership
-metadata or move it aside explicitly before connecting. Never change its owner to
-the account you want to connect. Legacy renderer preferences remain available as a
+Missing/malformed ownership and duplicate legacy/scoped checkouts leave legacy
+data untouched. Personal opens the selected connection's store automatically;
+an existing scoped checkout takes precedence. No folder selection is required.
+Restore proven original ownership before a future migration or recover old data
+explicitly; never change its owner to the account you want to connect.
+If Personal file access fails, **Retry** reconnects the same default store without
+opening a folder picker. Legacy renderer preferences remain available as a
 migration source; the selected identity's drafts are subsequently saved in its scope.
 
 Every refresh holds a cross-process lock, reloads the latest tokens, and writes

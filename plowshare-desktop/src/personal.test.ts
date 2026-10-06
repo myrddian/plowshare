@@ -1,12 +1,211 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  symlink,
+  rm,
+  lstat,
+  realpath,
+  chmod,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   personalDirectory,
   readPersonal,
 } from 'plowshare-client-node/personal';
+import { connectionDirectory } from 'plowshare-client-node/connections';
+
+await test('unreadable legacy ownership does not prevent initializing the connection store', async (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.skip('This fixture requires enforced POSIX directory permissions.');
+    return;
+  }
+  const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
+  const metadata = join(home, '.plowshare', 'personal', '.plowshare');
+  t.after(async () => {
+    await chmod(metadata, 0o700);
+    await rm(home, { recursive: true, force: true });
+  });
+  await mkdir(metadata, { recursive: true });
+  const owner = JSON.stringify({
+    server: 'http://server',
+    account: 'alice',
+    project: 'personal:alice',
+  });
+  await writeFile(join(metadata, 'personal.json'), owner);
+  await chmod(metadata, 0o000);
+  const root = await personalDirectory(
+    'http://server',
+    'alice',
+    'personal:alice',
+    home,
+  );
+  assert.equal(
+    root,
+    await realpath(
+      join(
+        connectionDirectory('http://server', 'alice', join(home, '.plowshare')),
+        'personal',
+      ),
+    ),
+  );
+  await chmod(metadata, 0o700);
+  assert.equal(await readFile(join(metadata, 'personal.json'), 'utf8'), owner);
+});
+
+await test('unclaimed legacy sync storage does not block the default connection mount', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const legacy = join(home, '.plowshare', 'personal');
+  await mkdir(join(legacy, '.plowshare', 'sync.git'), { recursive: true });
+  await writeFile(join(legacy, 'old-notes.txt'), 'Preserve unclaimed files');
+  const root = await personalDirectory(
+    'http://server',
+    'alice',
+    'personal:alice',
+    home,
+  );
+  assert.equal(
+    root,
+    await realpath(
+      join(
+        connectionDirectory('http://server', 'alice', join(home, '.plowshare')),
+        'personal',
+      ),
+    ),
+  );
+  assert.equal(
+    await readFile(join(legacy, 'old-notes.txt'), 'utf8'),
+    'Preserve unclaimed files',
+  );
+  assert.ok(
+    (await lstat(join(legacy, '.plowshare', 'sync.git'))).isDirectory(),
+  );
+  await assert.rejects(readFile(join(root, 'old-notes.txt')), {
+    code: 'ENOENT',
+  });
+  assert.equal(
+    await personalDirectory('http://server', 'alice', 'personal:alice', home),
+    root,
+  );
+});
+
+await test('unproven legacy ownership never imports files into a connection', async (t) => {
+  for (const owner of [
+    '{invalid json',
+    JSON.stringify({
+      server: 'not an origin',
+      account: 'alice',
+      project: 'personal:alice',
+    }),
+    JSON.stringify({
+      server: 'http://server',
+      account: 'bob',
+      project: 'personal:bob',
+    }),
+    JSON.stringify({
+      server: 'http://other',
+      account: 'alice',
+      project: 'personal:alice',
+    }),
+    JSON.stringify({
+      server: 'http://server',
+      account: 'alice',
+      project: 'another-project',
+    }),
+  ]) {
+    const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const legacy = join(home, '.plowshare', 'personal');
+    await mkdir(join(legacy, '.plowshare'), { recursive: true });
+    await writeFile(join(legacy, '.plowshare', 'personal.json'), owner);
+    await writeFile(join(legacy, 'old-notes.txt'), 'Do not import');
+    const root = await personalDirectory(
+      'http://server',
+      'alice',
+      'personal:alice',
+      home,
+    );
+    assert.equal(
+      await readFile(join(legacy, 'old-notes.txt'), 'utf8'),
+      'Do not import',
+    );
+    assert.equal(
+      await readFile(join(legacy, '.plowshare', 'personal.json'), 'utf8'),
+      owner,
+    );
+    await assert.rejects(readFile(join(root, 'old-notes.txt')), {
+      code: 'ENOENT',
+    });
+  }
+});
+
+await test('existing scoped Personal wins over a duplicate proven legacy checkout', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const root = await personalDirectory(
+    'http://server',
+    'alice',
+    'personal:alice',
+    home,
+  );
+  await writeFile(join(root, 'current.txt'), 'Current checkout');
+  const legacy = join(home, '.plowshare', 'personal');
+  await mkdir(join(legacy, '.plowshare'), { recursive: true });
+  await writeFile(
+    join(legacy, '.plowshare', 'personal.json'),
+    JSON.stringify({
+      server: 'http://server',
+      account: 'alice',
+      project: 'personal:alice',
+    }),
+  );
+  await writeFile(join(legacy, 'old.txt'), 'Preserve duplicate');
+  assert.equal(
+    await personalDirectory('http://server', 'alice', 'personal:alice', home),
+    root,
+  );
+  assert.equal(
+    await readFile(join(root, 'current.txt'), 'utf8'),
+    'Current checkout',
+  );
+  assert.equal(
+    await readFile(join(legacy, 'old.txt'), 'utf8'),
+    'Preserve duplicate',
+  );
+  await assert.rejects(readFile(join(root, 'old.txt')), { code: 'ENOENT' });
+});
+
+await test('symlinked legacy storage is preserved without redirecting the default mount', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const outside = join(home, 'outside');
+  await mkdir(join(outside, '.plowshare'), { recursive: true });
+  await writeFile(
+    join(outside, '.plowshare', 'personal.json'),
+    JSON.stringify({
+      server: 'http://server',
+      account: 'alice',
+      project: 'personal:alice',
+    }),
+  );
+  await mkdir(join(home, '.plowshare'));
+  await symlink(outside, join(home, '.plowshare', 'personal'));
+  const root = await personalDirectory(
+    'http://server',
+    'alice',
+    'personal:alice',
+    home,
+  );
+  assert.notEqual(root, outside);
+  assert.ok(
+    (await lstat(join(home, '.plowshare', 'personal'))).isSymbolicLink(),
+  );
+});
 
 await test('personal mount is idempotent and isolates accounts and servers', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));

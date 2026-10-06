@@ -371,8 +371,16 @@ export class DesktopWorkspace {
   ): Promise<Reply> {
     this.requireLive();
     const token = this.token;
+    if (project && project === this.personal?.project)
+      throw new Error(
+        'Personal uses the selected connection’s default store. Retry Personal file access to reconnect it.',
+      );
     const folder = await identifyFolder(directory, project);
     this.same(token);
+    if (folder.project === this.personal?.project)
+      throw new Error(
+        'Personal uses the selected connection’s default store. Retry Personal file access to reconnect it.',
+      );
     if (folder.kind === 'DISJOINT') {
       const held = [...this.children.entries()].find(
         ([key, value]) =>
@@ -470,6 +478,8 @@ export class DesktopWorkspace {
       return;
     }
     this.personal = { project: project.name };
+    // A saved/manual folder must never override the connection-owned Personal mount.
+    this.saved = this.saved.filter((row) => row.name !== project.name);
     try {
       const root = await personalDirectory(
         this.control.state.base,
@@ -849,6 +859,19 @@ export class DesktopWorkspace {
       const name = request.project ?? this.scope;
       if (name === this.personal?.project && request.action !== 'project-open')
         throw new Error('Personal space is always mounted for this account.');
+      if (
+        name === this.personal?.project &&
+        request.action === 'project-open'
+      ) {
+        // Recovery resolves the default again, including after an initial storage failure.
+        // It must never fall through to a recorded server path or a native folder picker.
+        await this.mountPersonal(token);
+        this.same(token);
+        if (!this.personal?.root)
+          throw new Error(
+            this.personal?.error || 'Personal store is unavailable.',
+          );
+      }
       const mapping = this.saved.find((row) => row.name === name);
       if (!mapping) {
         if (request.action !== 'project-open')
