@@ -1,0 +1,98 @@
+import { _electron as electron, expect } from 'playwright/test';
+import executablePath from 'electron';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { connectionDirectory } from '../../sdk/node/build/connections.js';
+import { protocolFixture } from './protocol-fixture.mjs';
+const directory = await mkdtemp(join(tmpdir(), 'plowshare-connections-ui-'));
+const env = { ...process.env, PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_DESKTOP_PROFILE: join(directory, 'profile') };
+for (const key of ['ELECTRON_RUN_AS_NODE', 'PLOWSHARE_DESKTOP_CONFIG', 'PLOWSHARE_CONNECTION', 'PLOWSHARE_HANDLE', 'PLOWSHARE_PASSWORD', 'PLOWSHARE_TOKEN', 'PLOWSHARE_URL']) delete env[key];
+const one = await protocolFixture({ loginHandles: ['fixture', 'second'] }), two = await protocolFixture();
+let app;
+const launch = async () => {
+  app = await electron.launch({ executablePath, args: [resolve('.')], env });
+  const page = await app.firstWindow();
+  await page.locator('#connection-button').waitFor();
+  await page.evaluate(() => window.plowshare.request({ action: 'bootstrap' }));
+  return page;
+};
+const state = page => page.evaluate(async () => (await window.plowshare.request({ action: 'bootstrap' })).state);
+const select = async (page, name) => {
+  await page.locator('#connection-button').click();
+  await page.locator('#connection-menu').getByRole('button', { name, exact: false }).click();
+  await expect.poll(async () => (await state(page)).selectedConnection).toBe(name);
+  await expect.poll(async () => (await state(page)).connected).toBe(true);
+};
+const connect = async (page, name, server, account = 'fixture') => {
+  await page.locator('#connect-sidebar').click();
+  await page.locator('#connection-name').fill(name);
+  await page.locator('#server-url').fill(server);
+  await page.locator('#handle').fill(account);
+  await page.locator('#password').fill('fixture-password');
+  await page.locator('#submit-connection').click();
+  await expect(page.locator('#connection-dialog')).toBeHidden();
+  assert.equal((await state(page)).selectedConnection, name);
+};
+try {
+  let page = await launch();
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await connect(page, 'Server A', one.base);
+  const conversation = (await state(page)).conversations[0]?.id; assert.ok(conversation);
+  await page.locator('#draft').fill('Draft belonging to A');
+  await expect.poll(async () => (await state(page)).localPreferences?.drafts[conversation]).toBe('Draft belonging to A');
+  const preference = (await state(page)).localPreferences;
+  await connect(page, 'Server B', two.base);
+  assert.ok(!(JSON.stringify((await state(page)).localPreferences) ?? '').includes('Draft belonging to A'));
+  await assert.rejects(page.evaluate(({ server, preference }) => window.plowshare.request({ action: 'connection-preferences', server, account: 'fixture', preference }), { server: one.base, preference }), /another identity/);
+  await select(page, 'Server A');
+  assert.equal((await state(page)).base, one.base);
+  assert.deepEqual((await state(page)).localPreferences, preference);
+  await expect(page.locator('#draft')).toHaveValue('Draft belonging to A');
+  await connect(page, 'Second account', one.base, 'second');
+  assert.equal((await state(page)).handle, 'second');
+  assert.ok(!(JSON.stringify((await state(page)).localPreferences) ?? '').includes('Draft belonging to A'));
+  assert.equal(new Set([connectionDirectory(one.base, 'fixture', directory), connectionDirectory(two.base, 'fixture', directory), connectionDirectory(one.base, 'second', directory)]).size, 3);
+  await select(page, 'Server A');
+  for (const [width, height] of [[1440, 960], [900, 700]]) {
+    await app.evaluate(({ BrowserWindow }, dimensions) => BrowserWindow.getAllWindows()[0].setSize(dimensions.width, dimensions.height), { width, height });
+    const handle = page.locator('.pane-resizer[data-pane="sidebar"]:visible');
+    await handle.press('End');
+    await page.locator('#connection-button').click();
+    await expect(page.locator('#connection-menu')).toBeVisible();
+    const buttons = page.locator('#connection-menu button');
+    await expect(buttons.first()).toBeFocused();
+    await buttons.first().press('ArrowDown'); await expect(buttons.nth(1)).toBeFocused();
+    await buttons.nth(1).press('End'); await expect(buttons.last()).toBeFocused();
+    assert.equal(await page.locator('#connection-menu').evaluate(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }), true);
+    await mkdir('build/smoke', { recursive: true });
+    await page.screenshot({ path: `build/smoke/connections-${width}.png` });
+    await buttons.last().press('Escape'); await expect(page.locator('#connection-menu')).toBeHidden();
+    await handle.press('Home');
+  }
+  assert.deepEqual(errors, []);
+  await app.close(); app = undefined; page = await launch();
+  assert.equal((await state(page)).selectedConnection, 'Server A'); assert.equal((await state(page)).connected, true);
+  assert.equal(one.loginCount(), 2); assert.equal(two.loginCount(), 1);
+  await page.evaluate(() => window.plowshare.request({ action: 'connection-rename', name: 'Server A', nextName: 'Renamed A' }));
+  await page.evaluate(() => window.plowshare.request({ action: 'connection-remove', name: 'Renamed A' }));
+  assert.equal((await state(page)).connected, false);
+  assert.ok((await readFile(join(connectionDirectory(one.base, 'fixture', directory), 'desktop-view.json'), 'utf8')).includes('Draft belonging to A'));
+  await select(page, 'Server B'); await app.close(); app = undefined;
+  await rm(join(connectionDirectory(two.base, 'fixture', directory), 'credentials'), { recursive: true });
+  page = await launch();
+  assert.equal((await state(page)).connected, false); assert.equal((await state(page)).base, two.base);
+  assert.equal((await state(page)).connection, 'Authentication required');
+  assert.ok(!JSON.stringify(await state(page)).includes('fixture-password'));
+  const offline = await protocolFixture();
+  const offlineBase = offline.base; await offline.close();
+  await assert.rejects(page.evaluate(base => window.plowshare.request({ action: 'connect', name: 'Offline server', base, handle: 'fixture', password: 'fixture-password' }), offlineBase), /Could not reach/);
+  assert.equal((await state(page)).connected, false);
+  assert.equal((await state(page)).base, offlineBase);
+  assert.equal((await state(page)).selectedConnection, 'Offline server');
+  assert.match((await state(page)).connection, /Offline/);
+  console.log('PASS: named A/B/A and same-server accounts, scoped drafts/credentials, restart, selected removal, missing-session and offline recovery, late writes, keyboard dropdown and native window/sidebar resize.');
+} finally {
+  if (app) await app.close(); await one.close(); await two.close(); await rm(directory, { recursive: true, force: true });
+}

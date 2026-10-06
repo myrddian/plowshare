@@ -15,32 +15,102 @@ password twice, changes it server-side, and signs in again. Ordinary operations
 and MCP never prompt. Login allows five minutes by default; `--timeout-ms`
 overrides that deadline. Other commands retain their existing deadlines.
 
-Desktop sign-in saves the same session and remembers the server/account in
-`desktop-connection.json`. On its next launch it reconnects with the shared tokens,
-without another password login. If no desktop preference exists and exactly one
-saved server is available, it discovers that login (including one created by the
-CLI). With multiple saved servers, choose the server explicitly. Explicit Disconnect
-or Use demo disables automatic startup reconnect while retaining saved tokens.
-Leave the password blank to connect manually using the saved login. Desktop clears the
-password form immediately and keeps tokens out of renderer state. The CLI requires
-`--server ORIGIN`, its `--url` alias, or `PLOWSHARE_URL` for online commands; it has
-no default endpoint. Flags override the environment and may appear before or after
-the command. Help, version and offline validation need no server. Select the same
-origin in each client to share its login. Origins, including ports, have separate
-saved credentials.
+Desktop, CLI and TUI share named connections. Save a connection before logging in:
 
-Credentials live in `$XDG_CONFIG_HOME/plowshare/credentials`, or
-`~/.config/plowshare/credentials` when XDG is unset. `PLOWSHARE_CONFIG_DIR`
-overrides the Plowshare configuration directory for isolated profiles and tests.
-Desktop connection/project preferences use that same config directory, unless
-`PLOWSHARE_DESKTOP_CONFIG` overrides their location; tokens still use the shared
-credential directory. Failed persistence is reported in the GUI. The connection
-preference contains server/account and reconnect intent only, never passwords or
-tokens. Each origin uses one digest-named JSON file. The directory is mode 0700 and the
-files are mode 0600 on POSIX systems. This is permission-protected local storage;
-OS keychain encryption is not implemented. Passwords are never saved. Explicit
-`PLOWSHARE_HANDLE` and `PLOWSHARE_PASSWORD` remain ephemeral overrides for CLI,
-TUI and MCP automation; run `login` explicitly to persist environment credentials.
+```sh
+bin/plowshare-cli connection add "Home" https://plowshare.example.com alice
+bin/plowshare-cli --connection "Home" login
+bin/plowshare-cli --connection "Home" memory index
+bin/plowshare-talk --connection "Home"
+bin/plowshare-talk connection list
+bin/plowshare-cli connection rename "Home" "Personal server"
+bin/plowshare-cli connection select "Personal server"
+```
+
+The desktop connection button opens a dropdown with saved connections and the
+current selection. Use **Add / manage connection** to enter a name, server and
+handle, rename the selected connection, or remove its saved entry. Arrow keys,
+Home/End, Tab and Enter navigate the dropdown; Escape closes it. Switching closes
+local sockets, event subscriptions, file channels, commands and union sync before
+opening the selected account. Admitted jobs remain on their original server;
+returning restores receipts through server APIs without replaying submissions.
+
+Arguments override the corresponding environment value. `--connection NAME`
+overrides `PLOWSHARE_CONNECTION`; `--server`/`--url` overrides `PLOWSHARE_URL`,
+and `--account` overrides `PLOWSHARE_ACCOUNT`. With neither an explicit name nor
+server/account, clients use the saved selection. An explicit origin/account
+bypasses the saved default. A named selection must agree with all explicit
+server/account values, including `PLOWSHARE_HANDLE`; conflicting or missing names
+are errors. Multiple accounts at one origin require a name or explicit account.
+There is no fallback to another connection when credentials expire or a server is
+offline. Help, version and offline validation need no configured server.
+
+Desktop sign-in remembers reconnect intent per connection. Restart reconnects the
+selected account with its saved session. **Disconnect** or **Use demo** disables
+startup reconnect for that connection while retaining its session. Leave the
+password blank to reconnect; an expired or interrupted session requires login.
+The desktop clears password fields immediately and keeps tokens out of renderer
+state. CLI/TUI selection changes apply to the next invocation; end the current TUI
+before switching. Named user connections cannot be combined with service tokens.
+
+Multiple client instances may connect to the same account and serve the same
+project directory on the same machine. The first file presence remains the routing
+choice; closing it leaves a surviving presence available for later routing.
+Outstanding requests on the closed socket fail without being replayed, since a
+write may already have reached disk. Account authentication, project membership,
+tool grants and workspace fences still apply to every client.
+
+A second directory claiming that same project remains a conflict, even on the
+same machine. Separate configuration roots can produce separate Personal
+directories, so clients sharing an account should use the same configuration root.
+After a file attachment is refused, desktop navigation and polling retain the
+error; use **Connect files** to retry explicitly after resolving the location or
+access conflict. CLI failures expose `FILES_UNAVAILABLE` without submitting the
+requested operation. Local union synchronization holds
+`.plowshare/sync.lock` in the project directory while reconciling, so multiple
+clients cannot interleave Git operations on one shadow repository. Stop clients
+and inspect an interrupted sync before removing a stale lock; locks are never
+stolen from another writer.
+
+Local state now lives under `~/.plowshare`, with this versioned layout:
+
+```text
+.plowshare/
+  config.json                         # names, immutable keys, selected key
+  connections/<server-account-key>/
+    credentials/<origin-digest>.json  # private rotating session
+    personal/                        # checkout, .git and union metadata
+    credential-migration.json        # prevents legacy-session resurrection after logout
+    desktop-projects.json            # bookmarks for this identity
+    desktop-jobs.json                # known and uncertain work receipts
+    desktop-view.json                # drafts and view selection
+```
+
+The key hashes the canonical origin and account together; names never become
+filesystem paths. Rename preserves the key and all files. `connection remove NAME`
+removes selection metadata and disconnects it in the desktop, preserving local
+content and sessions. Re-adding that same identity restores its key. Use **logout**
+to revoke only the selected account's session before removing an entry. No command
+implicitly removes another account or cancels its jobs.
+
+`PLOWSHARE_CONFIG_DIR` supplies an absolute root for all local clients. The older
+`PLOWSHARE_DESKTOP_CONFIG` supplies the shared root when the new override is absent;
+when both are set, the new override wins and the old desktop directory is a migration source. XDG configuration directories are legacy migration sources, not a new
+profile's fallback. POSIX directories are mode 0700 and session/config files mode
+0600. OS keychain encryption is not implemented. Passwords are never saved;
+`PLOWSHARE_HANDLE` plus `PLOWSHARE_PASSWORD` remain ephemeral automation overrides
+unless you run `login` explicitly.
+
+Legacy preferences and scoped bookmarks/receipts are imported without deleting
+their sources. A legacy session moves under the credential locks only when its
+origin and account match. In the default profile, a legacy `~/.plowshare/personal` checkout moves as a whole,
+including Git history, only when `.plowshare/personal.json` proves the matching
+server/account/project. Foreign ownership stays intact and gets a separate mount.
+Missing/malformed ownership or duplicate legacy/scoped checkouts stops migration
+with an actionable error. Preserve the old directory; restore its original ownership
+metadata or move it aside explicitly before connecting. Never change its owner to
+the account you want to connect. Legacy renderer preferences remain available as a
+migration source; the selected identity's drafts are subsequently saved in its scope.
 
 Every refresh holds a cross-process lock, reloads the latest tokens, and writes
 the new pair atomically before requesting a WS ticket. A failed ticket or socket
@@ -50,7 +120,7 @@ rather than spending a potentially retired refresh token again. No application
 operation is replayed during authentication or reconnect.
 
 The lock waits at most ten seconds. A process killed while holding it may leave
-an origin's `.json.lock` directory. Stop clients using that origin before removing
+an account's `.json.lock` directory. Stop clients using that account before removing
 that specific stale lock directory; do not remove a lock held by a live client.
 If a refresh was interrupted, sign in again. Automatic stale-lock reclamation is
 not implemented because it could race a client still rotating credentials.

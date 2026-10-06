@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 import { SyncFixture, git } from './sync-fixture.mjs';
+import { connectionDirectory } from '../../sdk/node/build/connections.js';
 
 const temporary = await realpath(await mkdtemp(join(tmpdir(), 'plowshare-personal-smoke-')));
 const project = 'personal:' + Buffer.from('fixture').toString('hex');
@@ -40,8 +41,9 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.evaluate(base => window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
   const state = async () => (await page.evaluate(() => window.plowshare.request({action:'bootstrap'}))).state;
-  assert.equal((await state()).personal.root, join(temporary,'.plowshare','personal'));
-  assert.equal(await readFile(join(temporary,'.plowshare','personal','Planning','plan.md'),'utf8'), 'A useful personal plan.');
+  const personal = join(connectionDirectory(fixture.base, 'fixture', env.PLOWSHARE_CONFIG_DIR), 'personal');
+  assert.equal((await state()).personal.root, personal);
+  assert.equal(await readFile(join(personal,'Planning','plan.md'),'utf8'), 'A useful personal plan.');
   await expect(page.locator('#personal-navigation')).toBeVisible();
   const personalHeading = page.locator('#personal-toggle');
   const projectsHeading = page.locator('#projects-toggle');
@@ -64,7 +66,7 @@ try {
   await expect(page.locator('#sidebar-projects')).toBeHidden();
   await projectsHeading.click();
   assert.equal(await page.locator('#conversations [data-project="'+project+'"]').count(),0);
-  assert.equal(await page.locator('[data-project=""]').count(),0);
+  assert.equal(await page.locator('#conversations button[data-project=""]').count(),0);
   await expect(page.locator('#personal-conversations-toggle')).toHaveText('Conversations');
   await expect(page.locator('#inbox-open')).toContainText('Mailbox');
   for (const section of ['In','Out','Resources','Archive','Planning']) {

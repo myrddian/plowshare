@@ -25,8 +25,8 @@ import org.junit.jupiter.api.Test;
  * <h2>What is measured here rather than assumed</h2>
  *
  * <ul>
- *   <li><b>the mapping is one-to-one in both directions.</b> One presence per project is the
- *       owner's decision and the refusal is where it is enforced; one presence per session is this
+ *   <li><b>each project has one location and stable primary routing.</b> Multiple sessions at the
+ *       same location remain declared until they withdraw; one presence per session is this
  *       registry's own, and it is what stops a reconnecting client leaving the project it used to
  *       root pointing at a socket that has gone;
  *   <li><b>a conflict names the holder.</b> A refusal that only said "taken" would leave an
@@ -152,6 +152,65 @@ class PresenceRegistryTest {
     assertEquals(Optional.of(again), presences.serving(LEDGER));
   }
 
+  @Test
+  void two_clients_at_the_same_location_keep_the_primary_until_it_leaves() {
+    Presence first = presences.declare(at("one", "bench", "/srv/ledger", LEDGER));
+    Presence second = presences.declare(at("two", "bench", "/srv/ledger/", LEDGER));
+    assertEquals(Optional.of(first), presences.serving(LEDGER));
+    assertEquals(Optional.of(second), presences.rootedBy("two"));
+    assertEquals(1, presences.count());
+    presences.declare(first);
+    assertEquals(Optional.of(first), presences.serving(LEDGER), "reconnect preserves order");
+    assertTrue(presences.withdraw("one"));
+    assertEquals(Optional.of(second), presences.serving(LEDGER));
+    assertFalse(presences.withdraw("one"), "a late repeated close cannot withdraw the survivor");
+    assertTrue(presences.withdraw("two"));
+    assertTrue(presences.serving(LEDGER).isEmpty());
+  }
+
+  @Test
+  void a_standby_close_or_project_change_keeps_the_primary() {
+    Presence first = presences.declare(at("one", "bench", "/srv/ledger", LEDGER));
+    presences.declare(at("two", "bench", "/srv/ledger", LEDGER));
+    presences.declare(at("two", "bench", "/srv/notes", "notes"));
+    assertEquals(Optional.of(first), presences.serving(LEDGER));
+    assertEquals("notes", presences.rootedBy("two").orElseThrow().project());
+    presences.declare(at("three", "bench", "/srv/ledger", LEDGER));
+    presences.withdraw("three");
+    assertEquals(Optional.of(first), presences.serving(LEDGER));
+  }
+
+  @Test
+  void different_directories_on_one_machine_conflict_and_preserve_the_previous_claim() {
+    Presence first = presences.declare(at("one", "bench", "/srv/ledger", LEDGER));
+    Presence second = presences.declare(at("two", "bench", "/srv/notes", "notes"));
+    assertThrows(
+        PresenceConflictException.class,
+        () -> presences.declare(at("two", "bench", "/tmp/ledger", LEDGER)));
+    assertEquals(Optional.of(first), presences.serving(LEDGER));
+    assertEquals(Optional.of(second), presences.rootedBy("two"));
+  }
+
+  @Test
+  void a_primary_cannot_move_while_a_standby_still_serves_the_old_directory() {
+    Presence first = presences.declare(at("one", "bench", "/srv/ledger", LEDGER));
+    presences.declare(at("two", "bench", "/srv/ledger", LEDGER));
+    assertThrows(
+        PresenceConflictException.class,
+        () -> presences.declare(at("one", "bench", "/tmp/ledger", LEDGER)));
+    assertEquals(Optional.of(first), presences.serving(LEDGER));
+    presences.withdraw("two");
+    Presence moved = presences.declare(at("one", "bench", "/tmp/ledger", LEDGER));
+    assertEquals(Optional.of(moved), presences.serving(LEDGER));
+  }
+
+  @Test
+  void location_components_are_compared_without_ambiguous_string_concatenation() {
+    assertFalse(at("one", "a/b", "/c", LEDGER).sameLocation(at("two", "a", "/b/c", LEDGER)));
+    assertFalse(
+        at("one", "a", "/srv/ledger", LEDGER).sameLocation(at("two", "b", "/srv/ledger", LEDGER)));
+  }
+
   // --- one presence per session --------------------------------------------
 
   @Test
@@ -266,6 +325,31 @@ class PresenceRegistryTest {
         List.copyOf(won),
         List.of(presences.serving(LEDGER).orElseThrow().session()),
         "the holder is the one that was told it had won");
+  }
+
+  @Test
+  void concurrent_clients_at_one_location_all_join_and_concurrent_closes_keep_the_survivor()
+      throws Exception {
+    Presence survivor = presences.declare(at("survivor", "bench", "/srv/ledger", LEDGER));
+    try (ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      List<java.util.concurrent.Future<?>> work = new java.util.ArrayList<>();
+      for (int i = 0; i < 16; i++) {
+        String session = "client-" + i;
+        work.add(
+            threads.submit(() -> presences.declare(at(session, "bench", "/srv/ledger", LEDGER))));
+      }
+      for (var joined : work) joined.get(10, TimeUnit.SECONDS);
+      assertEquals(Optional.of(survivor), presences.serving(LEDGER));
+      work.clear();
+      for (int i = 0; i < 16; i++) {
+        String session = "client-" + i;
+        assertTrue(presences.rootedBy(session).isPresent());
+        work.add(threads.submit(() -> presences.withdraw(session)));
+      }
+      for (var closed : work) closed.get(10, TimeUnit.SECONDS);
+    }
+    assertEquals(Optional.of(survivor), presences.serving(LEDGER));
+    assertEquals(1, presences.count());
   }
 
   @Test

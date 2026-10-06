@@ -1,3 +1,4 @@
+import { connectionDirectory } from 'plowshare-client-node/connections';
 import { httpHandler, wireText } from './http.test-support.js';
 import { record, text, field, json } from './json.test-support.js';
 import assert from 'node:assert/strict';
@@ -221,7 +222,10 @@ await test(
         assert.ok(!result.out.includes('refresh-'));
       }
       assert.deepEqual(fake.counts(), { logins: 1, refreshes: 2 });
-      const privateDirectory = join(directory, 'credentials'),
+      const privateDirectory = join(
+          connectionDirectory(fake.base, 'operator', directory),
+          'credentials',
+        ),
         files = await readdir(privateDirectory);
       assert.equal(files.length, 1);
       assert.equal((await stat(privateDirectory)).mode & 0o777, 0o700);
@@ -444,11 +448,12 @@ await test('setup consumes the temporary login and saves only the first administ
       ['/v1/auth/login', '/v1/auth/setup', '/v1/auth/login'],
     );
     assert.equal(requests[1]!.body['temporaryPassword'], 'temporary-secret');
-    const files = await readdir(join(directory, 'credentials'));
-    const saved = await readFile(
-      join(directory, 'credentials', files[0]!),
-      'utf8',
+    const credentials = join(
+      connectionDirectory(base, 'owner', directory),
+      'credentials',
     );
+    const files = await readdir(credentials);
+    const saved = await readFile(join(credentials, files[0]!), 'utf8');
     assert.equal(field(json(saved), ['handle']), 'owner');
     for (const value of [
       'temporary-secret',

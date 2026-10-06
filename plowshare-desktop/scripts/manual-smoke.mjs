@@ -23,7 +23,7 @@ try {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
   const main = await app.firstWindow(), errors = [];
   main.on('pageerror', error => errors.push(error.message));
-  await main.locator('#connection-button').click();
+  await main.locator('#connect-sidebar').click();
   await main.locator('#server-url').fill(fixture.base);
   await main.locator('#handle').fill('fixture');
   await main.locator('#password').fill('fixture-password');

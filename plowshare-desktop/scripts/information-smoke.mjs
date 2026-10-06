@@ -14,7 +14,7 @@ try {
   fixture.setInformationExtraction('failed');
   app=await electron.launch({executablePath,args:[resolve('.')],env});
   const main=await app.firstWindow(),errors=[];main.on('pageerror',error=>errors.push(error.message));
-  await main.locator('#connection-button').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
+  await main.locator('#connect-sidebar').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
   await main.locator('#library-open').click();
   // Library is an embedded WebContentsView; observe the loaded page rather than a native-window event.
   await expect.poll(()=>app.windows().some(page=>page.url()==='plowshare://app/library.html'),{timeout:30000}).toBe(true);

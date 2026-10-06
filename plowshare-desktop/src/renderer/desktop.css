@@ -765,3 +765,20 @@
 .information-panel form[data-tag-groups] { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .information-panel form[data-tag-groups] label { display: flex; flex-direction: column; gap: 6px; }
 .information-panel form[data-tag-groups] textarea { width: 100%; min-height: 90px; resize: vertical; }
+
+.connection-menu {
+  position: fixed;
+  inset: 60px 12px auto auto;
+  margin: 0;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 90px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.connection-menu button { display: block; width: 100%; text-align: left; padding: 10px; }
+.connection-menu small { display: block; overflow-wrap: anywhere; }
+.connection-menu [aria-current="true"] { font-weight: bold; border-left: 3px solid currentColor; }

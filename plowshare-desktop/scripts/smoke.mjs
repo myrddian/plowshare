@@ -186,7 +186,7 @@ try {
   await expect(page.locator('#transcript .message.summary')).toHaveCount(0);
   await expect(page.locator('.conversation-alert')).toHaveCount(1);
 
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture');
   await page.locator('#password').fill('wrong-password');
@@ -578,7 +578,7 @@ try {
   assert.equal(errors.length, 0, errors.join('\n'));
 
   fixture.appendTurn('fixture-first', 'A result delivered while disconnected.');
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#password').fill('');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected');
@@ -602,13 +602,13 @@ try {
   assert.equal(await copiedText(), longAnswer, 'Copy includes the ending of a long answer.');
   assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 3, 'Reconnect does not resubmit agent work.');
 
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#password').fill('');
   await page.locator('#handle').fill('');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toContainText('Connected');
   assert.equal(fixture.loginCount(), 1, 'Reconnect uses the saved session instead of another password login.');
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#use-demo').click();
   await expect.poll(() => liveTrajectory.isClosed()).toBe(true);
   await expect.poll(() => reconnectActivity.isClosed()).toBe(true);

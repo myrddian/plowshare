@@ -7,9 +7,17 @@ import {
   writeFile,
   readdir,
   stat,
+  rename,
 } from 'node:fs/promises';
 import { join, relative, isAbsolute, sep } from 'node:path';
-import { homedir } from 'node:os';
+import {
+  canonicalServer,
+  connectionDirectory,
+  localLock,
+  privateDirectory,
+  privateFile,
+  userConfigDirectory,
+} from './connections.ts';
 
 export const PERSONAL_SECTIONS = [
   'In',
@@ -31,61 +39,128 @@ export async function personalDirectory(
   server: string,
   account: string,
   project: string,
-  home = homedir(),
+  home?: string,
 ): Promise<string> {
-  const root = join(home, '.plowshare', 'personal');
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  if ((await lstat(root)).isSymbolicLink())
-    throw new Error('Personal space must be a directory, not a symbolic link');
-  const canonical = await realpath(root);
-  const config = join(canonical, '.plowshare');
-  try {
-    if ((await lstat(config)).isSymbolicLink())
-      throw new Error(
-        'Personal metadata must be a directory, not a symbolic link',
+  const storage =
+    home === undefined ? userConfigDirectory() : join(home, '.plowshare');
+  const scope = connectionDirectory(server, account, storage);
+  await privateDirectory(storage);
+  await privateDirectory(join(storage, 'connections'));
+  await privateDirectory(scope);
+  return localLock(storage, 'personal-migration', async () => {
+    const root = join(scope, 'personal');
+    const legacy = join(storage, 'personal');
+    try {
+      const info = await lstat(legacy);
+      if (!info.isDirectory() || info.isSymbolicLink())
+        throw new Error('Legacy Personal must be a real directory.');
+      await privateFile(join(legacy, '.plowshare', 'personal.json'));
+      const metadata = await lstat(join(legacy, '.plowshare'));
+      if (!metadata.isDirectory() || metadata.isSymbolicLink())
+        throw new Error('Legacy Personal metadata must be a real directory.');
+      const owner: unknown = JSON.parse(
+        await readFile(join(legacy, '.plowshare', 'personal.json'), 'utf8'),
       );
-  } catch (error) {
-    if (errorCode(error) !== 'ENOENT') throw error;
-  }
-  const claim = join(config, 'personal.json');
-  try {
-    if ((await lstat(claim)).isSymbolicLink())
+      if (
+        !owner ||
+        typeof owner !== 'object' ||
+        !('server' in owner) ||
+        typeof owner.server !== 'string' ||
+        !('account' in owner) ||
+        typeof owner.account !== 'string' ||
+        !('project' in owner) ||
+        typeof owner.project !== 'string'
+      )
+        throw new Error(
+          'Legacy Personal ownership is ambiguous. Preserve the old checkout and restore its server/account/project ownership metadata before migrating.',
+        );
+      if (
+        canonicalServer(owner.server) === canonicalServer(server) &&
+        owner.account === account
+      ) {
+        if (owner.project !== project)
+          throw new Error(
+            'Legacy Personal project ownership differs. Resolve its ownership before migration.',
+          );
+        try {
+          await lstat(root);
+          throw new Error(
+            'Both legacy and scoped Personal checkouts exist. Preserve both and resolve the duplicate before migrating.',
+          );
+        } catch (error) {
+          if (errorCode(error) !== 'ENOENT') throw error;
+        }
+        await rename(legacy, root);
+      }
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error;
+      // An existing legacy directory with missing ownership must remain untouched.
+      try {
+        await lstat(legacy);
+        throw new Error(
+          'Legacy Personal ownership is missing. Preserve the checkout and restore its personal.json ownership metadata before migrating.',
+          { cause: error },
+        );
+      } catch (missing) {
+        if (errorCode(missing) !== 'ENOENT') throw missing;
+      }
+    }
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    if ((await lstat(root)).isSymbolicLink())
       throw new Error(
-        'Personal ownership metadata must not be a symbolic link',
+        'Personal space must be a directory, not a symbolic link',
       );
-  } catch (error) {
-    if (errorCode(error) !== 'ENOENT') throw error;
-  }
-  const expected = { server: server.replace(/\/$/, ''), account, project };
-  let owned: unknown;
-  try {
-    owned = JSON.parse(await readFile(claim, 'utf8'));
-  } catch (error) {
-    if (errorCode(error) !== 'ENOENT') throw error;
-    if ((await readdir(canonical)).length)
+    const canonical = await realpath(root);
+    const config = join(canonical, '.plowshare');
+    try {
+      if ((await lstat(config)).isSymbolicLink())
+        throw new Error(
+          'Personal metadata must be a directory, not a symbolic link',
+        );
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error;
+    }
+    const claim = join(config, 'personal.json');
+    try {
+      if ((await lstat(claim)).isSymbolicLink())
+        throw new Error(
+          'Personal ownership metadata must not be a symbolic link',
+        );
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error;
+    }
+    const expected = { server: canonicalServer(server), account, project };
+    let owned: unknown;
+    try {
+      owned = JSON.parse(await readFile(claim, 'utf8'));
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error;
+      if ((await readdir(canonical)).length)
+        throw new Error(
+          'The personal directory has unclaimed files. Move it aside before connecting this account.',
+          { cause: error },
+        );
+      await mkdir(config, { mode: 0o700 });
+      await writeFile(claim, JSON.stringify(expected) + '\n', {
+        flag: 'wx',
+        mode: 0o600,
+      });
+      owned = expected;
+    }
+    const held = owned as Record<string, unknown>;
+    if (
+      !held ||
+      typeof held.server !== 'string' ||
+      canonicalServer(held.server) !== expected.server ||
+      held.account !== account ||
+      held.project !== project
+    ) {
       throw new Error(
-        'The personal directory has unclaimed files. Move it aside before connecting this account.',
-        { cause: error },
+        'The personal directory belongs to another server or account. Move it aside before connecting this account.',
       );
-    await mkdir(config, { mode: 0o700 });
-    await writeFile(claim, JSON.stringify(expected) + '\n', {
-      flag: 'wx',
-      mode: 0o600,
-    });
-    owned = expected;
-  }
-  const held = owned as Record<string, unknown>;
-  if (
-    !held ||
-    held.server !== expected.server ||
-    held.account !== account ||
-    held.project !== project
-  ) {
-    throw new Error(
-      'The personal directory belongs to another server or account. Move it aside before connecting this account.',
-    );
-  }
-  return canonical;
+    }
+    return canonical;
+  });
 }
 
 /** Canonical containment is checked on every read, including symlinks inside a section. */

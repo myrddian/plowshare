@@ -26,6 +26,7 @@ await test('desktop details survive a new store without persisting credentials o
       server: 'http://localhost:8091',
       account: 'alice',
       reconnect: true,
+      name: 'alice @ localhost:8091',
     });
     assert.equal((await stat(store.path)).mode & 0o777, 0o600);
     const saved = await readFile(store.path, 'utf8');
@@ -65,10 +66,14 @@ await test('desktop bookmarks follow the shared config override unless explicitl
       PLOWSHARE_CONFIG_DIR: '/shared',
       PLOWSHARE_DESKTOP_CONFIG: '/desktop',
     }),
+    '/shared',
+  );
+  assert.equal(
+    desktopConfigDirectory({ PLOWSHARE_DESKTOP_CONFIG: '/desktop' }),
     '/desktop',
   );
   assert.equal(
-    desktopConfigDirectory({ XDG_CONFIG_HOME: '/xdg' }),
-    '/xdg/plowshare',
+    desktopConfigDirectory({ XDG_CONFIG_HOME: '/xdg' }).endsWith('/.plowshare'),
+    true,
   );
 });

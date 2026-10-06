@@ -795,59 +795,16 @@ class InvariantsTest {
             + " written out.");
   }
 
-  /**
-   * The rule for who may address a presence is written down, with the condition that retires it.
-   *
-   * <p><b>The one invariant here that is about a sentence rather than about a string nobody should
-   * have committed</b>, and it is here because it guards the same class of failure from the other
-   * side. The others say <em>this must not appear</em>; this one says <em>this must not
-   * disappear</em>.
-   *
-   * <p>Presence let a caller cause reads and writes on a machine they are not sitting at. That is a
-   * new capability, and the design spec's §4 says what must not happen to it: <em>"What must not
-   * happen is that the rule is absent and the behaviour is discovered."</em> The rule is that
-   * {@code plowshare.auth} is single-user — one operator, one credential — so the operator may
-   * address any presence they have running, and it is an argument from there being exactly one
-   * principal rather than a permission anybody granted.
-   *
-   * <p><b>Nothing else can hold it.</b> The rule's implementation is the <em>absence</em> of a
-   * check: {@code AgentsConfig.runProviders} routes on the project and never looks at who asked. No
-   * behavioural test can distinguish "we decided one principal needs no check" from "nobody thought
-   * about it" — both compile to the same code, and both pass every test in this repository. What
-   * separates them is the paragraph, so the paragraph is what is pinned.
-   *
-   * <p>Three phrases and not one: the <b>rule</b>, the <b>reason</b> it holds, and the <b>condition
-   * under which it stops holding</b>. A rewrite that kept the rule and dropped the third would
-   * leave the next person to add a second user with nothing telling them this is the sentence to
-   * revisit.
-   */
+  /** Presence routing documents the existing authentication, membership and workspace fences. */
   @Test
   void the_presence_registry_states_who_may_address_a_presence() throws IOException {
     String rule = Files.readString(ROOT.resolve(PRESENCE_REGISTRY), StandardCharsets.UTF_8);
-
+    assertTrue(rule.contains("not authorization"), "Presence metadata must not confer access");
     assertTrue(
-        rule.contains("the operator may address any presence they have running"),
-        PRESENCE_REGISTRY
-            + " no longer states the rule for who may address a"
-            + " presence. A caller can cause reads and writes on a machine they are"
-            + " not sitting at, and the code that permits it is the ABSENCE of a"
-            + " check — so nothing but this sentence can tell a reader it was"
-            + " decided rather than overlooked.");
+        rule.contains("project membership"), "Declarations require authenticated membership");
     assertTrue(
-        rule.contains("single-user"),
-        PRESENCE_REGISTRY
-            + " states the rule without the reason it holds. 'The"
-            + " operator may address any presence' is an argument from"
-            + " plowshare.auth being single-user — one operator, one credential —"
-            + " and without that it reads as a permission somebody granted.");
-    assertTrue(
-        rule.contains("MULTI-USER"),
-        PRESENCE_REGISTRY
-            + " no longer says what retires the rule. The moment there"
-            + " are two principals, 'one operator' stops being true and this is the"
-            + " paragraph that has to change; nothing else in the system would"
-            + " notice, which is why the marker is part of the invariant and not"
-            + " part of the prose around it.");
+        rule.contains("Personal ownership"), "Run routing retains Personal ownership checks");
+    assertTrue(rule.contains("workspace fence"), "Client filesystem boundaries remain explicit");
   }
 
   /**

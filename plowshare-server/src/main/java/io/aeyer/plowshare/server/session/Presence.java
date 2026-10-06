@@ -89,6 +89,19 @@ public record Presence(String session, String machine, String root, String proje
    * one is dropped, so two spellings of one place are one identity rather than two.
    */
   public String canonicalName() {
+    return machine + SEPARATOR + locationPath() + SEPARATOR + project;
+  }
+
+  /**
+   * Whether two claims name the same location. Only leading/trailing slash spelling is normalized;
+   * paths on another machine must not be resolved using this server's filesystem semantics.
+   */
+  public boolean sameLocation(Presence other) {
+    Objects.requireNonNull(other, "other");
+    return machine.equals(other.machine()) && locationPath().equals(other.locationPath());
+  }
+
+  private String locationPath() {
     String between = root;
     while (!between.isEmpty() && between.charAt(0) == SEPARATOR) {
       between = between.substring(1);
@@ -96,7 +109,7 @@ public record Presence(String session, String machine, String root, String proje
     while (!between.isEmpty() && between.charAt(between.length() - 1) == SEPARATOR) {
       between = between.substring(0, between.length() - 1);
     }
-    return machine + SEPARATOR + between + SEPARATOR + project;
+    return between;
   }
 
   @Override

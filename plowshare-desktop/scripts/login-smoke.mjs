@@ -1,3 +1,4 @@
+import { connectionDirectory } from '../../sdk/node/build/connections.js';
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
@@ -10,7 +11,7 @@ const directory = await mkdtemp(join(tmpdir(), 'plowshare-desktop-login-'));
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: directory, PLOWSHARE_DESKTOP_PROFILE: join(directory, 'profile') };
 delete env.ELECTRON_RUN_AS_NODE; delete env.PLOWSHARE_DESKTOP_CONFIG;
 const fixture = await protocolFixture({ rotateTokens: true });
-const preference = join(directory, 'desktop-connection.json');
+const preference = join(directory, 'config.json');
 let app;
 const launch = async () => {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
@@ -23,16 +24,18 @@ const state = page => page.evaluate(async () => (await window.plowshare.request(
 const close = async () => { await app.close(); app = undefined; };
 try {
   let page = await launch();
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture');
   await page.locator('#password').fill('fixture-password');
   await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-dialog')).toBeHidden();
   assert.equal((await state(page)).connected, true);
-  assert.deepEqual(JSON.parse(await readFile(preference, 'utf8')), { version: 1, server: fixture.base, account: 'fixture', reconnect: true });
+  const config = JSON.parse(await readFile(preference, 'utf8'));
+  assert.equal(config.version, 1); assert.equal(config.connections.length, 1);
+  assert.equal(config.connections[0].server, fixture.base); assert.equal(config.connections[0].account, 'fixture'); assert.equal(config.connections[0].reconnect, true);
   assert.equal((await stat(preference)).mode & 0o777, 0o600);
-  const privateDirectory = join(directory, 'credentials');
+  const privateDirectory = join(connectionDirectory(fixture.base, 'fixture', directory), 'credentials');
   const files = await readdir(privateDirectory);
   assert.equal(files.length, 1);
   const saved = JSON.parse(await readFile(join(privateDirectory, files[0]), 'utf8'));
@@ -45,9 +48,11 @@ try {
   assert.equal((await state(page)).base, fixture.base);
   assert.equal((await state(page)).handle, 'fixture');
   assert.equal(fixture.loginCount(), 1, 'Fresh process must use saved tokens with no form submission.');
-  await assert.rejects(page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'another-account', password: '' }), fixture.base), /another account/);
-  assert.equal((await state(page)).handle, 'fixture');
-  await page.locator('#connection-button').click();
+  await assert.rejects(page.evaluate(base => window.plowshare.request({ action: 'connect', base, handle: 'another-account', password: '' }), fixture.base), /Sign in first/);
+  assert.equal((await state(page)).handle, 'another-account');
+  assert.equal((await state(page)).connected, false);
+  await page.evaluate(name => window.plowshare.request({ action: 'connection-select', name }), config.connections[0].name);
+  await page.locator('#connect-sidebar').click();
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#handle')).toHaveValue('fixture');
   await expect(page.locator('#password')).toHaveValue('');
@@ -63,7 +68,7 @@ try {
   await close();
   page = await launch();
   assert.equal((await state(page)).connected, false, 'Explicit disconnect must survive restart.');
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#password')).toHaveValue('');
   await page.locator('#submit-connection').click();
@@ -74,7 +79,7 @@ try {
   page = await launch();
   assert.equal((await state(page)).connected, false);
   assert.match((await state(page)).connectionPersistenceError, /Saved connection could not be restored/);
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await expect(page.locator('#server-url')).toHaveValue(fixture.base);
   await expect(page.locator('#handle')).toHaveValue('fixture');
   await page.locator('#password').fill('fixture-password');

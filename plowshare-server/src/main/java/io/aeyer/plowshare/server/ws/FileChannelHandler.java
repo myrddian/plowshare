@@ -946,9 +946,9 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
    *       Logged and dropped, and the socket serves. Refusing the whole upgrade would take a
    *       working file channel away over an identity component, and accepting it would put a name
    *       in the registry that no move operation could resolve;
-   *   <li><b>a conflict</b> — another live session roots that project, or the archive says some
-   *       other place already holds it. The socket is closed with the sentence naming the holder,
-   *       and this answers false so the caller attaches nothing.
+   *   <li><b>a conflict</b> — another live session roots that project at a different location, or
+   *       the archive says some other place already holds it. The socket is closed with the
+   *       sentence naming the holder, and this answers false so the caller attaches nothing.
    * </ul>
    *
    * <h2>The registry first, then the row, and the order is not arbitrary</h2>
@@ -1017,10 +1017,13 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       presences.declare(claim);
     } catch (PresenceConflictException taken) {
       log.warn(
-          "Session '{}' claimed a project another session roots; closing it. {}",
+          "Session '{}' claimed a different location for an already rooted project; closing it. {}",
           id,
           taken.getMessage());
-      String reason = "'" + claim.project() + "' is already rooted by another session";
+      String reason =
+          "'"
+              + claim.project()
+              + "' is rooted elsewhere; use its directory or reconnect explicitly";
       Optional<Presence> holder = presences.serving(claim.project());
       if (holder.isPresent()
           && handleOn(socket) != null

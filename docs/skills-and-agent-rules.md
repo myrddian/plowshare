@@ -16,7 +16,7 @@ A connected project uses `.plowshare/skills/<name>/SKILL.md`. The server's data
 tree uses `projects/<project-id>/skills/<name>/SKILL.md` and
 `global/skills/<name>/SKILL.md`. Shipped packages use `skills/<name>/SKILL.md` in
 the resource bundle. Each account can also put reusable packages in
-`~/.plowshare/personal/Resources/skills/<name>/SKILL.md`; the Personal union
+`~/.plowshare/connections/<server-account-key>/personal/Resources/skills/<name>/SKILL.md`; the Personal union
 synchronizes them to the server. Authority is server project, rooted session,
 account Personal, server global, then shipped. See [Personal space](personal-space.md). A malformed or unreadable override does not select a lower-tier
 package with the same name. An unreadable authority tier stops fallback and

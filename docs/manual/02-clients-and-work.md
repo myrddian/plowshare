@@ -114,3 +114,16 @@ without deleting the server's project, conversation or retained knowledge.
 Git-backed synchronization is a separate explicit mode. Attaching files does not
 enable it. Resolve a conflict using the reviewed file and conflict state; a stale
 preview is not permission to overwrite a changed file.
+
+### Named connections
+
+Desktop, CLI and TUI use the same named server/account registry. The desktop
+connection dropdown lists saved connections and offers Add / manage connection.
+Use `plowshare-cli connection add NAME SERVER ACCOUNT`, then `--connection NAME`
+for login or work. `plowshare-talk` accepts the same selection and connection
+management verbs. `connection select NAME` saves the default for future launches.
+Two accounts on one server and the same handle on different servers have separate
+sessions, Personal checkouts, bookmarks, drafts and job receipts. Switching closes
+local access without cancelling server work or replaying an uncertain submission.
+See [shared local login](../client-login.md) for precedence, storage, migration,
+rename/remove and recovery behavior.

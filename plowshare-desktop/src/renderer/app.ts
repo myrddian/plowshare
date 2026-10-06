@@ -161,7 +161,7 @@ try {
   /* Start with a clean view if a local draft is unreadable. */
 }
 
-function persist() {
+function persist(save = true) {
   if (!identity) return;
   preferences[identity] = {
     selected,
@@ -171,13 +171,33 @@ function persist() {
     chosenAgents,
     personalBotExpansion,
   };
-  try {
-    localStorage.setItem(
-      'plowshare.desktop.ui.v1',
-      JSON.stringify(preferences),
-    );
-  } catch {
-    /* Drafts still remain in this window if storage is full. */
+  if (!save) return;
+  if (state?.mode === 'live' && state.handle) {
+    const owner = identity;
+    const preference = preferences[identity];
+    if (preference)
+      void window.plowshare
+        .request({
+          action: 'connection-preferences',
+          server: state.base,
+          account: state.handle,
+          preference,
+        })
+        .catch((reason: unknown) => {
+          if (owner === identity)
+            error(
+              reason instanceof Error ? reason.message : errorMessage(reason),
+            );
+        });
+  } else {
+    try {
+      localStorage.setItem(
+        'plowshare.desktop.ui.v1',
+        JSON.stringify(preferences),
+      );
+    } catch {
+      /* Demo drafts remain available in this window. */
+    }
   }
 }
 function key(next: DesktopState) {
@@ -203,9 +223,10 @@ function update(next: DesktopState) {
   }
   const nextIdentity = key(next);
   if (nextIdentity !== identity) {
-    persist();
+    persist(false);
     identity = nextIdentity;
-    const saved = preferences[identity];
+    delete draft.dataset.conversation;
+    const saved = next.localPreferences ?? preferences[identity];
     drafts = saved?.drafts ?? {};
     selected = saved?.selected ?? '';
     scope = saved?.scope ?? (next.mode === 'demo' ? 'Research' : '');
@@ -260,7 +281,7 @@ function update(next: DesktopState) {
     signature = '';
   }
   render();
-  persist();
+  persist(state.mode === 'demo');
   followSelection();
 }
 function followSelection() {
@@ -287,9 +308,11 @@ async function request(command: Request) {
   return reply;
 }
 function action(command: Request) {
-  void request(command).catch((reason: unknown) =>
-    error(reason instanceof Error ? reason.message : errorMessage(reason)),
-  );
+  const owner = identity;
+  void request(command).catch((reason: unknown) => {
+    if (owner === identity)
+      error(reason instanceof Error ? reason.message : errorMessage(reason));
+  });
 }
 async function loadHistory(id = selected, before?: number) {
   if (!id || historyBusy.has(id)) return;
@@ -376,6 +399,8 @@ async function newConversation() {
   }
 }
 function openConnect() {
+  $<HTMLInputElement>('#connection-name').value =
+    state.selectedConnection ?? '';
   $<HTMLInputElement>('#server-url').value = state.base;
   $<HTMLInputElement>('#handle').value = state.handle;
   $<HTMLInputElement>('#password').value = '';
@@ -519,7 +544,12 @@ function render() {
     ? title(selected)
     : 'New conversation';
   $('#chat-title').textContent = selected ? title(selected) : 'An open field';
-  $('#connection-label').textContent = state.connection;
+  $('#connection-label').textContent = [
+    state.selectedConnection,
+    state.connection,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   $('#chat-footer-mode').textContent =
     state.mode === 'demo'
       ? 'Local demo · no model calls'
@@ -1321,7 +1351,89 @@ document.addEventListener('click', (event) => {
     action({ action: 'open-link', url: link.dataset.webLink });
   }
 });
-$('#connection-button').addEventListener('click', openConnect);
+const connectionMenu = $<HTMLElement>('#connection-menu');
+$('#connection-button').addEventListener('click', () => {
+  connectionMenu.innerHTML =
+    (state.namedConnections ?? [])
+      .map(
+        (row) =>
+          `<button type="button" data-connection="${esc(row.name)}" ${row.name === state.selectedConnection ? 'aria-current="true"' : ''}><strong>${esc(row.name)}</strong><small>${esc(row.account)} · ${esc(row.server)}</small></button>`,
+      )
+      .join('') +
+    '<button type="button" id="connection-manage">Add / manage connection…</button>';
+  connectionMenu.showPopover();
+  $('#connection-button').setAttribute('aria-expanded', 'true');
+  connectionMenu.querySelector<HTMLButtonElement>('button')?.focus();
+});
+connectionMenu.addEventListener('toggle', () =>
+  $('#connection-button').setAttribute(
+    'aria-expanded',
+    String(connectionMenu.matches(':popover-open')),
+  ),
+);
+connectionMenu.addEventListener('keydown', (event) => {
+  const buttons = [
+    ...connectionMenu.querySelectorAll<HTMLButtonElement>('button'),
+  ];
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const index =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? buttons.length - 1
+          : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) %
+            buttons.length;
+    buttons[index]?.focus();
+  }
+});
+connectionMenu.addEventListener(
+  'click',
+  ownedEvent(async (event: MouseEvent) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      'button',
+    );
+    if (!button) return;
+    connectionMenu.hidePopover();
+    if (button.id === 'connection-manage') {
+      openConnect();
+      return;
+    }
+    if (button.dataset.connection) {
+      try {
+        await request({
+          action: 'connection-select',
+          name: button.dataset.connection,
+        });
+      } catch (reason) {
+        openConnect();
+        $('#connect-error').textContent =
+          reason instanceof Error ? reason.message : errorMessage(reason);
+        $('#connect-error').hidden = false;
+      }
+    }
+  }),
+);
+for (const action of ['connection-rename', 'connection-remove'] as const) {
+  $('#' + action).addEventListener(
+    'click',
+    ownedEvent(async () => {
+      if (!state.selectedConnection)
+        throw new Error('Select a saved connection first.');
+      await request(
+        action === 'connection-rename'
+          ? {
+              action,
+              name: state.selectedConnection,
+              nextName: $<HTMLInputElement>('#connection-name').value,
+            }
+          : { action, name: state.selectedConnection },
+      );
+      dialog.close();
+    }),
+  );
+}
 $('#connect-sidebar').addEventListener('click', openConnect);
 $('#notice-connect').addEventListener('click', openConnect);
 $('#close-dialog').addEventListener('click', () => dialog.close());
@@ -1993,6 +2105,9 @@ $('#connection-form').addEventListener(
     try {
       await request({
         action: 'connect',
+        ...($<HTMLInputElement>('#connection-name').value.trim()
+          ? { name: $<HTMLInputElement>('#connection-name').value.trim() }
+          : {}),
         base: $<HTMLInputElement>('#server-url').value,
         handle: $<HTMLInputElement>('#handle').value,
         password,

@@ -455,3 +455,64 @@ await test('targeted help, group help, aliases and version work offline without 
   assert.equal(field(json(output), ['status']), 'version');
   assert.equal(reads, 0);
 });
+
+await test('CLI manages shared named connections including names with spaces and refuses a conflicting selection offline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'plowshare-cli-connections-'));
+  try {
+    let output = '',
+      failure = '';
+    const invoke = (args: string[]) =>
+      run(args, {
+        env: { PLOWSHARE_CONFIG_DIR: directory },
+        stdout: (text) => {
+          output = text;
+        },
+        stderr: (text) => {
+          failure = text;
+        },
+        stdin: async () => {
+          throw new Error(
+            'No stdin is needed for local connection management.',
+          );
+        },
+      });
+    assert.equal(
+      await invoke([
+        'connection',
+        'add',
+        'A name with spaces',
+        'https://server.example',
+        'alice',
+      ]),
+      0,
+    );
+    assert.ok(output.includes('A name with spaces'));
+    assert.equal(
+      await invoke([
+        'connection',
+        'rename',
+        'A name with spaces',
+        'Renamed account',
+      ]),
+      0,
+    );
+    assert.equal(await invoke(['connection', 'select', 'Renamed account']), 0);
+    assert.equal(
+      await invoke([
+        '--connection',
+        'Renamed account',
+        '--server',
+        'https://foreign.example',
+        'memory',
+        'index',
+      ]),
+      2,
+    );
+    assert.match(failure, /conflicts/);
+    assert.equal(await invoke(['connection', 'remove', 'Renamed account']), 0);
+    assert.equal(await invoke(['connection', 'list']), 0);
+    assert.deepEqual(list(json(output), ['connections']), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
