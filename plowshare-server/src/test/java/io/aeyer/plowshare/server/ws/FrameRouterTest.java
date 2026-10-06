@@ -4,11 +4,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.access.AccessRequest;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
+import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -27,6 +35,53 @@ import org.junit.jupiter.api.Test;
  * WebSocketSession} to a handler even if a test tried to.
  */
 class FrameRouterTest {
+
+  @Test
+  void usage_lineage_selection_reaches_handlers_without_bypassing_resource_authorization() {
+    var members = mock(ProjectMembers.class);
+    var resources = mock(ResourceScopeRepository.class);
+    var accounts = mock(AdminStore.class);
+    var conversation =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "cnv_1");
+    when(resources.projects(conversation)).thenReturn(List.of("resource-project"));
+    var handled = new java.util.concurrent.atomic.AtomicInteger();
+    Map<String, FrameHandler> handlers = new java.util.HashMap<>();
+    for (String operation : List.of("usage.models", "usage.calls", "usage.subscribe"))
+      handlers.put(
+          operation,
+          (payload, asking) -> {
+            handled.incrementAndGet();
+            return Outcome.ok(Map.of("scope", payload.get("scope")));
+          });
+    var router = new FrameRouter(handlers);
+    router.useAuthorization(new ProjectAuthorization(resources, members, accounts));
+    var asking = new Asking("session", "reader");
+    for (String operation : handlers.keySet())
+      for (String scope : List.of("direct", "subtree")) {
+        var body =
+            Map.<String, Object>of(
+                "scope", scope, "project", "explicit-project", "conversation", "cnv_1");
+        var outcome =
+            router.route(new Envelope("usage", operation, Envelope.CURRENT_VERSION, body), asking);
+        assertEquals(Code.OK, outcome.code());
+        assertEquals(Map.of("scope", scope), outcome.payload());
+      }
+    verify(members, times(6)).requireRole("explicit-project", "reader", ProjectRole.VIEWER);
+    verify(members, times(6)).requireRole("resource-project", "reader", ProjectRole.VIEWER);
+    doThrow(new CallerFault("resource project denied"))
+        .when(members)
+        .requireRole("resource-project", "reader", ProjectRole.VIEWER);
+    var denied =
+        router.route(
+            new Envelope(
+                "denied",
+                "usage.calls",
+                Envelope.CURRENT_VERSION,
+                Map.of("scope", "subtree", "conversation", "cnv_1")),
+            asking);
+    assertEquals(Code.BAD_REQUEST, denied.code());
+    assertEquals(6, handled.get(), "Denied usage reads must not reach their handler.");
+  }
 
   /**
    * What a channel routes a frame under — a session and no project, which is the whole of what a

@@ -11,6 +11,48 @@ import org.junit.jupiter.api.Test;
 
 class AccessRequestDecoderTest {
   @Test
+  void usage_lineage_scope_preserves_authorization_references() {
+    for (String scope : List.of("direct", "subtree")) {
+      var request =
+          AccessRequestDecoder.decode(
+              "usage.subscribe",
+              Map.of(
+                  "scope", scope,
+                  "project", "project",
+                  "conversation", "cnv_1",
+                  "run", "job_1",
+                  "orchestration", "orc_1"));
+      assertEquals(Set.of("project"), request.projects());
+      assertEquals(
+          List.of(
+              new AccessRequest.Resource(CONVERSATION, "cnv_1"),
+              new AccessRequest.Resource(JOB, "job_1"),
+              new AccessRequest.Resource(ORCHESTRATION, "orc_1")),
+          request.resources());
+      assertFalse(request.projectScope());
+    }
+  }
+
+  @Test
+  void usage_scope_rejects_object_scopes_and_invalid_lineage_values() {
+    for (String operation : List.of("usage.models", "usage.calls", "usage.subscribe"))
+      for (Object value :
+          List.of(
+              "project",
+              "SUBTREE",
+              " subtree ",
+              1,
+              true,
+              Map.of("kind", "project", "project", "other")))
+        assertThrows(
+            CallerFault.class,
+            () -> AccessRequestDecoder.decode(operation, Map.of("scope", value)));
+    assertThrows(
+        CallerFault.class,
+        () -> AccessRequestDecoder.decode("conversation.list", Map.of("scope", "subtree")));
+  }
+
+  @Test
   void decodes_explicit_and_resource_scopes_before_policy_runs() {
     var request =
         AccessRequestDecoder.decode(

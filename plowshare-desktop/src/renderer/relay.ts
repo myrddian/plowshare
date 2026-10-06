@@ -1,6 +1,7 @@
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import type {
   RelayScope,
+  RelayEvent,
   RelayReplies,
   RelayOperateRequest,
   RelayControlAction,
@@ -19,6 +20,7 @@ let snapshotValid = false;
 let operating = false;
 function disableControls() {
   snapshotValid = false;
+  more.disabled = true;
   for (const button of document.querySelectorAll<HTMLButtonElement>(
     '.relay-operation button',
   ))
@@ -93,14 +95,32 @@ function control(
       })(),
     );
   });
-  row.append(form);
+  if (row.id === 'relay-topic-actions') row.append(form);
+  else {
+    let management = row.querySelector<HTMLDetailsElement>('.relay-management');
+    if (!management) {
+      management = document.createElement('details');
+      management.className = 'relay-management';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Manage';
+      const note = document.createElement('p');
+      note.textContent =
+        'Requires project manager access and a reason. Removal requires inactive configuration and empty history. Abandonment does not cancel receiver work.';
+      management.append(summary, note);
+      row.append(management);
+    }
+    management.append(form);
+  }
 }
 
 const text = (id: string, value: string) => {
   document.querySelector(id)!.textContent = value;
 };
 const selected = (): RelayScope =>
-  scope.value === ':system:' ? { system: true } : { project: scope.value };
+  // Send the discriminator explicitly so the viewer also works with older strict decoders.
+  scope.value === ':system:'
+    ? { system: true }
+    : { project: scope.value, system: false };
 const article = (title: string, body: string): HTMLElement => {
   const row = document.createElement('article');
   const heading = document.createElement('strong');
@@ -111,6 +131,90 @@ const article = (title: string, body: string): HTMLElement => {
   row.append(content);
   return row;
 };
+/** Render the typed payload as readable content; wire details remain available on demand. */
+function eventCard(event: RelayEvent): HTMLElement {
+  const row = document.createElement('article');
+  const heading = document.createElement('strong');
+  const message = document.createElement('p');
+  message.className = 'relay-message';
+  const payload = event.payload;
+  switch (payload.kind) {
+    case 'TEXT':
+      heading.textContent = 'Message';
+      message.textContent = payload.text;
+      break;
+    case 'SCHEDULE_DUE':
+      heading.textContent = 'Scheduled work due';
+      message.textContent = `${payload.schedule} · ${payload.emits}\nDue ${payload.fireAt}`;
+      break;
+    case 'LIFECYCLE':
+      heading.textContent = 'Work status changed';
+      message.textContent = payload.lifecycle
+        ? `${payload.lifecycle.subject} · ${payload.lifecycle.state}\n${payload.lifecycle.source}`
+        : '';
+      break;
+    case 'WAKE_REQUESTED':
+      heading.textContent =
+        payload.wake?.type === 'MESSAGE'
+          ? 'Message wake requested'
+          : 'Board wake requested';
+      message.textContent = payload.wake?.target ?? '';
+      break;
+    case 'EMPTY':
+      heading.textContent = 'Signal published';
+      message.textContent = 'This event has no message body.';
+      break;
+  }
+  const meta = document.createElement('p');
+  meta.className = 'relay-card-meta';
+  meta.textContent = `#${event.position} · ${event.publisher} · ${event.publishedAt}`;
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'Event details';
+  const content = document.createElement('pre');
+  content.textContent = `Event: ${event.eventId}\nOccurred: ${event.occurredAt}\n${JSON.stringify(payload, null, 2)}${event.correlationId ? `\nCorrelation: ${event.correlationId}` : ''}${event.causationId ? `\nCause: ${event.causationId}` : ''}`;
+  details.append(summary, content);
+  row.append(heading, meta, message, details);
+  return row;
+}
+function empty(id: string, message: string) {
+  const note = document.createElement('p');
+  note.className = 'relay-empty';
+  note.textContent = message;
+  document.querySelector(id)!.replaceChildren(note);
+}
+function clearSnapshot(message: string) {
+  page = undefined;
+  disableControls();
+  text('#relay-policy', message);
+  for (const id of [
+    '#relay-gap',
+    '#relay-notice',
+    '#relay-error',
+    '#relay-topic-actions',
+    '#relay-page-position',
+  ])
+    text(id, '');
+  for (const id of [
+    '#relay-event-count',
+    '#relay-delivery-count',
+    '#relay-subscriber-count',
+  ])
+    text(id, '0');
+  for (const id of ['#relay-events', '#relay-subscribers', '#relay-branches'])
+    empty(id, message);
+  document.querySelector<HTMLDetailsElement>(
+    '#relay-topic-management',
+  )!.hidden = true;
+}
+function loading(value: boolean) {
+  document.querySelector<HTMLElement>('#relay-loading')!.hidden = !value;
+  document
+    .querySelector('#relay-events')!
+    .setAttribute('aria-busy', String(value));
+}
+const canRead = () =>
+  state?.mode === 'live' && state.connected && !!scope.value;
 function render(value: RelayReplies['relay.log']) {
   page = value;
   snapshotValid = true;
@@ -119,6 +223,9 @@ function render(value: RelayReplies['relay.log']) {
   )!;
   topicActions.replaceChildren();
   control(topicActions, value, 'REMOVE_TOPIC', 'Remove inactive empty topic');
+  document.querySelector<HTMLDetailsElement>(
+    '#relay-topic-management',
+  )!.hidden = !topicActions.childElementCount;
   text(
     '#relay-policy',
     `${value.scope.project ?? 'Server system topics'} · ${value.topic.name} · ${value.topic.kind} · retained for ${value.topic.retentionSeconds}s${value.topic.maxRecords ? ` / ${value.topic.maxRecords} records` : ''} · published through ${value.topic.through} · expired through ${value.topic.expiredThrough}`,
@@ -131,27 +238,16 @@ function render(value: RelayReplies['relay.log']) {
   );
   const events = document.querySelector('#relay-events')!;
   events.replaceChildren();
-  for (const event of value.events)
-    events.append(
-      article(
-        `${event.position} · ${event.eventId}`,
-        `${event.publisher} · ${event.publishedAt}
-Occurred: ${event.occurredAt}
-${JSON.stringify(event.payload, null, 2)}${
-          event.correlationId
-            ? `
-Correlation: ${event.correlationId}`
-            : ''
-        }${
-          event.causationId
-            ? `
-Cause: ${event.causationId}`
-            : ''
-        }`,
-      ),
-    );
+  text('#relay-event-count', String(value.events.length));
+  text('#relay-subscriber-count', String(value.subscribers.length));
+  text('#relay-delivery-count', String(value.branches.length));
+  text(
+    '#relay-page-position',
+    `Through #${value.next} of #${value.topic.through}`,
+  );
+  for (const event of value.events) events.append(eventCard(event));
   if (!value.events.length)
-    events.textContent = 'No retained events in this page.';
+    empty('#relay-events', 'No retained events in this page.');
   const subs = document.querySelector('#relay-subscribers')!;
   subs.replaceChildren();
   for (const sub of value.subscribers) {
@@ -185,12 +281,13 @@ Cause: ${event.causationId}`
     }
     subs.append(row);
   }
-  if (!value.subscribers.length) subs.textContent = 'No subscribers.';
+  if (!value.subscribers.length)
+    empty('#relay-subscribers', 'No subscribers have observed this topic.');
   const branches = document.querySelector('#relay-branches')!;
   branches.replaceChildren();
   for (const branch of value.branches) {
     const row = article(
-      `${branch.position} · ${branch.name} · ${branch.state}`,
+      branch.name,
       `${branch.subscriber} → ${branch.receiver}
 ${branch.updatedAt}${
         branch.failure
@@ -204,9 +301,23 @@ Receipt: ${branch.receiptNamespace} ${branch.receiptId}`
           : ''
       }`,
     );
+    const heading = row.querySelector('strong')!;
+    const header = document.createElement('div');
+    header.className = 'relay-card-header';
+    const status = document.createElement('span');
+    status.className = 'relay-status';
+    status.dataset['state'] = branch.state;
+    status.textContent = branch.state;
+    heading.replaceWith(header);
+    header.append(heading, status);
+    const position = document.createElement('p');
+    position.className = 'relay-card-meta';
+    position.textContent = `Event #${branch.position}`;
+    header.after(position);
     if (branch.conversation) {
       const button = document.createElement('button');
       button.textContent = 'Open trajectory';
+      button.className = 'secondary-button';
       button.addEventListener('click', () =>
         background(
           window.plowshare.request({
@@ -251,13 +362,15 @@ Handler: ${branch.handlerHash}`
     row.append(hashes);
     branches.append(row);
   }
-  if (!value.branches.length) branches.textContent = 'No retained deliveries.';
+  if (!value.branches.length)
+    empty('#relay-branches', 'No retained deliveries for this topic.');
   more.disabled = BigInt(value.next) >= BigInt(value.topic.through);
 }
 async function read(after = '0') {
   disableControls();
   const version = ++generation;
-  if (!topic.value) return;
+  if (!canRead() || !topic.value) return;
+  loading(true);
   try {
     const reply = await window.plowshare.request({
       action: 'relay-read',
@@ -269,12 +382,19 @@ async function read(after = '0') {
     text('#relay-error', '');
   } catch (error) {
     if (version === generation)
-      text('#relay-error', `${errorMessage(error)} · Last snapshot retained.`);
+      text(
+        '#relay-error',
+        `${errorMessage(error)}${page ? ' · Last snapshot retained.' : ''}`,
+      );
+  } finally {
+    if (version === generation) loading(false);
   }
 }
 async function topics() {
   disableControls();
   const version = ++generation;
+  if (!canRead()) return;
+  loading(true);
   try {
     const reply = await window.plowshare.request({
       action: 'relay-read',
@@ -293,47 +413,59 @@ async function topics() {
       topic.value = previous;
     text('#relay-error', '');
     if (topic.value) await read();
-    else {
-      page = undefined;
-      more.disabled = true;
-      text('#relay-policy', 'No registered topics in this scope.');
-      for (const id of [
-        '#relay-events',
-        '#relay-subscribers',
-        '#relay-branches',
-        '#relay-gap',
-        '#relay-topic-actions',
-      ])
-        text(id, '');
-    }
+    else clearSnapshot('No registered topics in this scope.');
   } catch (error) {
     if (version === generation)
-      text('#relay-error', `${errorMessage(error)} · Last snapshot retained.`);
+      text(
+        '#relay-error',
+        `${errorMessage(error)}${page ? ' · Last snapshot retained.' : ''}`,
+      );
+  } finally {
+    if (version === generation) loading(false);
   }
 }
 function update(next: DesktopState) {
   state = next;
-  if (!state.connected) disableControls();
+  if (!state.connected) {
+    ++generation;
+    disableControls();
+    loading(false);
+  }
+  scope.disabled = !state.connected;
+  topic.disabled = !state.connected;
+  document.querySelector<HTMLButtonElement>('#relay-refresh')!.disabled =
+    !state.connected;
   text(
     '#relay-connection',
     state.mode === 'demo'
       ? 'Connect a server to inspect Relay logs.'
       : `${state.base} · ${state.handle} · ${state.connected ? 'Connected' : 'Disconnected · last snapshot'}`,
   );
-  const nextIdentity = `${state.base}|${state.handle}|${state.connected}|${JSON.stringify(state.projects.map((project) => project.name))}`;
+  const nextIdentity = `${state.base}|${state.handle}|${state.connected}|${state.serverAdmin}|${JSON.stringify(state.projects.map((project) => project.name))}`;
   if (identity === nextIdentity) return;
   identity = nextIdentity;
   const previous = scope.value;
   scope.replaceChildren();
   for (const project of state.projects)
     scope.add(new Option(project.name, project.name));
-  scope.add(new Option('Server system topics (administrator)', ':system:'));
+  if (state.serverAdmin)
+    scope.add(new Option('Server system topics (administrator)', ':system:'));
   if ([...scope.options].some((option) => option.value === previous))
     scope.value = previous;
-  if (state.mode === 'live' && state.connected) background(topics());
+  if (state.mode === 'live' && state.connected) {
+    clearSnapshot('Loading retained events…');
+    background(topics());
+  }
 }
-scope.addEventListener('change', () => background(topics()));
-topic.addEventListener('change', () => background(read()));
+scope.addEventListener('change', () => {
+  topic.replaceChildren();
+  clearSnapshot('Loading topics for this scope…');
+  background(topics());
+});
+topic.addEventListener('change', () => {
+  clearSnapshot('Loading retained events…');
+  background(read());
+});
 document
   .querySelector('#relay-refresh')!
   .addEventListener('click', () => background(topics()));

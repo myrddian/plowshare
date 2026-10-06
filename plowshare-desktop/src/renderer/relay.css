@@ -1,12 +1,275 @@
-.relay-screen { padding: 24px; overflow: auto; height: 100vh; box-sizing: border-box; }
-.relay-controls { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; }
-.relay-controls label { display: grid; gap: 6px; }
-.relay-controls select { max-width: 340px; }
-.relay-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr); gap: 24px; }
-.relay-screen article { border: 1px solid var(--border, #525252); border-radius: 8px; padding: 12px; margin: 10px 0; overflow-wrap: anywhere; }
-.relay-screen pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
-#relay-error, #relay-gap { color: var(--warning, #cb9f55); }
-@media (max-width: 800px) { .relay-columns { grid-template-columns: 1fr; } }
-
-.relay-operation { display: flex; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }
-.relay-operation input { flex: 1; min-width: 12rem; }
+.relay-screen {
+  padding: 24px 28px;
+  overflow: auto;
+  height: 100vh;
+}
+.relay-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.relay-header h1 {
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.7px;
+}
+.relay-description,
+.relay-connection {
+  color: var(--muted);
+  font-size: 12px;
+}
+.relay-connection {
+  max-width: 38%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.relay-controls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.relay-controls label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 160px;
+  max-width: 280px;
+}
+.relay-controls .relay-topic-control {
+  max-width: 420px;
+}
+.relay-controls select {
+  width: 100%;
+  min-width: 0;
+  color: var(--ink);
+}
+#relay-loading {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+.relay-banner {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.relay-banner:empty {
+  display: none;
+}
+#relay-error,
+#relay-gap {
+  color: #edbe80;
+  border-color: #614b30;
+}
+.relay-context {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 16px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+#relay-policy {
+  overflow-wrap: anywhere;
+}
+#relay-topic-management {
+  max-width: 390px;
+  flex-shrink: 0;
+}
+.relay-screen summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+}
+.relay-screen summary:hover {
+  color: var(--ink);
+}
+.relay-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.relay-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.relay-panel-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.relay-panel-heading h2 {
+  font-size: 14px;
+  font-weight: 500;
+}
+.relay-panel-heading p {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.relay-count {
+  min-width: 24px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--muted);
+  font: 11px/1.8 var(--mono);
+  text-align: center;
+}
+.relay-inspector {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.relay-screen article {
+  padding: 16px 18px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--line);
+}
+.relay-screen article:last-child {
+  border-bottom: 0;
+}
+.relay-screen article strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.relay-card-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.relay-card-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 5px 0 10px;
+}
+.relay-message {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  margin: 10px 0;
+}
+.relay-screen pre {
+  font: 11px/1.7 var(--mono);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0;
+}
+.relay-screen details {
+  margin-top: 10px;
+}
+.relay-status {
+  font: 10px/1.6 var(--mono);
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  white-space: normal;
+  text-align: right;
+}
+.relay-status[data-state='ACCEPTED'] {
+  color: #aac6a5;
+  border-color: #465d40;
+}
+.relay-status[data-state='FAILED'],
+.relay-status[data-state='UNCERTAIN'],
+.relay-status[data-state='ABANDONED_UNCERTAIN'] {
+  color: #edbe80;
+  border-color: #614b30;
+}
+.relay-empty {
+  padding: 28px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.relay-page-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.relay-operation {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.relay-operation input {
+  flex: 1;
+  min-width: 120px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  font-size: 11px;
+}
+.relay-operation button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.relay-operation button:hover {
+  background: var(--tint);
+}
+.relay-management p {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 8px;
+}
+@media (max-width: 850px) {
+  .relay-screen {
+    padding: 20px;
+  }
+  .relay-columns {
+    grid-template-columns: 1fr;
+  }
+  .relay-context {
+    flex-direction: column;
+  }
+  #relay-topic-management {
+    max-width: 100%;
+  }
+}
+@media (max-width: 520px) {
+  .relay-header {
+    align-items: start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .relay-connection {
+    max-width: 100%;
+    text-align: left;
+  }
+  .relay-controls label {
+    max-width: none;
+  }
+}
