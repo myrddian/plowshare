@@ -108,16 +108,17 @@ embedding and derivation rather than using a character estimate. See the
 [embedding input contract](../embedding-evolution.md#input-tokenization-and-shared-chunks).
 
 Supply the database password and provider keys through your private environment
-(`LLM_API_KEY` for the generic pool) or the launcher's mode-0600 `~/.config/plowshare/secrets.env`. That file is sourced
-as shell assignments; it belongs outside the checkout. Keep authentication on
+(`LLM_API_KEY` for the generic pool) or an explicitly supplied external configuration.
+The launcher never discovers or sources credential files. Keep authentication on
 and complete normal first administrator setup. Use one separate development data
 directory, and preserve it if you want to keep the work.
 
 The packaged application settings and your private Spring overlay determine the
 effective pool layout. The generic packaged pool uses explicit endpoint/model
 values and maps both chat classes to the same model. Use
-`bin/plowshare --config /absolute/path/application-local.yml` for a different topology; see the
-[example overlay](../../bin/application-local.example.yml). A list overlay replaces
+`bin/plowshare --config /absolute/path/application.yml` for an external configuration;
+the [minimal example](../../bin/application-local.example.yml) uses one pool.
+Additional pools are optional. A list overlay replaces
 the whole pool list; retain every
 pool you intend to serve. Pool capacity, model context and timeouts have different
 purposes. Review [Server administration](09-server-administration.md) before
@@ -128,7 +129,8 @@ changing them.
 After building, start the source launcher in one terminal:
 
 ```sh
-bin/plowshare --no-build --data-dir /absolute/development/plowshare-data
+export PLOWSHARE_DATA_DIR=/absolute/development/plowshare-data
+bin/plowshare --no-build
 ```
 
 Replace the absolute path with your private development storage. The launcher

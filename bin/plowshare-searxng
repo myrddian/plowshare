@@ -1,111 +1,19 @@
 #!/usr/bin/env bash
-#
-# bin/plowshare-searxng -- bring up the SearXNG provider and register it.
-#
-#
-# Boot order
-# ----------
-#   1.  bin/plowshare-deployment     the server, on :8091
-#   2.  bin/plowshare-searxng        this: the provider, then registration
-#
-# That order is forced rather than stylistic. Registration is an HTTP call to
-# the server, using the administrator session saved by plowshare-cli setup or
-# login. Complete server setup before running this helper.
-#
-# Both are safe to re-run. ProviderStore.upsert is the whole of registration --
-# `ON CONFLICT (provider_key) DO UPDATE`, moving the URL rather than adding a
-# row, and resetting consecutiveFailures, on the argument that a redeployment
-# is a new thing wearing an old provider's key. So a second run after a restart
-# is the intended way to use this, not a thing to avoid.
-#
-#
-# Why this is not folded into bin/plowshare-deployment
-# ----------------------------------------------------
-# That script ends in `exec java -jar`: it BECOMES the server, so nothing
-# appended after it would ever run. Registration has to happen from a process
-# that outlives the handoff, which is this one.
-#
-# The architecture is not the reason. "Providers are external programs the
-# server does not own" is a rule about the SERVER's lifetime, not about an
-# operator's tooling -- a systemd unit would do exactly what this does.
-#
-#
-# What it does not do
-# -------------------
-# It does not own the provider it starts. If the port is already listening it
-# leaves that process alone, and it never kills one: stopping the server should
-# not silently take search down with it, and a script that supervised both
-# would need PID files and orphan handling to buy nothing.
-
+# Start only the adapter. Registration is a separate public-API operation.
 set -euo pipefail
-
-readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly REPO="$(cd "$HERE/.." && pwd)"
-DEPLOYMENT="${PLOWSHARE_DEPLOYMENT:-$HOME/.config/plowshare/deployment.env}"
-
-# Only names the caller left unset, so an exported variable still wins -- the
-# same order bin/plowshare states and bin/plowshare-deployment preserves.
-if [[ -f "$DEPLOYMENT" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        trimmed="${line#"${line%%[![:space:]]*}"}"
-        [[ -z "$trimmed" || "${trimmed:0:1}" == "#" || "$trimmed" != *=* ]] && continue
-        key="${trimmed%%=*}"; value="${trimmed#*=}"; key="${key//[[:space:]]/}"
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        value="${value%"${value##*[![:space:]]}"}"
-        [[ -z "${!key:-}" ]] && export "$key=$value"
-    done < "$DEPLOYMENT"
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    echo 'Usage: bin/plowshare-searxng [SPRING_ARGUMENTS...]'
+    echo 'Set SEARXNG_BASE_URL, SEARXNG_BIND and SEARXNG_PORT explicitly.'
+    echo 'Register separately with deploy/docker/register-search.mjs.'
+    exit 0
 fi
-
-SEARXNG_URL="${PLOWSHARE_EXT_SEARXNG_BASE_URL:-}"
-PORT="${PLOWSHARE_EXT_SEARXNG_PORT:-8100}"
-SERVER="${PLOWSHARE_URL:-http://127.0.0.1:8091}"
-JAR="$REPO/extensions/search-searxng/build/libs/search-searxng-0.1.0-SNAPSHOT.jar"
-LOG="${PLOWSHARE_EXT_SEARXNG_LOG:-/tmp/plowshare-searxng.log}"
-
-if [[ -z "$SEARXNG_URL" ]]; then
-    echo "plowshare-searxng: PLOWSHARE_EXT_SEARXNG_BASE_URL is not set." >&2
-    echo "                   Set it in $DEPLOYMENT -- there is no default," >&2
-    echo "                   because a provider that can reach nothing is worse" >&2
-    echo "                   than one that never started." >&2
+: "${SEARXNG_BASE_URL:?Set the existing SearXNG engine URL}"
+: "${SEARXNG_BIND:?Set the adapter listener address}"
+: "${SEARXNG_PORT:?Set the adapter listener port}"
+readonly REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+jar="$REPO/extensions/search-searxng/build/libs/search-searxng-0.1.0-SNAPSHOT.jar"
+if [[ ! -f "$jar" ]]; then
+    echo 'Build the adapter with ./gradlew :extensions:search-searxng:bootJar.' >&2
     exit 1
 fi
-
-listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
-
-# ---- 1. the provider process ---------------------------------------------
-if listening "$PORT"; then
-    echo "plowshare-searxng: something already listens on :$PORT -- leaving it."
-else
-    [[ -f "$JAR" ]] || { echo "plowshare-searxng: no jar at $JAR" >&2
-                         echo "                   ./gradlew :extensions:search-searxng:build" >&2
-                         exit 1; }
-    echo "plowshare-searxng: starting the provider on :$PORT against $SEARXNG_URL"
-    nohup java -jar "$JAR" \
-        --plowshare.ext.searxng.base-url="$SEARXNG_URL" \
-        --server.port="$PORT" > "$LOG" 2>&1 &
-fi
-
-for _ in $(seq 1 30); do
-    curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
-    sleep 1
-done
-curl -sf --max-time 3 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 || {
-    echo "plowshare-searxng: the provider never answered /health -- see $LOG" >&2; exit 1; }
-
-# ---- 2. the server, which must already be up ------------------------------
-for _ in $(seq 1 30); do
-    curl -s --max-time 2 -o /dev/null "$SERVER/" && break
-    sleep 1
-done
-curl -s --max-time 3 -o /dev/null "$SERVER/" 2>/dev/null || {
-    echo "plowshare-searxng: no server at $SERVER." >&2
-    echo "                   Start it first:  bin/plowshare-deployment" >&2
-    exit 1; }
-
-# ---- 3. register and append the ladder using the saved admin session ------
-# Provider registration and runtime configuration have no WebSocket contracts.
-# The shared helper renews once and sends each mutation once.
-PLOWSHARE_URL="$SERVER" PLOWSHARE_SEARCH_PROVIDER_URL="http://127.0.0.1:$PORT" \
-    node "$REPO/deploy/docker/register-search.mjs" --enable-ladder
-
-echo "plowshare-searxng: ready."
+exec java -jar "$jar" "$@"
