@@ -1,3 +1,4 @@
+import { connectionDirectory } from 'plowshare-client-node/connections';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -27,9 +28,27 @@ await test('job receipts survive restart, isolate server/account and preserve un
   ]);
   assert.deepEqual(await restarted.load('http://localhost:8091', 'two'), []);
   assert.deepEqual(await restarted.load('http://other:8091', 'one'), []);
-  assert.equal((await stat(journal.path)).mode & 0o777, 0o600);
   assert.equal(
-    /token|password|task|text/.test(await readFile(journal.path, 'utf8')),
+    (
+      await stat(
+        join(
+          connectionDirectory('http://localhost:8091', 'one', directory),
+          'desktop-jobs.json',
+        ),
+      )
+    ).mode & 0o777,
+    0o600,
+  );
+  assert.equal(
+    /token|password|task|text/.test(
+      await readFile(
+        join(
+          connectionDirectory('http://localhost:8091', 'one', directory),
+          'desktop-jobs.json',
+        ),
+        'utf8',
+      ),
+    ),
     false,
   );
 });
@@ -41,6 +60,6 @@ await test('corrupt recovery data is surfaced and not silently overwritten', asy
     journal.path,
     '{"version":1,"accounts":{"bad":[{"id":"job"}]}}',
   );
-  await assert.rejects(journal.load('server', 'account'), /invalid/);
-  await assert.rejects(journal.save('server', 'account', []), /invalid/);
+  await assert.rejects(journal.load('http://server', 'account'), /invalid/);
+  await assert.rejects(journal.save('http://server', 'account', []), /invalid/);
 });

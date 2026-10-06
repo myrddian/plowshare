@@ -41,7 +41,7 @@ try {
   await assert.rejects(board.evaluate(() => window.plowshare.request({ action: 'board-trajectory', conversation: 'demo-global' })), /displayed/);
   await board.close();
 
-  await page.locator('#connection-button').click(); await page.locator('#server-url').fill(fixture.base);
+  await page.locator('#connect-sidebar').click(); await page.locator('#server-url').fill(fixture.base);
   await page.locator('#handle').fill('fixture'); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected');
   const liveOpened = app.waitForEvent('window'); await page.locator('#board-open').click(); let live = await liveOpened; const liveBoard=live;
@@ -89,7 +89,7 @@ try {
   await live.screenshot({ path: 'build/smoke/board-compact.png' });
   fixture.disconnect(); await expect(live.locator('#board-error')).toContainText('Reconnect');
   await expect(live.locator('.swarm-member').first()).toContainText('A later board seat result.');
-  await page.locator('#connection-button').click(); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
+  await page.locator('#connect-sidebar').click(); await page.locator('#password').fill('fixture-password'); await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected'); await expect(live.locator('#board-error')).toBeHidden();
   await live.close(); await liveBoard.close();
   const reads = fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length;
@@ -97,7 +97,7 @@ try {
   assert.equal(fixture.frames.filter(f => f.type.startsWith('board.') || f.type === 'swarm.status').length, reads, 'Closing the inspector stops its reads.');
   const reopened = app.waitForEvent('window'); await page.locator('#board-open').click(); const ending = await reopened;
   await expect(ending.locator('#board-detail h2')).toHaveText('How should device sync work?');
-  await page.locator('#connection-button').click(); await page.locator('#use-demo').click();
+  await page.locator('#connect-sidebar').click(); await page.locator('#use-demo').click();
   await expect.poll(() => ending.isClosed()).toBe(true); await expect.poll(() => trajectory.isClosed()).toBe(true);
   assert.equal(fixture.frames.filter(f => ['board.post','board.open','board.topup','agent.run','inbox.read'].includes(f.type)).length, 0);
   assert.deepEqual(errors, []);

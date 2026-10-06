@@ -78,7 +78,7 @@ for lifecycle rules and configuration.
 ## Layout
 
 ```text
-~/.plowshare/personal/
+~/.plowshare/connections/<server-account-key>/personal/
   In/
   Out/
   Resources/
@@ -356,7 +356,7 @@ later startup does not overwrite edits or recreate deliberately removed files.
 For an existing account, connect its Personal files and run from this repository:
 
 ```sh
-node scripts/install-personal-starter.mjs "$HOME/.plowshare/personal"
+node scripts/install-personal-starter.mjs "$HOME/.plowshare/connections/<server-account-key>/personal"
 ```
 
 The installer verifies the Personal account claim and connected union, refuses

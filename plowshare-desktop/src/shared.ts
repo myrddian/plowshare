@@ -1,3 +1,4 @@
+import type { Preference } from './renderer/preferences.ts';
 import type { JobNotification } from 'plowshare-client-ts/operations/push';
 import type { ServerAdminCall } from './admin-input.ts';
 import type { InformationCall } from 'plowshare-client-ts/operations/information';
@@ -144,6 +145,15 @@ export interface DesktopState {
   mode: 'demo' | 'live';
   connected: boolean;
   connection: string;
+  localPreferences?: Preference;
+  namedConnections?: {
+    key: string;
+    name: string;
+    server: string;
+    account: string;
+    reconnect: boolean;
+  }[];
+  selectedConnection?: string;
   base: string;
   handle: string;
   projects: Project[];
@@ -358,7 +368,22 @@ export type Request =
       handle: string;
       password: string;
     }
-  | { action: 'connect'; base: string; handle: string; password: string }
+  | {
+      action: 'connect';
+      base: string;
+      handle: string;
+      password: string;
+      name?: string;
+    }
+  | { action: 'connection-select'; name: string }
+  | {
+      action: 'connection-preferences';
+      server: string;
+      account: string;
+      preference: Preference;
+    }
+  | { action: 'connection-rename'; name: string; nextName: string }
+  | { action: 'connection-remove'; name: string }
   | {
       action: 'personal-section';
       section: 'In' | 'Out' | 'Resources' | 'Archive' | 'Planning' | 'Bots';

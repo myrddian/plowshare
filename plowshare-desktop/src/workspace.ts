@@ -1,3 +1,4 @@
+import { connectionName } from 'plowshare-client-node/connections';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import type { JobStore, SavedJob } from './job-store.ts';
 import {
@@ -10,7 +11,12 @@ import { inspectionConversation } from './shared.ts';
 import { realpath } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { isAbsolute } from 'node:path';
-import { DesktopClient, serverConnector } from './client.ts';
+import {
+  DesktopClient,
+  serverConnector,
+  emptyConnectionState,
+  validatedLogin,
+} from './client.ts';
 import type { Connector } from './client.ts';
 import { identifyFolder } from './files.ts';
 import {
@@ -54,6 +60,10 @@ export class DesktopWorkspace {
   private jobRestoring = false;
   private unrestoredJobs: SavedJob[] = [];
   private lastReceipts = '';
+  private namedConnections: NonNullable<DesktopState['namedConnections']> = [];
+  private localPreferences: DesktopState['localPreferences'];
+  private selectedConnection: string | undefined;
+  private switches: Promise<unknown> = Promise.resolve();
   constructor(
     changed: (state: DesktopState) => void,
     store: ProjectStore,
@@ -100,6 +110,11 @@ export class DesktopWorkspace {
   }
   get state(): DesktopState {
     const state = structuredClone(this.control.state);
+    if (this.localPreferences !== undefined)
+      state.localPreferences = structuredClone(this.localPreferences);
+    state.namedConnections = structuredClone(this.namedConnections);
+    if (this.selectedConnection !== undefined)
+      state.selectedConnection = this.selectedConnection;
     state.personal = structuredClone(this.personal);
     if (this.operatorOwner)
       state.operator = structuredClone(this.operatorOwner.state.operator);
@@ -319,7 +334,10 @@ export class DesktopWorkspace {
     this.attachments.clear();
     if (clear) this.children.clear();
     await Promise.allSettled(
-      children.map((child) => child.dispatch({ action: 'disconnect' })),
+      children.map(async (child) => {
+        await child.dispatch({ action: 'disconnect' });
+        await child.shutdown();
+      }),
     );
   }
   async shutdown() {
@@ -474,6 +492,7 @@ export class DesktopWorkspace {
       ];
       this.scope = project.name;
     } catch (error) {
+      this.same(token);
       this.personal.error =
         error instanceof Error ? error.message : errorMessage(error);
     }
@@ -545,6 +564,10 @@ export class DesktopWorkspace {
     const mapping = this.saved.find((row) => row.name === project);
     if (mapping && !mapping.enabled) return; // An explicit pause is not undone by navigation.
     if (this.children.get(project)?.state.files.status === 'ready') return;
+    // A failed attachment requires an explicit Connect files action. Navigation, polling and
+    // run preparation must not repeatedly submit a claim the server has already refused.
+    const failed = this.errors.get(project);
+    if (failed) throw new Error(failed);
     // Recorded paths are offered for approval in the GUI. Navigation grants no new access.
     if (!mapping) return;
     const token = this.token;
@@ -565,6 +588,20 @@ export class DesktopWorkspace {
   dispatch(request: Request): Promise<Reply> {
     if (this.closing)
       return Promise.reject(new Error('The desktop is closing.'));
+    if (
+      [
+        'connect',
+        'connection-select',
+        'disconnect',
+        'demo',
+        'connection-rename',
+        'connection-remove',
+      ].includes(request.action)
+    ) {
+      const next = this.switches.then(() => this.dispatchRequest(request));
+      this.switches = next.catch(() => undefined);
+      return this.track(next);
+    }
     return this.track(this.dispatchRequest(request));
   }
   private async dispatchRequest(request: Request): Promise<Reply> {
@@ -582,24 +619,127 @@ export class DesktopWorkspace {
         this.restoring = undefined;
       }
     }
+    if (request.action === 'connection-preferences') {
+      if (
+        this.transitioning ||
+        this.control.state.mode !== 'live' ||
+        !this.control.state.handle
+      )
+        throw new Error(
+          'Wait for the selected connection before saving its view.',
+        );
+      const token = this.token;
+      const { base, handle } = this.control.state;
+      if (request.server !== base || request.account !== handle)
+        throw new Error('The connection view belongs to another identity.');
+      await this.connectionStore?.savePreferences?.(
+        base,
+        handle,
+        request.preference,
+      );
+      this.same(token);
+      this.localPreferences = structuredClone(request.preference);
+      return { state: this.state };
+    }
+    if (
+      request.action === 'connection-rename' ||
+      request.action === 'connection-remove'
+    ) {
+      if (!this.connectionStore?.rename || !this.connectionStore.remove)
+        throw new Error('Connection management is unavailable.');
+      if (request.action === 'connection-rename') {
+        await this.connectionStore.rename(request.name, request.nextName);
+        if (this.selectedConnection === request.name)
+          this.selectedConnection = request.nextName;
+      } else {
+        if (this.selectedConnection === request.name) {
+          await this.dispatchRequest({ action: 'disconnect' });
+          this.selectedConnection = undefined;
+        }
+        await this.connectionStore.remove(request.name);
+      }
+      await this.readConnections();
+      this.emit();
+      return { state: this.state };
+    }
+    if (request.action === 'connection-select') {
+      if (!this.connectionStore?.select)
+        throw new Error('Connection selection is unavailable.');
+      const row = await this.connectionStore.select(request.name);
+      request = {
+        action: 'connect',
+        base: row.server,
+        handle: row.account,
+        password: '',
+        name: row.name,
+      };
+    }
     if (request.action === 'server-setup') {
       const login = await this.control.initializeAdministrator(request);
       request = { action: 'connect', ...login, password: '' };
     }
     if (request.action === 'connect') {
       this.initialized = true;
-      const login = await this.control.login(request);
-      if (this.closing) throw new Error('The desktop is closing.');
-      const { base, handle } = login;
-      request = { ...request, ...login };
-      const sameAccount =
-        this.control.state.mode === 'live' &&
-        this.control.state.base === base &&
-        this.control.state.handle === handle;
+      const validated = validatedLogin(request);
+      request = { ...request, ...validated };
+      const requestedName =
+        request.name === undefined ? undefined : connectionName(request.name);
+      if (requestedName) {
+        const rows = (await this.connectionStore?.list?.()) ?? [];
+        const previous = rows.find((row) => row.name === requestedName);
+        if (
+          rows.some(
+            (row) =>
+              row.server === validated.base &&
+              row.account === validated.handle &&
+              row.name !== requestedName,
+          )
+        )
+          throw new Error(
+            'This identity already has a name. Rename that connection.',
+          );
+        if (
+          previous &&
+          (previous.server !== request.base.replace(/\/$/, '') ||
+            previous.account !== request.handle)
+        )
+          throw new Error(
+            'This name belongs to another server/account. Use a new name.',
+          );
+      }
+      // Persist the old receipts before fencing its subscribers and file work. No server job is cancelled.
+      await this.jobStore?.flush();
       this.transitioning = true;
       this.token = {};
       const token = this.token;
-      await this.closeChildren(!sameAccount);
+      const previousBase = this.control.state.base,
+        previousHandle = this.control.state.handle;
+      const pending = [...this.openings.values(), ...this.attachments.values()];
+      await this.closeChildren(true);
+      await this.control.dispatch({ action: 'disconnect' });
+      await this.control.shutdown();
+      await Promise.allSettled(pending);
+      this.personal = undefined;
+      this.scope = '';
+      this.saved = [];
+      this.owners.clear();
+      this.localPreferences = undefined;
+      this.selectedConnection = request.name;
+      let login;
+      try {
+        login = await this.control.login(request);
+      } catch (error) {
+        this.transitioning = false;
+        this.control.state = emptyConnectionState(request.base, request.handle);
+        this.control.state.connection = 'Authentication required';
+        this.emit();
+        throw error;
+      }
+      if (this.closing) throw new Error('The desktop is closing.');
+      const { base, handle } = login;
+      request = { ...request, ...login };
+      if (previousBase !== base || previousHandle !== handle)
+        this.authoring = undefined;
       this.same(token);
       this.operatorOwner = undefined;
       this.unrestoredJobs = [];
@@ -613,9 +753,28 @@ export class DesktopWorkspace {
       }
       this.same(token);
       try {
+        this.localPreferences = await this.connectionStore?.loadPreferences?.(
+          base,
+          handle,
+        );
+        this.same(token);
+        try {
+          await this.connectionStore?.save({
+            server: base,
+            account: handle,
+            reconnect: true,
+            ...(requestedName === undefined ? {} : { name: requestedName }),
+          });
+          await this.readConnections();
+          this.selectedConnection = (await this.connectionStore?.load())?.name;
+        } catch {
+          this.control.state.connectionPersistenceError =
+            'Connection details could not be saved. Reconnect manually after restarting the desktop.';
+        }
+        this.same(token);
         await this.control.dispatch(request);
         this.same(token);
-        await this.rememberConnection(true);
+        await this.rememberConnection(true, request.name);
         this.same(token);
         await this.mountPersonal(token);
         this.same(token);
@@ -674,6 +833,8 @@ export class DesktopWorkspace {
       this.emit();
       return { state: this.state };
     }
+    if (this.transitioning)
+      throw new Error('Wait for the connection switch to finish.');
     if (request.action === 'select') {
       await this.followView('chat', request.conversation);
       return { state: this.state };
@@ -937,14 +1098,19 @@ export class DesktopWorkspace {
         this.same(token);
         return { state: this.state, conversation: opened.conversation };
       } catch (error) {
-        if (launched && this.authoring?.status === 'launching') {
+        if (
+          token === this.token &&
+          launched &&
+          this.authoring?.status === 'launching'
+        ) {
           this.authoring.status = 'unknown';
           this.authoring.error =
             error instanceof Error ? error.message : errorMessage(error);
         }
         throw error;
       } finally {
-        if (request.action === 'builder-start') this.authoringBusy = false;
+        if (token === this.token && request.action === 'builder-start')
+          this.authoringBusy = false;
         this.emit();
       }
     }
@@ -1020,7 +1186,9 @@ export class DesktopWorkspace {
           'Project files are disconnected. Reconnect files before sending.',
         );
     }
+    const dispatchToken = this.token;
     const reply = await owner.dispatch(request);
+    this.same(dispatchToken);
     if (request.action === 'answer')
       await Promise.all(
         [this.control, ...this.children.values()]
@@ -1030,30 +1198,39 @@ export class DesktopWorkspace {
     this.emit();
     return { ...reply, state: this.state };
   }
-  private async rememberConnection(reconnect: boolean) {
+  private async rememberConnection(reconnect: boolean, name?: string) {
     if (!this.connectionStore || this.control.state.mode !== 'live') return;
     try {
       await this.connectionStore.save({
         server: this.control.state.base,
         account: this.control.state.handle,
         reconnect,
+        ...(name === undefined ? {} : { name }),
       });
+      const saved = await this.connectionStore.load();
+      this.selectedConnection = saved?.name;
+      await this.readConnections();
       delete this.control.state.connectionPersistenceError;
     } catch {
       this.control.state.connectionPersistenceError =
         'Connection details could not be saved. Reconnect manually after restarting the desktop.';
     }
   }
+  private async readConnections() {
+    this.namedConnections = (await this.connectionStore?.list?.()) ?? [];
+  }
   private async restoreConnection(): Promise<Reply> {
     const token = this.token;
     try {
       let saved = await this.connectionStore!.load();
+      await this.readConnections();
       if (!saved) {
         const servers = await savedLoginServers();
         if (servers.length === 1) saved = { ...servers[0]!, reconnect: true };
       }
       if (token !== this.token) return { state: this.state };
       if (!saved) return { state: this.state };
+      this.selectedConnection = saved.name;
       this.control.state.base = saved.server;
       this.control.state.handle = saved.account;
       this.emit();
@@ -1061,8 +1238,9 @@ export class DesktopWorkspace {
         return await this.dispatch({
           action: 'connect',
           base: saved.server,
-          handle: '',
+          handle: saved.account,
           password: '',
+          ...(saved.name === undefined ? {} : { name: saved.name }),
         });
       return { state: this.state };
     } catch (error) {

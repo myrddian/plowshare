@@ -1,8 +1,13 @@
+import {
+  scopedStateFile,
+  readStateFile,
+  atomicPrivateWrite,
+  localLock,
+  connectionKey,
+} from 'plowshare-client-node/connections';
 import { errorCode } from 'plowshare-client-ts/binding/values';
 import { isList, isObject } from 'plowshare-client-ts/binding/values';
-import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
-import { randomUUID } from 'node:crypto';
 
 export interface SavedProject {
   server: string;
@@ -37,10 +42,10 @@ export class ProjectConfig implements ProjectStore {
     this.directory = directory;
     this.path = join(directory, 'desktop-projects.json');
   }
-  private async read(): Promise<SavedProject[]> {
+  private async read(file = this.path): Promise<SavedProject[]> {
     let data: string;
     try {
-      data = await readFile(this.path, 'utf8');
+      data = await readStateFile(file, this.path, this.directory);
     } catch (error) {
       if (errorCode(error) === 'ENOENT') return [];
       throw error;
@@ -69,25 +74,41 @@ export class ProjectConfig implements ProjectStore {
   }
   async list(server: string, account: string) {
     await this.writes;
-    return (await this.read()).filter(
-      (row) => row.server === server && row.account === account,
-    );
+    return (
+      await this.read(
+        await scopedStateFile(
+          server,
+          account,
+          this.directory,
+          'desktop-projects.json',
+        ),
+      )
+    ).filter((row) => row.server === server && row.account === account);
   }
-  private update(change: (rows: SavedProject[]) => SavedProject[]) {
+  private update(
+    server: string,
+    account: string,
+    change: (rows: SavedProject[]) => SavedProject[],
+  ) {
     const work = this.writes.then(async () => {
-      const projects = change(await this.read());
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(
-          temporary,
-          JSON.stringify({ version: 1, projects }, null, 2) + '\n',
-          { mode: 0o600, flag: 'wx' },
-        );
-        await rename(temporary, this.path);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      const file = await scopedStateFile(
+        server,
+        account,
+        this.directory,
+        'desktop-projects.json',
+      );
+      return localLock(
+        this.directory,
+        'projects-' + connectionKey(server, account),
+        async () => {
+          const projects = change(
+            (await this.read(file)).filter(
+              (row) => row.server === server && row.account === account,
+            ),
+          );
+          await atomicPrivateWrite(file, { version: 1, projects });
+        },
+      );
     });
     this.writes = work.catch(() => undefined);
     return work;
@@ -95,7 +116,7 @@ export class ProjectConfig implements ProjectStore {
   put(project: SavedProject) {
     if (!valid(project))
       return Promise.reject(new Error('Invalid project mapping.'));
-    return this.update((rows) => [
+    return this.update(project.server, project.account, (rows) => [
       ...rows.filter(
         (row) =>
           row.server !== project.server ||
@@ -106,7 +127,7 @@ export class ProjectConfig implements ProjectStore {
     ]);
   }
   remove(server: string, account: string, name: string) {
-    return this.update((rows) =>
+    return this.update(server, account, (rows) =>
       rows.filter(
         (row) =>
           row.server !== server || row.account !== account || row.name !== name,

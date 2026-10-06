@@ -10,7 +10,7 @@ const env={...process.env,PLOWSHARE_CONFIG_DIR:join(profile,'credentials'),PLOWS
 let app;
 try {
  app=await electron.launch({executablePath,args:[resolve('.')],env});const main=await app.firstWindow(),errors=[];main.on('pageerror',e=>errors.push(e.message));
- await main.locator('#connection-button').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
+ await main.locator('#connect-sidebar').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
  const opening=app.waitForEvent('window');await main.locator('#library-open').click();const library=await opening;library.on('pageerror',e=>errors.push(e.message));
  await library.locator('#library-documents').click();
  await expect(library.locator('#library-results')).toContainText('50 / 52 documents');await library.locator('#documents-more').click();await expect(library.locator('#library-results')).toContainText('52 / 52 documents');

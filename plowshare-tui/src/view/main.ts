@@ -1,3 +1,9 @@
+import {
+  Connections,
+  manageConnections,
+  resolveConnection,
+  userConfigDirectory,
+} from 'plowshare-client-node/connections';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './background.ts';
 import { parseCommand as parseScheduleFileCommand } from 'plowshare-client-ts/operations/commands';
@@ -5822,8 +5828,38 @@ export function unreachable(trouble: unknown): boolean {
   );
 }
 
-export async function run(): Promise<void> {
-  const base = process.env['PLOWSHARE_URL'];
+export async function run(args: readonly string[] = []): Promise<void> {
+  const registry = new Connections(userConfigDirectory());
+  if (args[0] === 'connection') {
+    process.stdout.write(
+      JSON.stringify(
+        await manageConnections(registry, args.slice(1)),
+        null,
+        2,
+      ) + '\n',
+    );
+    return;
+  }
+  const selection: { name?: string; server?: string; account?: string } = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index],
+      value = args[index + 1];
+    if (
+      !value ||
+      !['--connection', '--server', '--account'].includes(flag ?? '')
+    )
+      throw new Error(
+        'Use --connection NAME, --server ORIGIN or --account HANDLE.',
+      );
+    if (flag === '--connection') selection.name = value;
+    else if (flag === '--server') selection.server = value;
+    else selection.account = value;
+  }
+  if (!selection.account && process.env['PLOWSHARE_ACCOUNT'])
+    selection.account = process.env['PLOWSHARE_ACCOUNT'];
+  const selected = await resolveConnection(registry, selection, process.env);
+  const base =
+    selected?.server ?? selection.server ?? process.env['PLOWSHARE_URL'];
   if (!base?.trim())
     throw new Error(
       'Set PLOWSHARE_URL to the server origin before starting the TUI.',
@@ -5883,9 +5919,15 @@ export async function run(): Promise<void> {
   themes?.onChange((next) => surface.restyle?.(next));
   try {
     const credentials =
-      process.env['PLOWSHARE_HANDLE'] || process.env['PLOWSHARE_PASSWORD']
+      process.env['PLOWSHARE_PASSWORD'] ||
+      (process.env['PLOWSHARE_HANDLE'] && !selected && !selection.account)
         ? undefined
-        : new Credentials(base, credentialDirectory());
+        : new Credentials(
+            base,
+            credentialDirectory(),
+            undefined,
+            selected?.account ?? selection.account,
+          );
     const agent = agentNamed(process.env);
     await converse({
       // The id this client listens under. Generated here because
@@ -5901,7 +5943,12 @@ export async function run(): Promise<void> {
           : { renew: () => credentials.renew({ base, fetch }) }),
       },
       ...(credentials === undefined ? {} : { credentials }),
-      handle: process.env['PLOWSHARE_HANDLE'] ?? '',
+      handle: credentials
+        ? ''
+        : (process.env['PLOWSHARE_HANDLE'] ??
+          selected?.account ??
+          selection.account ??
+          ''),
       password: process.env['PLOWSHARE_PASSWORD'] ?? '',
       ...(agent === undefined ? {} : { agent }),
       ...(project === undefined ? {} : { project }),
@@ -5948,5 +5995,5 @@ if (
   process.argv[1] !== undefined &&
   process.argv[1] === fileURLToPath(import.meta.url)
 ) {
-  background(run());
+  background(run(process.argv.slice(2)));
 }

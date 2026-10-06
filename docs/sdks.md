@@ -153,3 +153,13 @@ Integrations can authenticate with an expiring `pss_` bearer issued to a [Plowsh
 Event producers use the [explicit event payload contracts](event-payloads.md).
 Deployments must pass the restored-copy compatibility preflight before typed
 event reads are enabled; arbitrary manual event objects are no longer accepted.
+
+### Node connection configuration
+
+`plowshare-client-node/connections` owns the version 1 local registry, strict
+configuration decoding, canonical origin/account storage keys, selection precedence,
+private atomic writes and cross-process locks. `Connections` implements
+`ConnectionRegistry`; `resolveConnection` combines explicit selectors, environment
+and saved selection while refusing identity conflicts. `Credentials` accepts an
+explicit account as its fourth constructor argument and keeps refresh locking and
+uncertain-renewal fencing within that scope. See [client login](client-login.md).

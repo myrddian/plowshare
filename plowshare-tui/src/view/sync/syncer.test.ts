@@ -159,6 +159,54 @@ afterEach(async () => {
 });
 
 describe('syncer', () => {
+  it('two independent runtimes serialize reconciliation of one checkout and preserve edits', async () => {
+    const server = new FakeServer();
+    const first = make(server, [2, 50], { strict: true });
+    const second = make(server, [2, 50], { strict: true });
+    try {
+      await first.sync.run({ kind: 'on' });
+      await Promise.all([first.sync.connect(), second.sync.connect()]);
+      expect(server.sent.filter((type) => type === 'union.ready')).toHaveLength(
+        3,
+      );
+      await writeFile(join(root, 'a.txt'), 'shared edit\n');
+      await Promise.all([first.sync.connect(), second.sync.connect()]);
+      expect(
+        execFileSync('git', [
+          '--git-dir',
+          hub,
+          'show',
+          'main:a.txt',
+        ]).toString(),
+      ).toBe('shared edit\n');
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('shared edit\n');
+      await expect(
+        readFile(join(root, '.plowshare', 'sync.lock')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      first.sync.stop();
+      second.sync.stop();
+    }
+  });
+
+  it('a stopped client waiting for another checkout writer never sends a queued operation', async () => {
+    const server = new FakeServer();
+    const lifetime = new AbortController();
+    const { sync } = make(server, [2, 50], {
+      signal: lifetime.signal,
+      strict: true,
+    });
+    const lock = join(root, '.plowshare', 'sync.lock');
+    await mkdir(lock, { recursive: true });
+    const pending = sync.run({ kind: 'on' });
+    lifetime.abort();
+    sync.stop();
+    await expect(pending).rejects.toThrow();
+    expect(server.sent).toHaveLength(0);
+    // Cancellation does not remove the other writer's lock.
+    await expect(mkdir(lock)).rejects.toMatchObject({ code: 'EEXIST' });
+  });
+
   it('/sync on pushes a snapshot and goes live', async () => {
     const server = new FakeServer();
     const { sync } = make(server);

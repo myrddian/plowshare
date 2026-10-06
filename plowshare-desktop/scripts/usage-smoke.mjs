@@ -29,7 +29,7 @@ try {
   await main.locator('[data-context-details="schemas"] > summary').click();await expect(main.locator('[data-context-details="schemas"]')).toContainText('lookup');
   fixture.setRefuseSnapshot(true);await main.locator('#context-refresh').click();await expect(main.locator('#inspector-content [role="alert"]')).toContainText('last snapshot');fixture.setRefuseSnapshot(false);await main.locator('#context-count').click();await expect(main.locator('#inspector-content [role="alert"]')).toHaveCount(0);
   await mkdir('build/smoke',{recursive:true});await main.screenshot({path:'build/smoke/current-context.png'});
-  await main.locator('#connection-button').click();const opening=app.waitForEvent('window');await main.locator('#connection-usage').click();const usage=await opening;usage.on('pageerror',e=>errors.push(e.message));
+  await main.locator('#connect-sidebar').click();const opening=app.waitForEvent('window');await main.locator('#connection-usage').click();const usage=await opening;usage.on('pageerror',e=>errors.push(e.message));
   await expect(main.locator('#title-caption')).toHaveText('Usage');await expect(main.locator('#usage-open')).toHaveAttribute('aria-current','page');
   await expect(main.locator('#inspector')).toBeHidden();
   await expect(usage.locator('[data-usage-report]')).toContainText('Input tokens2,400');

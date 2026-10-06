@@ -4,6 +4,8 @@ import type {
 } from 'plowshare-client-ts/operations/union';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { localLock } from '../connections.ts';
 import type { Answering } from 'plowshare-client-ts/binding/channel';
 import {
   DELETE,
@@ -152,7 +154,12 @@ export function syncer(options: SyncerOptions): Syncer {
   let queue: Promise<unknown> = Promise.resolve();
 
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = queue.then(work, work);
+    // Two clients can share this checkout. Serialize the entire reconciliation, including hub
+    // claims and conflict decisions, so their Git commands cannot interleave on one shadow tree.
+    // A killed writer leaves a lock for explicit recovery; no client steals a live operation.
+    const locked = () =>
+      localLock(join(claim.root, '.plowshare'), 'sync', work, options.signal);
+    const next = queue.then(locked, locked);
     queue = next.catch(() => undefined);
     return next;
   };

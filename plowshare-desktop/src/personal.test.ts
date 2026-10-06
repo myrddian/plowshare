@@ -8,7 +8,7 @@ import {
   readPersonal,
 } from 'plowshare-client-node/personal';
 
-await test('personal mount is idempotent and refuses another account or server', async () => {
+await test('personal mount is idempotent and isolates accounts and servers', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plowshare-personal-'));
   try {
     const root = await personalDirectory(
@@ -26,12 +26,30 @@ await test('personal mount is idempotent and refuses another account or server',
       ),
       root,
     );
-    await assert.rejects(
-      personalDirectory('http://server', 'bob', 'personal:bob', home),
-      /another server or account/,
+    const bob = await personalDirectory(
+      'http://server',
+      'bob',
+      'personal:bob',
+      home,
     );
+    const other = await personalDirectory(
+      'http://other',
+      'alice',
+      'personal:alice',
+      home,
+    );
+    assert.notEqual(bob, root);
+    assert.notEqual(other, root);
+    assert.notEqual(other, bob);
+    await mkdir(join(root, 'In'));
+    await writeFile(join(root, 'In', 'alice.txt'), 'Alice');
+    assert.equal(
+      await personalDirectory('http://server', 'alice', 'personal:alice', home),
+      root,
+    );
+    await assert.rejects(readPersonal(bob, 'In', 'In/alice.txt'));
     await assert.rejects(
-      personalDirectory('http://other', 'alice', 'personal:alice', home),
+      personalDirectory('http://server', 'alice', 'wrong-project', home),
       /another server or account/,
     );
   } finally {

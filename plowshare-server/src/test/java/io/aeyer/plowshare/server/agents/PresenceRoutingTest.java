@@ -115,6 +115,57 @@ class PresenceRoutingTest {
   }
 
   @Test
+  void a_primary_withdrawal_changes_new_routing_without_rebinding_existing_providers() {
+    attached("first");
+    attached("second");
+    presences.declare(new Presence("first", "bench.local", "/srv/payments", "payments"));
+    presences.declare(new Presence("second", "bench.local", "/srv/payments", "payments"));
+    RunProviders providers = rootedOn("bench.local");
+    FileProvider pinned = remoteOf(providers.forRun(PAYMENTS, READ, "second", null));
+    pinned.roots();
+    presences.withdraw("first");
+    remoteOf(providers.forRun(PAYMENTS, READ, "second", null)).roots();
+    pinned.roots();
+    assertEquals(List.of("first", "second", "first"), channel.asked());
+  }
+
+  @Test
+  void a_server_checkout_standby_uses_its_own_session_and_membership_is_still_required() {
+    attached("first");
+    attached("second");
+    presences.declare(new Presence("first", "bench.local", "/srv/payments", "payments"));
+    presences.declare(new Presence("second", "bench.local", "/srv/payments", "payments"));
+    ProjectStore projects = mock(ProjectStore.class);
+    ProjectRecord row =
+        new ProjectRecord("payments", serverSide, List.of(), List.of(), "UNION", List.of("."));
+    when(projects.find("payments")).thenReturn(Optional.of(row));
+    when(projects.effectiveExclusions(any(ProjectRecord.class))).thenReturn(List.of());
+    var members = mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    when(members.mayWork("payments", "alice")).thenReturn(true);
+    RunProviders providers =
+        new AgentsConfig()
+            .runProviders(
+                projects,
+                channel,
+                sessions,
+                presences,
+                ImageStore.NONE,
+                UnionRouting.NONE,
+                members);
+    remoteOf(providers.forRun(PAYMENTS, READ, "second", "alice")).roots();
+    assertEquals(List.of("second"), channel.asked());
+    org.mockito.Mockito.doThrow(
+            new io.aeyer.plowshare.server.archive.ArchiveRefusedException("Not a contributor"))
+        .when(members)
+        .requireRole(
+            "payments", "mallory", io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR);
+    assertThrows(
+        io.aeyer.plowshare.server.archive.ArchiveRefusedException.class,
+        () -> providers.forRun(PAYMENTS, READ, "second", "mallory"));
+    assertEquals(List.of("second"), channel.asked(), "a denied caller performs no remote request");
+  }
+
+  @Test
   void the_machine_that_roots_a_project_serves_a_run_submitted_with_no_session_at_all() {
     attached("bench");
     presences.declare(new Presence("bench", "bench.local", "/srv/payments", "payments"));

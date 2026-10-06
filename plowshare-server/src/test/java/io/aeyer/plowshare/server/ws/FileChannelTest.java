@@ -1952,6 +1952,51 @@ class FileChannelTest {
         "and the project is still rooted, by the socket a human is looking at");
   }
 
+  @Test
+  void two_client_sessions_at_one_location_are_ready_and_a_primary_close_preserves_the_survivor()
+      throws Exception {
+    String query = rooting("bench.local", "/srv/shared", "shared") + "&ready=1";
+    Silent first = connect(FAST_PATH, "shared-first", query);
+    Silent second = connect(FAST_PATH, "shared-second", query);
+    assertTrue(fast.isConnected("shared-first"));
+    assertTrue(fast.isConnected("shared-second"));
+    for (int i = 0; i < 500 && (first.frames.isEmpty() || second.frames.isEmpty()); i++) {
+      Thread.sleep(5);
+    }
+    assertEquals(List.of("{\"ready\":true,\"project\":\"shared\"}"), List.copyOf(first.frames));
+    assertEquals(List.of("{\"ready\":true,\"project\":\"shared\"}"), List.copyOf(second.frames));
+    assertEquals("shared-first", Wiring.FAST_PRESENCES.serving("shared").orElseThrow().session());
+    RemoteProvider pinned = new RemoteProvider(fast, "shared-first", WRITE);
+    CompletableFuture<Throwable> waiting =
+        CompletableFuture.supplyAsync(
+            () -> caught(() -> pinned.read(Path.of("/srv/shared/pending"), FIRST)));
+    first.awaitRequests(1);
+    first.socket.close(1000, "first client exits");
+    assertTrue(waiting.get(10, TimeUnit.SECONDS) instanceof SessionGoneException);
+    for (int i = 0; i < 500 && Wiring.FAST_PRESENCES.rootedBy("shared-first").isPresent(); i++) {
+      Thread.sleep(5);
+    }
+    assertEquals("shared-second", Wiring.FAST_PRESENCES.serving("shared").orElseThrow().session());
+    assertEquals(0, second.requests.size(), "the interrupted request was not replayed");
+    second.answer = request -> FileReply.answered(request.id(), one("surviving client"));
+    RemoteProvider survivor = new RemoteProvider(fast, "shared-second", WRITE);
+    assertEquals("surviving client", text(survivor, Path.of("/srv/shared/new")));
+    assertTrue(fast.isConnected("shared-second"));
+  }
+
+  @Test
+  void a_refused_standby_never_withdraws_the_incumbent_presence() throws Exception {
+    String query = rooting("bench.local", "/srv/shared", "shared");
+    connect(FAST_PATH, "shared-first", query);
+    Wiring.ROOTED.refuseWith("membership or archive ownership changed");
+    Silent denied = dial(FAST_PATH, "shared-denied", query + "&ready=1");
+    assertTrue(denied.awaitClosed(10_000));
+    assertEquals(List.of(), List.copyOf(denied.frames));
+    assertTrue(Wiring.FAST_PRESENCES.rootedBy("shared-denied").isEmpty());
+    assertEquals("shared-first", Wiring.FAST_PRESENCES.serving("shared").orElseThrow().session());
+    assertTrue(fast.isConnected("shared-first"));
+  }
+
   /** Closing the channel stops the session rooting the project. */
   @Test
   void closing_the_channel_leaves_the_project_rooted_nowhere() throws Exception {

@@ -35,7 +35,22 @@ export function readPreferences(value: unknown): Preferences {
   if (!isObject(value)) throw new Error('Unreadable saved preferences.');
   const entries: [string, Preference][] = [];
   for (const [key, item] of Object.entries(value)) {
-    if (!isObject(item) || !text(item.selected) || !text(item.scope))
+    if (
+      !isObject(item) ||
+      Object.keys(item).some(
+        (field) =>
+          ![
+            'selected',
+            'scope',
+            'drafts',
+            'projectExpansion',
+            'chosenAgents',
+            'personalBotExpansion',
+          ].includes(field),
+      ) ||
+      !text(item.selected) ||
+      !text(item.scope)
+    )
       throw new Error('Unreadable saved selection.');
     entries.push([
       key,

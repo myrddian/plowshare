@@ -1,3 +1,12 @@
+import {
+  Connections,
+  resolveConnection,
+  userConfigDirectory,
+} from 'plowshare-client-node/connections';
+import {
+  Credentials,
+  credentialDirectory,
+} from 'plowshare-client-node/credentials';
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import {
@@ -60,7 +69,12 @@ export async function retrievalCli(
     return 2;
   }
   try {
-    const origin = env['PLOWSHARE_URL'];
+    const selected = await resolveConnection(
+      new Connections(userConfigDirectory(env)),
+      {},
+      env,
+    );
+    const origin = selected?.server ?? env['PLOWSHARE_URL'];
     if (!origin?.trim())
       throw new Error('Set PLOWSHARE_URL to the server origin.');
     const connection = await authenticateConfigured(
@@ -68,6 +82,16 @@ export async function retrievalCli(
       env,
       AbortSignal.timeout(30_000),
       () => undefined,
+      selected
+        ? {
+            credentials: new Credentials(
+              origin,
+              credentialDirectory(env),
+              undefined,
+              selected.account,
+            ),
+          }
+        : {},
     );
     try {
       if (usage) {

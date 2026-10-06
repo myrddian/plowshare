@@ -1,3 +1,4 @@
+import { connectionDirectory } from 'plowshare-client-node/connections';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
@@ -36,7 +37,17 @@ await test('project bookmarks persist atomically and remain scoped to server and
       (await restarted.list('http://localhost:8081', 'alice'))[0]?.path,
       '/projects/other-server',
     );
-    assert.equal((await stat(config.path)).mode & 0o777, 0o600);
+    assert.equal(
+      (
+        await stat(
+          join(
+            connectionDirectory(mapping.server, 'alice', directory),
+            'desktop-projects.json',
+          ),
+        )
+      ).mode & 0o777,
+      0o600,
+    );
     await restarted.put({ ...mapping, enabled: false });
     assert.equal(
       (await restarted.list(mapping.server, 'alice'))[0]?.enabled,
@@ -46,7 +57,15 @@ await test('project bookmarks persist atomically and remain scoped to server and
     assert.deepEqual(await restarted.list(mapping.server, 'alice'), []);
     assert.equal((await restarted.list(mapping.server, 'bob')).length, 1);
     assert.equal(
-      (await readFile(config.path, 'utf8')).includes('password'),
+      (
+        await readFile(
+          join(
+            connectionDirectory(mapping.server, 'alice', directory),
+            'desktop-projects.json',
+          ),
+          'utf8',
+        )
+      ).includes('password'),
       false,
     );
   } finally {

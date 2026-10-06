@@ -67,6 +67,10 @@
     "./personal": {
       "types": "./build/personal.d.ts",
       "import": "./build/personal.js"
+    },
+    "./connections": {
+      "types": "./build/connections.d.ts",
+      "import": "./build/connections.js"
     }
   },
   "description": "Plowshare WebSocket SDK and optional Node platform adapters"

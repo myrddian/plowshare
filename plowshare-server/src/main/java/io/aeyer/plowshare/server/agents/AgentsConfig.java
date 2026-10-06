@@ -488,7 +488,15 @@ public class AgentsConfig {
                   .find(home.project())
                   .filter(io.aeyer.plowshare.server.archive.ProjectRecord::serverProject)
                   .isPresent();
-      if (separateCheckout) rooting = rooting.filter(id -> id.equals(sessionId));
+      if (separateCheckout && permitted) {
+        // A server project's local checkout is tied to the asking session, including a standby
+        // serving the same folder. Primary routing must not hide that session's own file claim.
+        rooting =
+            presences
+                .rootedBy(sessionId)
+                .filter(claim -> claim.project().equals(home.project()))
+                .map(Presence::session);
+      }
       Optional<Session> machine =
           rooting.flatMap(sessions::find).filter(session -> session.has(Role.FILE_PROVIDER));
       if (!home.isGlobal()) {

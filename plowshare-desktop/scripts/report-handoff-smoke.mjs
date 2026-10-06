@@ -14,7 +14,7 @@ let app;
 try {
  app=await electron.launch({executablePath,args:[resolve('.')],env});
  const main=await app.firstWindow(),errors=[];main.on('pageerror',error=>errors.push(error.message));
- await main.locator('#connection-button').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
+ await main.locator('#connect-sidebar').click();await main.locator('#server-url').fill(fixture.base);await main.locator('#handle').fill('fixture');await main.locator('#password').fill('fixture-password');await main.locator('#submit-connection').click();await expect(main.locator('#connection-label')).toHaveText('Connected');
  await main.locator('[data-project="Research"]').click();
  await expect(main.locator('#agent')).toContainText('Friendly Bot');
  await main.locator('#agent-identity > summary').click();await expect(main.locator('#agent-identity')).toContainText('classpath bots/friendly_bot.md');await expect(main.locator('#agent-identity')).toContainText('workspace:read');await expect(main.locator('#agent-identity')).toContainText('file_edit withheld');
