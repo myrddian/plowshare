@@ -1,6 +1,6 @@
 import { _electron as electron, expect } from 'playwright/test';
 import executablePath from 'electron';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -33,10 +33,18 @@ fixture.addConversation({ id:'personal-planning', project, title:'Saved planning
 const env = { ...process.env, HOME: temporary, PLOWSHARE_CONFIG_DIR: join(temporary,'credentials'),
   PLOWSHARE_DESKTOP_CONFIG: join(temporary,'config'), PLOWSHARE_DESKTOP_PROFILE: join(temporary,'profile') };
 delete env.ELECTRON_RUN_AS_NODE;
+// A previous sync runtime can leave an unclaimed legacy directory. It must neither
+// block the selected connection's automatic mount nor be adopted as Personal.
+const legacy = join(env.PLOWSHARE_CONFIG_DIR, 'personal');
+await mkdir(join(legacy, '.plowshare', 'sync.git'), { recursive: true });
+await writeFile(join(legacy, 'old-notes.txt'), 'Leave legacy files untouched');
 await mkdir('build/smoke', {recursive:true});
 let app;
 try {
   app = await electron.launch({executablePath,args:[resolve('.')],env});
+  await app.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = async () => { throw new Error('Personal must never open a folder picker'); };
+  });
   const page = await app.firstWindow(); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.evaluate(base => window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
@@ -44,6 +52,7 @@ try {
   const personal = join(connectionDirectory(fixture.base, 'fixture', env.PLOWSHARE_CONFIG_DIR), 'personal');
   assert.equal((await state()).personal.root, personal);
   assert.equal(await readFile(join(personal,'Planning','plan.md'),'utf8'), 'A useful personal plan.');
+  assert.equal(await readFile(join(legacy, 'old-notes.txt'), 'utf8'), 'Leave legacy files untouched');
   await expect(page.locator('#personal-navigation')).toBeVisible();
   const personalHeading = page.locator('#personal-toggle');
   const projectsHeading = page.locator('#projects-toggle');
@@ -112,6 +121,86 @@ try {
   await page.screenshot({path:'build/smoke/personal.png'});
   assert.equal(fixture.frames.filter(row => row.type === 'agent.run').length,0);
   assert.equal(fixture.frames.filter(row => row.type === 'union.enable').length,0);
+  // Damaged scoped files are preserved in a dated recovery directory and the
+  // replacement is populated through normal authenticated union synchronization.
+  await page.evaluate(() => window.plowshare.request({action:'disconnect'}));
+  const retained = personal + '.retained';
+  await rename(personal, retained);
+  await mkdir(personal);
+  await writeFile(join(personal, 'unclaimed.txt'), 'Unclaimed scoped files');
+  await page.evaluate(base => window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+  assert.equal((await state()).personal.root, personal);
+  assert.equal((await state()).files.status, 'ready');
+  let warning = (await state()).personal.warning;
+  assert.match(warning, /store was recreated.*previous store is intact at/);
+  const scopeDirectory = connectionDirectory(fixture.base, 'fixture', env.PLOWSHARE_CONFIG_DIR);
+  const backups = (await readdir(scopeDirectory)).filter(name => name.startsWith('personal-connection-recovery-'));
+  assert.equal(backups.length, 1);
+  const backup = join(scopeDirectory, backups[0], 'personal');
+  assert.equal(await readFile(join(backup, 'unclaimed.txt'), 'utf8'), 'Unclaimed scoped files');
+  await assert.rejects(readFile(join(personal, 'unclaimed.txt')), {code:'ENOENT'});
+  assert.equal(await readFile(join(personal,'Planning','plan.md'),'utf8'), 'A useful personal plan.');
+  await expect(page.locator('#personal-recovery-warning')).toHaveText(warning);
+  await page.reload();
+  await expect(page.locator('#personal-recovery-warning')).toHaveText(warning);
+  fixture.setRefuseFiles(true);
+  await page.evaluate(base => window.plowshare.request({action:'connect',base,handle:'fixture',password:'fixture-password'}),fixture.base);
+  await expect(page.locator('#file-access-prompt')).toBeVisible();
+  await expect(page.locator('#file-access-title')).toHaveText('Personal file access unavailable');
+  await expect(page.locator('#file-access-allow')).toHaveText('Retry');
+  await expect(page.locator('#file-access-deny')).toBeHidden();
+  await page.locator('#files-open').click();
+  await expect(page.locator('#files-choose')).toBeHidden();
+  await expect(page.locator('#files-withdraw')).toBeHidden();
+  await expect(page.locator('#files-forget')).toBeHidden();
+  await expect(page.locator('#files-reopen')).toHaveText('Retry Personal files');
+  for (const width of [760, 1200]) {
+    await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 800), width);
+    const sidebar = page.locator('.pane-resizer[data-pane="sidebar"]:visible');
+    for (const size of ['Home', 'End']) {
+      await sidebar.press(size);
+      await expect(page.locator('#files-reopen')).toBeVisible();
+      await expect(page.locator('#files-choose')).toBeHidden();
+      await expect(page.locator('#personal-recovery-warning')).toBeVisible();
+      assert.equal(await page.locator('#personal-recovery-warning').evaluate(banner => {
+        const bounds = banner.getBoundingClientRect();
+        return bounds.left >= 0 && bounds.right <= innerWidth && banner.scrollWidth <= banner.clientWidth;
+      }), true, 'Recovery warning wraps its preserved path at every native pane size');
+      await page.screenshot({path:`build/smoke/personal-recovery-${width}-${size}.png`});
+      assert.equal(await page.locator('#files-reopen').evaluate(button => {
+        const bounds = button.getBoundingClientRect();
+        return bounds.left >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight && button.scrollWidth <= button.clientWidth;
+      }), true, 'Personal retry stays readable after native window/sidebar resize');
+    }
+  }
+  fixture.setRefuseFiles(false);
+  await page.locator('#files-reopen').click();
+  await expect.poll(async () => (await state()).files.status).toBe('ready');
+  assert.equal((await state()).personal.root, personal);
+  // Even a stale renderer sending files-choose must be routed to default-store recovery.
+  await page.evaluate(project => window.plowshare.request({action:'files-choose',project}), project);
+  assert.equal((await state()).files.root, personal);
+  await writeFile(join(personal, 'unsynced.txt'), 'Preserve explicit recovery data');
+  await page.locator('#files-recreate').click();
+  await expect(page.locator('#files-recreate')).toBeEnabled();
+  await expect(page.locator('#files-error')).toBeHidden();
+  await expect.poll(async () => (await state()).files.status).toBe('ready');
+  warning = (await state()).personal.warning;
+  await expect(page.locator('#personal-recovery-warning')).toHaveText(warning);
+  const recreated = (await readdir(scopeDirectory)).filter(name => name.startsWith('personal-connection-recovery-') && name !== backups[0]);
+  assert.equal(recreated.length, 1);
+  assert.equal(await readFile(join(scopeDirectory, recreated[0], 'personal', 'unsynced.txt'), 'utf8'), 'Preserve explicit recovery data');
+  assert.equal(await readFile(join(backup, 'unclaimed.txt'), 'utf8'), 'Unclaimed scoped files');
+  await assert.rejects(readFile(join(personal, 'unsynced.txt')), {code:'ENOENT'});
+  assert.equal(await readFile(join(personal,'Planning','plan.md'),'utf8'), 'A useful personal plan.');
+  await app.close(); app = undefined;
+  app = await electron.launch({executablePath,args:[resolve('.')],env});
+  const restarted = await app.firstWindow();
+  await expect(restarted.locator('#personal-recovery-warning')).toHaveText(warning);
+  const reopened = (await restarted.evaluate(() => window.plowshare.request({action:'bootstrap'}))).state;
+  assert.equal(reopened.personal.root, personal);
+  assert.equal(reopened.files.status, 'ready');
+  assert.equal((await readdir(scopeDirectory)).filter(name => name.startsWith('personal-connection-recovery-')).length, 2);
   assert.deepEqual(errors,[]);
-  console.log('Personal smoke passed: Inbox/Mailbox separation, conversation and bot trees, server chat continuation without duplicate creation, persisted bot choices, automatic union mount and previews.');
+  console.log('Personal smoke passed: unclaimed legacy preservation, default connection store, dated preservation/recreation, warning after restart, recovery without a folder picker, native window/sidebar resize, Inbox/Mailbox separation, conversation and bot trees, server chat continuation without duplicate creation, persisted bot choices, automatic union mount and previews.');
 } finally { await app?.close(); union.close(); await fixture.close(); await rm(temporary,{recursive:true,force:true}); }

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const fixture = vi.hoisted(() => ({
   authenticate: vi.fn(),
   ask: vi.fn(),
@@ -31,12 +34,18 @@ describe('retrieval CLI without a terminal or selected agent', () => {
       await retrievalCli(['conversation', 'search'], {}, write, error),
     ).toBe(2);
   });
-  it('requires an explicit origin before connecting', async () => {
+  it('requires an origin when there is no saved connection', async ({
+    onTestFinished,
+  }) => {
+    const config = await mkdtemp(
+      join(tmpdir(), 'plowshare-tui-no-connections-'),
+    );
+    onTestFinished(() => rm(config, { recursive: true, force: true }));
     const error = vi.fn();
     expect(
       await retrievalCli(
         ['conversation', 'search', '--json', 'q'],
-        {},
+        { PLOWSHARE_CONFIG_DIR: config },
         vi.fn(),
         error,
       ),

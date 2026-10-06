@@ -408,9 +408,25 @@ The desktop maintains Personal as an independent project client alongside other
 mounted projects. A TUI started outside a discovered project uses Personal as its
 rooted workspace; an explicitly selected project uses that project's existing
 rooting, with account resources resolved from the server's Personal replica.
-The Node helper claims the fixed directory for one normalized server/account
-pair. It refuses a nonempty unclaimed directory, a conflicting claim or symlinked
-ownership metadata; it never merges two accounts into the same local directory.
+The Node helper claims the fixed directory in the selected connection's store
+for one normalized server/account pair. Personal never asks for a local folder;
+file-access recovery retries this default mount. A proven legacy checkout moves
+only when the scoped directory is absent. Unclaimed, malformed or duplicate
+legacy data stays untouched and does not prevent creating the default mount.
+Desktop and TUI recover a damaged scoped mount by renaming it into a unique
+`personal-connection-recovery-<UTC datetime>-<unique suffix>` directory within
+the same connection store, then creating a fresh default Personal directory.
+The old `personal` entry, including unsynced files and Git history, remains intact
+inside that directory. A persistent warning names its path. Metadata corruption,
+unclaimed files and invalid directory/symlink structure can trigger recovery;
+valid foreign ownership, a sync lock, and authentication/network/server failures
+cannot trigger automatic recovery. In desktop Project files, **Recreate Personal
+store** preserves even a valid but unusable local replica before resetting it.
+This explicit action also keeps foreign local metadata intact in the backup;
+it never imports it into the selected account. Sync locks still refuse recreation. The shared Node `preparePersonalStore` helper returns the mount and warning;
+`recreatePersonalStore` exposes explicit preservation/recreation, while
+`personalDirectory` retains strict validation for consumers that do not opt into
+recovery. No recovery merges two accounts into the same local directory.
 Section previews resolve canonical paths and refuse traversal or symlink escape.
 
 Control operations use the existing authenticated WebSocket protocol. Git smart

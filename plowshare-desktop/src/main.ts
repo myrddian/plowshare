@@ -1044,6 +1044,14 @@ background(
             !client.state.projects.some((row) => row.name === request.project))
         )
           throw new Error('Choose an available project.');
+        if (
+          request.project === client.state.personal?.project &&
+          request.project
+        )
+          return client.dispatch({
+            action: 'project-open',
+            project: request.project,
+          });
         const defaultPath =
           client.state.projectFolders?.find(
             (row) =>

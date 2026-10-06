@@ -106,11 +106,30 @@ their sources. A legacy session moves under the credential locks only when its
 origin and account match. In the default profile, a legacy `~/.plowshare/personal` checkout moves as a whole,
 including Git history, only when `.plowshare/personal.json` proves the matching
 server/account/project. Foreign ownership stays intact and gets a separate mount.
-Missing/malformed ownership or duplicate legacy/scoped checkouts stops migration
-with an actionable error. Preserve the old directory; restore its original ownership
-metadata or move it aside explicitly before connecting. Never change its owner to
-the account you want to connect. Legacy renderer preferences remain available as a
+Missing/malformed ownership and duplicate legacy/scoped checkouts leave legacy
+data untouched. Personal opens the selected connection's store automatically;
+an existing scoped checkout takes precedence. No folder selection is required.
+Restore proven original ownership before a future migration or recover old data
+explicitly; never change its owner to the account you want to connect.
+If Personal file access fails, **Retry** reconnects the same default store without
+opening a folder picker. Legacy renderer preferences remain available as a
 migration source; the selected identity's drafts are subsequently saved in its scope.
+
+If the selected connection's Personal directory is structurally damaged or its
+ownership metadata is missing, malformed or unreadable, desktop and TUI preserve
+it at `connections/<key>/personal-connection-recovery-<UTC datetime>-<unique suffix>/personal`
+and recreate `connections/<key>/personal`. The warning names the preserved path
+and remains available after restart. Unsynced files and Git history stay in the
+preserved store; the replacement uses normal authenticated synchronization.
+Credentials, bookmarks, drafts and other connections are unaffected. Valid
+foreign ownership is refused automatically. Desktop Project files offers
+**Recreate Personal store** for deliberate recovery of a valid but unusable local
+replica, preserving it before starting fresh. Active/interrupted sync locks require
+explicit resolution; authentication, network and server errors never trigger an
+automatic reset.
+Recovery and synchronization share a lock outside the Personal directory. After
+replacement, an older sync runtime refuses further work until file access is
+reconnected, so it cannot carry cached Git state into the new store.
 
 Every refresh holds a cross-process lock, reloads the latest tokens, and writes
 the new pair atomically before requesting a WS ticket. A failed ticket or socket

@@ -95,13 +95,15 @@ await test('server and url select the origin before or after commands and overri
   );
 });
 
-await test('online commands require a server before credentials, prompts or stdin are used', async () => {
+await test('online commands without a saved connection require a server before credentials, prompts or stdin are used', async (t) => {
+  const config = await mkdtemp(join(tmpdir(), 'plowshare-cli-no-connections-'));
+  t.after(() => rm(config, { recursive: true, force: true }));
   let output = '';
   const forbidden = async (): Promise<never> => {
     throw new Error('must not prompt or read');
   };
   const io = {
-    env: {},
+    env: { PLOWSHARE_CONFIG_DIR: config },
     stdout: (text: string) => {
       output += text;
     },

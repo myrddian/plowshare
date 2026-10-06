@@ -3,9 +3,9 @@ import type {
   UnionExtra,
 } from 'plowshare-client-ts/operations/union';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { localLock } from '../connections.ts';
+import { rm, lstat } from 'node:fs/promises';
+import { join, dirname, basename } from 'node:path';
+import { localLock, connectionKey } from '../connections.ts';
 import type { Answering } from 'plowshare-client-ts/binding/channel';
 import {
   DELETE,
@@ -152,13 +152,43 @@ export function syncer(options: SyncerOptions): Syncer {
   let timer: ReturnType<typeof setInterval> | undefined;
   let debounce: ReturnType<typeof setTimeout> | undefined;
   let queue: Promise<unknown> = Promise.resolve();
+  let directoryIdentity: { dev: bigint; ino: bigint } | undefined;
+  const personalScope =
+    claim.project.startsWith('personal:') &&
+    basename(claim.root) === 'personal' &&
+    basename(dirname(claim.root)) ===
+      connectionKey(options.base, options.handle)
+      ? dirname(claim.root)
+      : undefined;
 
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
     // Two clients can share this checkout. Serialize the entire reconciliation, including hub
     // claims and conflict decisions, so their Git commands cannot interleave on one shadow tree.
     // A killed writer leaves a lock for explicit recovery; no client steals a live operation.
+    const checked = async () => {
+      const identity = await lstat(claim.root, { bigint: true });
+      if (
+        directoryIdentity &&
+        (identity.dev !== directoryIdentity.dev ||
+          identity.ino !== directoryIdentity.ino)
+      )
+        throw new Error(
+          'The local store was replaced. Reconnect file access before synchronizing.',
+        );
+      directoryIdentity = { dev: identity.dev, ino: identity.ino };
+      return localLock(
+        join(claim.root, '.plowshare'),
+        'sync',
+        work,
+        options.signal,
+      );
+    };
+    // The stable connection lock stays outside Personal, so recovery cannot race
+    // a Git operation when it renames the entire checkout (including its sync lock).
     const locked = () =>
-      localLock(join(claim.root, '.plowshare'), 'sync', work, options.signal);
+      personalScope
+        ? localLock(personalScope, 'personal-store', checked, options.signal)
+        : checked();
     const next = queue.then(locked, locked);
     queue = next.catch(() => undefined);
     return next;

@@ -9,6 +9,8 @@ import {
   rm,
   stat,
   symlink,
+  realpath,
+  readdir,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +27,10 @@ import {
   Credentials,
   savedLoginServers,
 } from 'plowshare-client-node/credentials';
-import { personalDirectory } from 'plowshare-client-node/personal';
+import {
+  personalDirectory,
+  preparePersonalStore,
+} from 'plowshare-client-node/personal';
 import { ConnectionConfig } from './connection-config.ts';
 import { ProjectConfig } from './project-config.ts';
 import { JobJournal } from './job-store.ts';
@@ -335,13 +340,51 @@ await test('Personal migration retains content and actual Git history, and ambig
   );
   await mkdir(legacy);
   await writeFile(join(legacy, 'unclaimed.txt'), 'Untouched');
-  await assert.rejects(
-    personalDirectory(first.server, 'bob', 'personal:bob', home),
-    /ownership.*missing/,
+  const bob = await personalDirectory(
+    first.server,
+    'bob',
+    'personal:bob',
+    home,
+  );
+  assert.equal(
+    bob,
+    await realpath(
+      join(
+        connectionDirectory(first.server, 'bob', join(home, '.plowshare')),
+        'personal',
+      ),
+    ),
   );
   assert.equal(
     await readFile(join(legacy, 'unclaimed.txt'), 'utf8'),
     'Untouched',
+  );
+  await writeFile(join(moved, '.plowshare', 'personal.json'), '{corrupt');
+  const recovered = await preparePersonalStore(
+    first.server,
+    first.account,
+    'personal:alice',
+    home,
+  );
+  assert.equal(recovered.root, moved);
+  assert.ok(recovered.warning);
+  const scope = connectionDirectory(
+    first.server,
+    first.account,
+    join(home, '.plowshare'),
+  );
+  const backup = (await readdir(scope)).find((name) =>
+    name.startsWith('personal-connection-recovery-'),
+  );
+  assert.ok(backup);
+  const preserved = join(scope, backup, 'personal');
+  assert.equal(
+    (await run('git', ['-C', preserved, 'rev-parse', 'HEAD'])).stdout,
+    before,
+  );
+  assert.equal(
+    await readFile(join(preserved, 'notes.txt'), 'utf8'),
+    'Preserved notes',
   );
 });
 
