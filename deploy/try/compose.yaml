@@ -1,6 +1,7 @@
 # Local try-out only. Public release tooling supplies digest-pinned images.env.
 services:
   postgres:
+    platform: linux/amd64
     image: pgvector/pgvector:0.8.7-pg16-bookworm@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     env_file:
       - path: ${PLOWSHARE_TRY_STATE:?Set external trial settings}/database.env
@@ -17,6 +18,7 @@ services:
     restart: unless-stopped
     mem_limit: 1g
   init-state:
+    platform: linux/amd64
     image: ${PLOWSHARE_SERVER_IMAGE:?Use a released server image}
     profiles: [tools]
     user: '0:0'
@@ -25,6 +27,7 @@ services:
     volumes: [data:/var/lib/plowshare, workspaces:/var/lib/plowshare-workspaces]
     network_mode: none
   server:
+    platform: linux/amd64
     image: ${PLOWSHARE_SERVER_IMAGE:?Use a released server image}
     env_file:
       - path: ${PLOWSHARE_TRY_STATE:?Set external trial settings}/server.env

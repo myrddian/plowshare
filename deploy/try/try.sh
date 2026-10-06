@@ -14,6 +14,7 @@ case "$action" in
   start|configure|stop|status) ;;
   *) echo 'Choose start, configure, stop or status; see --help.' >&2; exit 2 ;;
 esac
+test "$state" != / || { echo 'Choose a dedicated trial settings directory.' >&2; exit 2; }
 case "$state" in /*) ;; *) echo 'PLOWSHARE_TRY_STATE must be absolute.' >&2; exit 2 ;; esac
 case "$state/" in "$here/"*) echo 'Keep trial settings outside the bundle.' >&2; exit 2 ;; esac
 test -f "$here/images.env" || { echo 'Use a released bundle with images.env.' >&2; exit 2; }
@@ -23,7 +24,7 @@ if ! printf '%s\n' "$version" | awk -F. '{sub(/^v/, "", $1); exit !($1 > 2 || ($
   echo 'Docker Compose 2.30+ is required.' >&2; exit 2
 fi
 # Prevent inherited deployment variables from overriding the released image/port.
-unset PLOWSHARE_SERVER_IMAGE COMPOSE_FILE COMPOSE_PROJECT_NAME
+unset PLOWSHARE_SERVER_IMAGE COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES
 image=$(sed -n 's/^PLOWSHARE_SERVER_IMAGE=//p' "$here/images.env")
 if ! printf '%s\n' "$image" | LC_ALL=C grep -Eq '^ghcr\.io/myrddian/plowshare-server@sha256:[0-9a-f]{64}$'; then
   echo 'Use a released bundle with an immutable GHCR server digest.' >&2; exit 2
@@ -87,10 +88,10 @@ if { [ "$action" = start ] || [ "$action" = configure ]; } && [ ! -f "$state/com
   test "$PLOWSHARE_TRY_PORT" -ge 1 && test "$PLOWSHARE_TRY_PORT" -le 65535 || { echo 'Local port must be 1–65535.' >&2; exit 2; }
   # Environment files use Compose's raw format: quotes and dollars in keys and
   # passwords stay literal. Newlines are not valid in this format.
+  cr=$(printf '\r')
   for value in "$LLM_BASE_URL" "$LLM_CHAT_MODEL" "$LLM_EMBEDDING_MODEL" "$LLM_API_KEY" "$PLOWSHARE_ADMIN_PASSWORD"; do
     case "$value" in *'
-'*|*'
-'*) echo 'Settings must be single-line values.' >&2; exit 2 ;; esac
+'*|*"$cr"*) echo 'Settings must be single-line values.' >&2; exit 2 ;; esac
   done
   password=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
   (set -C; printf 'POSTGRES_PASSWORD=%s\n' "$password" > "$state/database.env")
@@ -103,6 +104,7 @@ fi
 test -f "$state/compose.env" && test -f "$state/server.env" && test -f "$state/database.env" || {
   echo 'Run start once to configure this trial.' >&2; exit 2;
 }
+unset PLOWSHARE_TRY_PORT
 for file in compose.env server.env database.env; do
   test ! -L "$state/$file" || { echo 'Settings files must not be symlinks.' >&2; exit 2; }
   chmod 600 "$state/$file"

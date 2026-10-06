@@ -56,7 +56,8 @@ class TrialTests(unittest.TestCase):
                            ("PLOWSHARE_ADMIN_HANDLE", "invalid user"),
                            ("PLOWSHARE_ADMIN_PASSWORD", "short"),
                            ("PLOWSHARE_TRY_PORT", "65536"),
-                           ("LLM_CHAT_MODEL", "model\nINJECTED=value")):
+                           ("LLM_CHAT_MODEL", "model\nINJECTED=value"),
+                           ("LLM_API_KEY", "secret\rINJECTED=value")):
             with self.subTest(key=key, value=value):
                 self.assertNotEqual(self.run_trial(**{key: value}).returncode, 0)
                 self.assertFalse((self.state / "compose.env").exists())
