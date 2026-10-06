@@ -54,7 +54,11 @@ export function demoState(): DesktopState {
             1,
             'utterance',
             'Help me explore the ideas behind Project Plowshare. What should I read first?',
-            { speaker: 'person' },
+            {
+              speaker: 'person',
+              job: 'demo-job',
+              source: { kind: 'person', reference: 'demo' },
+            },
           ),
           entry(
             2,

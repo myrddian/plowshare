@@ -47,15 +47,19 @@ public final class JdbcRelayExecutions implements RelayExecutions {
       throw new IllegalArgumentException("unsupported execution receipt");
     if (jdbc.update(
             """
-        UPDATE relay_executions SET receipt_namespace=?,receipt_id=?,conversation_id=?,accepted_at=now()
-        WHERE request_id=? AND account=? AND project_id=? AND receipt_id IS NULL
+        UPDATE relay_executions SET receipt_namespace=?,receipt_id=?,conversation_id=?,accepted_at=COALESCE(accepted_at,now())
+        WHERE request_id=? AND account=? AND project_id=?
+          AND (receipt_id IS NULL OR (receipt_namespace=? AND receipt_id=? AND conversation_id=?))
         """,
             receipt.namespace(),
             receipt.id(),
             conversation,
             request.identity(),
             request.access().account(),
-            request.access().projectId())
+            request.access().projectId(),
+            receipt.namespace(),
+            receipt.id(),
+            conversation)
         != 1) throw new IllegalStateException("Relay execution receipt was not recorded");
   }
 

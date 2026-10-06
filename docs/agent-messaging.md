@@ -182,6 +182,20 @@ firing listings.
 
 Opening is idempotent for the same account/project/request UUID and arguments;
 conflicting reuse is refused. It creates an address without starting inference.
+Delivery inspection includes `conversation` (the recipient's log), `sourceConversation`
+(the sender's log) and the latest submitted `job`, including completed handling while
+its firing record is retained. The delivery state uses live firing status separately;
+a completed job reference does not make a message running. Reads check ownership and
+visibility of both participants before returning these links.
+
+Incoming trajectory utterances carry `source: {kind: "message", reference: <message ID>}`.
+Use `message.delivery` to inspect that identity and its participant conversations.
+Each runtime entry carries its actual owning `job`; continuations can have different
+jobs within the same turn ordinal. Old or unbound entries have a null job, and an
+unidentified utterance has an explicit `unknown` source with a null reference.
+References never bypass the owning API's authorization or retain records beyond
+administrator cleanup policy.
+
 Inspection pages default to 100 items and allow at most 200. Page offsets advance
 through underlying records even when revoked inputs hide an item.
 

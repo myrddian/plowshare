@@ -4625,6 +4625,17 @@ function inspectorLines(
     }
   } else if (pane === 'timing') {
     const result = step?.kind === 'call' ? step.result : undefined;
+    const recorded = result ?? entry;
+    if (recorded?.job !== undefined) body.push(field('job', recorded.job));
+    if (recorded?.source !== undefined)
+      body.push(
+        field(
+          'origin',
+          recorded.source.kind === 'unknown'
+            ? 'not recorded'
+            : `${recorded.source.kind} · ${recorded.source.reference ?? ''}`,
+        ),
+      );
     const at = result?.recordedAt ?? entry?.recordedAt;
     if (at !== undefined)
       body.push(field('recorded', describeClock(at, extras.zone)));

@@ -1636,6 +1636,10 @@ public final class Compaction {
    * as the harness speaking, because on this path it is. Both are argued where they are.
    */
   public final class ResumedTranscript implements Transcript {
+    @Override
+    public void startedAs(String job) {
+      turn.startedAs(job);
+    }
 
     @Override
     public Integer continuingTurn() {
@@ -2070,6 +2074,17 @@ public final class Compaction {
 
     private final Speaker speaker;
 
+    private volatile String job;
+
+    @Override
+    public synchronized void startedAs(String id) {
+      if (id == null || id.isBlank())
+        throw new IllegalArgumentException("job identity is required");
+      if (job != null && !job.equals(id))
+        throw new IllegalStateException("transcript already has a job");
+      job = id;
+    }
+
     private final Origin origin;
 
     /** Read once per run and kept: a log's opening never changes once written. */
@@ -2493,7 +2508,7 @@ public final class Compaction {
     @Override
     public void record(LoggedEntry entry) {
       try {
-        entries.append(conversationId, turnOrdinal(), entry);
+        entries.append(conversationId, turnOrdinal(), entry, job);
       } catch (RuntimeException notRecorded) {
         // First line only; see JobRuntime.describe. A constraint
         // violation's second line quotes the failing row, and an

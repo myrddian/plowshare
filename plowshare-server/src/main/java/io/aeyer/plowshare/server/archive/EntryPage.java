@@ -166,7 +166,48 @@ public record EntryPage(List<Row> listed, int total, int through, Boolean more) 
       String wireModel,
       String completion,
       Speaker speaker,
-      String outcome) {
+      String outcome,
+      String job) {
+
+    /** Compatibility constructor for unbound entries. Unknown jobs are never inferred. */
+    public Row(
+        int ordinal,
+        int turnOrdinal,
+        EntryKind kind,
+        String excerpt,
+        int length,
+        Instant ejectedAt,
+        Integer supersededBy,
+        String toolCallId,
+        List<Asked> toolCalls,
+        UUID handle,
+        Instant recordedAt,
+        Long tookMillis,
+        String dispatch,
+        String wireModel,
+        String completion,
+        Speaker speaker,
+        String outcome) {
+      this(
+          ordinal,
+          turnOrdinal,
+          kind,
+          excerpt,
+          length,
+          ejectedAt,
+          supersededBy,
+          toolCallId,
+          toolCalls,
+          handle,
+          recordedAt,
+          tookMillis,
+          dispatch,
+          wireModel,
+          completion,
+          speaker,
+          outcome,
+          null);
+    }
 
     public Row {
       Objects.requireNonNull(kind, "kind");

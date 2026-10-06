@@ -808,7 +808,7 @@ public final class JobStore implements AutoCloseable, EventRuns {
                 images,
                 callerHandle,
                 incoming),
-        id -> {},
+        transcript::startedAs,
         causation);
   }
 

@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.orchestrations;
 
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.agents.Speaker;
 import java.util.function.Consumer;
 
 /**
@@ -34,6 +35,18 @@ public interface ConductorVoice {
       String sessionId,
       Integer maxModelCalls,
       Consumer<Outcome> ended);
+
+  /** The first turn may name its immediate external source instead of a generic harness. */
+  default String speakFrom(
+      String conversation,
+      AgentDefinition conductor,
+      String utterance,
+      String sessionId,
+      Integer maxModelCalls,
+      Consumer<Outcome> ended,
+      Speaker source) {
+    return speak(conversation, conductor, utterance, sessionId, maxModelCalls, ended);
+  }
 
   /**
    * Carries a conductor's sub-agent on in its own conversation after the person answered the

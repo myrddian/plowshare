@@ -1,5 +1,338 @@
 [
   {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": null,
+          "source": {
+            "kind": "unknown",
+            "reference": null
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": null
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "unknown",
+            "reference": "msg_fixture"
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "forged",
+            "reference": "msg_fixture"
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": "job_fixture",
+          "source": {
+            "kind": "message",
+            "reference": " "
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.trajectory",
+    "value": {
+      "entries": [
+        {
+          "ordinal": 1,
+          "turnOrdinal": 1,
+          "kind": "utterance",
+          "excerpt": "message",
+          "length": 7,
+          "cut": false,
+          "ejectedAt": null,
+          "supersededBy": null,
+          "toolCallId": null,
+          "toolCalls": [],
+          "handle": null,
+          "recordedAt": null,
+          "tookMillis": null,
+          "dispatch": null,
+          "wireModel": null,
+          "completion": null,
+          "speaker": "harness",
+          "speakerName": "message msg_fixture",
+          "outcome": null,
+          "job": " ",
+          "source": {
+            "kind": "message",
+            "reference": "msg_fixture"
+          }
+        }
+      ],
+      "total": 1,
+      "offset": 0,
+      "limit": 1,
+      "through": 1,
+      "oldest": 1,
+      "more": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "message.delivery",
+    "value": {
+      "message": "msg_fixture",
+      "sender": "sender",
+      "recipient": "recipient",
+      "replyTo": null,
+      "replyExpected": false,
+      "finalReply": false,
+      "generated": false,
+      "state": "handled",
+      "ending": "ANSWERED",
+      "reply": null,
+      "job": "job_fixture",
+      "deadlineAt": null,
+      "postedAt": "2026-10-07T00:00:00Z",
+      "body": "hello",
+      "conversation": "cnv_recipient",
+      "sourceConversation": "cnv_sender"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "message.delivery",
+    "value": {
+      "message": "msg_fixture",
+      "sender": "sender",
+      "recipient": "recipient",
+      "replyTo": null,
+      "replyExpected": false,
+      "finalReply": false,
+      "generated": false,
+      "state": "handled",
+      "ending": "ANSWERED",
+      "reply": null,
+      "job": "job_fixture",
+      "deadlineAt": null,
+      "postedAt": "2026-10-07T00:00:00Z",
+      "body": "hello",
+      "conversation": "",
+      "sourceConversation": "cnv_sender"
+    },
+    "valid": false
+  },
+  {
     "boundary": "input",
     "operation": "project.list",
     "value": {},

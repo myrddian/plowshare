@@ -12,6 +12,26 @@ const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const receipt = '11111111-1111-1111-1111-111111111111';
+const originEntry = {
+  ordinal: 1, turnOrdinal: 1, kind: 'utterance', excerpt: 'message', length: 7,
+  cut: false, ejectedAt: null, supersededBy: null, toolCallId: null, toolCalls: [],
+  handle: null, recordedAt: null, tookMillis: null, dispatch: null, wireModel: null,
+  completion: null, speaker: 'harness', speakerName: 'message msg_fixture', outcome: null,
+  job: 'job_fixture', source: { kind: 'message', reference: 'msg_fixture' },
+};
+const originPage = (entry) => ({ entries: [entry], total: 1,
+  offset: 0, limit: 1, through: 1, oldest: 1, more: false });
+result('conversation.trajectory', originPage(originEntry), true);
+result('conversation.trajectory', originPage({ ...originEntry, job: null, source: { kind: 'unknown', reference: null } }), true);
+for (const source of [{ kind: 'message', reference: null }, { kind: 'unknown', reference: 'msg_fixture' }, { kind: 'forged', reference: 'msg_fixture' }, { kind: 'message', reference: ' ' }])
+  result('conversation.trajectory', originPage({ ...originEntry, source }), false);
+result('conversation.trajectory', originPage({ ...originEntry, job: ' ' }), false);
+const messageDelivery = { message: 'msg_fixture', sender: 'sender', recipient: 'recipient',
+  replyTo: null, replyExpected: false, finalReply: false, generated: false, state: 'handled',
+  ending: 'ANSWERED', reply: null, job: 'job_fixture', deadlineAt: null,
+  postedAt: '2026-10-07T00:00:00Z', body: 'hello', conversation: 'cnv_recipient', sourceConversation: 'cnv_sender' };
+result('message.delivery', messageDelivery, true);
+result('message.delivery', { ...messageDelivery, conversation: '' }, false);
 input('project.list', {}, true);
 input('project.list', { future: 1 }, false);
 for (const job of ['job_fixture', '', '  '])

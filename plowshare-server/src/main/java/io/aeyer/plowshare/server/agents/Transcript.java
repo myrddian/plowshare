@@ -62,6 +62,9 @@ import java.util.UUID;
  */
 public interface Transcript {
 
+  /** Binds the owning job before its runtime can append entries. Not an accounting run ID. */
+  default void startedAs(String job) {}
+
   /**
    * A run in no conversation: nothing before it, and nothing listening.
    *
