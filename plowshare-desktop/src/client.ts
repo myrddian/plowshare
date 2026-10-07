@@ -845,10 +845,18 @@ export class DesktopClient {
     let notice: string | undefined;
     switch (request.action) {
       case 'application-files':
-        await this.applicationFiles.list(request.project, request.path);
+        await this.applicationFiles.list(
+          request.project,
+          request.path,
+          request.location,
+        );
         break;
       case 'application-file-read':
-        await this.applicationFiles.read(request.project, request.path);
+        await this.applicationFiles.read(
+          request.project,
+          request.path,
+          request.location,
+        );
         break;
       case 'application-file-save':
         await this.applicationFiles.save(
@@ -856,6 +864,7 @@ export class DesktopClient {
           request.path,
           request.text,
           request.revision,
+          request.location,
         );
         if (request.path === 'plowshare.json') await this.readProjects();
         break;
@@ -1109,6 +1118,30 @@ export class DesktopClient {
           throw new Error(
             'Connect as a server administrator to add a server project.',
           );
+        if (request.applicationRoot !== undefined) {
+          if (
+            request.workspace !== undefined ||
+            request.writePaths !== undefined
+          )
+            throw new Error(
+              'Do not mix FileStore placement with legacy source fields.',
+            );
+          ok(
+            await this.send(
+              decodeRequest('application.create', {
+                name: request.name,
+                type: request.type ?? 'MANAGED',
+                applicationRoot: request.applicationRoot,
+                writableAreas: request.writableAreas ?? [],
+              }),
+            ),
+          );
+          await this.readProjects();
+          this.emit();
+          break;
+        }
+        if (request.writableAreas !== undefined)
+          throw new Error('Writable areas need an Application root.');
         const type = request.type ?? 'MANAGED';
         if (type !== 'MANAGED' && type !== 'DISJOINT')
           throw new Error('Choose MANAGED or DISJOINT.');

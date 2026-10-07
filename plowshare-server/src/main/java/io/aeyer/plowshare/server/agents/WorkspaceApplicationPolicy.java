@@ -47,7 +47,12 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
         || project.startsWith("personal:")
         || ClientProjects.privateProject(project)) return EXTERNAL;
     boolean required = registrations.required(project);
-    var recorded = projects.find(project);
+    java.util.Optional<io.aeyer.plowshare.server.archive.ProjectRecord> recorded;
+    try {
+      recorded = projects.find(project);
+    } catch (io.aeyer.plowshare.server.files.WorkspaceRefusedException unavailable) {
+      return INVALID;
+    }
     if (recorded.isEmpty())
       return required ? INVALID : EXTERNAL; // find never returns another machine's workspace.
     var row = recorded.orElseThrow();

@@ -6,27 +6,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One row of {@code projects}: a project's name, the directory it <em>is</em>, the further
- * directories lent at that place, and the paths inside them its jobs may not reach.
+ * A project's primary source directory and the filesystem boundaries admitted on this host.
  *
- * <p>{@code workspace} and every element of {@code lent} are absolute and normalised, never as the
- * caller spelled them. A relative path is resolved against the server's working directory
- * <em>once</em>, when it is written, so the leash cannot move later because the process was started
- * somewhere else.
+ * <p>For legacy records, {@code workspace} is the stored absolute primary source path and {@code
+ * lent} adds readable roots. Their existing meaning is preserved until explicit Application
+ * adoption. Client Workspace views are permitted operations over filesystem locations; they are not
+ * Application identities.
  *
- * <h2>Two components, two jobs, and that is why there are two</h2>
- *
- * <p><b>{@code workspace} is the identity; {@link #roots()} is the leash.</b> {@code workspace} is
- * the {@code <PATH>} of {@code Presence.canonicalName()} — {@code <MACHINE>/<PATH>/<PROJ_NAME>} —
- * and the column {@code projects_machine_has_a_place} keys on. {@code lent} is the rest of what the
- * project may read at that place, and <b>nothing composing an identity may read it</b>: a canonical
- * name built from a list renames the project whenever the list reorders, and V14 exists so that a
- * rename is survivable rather than routine. V30 carries the whole argument.
- *
- * <p>So a caller wanting "where is this project" asks {@link #workspace()}, and a caller wanting
- * "what may its jobs read" asks {@link #roots()}. Neither question is answered by the other
- * component, and the accessor for the leash is a method rather than a component precisely so there
- * is no third list anybody can build by hand.
+ * <p>For alias-based Applications, {@code placement} is the durable alias/relative-path contract.
+ * The repository resolves it against this host's FileStores on each read, supplying {@code
+ * workspace} as the current Application root and {@code areaRoots} as the admitted writable areas.
+ * An unavailable alias is refused rather than falling back to the historical absolute path. {@link
+ * #roots()} includes source and admitted writable areas; {@link #writeRoots()} includes only
+ * writable areas. User FileStore access and agent grants remain separate checks.
  *
  * <p><b>{@link #exclusions()} is the row's own list and is not the containment set.</b> The
  * mandatory exclusions — the server's configuration, the sampling profiles, the operator token, the
@@ -58,14 +50,27 @@ public record ProjectRecord(
     List<Path> lent,
     List<Path> exclusions,
     String type,
-    List<String> writePaths) {
+    List<String> writePaths,
+    ApplicationPlacement placement,
+    List<Path> areaRoots) {
+
+  /** Legacy paths retain their source-relative meaning until explicitly adopted. */
+  public ProjectRecord(
+      String name,
+      Path workspace,
+      List<Path> lent,
+      List<Path> exclusions,
+      String type,
+      List<String> writePaths) {
+    this(name, workspace, lent, exclusions, type, writePaths, null, List.of());
+  }
 
   public ProjectRecord(String name, Path workspace, List<Path> lent, List<Path> exclusions) {
     this(name, workspace, lent, exclusions, "STANDARD", List.of("."));
   }
 
   public boolean readOnly() {
-    return writePaths.isEmpty();
+    return placement == null ? writePaths.isEmpty() : placement.writableAreas().isEmpty();
   }
 
   public boolean serverProject() {
@@ -81,6 +86,9 @@ public record ProjectRecord(
     writePaths = List.copyOf(writePaths);
     lent = List.copyOf(lent);
     exclusions = List.copyOf(exclusions);
+    areaRoots = List.copyOf(areaRoots);
+    if (placement == null && !areaRoots.isEmpty())
+      throw new IllegalArgumentException("Resolved areas need an Application placement");
   }
 
   /**
@@ -107,7 +115,24 @@ public record ProjectRecord(
     List<Path> roots = new ArrayList<>(lent.size() + 1);
     roots.add(workspace);
     roots.addAll(lent);
+    roots.addAll(areaRoots);
     return List.copyOf(roots);
+  }
+
+  /**
+   * Admitted runtime write roots; account grants and mandatory exclusions further restrict them.
+   */
+  public List<Path> writeRoots() {
+    if (placement != null) return areaRoots;
+    return writePaths.stream()
+        .map(path -> FileAccess.canonical(workspace.resolve(path)))
+        .filter(path -> path.startsWith(FileAccess.canonical(workspace)))
+        .toList();
+  }
+
+  /** A working directory is not a sandbox for writes across multiple FileStores. */
+  public boolean restrictedCommands() {
+    return placement != null || !writePaths.contains(".");
   }
 
   /**

@@ -181,7 +181,14 @@ export function createProjects(options: ProjectsOptions): Screen {
     card.append(lent(project));
     card.append(leash(project));
     if (project.kind === 'application')
-      card.append(applicationFiles(textOf(project.name), () => stream));
+      card.append(
+        applicationFiles(
+          textOf(project.name),
+          () => stream,
+          project.applicationRoot ?? undefined,
+          project.writableAreas ?? [],
+        ),
+      );
     card.append(mover(project));
     if (options.openStream !== undefined) {
       const section = el('section', 'approved');

@@ -431,26 +431,27 @@ export async function protocolFixture(options = {}) {
           }
           result.payload=['project.member.add','project.member.remove'].includes(frame.type)?{project:payload.project,members:[...grants.keys()]}:{project:payload.project,role:row.role ?? 'MANAGER',permissions:row.role==='VIEWER'?['read']:['read','work','manage'],members:[...grants].map(([handle,role])=>({handle,role})),history};break;
         }
+        case 'application.create':
         case 'project.create':
         case 'project.define': {
-          projectRows.set(payload.name, { name: payload.name, role:'MANAGER', workspace: payload.workspace || '/server/provisioned', type: payload.type || 'STANDARD', readOnly: payload.writePaths?.length === 0, writePaths: payload.writePaths || ['.'], machine: null, lent: [], exclusions: [], members: ['fixture'] });
+          projectRows.set(payload.name, { name: payload.name, ...(frame.type === 'application.create' ? {kind:'application', applicationRoot:payload.applicationRoot, writableAreas:payload.writableAreas} : {}), role:'MANAGER', workspace: payload.workspace || '/server/provisioned', type: payload.type || 'STANDARD', readOnly: (payload.writableAreas ?? payload.writePaths)?.length === 0, writePaths: payload.writableAreas ? [] : payload.writePaths || ['.'], machine: null, lent: [], exclusions: [], members: ['fixture'] });
           result = { code: 'OK', payload: projectWire(payload.name, projectRows.get(payload.name)) }; break;
         }
         case 'application.files': {
-          const files = applicationSources.get(payload.project), row = projectRows.get(payload.project);
+          const files = applicationSources.get(payload.location ? JSON.stringify([payload.project, payload.location.store, payload.location.path]) : payload.project), row = projectRows.get(payload.project);
           if (!files || row?.kind !== 'application') { result = { code: 'FORBIDDEN', said: 'Application access unavailable' }; break; }
           const prefix = payload.path ? payload.path + '/' : '';
-          result.payload = { project: payload.project, path: payload.path ?? '', entries: [...files.keys()].filter(path => path.startsWith(prefix) && !path.slice(prefix.length).includes('/')).map(path => ({ path, name: path.slice(prefix.length), directory: false })), more: false }; break;
+          result.payload = { project: payload.project, path: payload.path ?? '', entries: [...files.keys()].filter(path => path.startsWith(prefix) && !path.slice(prefix.length).includes('/')).map(path => ({ path, name: path.slice(prefix.length), directory: false })), more: false, location: payload.location ?? null }; break;
         }
         case 'application.file.read': case 'application.file.save': {
-          const file = applicationSources.get(payload.project)?.get(payload.path), row = projectRows.get(payload.project);
+          const file = applicationSources.get(payload.location ? JSON.stringify([payload.project, payload.location.store, payload.location.path]) : payload.project)?.get(payload.path), row = projectRows.get(payload.project);
           if (!file || row?.kind !== 'application') { result = { code: 'FORBIDDEN', said: 'Application file unavailable' }; break; }
           const writable = file.writable && row.role !== 'VIEWER';
           if (frame.type === 'application.file.save') {
             if (!writable || payload.revision !== sourceRevision(file.text)) { result = { code: 'CONFLICT', said: 'The file changed or write access is unavailable' }; break; }
             file.text = payload.text;
           }
-          result.payload = { project: payload.project, path: payload.path, text: file.text, revision: sourceRevision(file.text), writable }; break;
+          result.payload = { project: payload.project, path: payload.path, text: file.text, revision: sourceRevision(file.text), writable, location: payload.location ?? null }; break;
         }
         case 'project.list': result = refuseProjects ? { code: 'BAD_REQUEST', said: 'Project listing unavailable' } : { code: 'OK', payload: [...projectRows.values()].map(row => projectWire(row.name, row)) }; break;
         case 'agent.list': {
@@ -647,7 +648,7 @@ export async function protocolFixture(options = {}) {
     get fileClaim() { return fileClaim; },
     get liveFileClaims() { return [...filePeers.values()].flat().map(row => row.claim); },
     get rotations() { return rotations; },
-    setApplicationFile(project, path, text, writable = false) { const files = applicationSources.get(project) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(project, files); },
+    setApplicationFile(project, path, text, writable = false, location) { const key = location ? JSON.stringify([project, location.store, location.path]) : project; const files = applicationSources.get(key) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(key, files); },
     removeServerProject(project) { projectRows.delete(project); },
     addServerProject(row) { projectRows.set(row.name, row); },
     addConversation(row, bot) {

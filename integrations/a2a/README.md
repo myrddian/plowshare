@@ -24,6 +24,15 @@ Build with `./gradlew :plowshare-a2a:installDist`. Set `PLOWSHARE_TOKEN`, config
 operator-owned JSON file, and launch
 `integrations/a2a/build/install/plowshare-a2a/bin/plowshare-a2a /path/to/config.json`.
 
+The distribution includes [an A2A Application template](examples/application/plowshare.json).
+Copy it to the server's intended Application root and add explicit `access.accounts`
+grants for the operator and adapter account (a service token uses its owner's
+handle), with matching server membership. The template is hidden until granted.
+Register the root through [Application creation or adoption](../../docs/projects.md#create-or-adopt-an-alias-based-application).
+The adapter configuration's `project` field selects that Application; a binding
+alone does not create or classify it. The adapter's private endpoint and credential
+configuration remains outside the Application template.
+
 ```json
 {
   "plowshare": "https://plowshare.example.invalid",

@@ -1,5 +1,12 @@
 # Server administration
 
+Server FileStore aliases are configured through `PLOWSHARE_FILESTORES_CONFIG_FILE`,
+an absolute path to private `filestore.js`. Store roots and admitted writable-area
+directories must exist on this server or in its container. Account grants for
+direct browsing are independent of Application runtime writable areas. Missing
+or invalid aliases deny access without using an old absolute path. See
+[FileStore configuration and Application adoption](../projects.md#filestores-application-roots-and-writable-areas).
+
 ## Separate infrastructure from everyday use
 
 The server is a persistent service. PostgreSQL/pgvector, provider access and durable

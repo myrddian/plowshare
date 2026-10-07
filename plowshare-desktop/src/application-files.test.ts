@@ -49,6 +49,32 @@ function fixture() {
     },
   };
 }
+await test('writable-area selection cannot reuse source write authority or accept a reply without its location', async () => {
+  const f = fixture();
+  const location = { store: 'outputs', path: 'reports' };
+  await f.client.read('app', 'a.txt');
+  await assert.rejects(
+    f.client.save('app', 'a.txt', 'new', source.revision, location),
+  );
+  assert.equal(
+    f.calls.filter((row) => row.type === 'application.file.save').length,
+    0,
+  );
+  await f.client.read('app', 'a.txt', location);
+  assert.match(f.state.applicationFiles?.error ?? '', /reply|response/i);
+  assert.equal(f.state.applicationFiles?.document, undefined);
+  f.respond(async () => ({ code: 'OK', payload: { ...source, location } }));
+  await f.client.read('app', 'a.txt', location);
+  assert.deepEqual(f.state.applicationFiles?.location, location);
+  await f.client.save('app', 'a.txt', 'new', source.revision, location);
+  assert.deepEqual(f.calls.at(-1)?.payload, {
+    project: 'app',
+    path: 'a.txt',
+    text: 'new',
+    revision: source.revision,
+    location,
+  });
+});
 await test('server-only files require an available Application and preserve failed save without replay', async () => {
   const f = fixture();
   await f.client.list('app');

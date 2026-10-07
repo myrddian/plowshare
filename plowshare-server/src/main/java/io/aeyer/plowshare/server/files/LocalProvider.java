@@ -1299,13 +1299,8 @@ public final class LocalProvider implements FileProvider {
     }
     if (defined.serverProject()) {
       FileAccess writes =
-          FileAccess.of(
-              defined.writePaths().stream()
-                  .map(path -> FileAccess.canonical(defined.workspace().resolve(path)))
-                  .filter(path -> path.startsWith(FileAccess.canonical(defined.workspace())))
-                  .toList(),
-              projects.effectiveExclusions(defined));
-      return new Leash(access, null, writes, !defined.writePaths().contains("."));
+          FileAccess.of(defined.writeRoots(), projects.effectiveExclusions(defined));
+      return new Leash(access, null, writes, defined.restrictedCommands());
     }
     return new Leash(access, null);
   }

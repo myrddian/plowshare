@@ -3,6 +3,7 @@ import type { MessagingPayloads } from './messaging.ts';
 import type { UsagePayloads } from './usage.ts';
 import type { InformationPayloads } from './information-payloads.ts';
 import type { AdministrativePayloads } from './administration.ts';
+import type { FileStoreReference } from '../binding/filestores.ts';
 
 /** WS request shapes. Optional fields retain the server's defaults. */
 type Tier = { readonly project?: string | null };
@@ -154,13 +155,33 @@ export interface ExtendedPayloads
     readonly handle: string;
     readonly id: string;
   };
-  'application.files': { readonly project: string; readonly path?: string };
-  'application.file.read': { readonly project: string; readonly path: string };
+  'application.create': {
+    readonly name: string;
+    readonly type?: 'MANAGED' | 'DISJOINT';
+    readonly applicationRoot: FileStoreReference;
+    readonly writableAreas: readonly FileStoreReference[];
+  };
+  'application.storage.set': {
+    readonly project: string;
+    readonly applicationRoot: FileStoreReference;
+    readonly writableAreas: readonly FileStoreReference[];
+  };
+  'application.files': {
+    readonly project: string;
+    readonly path?: string;
+    readonly location?: FileStoreReference;
+  };
+  'application.file.read': {
+    readonly project: string;
+    readonly path: string;
+    readonly location?: FileStoreReference;
+  };
   'application.file.save': {
     readonly project: string;
     readonly path: string;
     readonly text: string;
     readonly revision: string;
+    readonly location?: FileStoreReference;
   };
   'project.list': Record<string, never>;
   'project.attach': {
@@ -320,6 +341,8 @@ export const CLI_OPERATIONS = {
   'application files': 'application.files',
   'application read': 'application.file.read',
   'application save': 'application.file.save',
+  'application create': 'application.create',
+  'application storage set': 'application.storage.set',
   'project list': 'project.list',
   'project define': 'project.define',
   'project lend': 'project.lend',

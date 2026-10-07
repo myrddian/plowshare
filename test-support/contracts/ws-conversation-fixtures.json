@@ -862,5 +862,45 @@
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "writable": false
     }
+  },
+  "application.create": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
+  },
+  "application.storage.set": {
+    "code": "OK",
+    "payload": {
+      "name": "p",
+      "workspace": "/server/work",
+      "lent": [
+        "/server/extra"
+      ],
+      "exclusions": [
+        "private"
+      ],
+      "machine": null,
+      "members": [
+        "enzo"
+      ],
+      "future": {
+        "preserved": true
+      }
+    }
   }
 }

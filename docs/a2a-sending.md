@@ -49,6 +49,12 @@ project accessible to your account, and a remote agent that supports the adapter
 Obtain the remote agent's JSON-RPC endpoint from its operator. The configured URL
 must be that endpoint, rather than its Agent Card URL.
 
+For a dedicated A2A Application, deploy the bundled
+[root manifest](../integrations/a2a/examples/application/plowshare.json) and
+[register or adopt its Application root](projects.md#create-or-adopt-an-alias-based-application).
+Add explicit manifest account grants with matching server membership; the template
+is hidden by default. The protocol's `project` field still selects its work scope.
+
 Save this configuration outside tracked source, for example as
 `/absolute/private/path/a2a.json`. Replace the example origins and project:
 
