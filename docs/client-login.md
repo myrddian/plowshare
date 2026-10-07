@@ -182,6 +182,12 @@ Web Locks (including unsupported or insecure origins) keep existing sessions but
 require explicit sign-in after expiry; they never rotate shared cookies through
 a per-tab fallback.
 
+This controls application submissions, not exactly-once HTTP delivery. An abrupt
+connection-close fixture received duplicate arrivals for one instrumented fetch.
+The current refresh endpoint has no request-id/receipt reconciliation contract;
+transport-level duplication remains an unresolved authentication boundary and
+requires a server-owned design rather than a client retry workaround.
+
 A refused single-use bootstrap token cannot be renewed by reloading. Use an
 existing account, or ask the operator for the current handoff from the configured
 protected token file when setting up a new installation.

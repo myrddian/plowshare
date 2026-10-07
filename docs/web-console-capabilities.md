@@ -28,6 +28,13 @@ runtime configuration remain explicit HTTP boundaries. A stale comment mentionin
 client assets must be checked separately from server image revision labels and
 authenticated runtime observations.
 
+Application refreshes are coordinated and never deliberately replayed. This does
+not prove exactly-once HTTP delivery: abrupt-close fixture tracing observed
+multiple arrivals carrying the same per-fetch diagnostic ID. The current refresh
+endpoint has no public receipt reconciliation contract for that duplication;
+transport-level authentication recovery remains unresolved. See
+[browser connection recovery](client-login.md#browser-connection-recovery).
+
 ## Workflow inventory
 
 | Workflow                            | Browser coverage                                                                                                                                                                                                                                                                                                                                                                     | Other client / public contract evidence                                                                                                                                         | Implementation and test evidence                                                                                                                                                                                                                                                                                                                                                                                                |

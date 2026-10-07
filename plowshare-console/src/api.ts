@@ -11,7 +11,7 @@
  * cannot, because a browser cannot set headers on a WebSocket upgrade, which is
  * why the cookie exists at all.
  *
- * **A refresh is spent exactly once, and is never retried.** `POST
+ * **This client submits a refresh once and never initiates a replay.** `POST
  * /v1/auth/refresh` rotates both cookies, and presenting a refresh token that
  * has already been spent RETIRES THE WHOLE CHAIN on the server. A client that
  * retries a refresh, or that lets two requests refresh concurrently, logs
