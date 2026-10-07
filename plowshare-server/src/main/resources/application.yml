@@ -46,6 +46,9 @@ management:
 # single-pool shape below can be replaced by a complete external pool list.
 # LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
+  filestores:
+    # Host-side registry; blank keeps existing absolute workspace registrations usable.
+    config-file: ${PLOWSHARE_FILESTORES_CONFIG_FILE:}
   projects:
     workspace-directory: ${PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY}
   # To enable named code/prose spaces, provide both complete external model

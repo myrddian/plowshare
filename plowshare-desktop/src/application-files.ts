@@ -1,3 +1,4 @@
+import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import {
@@ -35,17 +36,26 @@ export class ApplicationFilesClient {
     )
       throw new Error('Choose an available server Application.');
   }
-  async list(project: string, path = '') {
+  async list(project: string, path = '', location?: FileStoreReference) {
     this.available(project);
     if (this.state().applicationFiles?.saving)
       throw new Error('Wait for the current save before browsing.');
     const epoch = ++this.epoch;
-    const value = { project, loading: true, saving: false };
+    const value = {
+      project,
+      ...(location ? { location } : {}),
+      loading: true,
+      saving: false,
+    };
     this.state().applicationFiles = value;
     this.emit();
     try {
       const answer = await this.send(
-        request('application.files', { project, path }),
+        request('application.files', {
+          project,
+          path,
+          ...(location ? { location } : {}),
+        }),
       );
       if (epoch !== this.epoch) return;
       this.available(project);
@@ -67,7 +77,7 @@ export class ApplicationFilesClient {
       if (epoch === this.epoch) this.emit();
     }
   }
-  async read(project: string, path: string) {
+  async read(project: string, path: string, location?: FileStoreReference) {
     this.available(project);
     const previous = this.state().applicationFiles;
     if (previous?.saving)
@@ -75,9 +85,12 @@ export class ApplicationFilesClient {
     const epoch = ++this.epoch;
     const value = {
       project,
+      ...(location ? { location } : {}),
       loading: true,
       saving: false,
-      ...(previous?.project === project && previous.listing
+      ...(previous?.project === project &&
+      sameLocation(previous.location, location) &&
+      previous.listing
         ? { listing: previous.listing }
         : {}),
     };
@@ -85,7 +98,11 @@ export class ApplicationFilesClient {
     this.emit();
     try {
       const answer = await this.send(
-        request('application.file.read', { project, path }),
+        request('application.file.read', {
+          project,
+          path,
+          ...(location ? { location } : {}),
+        }),
       );
       if (epoch !== this.epoch) return;
       this.available(project);
@@ -107,12 +124,19 @@ export class ApplicationFilesClient {
       if (epoch === this.epoch) this.emit();
     }
   }
-  async save(project: string, path: string, text: string, revision: string) {
+  async save(
+    project: string,
+    path: string,
+    text: string,
+    revision: string,
+    location?: FileStoreReference,
+  ) {
     this.available(project);
     const value = this.state().applicationFiles;
     if (
       !value ||
       value.project !== project ||
+      !sameLocation(value.location, location) ||
       value.loading ||
       value.saving ||
       value.uncertain ||
@@ -129,7 +153,13 @@ export class ApplicationFilesClient {
     this.emit();
     try {
       const answer = await this.send(
-        request('application.file.save', { project, path, text, revision }),
+        request('application.file.save', {
+          project,
+          path,
+          text,
+          revision,
+          ...(location ? { location } : {}),
+        }),
       );
       if (epoch !== this.epoch) return;
       this.available(project);
@@ -148,4 +178,11 @@ export class ApplicationFilesClient {
       }
     }
   }
+}
+
+function sameLocation(
+  a: FileStoreReference | undefined,
+  b: FileStoreReference | undefined,
+) {
+  return a?.store === b?.store && a?.path === b?.path;
 }

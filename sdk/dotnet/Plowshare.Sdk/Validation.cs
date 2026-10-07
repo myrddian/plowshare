@@ -50,6 +50,10 @@ internal static class Validation
     private static double Bound(JsonElement schema, string key, double fallback) => schema.TryGetProperty(key, out var v) ? v.GetDouble() : fallback;
     private static bool Matches(JsonElement schema, string key, string value)
         => !schema.TryGetProperty(key, out var p) || Regex.IsMatch(value, p.GetString()!, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    private static bool CanonicalRelativePath(string value)
+        => !value.Contains('\\') && !value.Contains(':')
+        && !value.Any(c => c < 32 || c >= 127 && c <= 159)
+        && (value.Length == 0 || value.Split('/').All(part => part.Length > 0 && part != "." && part != ".." && !part.Equals(".git", StringComparison.OrdinalIgnoreCase)));
     internal static void Check(JsonElement schema, JsonElement value)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
@@ -66,6 +70,7 @@ internal static class Validation
                     || Flag(schema, "noNul") && text.Contains('\0')
                     || !Matches(schema, "pattern", text)
                     || schema.TryGetProperty("disallow", out var disallowed) && disallowed.EnumerateArray().Any(v => v.GetString() == text)
+                    || Flag(schema, "canonicalRelativePath") && !CanonicalRelativePath(text)
                     || Flag(schema, "safeRelativePath") && (text.StartsWith('/') || text.Contains('\\') || text.Split('/').Contains(".."));
                 break;
             case JsonValueKind.Number:

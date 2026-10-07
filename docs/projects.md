@@ -61,7 +61,95 @@ the server cannot turn the Application back into a legacy External. Repair the
 manifest through its authorized source-management workflow. Agents cannot create,
 edit, delete or move the root `plowshare.json` through workspace file tools.
 
-## Create a server project
+## FileStores, Application roots and writable areas
+
+A **Workspace** is a client-facing view of filesystem locations and operations
+the account may use. It can include unrelated directories and does not identify
+an Application. A **FileStore** is a host filesystem location with a stable alias.
+An **Application root** is a directory inside a FileStore containing its valid
+root `plowshare.json`. **Writable areas** are separately admitted locations inside
+one or more FileStores. MANAGED or DISJOINT describes source lifecycle ownership,
+independently of placement and write admission.
+
+Set `PLOWSHARE_FILESTORES_CONFIG_FILE` to an absolute path to the server's private
+`filestore.js`. The version 1 registry uses the same alias/root structure as the
+client registry, with optional server account grants for direct file access:
+
+```js
+export default {
+  version: 1,
+  defaultStore: 'applications',
+  fileStores: {
+    applications: {
+      root: '/srv/applications',
+      access: { accounts: [{ handle: 'builder', role: 'CONTRIBUTOR' }] },
+    },
+    outputs: {
+      root: '/srv/outputs',
+      access: { accounts: [{ handle: 'builder', role: 'CONTRIBUTOR' }] },
+    },
+  },
+};
+```
+
+These paths are illustrative operator configuration, not runtime defaults. Store
+roots must be existing directories on the server host or inside its container.
+The JavaScript default export is evaluated without host, filesystem, network or
+import access, with a two-second deadline and a 64 KiB limit. Unknown fields,
+aliases, invalid definitions and linked locations are refused. The registry is
+private configuration and excluded from agent and user file operations.
+
+Aliases resolve only on the addressed host. A laptop's `filestore.js` never
+supplies a missing server alias. Applications persist alias/relative-path
+references, resolving them again for access; a missing store or directory cannot
+fall back to an old absolute path. Unavailable Applications are omitted from
+listings until their locations are restored. Relative references use canonical
+slash-separated paths without traversal, Git metadata or symbolic links. An
+empty path names the store root.
+
+## Create or adopt an alias-based Application
+
+An administrator creates an Application with explicit placement:
+
+```sh
+bin/plowshare-cli application create '{"name":"mychatbot","applicationRoot":{"store":"applications","path":"mychatbot"},"writableAreas":[{"store":"outputs","path":"mychatbot/reports"}]}'
+```
+
+Use the same command with `/` in the TUI. In Desktop **Add Application**, select
+**Use server FileStore aliases**, enter `applications/mychatbot` as the source,
+and comma-separated `alias/path` writable areas. Blank writable areas are read
+only. This new `application.create` operation safely refuses on older servers.
+MANAGED provisions its source and valid manifest; DISJOINT requires an existing
+source with a valid manifest and leaves it unchanged. All writable-area
+directories must already exist; creation never provisions unrelated output trees.
+The source is writable only when explicitly included in `writableAreas`.
+
+Existing registrations retain `workspace` as their primary source and
+`writePaths` as source-relative write admission. Adoption is explicit:
+
+```sh
+bin/plowshare-cli application storage set '{"project":"mychatbot","applicationRoot":{"store":"applications","path":"mychatbot"},"writableAreas":[]}'
+```
+
+The alias must resolve to the current Application root. This operation updates
+placement and write admission atomically; it does not relocate source. It clears
+legacy lending and write-path grants. Subsequent changes use the same operation;
+legacy define, workspace and lending mutations are refused for adopted records.
+Changing a host alias deliberately changes where its Applications resolve.
+`project forget` revokes filesystem registration and alias write admission while
+retaining the adopted Application boundary and durable work. Re-registration is
+deliberate; forgetting cannot turn an adopted Application into an External.
+
+Direct user browsing requires both effective Application VIEWER membership and
+a FileStore VIEWER grant. Saving additionally requires CONTRIBUTOR in both and
+an admitted writable area; configuration files still require Application MANAGER.
+Omitted FileStore account grants deny direct access, including to administrators.
+Runtime writes instead intersect admitted writable areas with agent grants and
+mandatory exclusions. Neither user grants nor runtime admission imply the other.
+Unsandboxed subprocess commands are disabled for alias-based Applications because
+a working directory cannot enforce these filesystem boundaries.
+
+## Legacy server project creation
 
 CLI and TUI commands use the same authenticated WebSocket operation,
 `project.create`. In the TUI, prefix the command with `/`. In the desktop,
@@ -73,8 +161,8 @@ A `MANAGED` project provisions a server workspace and writes `plowshare.json` wi
 bin/plowshare-cli project create '{"name":"home-assistant"}'
 ```
 
-The server chooses a directory under `PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY`
-(default `workspaces/` relative to the server process). Specify `workspace` to
+The server chooses a directory under the explicitly configured absolute
+`PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY`. Specify `workspace` to
 choose a server directory. Keep this directory separate from private server
 state. Docker deployments mount it at `/var/lib/plowshare-workspaces`.
 
@@ -442,8 +530,9 @@ The browser lists up to 200 entries per directory. An explicit relative path can
 open files or directories beyond that listing. Reads and edits require existing
 regular UTF-8 text files no larger than 256 KiB. Linked paths, Git metadata and
 excluded paths cannot be accessed. Each request rechecks effective Application
-membership, the root manifest and the workspace fence. Write access also requires
-CONTRIBUTOR or MANAGER and a matching `writePaths` area. Editing `plowshare.json`,
+membership, the root manifest and the filesystem fence. Write access also requires
+CONTRIBUTOR or MANAGER and a matching admitted writable area (legacy registrations
+use `writePaths`). Editing `plowshare.json`,
 `.plowshare/` definitions or `Relay/` definitions requires MANAGER; an edited root
 manifest must remain valid.
 
@@ -453,3 +542,16 @@ where supported. Concurrent external source owners remain independent: this is
 not a filesystem transaction with their writers. A failed or unreadable save
 reply is never replayed. Read and review the current file before saving again;
 the graphical editors retain an unsaved draft while reconciling changes.
+
+For alias-based Applications, the graphical file views offer Application source
+and each additional writable area. Drafts stay separate by location and path.
+CLI, TUI and SDK requests select an exact admitted location with `location`:
+
+```text
+application files {"project":"mychatbot","location":{"store":"outputs","path":"mychatbot/reports"}}
+application read {"project":"mychatbot","location":{"store":"outputs","path":"mychatbot/reports"},"path":"summary.md"}
+```
+
+Omitting `location` selects the Application source. Arbitrary unadmitted locations
+are refused. Replies echo the selector; clients refuse crossed or missing
+selectors rather than silently opening the source directory.

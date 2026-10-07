@@ -15,26 +15,27 @@ import (
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
-	Web              bool     `json:"web"`
-	SafePrecision    bool     `json:"safePrecision"`
-	Timestamp        bool     `json:"timestamp"`
-	MinLength        int      `json:"minLength"`
-	MaxLength        *int     `json:"maxLength"`
-	Nonblank         bool     `json:"nonblank"`
-	Trimmed          bool     `json:"trimmed"`
-	NoNul            bool     `json:"noNul"`
-	Pattern          string   `json:"pattern"`
-	Disallow         []string `json:"disallow"`
-	SafeRelativePath bool     `json:"safeRelativePath"`
-	Integer          bool     `json:"integer"`
-	Minimum          *float64 `json:"minimum"`
-	Maximum          *float64 `json:"maximum"`
-	UniqueItems      bool     `json:"uniqueItems"`
-	Element          *shape   `json:"element"`
-	MaxProperties    *int     `json:"maxProperties"`
-	KeyPattern       string   `json:"keyPattern"`
-	Values           *shape   `json:"values"`
-	Rules            []any    `json:"rules"`
+	Web                   bool     `json:"web"`
+	SafePrecision         bool     `json:"safePrecision"`
+	Timestamp             bool     `json:"timestamp"`
+	MinLength             int      `json:"minLength"`
+	MaxLength             *int     `json:"maxLength"`
+	Nonblank              bool     `json:"nonblank"`
+	Trimmed               bool     `json:"trimmed"`
+	NoNul                 bool     `json:"noNul"`
+	Pattern               string   `json:"pattern"`
+	Disallow              []string `json:"disallow"`
+	CanonicalRelativePath bool     `json:"canonicalRelativePath"`
+	SafeRelativePath      bool     `json:"safeRelativePath"`
+	Integer               bool     `json:"integer"`
+	Minimum               *float64 `json:"minimum"`
+	Maximum               *float64 `json:"maximum"`
+	UniqueItems           bool     `json:"uniqueItems"`
+	Element               *shape   `json:"element"`
+	MaxProperties         *int     `json:"maxProperties"`
+	KeyPattern            string   `json:"keyPattern"`
+	Values                *shape   `json:"values"`
+	Rules                 []any    `json:"rules"`
 }
 
 func get(row any, path string) any {
@@ -128,6 +129,25 @@ func rule(expr any, row any) any {
 	return false
 }
 func pattern(p, s string) bool { valid, err := regexp.MatchString(p, s); return err == nil && valid }
+func canonicalRelativePath(value string) bool {
+	if strings.ContainsAny(value, "\\:") {
+		return false
+	}
+	for _, character := range value {
+		if character < 32 || character >= 127 && character <= 159 {
+			return false
+		}
+	}
+	if value == "" {
+		return true
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." || strings.EqualFold(part, ".git") {
+			return false
+		}
+	}
+	return true
+}
 func check(s shape, value any) error {
 	if value == nil {
 		return nil
@@ -156,7 +176,7 @@ func check(s shape, value any) error {
 		if s.MaxLength != nil {
 			maximum = *s.MaxLength
 		}
-		if n < s.MinLength || n > maximum || s.Nonblank && strings.TrimSpace(v) == "" || s.Trimmed && strings.TrimSpace(v) != v || s.NoNul && strings.ContainsRune(v, 0) || s.Pattern != "" && !pattern(s.Pattern, v) || slices.Contains(s.Disallow, v) || s.SafeRelativePath && (strings.HasPrefix(v, "/") || strings.Contains(v, "\\") || slices.Contains(strings.Split(v, "/"), "..")) {
+		if s.CanonicalRelativePath && !canonicalRelativePath(v) || n < s.MinLength || n > maximum || s.Nonblank && strings.TrimSpace(v) == "" || s.Trimmed && strings.TrimSpace(v) != v || s.NoNul && strings.ContainsRune(v, 0) || s.Pattern != "" && !pattern(s.Pattern, v) || slices.Contains(s.Disallow, v) || s.SafeRelativePath && (strings.HasPrefix(v, "/") || strings.Contains(v, "\\") || slices.Contains(strings.Split(v, "/"), "..")) {
 			return contractError
 		}
 	case json.Number:

@@ -1,5 +1,8 @@
 import { validateRelayReply } from './relay.ts';
-import { validateEntryOrigins } from './conversation-replies.ts';
+import {
+  validateEntryOrigins,
+  validateFileStoreReplies,
+} from './conversation-replies.ts';
 import { validateMessagingOrigins } from './messaging.ts';
 import { validateReportDetails } from './report-details.ts';
 import {
@@ -239,6 +242,7 @@ export function decodeReply<K extends keyof Replies>(
   ) as unknown as Replies[K];
   validateRelayReply(type, decoded);
   validateEntryOrigins(type, decoded);
+  validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);
   validateExternalResponse({ type, payload: decoded } as Parameters<
     typeof validateExternalResponse

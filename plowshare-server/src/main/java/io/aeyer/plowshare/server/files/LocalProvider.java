@@ -15,7 +15,6 @@ import io.aeyer.plowshare.protocol.Replacement;
 import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
-import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.archive.ValidationException;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.images.StoredImage;
@@ -167,7 +166,7 @@ public final class LocalProvider implements FileProvider {
   /** The empty leash: no root, nothing permitted, used for every absence. */
   private static final FileAccess NOTHING = FileAccess.of(List.of(), List.of());
 
-  private final ProjectStore projects;
+  private final io.aeyer.plowshare.server.archive.ProjectWorkspaces projects;
   private final Home home;
 
   /**
@@ -198,7 +197,8 @@ public final class LocalProvider implements FileProvider {
    * @param grants what the agent's definition declared. Empty is an ordinary answer and means this
    *     agent reaches no file at all
    */
-  public LocalProvider(ProjectStore projects, Home home, List<Grant> grants) {
+  public LocalProvider(
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects, Home home, List<Grant> grants) {
     this(projects, home, grants, ImageStore.NONE);
   }
 
@@ -209,12 +209,20 @@ public final class LocalProvider implements FileProvider {
    *     ImageStore#NONE} for a deployment that names none, which is every one that keeps no data
    *     directory and is the three-argument form above
    */
-  public LocalProvider(ProjectStore projects, Home home, List<Grant> grants, ImageStore images) {
+  public LocalProvider(
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
+      Home home,
+      List<Grant> grants,
+      ImageStore images) {
     this(projects, home, grants, images, null);
   }
 
   private LocalProvider(
-      ProjectStore projects, Home home, List<Grant> grants, ImageStore images, FileAccess fixed) {
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
+      Home home,
+      List<Grant> grants,
+      ImageStore images,
+      FileAccess fixed) {
     this.projects = projects;
     this.home = home;
     this.images = Objects.requireNonNull(images, "images");
@@ -1260,13 +1268,8 @@ public final class LocalProvider implements FileProvider {
     }
     if (defined.serverProject()) {
       FileAccess writes =
-          FileAccess.of(
-              defined.writePaths().stream()
-                  .map(path -> FileAccess.canonical(defined.workspace().resolve(path)))
-                  .filter(path -> path.startsWith(FileAccess.canonical(defined.workspace())))
-                  .toList(),
-              projects.effectiveExclusions(defined));
-      return new Leash(access, null, writes, !defined.writePaths().contains("."));
+          FileAccess.of(defined.writeRoots(), projects.effectiveExclusions(defined));
+      return new Leash(access, null, writes, defined.restrictedCommands());
     }
     return new Leash(access, null);
   }

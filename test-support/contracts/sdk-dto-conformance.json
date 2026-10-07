@@ -1502,5 +1502,863 @@
       }
     },
     "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "application.create",
+    "value": {
+      "name": "chatbot",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": [
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "application.storage.set",
+    "value": {
+      "project": "chatbot",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "application.create",
+    "value": {
+      "name": "chatbot",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.create",
+    "value": {
+      "name": "chatbot",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": [
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "project.create",
+    "value": {
+      "name": "chatbot",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.create",
+    "value": {
+      "name": "chatbot",
+      "workspace": "/legacy",
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "chatbot/reports"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "chatbot/reports",
+        "future": true
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.create",
+    "value": {
+      "name": "chatbot",
+      "workspace": "/fixture",
+      "machine": null,
+      "members": [],
+      "lent": [],
+      "exclusions": [],
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": [
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.storage.set",
+    "value": {
+      "name": "chatbot",
+      "workspace": "/fixture",
+      "machine": null,
+      "members": [],
+      "lent": [],
+      "exclusions": [],
+      "applicationRoot": {
+        "store": "applications",
+        "path": "chatbot"
+      },
+      "writableAreas": [
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        },
+        {
+          "store": "outputs",
+          "path": "chatbot/reports"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "Upper",
+        "path": ""
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "Upper",
+        "path": ""
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "../secret"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "../secret"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "/absolute"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "/absolute"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "a//b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "a//b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "a/./b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "a/./b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "a\\b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "a\\b"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "a:stream"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "a:stream"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": ".GiT/config"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": ".GiT/config"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "a"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "text": "",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": true,
+      "location": {
+        "store": "outputs",
+        "path": "a"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.file.read",
+    "value": {
+      "project": "chatbot",
+      "path": "report.md",
+      "location": {
+        "store": "outputs",
+        "path": "",
+        "extra": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.files",
+    "value": {
+      "project": "chatbot",
+      "location": {
+        "store": "outputs",
+        "path": ""
+      }
+    },
+    "valid": true
   }
 ]

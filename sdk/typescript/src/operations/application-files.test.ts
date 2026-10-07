@@ -11,6 +11,42 @@ const document = {
   writable: true,
 };
 describe('Application server file contracts', () => {
+  it('requires explicit alias placement and rejects replies from another file location', () => {
+    const applicationRoot = { store: 'applications', path: 'chatbot' };
+    const location = { store: 'outputs', path: 'reports' };
+    const create = { name: 'app', applicationRoot, writableAreas: [location] };
+    expect(
+      parseCommand(`application create ${JSON.stringify(create)}`),
+    ).toMatchObject({
+      kind: 'request',
+      request: { type: 'application.create', payload: create },
+    });
+    expect(() => decodeRequest('project.create', create)).toThrow();
+    expect(() =>
+      decodeRequest('application.create', { name: 'app', applicationRoot }),
+    ).toThrow();
+    expect(() =>
+      decodeRequest('application.create', {
+        ...create,
+        writableAreas: [location, location],
+      }),
+    ).toThrow();
+    const asked = request('application.file.read', {
+      project: 'app',
+      path: 'a.txt',
+      location,
+    });
+    for (const payload of [
+      document,
+      { ...document, location: applicationRoot },
+    ])
+      expect(resultOf(asked, { code: 'OK', payload }).kind).toBe(
+        'invalid-response',
+      );
+    expect(
+      resultOf(asked, { code: 'OK', payload: { ...document, location } }).kind,
+    ).toBe('completed');
+  });
   it('exposes shared CLI/TUI commands and allows an empty text file', () => {
     expect(parseCommand('application files', 'app')).toMatchObject({
       kind: 'request',

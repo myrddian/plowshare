@@ -52,6 +52,23 @@ bounded write areas, manifest validation and routing.
 
 ## Choose the right filesystem ownership
 
+A Workspace is a client-facing view of allowed filesystem operations, potentially
+over unrelated directories. A FileStore is a host location with a stable alias.
+An Application root resides in one FileStore; separate writable areas can reside
+in several. The server's private `filestore.js` resolves aliases on that host.
+Local client FileStores cannot substitute for server definitions.
+
+Use `application create` with explicit `applicationRoot` and `writableAreas`, or
+`application storage set` to adopt an existing Application at its current root.
+Empty writable areas make it read only; source writes also need explicit admission.
+The desktop creation form offers server FileStore aliases, and file views select
+source or an admitted writable area. User FileStore account grants and Application
+runtime write admission are separate. See [FileStore setup and adoption](../projects.md#filestores-application-roots-and-writable-areas)
+for configuration, permissions, command examples and older-server behavior.
+
+Legacy `project create` retains its existing primary-source and source-relative
+write-path meaning until explicit adoption:
+
 | Mode | Files belong to | Setup and behavior |
 | --- | --- | --- |
 | Managed server project | Plowshare server workspace | Administrator provisions files; writes default to the permitted workspace |

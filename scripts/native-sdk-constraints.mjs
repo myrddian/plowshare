@@ -147,6 +147,10 @@ export function constrain(graph) {
       const f = s.properties.writePaths;
       if (f) add(f, { element: { safeRelativePath: true, minLength: 1 } });
     }
+    if (op === 'application.create' || op === 'application.storage.set') {
+      field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
+      field(s, 'type', {pattern:'^(MANAGED|DISJOINT)$'});
+    }
     if (op === 'agent.run')
       rules(
         s,
@@ -281,6 +285,11 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'FileStoreReference') {
+      field(s, 'store', {pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+      field(s, 'path', {maxLength:2048,canonicalRelativePath:true});
+    }
+    if (title === 'ProjectView') field(s, 'writableAreas', { maxItems: 100 });
     if (title === 'SourceView') {
       field(s, 'kind', { pattern: '^(unknown|person|message|relay|board|event|approval|orchestration)$' });
       field(s, 'reference', { minLength: 1, nonblank: true });

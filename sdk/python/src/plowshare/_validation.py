@@ -89,6 +89,16 @@ def check(schema: dict[str, object], value: object) -> None:
         invalid |= bool(schema.get("safeRelativePath")) and (
             value.startswith("/") or "\\" in value or ".." in value.split("/")
         )
+        invalid |= bool(schema.get("canonicalRelativePath")) and (
+            "\\" in value
+            or ":" in value
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)
+            or bool(value)
+            and any(
+                part in ("", ".", "..") or part.lower() == ".git"
+                for part in value.split("/")
+            )
+        )
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         invalid |= bool(schema.get("integer")) and (
             not finite(value) or int(value) != value

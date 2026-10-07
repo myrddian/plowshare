@@ -30,12 +30,23 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
   private final ProjectWorkspaces projects;
   private final ProjectMembers members;
   private final ApplicationPolicy applications;
+  private final FileStores fileStores;
 
   public WorkspaceApplicationFiles(
       ProjectWorkspaces projects, ProjectMembers members, ApplicationPolicy applications) {
+    this(projects, members, applications, FileStores.NONE);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public WorkspaceApplicationFiles(
+      ProjectWorkspaces projects,
+      ProjectMembers members,
+      ApplicationPolicy applications,
+      FileStores fileStores) {
     this.projects = projects;
     this.members = members;
     this.applications = applications;
+    this.fileStores = fileStores;
   }
 
   private record Source(ProjectRecord project, Path root, Path path, FileAccess fence) {}
@@ -51,8 +62,22 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
             .find(caller.project())
             .orElseThrow(() -> new CallerFault("The server Application workspace is unavailable"));
     path(relative);
-    Path root = row.workspace().toRealPath(),
-        target = relative.isEmpty() ? root : root.resolve(relative);
+    Path location = row.workspace();
+    if (row.placement() != null) {
+      var reference =
+          caller.location() == null ? row.placement().applicationRoot() : caller.location();
+      if (!reference.equals(row.placement().applicationRoot())) {
+        int index = row.placement().writableAreas().indexOf(reference);
+        if (index < 0) throw new CallerFault("This location is not admitted to the Application");
+        location = row.areaRoots().get(index);
+      }
+      if (!fileStores.permits(
+          reference, members.authorityAccount(caller.account()).orElse(null), ProjectRole.VIEWER))
+        throw new CallerFault("Direct FileStore read access is not granted to this account");
+    } else if (caller.location() != null) {
+      throw new CallerFault("This legacy Application has no FileStore placement");
+    }
+    Path root = location.toRealPath(), target = relative.isEmpty() ? root : root.resolve(relative);
     var fence = row.reach(projects.effectiveExclusions(row));
     Path at = root;
     for (Path segment : root.relativize(target)) {
@@ -121,7 +146,7 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
         more = true;
         entries.subList(200, entries.size()).clear();
       }
-      return new Listing(caller.project(), path, entries, more);
+      return new Listing(caller.project(), path, entries, more, caller.location());
     } catch (IOException | SecurityException unavailable) {
       throw new CallerFault("The Application directory could not be read");
     }
@@ -148,7 +173,21 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
 
   private boolean writable(Caller caller, Source source) {
     if (!members.mayWork(caller.project(), caller.account())) return false;
-    String relative = source.root().relativize(source.path()).toString().replace('\\', '/');
+    if (source.project().placement() != null) {
+      var reference =
+          caller.location() == null
+              ? source.project().placement().applicationRoot()
+              : caller.location();
+      if (!fileStores.permits(
+          reference,
+          members.authorityAccount(caller.account()).orElse(null),
+          ProjectRole.CONTRIBUTOR)) return false;
+    }
+    Path applicationRoot = FileAccess.canonical(source.project().workspace());
+    String relative =
+        source.path().startsWith(applicationRoot)
+            ? applicationRoot.relativize(source.path()).toString().replace('\\', '/')
+            : "";
     // Editing runtime definitions or the access/routing manifest needs definition-management
     // authority.
     boolean configuration =
@@ -156,12 +195,9 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
             || relative.startsWith(".plowshare/")
             || relative.startsWith("Relay/");
     if (configuration && !members.mayManage(caller.project(), caller.account())) return false;
-    return source.project().writePaths().stream()
-        .anyMatch(
-            allowed ->
-                allowed.equals(".")
-                    || relative.equals(allowed)
-                    || relative.startsWith(allowed + "/"));
+    return FileAccess.of(
+            source.project().writeRoots(), projects.effectiveExclusions(source.project()))
+        .permits(source.path());
   }
 
   private static String text(byte[] bytes) throws java.nio.charset.CharacterCodingException {
@@ -176,7 +212,13 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
       var source = source(caller, path);
       byte[] bytes = bytes(source);
       String text = text(bytes);
-      return new Document(caller.project(), path, text, revision(bytes), writable(caller, source));
+      return new Document(
+          caller.project(),
+          path,
+          text,
+          revision(bytes),
+          writable(caller, source),
+          caller.location());
     } catch (IOException | SecurityException unavailable) {
       throw new CallerFault("The Application file could not be read as bounded UTF-8 text");
     }
@@ -200,7 +242,9 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
       text(existing);
       if (!revision(existing).equals(expected))
         throw new CallerFault("The file changed elsewhere. Refresh and review it before saving");
-      if (path.equals("plowshare.json")) {
+      if (source
+          .path()
+          .equals(FileAccess.canonical(source.project().workspace()).resolve("plowshare.json"))) {
         try {
           WorkspaceApplicationPolicy.parse(text, caller.project());
         } catch (IllegalArgumentException invalid) {
@@ -231,7 +275,8 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
           path,
           text,
           revision(text.getBytes(StandardCharsets.UTF_8)),
-          writable(caller, source));
+          writable(caller, source),
+          caller.location());
     } catch (IOException | SecurityException unavailable) {
       throw new CallerFault("The Application file could not be saved atomically");
     } finally {

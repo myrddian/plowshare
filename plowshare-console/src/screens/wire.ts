@@ -1,3 +1,4 @@
+import type { FileStoreReference } from '../../../sdk/typescript/src/binding/filestores.ts';
 /**
  * The shapes the four screens read, written down once.
  *
@@ -66,6 +67,8 @@ export const GLOBAL_TIER = 'global';
  *   rather than guessing.
  */
 export interface ProjectView {
+  readonly applicationRoot?: FileStoreReference | null;
+  readonly writableAreas?: readonly FileStoreReference[] | null;
   readonly kind?: 'project' | 'application' | 'personal';
   readonly name: string;
   readonly workspace: string;
