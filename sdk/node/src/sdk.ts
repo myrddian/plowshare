@@ -116,3 +116,26 @@ export async function connectPlowshare(
     ...(options.onPush === undefined ? {} : { onPush: options.onPush }),
   });
 }
+
+export {
+  nodeToolHost,
+  ToolProvider,
+  toolDeploymentConfig,
+  validateToolArguments,
+  decodeToolCall,
+  toolResultRequestId,
+} from './tools.ts';
+export type {
+  ToolArguments,
+  ToolBinding,
+  ToolCall,
+  ToolDeclaration,
+  ToolHost,
+  ToolJournal,
+  ToolParameter,
+  ToolReceipt,
+  ToolResult,
+  ToolScalar,
+  ToolState,
+  RegisteredTool,
+} from './tools.ts';

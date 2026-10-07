@@ -3448,6 +3448,7 @@ public final class JobRuntime {
         }
         continue;
       }
+      if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
       if (tool instanceof AskTool shared) {
         // THE FOURTH KIND BUILT PER RUN, and the only one that is
         // registered as a shared tool first. The three above are absent

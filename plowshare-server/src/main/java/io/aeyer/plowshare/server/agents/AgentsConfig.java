@@ -642,6 +642,27 @@ public class AgentsConfig {
             + " back, or the project is pointed at one this server has");
   }
 
+  /** Configured tools join the real registry before definitions are validated. */
+  private static java.util.List<AgentTool> withRelayTools(
+      java.util.List<AgentTool> builtins,
+      io.aeyer.plowshare.server.relay.tools.RelayToolProperties properties,
+      io.aeyer.plowshare.server.relay.tools.RelayToolInvocations invocations) {
+    var tools = new java.util.ArrayList<>(builtins);
+    if (properties == null || properties.getBindings().isEmpty()) return tools;
+    if (invocations == null)
+      throw new IllegalStateException("Relay tools require their invocation service");
+    tools.add(new RelayInvocationReadTool(invocations));
+    var grouped =
+        properties.getBindings().stream()
+            .collect(
+                java.util.stream.Collectors.groupingBy(
+                    io.aeyer.plowshare.server.relay.tools.RelayToolDefinition::name,
+                    java.util.TreeMap::new,
+                    java.util.stream.Collectors.toList()));
+    grouped.values().forEach(bindings -> tools.add(new RelayAgentTool(bindings, invocations)));
+    return tools;
+  }
+
   /**
    * The turn loop, and the tools an agent may hold.
    *
@@ -745,60 +766,66 @@ public class AgentsConfig {
       ObjectProvider<Scribe> scribe,
       io.aeyer.plowshare.server.todos.TodoBoard todos,
       ObjectProvider<io.aeyer.plowshare.server.outgoing.OutgoingWork> outgoing,
-      ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging) {
+      ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging,
+      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
+      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
-            List.of(
-                new MemoryTools.Recall(archive),
-                new MemoryTools.Read(archive),
-                new MemoryTools.Write(archive, scribe::getObject),
-                new ConversationTrajectoryTool(conversations, entries),
-                new ConversationSearchTool(entries),
-                new ArchiveReadTools.Index(archive),
-                new ArchiveReadTools.Conversations(conversations),
-                new ArchiveReadTools.Chat(conversations, entries),
-                new ConversationContextTool(
-                    conversations,
-                    turns,
-                    conversationRules::getObject,
-                    (conversation, agent, session) -> {
-                      Callers callers = contextCallers.getObject();
-                      AgentDefinition definition =
-                          callers.readAgent(
-                              agent, callers.callerForConversation(conversation, session));
-                      definition =
-                          contextRuntime
-                              .getObject()
-                              .withAgentRules(
-                                  definition,
-                                  callers.homeOfConversation(conversation),
-                                  session,
-                                  conversation);
-                      return io.aeyer.plowshare.server.api.ContextView.Prefix.of(
-                          definition,
-                          contextRuntime.getObject().schemasOfferedTo(definition),
-                          contextTokenizer.getObject(),
-                          contextCompaction.getObject().contextLengthOf(definition));
-                    }),
-                new RetrievalTools.Retrieve(corpus),
-                new RetrievalTools.Rank(corpus),
-                new RetrievalTools.Outline(documents),
-                new RetrievalTools.Citations(citations, conversations),
-                new DocumentTools.Search(corpus),
-                new InformationTool(false, information::getObject).withRetrieval(corpus),
-                new InformationTool(true, information::getObject),
-                new MemoryNavigateTool(
-                    navigator::getObject, () -> memoryProperties.getObject().getNavigationBudget()),
-                new DocumentTools.AgentList(documents),
-                new AskTool(asking(deliberation), corpus, () -> askBudget(props)),
-                new GetDateTool(Instant::now, ZoneId.systemDefault()),
-                new FetchTool(fetch),
-                new SearchTool(search),
-                new OutgoingTool(outgoing::getIfAvailable, "send"),
-                new OutgoingTool(outgoing::getIfAvailable, "read"),
-                new OutgoingTool(outgoing::getIfAvailable, "cancel"),
-                new OutgoingTool(outgoing::getIfAvailable, "peers")),
+            withRelayTools(
+                List.of(
+                    new MemoryTools.Recall(archive),
+                    new MemoryTools.Read(archive),
+                    new MemoryTools.Write(archive, scribe::getObject),
+                    new ConversationTrajectoryTool(conversations, entries),
+                    new ConversationSearchTool(entries),
+                    new ArchiveReadTools.Index(archive),
+                    new ArchiveReadTools.Conversations(conversations),
+                    new ArchiveReadTools.Chat(conversations, entries),
+                    new ConversationContextTool(
+                        conversations,
+                        turns,
+                        conversationRules::getObject,
+                        (conversation, agent, session) -> {
+                          Callers callers = contextCallers.getObject();
+                          AgentDefinition definition =
+                              callers.readAgent(
+                                  agent, callers.callerForConversation(conversation, session));
+                          definition =
+                              contextRuntime
+                                  .getObject()
+                                  .withAgentRules(
+                                      definition,
+                                      callers.homeOfConversation(conversation),
+                                      session,
+                                      conversation);
+                          return io.aeyer.plowshare.server.api.ContextView.Prefix.of(
+                              definition,
+                              contextRuntime.getObject().schemasOfferedTo(definition),
+                              contextTokenizer.getObject(),
+                              contextCompaction.getObject().contextLengthOf(definition));
+                        }),
+                    new RetrievalTools.Retrieve(corpus),
+                    new RetrievalTools.Rank(corpus),
+                    new RetrievalTools.Outline(documents),
+                    new RetrievalTools.Citations(citations, conversations),
+                    new DocumentTools.Search(corpus),
+                    new InformationTool(false, information::getObject).withRetrieval(corpus),
+                    new InformationTool(true, information::getObject),
+                    new MemoryNavigateTool(
+                        navigator::getObject,
+                        () -> memoryProperties.getObject().getNavigationBudget()),
+                    new DocumentTools.AgentList(documents),
+                    new AskTool(asking(deliberation), corpus, () -> askBudget(props)),
+                    new GetDateTool(Instant::now, ZoneId.systemDefault()),
+                    new FetchTool(fetch),
+                    new SearchTool(search),
+                    new OutgoingTool(outgoing::getIfAvailable, "send"),
+                    new OutgoingTool(outgoing::getIfAvailable, "read"),
+                    new OutgoingTool(outgoing::getIfAvailable, "cancel"),
+                    new OutgoingTool(outgoing::getIfAvailable, "peers")),
+                relayTools.getIfAvailable(),
+                relayInvocations.getIfAvailable()),
             agents::getIfAvailable,
             files.getIfAvailable(),
             Instant::now,

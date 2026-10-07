@@ -1,0 +1,111 @@
+{
+  "invocationId": "11111111-1111-1111-1111-111111111111",
+  "resultRequestId": "863ac437-da7e-df21-a6f4-df7fc6343522",
+  "cases": [
+    {
+      "name": "number",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": true
+    },
+    {
+      "name": "safe-integer",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":9007199254740991}}",
+      "valid": true
+    },
+    {
+      "name": "small-number",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":1e-18}}",
+      "valid": true
+    },
+    {
+      "name": "tiny-number",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":1e-19}}",
+      "valid": false
+    },
+    {
+      "name": "large-integer",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":9007199254740992}}",
+      "valid": false
+    },
+    {
+      "name": "boolean-number",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":true}}",
+      "valid": false
+    },
+    {
+      "name": "null",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":null}}",
+      "valid": false
+    },
+    {
+      "name": "nested",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":{}}}",
+      "valid": false
+    },
+    {
+      "name": "array",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":[]}}",
+      "valid": false
+    },
+    {
+      "name": "unknown",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"other\":1}}",
+      "valid": false
+    },
+    {
+      "name": "missing",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{}}",
+      "valid": false
+    },
+    {
+      "name": "precision",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.123456789012345678}}",
+      "valid": false
+    },
+    {
+      "name": "duplicate",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5,\"value\":1}}",
+      "valid": false
+    },
+    {
+      "name": "duplicate-envelope",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"run\":\"other\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
+    },
+    {
+      "name": "trailing",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}} {}",
+      "valid": false
+    },
+    {
+      "name": "extra",
+      "source": "{\"extra\":1,\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
+    },
+    {
+      "name": "wrong-version",
+      "source": "{\"schema\":\"plowshare-tool/2\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
+    },
+    {
+      "name": "coerced-account",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":42,\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
+    },
+    {
+      "name": "bad-provider",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scan__ner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
+    },
+    {
+      "name": "missing-arguments",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\"}",
+      "valid": false
+    },
+    {
+      "name": "null-arguments",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":null}",
+      "valid": false
+    }
+  ]
+}

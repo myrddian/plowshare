@@ -3,6 +3,10 @@
 Python 3.11+ asynchronous client for `plowshare-v1`. Build a wheel with
 `python -m build`; install it with pip. No package has been published remotely.
 
+For a complete external application, see the [Python Network Privacy example](../../integrations/network-privacy/README.md).
+It combines a Python web interface and collection scripts with SDK Relay ingress/egress,
+project evidence uploads, scheduled work and Plowshare agent investigations.
+
 ```python
 import os
 from plowshare import Client
@@ -35,3 +39,7 @@ explicit caller action. Filesystem/process presence and binary uploads are not p
 by this core SDK. See [the SDK contract and roadmap](../../docs/sdks.md).
 
 The mandatory native checks and design rules are in [the native SDK standard](../../docs/native-sdk-standards.md).
+
+Named external tools use the same declaration, handler, durable journal and
+read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
+for configuration, grants, examples and recovery semantics.

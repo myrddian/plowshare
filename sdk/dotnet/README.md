@@ -33,3 +33,7 @@ presence and binary uploads are optional platform concerns outside this SDK.
 See [the SDK contract and roadmap](../../docs/sdks.md).
 
 Follow [the native SDK standard](../../docs/native-sdk-standards.md), including nullable and warnings-as-errors compilation.
+
+Named external tools use the same declaration, handler, durable journal and
+read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
+for configuration, grants, examples and recovery semantics.

@@ -79,6 +79,10 @@
     "./filestores": {
       "types": "./build/filestores.d.ts",
       "import": "./build/filestores.js"
+    },
+    "./tools": {
+      "types": "./build/tools.d.ts",
+      "import": "./build/tools.js"
     }
   },
   "description": "Plowshare WebSocket SDK and optional Node platform adapters"

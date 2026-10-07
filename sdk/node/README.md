@@ -63,3 +63,7 @@ cross-process renewal locks and atomic rotation writes. `authenticateConfigured`
 uses saved login when explicit environment credentials are absent. See
 [shared login](../../docs/client-login.md) for custody and recovery.
 The neutral core continues to contain no Node/filesystem imports.
+
+Named external tools use the same declaration, handler, durable journal and
+read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
+for configuration, grants, examples and recovery semantics.

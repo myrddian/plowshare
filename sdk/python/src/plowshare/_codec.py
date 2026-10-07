@@ -147,7 +147,14 @@ def encode_request(request: contracts.Request[object]) -> tuple[str, object]:
         raise ValueError("Expected an operation-specific generated request")
     value = (
         _wire(request.selection)
-        if isinstance(request, contracts.ConversationFollowRequest)
+        if isinstance(
+            request,
+            (
+                contracts.ConversationFollowRequest,
+                contracts.RelayLogRequest,
+                contracts.RelayTopicsRequest,
+            ),
+        )
         else _wire(request)
     )
     schema = _schema(_object(_SCHEMAS["inputs"])[operation])

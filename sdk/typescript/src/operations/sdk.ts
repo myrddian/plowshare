@@ -42,6 +42,27 @@ export type {
   FilterReviewResponse,
 } from './relay-ports.ts';
 export { JobLifecycle } from '../jobs/lifecycle.ts';
+export {
+  ToolProvider,
+  toolDeploymentConfig,
+  validateToolArguments,
+  decodeToolCall,
+  toolResultRequestId,
+} from './relay-tools.ts';
+export type {
+  ToolArguments,
+  ToolBinding,
+  ToolCall,
+  ToolDeclaration,
+  ToolHost,
+  ToolJournal,
+  ToolParameter,
+  ToolReceipt,
+  ToolResult,
+  ToolScalar,
+  ToolState,
+  RegisteredTool,
+} from './relay-tools.ts';
 export const OPERATIONS: readonly Operation[] = Object.freeze(
   Object.keys(OPERATION_SCHEMAS.inputs).filter(isOperation).sort(),
 );

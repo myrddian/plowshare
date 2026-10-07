@@ -32,6 +32,7 @@ def main():
         python = str(ROOT / 'build/sdk-python-env/bin/python')
     dotnet = tool('PLOWSHARE_SDK_DOTNET', 'dotnet', ROOT / 'build/dotnet/dotnet')
     go = tool('PLOWSHARE_SDK_GO', 'go')
+    run('node', '--test', 'sdk/node/test/tools.test.mjs')
     run(python, '-c', 'import websockets; import build; import setuptools; import mypy; import ruff')
     run(python, '-m', 'ruff', 'check', '.', cwd=ROOT / 'sdk/python')
     run(python, '-m', 'ruff', 'format', '--check', '.', cwd=ROOT / 'sdk/python')
@@ -51,7 +52,7 @@ def main():
         run(python, '-m', 'build', 'sdk/python', '--no-isolation', '--outdir', str(OUT))
         run(dotnet, 'pack', 'sdk/dotnet/Plowshare.Sdk', '--configuration', 'Release', '--output', str(OUT), '--nologo')
         with tarfile.open(OUT / 'plowshare-sdk-go-0.1.0.tar.gz', 'w:gz') as archive:
-            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'schemas.json']:
+            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'tools.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'schemas.json']:
                 path = ROOT / 'sdk/go' / name
                 info = archive.gettarinfo(str(path), 'plowshare-sdk-go/' + name)
                 info.uid = info.gid = info.mtime = 0

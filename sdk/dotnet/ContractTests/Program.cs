@@ -25,3 +25,5 @@ if (absent.TryGetProperty("project", out _)) throw new Exception("Absent field e
 var explicitNull = Codec.Input("conversation.open", new ConversationOpenRequest { Project = TierDtoProject.FromVariant1(default) });
 if (explicitNull.GetProperty("project").ValueKind != JsonValueKind.Null) throw new Exception("Explicit null lost");
 Console.WriteLine(".NET DTO contract checks passed");
+
+await ToolFacadeChecks.RunAsync();

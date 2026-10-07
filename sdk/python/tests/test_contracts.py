@@ -20,6 +20,45 @@ from plowshare._codec import (
 
 
 class ContractsTest(unittest.TestCase):
+    def test_selection_request_wrappers_emit_the_selected_operation_payload(
+        self,
+    ) -> None:
+        samples = (
+            (
+                contracts.ConversationFollowRequest(
+                    selection=contracts.ConversationFollowPayloadVariant1Dto(
+                        conversation="cnv_fixture"
+                    )
+                ),
+                {"conversation": "cnv_fixture"},
+            ),
+            (
+                contracts.RelayLogRequest(
+                    selection=contracts.RelayLogPayloadVariant1Dto(
+                        project="fixture",
+                        topic="tool.scanner.inspect.result",
+                        system=False,
+                    )
+                ),
+                {
+                    "project": "fixture",
+                    "topic": "tool.scanner.inspect.result",
+                    "system": False,
+                },
+            ),
+            (
+                contracts.RelayTopicsRequest(
+                    selection=contracts.RelayTopicsPayloadVariant1Dto(
+                        project="fixture", system=False
+                    )
+                ),
+                {"project": "fixture", "system": False},
+            ),
+        )
+        for request, expected in samples:
+            with self.subTest(operation=request.operation):
+                self.assertEqual((request.operation, expected), encode_request(request))
+
     def test_shared_boundary_cases(self) -> None:
         path = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"])
         cases = cast(list[dict[str, object]], json.loads(path.read_text()))
