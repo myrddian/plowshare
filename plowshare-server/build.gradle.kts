@@ -386,3 +386,17 @@ tasks.register<JavaExec>("eventDtoPreflight") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("io.aeyer.plowshare.server.events.EventPreflightConfiguration")
 }
+
+// Explicit, database-free Linux process fixture; never part of check or server startup.
+// Copy only public classes and dependency jars, not operator configuration or the Gradle cache.
+tasks.register<Sync>("commandIsolationAcceptanceBundle") {
+    group = "verification"
+    dependsOn(tasks.named("testClasses"))
+    into(layout.buildDirectory.dir("isolation-acceptance"))
+    from(sourceSets["main"].output.classesDirs) { into("classes") }
+    from(sourceSets["test"].output.classesDirs) {
+        include("io/aeyer/plowshare/server/agents/CommandIsolationAcceptance.class")
+        into("classes")
+    }
+    from(configurations.testRuntimeClasspath) { into("lib") }
+}

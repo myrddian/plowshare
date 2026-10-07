@@ -378,10 +378,10 @@ export function parseEnvironment(source: string): Parsed {
         break;
       case 'isolation': {
         const isolation = scalar(value, number);
-        if (isolation !== 'none') {
+        if (isolation !== 'none' && isolation !== 'bubblewrap') {
           throw new Unreadable(
             number,
-            `isolation can only be none for now, not '${isolation}'`,
+            `isolation must be none or bubblewrap, not '${isolation}'`,
           );
         }
         current.set(key, isolation);

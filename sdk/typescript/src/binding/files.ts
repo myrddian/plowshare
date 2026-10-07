@@ -38,6 +38,9 @@ export const EDIT = 'edit';
 export const DELETE = 'delete';
 export const MOVE = 'move';
 export const RUN = 'run';
+
+/** Requires the local bubblewrap backend; older clients refuse this distinct operation. */
+export const RUN_ISOLATED = 'run_isolated';
 export const CANCEL = 'cancel';
 export const OPS: readonly string[] = [
   ROOTS,

@@ -461,7 +461,8 @@ public final class RemoteProvider implements FileProvider {
             timeout.toMillis(),
             side.outputBytes(),
             side.shells(),
-            stdin);
+            stdin,
+            side.isolation());
     CompletableFuture<FileReply> answer =
         CompletableFuture.supplyAsync(
             () -> channel.ask(session, request, timeout.plus(RUN_MARGIN)),
@@ -576,7 +577,7 @@ public final class RemoteProvider implements FileProvider {
     if (FileReply.REFUSED.equals(reply.outcome())) {
       // A run's own consent and bounds are the one refusal a current
       // client still words; every other in words is an old client's.
-      if (!FileRequest.RUN.equals(request.op())) {
+      if (!FileRequest.RUN.equals(request.op()) && !FileRequest.RUN_ISOLATED.equals(request.op())) {
         heardFromAnOldClient(request.op());
       }
       // The client's own sentence, unchanged. It is the only party that

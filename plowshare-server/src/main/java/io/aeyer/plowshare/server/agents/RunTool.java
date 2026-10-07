@@ -53,10 +53,10 @@ import java.util.regex.Pattern;
  * (spec 2026-09-15, asking a person). {@link #run} checks the environment again against whatever
  * arguments actually run, since a hook may have rewritten them.
  *
- * <h2>What it does not do</h2>
+ * <h2>Execution boundary</h2>
  *
- * <p>Isolate. The gate judges a command line and the fence judges a working directory; a command
- * that is let through can read anything its OS user can.
+ * <p>The gate judges admission; the selected provider enforces workspace grants and configured OS
+ * isolation. With isolation {@code none}, an admitted command retains its OS user authority.
  */
 public final class RunTool implements AgentTool {
 

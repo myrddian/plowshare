@@ -426,9 +426,9 @@ public final class EnvironmentFile {
         case "output" -> current.put(key, size(scalar(value, number), number));
         case "isolation" -> {
           String isolation = scalar(value, number);
-          if (!isolation.equals("none")) {
+          if (!isolation.equals("none") && !isolation.equals("bubblewrap")) {
             throw new Unreadable(
-                number, "isolation can only be none for now, not '" + isolation + "'");
+                number, "isolation must be none or bubblewrap, not '" + isolation + "'");
           }
           current.put(key, isolation);
         }
