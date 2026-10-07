@@ -793,3 +793,11 @@
 .connection-menu button { display: block; width: 100%; text-align: left; padding: 10px; }
 .connection-menu small { display: block; overflow-wrap: anywhere; }
 .connection-menu [aria-current="true"] { font-weight: bold; border-left: 3px solid currentColor; }
+
+.filestore-notice { display: flex; gap: 12px; padding: 12px 20px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--line); }
+.filestore-notice span { flex: 1 1 180px; overflow-wrap: anywhere; }
+#filestore-dialog { max-width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; }
+#filestore-status, #filestore-list { overflow-wrap: anywhere; }
+#filestore-form { display: grid; gap: 12px; }
+#filestore-form label { display: grid; gap: 6px; }
+#filestore-form input { width: 100%; min-width: 0; }

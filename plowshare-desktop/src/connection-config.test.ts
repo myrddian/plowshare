@@ -1,3 +1,5 @@
+import { FileStores } from 'plowshare-client-node/filestores';
+import { Connections } from 'plowshare-client-node/connections';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -76,4 +78,39 @@ await test('desktop bookmarks follow the shared config override unless explicitl
     desktopConfigDirectory({ XDG_CONFIG_HOME: '/xdg' }).endsWith('/.plowshare'),
     true,
   );
+});
+
+await test('FileStore-only bootstrap preserves the first legacy login migration, and explicit removal cannot resurrect it', async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'plowshare-filestore-migration-'),
+  );
+  try {
+    const stores = new FileStores(directory);
+    await stores.configureDefault({
+      alias: 'apps',
+      root: join(directory, 'apps'),
+    });
+    const registry = new Connections(directory);
+    assert.equal((await registry.load()).connectionSetupPending, true);
+    await writeFile(
+      join(directory, 'desktop-connection.json'),
+      JSON.stringify({
+        version: 1,
+        server: 'https://fixture.example',
+        account: 'alice',
+        reconnect: true,
+      }),
+    );
+    const connection = new ConnectionConfig(directory);
+    const migrated = await connection.load();
+    assert.equal(migrated?.account, 'alice');
+    assert.equal((await registry.load()).fileStoreDefault?.alias, 'apps');
+    assert.equal((await registry.load()).connectionSetupPending, undefined);
+    assert.ok(migrated?.name);
+    await registry.remove(migrated.name);
+    assert.equal(await new ConnectionConfig(directory).load(), undefined);
+    assert.equal((await stores.load()).status, 'loaded');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

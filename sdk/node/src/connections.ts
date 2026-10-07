@@ -1,3 +1,5 @@
+import { decodeFileStoreDefault } from './filestore-config.ts';
+import type { FileStoreDefault } from './filestore-config.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmod,
@@ -24,6 +26,9 @@ export interface ConnectionConfiguration {
   version: 1;
   selected?: string;
   connections: NamedConnection[];
+  fileStoreDefault?: FileStoreDefault;
+  /** A FileStore-only config must not suppress the first legacy desktop login migration. */
+  connectionSetupPending?: true;
 }
 export interface ConnectionRegistry {
   load(): Promise<ConnectionConfiguration>;
@@ -187,7 +192,13 @@ function fields(
 export function decodeConnectionConfiguration(
   value: unknown,
 ): ConnectionConfiguration {
-  fields(value, ['version', 'selected', 'connections']);
+  fields(value, [
+    'version',
+    'selected',
+    'connections',
+    'fileStoreDefault',
+    'connectionSetupPending',
+  ]);
   if (
     value.version !== 1 ||
     !Array.isArray(value.connections) ||
@@ -226,8 +237,22 @@ export function decodeConnectionConfiguration(
     throw new Error(
       'Selected connection is missing. Select a saved connection explicitly.',
     );
+  if (
+    value.connectionSetupPending !== undefined &&
+    (value.connectionSetupPending !== true ||
+      connections.length !== 0 ||
+      value.selected !== undefined ||
+      value.fileStoreDefault === undefined)
+  )
+    throw new Error('Invalid pending connection setup metadata.');
   return {
     version: 1,
+    ...(value.connectionSetupPending === true
+      ? { connectionSetupPending: true }
+      : {}),
+    ...(value.fileStoreDefault === undefined
+      ? {}
+      : { fileStoreDefault: decodeFileStoreDefault(value.fileStoreDefault) }),
     connections,
     ...(value.selected === undefined ? {} : { selected: value.selected }),
   };
@@ -249,14 +274,27 @@ export class Connections implements ConnectionRegistry {
     }
   }
   private update<T>(
-    change: (config: ConnectionConfiguration) => T,
+    change: (config: ConnectionConfiguration) => T | Promise<T>,
   ): Promise<T> {
     return localLock(this.directory, 'config', async () => {
       const config = await this.load();
-      const result = change(config);
+      const result = await change(config);
       decodeConnectionConfiguration(config);
       await atomicPrivateWrite(this.path, config);
       return result;
+    });
+  }
+  /** Bootstrap policy lives outside filestore.js, so a missing registry can be recreated. */
+  setFileStoreDefault(input: FileStoreDefault): Promise<void> {
+    const definition = decodeFileStoreDefault(input);
+    return this.update(async (config) => {
+      try {
+        await lstat(this.path);
+      } catch (error) {
+        if (errorCode(error) !== 'ENOENT') throw error;
+        config.connectionSetupPending = true;
+      }
+      config.fileStoreDefault = definition;
     });
   }
   put(input: Omit<NamedConnection, 'key'>): Promise<NamedConnection> {
@@ -283,6 +321,7 @@ export class Connections implements ConnectionRegistry {
         throw new Error(
           'This identity already has a name. Rename that connection.',
         );
+      delete config.connectionSetupPending;
       config.connections = [
         ...config.connections.filter((item) => item.key !== row.key),
         row,
@@ -291,7 +330,7 @@ export class Connections implements ConnectionRegistry {
       return row;
     });
   }
-  /** Import a legacy default only if no registry exists; concurrent explicit selections win. */
+  /** Import a legacy default only before connection setup; FileStore-only bootstrap must not suppress migration. Concurrent explicit selections win. */
   initialize(input: Omit<NamedConnection, 'key'>): Promise<void> {
     const server = canonicalServer(input.server);
     const row = { ...input, server, key: connectionKey(server, input.account) };
@@ -302,13 +341,19 @@ export class Connections implements ConnectionRegistry {
     });
     return localLock(this.directory, 'config', async () => {
       await privateFile(this.path);
+      const previous = await this.load();
       try {
         await readFile(this.path);
-        return;
+        if (!previous.connectionSetupPending) return;
       } catch (error) {
         if (errorCode(error) !== 'ENOENT') throw error;
       }
-      await atomicPrivateWrite(this.path, initial);
+      await atomicPrivateWrite(this.path, {
+        ...initial,
+        ...(previous.fileStoreDefault
+          ? { fileStoreDefault: previous.fileStoreDefault }
+          : {}),
+      });
     });
   }
   select(name: string): Promise<NamedConnection> {

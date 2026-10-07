@@ -1,3 +1,4 @@
+import { run } from './run.js';
 import { httpHandler, wireText } from './http.test-support.js';
 import { record, json, list, field, text } from './json.test-support.js';
 import assert from 'node:assert/strict';
@@ -2672,3 +2673,38 @@ await test(
     }
   },
 );
+
+await test('FileStore setup and bootstrap are shared offline operations and preserve errors without connecting', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'plowshare-cli-filestores-'));
+  let output = '';
+  const io = {
+    env: { PLOWSHARE_CONFIG_DIR: join(directory, 'config') },
+    stdout: (text: string) => {
+      output += text;
+    },
+    stderr: (text: string) => {
+      output += text;
+    },
+    stdin: async () => '',
+  };
+  try {
+    assert.equal(await run(['--json', 'filestore', 'status'], io), 2);
+    assert.match(output, /needs-setup/);
+    output = '';
+    assert.equal(
+      await run(['filestore', 'setup', 'apps', join(directory, 'apps')], io),
+      0,
+    );
+    assert.match(output, /loaded/);
+    output = '';
+    assert.equal(await run(['filestore', 'resolve', 'apps', ''], io), 0);
+    assert.match(output, /apps/);
+    assert.equal(
+      await run(['filestore', 'setup', 'other', join(directory, 'other')], io),
+      2,
+    );
+    assert.match(output, /already exists/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
