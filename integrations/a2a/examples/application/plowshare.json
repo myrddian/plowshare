@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "a2a",
+  "access": {"accounts": []},
+  "commands": {
+    "local": {"mode": "off"},
+    "server": {"mode": "off"}
+  }
+}
