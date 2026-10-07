@@ -68,3 +68,15 @@ denied`). This disposable fixture additionally needs
 profile to run acceptance: production needs a deliberately reviewed deployment
 policy. The fixture mounts only public acceptance artifacts and runs as a
 non-root account without added capabilities, host secrets or Docker sockets.
+
+After committing and compiling the source, create a portable public-only bundle:
+
+```sh
+python3 test-support/isolation/bundle.py /tmp/plowshare-isolation-acceptance.tgz
+```
+
+The archive includes Java classes/dependency jars, both compiled public SDK
+packages and fixtures, plus the source revision. It excludes operator files and
+package caches, strips host metadata, and refuses to replace an existing output.
+On the target, extract it into a private temporary directory and mount that
+path read-only at `/source` in the disposable acceptance container.
