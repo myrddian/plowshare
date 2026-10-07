@@ -2568,3 +2568,107 @@ await test(
     }
   },
 );
+
+await test(
+  'project list groups Applications and Projects while JSON retains the protocol reply',
+  { timeout: 10000 },
+  async () => {
+    const rows = [
+      { name: 'Chatbot', kind: 'application', type: 'MANAGED' },
+      { name: 'Pipeline app', kind: 'application', type: 'DISJOINT' },
+      { name: 'Remote files', kind: 'project' },
+      { name: 'External checkout', kind: 'project', type: 'DISJOINT' },
+      { name: 'personal:fixture', kind: 'personal' },
+    ].map((row) => ({
+      ...row,
+      workspace: '/fixture/source',
+      lent: [],
+      exclusions: [],
+      machine: null,
+      members: [],
+    }));
+    let listed = rows;
+    const fake = await fixture((frame) =>
+      frame.type === 'project.list'
+        ? { code: 'OK', payload: listed }
+        : { code: 'OK', payload: {} },
+    );
+    try {
+      const human = await cli(fake.base, ['project', 'list']).done;
+      assert.equal(human.code, 0, human.stderr);
+      assert.equal(
+        human.stdout,
+        'project.list: completed\nApplications:\n  Chatbot\n  Pipeline app · DISJOINT · no sync\nProjects:\n  Remote files\n  External checkout · DISJOINT · no sync\nPersonal · personal:fixture\n',
+      );
+      assert.ok(!human.stdout.includes('/fixture/source'));
+      const machine = await cli(fake.base, ['--json', 'project', 'list']).done;
+      assert.equal(machine.code, 0, machine.stderr);
+      assert.deepEqual(
+        field(json(machine.stdout), ['outcome', 'payload']),
+        rows,
+      );
+      listed = [];
+      const empty = await cli(fake.base, ['project', 'list']).done;
+      assert.equal(empty.code, 0, empty.stderr);
+      assert.ok(
+        empty.stdout.includes('No Applications available to this account.'),
+      );
+      assert.ok(
+        empty.stdout.includes('No Projects available to this account.'),
+      );
+    } finally {
+      await fake.close();
+    }
+  },
+);
+
+await test(
+  'Application files use server source commands without a local root or union',
+  { timeout: 10000 },
+  async () => {
+    const document = {
+      project: 'app',
+      path: 'a.txt',
+      text: 'old',
+      revision: 'a'.repeat(64),
+      writable: true,
+    };
+    const fake = await fixture((frame) => ({
+      code: 'OK',
+      payload:
+        frame.type === 'application.files'
+          ? { project: 'app', path: '', entries: [], more: false }
+          : document,
+    }));
+    try {
+      for (const command of [
+        ['files'],
+        ['read', '{"path":"a.txt"}'],
+        [
+          'save',
+          JSON.stringify({
+            path: 'a.txt',
+            text: 'old',
+            revision: document.revision,
+          }),
+        ],
+      ]) {
+        const result = await cli(fake.base, [
+          '--json',
+          '--project',
+          'app',
+          'application',
+          ...command,
+        ]).done;
+        assert.equal(result.code, 0, result.stderr);
+      }
+      assert.deepEqual(
+        fake.frames.map((row) => row.type),
+        ['application.files', 'application.file.read', 'application.file.save'],
+      );
+      assert.equal(fake.frames[2]!.payload['revision'], document.revision);
+    } finally {
+      await fake.close();
+    }
+  },
+);

@@ -34,7 +34,10 @@ Web: search, fetch. Project: create, list, define, lend, unlend, workspace, move
 A server-side project scopes work in the Plowshare agent framework: agents,
 skills, conversations, memory, information and any server workspace files.
 SDK integrations submit agentic or information tasks within that scope.
-project create provisions MANAGED server files, or registers DISJOINT files without
+project list groups authorized Applications and Projects; external work stays in Projects.
+Application: files, read, save [JSON]. Browses deployed files without --root or sync.
+     save requires the revision returned by read and permitted writePaths.
+project create provisions a MANAGED Application with plowshare.json, or registers DISJOINT files without
 client sync. writePaths names relative writable areas; DISJOINT defaults to [].
 admin accounts lists server accounts; admin account create/update/reset manages accounts.
 admin sessions lists active logins; admin session revoke signs an account out everywhere.

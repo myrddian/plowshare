@@ -71,6 +71,8 @@ public class ServerProjectFrames implements FrameArea {
             ? directory.resolve(UUID.randomUUID().toString())
             : Path.of(request.workspace()).toAbsolutePath().normalize();
     boolean[] made = {false, false};
+    boolean[] application = {false};
+    boolean committed = false;
     try {
       ProjectRecord created =
           projects.createServer(
@@ -92,46 +94,55 @@ public class ServerProjectFrames implements FrameArea {
                     if (!Files.isDirectory(root))
                       throw new CallerFault("Workspace must be a directory");
                   }
-                  Path marker = root.resolve(".plowshare/project");
-                  if (Files.isSymbolicLink(marker.getParent()))
-                    throw new CallerFault("Project marker directory must not be a symlink");
-                  if (Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+                  Path marker = root.resolve("plowshare.json");
+                  application[0] = !disjoint || !Files.notExists(marker, LinkOption.NOFOLLOW_LINKS);
+                  if (!Files.notExists(marker, LinkOption.NOFOLLOW_LINKS)) {
                     if (!Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)
-                        || !Files.readString(marker)
-                            .lines()
-                            .findFirst()
-                            .orElse("")
-                            .trim()
-                            .equals(name))
-                      throw new CallerFault(
-                          "Workspace marker belongs to a different project or is invalid");
+                        || Files.isSymbolicLink(marker)
+                        || Files.size(marker) > 65536)
+                      throw new CallerFault("Application manifest must be a bounded regular file");
+                    try (var input = Files.newInputStream(marker, LinkOption.NOFOLLOW_LINKS)) {
+                      byte[] bytes = input.readNBytes(65537);
+                      if (bytes.length > 65536)
+                        throw new CallerFault("Application manifest is too large");
+                      io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy.parse(
+                          java.nio.charset.StandardCharsets.UTF_8
+                              .newDecoder()
+                              .decode(java.nio.ByteBuffer.wrap(bytes))
+                              .toString(),
+                          name);
+                    }
                   } else if (!disjoint) {
-                    if (Files.isSymbolicLink(marker.getParent()))
-                      throw new CallerFault("Project marker directory must not be a symlink");
-                    Files.createDirectories(marker.getParent());
+                    var json = new com.fasterxml.jackson.databind.ObjectMapper();
+                    var manifest = json.createObjectNode().put("version", 1).put("name", name);
+                    manifest
+                        .putObject("access")
+                        .putArray("accounts")
+                        .addObject()
+                        .put("handle", asking.requireHandle(FrameTypes.PROJECT_CREATE))
+                        .put("role", "MANAGER");
                     Files.writeString(
                         marker,
-                        new com.fasterxml.jackson.databind.ObjectMapper()
-                                .createObjectNode()
-                                .put("version", 1)
-                                .put("name", name)
-                                .toString()
-                            + "\n",
+                        manifest.toString() + "\n",
                         java.nio.file.StandardOpenOption.CREATE_NEW);
                     made[1] = true;
                   }
-                  return root;
-                } catch (IOException failed) {
+                  return new ProjectStore.ServerWorkspace(root, application[0]);
+                } catch (IOException | IllegalArgumentException failed) {
                   throw new CallerFault("Server workspace could not be initialized");
                 }
               });
-      return Outcome.ok(ProjectView.of(created, projects.effectiveExclusions(created)));
+      committed = true;
+      return Outcome.ok(
+          ProjectView.of(created, projects.effectiveExclusions(created))
+              .application(application[0]));
     } catch (RuntimeException failed) {
+      // Once registration committed, a later failure has uncertain delivery; preserve its source.
+      if (committed) throw failed;
       // Remove only files this attempt created, never an existing checkout or pipeline content.
       try {
-        if (made[1]) Files.deleteIfExists(root.resolve(".plowshare/project"));
+        if (made[1]) Files.deleteIfExists(root.resolve("plowshare.json"));
         if (made[0]) {
-          Files.deleteIfExists(root.resolve(".plowshare"));
           Files.deleteIfExists(root);
         }
       } catch (IOException cleanup) {

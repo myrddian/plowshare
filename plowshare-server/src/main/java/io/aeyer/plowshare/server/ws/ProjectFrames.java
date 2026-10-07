@@ -99,7 +99,7 @@ public class ProjectFrames implements FrameArea {
                   asking.requireHandle(FrameTypes.PROJECT_MEMBER_ROLE),
                   false);
               return io.aeyer.plowshare.protocol.frames.Outcome.ok(
-                  members.access(project, asking.handle()));
+                  members.managementAccess(project, asking.handle()));
             }),
         Map.entry(FrameTypes.PROJECT_MEMBER_ADD, new ProjectMemberHandler(members, auth, true)),
         Map.entry(FrameTypes.PROJECT_MEMBER_REMOVE, new ProjectMemberHandler(members, auth, false)),

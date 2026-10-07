@@ -19,8 +19,19 @@ const fixtures = JSON.parse(
     'utf8',
   ),
 ) as Record<ConversationOperation, Outcome>;
-const asked = (type: ConversationOperation): Request =>
-  ({ type, payload: { conversation: 'c' } }) as Request;
+const asked = (type: ConversationOperation): Request => {
+  if (type === 'application.files') return request(type, { project: 'app' });
+  if (type === 'application.file.read')
+    return request(type, { project: 'app', path: 'plowshare.json' });
+  if (type === 'application.file.save')
+    return request(type, {
+      project: 'app',
+      path: 'plowshare.json',
+      text: '{}',
+      revision: 'a'.repeat(64),
+    });
+  return { type, payload: { conversation: 'c' } } as Request;
+};
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !isList(value);
 function missingFields(value: unknown): unknown[] {
@@ -310,6 +321,16 @@ describe('complete conversation, agent and project WS replies', () => {
       readonly string[],
       Record<string, string>?,
     ][] = [
+      ['ApplicationFileEntry', 'files/ApplicationFiles', 'Entry', []],
+      [
+        'ApplicationFileListing',
+        'files/ApplicationFiles',
+        'Listing',
+        [],
+        { Entry: 'ApplicationFileEntry' },
+      ],
+      ['ApplicationFileDocument', 'files/ApplicationFiles', 'Document', []],
+
       ['ServiceAccount', 'auth/ServiceAccounts', 'Account', []],
       ['ServiceScope', 'auth/ServiceAccounts', 'Scope', []],
       [

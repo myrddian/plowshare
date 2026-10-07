@@ -62,6 +62,8 @@ public class ProjectAuthorization {
           "web.search",
           "web.fetch",
           "agent.list",
+          "application.files",
+          "application.file.read",
           "job.list",
           "job.status",
           "job.stream",
@@ -156,6 +158,7 @@ public class ProjectAuthorization {
         || operation.startsWith("message.")
         || operation.startsWith("union.")
         || operation.startsWith("information.")
+        || operation.startsWith("application.")
         || operation.startsWith("trigger.")
         || operation.equals("firing.list")
         || operation.startsWith("approval.")
@@ -241,6 +244,8 @@ public class ProjectAuthorization {
       accounts.requireServerAdmin(account);
       return;
     }
+    // Administrative membership management does not grant ordinary Application use.
+    if (operation.startsWith("project.member.") && members.isServerAdmin(account)) return;
     if (ACCOUNT_OWNED.contains(operation)) {
       // Resuming a global emitter requires the same authority as defining one.
       if (operation.equals("schedule.pause") && Boolean.FALSE.equals(payload.paused())) {

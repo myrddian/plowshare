@@ -1,6 +1,7 @@
 import { isList, isObject, displayText } from '../binding/values.ts';
 import type { Operation } from './direct.ts';
 import type { ExtendedPayloads } from './catalog.ts';
+import { utf8Length } from '../binding/files.ts';
 import { relayPayloadProblem } from './relay.ts';
 import { informationPayloadProblem } from './information-validation.ts';
 import { schedulePayloadProblem } from './schedule-files.ts';
@@ -405,6 +406,9 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
+  'application.files': [['project'], ['path']],
+  'application.file.read': [['project', 'path'], []],
+  'application.file.save': [['project', 'path', 'revision'], ['text']],
   'project.list': [[], []],
   'project.attach': [['name', 'workspace', 'machine'], []],
   'project.create': [['name'], ['workspace', 'type', 'writePaths']],
@@ -492,6 +496,9 @@ export const SHAPES: Record<
   ];
 };
 export const SCOPED: readonly ExtendedOperation[] = [
+  'application.files',
+  'application.file.read',
+  'application.file.save',
   'project.access',
   'project.member.add',
   'project.member.remove',
@@ -567,6 +574,60 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (type.startsWith('application.')) {
+    if (
+      typeof body['project'] !== 'string' ||
+      !body['project'].trim() ||
+      body['project'].length > 512 ||
+      Array.from(body['project']).some(
+        (char) =>
+          char.charCodeAt(0) < 32 ||
+          (char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159),
+      )
+    )
+      return 'Application files need a project';
+    const path = body['path'];
+    if (
+      path !== undefined &&
+      (typeof path !== 'string' ||
+        path.length > 2048 ||
+        path.includes('\\') ||
+        path.includes(':') ||
+        path.startsWith('/') ||
+        (path !== '' &&
+          path
+            .split('/')
+            .some(
+              (part) =>
+                !part ||
+                part === '.' ||
+                part === '..' ||
+                part.toLowerCase() === '.git',
+            )) ||
+        Array.from(path).some(
+          (char) =>
+            char.charCodeAt(0) < 32 ||
+            (char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159),
+        ))
+    )
+      return 'Application paths must be canonical relative paths';
+    if (type !== 'application.files' && (typeof path !== 'string' || !path))
+      return 'Choose a file path';
+    if (
+      type === 'application.file.save' &&
+      (typeof body['text'] !== 'string' ||
+        body['text'].includes('\0') ||
+        Array.from(body['text']).some((c) => {
+          const point = c.codePointAt(0)!;
+          return point >= 0xd800 && point <= 0xdfff;
+        }) ||
+        utf8Length(body['text']) > 262144 ||
+        typeof body['revision'] !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(body['revision']))
+    )
+      return 'Saving needs bounded text and its reviewed file revision';
+    return undefined;
+  }
   // Relay positions are decimal strings, rather than the legacy numeric paging fields.
   if (type.startsWith('relay.')) return relayPayloadProblem(type, body);
   if (

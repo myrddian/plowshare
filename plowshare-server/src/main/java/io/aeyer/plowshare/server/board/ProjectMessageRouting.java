@@ -113,8 +113,14 @@ public final class ProjectMessageRouting implements BoardMessaging.Routing {
     try {
       Path root = (row == null ? personalRoot.orElseThrow() : row.workspace()).toRealPath();
       String text = null;
-      for (String marker : List.of(".plowshare/plowshare", ".plowshare/project", "plowshare")) {
+      for (String marker :
+          List.of("plowshare.json", ".plowshare/plowshare", ".plowshare/project", "plowshare")) {
         text = read(row, root, marker, true);
+        if (marker.equals("plowshare.json") && text != null) {
+          if (!text.stripLeading().startsWith("{"))
+            throw new Board.Refused("Invalid application manifest.");
+          break;
+        }
         if (text != null && !text.isBlank()) break;
       }
       if (text == null || text.isBlank() || !text.stripLeading().startsWith("{"))

@@ -5,13 +5,69 @@ conversations, memory, information, and working files. The administrator creates
 server projects; accounts granted project membership can use them. Personal
 spaces remain account-owned.
 
+## Applications and Projects
+
+An Application has a valid version 1 `plowshare.json` at its root. The manifest
+sets its identity, runtime settings, messaging boundary and account access.
+Existing definition directories stay underneath that root:
+
+```text
+mychatbot/
+  plowshare.json
+  .plowshare/
+    agents/
+    bots/
+    skills/
+    hooks/
+    relay/
+```
+
+Older markers and `.plowshare/` definitions alone remain Externals. Remote file
+access and coding-agent work appear under **Projects**. Desktop, web console, CLI
+and TUI group authorized **Applications** separately from **Projects**. Managed
+server projects belong under Applications; they require a valid manifest and
+explicit grants, including for earlier registrations. They cannot fall back to
+external project access when their manifest is absent.
+
+```json
+{
+  "version": 1,
+  "name": "mychatbot",
+  "access": {
+    "accounts": [
+      {"handle": "reader", "role": "VIEWER"},
+      {"handle": "builder", "role": "CONTRIBUTOR"},
+      {"handle": "owner", "role": "MANAGER"}
+    ]
+  },
+  "routing": {"sendTo": ["notifications"], "acceptFrom": ["scheduler"]}
+}
+```
+
+Account handles must match authenticated accounts exactly. Grants use the existing
+`VIEWER`, `CONTRIBUTOR` and `MANAGER` roles and cap the account's durable server
+membership; they cannot create membership or raise its role. Machine tokens
+use their service account owner's manifest grant and retain their token role ceiling. Omitted `access` or
+an empty `accounts` list hides the Application from ordinary use. No implicit
+public access or wildcard grants exist. Server administration remains a separate
+management capability; administrators need a manifest grant for ordinary use too.
+
+The server reads its deployed manifest on each access decision. Client checkouts
+cannot override deployed access. Unauthorized Applications are omitted from
+project listings, and direct requests and project events use the same effective
+role checks. Invalid, unreadable, linked, oversized or missing adopted manifests
+close access. Adoption is recorded durably, so deleting the manifest or restarting
+the server cannot turn the Application back into a legacy External. Repair the
+manifest through its authorized source-management workflow. Agents cannot create,
+edit, delete or move the root `plowshare.json` through workspace file tools.
+
 ## Create a server project
 
 CLI and TUI commands use the same authenticated WebSocket operation,
 `project.create`. In the TUI, prefix the command with `/`. In the desktop,
-connect as an administrator and choose **Add server project**.
+connect as an administrator and choose **Add Application**.
 
-A `MANAGED` project provisions a server workspace and writes its identity marker:
+A `MANAGED` project provisions a server workspace and writes `plowshare.json` with an explicit `MANAGER` grant for the creator:
 
 ```sh
 bin/plowshare-cli project create '{"name":"home-assistant"}'
@@ -32,7 +88,11 @@ bin/plowshare-cli project create '{"name":"home-assistant","type":"DISJOINT","wo
 
 The pipeline can update the directory while Plowshare retains the project's
 framework state. Neither server project type participates in client union sync.
-`DISJOINT` makes independent lifecycle ownership explicit. `project define`
+`DISJOINT` makes independent lifecycle ownership explicit. It can register an
+Application with a valid existing `plowshare.json`, or an External without one.
+An existing Application manifest is validated and never rewritten; the source
+owner supplies its account grants. A managed server project is an Application
+whose source lifecycle Plowshare controls. `project define`
 continues to register existing workspaces with the earlier project behavior;
 client-rooted projects can still opt into their existing union sync workflow.
 Creation refuses an existing project rather than overwriting it. After an
@@ -65,12 +125,14 @@ commands need a filesystem sandbox before they can honor that policy.
 
 ## Recognize a project from its files
 
-A local project uses a marker at `.plowshare/plowshare` or the existing
+Discovery first checks a root `plowshare.json` Application manifest. It must be
+versioned JSON; invalid Applications never fall back to a legacy marker.
+A legacy External uses a marker at `.plowshare/plowshare` or the existing
 `.plowshare/project` path. Local markers take precedence over a root-level
 `plowshare` file in the same directory. Discovery walks upward and uses the
 nearest project identity.
 
-For a client-only checkout, put a `plowshare` file directly in the project root.
+For a legacy client-only checkout, put a `plowshare` file directly in the project root.
 The preferred format is versioned JSON:
 
 ```json
@@ -91,7 +153,9 @@ Neither format is automatically rewritten. A CLI executable with a shebang
 is not a project manifest.
 
 Before interpreting a root manifest as `DISJOINT`, clients check whether it
-already identifies a registered local or UNION project. Otherwise, it attaches
+already identifies a registered project. Application manifests can resolve a
+registered MANAGED or DISJOINT Application; legacy roots retain local or UNION
+identity matching. Otherwise, it attaches
 as a **client-only DISJOINT project**. No `.plowshare` directory, marker, Git
 repository, mirror or sync configuration is created. Its files are served only
 for that client, with the ordinary file containment and agent permissions.
@@ -171,10 +235,9 @@ For a server DISJOINT workspace, its root `plowshare` manifest can contain:
 ```
 
 The `notifications` project needs its own manifest with
-`"routing": {"acceptFrom": ["home-assistant"]}`. For a MANAGED workspace, put
-the JSON configuration in `.plowshare/plowshare`, or replace its generated
-`.plowshare/project` marker with the JSON form. Local marker precedence applies
-to configuration as well as identity. The manifest name must match the
+`"routing": {"acceptFrom": ["home-assistant"]}`. For an Application, put routing in its root `plowshare.json`, preserving its
+explicit account grants. Legacy Externals can retain their existing identity
+files. Root Application precedence applies to configuration as well as identity. The manifest name must match the
 registered server project.
 
 Route files are versioned JSON, with names unique across the project's files:
@@ -273,8 +336,8 @@ The version 1 project JSON file is the preferred place for project settings:
 }
 ```
 
-Settings apply from the selected identity file: `.plowshare/plowshare`, then
-`.plowshare/project`, then root-level `plowshare`. The first identity wins, including
+Settings apply from the selected identity file: root `plowshare.json`, then
+`.plowshare/plowshare`, `.plowshare/project`, then root-level `plowshare`. The first identity wins, including
 an existing plain-name marker. New marked and managed projects write JSON. Existing
 identity files are preserved until explicitly edited. To upgrade a plain marker,
 replace it with `{"version": 1, "name": "its-existing-name"}` and add settings.
@@ -286,6 +349,7 @@ replace it with `{"version": 1, "name": "its-existing-name"}` and add settings.
 | `skills.<name>.agentVisible` | Skill discovery visibility, without granting the skill or changing its package |
 | `defaultBot` | Bot selected when the caller does not name one |
 | `routing` | Existing cross-project message policy and named route files |
+| `access.accounts` | Explicit Application account grants, capped by server membership |
 
 Command modes are `off`, `gated`, `ask` and `open`. `timeout` uses seconds or minutes
 (e.g. `90s`), `output` uses `KiB` or `MiB`, and `isolation` currently accepts only
@@ -349,3 +413,43 @@ further growth. Each approved model-call chunk permits additional model use.
 
 Regular accounts receive Viewer, Contributor or Manager access per project. Personal
 spaces remain private to their account owner. See [server administration](server-administration.md#project-access-and-personal-scopes) for the permission matrix, membership commands and desktop access dialog. Workspace write restrictions still apply to every role.
+
+## Deployed Application files
+
+An authorized Application can be inspected without connecting a local folder. In
+Desktop, select it under **Applications** to open its workspace. **Conversations**
+returns to your scoped conversations; **Files** browses the deployed source.
+**Runtime definitions**, **Memory** and **Boards** open existing views with the
+Application selected. Conversation histories retain their account ownership.
+The web console exposes **Files** on each Application card.
+
+CLI and TUI use the same WebSocket operations:
+
+```text
+application files {"project":"mychatbot"}
+application files {"project":"mychatbot","path":".plowshare/agents"}
+application read {"project":"mychatbot","path":"notes.md"}
+application save {"project":"mychatbot","path":"notes.md","text":"Updated notes","revision":"<revision returned by read>"}
+```
+
+CLI `--project` and the TUI's current project supply the project when omitted.
+`application.files`, `application.file.read` and `application.file.save` are also
+available through the shared SDK operation contracts. No local file claim, union
+or checkout is needed. This capability applies to registered server Applications;
+external Projects continue to use their existing file access path.
+
+The browser lists up to 200 entries per directory. An explicit relative path can
+open files or directories beyond that listing. Reads and edits require existing
+regular UTF-8 text files no larger than 256 KiB. Linked paths, Git metadata and
+excluded paths cannot be accessed. Each request rechecks effective Application
+membership, the root manifest and the workspace fence. Write access also requires
+CONTRIBUTOR or MANAGER and a matching `writePaths` area. Editing `plowshare.json`,
+`.plowshare/` definitions or `Relay/` definitions requires MANAGER; an edited root
+manifest must remain valid.
+
+A save carries the SHA-256 content revision returned by its read. The server
+checks it before replacing the file atomically and preserves POSIX file modes
+where supported. Concurrent external source owners remain independent: this is
+not a filesystem transaction with their writers. A failed or unreadable save
+reply is never replayed. Read and review the current file before saving again;
+the graphical editors retain an unsaved draft while reconciling changes.

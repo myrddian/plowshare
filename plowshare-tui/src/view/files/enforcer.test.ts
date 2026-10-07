@@ -1849,3 +1849,17 @@ describe('schedule definition file purpose', () => {
     ).toBe('refused');
   });
 });
+
+it('protects application authority even before the root manifest exists', async () => {
+  expect(
+    (await asking('write', { path: 'plowshare.json', content: '{}' })).outcome,
+  ).toBe('refused');
+  await writeFile(join(root, 'plowshare.json'), '{}');
+  expect((await asking('delete', { path: 'plowshare.json' })).outcome).toBe(
+    'refused',
+  );
+  expect(
+    (await asking('move', { from: 'plowshare.json', to: 'old.json' })).outcome,
+  ).toBe('refused');
+  expect(allows(root, join(root, 'plowshare.json'), 'definitions')).toBe(true);
+});

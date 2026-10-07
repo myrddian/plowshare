@@ -27,16 +27,16 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       "$ref": "#/$defs/shape18"
     },
     "conversation.context": {
-      "$ref": "#/$defs/shape24"
+      "$ref": "#/$defs/shape25"
     },
     "memory.recall": {
-      "$ref": "#/$defs/shape42"
+      "$ref": "#/$defs/shape43"
     },
     "memory.index": {
-      "$ref": "#/$defs/shape53"
+      "$ref": "#/$defs/shape54"
     },
     "document.search": {
-      "$ref": "#/$defs/shape55"
+      "$ref": "#/$defs/shape56"
     }
   },
   "$defs": {
@@ -267,6 +267,9 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       "const": "project"
     },
     "shape23": {
+      "const": "application"
+    },
+    "shape24": {
       "const": "personal"
     },
     "shape21": {
@@ -276,6 +279,9 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
         },
         {
           "$ref": "#/$defs/shape23"
+        },
+        {
+          "$ref": "#/$defs/shape24"
         }
       ]
     },
@@ -312,7 +318,7 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
         "$ref": "#/$defs/shape18"
       }
     },
-    "shape27": {
+    "shape28": {
       "type": "object",
       "properties": {
         "grewBy": {
@@ -336,49 +342,49 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape26": {
+    "shape27": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape27"
+        "$ref": "#/$defs/shape28"
       }
     },
-    "shape25": {
+    "shape26": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape26"
+          "$ref": "#/$defs/shape27"
         }
       ]
     },
-    "shape31": {
+    "shape32": {
       "const": "MEASURED"
     },
-    "shape32": {
+    "shape33": {
       "const": "BOUND"
     },
-    "shape33": {
+    "shape34": {
       "const": "ESTIMATED"
     },
-    "shape30": {
+    "shape31": {
       "anyOf": [
-        {
-          "$ref": "#/$defs/shape31"
-        },
         {
           "$ref": "#/$defs/shape32"
         },
         {
           "$ref": "#/$defs/shape33"
+        },
+        {
+          "$ref": "#/$defs/shape34"
         }
       ]
     },
-    "shape29": {
+    "shape30": {
       "type": "object",
       "properties": {
         "basis": {
-          "$ref": "#/$defs/shape30"
+          "$ref": "#/$defs/shape31"
         },
         "how": {
           "$ref": "#/$defs/shape1"
@@ -394,17 +400,17 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape28": {
+    "shape29": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape29"
+          "$ref": "#/$defs/shape30"
         }
       ]
     },
-    "shape38": {
+    "shape39": {
       "type": "object",
       "properties": {
         "characters": {
@@ -420,23 +426,23 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape37": {
+    "shape38": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape38"
+        "$ref": "#/$defs/shape39"
       }
     },
-    "shape36": {
+    "shape37": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape37"
+          "$ref": "#/$defs/shape38"
         }
       ]
     },
-    "shape35": {
+    "shape36": {
       "type": "object",
       "properties": {
         "agent": {
@@ -452,7 +458,7 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
           "$ref": "#/$defs/shape10"
         },
         "tools": {
-          "$ref": "#/$defs/shape36"
+          "$ref": "#/$defs/shape37"
         }
       },
       "required": [
@@ -464,17 +470,17 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape34": {
+    "shape35": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape35"
+          "$ref": "#/$defs/shape36"
         }
       ]
     },
-    "shape41": {
+    "shape42": {
       "type": "object",
       "properties": {
         "component": {
@@ -490,36 +496,36 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape40": {
+    "shape41": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape41"
+        "$ref": "#/$defs/shape42"
       }
     },
-    "shape39": {
+    "shape40": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape40"
+          "$ref": "#/$defs/shape41"
         }
       ]
     },
-    "shape24": {
+    "shape25": {
       "type": "object",
       "properties": {
         "cacheHitRate": {
           "$ref": "#/$defs/shape11"
         },
         "measuredTurns": {
-          "$ref": "#/$defs/shape25"
+          "$ref": "#/$defs/shape26"
         },
         "messageTokens": {
-          "$ref": "#/$defs/shape28"
+          "$ref": "#/$defs/shape29"
         },
         "prefix": {
-          "$ref": "#/$defs/shape34"
+          "$ref": "#/$defs/shape35"
         },
         "sent": {
           "$ref": "#/$defs/shape11"
@@ -528,10 +534,10 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
           "$ref": "#/$defs/shape11"
         },
         "systemPromptTokens": {
-          "$ref": "#/$defs/shape28"
+          "$ref": "#/$defs/shape29"
         },
         "toolTokens": {
-          "$ref": "#/$defs/shape28"
+          "$ref": "#/$defs/shape29"
         },
         "turns": {
           "$ref": "#/$defs/shape10"
@@ -540,7 +546,7 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
           "$ref": "#/$defs/shape10"
         },
         "unavailable": {
-          "$ref": "#/$defs/shape39"
+          "$ref": "#/$defs/shape40"
         }
       },
       "required": [
@@ -558,7 +564,7 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape47": {
+    "shape48": {
       "type": "object",
       "properties": {
         "at": {
@@ -578,17 +584,17 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape46": {
+    "shape47": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape47"
+          "$ref": "#/$defs/shape48"
         }
       ]
     },
-    "shape49": {
+    "shape50": {
       "type": "object",
       "properties": {
         "project": {
@@ -600,17 +606,17 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape48": {
+    "shape49": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape49"
+          "$ref": "#/$defs/shape50"
         }
       ]
     },
-    "shape51": {
+    "shape52": {
       "type": "object",
       "properties": {
         "at": {
@@ -630,17 +636,17 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape50": {
+    "shape51": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape51"
+          "$ref": "#/$defs/shape52"
         }
       ]
     },
-    "shape52": {
+    "shape53": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
@@ -650,26 +656,26 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
         }
       ]
     },
-    "shape45": {
+    "shape46": {
       "type": "object",
       "properties": {
         "body": {
           "$ref": "#/$defs/shape1"
         },
         "formed": {
-          "$ref": "#/$defs/shape46"
+          "$ref": "#/$defs/shape47"
         },
         "home": {
-          "$ref": "#/$defs/shape48"
+          "$ref": "#/$defs/shape49"
         },
         "id": {
           "$ref": "#/$defs/shape1"
         },
         "invalidation": {
-          "$ref": "#/$defs/shape50"
+          "$ref": "#/$defs/shape51"
         },
         "lastUsed": {
-          "$ref": "#/$defs/shape52"
+          "$ref": "#/$defs/shape53"
         },
         "pinned": {
           "$ref": "#/$defs/shape2"
@@ -684,10 +690,10 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
           "$ref": "#/$defs/shape1"
         },
         "supersededBy": {
-          "$ref": "#/$defs/shape52"
+          "$ref": "#/$defs/shape53"
         },
         "supersedes": {
-          "$ref": "#/$defs/shape52"
+          "$ref": "#/$defs/shape53"
         },
         "uses": {
           "$ref": "#/$defs/shape11"
@@ -710,30 +716,30 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape44": {
+    "shape45": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape45"
+        "$ref": "#/$defs/shape46"
       }
     },
-    "shape43": {
+    "shape44": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape44"
+          "$ref": "#/$defs/shape45"
         }
       ]
     },
-    "shape42": {
+    "shape43": {
       "type": "object",
       "properties": {
         "limit": {
           "$ref": "#/$defs/shape10"
         },
         "memories": {
-          "$ref": "#/$defs/shape43"
+          "$ref": "#/$defs/shape44"
         },
         "question": {
           "$ref": "#/$defs/shape1"
@@ -750,7 +756,7 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape54": {
+    "shape55": {
       "type": "object",
       "properties": {
         "id": {
@@ -774,13 +780,13 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape53": {
+    "shape54": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape54"
+        "$ref": "#/$defs/shape55"
       }
     },
-    "shape58": {
+    "shape59": {
       "type": "object",
       "properties": {
         "chunkId": {
@@ -824,27 +830,27 @@ export const CONSOLE_SCHEMAS:{results:Record<string,Schema>;$defs:Record<string,
       ],
       "additionalProperties": false
     },
-    "shape57": {
+    "shape58": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape58"
+        "$ref": "#/$defs/shape59"
       }
     },
-    "shape56": {
+    "shape57": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape6"
         },
         {
-          "$ref": "#/$defs/shape57"
+          "$ref": "#/$defs/shape58"
         }
       ]
     },
-    "shape55": {
+    "shape56": {
       "type": "object",
       "properties": {
         "hits": {
-          "$ref": "#/$defs/shape56"
+          "$ref": "#/$defs/shape57"
         },
         "limit": {
           "$ref": "#/$defs/shape10"

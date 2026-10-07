@@ -12,6 +12,7 @@ public final class ProjectFile {
   private ProjectFile() {}
 
   public static boolean modelMayChange(Path root, Path target) {
+    if (target.equals(root.resolve("plowshare.json"))) return false;
     if (!target.equals(root.resolve("plowshare"))) return true;
     if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) return false;
     try (var input = Files.newInputStream(target, LinkOption.NOFOLLOW_LINKS)) {

@@ -155,7 +155,9 @@ describe('an answer with nothing in it', () => {
 
     const empty = root.querySelector('[data-empty]');
     expect(empty).not.toBeNull();
-    expect(empty?.textContent).toContain('no local file access');
+    expect(empty?.textContent).toContain(
+      'No Applications available to this account.',
+    );
     expect(root.querySelector('[data-trouble]')).toBeNull();
   });
 
@@ -504,4 +506,34 @@ describe('approved commands', () => {
 
     expect(root.querySelector('[data-approved]')).toBeNull();
   });
+});
+
+it('groups authorized Applications separately from Projects and handles empty groups', async () => {
+  server.projects = [
+    project({ name: 'Chatbot', kind: 'application' }),
+    project({ name: 'Pipeline app', kind: 'application' }),
+    project({ name: 'External checkout', kind: 'project' }),
+    project({ name: 'Remote files' }),
+  ];
+  await screen.load();
+  const groups = [...root.querySelectorAll('details')].filter((node) =>
+    ['Applications', 'Projects'].includes(
+      node.querySelector('summary')?.textContent ?? '',
+    ),
+  );
+  expect(groups).toHaveLength(2);
+  expect(groups[0]?.textContent).toContain('Chatbot');
+  expect(groups[0]?.textContent).not.toContain('Remote files');
+  expect(groups[0]?.textContent).toContain('Pipeline app');
+  expect(groups[0]?.textContent).not.toContain('External checkout');
+  expect(groups[1]?.textContent).toContain('Remote files');
+  expect(groups[1]?.textContent).not.toContain('Chatbot');
+  expect(groups[1]?.textContent).toContain('External checkout');
+  expect(root.textContent).not.toContain('Externals');
+  server.projects = [];
+  await screen.load();
+  expect(root.textContent).toContain(
+    'No Applications available to this account.',
+  );
+  expect(root.textContent).toContain('No Projects available to this account.');
 });

@@ -93,4 +93,21 @@ class ProjectConfigurationTest {
         () ->
             ProjectConfiguration.parse("{\"version\":2,\"name\":\"house\"}", "house", "plowshare"));
   }
+
+  @Test
+  void application_settings_take_precedence_and_invalid_roots_never_fall_back(@TempDir Path root)
+      throws Exception {
+    Files.createDirectory(root.resolve(".plowshare"));
+    Files.writeString(root.resolve(".plowshare/project"), "house");
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        "{\"version\":1,\"name\":\"house\",\"caps\":{\"steps\":4}}");
+    assertEquals(
+        new ProjectCaps.Setting(4, "the server's plowshare.json"),
+        ProjectConfiguration.server(root, List.of(), "house").caps().steps());
+    Files.writeString(root.resolve("plowshare.json"), "house");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ProjectConfiguration.server(root, List.of(), "house"));
+  }
 }

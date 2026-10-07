@@ -288,3 +288,43 @@ describe('root-level manifests are client-only DISJOINT candidates', () => {
     await expect(discover(linked)).rejects.toThrow('regular file');
   });
 });
+
+describe('root plowshare.json applications', () => {
+  it('takes precedence over legacy markers without changing the checkout', async () => {
+    const manifest = {
+      version: 1,
+      name: 'Chatbot',
+      access: { accounts: [{ handle: 'reader', role: 'VIEWER' }] },
+    };
+    await marked(top, 'Legacy');
+    const source = JSON.stringify(manifest);
+    await writeFile(join(top, 'plowshare.json'), source);
+    expect(await discover(top)).toEqual({
+      root: top,
+      project: 'Chatbot',
+      kind: 'DISJOINT',
+      application: true,
+    });
+    expect((await readProjectManifest(top))?.access).toEqual(manifest.access);
+    await mark(top, 'Chatbot');
+    expect(await readFile(join(top, '.plowshare/project'), 'utf8')).toBe(
+      'Legacy',
+    );
+    expect(await readFile(join(top, 'plowshare.json'), 'utf8')).toBe(source);
+    for (const text of [
+      'Chatbot',
+      '',
+      '{invalid',
+      '{"version":2,"name":"Chatbot"}',
+      '{"version":1,"name":"Chatbot","access":{"accounts":[{"handle":"reader","role":"ADMIN"}]}}',
+    ]) {
+      await writeFile(join(top, 'plowshare.json'), text);
+      await expect(discover(top)).rejects.toThrow();
+    }
+  });
+  it('rejects linked application manifests', async () => {
+    await marked(top, 'Legacy');
+    await symlink(join(top, '.plowshare/project'), join(top, 'plowshare.json'));
+    await expect(discover(top)).rejects.toThrow('regular file');
+  });
+});

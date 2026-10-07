@@ -21,6 +21,7 @@ describe('version 1 project settings', () => {
       skills: { research: { agentVisible: true } },
       defaultBot: 'interlocutor',
       routing: { sendTo: ['alerts'] },
+      access: { accounts: [{ handle: 'reader', role: 'VIEWER' }] },
       homeAssistant: { entities: ['light.office'] },
     });
     const settings = parseObject(source);
@@ -49,6 +50,21 @@ describe('version 1 project settings', () => {
       { commands: { remote: { mode: 'open' } } },
       { skills: { research: { agentVisible: 'true' } } },
       { defaultBot: '../other' },
+      ...[
+        null,
+        [],
+        {},
+        { accounts: null },
+        { accounts: [{ handle: 'reader', role: 'ADMIN' }] },
+        { accounts: [{ handle: ' reader', role: 'VIEWER' }] },
+        {
+          accounts: [
+            { handle: 'reader', role: 'VIEWER' },
+            { handle: 'reader', role: 'MANAGER' },
+          ],
+        },
+        { accounts: [], public: true },
+      ].map((access) => ({ access })),
     ])
       expect(() => projectSettings(record)).toThrow();
   });

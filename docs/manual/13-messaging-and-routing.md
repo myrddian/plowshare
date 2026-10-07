@@ -83,16 +83,19 @@ not a client folder attached under the same display name. Inspect `project list`
 for the actual server workspace. In Docker that directory must be visible inside
 the container's mounted filesystem.
 
-The first nonempty identity marker is authoritative, in this order:
+A root Application manifest is authoritative when present, followed by the first
+nonempty legacy External identity marker:
 
-1. `.plowshare/plowshare`
-2. `.plowshare/project`
-3. Root-level `plowshare`
+1. Root-level `plowshare.json`
+2. `.plowshare/plowshare`
+3. `.plowshare/project`
+4. Root-level `plowshare`
 
-They are alternatives, not merged settings. A generated name-only
-`.plowshare/project` can hide a root manifest. For a MANAGED project, put the JSON
-in `.plowshare/plowshare` or replace the authoritative `.plowshare/project` with
-that JSON. A legacy plain name cannot declare routing.
+They are alternatives, not merged settings. An invalid `plowshare.json` closes
+Application access and never falls back to older markers. Preserve its explicit
+`access.accounts` grants when adding routing: messaging requires CONTRIBUTOR
+access in both Applications as well as both routing policies. Legacy External
+markers keep their existing precedence; a plain name cannot declare routing.
 
 The complete example files live in [the messaging examples](../examples/messaging).
 Their root-level `plowshare` files are portable content examples: deploy them into

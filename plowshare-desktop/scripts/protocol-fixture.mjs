@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { agentWire, conversationWire, projectWire, entryWire, entryPageWire, contextWire, approvalWire } from '../src/wire-fixtures.ts';
 import { runWire } from '../src/run-fixtures.ts';
@@ -18,6 +19,8 @@ export async function protocolFixture(options = {}) {
   let pricing={billingRoute:'hosted',model:'deployment',pools:['hosted'],version:'boot:',origin:'configuration',card:null,configured:[],updatedAt:null};
   const projectGrants=new Map();
   const projectChanges=new Map();
+  const applicationSources = new Map();
+  const sourceRevision = text => createHash('sha256').update(text).digest('hex');
   const projectRows = new Map([['Empty workspace', { name: 'Empty workspace' }]]);
   const board = demoBoard();
   // Display demos omit this nullable server field; the WS fixture carries the full DTO.
@@ -433,6 +436,22 @@ export async function protocolFixture(options = {}) {
           projectRows.set(payload.name, { name: payload.name, role:'MANAGER', workspace: payload.workspace || '/server/provisioned', type: payload.type || 'STANDARD', readOnly: payload.writePaths?.length === 0, writePaths: payload.writePaths || ['.'], machine: null, lent: [], exclusions: [], members: ['fixture'] });
           result = { code: 'OK', payload: projectWire(payload.name, projectRows.get(payload.name)) }; break;
         }
+        case 'application.files': {
+          const files = applicationSources.get(payload.project), row = projectRows.get(payload.project);
+          if (!files || row?.kind !== 'application') { result = { code: 'FORBIDDEN', said: 'Application access unavailable' }; break; }
+          const prefix = payload.path ? payload.path + '/' : '';
+          result.payload = { project: payload.project, path: payload.path ?? '', entries: [...files.keys()].filter(path => path.startsWith(prefix) && !path.slice(prefix.length).includes('/')).map(path => ({ path, name: path.slice(prefix.length), directory: false })), more: false }; break;
+        }
+        case 'application.file.read': case 'application.file.save': {
+          const file = applicationSources.get(payload.project)?.get(payload.path), row = projectRows.get(payload.project);
+          if (!file || row?.kind !== 'application') { result = { code: 'FORBIDDEN', said: 'Application file unavailable' }; break; }
+          const writable = file.writable && row.role !== 'VIEWER';
+          if (frame.type === 'application.file.save') {
+            if (!writable || payload.revision !== sourceRevision(file.text)) { result = { code: 'CONFLICT', said: 'The file changed or write access is unavailable' }; break; }
+            file.text = payload.text;
+          }
+          result.payload = { project: payload.project, path: payload.path, text: file.text, revision: sourceRevision(file.text), writable }; break;
+        }
         case 'project.list': result = refuseProjects ? { code: 'BAD_REQUEST', said: 'Project listing unavailable' } : { code: 'OK', payload: [...projectRows.values()].map(row => projectWire(row.name, row)) }; break;
         case 'agent.list': {
           const ownsFiles = (filePeers.get(payload.project) ?? []).some(row => row.claim.session === sessionId);
@@ -628,6 +647,8 @@ export async function protocolFixture(options = {}) {
     get fileClaim() { return fileClaim; },
     get liveFileClaims() { return [...filePeers.values()].flat().map(row => row.claim); },
     get rotations() { return rotations; },
+    setApplicationFile(project, path, text, writable = false) { const files = applicationSources.get(project) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(project, files); },
+    removeServerProject(project) { projectRows.delete(project); },
     addServerProject(row) { projectRows.set(row.name, row); },
     addConversation(row, bot) {
       conversations.push(conversationWire(row.id, row)); entries.set(row.id, []);

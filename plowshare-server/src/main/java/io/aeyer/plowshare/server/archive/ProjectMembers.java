@@ -9,6 +9,16 @@ import java.util.Optional;
  * history is recorded in the same transaction. No caller receives JDBC infrastructure.
  */
 public interface ProjectMembers {
+  /** Whether the registered server source has a valid root application manifest. */
+  default boolean application(String project) {
+    return false;
+  }
+
+  /** Account whose live manifest grant caps this principal, including machine-token owners. */
+  default Optional<String> authorityAccount(String principal) {
+    return Optional.ofNullable(principal);
+  }
+
   boolean isServerAdmin(String handle);
 
   boolean isMember(String project, String handle);
@@ -28,6 +38,11 @@ public interface ProjectMembers {
   void requireRole(String project, String handle, ProjectRole required);
 
   Access access(String project, String handle);
+
+  /** Membership-management result; server administration is distinct from ordinary project use. */
+  default Access managementAccess(String project, String actor) {
+    return access(project, actor);
+  }
 
   void assign(String project, String handle, ProjectRole role, String actor, boolean add);
 

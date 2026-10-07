@@ -1,3 +1,7 @@
+import type {
+  ApplicationFileListing,
+  ApplicationFileDocument,
+} from 'plowshare-client-ts/operations/conversation-replies';
 import type { Preference } from './renderer/preferences.ts';
 import type { JobNotification } from 'plowshare-client-ts/operations/push';
 import type { ServerAdminCall } from './admin-input.ts';
@@ -140,6 +144,15 @@ export interface History {
   error?: string;
 }
 export interface DesktopState {
+  applicationFiles?: {
+    project: string;
+    loading: boolean;
+    saving: boolean;
+    listing?: ApplicationFileListing;
+    document?: ApplicationFileDocument;
+    error?: string;
+    uncertain?: boolean;
+  };
   backgroundError?: string;
   usage?: UsageViewState;
   mode: 'demo' | 'live';
@@ -306,6 +319,16 @@ export interface ContextReading extends Load {
   sample?: boolean;
 }
 export type Request =
+  | { action: 'application-runtime'; project: string }
+  | { action: 'application-files'; project: string; path?: string }
+  | { action: 'application-file-read'; project: string; path: string }
+  | {
+      action: 'application-file-save';
+      project: string;
+      path: string;
+      text: string;
+      revision: string;
+    }
   | { action: 'usage' }
   | {
       action: 'context-snapshot';

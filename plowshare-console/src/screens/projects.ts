@@ -1,3 +1,4 @@
+import { applicationFiles } from './application-files';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import { isList } from '../../../sdk/typescript/src/binding/values.ts';
@@ -119,11 +120,6 @@ export const NO_EXCLUSIONS =
   ' answers, so an empty list is not a leash with nothing on it — it is an answer this' +
   ' console cannot account for. Treat this project’s reach as unknown rather than as open.';
 
-export const NO_PROJECTS =
-  'No project on this server has a workspace. That is an answer and not a failure: a job in a' +
-  ' project with no workspace has no local file access at all, and every file tool says so' +
-  ' in words when it is asked.';
-
 /**
  * What an empty `lent` list means, which is the ordinary case and not a
  * shortfall.
@@ -160,7 +156,7 @@ export function createProjects(options: ProjectsOptions): Screen {
 
   const shell = el('section', 'screen projects');
   const head = el('header', 'screen-head');
-  const title = el('h2', 'screen-title', 'projects');
+  const title = el('h2', 'screen-title', 'Applications and Projects');
   const reload = button('reload', 'reload');
   const body = el('div', 'screen-body');
   body.dataset['projects'] = '';
@@ -184,6 +180,8 @@ export function createProjects(options: ProjectsOptions): Screen {
     card.append(field('workspace', textOf(project.workspace)));
     card.append(lent(project));
     card.append(leash(project));
+    if (project.kind === 'application')
+      card.append(applicationFiles(textOf(project.name), () => stream));
     card.append(mover(project));
     if (options.openStream !== undefined) {
       const section = el('section', 'approved');
@@ -471,10 +469,6 @@ export function createProjects(options: ProjectsOptions): Screen {
       );
       return;
     }
-    if (projects.length === 0) {
-      body.replaceChildren(nothing(NO_PROJECTS));
-      return;
-    }
     const personal = projects.filter((project) => project.kind === 'personal');
     const ordinary = projects.filter((project) => project.kind !== 'personal');
     const personalRows = personal.map(() => {
@@ -488,7 +482,27 @@ export function createProjects(options: ProjectsOptions): Screen {
       element.append(title, note);
       return element;
     });
-    body.replaceChildren(...personalRows, ...ordinary.map(draw));
+    const applications = ordinary.filter(
+      (project) => project.kind === 'application',
+    );
+    const projectRows = ordinary.filter(
+      (project) => project.kind !== 'application',
+    );
+    const group = (name: string, rows: readonly ProjectView[]) => {
+      const section = document.createElement('details');
+      section.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = name;
+      section.append(summary, ...rows.map(draw));
+      if (!rows.length)
+        section.append(nothing(`No ${name} available to this account.`));
+      return section;
+    };
+    body.replaceChildren(
+      ...personalRows,
+      group('Applications', applications),
+      group('Projects', projectRows),
+    );
   }
 
   return {

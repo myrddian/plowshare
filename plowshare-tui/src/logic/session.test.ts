@@ -1756,18 +1756,36 @@ describe('/theme, which the view answers', () => {
 });
 
 describe('what a listing says, which is wording and not layout', () => {
-  it('names each project and nothing else about it', () => {
+  it('groups scopes by Application identity without exposing workspace paths', () => {
     // The name is what `PLOWSHARE_PROJECT` takes and what a person chose;
     // the workspace and the exclusions are a map of this server's disk, and
     // `ProjectListHandler` is explicit about what that second list is.
     expect(
-      describeProjects([{ name: 'plowshare' }, { name: 'notes' }]),
-    ).toEqual(['plowshare', 'notes']);
+      describeProjects([
+        { name: 'notes', workspace: '/fixture/remote' },
+        { name: 'plowshare', kind: 'application', type: 'MANAGED' },
+        { name: 'pipeline', kind: 'application', type: 'DISJOINT' },
+        { name: 'external', kind: 'project', type: 'DISJOINT' },
+        { name: 'personal:reader', kind: 'personal' },
+      ]),
+    ).toEqual([
+      'Applications:',
+      '  plowshare',
+      '  pipeline · DISJOINT · no sync',
+      'Projects:',
+      '  notes',
+      '  external · DISJOINT · no sync',
+      'Personal · personal:reader',
+    ]);
   });
 
   it('says so when there is nothing to list, rather than saying nothing', () => {
-    expect(describeProjects([])).toHaveLength(1);
-    expect(describeProjects([])[0]).toContain('no projects');
+    expect(describeProjects([])).toEqual([
+      'Applications:',
+      '  No Applications available to this account.',
+      'Projects:',
+      '  No Projects available to this account.',
+    ]);
     expect(describeConversations([])[0]).toContain('no conversations');
   });
 
@@ -5313,5 +5331,23 @@ describe('explicit failed orchestration recovery', () => {
       expect(typed(command)).toEqual({ kind: 'usage', command });
       expect(typed(`${command} one two`)).toEqual({ kind: 'usage', command });
     }
+  });
+});
+
+// These source commands use the server Application scope, never the TUI's local file runner.
+it('builds Application file commands with the current scope and reviewed revision', async () => {
+  const { serverCommand } = await import('./session.ts');
+  expect(serverCommand('/application files', 'HA')).toMatchObject({
+    kind: 'request',
+    request: { type: 'application.files', payload: { project: 'HA' } },
+  });
+  expect(
+    serverCommand('/application read {"path":"notes.md"}', 'HA'),
+  ).toMatchObject({
+    kind: 'request',
+    request: {
+      type: 'application.file.read',
+      payload: { project: 'HA', path: 'notes.md' },
+    },
   });
 });

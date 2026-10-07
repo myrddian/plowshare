@@ -102,6 +102,24 @@ public record ProjectView(
         role == null ? null : io.aeyer.plowshare.server.archive.ProjectRole.parse(role));
   }
 
+  /** Applications are identified by a validated manifest, independently of workspace ownership. */
+  public ProjectView application(boolean application) {
+    return new ProjectView(
+        name,
+        workspace,
+        lent,
+        exclusions,
+        machine,
+        members,
+        application ? "application" : kind,
+        type,
+        readOnly,
+        writePaths,
+        displayName,
+        routingIdentity,
+        role);
+  }
+
   public ProjectView(
       String name,
       String workspace,

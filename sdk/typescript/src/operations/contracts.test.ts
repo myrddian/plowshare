@@ -92,7 +92,7 @@ describe('typed requests cover the actual server contracts', () => {
       (frame) => !cli.has(frame),
     );
     expect([...cli, ...remaining].sort()).toEqual(typed);
-    expect(cli.size).toBe(192);
+    expect(cli.size).toBe(195);
     expect(remaining.sort()).toEqual([
       'incoming.cancel',
       'incoming.catalog',

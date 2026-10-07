@@ -20,7 +20,7 @@ public record ProjectConfiguration(
     Optional<DefinitionResolver.DefaultBot> defaultBot) {
   static final int MAX_BYTES = 65536;
   static final List<String> FILES =
-      List.of(".plowshare/plowshare", ".plowshare/project", "plowshare");
+      List.of("plowshare.json", ".plowshare/plowshare", ".plowshare/project", "plowshare");
   public static final ProjectConfiguration NONE =
       new ProjectConfiguration(
           "definition", ProjectCaps.NONE, EnvironmentFile.Parsed.EMPTY, Map.of(), Optional.empty());
@@ -105,8 +105,10 @@ public record ProjectConfiguration(
       if (read.unreadable() != null)
         throw new IllegalArgumentException(file + ": " + read.unreadable());
       if (read.absent()
-          || read.text().isBlank()
+          || !file.equals("plowshare.json") && read.text().isBlank()
           || file.equals("plowshare") && read.text().startsWith("#!")) continue;
+      if (file.equals("plowshare.json") && !read.text().stripLeading().startsWith("{"))
+        throw new IllegalArgumentException("Application manifest must be JSON");
       return parse(read.text(), project, file);
     }
     return NONE;
@@ -132,7 +134,10 @@ public record ProjectConfiguration(
           byte[] bytes = input.readNBytes(MAX_BYTES + 1);
           if (bytes.length > MAX_BYTES) throw new IOException("Project manifest exceeds 64 KiB");
           String text = new String(bytes, StandardCharsets.UTF_8);
-          if (text.isBlank() || file.equals("plowshare") && text.startsWith("#!")) continue;
+          if (!file.equals("plowshare.json") && text.isBlank()
+              || file.equals("plowshare") && text.startsWith("#!")) continue;
+          if (file.equals("plowshare.json") && !text.stripLeading().startsWith("{"))
+            throw new IllegalArgumentException("Application manifest must be JSON");
           return parse(text, project, "the server's " + file);
         } catch (NoSuchFileException absent) {
           /* Next identity location. */

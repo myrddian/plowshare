@@ -18,6 +18,7 @@ import {
   InformationClient,
   decodeInformationCall,
 } from 'plowshare-client-ts/operations/information';
+import { ApplicationFilesClient } from './application-files.ts';
 import { LibraryClient } from './library.ts';
 import {
   resultOf,
@@ -356,6 +357,11 @@ export class DesktopClient {
     },
   );
   readonly activity = new ActivityClient(
+    () => this.state,
+    (ask) => this.send(ask),
+    () => this.emit(),
+  );
+  readonly applicationFiles = new ApplicationFilesClient(
     () => this.state,
     (ask) => this.send(ask),
     () => this.emit(),
@@ -750,6 +756,15 @@ export class DesktopClient {
       if (!rows)
         throw new Error('The server returned an unreadable project listing.');
       this.state.projects = rows;
+      if (
+        this.state.applicationFiles &&
+        !rows.some(
+          (row) =>
+            row.name === this.state.applicationFiles?.project &&
+            row.kind === 'application',
+        )
+      )
+        this.applicationFiles.reset();
       this.state.projectListError = undefined;
     } catch (error) {
       if (generation !== this.generation) throw error;
@@ -768,6 +783,7 @@ export class DesktopClient {
     this.activity.reset();
     this.runs.reset();
     this.schedules.reset();
+    this.applicationFiles.reset();
     this.library.reset();
     this.board.reset();
     this.operator.reset();
@@ -796,6 +812,7 @@ export class DesktopClient {
     this.activity.reset();
     this.runs.reset();
     this.schedules.reset();
+    this.applicationFiles.reset();
     this.library.reset();
     this.board.reset();
     // Invalidate every pending read and subscription acknowledgement from this socket.
@@ -827,6 +844,21 @@ export class DesktopClient {
     let conversation: string | undefined;
     let notice: string | undefined;
     switch (request.action) {
+      case 'application-files':
+        await this.applicationFiles.list(request.project, request.path);
+        break;
+      case 'application-file-read':
+        await this.applicationFiles.read(request.project, request.path);
+        break;
+      case 'application-file-save':
+        await this.applicationFiles.save(
+          request.project,
+          request.path,
+          request.text,
+          request.revision,
+        );
+        if (request.path === 'plowshare.json') await this.readProjects();
+        break;
       case 'relay-operate': {
         const answer = await this.ask('relay.operate', request.payload);
         if (answer.code !== 'OK')

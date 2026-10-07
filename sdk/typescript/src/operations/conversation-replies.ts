@@ -1,3 +1,4 @@
+import { utf8Length } from '../binding/files.ts';
 import type { Outcome } from '../binding/envelope.ts';
 import {
   bool,
@@ -310,6 +311,25 @@ export interface AdminStatus {
   readonly serverAdmin: boolean;
 }
 
+export interface ApplicationFileEntry {
+  readonly path: string;
+  readonly name: string;
+  readonly directory: boolean;
+}
+export interface ApplicationFileListing {
+  readonly project: string;
+  readonly path: string;
+  readonly entries: readonly ApplicationFileEntry[];
+  readonly more: boolean;
+}
+export interface ApplicationFileDocument {
+  readonly project: string;
+  readonly path: string;
+  readonly text: string;
+  readonly revision: string;
+  readonly writable: boolean;
+}
+
 export interface ConversationReplies {
   'conversation.open': ConversationView;
   'conversation.list': readonly ConversationView[];
@@ -340,6 +360,9 @@ export interface ConversationReplies {
   'admin.service.token.create': ServiceCredential;
   'admin.service.token.rotate': ServiceCredential;
   'admin.service.token.revoke': ServiceToken;
+  'application.files': ApplicationFileListing;
+  'application.file.read': ApplicationFileDocument;
+  'application.file.save': ApplicationFileDocument;
   'project.list': readonly ProjectView[];
   'project.attach': ProjectView;
   'project.create': ProjectView;
@@ -375,7 +398,10 @@ const project = record({
   machine: nullable(text),
   members: strings,
   kind: (value) =>
-    value === undefined || value === 'project' || value === 'personal',
+    value === undefined ||
+    value === 'project' ||
+    value === 'application' ||
+    value === 'personal',
   type: (value) => value === undefined || named(value),
   readOnly: (value) => value === undefined || bool(value),
   writePaths: (value) => value === undefined || strings(value),
@@ -603,6 +629,41 @@ const priceEntry = record({
   configured: list(priceCard),
   updatedAt: nullable(named),
 });
+const applicationPath: Check = (value) =>
+  typeof value === 'string' &&
+  value.length <= 2048 &&
+  !/[\\:]/.test(value) &&
+  Array.from(value).every(
+    (char) =>
+      char.charCodeAt(0) >= 32 &&
+      !(char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159),
+  ) &&
+  (value === '' ||
+    value
+      .split('/')
+      .every(
+        (part) =>
+          !!part &&
+          part !== '.' &&
+          part !== '..' &&
+          part.toLowerCase() !== '.git',
+      ));
+const applicationDocument = record({
+  project: named,
+  path: (value) => named(value) && applicationPath(value),
+  text: (value) =>
+    typeof value === 'string' &&
+    !value.includes('\0') &&
+    utf8Length(value) <= 262144 &&
+    Array.from(value).every((c) => {
+      const point = c.codePointAt(0)!;
+      return point < 0xd800 || point > 0xdfff;
+    }),
+  revision: (value) =>
+    typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
+  writable: bool,
+});
+
 const readers = {
   'conversation.open': conversation,
   'conversation.list': list(conversation),
@@ -667,6 +728,38 @@ const readers = {
   'project.member.role': projectAccess,
   'project.attach': project,
   'project.create': project,
+  'application.files': record(
+    {
+      project: named,
+      path: applicationPath,
+      entries: list(
+        record(
+          { path: applicationPath, name: named, directory: bool },
+          (row) =>
+            typeof row['path'] === 'string' &&
+            row['name'] === row['path'].split('/').at(-1),
+        ),
+      ),
+      more: bool,
+    },
+    (row) => {
+      const entries = row['entries'] as { path: string }[];
+      const path = row['path'];
+      if (typeof path !== 'string') return false;
+      const prefix = path ? `${path}/` : '';
+      return (
+        entries.length <= 200 &&
+        new Set(entries.map((entry) => entry.path)).size === entries.length &&
+        entries.every(
+          (entry) =>
+            entry.path.startsWith(prefix) &&
+            !entry.path.slice(prefix.length).includes('/'),
+        )
+      );
+    },
+  ),
+  'application.file.read': applicationDocument,
+  'application.file.save': applicationDocument,
   'project.list': list(project),
   'project.define': project,
   'project.lend': project,

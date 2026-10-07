@@ -766,6 +766,17 @@
 .information-panel form[data-tag-groups] label { display: flex; flex-direction: column; gap: 6px; }
 .information-panel form[data-tag-groups] textarea { width: 100%; min-height: 90px; resize: vertical; }
 
+#application-panel { padding: clamp(18px, 3vw, 40px); overflow: auto; min-width: 0; flex: 1; }
+#application-panel header, #application-panel nav, .application-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+#application-panel nav { justify-content: flex-start; margin-block: 20px; }
+#application-panel [data-location] { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+#application-panel [data-location] label { flex: 1 1 240px; }
+#application-panel [data-path] { width: 100%; }
+#application-panel [data-entries] { display: flex; flex-wrap: wrap; gap: 8px; padding-block: 16px; }
+#application-panel [data-entries] button { max-width: 100%; overflow-wrap: anywhere; }
+#application-panel [data-text] { width: 100%; min-height: 300px; resize: vertical; font-family: monospace; tab-size: 2; }
+#application-panel [data-editor] label { display: block; }
+#application-panel [data-summary], #application-panel [data-status], #application-panel [data-permission] { overflow-wrap: anywhere; }
 .connection-menu {
   position: fixed;
   inset: 60px 12px auto auto;

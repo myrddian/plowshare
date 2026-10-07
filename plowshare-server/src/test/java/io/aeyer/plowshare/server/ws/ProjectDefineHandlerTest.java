@@ -67,7 +67,11 @@ class ProjectDefineHandlerTest {
   void setUp() {
     projects = mock(ProjectStore.class);
     mvc =
-        MockMvcBuilders.standaloneSetup(new ProjectController(projects, new PresenceRegistry()))
+        MockMvcBuilders.standaloneSetup(
+                new ProjectController(
+                    projects,
+                    new PresenceRegistry(),
+                    io.aeyer.plowshare.server.ws.TestProjectMembers.allowed()))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
     // Through the area rather than through a literal map: this is the

@@ -627,9 +627,12 @@ async function permitted(
   const declared = isAbsolute(named) ? named : resolve(root, named);
   if (
     purpose === 'definitions' &&
-    ['plowshare', '.plowshare/plowshare', '.plowshare/project'].includes(
-      relative(root, declared).split(sep).join('/'),
-    )
+    [
+      'plowshare.json',
+      'plowshare',
+      '.plowshare/plowshare',
+      '.plowshare/project',
+    ].includes(relative(root, declared).split(sep).join('/'))
   ) {
     let at = root;
     for (const part of relative(root, declared).split(sep)) {
@@ -642,6 +645,12 @@ async function permitted(
     }
   }
   const candidate = await canonical(declared);
+  if (purpose === 'writing' && candidate === join(root, 'plowshare.json'))
+    throw ruled(
+      op,
+      'The application manifest is operator configuration',
+      named,
+    );
   if (purpose === 'writing' && candidate === join(root, 'plowshare')) {
     let executable = false;
     try {

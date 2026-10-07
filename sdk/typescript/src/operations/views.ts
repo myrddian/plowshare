@@ -53,7 +53,7 @@ export interface Conversation {
  */
 export interface Project {
   readonly name: string;
-  readonly kind?: 'project' | 'personal';
+  readonly kind?: 'project' | 'application' | 'personal';
   readonly type?: string;
   readonly role?: 'VIEWER' | 'CONTRIBUTOR' | 'MANAGER';
   readonly readOnly?: boolean;
@@ -376,8 +376,10 @@ export function projects(answer: Answer): Project[] | undefined {
           : {}),
         ...(workspace === undefined ? {} : { workspace }),
         ...(machine === undefined ? {} : { machine }),
-        ...(fields['kind'] === 'personal'
-          ? { kind: 'personal' as 'personal' | 'project' }
+        ...(['personal', 'project', 'application'].includes(
+          String(fields['kind']),
+        )
+          ? { kind: fields['kind'] as 'personal' | 'project' | 'application' }
           : {}),
       };
     })

@@ -14,10 +14,41 @@ grant or another account's conversation ownership.
 
 Project roles are `VIEWER` (read), `CONTRIBUTOR` (read and start/update work), and
 `MANAGER` (also manage definitions and membership). Server administrators have
-Manager authority in ordinary server projects. Inspect `project access` before
+Manager authority in legacy Externals. Applications also require an explicit
+manifest grant for ordinary use. Inspect `project access` before
 starting work; Viewer membership alone cannot run an agent or send a message.
 See [account and role administration](../server-administration.md) for grants,
 role changes, recovery and service-token ceilings.
+
+## Applications and Projects
+
+An Application is a folder with a valid root `plowshare.json`, using the existing
+`.plowshare/` conventions for skills, agents, bots, relay and hooks underneath it.
+Older identity formats and `.plowshare/` alone remain Externals; remote file
+access and coding-agent work appear under **Projects** in the GUI, CLI and TUI.
+Managed server projects appear under **Applications**, with a valid manifest and
+explicit grants required even for earlier registrations. They cannot fall back to
+external project access. The client lists only Applications that the authenticated
+account can use.
+
+```json
+{"version":1,"name":"mychatbot","access":{"accounts":[{"handle":"reader","role":"VIEWER"}]}}
+```
+
+`access.accounts` grants an exact account handle one of `VIEWER`, `CONTRIBUTOR`
+or `MANAGER`. It caps existing server membership and never creates or raises it.
+Absent or empty grants hide the Application from ordinary use, including direct
+requests. The deployed server manifest is authoritative. Invalid, unreadable or
+missing adopted manifests close access, including after restart; deleting the
+manifest cannot restore legacy access. Server administration remains separate.
+
+Managed server projects are Applications Plowshare owns and manages. Creation
+writes a manifest with an explicit MANAGER grant for the creator. A DISJOINT
+registration can be an Application or an External, depending on its root
+manifest; another system owns that directory's lifecycle. Plowshare validates an
+existing Application manifest without rewriting it. Source writes default off,
+with runtime state kept separately. See [the project guide](../projects.md) for
+bounded write areas, manifest validation and routing.
 
 ## Choose the right filesystem ownership
 
@@ -50,7 +81,9 @@ The project identity marker supports versioned JSON:
 {"version":1,"name":"my-project"}
 ```
 
-Supported locations include `.plowshare/plowshare`, the legacy
+Discovery first checks the root Application manifest `plowshare.json`. It must
+contain versioned JSON; invalid Applications never fall back to older markers.
+Legacy External locations include `.plowshare/plowshare`, the legacy
 `.plowshare/project` path, and a root-level `plowshare` manifest. Nearest-project
 discovery and local-marker precedence avoid an ancestor's identity swallowing a
 nested project. Plain first-line names remain compatible. Malformed or linked

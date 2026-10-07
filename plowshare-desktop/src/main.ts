@@ -292,7 +292,11 @@ function openUsage() {
   background(page.loadURL(usageUrl));
 }
 
-function openActivity(tab: ActivityView) {
+function openActivity(tab: ActivityView, project?: string) {
+  const prepare = async () => {
+    if (project) await client.dispatch({ action: 'run-definitions', project });
+    await client.dispatch({ action: 'activity-view', view: tab });
+  };
   if (!['inbox', 'runs', 'definitions', 'schedules', 'builder'].includes(tab))
     throw new Error('Choose an Activity view.');
   const group = activityGroup(tab);
@@ -301,7 +305,7 @@ function openActivity(tab: ActivityView) {
     activity.view = tab;
     activity.window.show();
     activity.window.focus();
-    background(client.dispatch({ action: 'activity-view', view: tab }));
+    background(prepare());
     return;
   }
   const page = makePage(() => ({
@@ -324,7 +328,7 @@ function openActivity(tab: ActivityView) {
       background(client.activity.open());
     }
   });
-  background(client.dispatch({ action: 'activity-view', view: tab }));
+  background(prepare());
   background(page.loadURL(activityUrl));
 }
 
@@ -1022,6 +1026,18 @@ background(
           request.revision,
           request.chapter,
         ).then(() => ({ state: client.state }));
+      if (request?.action === 'application-runtime') {
+        if (
+          !main ||
+          !client.state.connected ||
+          !client.state.projects.some(
+            (row) => row.name === request.project && row.kind === 'application',
+          )
+        )
+          throw new Error('Choose an available server Application.');
+        openActivity('definitions', request.project);
+        return { state: client.state };
+      }
       if (request?.action === 'activity') {
         openActivity(request.view);
         return { state: client.state };

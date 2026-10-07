@@ -22,6 +22,22 @@ public class JdbcProjectMembers implements ProjectMembers {
                 Objects.requireNonNull(jdbc.getDataSource(), "dataSource")));
   }
 
+  @Override
+  public java.util.Optional<String> authorityAccount(String principal) {
+    if (!io.aeyer.plowshare.server.auth.ServiceCredentials.principal(principal))
+      return java.util.Optional.ofNullable(principal);
+    return ArchiveUnavailableException.translating(
+        "read service account authority",
+        () ->
+            jdbc
+                .queryForList(
+                    "SELECT owner_handle FROM service_tokens WHERE principal_handle = ? AND account_active(principal_handle)",
+                    String.class,
+                    principal)
+                .stream()
+                .findFirst());
+  }
+
   public boolean isServerAdmin(String handle) {
     return handle != null
         && !jdbc.queryForList(

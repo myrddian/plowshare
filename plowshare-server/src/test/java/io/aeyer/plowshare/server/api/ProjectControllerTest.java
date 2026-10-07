@@ -69,7 +69,9 @@ class ProjectControllerTest {
     projects = mock(ProjectStore.class);
     presences = new PresenceRegistry();
     mvc =
-        MockMvcBuilders.standaloneSetup(new ProjectController(projects, presences))
+        MockMvcBuilders.standaloneSetup(
+                new ProjectController(
+                    projects, presences, io.aeyer.plowshare.server.ws.TestProjectMembers.allowed()))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
   }

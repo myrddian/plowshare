@@ -90,6 +90,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectController {
 
   private final ProjectStore projects;
+  private final io.aeyer.plowshare.server.archive.ProjectMembers members;
 
   /**
    * The presence rule {@link #move} refuses under, built from the registry that says which live
@@ -109,8 +110,12 @@ public class ProjectController {
    */
   private final Projects rules;
 
-  public ProjectController(ProjectStore projects, PresenceRegistry presences) {
+  public ProjectController(
+      ProjectStore projects,
+      PresenceRegistry presences,
+      io.aeyer.plowshare.server.archive.ProjectMembers members) {
     this.projects = projects;
+    this.members = members;
     this.rules = new Projects(presences);
   }
 
@@ -148,7 +153,13 @@ public class ProjectController {
           String handle) {
     return ResponseEntity.ok(
         projects.allFor(handle).stream()
-            .map(project -> listView(project).withRole(projects.roleFor(project.name(), handle)))
+            .filter(project -> members.mayUse(project.name(), handle))
+            .map(
+                project ->
+                    listView(project)
+                        .application(members.application(project.name()))
+                        .withRole(
+                            members.role(project.name(), handle).map(Enum::name).orElse(null)))
             .toList());
   }
 
