@@ -445,7 +445,7 @@ class AgentsConfigTest {
    * does not need {@code containsAll} to stay honest about contamination it is not subject to.
    */
   @Test
-  void the_shipped_inventory_is_exactly_these_thirty_two_names() {
+  void the_shipped_inventory_has_the_expected_definitions() {
     assertEquals(
         List.of(
             "acceptance_checker",
@@ -458,6 +458,7 @@ class AgentsConfigTest {
             "close_reader",
             "code_reviewer",
             "coder",
+            "coder_minimal",
             "command_judge",
             "conversation_folder",
             "critic",

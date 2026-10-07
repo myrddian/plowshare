@@ -515,6 +515,40 @@ class OrchestrationRegistryTest {
   }
 
   @Test
+  void a_conductor_alias_grant_checks_unselected_variants(@TempDir Path root) throws Exception {
+    Path directory = root.resolve("agents");
+    agent(directory, "coder", "alias: coder\nscopes: [workspace:read]\n");
+    agent(directory, "heavy", "alias: coder\nguidance: guided\nscopes: [workspace:write]\n");
+    orchestration(
+        root.resolve("orchestrations"),
+        "code_implementation",
+        "[coder]",
+        "scopes: [workspace:read]\n");
+    var loaded =
+        OrchestrationRegistry.read(
+            List.of(
+                new OrchestrationRegistry.Layer(
+                    OrchestrationDefinition.Tier.PROJECT,
+                    new FilesystemDefinitions(root.resolve("orchestrations")))),
+            TOOLS,
+            agents(directory),
+            DefinitionChecks.NONE);
+    assertTrue(loaded.disabled().get("code_implementation").contains("workspace:write"));
+
+    agent(directory, "heavy", "alias: coder\nguidance: guided\ndelegable: false\n");
+    loaded =
+        OrchestrationRegistry.read(
+            List.of(
+                new OrchestrationRegistry.Layer(
+                    OrchestrationDefinition.Tier.PROJECT,
+                    new FilesystemDefinitions(root.resolve("orchestrations")))),
+            TOOLS,
+            agents(directory),
+            DefinitionChecks.NONE);
+    assertTrue(loaded.disabled().get("code_implementation").contains("not delegable"));
+  }
+
+  @Test
   void the_servers_definition_checks_run_over_every_conductor(@TempDir Path root) throws Exception {
     orchestration(root.resolve("orchestrations"), "served", "[]");
     orchestration(root.resolve("orchestrations"), "unserved", "[]");
@@ -751,6 +785,25 @@ class OrchestrationRegistryTest {
         TOOLS,
         agents(root.resolve("agents")),
         DefinitionChecks.NONE);
+  }
+
+  @Test
+  void a_checker_alias_checks_unselected_variants(@TempDir Path root) throws Exception {
+    agent(root.resolve("agents"), "helper", "tools: [file_read]\n");
+    agent(
+        root.resolve("agents"),
+        "checker_guided",
+        "alias: acceptance_checker\nguidance: guided\ntools: [agent_run]\ncalls: [helper]\ndelegable: false\n");
+    var loaded =
+        withChecker(root, "alias: acceptance_checker\ntools: [file_read]\ndelegable: false\n");
+    assertTrue(loaded.disabled().get("implement_specification").contains("the tools [agent_run]"));
+
+    agent(
+        root.resolve("agents"),
+        "checker_guided",
+        "alias: acceptance_checker\nguidance: guided\ntools: [file_read]\n");
+    loaded = withChecker(root, "alias: acceptance_checker\ntools: [file_read]\ndelegable: false\n");
+    assertTrue(loaded.disabled().get("implement_specification").contains("which is delegable"));
   }
 
   @Test

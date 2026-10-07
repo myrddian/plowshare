@@ -555,4 +555,61 @@ class DefinitionWriterTest {
 
     assertTrue(Files.exists(written.file()));
   }
+
+  private static String variant(String name, String alias) {
+    return definition(name, "Change code")
+        .replace("description: d", "alias: " + alias + "\nguidance: minimal\ndescription: d");
+  }
+
+  @Test
+  void conflicting_alias_variants_are_refused_before_writing(@TempDir Path data) throws Exception {
+    DataLayout layout = new DataLayout(data).initialise();
+    var writer = writerOver(layout);
+    writer.write(7L, "light", variant("light", "worker"));
+    assertThrows(CallerFault.class, () -> writer.write(7L, "other", variant("other", "worker")));
+    assertFalse(Files.exists(layout.botsFor(7L).resolve("other.md")));
+    assertTrue(
+        Files.readString(layout.botsFor(7L).resolve("light.md")).contains("guidance: minimal"));
+    assertThrows(
+        CallerFault.class, () -> writer.write(7L, "worker", definition("worker", "Unrelated")));
+    assertFalse(Files.exists(layout.botsFor(7L).resolve("worker.md")));
+  }
+
+  @Test
+  void alias_admission_checks_inherited_variants_without_blocking_on_unrelated_bad_files(
+      @TempDir Path data) throws Exception {
+    DataLayout layout = new DataLayout(data).initialise();
+    var writer = writerOver(layout);
+    assertThrows(CallerFault.class, () -> writer.write(7L, "light", variant("light", "coder")));
+    assertFalse(Files.exists(layout.botsFor(7L).resolve("light.md")));
+    Files.createDirectories(layout.botsFor(7L));
+    Files.writeString(layout.botsFor(7L).resolve("broken.md"), "Malformed existing definition");
+    writer.write(7L, "light", variant("light", "worker"));
+    assertTrue(Files.exists(layout.botsFor(7L).resolve("light.md")));
+  }
+
+  @Test
+  void concurrent_service_writes_cannot_admit_the_same_alias_slot(@TempDir Path data)
+      throws Exception {
+    DataLayout layout = new DataLayout(data).initialise();
+    var writer = writerOver(layout);
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var one = executor.submit(() -> admitVariant(writer, "one"));
+      var two = executor.submit(() -> admitVariant(writer, "two"));
+      assertEquals(1, (one.get() ? 1 : 0) + (two.get() ? 1 : 0));
+    }
+    try (var files = Files.list(layout.botsFor(7L))) {
+      assertEquals(1, files.filter(path -> path.toString().endsWith(".md")).count());
+    }
+  }
+
+  private static boolean admitVariant(DefinitionWriter writer, String name) {
+    try {
+      writer.write(7L, name, variant(name, "worker"));
+      return true;
+    } catch (CallerFault conflict) {
+      assertTrue(conflict.getMessage().contains("multiple variants"));
+      return false;
+    }
+  }
 }

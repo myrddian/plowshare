@@ -1,4 +1,4 @@
-# Scripted Aletheia research
+# Scripted research
 
 `deep_research` now runs an executable JavaScript workflow. The script decides
 which task runs next, validates its output and assembles a detailed report with a
@@ -117,11 +117,12 @@ Treat `holds` as a recorded adjudication, not a guarantee of truth. If a run fai
 inspect status, the record and relevant tickets before starting another paid run.
 Do not cite search snippets or assume a retained source was used in the report.
 
-## What the pipeline ports
+## Pipeline stages
 
-Compared against the local Aletheia checkout `851668f` in `llm-mcp-project`:
+The scripted workflow retains the original question and passes validated evidence
+between these stages:
 
-| Aletheia behaviour | Plowshare implementation |
+| Stage | Behavior |
 | --- | --- |
 | Question analysis and objectives | Preserve original question; derive one to five objectives, intent, entity anchors, scope and expected evidence. |
 | Objective review | Present the proposed objectives to the user; accept explicit approval or revise from corrections before research. |
@@ -136,23 +137,19 @@ Compared against the local Aletheia checkout `851668f` in `llm-mcp-project`:
 | Yellow expansion and synthesis | Expand each adjudicated point into analytical prose, review it against evidence and its verdict, then preserve the edited prose in code-assembled objective sections. |
 | Report feedback/revision | Rerun with feedback and retain an immutable revision of the same report resource. |
 
-Aletheia's current dispatch skips its deprecated Blue expansion and expands only
-after Yellow adjudication. Plowshare follows that sequence: brief claims first,
-then evidence-bounded analytical paragraphs. Aletheia requests 2–4 paragraphs
-without a word-count validator; Plowshare also treats paragraph count as guidance.
+Expansion follows adjudication: brief claims first, then evidence-bounded
+analytical paragraphs. Paragraph count is guidance rather than a hard validator.
 An incomplete expansion is recorded locally rather than stopping the research
 run or silently approving the prose.
 
-The workflow follows Aletheia's objective review, query planning and evidence-driven
-plan critique. Its ranking implementation differs: Aletheia defaults to 70%
-objective embedding similarity plus 30% normalized cross-query frequency; this
-script uses worker-assessed relevance scores and sorts retained passages by their
-highest objective score. Rankings are advisory: unscored passages retain a null
-relevance and `ranking_status: not_checked`, remain available to downstream reviewers,
-and sort after scored passages. A zero score means an actual low-relevance assessment;
-it is not substituted for a missing score. It does not implement that embedding formula. Entity
-enrichment, scheduling and delta monitoring remain outside this port. Plowshare
-keeps its existing PostgreSQL/pgvector projections; Solr, Neo4j
+Worker-assessed relevance scores rank retained passages against the question and
+objectives. Passages sort by their highest objective score. Rankings are advisory:
+unscored passages retain a null relevance and `ranking_status: not_checked`,
+remain available to downstream reviewers, and sort after scored passages. A zero
+score means an actual low-relevance assessment; it is not substituted for a
+missing score. Discovery frequency remains a separate signal. Entity enrichment,
+scheduling and delta monitoring are outside this workflow. The server retains
+its existing PostgreSQL/pgvector projections.
 
 ## Catalogue retention and the fetch audit
 
@@ -516,8 +513,8 @@ the step contract, a runnable small example, debugging and recovery boundaries.
 Model responses use the shared Java [LlmJson utility](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/LlmJson.java),
 exported through Graal as `llmJson.parse(raw)`. The Java `ModelJson` object reader uses
 the same utility; the script contains no recovery parser. It first tries strict JSON,
-then, for malformed responses up to 32,768 UTF-16 units, combines Aletheia's research,
-enrichment and graph recovery: Markdown fence/prefix removal and complete-root extraction,
+then, for malformed responses up to 32,768 UTF-16 units, applies formatting recovery:
+Markdown fence/prefix removal and complete-root extraction,
 single quotes, trailing commas/raw controls, missing commas between lines, literal quotes,
 lone backslashes and escaped structural quotes. Valid escapes and LaTeX backslashes
 are preserved before the broad escape fallback. Multiple roots and non-finite numeric
@@ -637,4 +634,4 @@ editorial verdicts.
 Real PostgreSQL tests exercise command recovery and policy; authenticated WebSocket
 integration retains a source-derived report with the actual producer/hash and
 refuses it after source withdrawal. These establish execution and provenance.
-Live report quality, cost and latency parity with Aletheia remain unmeasured.
+These checks do not establish live report quality, cost or latency.

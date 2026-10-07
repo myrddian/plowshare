@@ -1010,7 +1010,11 @@ public class AgentsConfig {
    */
   @Bean
   public AgentRegistry agentRegistry(
-      JobRuntime runtime, LlmDispatcher dispatcher, SamplingProfiles profiles, DataLayout data) {
+      JobRuntime runtime,
+      LlmDispatcher dispatcher,
+      SamplingProfiles profiles,
+      DataLayout data,
+      AgentGuidance guidance) {
 
     DefinitionSource boot;
     if (data.keepsAnything()) {
@@ -1027,7 +1031,42 @@ public class AgentsConfig {
 
     AgentRegistry.Loaded loaded = AgentRegistry.read(boot, runtime.knownTools(), REQUIRED);
     return new AgentRegistry(
-        sampled(modelChecked(loaded, dispatcher, source, REQUIRED), dispatcher, profiles));
+        guidanceChecked(
+            sampled(modelChecked(loaded, dispatcher, source, REQUIRED), dispatcher, profiles),
+            guidance),
+        guidance);
+  }
+
+  /** Connects logical role selection to the same model profiles used by the running harness. */
+  @Bean
+  public AgentGuidance agentGuidance(
+      LlmDispatcher dispatcher,
+      ObjectProvider<io.aeyer.plowshare.server.harness.Harness> harnesses) {
+    var harness = harnesses.getIfAvailable(() -> io.aeyer.plowshare.server.harness.Harness.NONE);
+    return model -> {
+      Set<String> profiles = new java.util.HashSet<>();
+      for (String wire : dispatcher.wireModelsFor(model)) profiles.add(harness.profileFor(wire));
+      if (profiles.size() > 1)
+        throw new IllegalStateException(
+            "model binding '"
+                + model
+                + "' spans different harness profiles; bind alias variants to one profile or an explicit model");
+      return profiles.isEmpty() ? null : profiles.iterator().next();
+    };
+  }
+
+  private static AgentRegistry.Loaded guidanceChecked(
+      AgentRegistry.Loaded loaded, AgentGuidance guidance) {
+    for (AgentDefinition definition : List.copyOf(loaded.enabled().values())) {
+      if (definition.alias() == null) continue;
+      try {
+        guidance.profileFor(definition.model());
+      } catch (IllegalStateException invalid) {
+        log.warn("Agent '{}' is DISABLED: {}", definition.name(), invalid.getMessage());
+        loaded = loaded.without(definition.name(), invalid.getMessage());
+      }
+    }
+    return loaded;
   }
 
   /**
@@ -1086,9 +1125,12 @@ public class AgentsConfig {
    * {@code REQUIRED} set is what earns.
    */
   @Bean
-  public DefinitionChecks definitionChecks(LlmDispatcher dispatcher, SamplingProfiles profiles) {
+  public DefinitionChecks definitionChecks(
+      LlmDispatcher dispatcher, SamplingProfiles profiles, AgentGuidance guidance) {
     return (loaded, source) ->
-        sampled(modelChecked(loaded, dispatcher, source, Set.of()), dispatcher, profiles);
+        guidanceChecked(
+            sampled(modelChecked(loaded, dispatcher, source, Set.of()), dispatcher, profiles),
+            guidance);
   }
 
   /**

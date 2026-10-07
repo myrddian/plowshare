@@ -57,8 +57,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>{@link #ignoredDomainsNow()} is the list; nothing in this slice matches a result's host
  * against it. The design gives that list to a provider that declares {@code domainExclusion} in its
  * {@code ProviderFacts} and to nothing else, so a matcher here would be production code whose only
- * caller was its own test. Aletheia's {@code SearchDomainPolicy} is the pattern to port once the
- * fetch facade in slice 2 has a reason to run it — not now.
+ * caller was its own test. Local matching belongs at a boundary that actually consumes the
+ * exclusion policy; this configuration holder does not add a second enforcement path.
  *
  * <h2>{@link #getTimeout()} is a fifth key, and deliberately not a fifth {@link Live} one</h2>
  *

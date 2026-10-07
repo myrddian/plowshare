@@ -163,3 +163,15 @@ private atomic writes and cross-process locks. `Connections` implements
 and saved selection while refusing identity conflicts. `Credentials` accepts an
 explicit account as its fourth constructor argument and keeps refresh locking and
 uncertain-renewal fencing within that scope. See [client login](client-login.md).
+
+## Relay topic ports
+
+All SDKs expose typed `relay.publish`, `relay.consume` and `relay.ack` operations.
+They provide configured project-topic ingress and bounded leased consumer-group
+egress. Java exposes them through `RelayClient`; TypeScript/Node expose
+`Plowshare.publishRelay`, `consumeRelay` and `acknowledgeRelay` alongside the typed
+`Plowshare.request` surface. Both package roots export the Relay request/batch and
+filter-review types. Generated Python, Go and .NET request/result DTOs
+include all three operations. See [Relay](relay.md#sdk-topic-ports) for explicit
+acknowledgement, retention gaps, fencing and uncertain-delivery recovery, and
+[message filtering](message-filtering.md) for external detector protocols.

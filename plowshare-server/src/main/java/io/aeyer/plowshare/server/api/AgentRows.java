@@ -27,7 +27,11 @@ public final class AgentRows {
       AgentRegistry registry, Callers callers, Optional<DefinitionResolver.DefaultBot> preferred) {
     Map<String, AgentView> rows = new TreeMap<>();
     for (String name : registry.exportedNames()) {
-      rows.put(name, AgentView.of(registry.get(name), callers.withheldFrom(registry, name)));
+      var selected = registry.get(name);
+      rows.put(
+          name,
+          AgentView.of(selected, callers.withheldFrom(registry, selected.name()))
+              .addressedAs(name));
     }
     for (Map.Entry<String, String> refused : registry.disabled().entrySet()) {
       rows.put(refused.getKey(), AgentView.disabled(refused.getKey(), refused.getValue()));

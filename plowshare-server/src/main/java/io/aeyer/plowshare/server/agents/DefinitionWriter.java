@@ -12,7 +12,9 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.text.Normalizer;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -315,7 +317,7 @@ public final class DefinitionWriter {
    *     {@code 400}; see its own class javadoc
    * @throws UncheckedIOException if the write itself fails
    */
-  public Written write(Long projectId, String name, String text, boolean overwrite) {
+  public synchronized Written write(Long projectId, String name, String text, boolean overwrite) {
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(text, "text");
     // Before everything, including the deployment's own refusal: this is
@@ -399,6 +401,10 @@ public final class DefinitionWriter {
     // says it must not.
     requireNothingWithheld(checked);
 
+    // Serialize service-owned writes across filenames: two different names can compete for the
+    // same alias/guidance slot. External edits are still revalidated by the normal tier loader.
+    requireValidAliases(projectId, candidate, checked.enabled().get(bareName));
+
     boolean existedBefore = Files.exists(target);
     if (existedBefore && !overwrite) {
       throw new DefinitionAlreadyExistsException(
@@ -412,6 +418,35 @@ public final class DefinitionWriter {
 
     writeAtomically(dir, target, text);
     return new Written(target, origin, existedBefore ? Disposition.REPLACED : Disposition.CREATED);
+  }
+
+  /** Checks the family the candidate would join before accepting an edit on either API surface. */
+  private void requireValidAliases(
+      Long projectId, DefinitionSource candidate, AgentDefinition definition) {
+    DefinitionSource tier =
+        new LayeredDefinitions(
+            List.of(
+                candidate,
+                new FilesystemDefinitions(data.agentsFor(projectId)),
+                new FilesystemDefinitions(data.botsFor(projectId))));
+    Map<String, AgentDefinition> merged = new LinkedHashMap<>(bootSet.byName());
+    // Read individual entries before validating their union. Reading the union first would
+    // discard a conflicting family, concealing the collision from the write's own refusal.
+    for (DefinitionSource.Definition entry : tier.list()) {
+      AgentRegistry.Loaded item =
+          AgentRegistry.read(
+              singleEntry(entry.name(), entry.origin(), entry.text()),
+              knownTools,
+              Set.of(),
+              bootSet.names());
+      merged.putAll(item.enabled());
+    }
+    Map<String, String> faults = AgentAliases.faults(merged);
+    String alias = definition.alias() == null ? definition.name() : definition.alias();
+    for (AgentDefinition member : AgentAliases.families(merged).getOrDefault(alias, List.of())) {
+      String reason = faults.get(member.name());
+      if (reason != null) throw new CallerFault(reason);
+    }
   }
 
   /**

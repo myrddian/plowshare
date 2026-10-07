@@ -30,6 +30,12 @@ export type {
   OutgoingWork,
   JobView,
   JobOutcome,
+  RelayPublishRequest,
+  RelayConsumeRequest,
+  RelayAckRequest,
+  RelayBatch,
+  FilterReviewRequest,
+  FilterReviewResponse,
 } from 'plowshare-client-ts';
 
 export interface ClientOptions {

@@ -158,6 +158,51 @@ class WorkRelayReceiverTest {
   }
 
   @Test
+  void review_requests_and_sdk_reply_descendants_cannot_start_native_work() {
+    var root = RelayReviewCausation.root("00000000-0000-4000-8000-000000000001");
+    var definition = mock(OrchestrationDefinition.class);
+    when(grants.granted(any(), any(), any(), any(), any()))
+        .thenReturn(Map.of("review", definition));
+    for (var cause : List.of(root, root.next("review-request", 8))) {
+      var input =
+          new Relay.Publication(
+              SUB.topic(),
+              1,
+              java.time.Instant.EPOCH,
+              new Relay.Draft(
+                  "review-event",
+                  "reviewer",
+                  java.time.Instant.EPOCH,
+                  null,
+                  cause.parentId(),
+                  new RelayPayload.Text("held review"),
+                  cause));
+      for (var name : List.of("agent.run", "script.run", "orchestration.start")) {
+        var request =
+            request(
+                name,
+                null,
+                name.equals("script.run")
+                    ? "// plowshare-script v1\nexport const manifest={};export function step(input){return {state:null,command:{finish:'done'}};}"
+                    : null,
+                input,
+                RelayDeliveries.State.DISPATCHING,
+                1);
+        assertEquals(
+            "receiver.review-protocol.refused",
+            assertThrows(RelayReceiver.Refused.class, () -> receiver(name).require(request))
+                .code());
+        assertEquals(
+            "receiver.review-protocol.refused",
+            assertThrows(RelayReceiver.Refused.class, () -> receiver(name).dispatch(request))
+                .code());
+      }
+    }
+    verify(executions, never()).begin(any());
+    verifyNoInteractions(jobs, starts);
+  }
+
+  @Test
   void agent_dispatch_records_intent_before_normal_event_submission_and_receipt_after() {
     var request = request("agent.run", null, null);
     assertInstanceOf(RelayReceiver.Settled.class, receiver("agent.run").dispatch(request));

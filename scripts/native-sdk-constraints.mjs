@@ -1,6 +1,17 @@
 /** Portable constraints supplement the generated field graph. Authorization remains server-owned. */
 import { SHAPES } from '../sdk/typescript/build/operations/payload-validation.js';
 const uuid = '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$';
+const portName = { pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$', maxLength: 160 };
+const canonicalUuid = { pattern: '^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$' };
+const instant = { timestamp: true, pattern: '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,9})?Z$' };
+// Decimal positions are signed-long values; never coerce them through floating point.
+const longLimit = '9223372036854775807';
+const longBranches = [...longLimit].flatMap((digit,index) => {
+  const lower=index===0?1:0, upper=Number(digit)-1;
+  if(upper<lower) return [];
+  return [longLimit.slice(0,index)+(upper===lower?String(lower):`[${lower}-${upper}]`)+`[0-9]{${18-index}}`];
+});
+const decimal = { pattern: `^(?:0|[1-9][0-9]{0,17}|${longBranches.join('|')}|${longLimit})$` };
 const printable =
   '^[^\\x00-\\x1f\\x7f-\\x9f' + String.fromCharCode(0x2028, 0x2029) + ']+$';
 const identity = {
@@ -265,6 +276,30 @@ export function constrain(graph) {
           absent('limits.maxModelCalls', 'limits.maxTurns'),
         ),
       );
+    }
+  }
+  for (const op of ['relay.publish','relay.consume','relay.ack']) {
+    const request=resolve(graph,graph.inputs[op]), reply=resolve(graph,graph.results[op]);
+    for(const shape of [request,reply]) {
+      field(shape,'project',{...identity,maxLength:256});
+      for(const k of ['topic','parentTopic']) field(shape,k,portName);
+      field(shape,'group',{...portName,maxLength:140});
+      for(const k of ['consumerId','requestId','batchId']) field(shape,k,canonicalUuid);
+      for(const k of ['position','through','expiredThrough','fence']) field(shape,k,decimal);
+      field(shape,'position',{disallow:['0']}); field(shape,'fence',{disallow:['0']});
+      for(const k of ['occurredAt','publishedAt','expiresAt']) field(shape,k,instant);
+    }
+    if(op==='relay.publish') {
+      field(request,'text',{...text(65536,1),nonblank:true});
+      for(const k of ['parentEventId','correlationId']) field(request,k,{...identity,maxLength:256});
+      rules(request,{eq:[present('parentTopic'),present('parentEventId')]});
+    }
+    if(op==='relay.consume') {
+      field(request,'limit',integer(1,100)); field(request,'waitMs',integer(0,30000));
+      field(reply,'events',{maxItems:100});
+      const leased=or(eq('status','DATA'),eq('status','GAP'));
+      for(const k of ['batchId','fence','expiresAt']) rules(reply,{eq:[leased,present(k)]});
+      rules(reply,{eq:[eq('status','DATA'),present('events')]},{eq:[eq('status','GAP'),present('expiredThrough')]});
     }
   }
   const claim = resolve(graph, graph.results['outgoing.claim']);

@@ -33,6 +33,14 @@ export type {
   IntegrationResult,
 } from './external.ts';
 export type { OutgoingWork } from './outgoing.ts';
+export type {
+  RelayPublishRequest,
+  RelayConsumeRequest,
+  RelayAckRequest,
+  RelayBatch,
+  FilterReviewRequest,
+  FilterReviewResponse,
+} from './relay-ports.ts';
 export { JobLifecycle } from '../jobs/lifecycle.ts';
 export const OPERATIONS: readonly Operation[] = Object.freeze(
   Object.keys(OPERATION_SCHEMAS.inputs).filter(isOperation).sort(),
@@ -166,6 +174,24 @@ export class Plowshare {
   }
   cancelOutgoing(id: string): Promise<Reply<'outgoing.cancel'>> {
     return this.request('outgoing.cancel', { id });
+  }
+  /** Explicit ingress. Keep the request UUID to reconcile uncertain publication. */
+  publishRelay(
+    payload: Payloads['relay.publish'],
+  ): Promise<Reply<'relay.publish'>> {
+    return this.request('relay.publish', payload);
+  }
+  /** Bounded topic listening. Reading never acknowledges the consumer group's batch. */
+  consumeRelay(
+    payload: Payloads['relay.consume'],
+  ): Promise<Reply<'relay.consume'>> {
+    return this.request('relay.consume', payload);
+  }
+  /** Acknowledge the complete issued batch explicitly after handling its records. */
+  acknowledgeRelay(
+    payload: Payloads['relay.ack'],
+  ): Promise<Reply<'relay.ack'>> {
+    return this.request('relay.ack', payload);
   }
   close(): void {
     this.connection.close();

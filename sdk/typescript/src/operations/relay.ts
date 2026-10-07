@@ -1,3 +1,9 @@
+import {
+  isRelayPort,
+  relayPortProblem,
+  validateRelayPortReply,
+} from './relay-ports.ts';
+import type { RelayPortPayloads, RelayPortReplies } from './relay-ports.ts';
 /** Read-only broker records; positions are decimal strings, never JavaScript numbers. */
 export type RelayScope =
   | { readonly project: string; readonly system?: false }
@@ -41,7 +47,7 @@ export interface RelayControlResult {
   readonly seenThrough: string | null;
   readonly completedAt: string;
 }
-export interface RelayPayloads {
+export interface RelayPayloads extends RelayPortPayloads {
   'relay.operate': RelayOperateRequest;
   'relay.process': { readonly project: string; readonly limit?: number };
   'relay.topics': RelayScope & { readonly limit?: number };
@@ -124,7 +130,7 @@ export interface RelayBranch {
   readonly routingHash: string;
   readonly handlerHash: string | null;
 }
-export interface RelayReplies {
+export interface RelayReplies extends RelayPortReplies {
   'relay.operate': RelayControlResult;
   'relay.process': {
     readonly project: string;
@@ -205,6 +211,7 @@ export function relayPayloadProblem(
   payload: Record<string, unknown>,
 ): string | undefined {
   if (!type.startsWith('relay.')) return;
+  if (isRelayPort(type)) return relayPortProblem(type, payload);
   if (type === 'relay.operate') {
     const action = payload['action'];
     const requiredIdentity = (key: string): boolean =>
@@ -294,6 +301,10 @@ export function relayPayloadProblem(
 }
 export function validateRelayReply(type: string, value: unknown): void {
   if (!type.startsWith('relay.')) return;
+  if (isRelayPort(type)) {
+    validateRelayPortReply(type, value);
+    return;
+  }
   // This receives recursively decoded DTOs. Semantic checks keep impossible offsets from reaching viewers.
   const fail = (): never => {
     throw new Error('Invalid Relay log response');
@@ -497,105 +508,9 @@ export function validateRelayReply(type: string, value: unknown): void {
         )
           fail();
         if (key === 'events') {
-          identity(fields['eventId']);
-          identity(fields['publisher']);
-          instant(fields['occurredAt']);
-          instant(fields['publishedAt']);
-          for (const optional of ['correlationId', 'causationId'])
-            if (fields[optional] !== null) identity(fields[optional]);
-          const ancestry = fields['causation'];
-          if (ancestry != null) {
-            if (typeof ancestry !== 'object' || Array.isArray(ancestry))
-              return fail();
-            const cause = ancestry as Record<string, unknown>;
-            identity(cause['rootId']);
-            const depth = cause['depth'];
-            if (
-              typeof depth !== 'number' ||
-              !Number.isInteger(depth) ||
-              depth < -1 ||
-              depth > 32
-            )
-              return fail();
-            if (depth <= 0) {
-              if (cause['parentId'] !== null) return fail();
-            } else identity(cause['parentId']);
-          }
-          const at = position(fields['position']);
+          const at = validateRelayEvent(fields, metadata['kind']);
           if (at <= previous || at > through) fail();
           previous = at;
-          const payload = fields['payload'];
-          if (
-            payload === null ||
-            typeof payload !== 'object' ||
-            Array.isArray(payload)
-          )
-            fail();
-          const body = payload as Record<string, unknown>;
-          if (body['kind'] !== metadata['kind']) fail();
-          if (
-            body['kind'] === 'TEXT'
-              ? typeof body['text'] !== 'string'
-              : body['text'] !== null
-          )
-            fail();
-          for (const part of ['schedule', 'emits', 'fireAt'])
-            if (
-              body['kind'] === 'SCHEDULE_DUE'
-                ? typeof body[part] !== 'string'
-                : body[part] !== null
-            )
-              fail();
-          if (
-            body['kind'] === 'TEXT' &&
-            (typeof body['text'] !== 'string' ||
-              !body['text'].trim() ||
-              body['text'].length > 65536 ||
-              body['text'].includes('\0'))
-          )
-            fail();
-          for (const part of ['lifecycle', 'wake']) {
-            const data = body[part];
-            const expected =
-              body['kind'] ===
-              (part === 'lifecycle' ? 'LIFECYCLE' : 'WAKE_REQUESTED');
-            if (!expected) {
-              if (data != null) fail();
-              continue;
-            }
-            if (
-              data === null ||
-              typeof data !== 'object' ||
-              Array.isArray(data)
-            )
-              return fail();
-            const details = data as Record<string, unknown>;
-            if (part === 'lifecycle') {
-              if (!validName(details['source'])) fail();
-              identity(details['subject'], 1024);
-              identity(details['state']);
-              for (const reference of ['context', 'related'])
-                if (details[reference] !== null)
-                  identity(details[reference], 1024);
-            } else {
-              identity(details['firing'], 1024);
-              identity(details['target'], 1024);
-              if (
-                typeof details['firing'] !== 'string' ||
-                !details['firing'].startsWith('fir_') ||
-                typeof details['target'] !== 'string' ||
-                !details['target'].startsWith('conversation:') ||
-                details['target'].length <= 13 ||
-                !['MESSAGE', 'BOARD'].includes(String(details['type']))
-              )
-                fail();
-            }
-          }
-          if (body['kind'] === 'SCHEDULE_DUE') {
-            identity(body['schedule'], 1024);
-            identity(body['emits'], 1024);
-            instant(body['fireAt']);
-          }
         }
         if (key === 'subscribers') {
           identity(fields['name']);
@@ -659,4 +574,135 @@ export function validateRelayReply(type: string, value: unknown): void {
     }
     if (position(row['next']) !== previous) fail();
   }
+}
+
+/** Validates a topic event independently of inspection-page metadata. */
+export function validateRelayEvent(value: unknown, kind: unknown): bigint {
+  const fail = (): never => {
+    throw new Error('Invalid Relay log response');
+  };
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    fail();
+  const position = (value: unknown): bigint => {
+    if (!decimal(value)) return fail();
+    return BigInt(value);
+  };
+  const identity = (value: unknown, maximum = 256): void => {
+    if (
+      typeof value !== 'string' ||
+      !value.trim() ||
+      value !== value.trim() ||
+      value.length > maximum ||
+      hasControls(value)
+    )
+      fail();
+  };
+  const instant = (value: unknown): void => {
+    if (
+      typeof value !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        value,
+      ) ||
+      !Number.isFinite(Date.parse(value))
+    )
+      fail();
+  };
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return fail();
+  const fields = value as Record<string, unknown>;
+  if (
+    !['EMPTY', 'TEXT', 'SCHEDULE_DUE', 'LIFECYCLE', 'WAKE_REQUESTED'].includes(
+      String(kind),
+    )
+  )
+    return fail();
+  identity(fields['eventId']);
+  identity(fields['publisher']);
+  instant(fields['occurredAt']);
+  instant(fields['publishedAt']);
+  for (const optional of ['correlationId', 'causationId'])
+    if (fields[optional] !== null) identity(fields[optional]);
+  const ancestry = fields['causation'];
+  if (ancestry != null) {
+    if (typeof ancestry !== 'object' || Array.isArray(ancestry)) return fail();
+    const cause = ancestry as Record<string, unknown>;
+    identity(cause['rootId']);
+    const depth = cause['depth'];
+    if (
+      typeof depth !== 'number' ||
+      !Number.isInteger(depth) ||
+      depth < -1 ||
+      depth > 32
+    )
+      return fail();
+    if (depth <= 0) {
+      if (cause['parentId'] !== null) return fail();
+    } else identity(cause['parentId']);
+  }
+  const at = position(fields['position']);
+
+  const payload = fields['payload'];
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload))
+    fail();
+  const body = payload as Record<string, unknown>;
+  if (body['kind'] !== kind) fail();
+  if (
+    body['kind'] === 'TEXT'
+      ? typeof body['text'] !== 'string'
+      : body['text'] !== null
+  )
+    fail();
+  for (const part of ['schedule', 'emits', 'fireAt'])
+    if (
+      body['kind'] === 'SCHEDULE_DUE'
+        ? typeof body[part] !== 'string'
+        : body[part] !== null
+    )
+      fail();
+  if (
+    body['kind'] === 'TEXT' &&
+    (typeof body['text'] !== 'string' ||
+      !body['text'].trim() ||
+      body['text'].length > 65536 ||
+      body['text'].includes('\0'))
+  )
+    fail();
+  for (const part of ['lifecycle', 'wake']) {
+    const data = body[part];
+    const expected =
+      body['kind'] === (part === 'lifecycle' ? 'LIFECYCLE' : 'WAKE_REQUESTED');
+    if (!expected) {
+      if (data != null) fail();
+      continue;
+    }
+    if (data === null || typeof data !== 'object' || Array.isArray(data))
+      return fail();
+    const details = data as Record<string, unknown>;
+    if (part === 'lifecycle') {
+      if (!validName(details['source'])) fail();
+      identity(details['subject'], 1024);
+      identity(details['state']);
+      for (const reference of ['context', 'related'])
+        if (details[reference] !== null) identity(details[reference], 1024);
+    } else {
+      identity(details['firing'], 1024);
+      identity(details['target'], 1024);
+      if (
+        typeof details['firing'] !== 'string' ||
+        !details['firing'].startsWith('fir_') ||
+        typeof details['target'] !== 'string' ||
+        !details['target'].startsWith('conversation:') ||
+        details['target'].length <= 13 ||
+        !['MESSAGE', 'BOARD'].includes(String(details['type']))
+      )
+        fail();
+    }
+  }
+  if (body['kind'] === 'SCHEDULE_DUE') {
+    identity(body['schedule'], 1024);
+    identity(body['emits'], 1024);
+    instant(body['fireAt']);
+  }
+
+  return at;
 }

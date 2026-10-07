@@ -28,7 +28,7 @@ class ResearchJsonRecoveryTest {
   }
 
   @Test
-  void the_retained_production_decomposition_matches_aletheias_recovered_values() throws Exception {
+  void the_retained_production_decomposition_matches_expected_recovered_values() throws Exception {
     var result =
         recover(
             Files.readString(Path.of("src/test/resources/scripted/decomposition-malformed.json")));

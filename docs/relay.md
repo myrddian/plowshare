@@ -238,13 +238,18 @@ Automatic operation requires explicit project/account bindings in the server's
 configuration. This supplies execution identity; project JavaScript cannot choose
 or expand authority. For example, using your deployment's project and account names:
 
-```yaml
-plowshare:
-  relay:
-    workers:
-      projects:
-        - project: my-project
-          account: my-account
+```json
+{
+  "plowshare": {
+    "relay": {
+      "workers": {
+        "projects": [
+          { "project": "my-project", "account": "my-account" }
+        ]
+      }
+    }
+  }
+}
 ```
 
 The default list is empty. Each configured project has local lifecycle supervision
@@ -403,3 +408,67 @@ The desktop page offers these explicit controls with a required reason. Buttons
 bind to the displayed project, generations and delivery fence, and are disabled
 after failed refresh or disconnection. Reading, refreshing and paging remain
 read-only. Server authority and generation checks remain decisive.
+
+## SDK topic ports
+
+`relay.publish`, `relay.consume` and `relay.ack` expose configured project topics
+through the public SDK/WebSocket. They support arbitrary application text,
+including JSON owned by a consumer, without requiring a Plowshare lifecycle
+event. Egress can read any existing project topic family; ingress publishes TEXT.
+System scope has no SDK port.
+
+Deployment configuration supplies `plowshare.relay.ports.bindings`: exact
+`project`, `topic`, authenticated `account`, `direction` (INGRESS or EGRESS) and,
+for EGRESS, a nonempty list of allowed `groups`. There are no grants by default.
+Live project work membership and Personal ownership are checked independently of
+these grants. See [message filtering](message-filtering.md) for a complete
+JSON request/response configuration example and loading instructions. The server
+also supports YAML configuration files; project Relay configuration remains JSON.
+
+| Operation | Contract |
+| --- | --- |
+| `relay.publish` | UUID `requestId`, project/topic, nonblank text up to 65,536 UTF-16 units, stable ISO `occurredAt`, optional correlation and parent topic/event. |
+| `relay.consume` | Project/topic, group, UUID consumer instance, `start` OLDEST_RETAINED or LATEST, limit 1–100 (default 100), waitMs 0–30,000 (default 0). |
+| `relay.ack` | Exact project/topic/group/consumer, batch UUID, decimal fence and, for a gap, its exact `expiredThrough`. |
+
+Use a stable UUID per running consumer instance. Same-group instances compete;
+different groups have independent cursors. Start applies only when registering a
+new group. Batches return DATA, EMPTY, GAP or BUSY. DATA/GAP carry a 30-second
+lease, batch token and fence. EMPTY/BUSY carry no acknowledgement authority.
+Reading never advances a cursor. While the lease remains live, the owner receives
+the same token and complete boundary again; asking for a smaller limit that hides
+part of an outstanding batch fails. A competing owner gets BUSY.
+
+A batch may contain fewer than the requested limit to keep its encoded events
+within 768 KiB, leaving room for the envelope below native SDKs' 1 MiB frame cap.
+JSON escaping and UTF-8 bytes count toward this budget. Acknowledgement covers
+only the returned prefix; the next batch delivers the remaining records.
+
+After handling every publication, explicitly acknowledge that batch. The server
+advances only its issued boundary. Repeated acknowledgements remain idempotent
+until a successor batch is issued. Expired/superseded tokens or a different
+account/consumer cannot advance a cursor. A retention GAP has no deliverable
+events: inspect the exact loss before acknowledging it. This never implies that
+lost external effects succeeded. SDK groups use a separate `sdk.*` subscriber
+namespace. Removing a deployment grant retains its cursor and published data;
+this first port surface has no group-deletion operation.
+
+This provides ordered, at-least-once availability per topic/group. It has no
+partition assignment, lease renewal or exactly-once guarantee for external
+side effects. Bound handler work to the lease, record application receipts and
+reconcile uncertain effects instead of replaying them automatically. Neither the
+SDK nor server automatically retries a publication or acknowledgement after
+uncertain transport delivery. Inspect `relay.log` by event identity to reconcile a
+publication; absence after retention cannot prove it never occurred.
+
+Ingress publisher identity is derived from authentication. Retained equal reuse
+of the request UUID returns the original position; conflicting reuse fails.
+Parent references require authorized egress from the source topic, a retained
+parent and a known remaining causation budget. Independent ingress creates a new
+root. Ports do not grant tools or runtime execution authority.
+
+A TypeScript listener can perform bounded `requirePayload(await client.request('relay.consume', request))`
+in a loop and explicitly call `relay.ack` after handling the batch. Python, Go,
+.NET and Java expose the same typed operations. The detector protocol described
+in [message filtering](message-filtering.md) uses these ordinary ports: consuming
+or acknowledging a review request is separate from publishing its acceptance.

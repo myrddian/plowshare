@@ -4,6 +4,7 @@
 # works. It owns the focused implementation loop; interlocutor can also edit and run commands,
 # while code_reviewer reads and cannot change anything.
 name: coder
+alias: coder
 description: |
   Makes a change to code and checks it: edits files, runs the build or the tests, reads what
   failed, and fixes it, until the change works or it stops making progress. Give it what to
