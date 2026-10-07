@@ -1,5 +1,5 @@
 /**
- * The console's one stylesheet, as a string, mounted as a `<style>` element's
+ * The console's application stylesheet, as a string, mounted as a `<style>` element's
  * `textContent`.
  *
  * A string and not a `.css` import: the module's `tsconfig.json` sets
@@ -20,9 +20,10 @@
  * The seven screens beside the REPL are in the second half of the string and
  * follow the same shape: a fixed header, one scrolling body, and nothing else
  * that scrolls. This file stays under `repl/` because it is still *the*
- * stylesheet and a second one mounted beside it would be two sources for the
- * same custom properties; the module that mounts it is `mountStyles`, which
- * every screen reaches through the shell.
+ * application stylesheet and owns layout selectors and console properties. The
+ * shared appearance sheets own the print palette and bundled font faces. The module that
+ * mounts this stylesheet is `mountStyles`, which every screen reaches through
+ * the shell.
  */
 export const STYLES = `
 /* THE KEY, WRITTEN DOWN, BECAUSE NOTHING RECORDED IT AND TWO COLOURS HAD DRIFTED
@@ -47,10 +48,16 @@ export const STYLES = `
    page, which is invisible in review and obvious to a person. */
 :root {
     color-scheme: light dark;
-    --ink: #1a1a1a;
-    --paper: #fbfaf7;
-    --dim: #6b6b6b;
-    --rule: #d9d5cc;
+    /* Mid-century print palette shared with the public website. Brand accents
+       describe navigation and controls; role colours below retain their meanings. */
+    --ink: var(--print-ink);
+    --paper: var(--print-paper);
+    --dim: var(--print-muted);
+    --rule: var(--print-rule);
+    --accent: var(--print-accent);
+    --surface: var(--print-surface);
+    --body-font: var(--print-body-font);
+    --display-font: var(--print-display-font);
     --you: #1d4ed8;
     --agent: #166534;
     --tool: #92400e;
@@ -70,15 +77,19 @@ export const STYLES = `
     --step--1: 12px;
     --step-0: 14px;
     --step-1: 16px;
-    --step-2: 24px;
-    --strong: 600;
+    --step-2: 30px;
+    --strong: 700;
 }
 @media (prefers-color-scheme: dark) {
     :root {
-        --ink: #e6e3dc;
-        --paper: #14161a;
-        --dim: #9aa0a6;
-        --rule: #2c3038;
+        --ink: var(--print-ink);
+        --paper: var(--print-paper);
+        --dim: var(--print-muted);
+        --rule: var(--print-rule);
+        --accent: var(--print-accent);
+        --surface: var(--print-surface);
+        --body-font: var(--print-body-font);
+        --display-font: var(--print-display-font);
         --you: #7aa2f7;
         --agent: #7bc47f;
         --tool: #e0a458;
@@ -91,8 +102,8 @@ export const STYLES = `
         --step--1: 12px;
         --step-0: 14px;
         --step-1: 16px;
-        --step-2: 24px;
-        --strong: 600;
+        --step-2: 30px;
+        --strong: 700;
     }
 }
 html, body { height: 100%; margin: 0; }
@@ -104,7 +115,7 @@ html, body { height: 100%; margin: 0; }
 body {
     background: var(--paper);
     color: var(--ink);
-    font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font: 14px/1.5 var(--body-font);
     font-size: var(--step-0);
 }
 #console { height: 100%; display: flex; flex-direction: column; }
@@ -265,19 +276,22 @@ body {
 .shell { display: grid; grid-template-columns: 13rem minmax(0, 1fr); height: 100%; min-height: 0; }
 .rail {
     display: flex; flex-direction: column; gap: .6rem;
-    padding: 1.2rem .75rem; border-right: 1px solid var(--rule); overflow-y: auto;
+    padding: 1.2rem .75rem; border-right: 2px solid var(--ink); overflow-y: auto;
+    background: var(--surface);
 }
 .rail-group, .rail-primary { display: flex; flex-direction: column; gap: .25rem; }
-.console-brand { display: flex; flex-direction: column; padding: .25rem .5rem 1.25rem; }
-.console-brand strong { font-size: var(--step-1); }
+.console-brand { display: flex; flex-direction: column; padding: .25rem .5rem 1rem; border-bottom: 2px solid var(--ink); margin-bottom: .35rem; }
+.console-brand strong { font-family: var(--display-font); font-size: 30px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; line-height: 1.1; }
+.console-brand .note { font-size: var(--step--1); color: var(--dim); letter-spacing: .08em; text-transform: uppercase; margin-top: .4rem; }
 .rail-browse { margin-top: .75rem; }
 .rail-browse summary { padding: .5rem; cursor: pointer; color: var(--dim); }
 .rail-browse .rail-group { margin-top: .5rem; }
 .rail button {
     font: inherit; color: var(--dim); background: transparent; cursor: pointer;
-    text-align: left; border: 1px solid transparent; border-radius: 6px; padding: .55rem .65rem; text-transform: capitalize;
+    text-align: left; border: 1px solid transparent; border-radius: 0; padding: .55rem .65rem; text-transform: capitalize;
 }
-.rail button[aria-current="page"] { color: var(--you); border-color: var(--rule); background: color-mix(in srgb, var(--you) 8%, var(--paper)); font-weight: var(--strong); }
+.rail button[aria-current="page"] { color: var(--paper); border-color: var(--ink); background: var(--ink); font-weight: var(--strong); }
+.rail button:hover:not(:disabled):not([aria-current="page"]) { color: var(--accent); border-color: var(--rule); }
 /* The socket's state, once for the tab. Pushed down and no longer along:
    margin-top rather than the margin-left it carried inside the REPL's header,
    because the rail is a column and this sits at the foot of it. */
@@ -290,15 +304,16 @@ body {
 /* Work records remain readable as the browser panel narrows. */
 .workbench { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 1fr); gap: 1.5rem; align-items: start; }
 .work-summaries { display: grid; gap: 1rem; }
-.work-inspector { position: sticky; top: 0; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; min-width: 0; }
+.work-inspector { position: sticky; top: 0; border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 1rem; min-width: 0; background: var(--surface); }
 .work-inspector h3 { margin-top: 0; }
 .work-inspection { overflow-wrap: anywhere; }
 .work-row-title { display: block; margin-bottom: .25rem; }
 .work-summaries .work-row > .field, .work-summaries .work-row > .record-links { display: none; }
 .work-summaries .work-row > .result-preview { max-height: 4.5rem; font-family: inherit; }
-.work-row[data-selected="true"] { border-left: 3px solid var(--you); padding-left: .75rem; }
+.work-row[data-selected="true"] { border-left: 3px solid var(--accent); padding-left: .75rem; }
 .work-row > .inspect-record { float: right; margin: 0 0 .5rem .5rem; }
-.work-summary h3 { margin-bottom: .25rem; }
+.work-summary h3 { margin-bottom: .25rem; border-bottom: 2px solid var(--ink); padding-bottom: .35rem; }
+.work-summary h3, .work-inspector h3 { font-family: var(--display-font); font-size: 22px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
 .work-status { color: var(--dim); }
 .work-admissions { margin-top: 1.5rem; }
 .work-overview .screen-body { padding: 1.25rem 1.5rem; }
@@ -306,25 +321,25 @@ body {
 .command-catalog summary { cursor: pointer; }
 .command-catalog input, .command-catalog select { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--rule); max-width: 100%; padding: .3rem; }
 .command-cards { max-height: 16rem; overflow-y: auto; display: grid; gap: .5rem; }
-.command-card { padding: .5rem; border: 1px solid var(--rule); border-radius: 4px; }
+.command-card { padding: .5rem; border: 1px solid var(--rule); border-radius: 0; }
 .command-card p { margin: .3rem 0; }
 .command-card button { margin-left: .4rem; }
 .command-completions { max-height: 12rem; overflow-y: auto; display: grid; }
 .command-completions button { text-align: left; padding: .4rem; }
-.command-completions button[aria-selected="true"] { border-color: var(--you); }
+.command-completions button[aria-selected="true"] { border-color: var(--accent); }
 .trajectory-summary { display: grid; gap: .5rem; margin-block: 1rem; }
-.trajectory-step { padding: .65rem .8rem; border: 1px solid var(--rule); border-radius: 6px; min-width: 0; }
+.trajectory-step { padding: .65rem .8rem; border: 1px solid var(--rule); border-radius: 0; min-width: 0; }
 .trajectory-step summary { cursor: pointer; font-weight: var(--strong); }
 .trajectory-step[data-standing="fail"] { border-left: 3px solid var(--refused); }
 .trajectory-step[data-standing="waiting"] { border-left: 3px solid var(--bound); }
 .trajectory-step pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto; }
 .trajectory-full > summary { cursor: pointer; color: var(--dim); padding-block: .75rem; }
 pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .work-summary, .work-admissions { min-width: 0; }
 .work-row, .inbox-item { padding: .6rem 0; border-bottom: 1px solid var(--rule); }
 .record-links { display: flex; gap: .75rem; flex-wrap: wrap; margin: .4rem 0; }
-.record-links a, .work-overview a { color: var(--you); overflow-wrap: anywhere; }
+.record-links a, .work-overview a { color: var(--accent); overflow-wrap: anywhere; }
 .result-preview, .inbox-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-preview { max-height: 12rem; overflow: auto; }
 .approval-rows { display: grid; gap: .75rem; }
@@ -388,7 +403,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 }
 /* The same treatment the rail's current view has, so "where am I" is one
    visual language in both places rather than two. */
-.picker .conversation[aria-current] { color: var(--ink); border-left-color: var(--you); }
+.picker .conversation[aria-current] { color: var(--ink); border-left-color: var(--accent); }
 
 /* THE PROSE, DEMOTED RATHER THAN DELETED. This console's discipline is that an
    absence states itself rather than being discovered, and that is right: every
@@ -676,7 +691,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .screen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; }
 .screen-head {
     display: flex; gap: .75rem 1.25rem; align-items: baseline; flex-wrap: wrap;
-    padding: .6rem .9rem; border-bottom: 1px solid var(--rule);
+    padding: .8rem 1.1rem; border-bottom: 2px solid var(--ink);
 }
 /* The size AFTER the shorthand. font: inherit resets font-size, so the
    scale has to be re-stated here and cannot be set on a rule of its own
@@ -684,13 +699,14 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
    the title computed to the body size. --step-2 is the one big thing a screen
    has. */
 .screen-title {
-    margin: 0; font: inherit; font-size: var(--step-2);
-    font-weight: var(--strong); text-transform: lowercase;
+    margin: 0; font: inherit; font-family: var(--display-font); font-size: var(--step-2);
+    font-weight: 800; text-transform: uppercase; letter-spacing: .03em; line-height: 1.15;
 }
 .screen-head button, .screen-body button {
     font: inherit; color: inherit; background: transparent; cursor: pointer;
-    border: 1px solid var(--rule); border-radius: 3px; padding: .15rem .4rem;
+    border: 1px solid var(--rule); border-radius: 0; padding: .35rem .65rem; min-height: 2.25rem;
 }
+.screen-head button:hover:not(:disabled), .screen-body button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .screen-head button[disabled], .screen-body button[disabled] {
     cursor: default; opacity: .5;
 }
@@ -699,7 +715,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
     border: 1px solid var(--rule); border-radius: 3px; padding: .15rem .4rem;
 }
 .screen-head label, .screen-body label { color: var(--dim); }
-.screen-body { overflow-y: auto; padding: .6rem .9rem; }
+.screen-body { overflow-y: auto; padding: 1rem 1.1rem; }
 
 .nothing { margin: .6rem 0; color: var(--dim); font-style: italic; }
 .trouble { margin: .4rem 0; color: var(--refused); }
@@ -893,10 +909,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .mode-note, .reach { margin: .2rem 0; color: var(--dim); }
 @media (max-width: 720px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .rail { flex-direction: row; flex-wrap: wrap; gap: .25rem; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .rail { flex-direction: row; flex-wrap: wrap; gap: .25rem; padding: .75rem; border-right: 0; border-bottom: 2px solid var(--ink); }
   .rail-primary { flex-direction: row; flex-wrap: wrap; flex-basis: 100%; }
   .rail-group { display: flex; }
-  .console-brand { flex-direction: row; gap: .5rem; padding: 0 .5rem; align-items: baseline; }
+  .console-brand { flex-direction: row; gap: .5rem; padding: 0 .5rem .5rem; align-items: baseline; flex-basis: 100%; }
   .rail-browse { margin-top: 0; }
   .rail-browse[open] { flex-basis: 100%; }
   .workbench { grid-template-columns: minmax(0, 1fr); }

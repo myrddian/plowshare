@@ -3,13 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!--
-      No `referrer` meta and no `<link>` to anywhere: this page is served from
-      the jar and has no third party in it. The bootstrap token arrives in this
-      page's own URL and `auth.ts` strips it before anything can be navigated
-      to, which is the referrer hazard that would otherwise matter here.
-    -->
+    <!-- All resources, including licensed fonts, are served from this origin.
+      Referrers stay disabled before auth.ts removes a bootstrap credential. -->
     <meta name="referrer" content="no-referrer" />
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <link rel="stylesheet" href="/themes/print.css" />
     <title>Plowshare</title>
   </head>
   <body>

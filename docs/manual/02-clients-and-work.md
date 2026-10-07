@@ -19,6 +19,13 @@ The repository clients use shared TypeScript transport and operation contracts.
 The Java client remains available for existing tooling. SDK consumers can use
 the same operations without embedding a GUI.
 
+Desktop's sidebar **Appearance** selector keeps the original **Classic** look
+and offers **Print**, the same cream paper, charcoal ink, rust accents and
+condensed headings used by the web console. Print can follow the system's light
+or dark appearance, or use an explicit light or dark choice. The choice stays on
+this computer, survives restart, and updates open inspection pages. It changes
+presentation only; server permissions and work state still come from the server.
+
 ## Conversations, projects and bots
 
 Select the project before starting work that should live there. A conversation

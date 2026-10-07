@@ -124,6 +124,16 @@ overview inspector is a selection within the current bounded window. A refreshed
 or unreadable record replaces its previous contents; it never establishes a
 historical outcome from cached job state.
 
+The visual treatment follows the website's mid-century print palette: cream
+paper, charcoal ink, rust navigation accents, condensed display headings and
+ruled panels. Lato body text and Barlow Condensed headings are bundled under their
+font licenses, served from the console's own origin without external font calls.
+Desktop's selectable Print theme uses the same `client-assets/` palette and fonts;
+both builds track those assets so an incremental build cannot retain old branding.
+Dark mode uses the same warm palette. Conversation role colours and explicit
+state labels keep their semantic meanings; decoration does not establish work
+state or authorization.
+
 Command discovery uses the selected agent's server-provided catalogue and the
 same draft/completion model as Desktop. Completion only prepares a draft. A skill
 without a prescribed context requires an explicit context choice. The browser

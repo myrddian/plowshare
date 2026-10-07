@@ -47,6 +47,8 @@ val desktopBuild by tasks.registering(Exec::class) {
     desktopSources()
     inputs.dir("scripts").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("assets/icons").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("client-assets"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.files("build/main.cjs", "build/preload.cjs")
     outputs.dir("build/renderer")
     outputs.dir("build/icons")

@@ -69,8 +69,8 @@
 }
 #relay-error,
 #relay-gap {
-  color: #edbe80;
-  border-color: #614b30;
+  color:var(--theme-danger, #edbe80);
+  border-color:var(--theme-danger, #614b30);
 }
 .relay-context {
   display: flex;
@@ -191,14 +191,14 @@
   text-align: right;
 }
 .relay-status[data-state='ACCEPTED'] {
-  color: #aac6a5;
-  border-color: #465d40;
+  color:var(--theme-muted, #aac6a5);
+  border-color:var(--theme-rule, #465d40);
 }
 .relay-status[data-state='FAILED'],
 .relay-status[data-state='UNCERTAIN'],
 .relay-status[data-state='ABANDONED_UNCERTAIN'] {
-  color: #edbe80;
-  border-color: #614b30;
+  color:var(--theme-danger, #edbe80);
+  border-color:var(--theme-danger, #614b30);
 }
 .relay-empty {
   padding: 28px 18px;

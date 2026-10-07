@@ -159,6 +159,10 @@ val pnpmInstall by tasks.registering(Exec::class) {
 
 /** Everything the TypeScript build and the Vitest run both read. */
 fun Exec.declareSources() {
+    // Vite copies these assets and the style checks read the shared palette.
+    inputs.dir(rootProject.file("client-assets"))
+        .withPropertyName("appearanceAssets")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("sdk/typescript/src/operations")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src")
         .withPropertyName("sources")
