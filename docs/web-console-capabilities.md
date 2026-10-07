@@ -118,6 +118,15 @@ and read-receipt controls require a fresh successful read on the active
 connection. A refused or unreadable read does not re-enable these controls.
 Server authorization still decides every effect; reconnect never resubmits one.
 
+Inbox offers All and Unread deliveries through the existing server-side filter,
+applied before paging. Each page renders up to fifty short previews and one full
+selected result, with its delivery metadata and owning conversation link.
+Selection and refresh never acknowledge a delivery; Mark read requires explicit
+input. Changing the filter returns to its first page. If reconciliation removes
+the selected item, the reader states that it is no longer in the current page
+instead of keeping its old result. A refused receipt disables acknowledgement
+until a fresh authorized read; uncertain receipts stay blocked across reconnect.
+
 The Workbench keeps overview, inbox, approvals, chat and jobs in primary
 navigation; the remaining views are reachable through Browse & settings. The
 overview inspector is a selection within the current bounded window. A refreshed

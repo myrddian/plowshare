@@ -19,7 +19,8 @@ export class WorkRefused extends Error {}
  * Paging is server paging; receipt mutations never run as part of reconciliation. */
 export interface WorkRecords {
   unread(): Promise<number>;
-  inbox(offset: number, limit: number): Promise<InboxPage>;
+  /** Unread filtering happens before paging on the server; counts are account-wide. */
+  inbox(offset: number, limit: number, unread?: boolean): Promise<InboxPage>;
   markRead(id: string): Promise<InboxMarked>;
   firings(offset: number, limit: number): Promise<readonly FiringRecord[]>;
 }
@@ -42,7 +43,8 @@ export function socketWorkRecords(stream: EventStream): WorkRecords {
   return {
     unread: async () =>
       (await call('inbox.list', { unread: true, limit: 1 })).unread,
-    inbox: (offset, limit) => call('inbox.list', { offset, limit }),
+    inbox: (offset, limit, unread = false) =>
+      call('inbox.list', { offset, limit, unread }),
     markRead: (id) => call('inbox.read', { items: [id] }),
     firings: (offset, limit) => call('firing.list', { offset, limit }),
   };

@@ -344,6 +344,21 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .result-preview { max-height: 12rem; overflow: auto; }
 .approval-rows { display: grid; gap: .75rem; }
 .inbox-paging { display: flex; gap: .75rem; margin: .75rem 0; }
+.inbox-filter { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: .4rem; max-width: 100%; }
+.inbox-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1.5rem; margin-top: 1rem; }
+.inbox-rows { max-height: 36rem; overflow: auto; min-width: 0; }
+.inbox-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.inbox-meta, .inbox-read-state { color: var(--dim); font-size: var(--step--1); }
+.inbox-select { max-width: 100%; overflow-wrap: anywhere; }
+.inbox-select[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.inbox-reader { min-width: 0; border: 1px solid var(--rule); padding: 1rem; align-self: start; }
+.inbox-reader-title { overflow-wrap: anywhere; margin-top: 0; }
+.inbox-reader-title:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.inbox-reader .inbox-answer { max-height: 35rem; overflow: auto; }
+@media (max-width: 800px) {
+  .inbox-layout { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .inbox-rows { max-height: 18rem; }
+}
 .rail button[data-stale]::after { content: " · stale"; }
 
 /* ---- the chat surface: the tree, then the conversation ----------------- */
