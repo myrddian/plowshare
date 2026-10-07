@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { gate, probeSession, type GateDeps, type SessionState } from './main';
+import {
+  gate,
+  mountUnavailable,
+  probeSession,
+  type GateDeps,
+  type SessionState,
+} from './main';
 
 /**
  * `gate`'s branching, held apart from `render`/`bootstrapFromUrl` and from
@@ -80,15 +86,7 @@ describe('gate', () => {
   });
 });
 
-/**
- * `probeSession`'s own mapping from a real `fetch` response to a
- * {@link SessionState}, composed with the real `gate` -- so the fourth
- * outcome ("a probe failure lands on login, not a blank page") is pinned
- * end to end rather than only at `gate`'s branch, which by itself cannot
- * tell "signed-out because 401" from "signed-out because the network never
- * answered": both are `probeSession`'s job to fold together, and it is
- * exercised here doing exactly that.
- */
+/** Session refusals and availability failures take distinct gate paths. */
 describe('probeSession, and gate acting on what it reports', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -152,7 +150,10 @@ describe('probeSession, and gate acting on what it reports', () => {
 
     const deps = fakeDeps(probeSession);
     await gate(host, deps);
-    expect(deps.mountUnavailable).toHaveBeenCalledWith(host);
+    expect(deps.mountUnavailable).toHaveBeenCalledWith(
+      host,
+      expect.any(Function),
+    );
     expect(deps.mountLogin).not.toHaveBeenCalled();
     expect(deps.mountShell).not.toHaveBeenCalled();
     expect(deps.mountPassword).not.toHaveBeenCalled();
@@ -209,5 +210,55 @@ describe('a real password change, end to end through gate', () => {
     await vi.waitFor(() =>
       expect(host.querySelector('[data-login]')).not.toBeNull(),
     );
+  });
+});
+
+describe('availability recovery', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([200, 404, 500, 503])(
+    'does not interpret HTTP %s as an authentication refusal',
+    async (status) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(null, { status })),
+      );
+      expect(await probeSession()).toBe('unavailable');
+    },
+  );
+
+  it('rejects a malformed password flag rather than admitting the shell', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(null, {
+            status: 204,
+            headers: { 'X-Plowshare-Must-Change-Password': 'invalid' },
+          }),
+      ),
+    );
+    expect(await probeSession()).toBe('unavailable');
+  });
+
+  it('retries only the session read, coalescing double clicks and recovering to the existing session', async () => {
+    const fetchMock = vi.fn(
+      async (_path: string, _options?: RequestInit) =>
+        new Response(null, { status: 503 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const deps = { ...fakeDeps(probeSession), mountUnavailable };
+    await gate(host, deps);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    const retry = host.querySelector('button');
+    if (!retry) throw new Error('Expected connection retry');
+    retry.click();
+    retry.click();
+    await vi.waitFor(() => expect(deps.mountShell).toHaveBeenCalledOnce());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.every(([path]) => path === '/v1/auth/session'),
+    ).toBe(true);
+    expect(deps.mountLogin).not.toHaveBeenCalled();
   });
 });

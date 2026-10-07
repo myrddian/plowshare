@@ -123,13 +123,15 @@ controls closed until a fresh retained read. Neither path replays a decision.
 Command display preserves argument boundaries and compound command lists.
 Conversation and project grants still require their existing explicit controls
 and current server authority. Usage construction installs the renderer owner
-after mounting and replays the initial synchronous watch state.
+after mounting and replays the initial synchronous watch state. Its first load
+uses the subscription already selected during mount, avoiding a duplicate read.
 
-Document restart guidance still claims sequential job IDs can repeat, although
-current jobs use durable identifiers. Keep the true current-process history limit
-and remove obsolete identifier/transport assertions from the UI.
+Document job polling pauses on navigation and when the browser tab is hidden.
+Returning or reconnecting reads the selected view, coalesces overlapping refreshes
+and rejects replies from an earlier visit. Restart guidance distinguishes current
+process jobs from the retained corpus; refresh never resubmits ingestion.
 
-Document ingest polling needs visibility ownership. Memory, project and proposal
+Memory, project and proposal
 lists need bounded presentation where their current operations return a full
 collection. Catalogue and retrieval usability, project context selection and
 missing administration/workflow screens are separate client coverage changes.

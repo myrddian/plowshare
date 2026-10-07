@@ -54,9 +54,9 @@ const MESSAGES: Readonly<Record<BootstrapOutcome, string>> = {
   exchanged: '',
   absent: '',
   refused:
-    'That bootstrap token was refused — it is single-use, so a reload spends nothing.' +
-    ' If this console cannot reach the server below, restart it and open the URL it' +
-    ' prints.',
+    'That bootstrap token was refused. Sign in with an existing account below.' +
+    ' For first-time setup, ask the operator for the current bootstrap handoff from' +
+    ' the configured protected token file. Reloading cannot renew a single-use token.',
 };
 
 /** `GET /v1/auth/session`'s two questions, folded into one answer for {@link gate}. */
@@ -84,15 +84,17 @@ export async function probeSession(): Promise<SessionState> {
     response = await fetch('/v1/auth/session', {
       method: 'GET',
       credentials: 'same-origin',
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     return 'unavailable';
   }
   if (response.status === 401 || response.status === 403) return 'signed-out';
   if (response.status !== 204) return 'unavailable';
-  return response.headers.get('X-Plowshare-Must-Change-Password') === 'true'
-    ? 'flagged'
-    : 'signed-in';
+  const flag = response.headers.get('X-Plowshare-Must-Change-Password');
+  if (flag !== null && flag !== 'true' && flag !== 'false')
+    return 'unavailable';
+  return flag === 'true' ? 'flagged' : 'signed-in';
 }
 
 /** The shell, built the same way regardless of which branch of {@link gate} reached it. */
@@ -147,7 +149,10 @@ export interface GateDeps {
   readonly mountShell: (host: HTMLElement) => void;
   readonly mountLogin: (host: HTMLElement) => void;
   readonly mountPassword: (host: HTMLElement) => void;
-  readonly mountUnavailable: (host: HTMLElement) => void;
+  readonly mountUnavailable: (
+    host: HTMLElement,
+    retry: () => Promise<void>,
+  ) => void;
 }
 
 const REAL_DEPS: GateDeps = {
@@ -177,7 +182,7 @@ export async function gate(
 ): Promise<void> {
   const state = await deps.probe();
   if (state === 'unavailable') {
-    deps.mountUnavailable(host);
+    deps.mountUnavailable(host, () => gate(host, deps));
   } else if (state === 'signed-out') {
     deps.mountLogin(host);
   } else if (state === 'flagged') {
@@ -188,7 +193,10 @@ export async function gate(
 }
 
 /** Availability failure has a visible retry and never spends refresh cookies. */
-function mountUnavailable(host: HTMLElement): void {
+export function mountUnavailable(
+  host: HTMLElement,
+  retryConnection: () => Promise<void>,
+): void {
   const panel = document.createElement('section');
   const message = document.createElement('p');
   message.setAttribute('role', 'alert');
@@ -198,8 +206,9 @@ function mountUnavailable(host: HTMLElement): void {
   retry.type = 'button';
   retry.textContent = 'Retry connection';
   retry.addEventListener('click', () => {
+    if (retry.disabled) return;
     retry.disabled = true;
-    background(gate(host));
+    background(retryConnection());
   });
   panel.append(message, retry);
   host.replaceChildren(panel);

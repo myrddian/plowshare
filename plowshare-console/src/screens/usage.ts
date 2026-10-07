@@ -53,10 +53,10 @@ export function createUsage(options: {
     element: () => options.root,
     async load() {
       if (closed) return;
-      if (opened) await activeWatch.reconnect();
+      if (opened && !activeWatch.state.loading) await activeWatch.reconnect();
       else if (stream.status().state === 'open') {
+        // Mount already owns the first selection on an open stream.
         opened = true;
-        await activeWatch.reconnect();
       }
     },
     destroy() {

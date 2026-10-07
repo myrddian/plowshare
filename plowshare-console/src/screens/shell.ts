@@ -402,6 +402,10 @@ export function createShell(options: ShellOptions): Shell {
   streamLabel.dataset['stream'] = '';
   function showStream(status: StreamStatus): void {
     streamLabel.dataset['state'] = status.state;
+    if (status.state === 'open' && showing === 'documents') {
+      const documents = built.get('documents');
+      if (documents) background(documents.load());
+    }
     if (status.signedOut) {
       streamLabel.textContent = 'signed out — reload to sign in';
       return;

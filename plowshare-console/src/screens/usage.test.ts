@@ -473,3 +473,35 @@ describe('Usage workspace', () => {
     panel.destroy();
   });
 });
+
+it('delivers synchronous first-mount updates and loads the first connected snapshot without a manual refresh', async () => {
+  const root = document.createElement('div');
+  const report = makeReport();
+  const ask = vi.fn(async () => ({
+    code: 'OK',
+    payload: {
+      subscription: 'first',
+      revision: 0,
+      filters: report.filters,
+      report,
+    },
+  }));
+  const screen = createUsage({
+    root,
+    session: 'one',
+    project: null,
+    openStream: () => ({
+      ask,
+      close: vi.fn(),
+      status: () => ({ state: 'open', attempt: 0, retryInMs: null }),
+    }),
+  });
+  expect(root.textContent).toContain('Reading usage');
+  await screen.load();
+  await tick();
+  expect(ask).toHaveBeenCalledOnce();
+  expect(root.textContent).toContain('USD 0.005');
+  expect(root.textContent).not.toContain('before initialization');
+  screen.destroy();
+  await tick();
+});

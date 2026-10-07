@@ -437,3 +437,38 @@ describe('read-only owning-record routes', () => {
     window.history.replaceState(null, '', '#');
   });
 });
+
+it('suspends document reads across navigation and reconciles the selected view after reconnect', async () => {
+  vi.useFakeTimers();
+  shell.destroy();
+  shell = createShell({
+    root,
+    transport: transport(),
+    openStream: opener,
+    session: 'poll-test',
+    scope,
+    pollMs: 100,
+  });
+  try {
+    await shell.start();
+    const count = () =>
+      get.mock.calls.filter(([path]) => path === '/v1/jobs').length;
+    const initial = count();
+    await shell.show('documents');
+    expect(count()).toBe(initial + 1);
+    await shell.show('chat');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(count()).toBe(initial + 1);
+    await shell.show('documents');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(count()).toBe(initial + 2);
+    if (!statuses) throw new Error('Expected shared stream status owner');
+    statuses({ state: 'open', attempt: 0, retryInMs: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(count()).toBe(initial + 3);
+    expect(sockets).toHaveLength(1);
+  } finally {
+    shell.destroy();
+    vi.useRealTimers();
+  }
+});

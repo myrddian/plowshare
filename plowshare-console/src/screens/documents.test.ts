@@ -189,18 +189,15 @@ describe('an ingest is a long job, and the screen says what running is worth', (
     await screen.load();
 
     expect(textUnder('[data-no-progress]')).toBe(NO_PROGRESS);
-    // The door DocumentController submits through takes no session and puts
-    // no limits on the handle, so nothing is published and nothing counts.
-    expect(NO_PROGRESS).toContain('no session');
-    expect(NO_PROGRESS).toContain('limits');
-    expect(NO_PROGRESS).toContain('26 minutes');
+    expect(root.querySelector('[role=progressbar]')).toBeNull();
   });
 
-  it('says the handle does not survive a restart, and does not pretend otherwise', async () => {
+  it('distinguishes current-process handles from retained corpus records', async () => {
     await screen.load();
 
     expect(textUnder('[data-restart-note]')).toBe(RESTART_NOTE);
-    expect(RESTART_NOTE).toContain('job_000001');
+    expect(RESTART_NOTE).toContain('job identifiers remain unique');
+    expect(RESTART_NOTE).toContain('An absent job is not a completion result');
   });
 
   it('shows only ingests, and says how many runs of other kinds it left out', async () => {
