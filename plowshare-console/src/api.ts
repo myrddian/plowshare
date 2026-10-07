@@ -13,12 +13,15 @@
  *
  * **This client submits a refresh once and never initiates a replay.** `POST
  * /v1/auth/refresh` rotates both cookies, and presenting a refresh token that
- * has already been spent RETIRES THE WHOLE CHAIN on the server. A client that
- * retries a refresh, or that lets two requests refresh concurrently, logs
+ * has already been spent retires the chain unless it is an identical intent
+ * within the server's bounded duplicate-delivery window. A client that
+ * retries with a new intent, or lets two requests refresh concurrently, logs
  * itself out -- and it logs itself out in a way that looks like the server's
  * fault. Hence {@link refreshOnce}'s single-flight latch below, and hence the
  * absence of any retry loop anywhere in this file.
  */
+
+import { REFRESH_INTENT_HEADER } from '../../sdk/typescript/src/binding/refresh-intent.ts';
 
 /** `POST /v1/auth/refresh`: rotates both cookies, 204, no body. */
 export const REFRESH_PATH = '/v1/auth/refresh';
@@ -152,9 +155,14 @@ function refreshOnce(): Promise<boolean> {
         throw new Error(
           'Session refresh delivery is uncertain. Reload to recheck your session.',
         );
+      // One immutable intent per fetch. The HTTP stack may redeliver that fetch
+      // after a lost response; the server can coalesce it without another rotation.
+      // This is deliberately not persisted or reused by application code.
+      const intent = crypto.randomUUID();
       window.localStorage.setItem(REFRESH_UNCERTAIN, 'pending');
       const response = await fetch(REFRESH_PATH, {
         method: 'POST',
+        headers: { [REFRESH_INTENT_HEADER]: intent },
         credentials: 'same-origin',
         cache: 'no-store',
         // Following 307/308 would submit the rotating mutation again at the

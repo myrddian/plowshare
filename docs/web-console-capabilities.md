@@ -32,9 +32,12 @@ Client refresh calls are coordinated and never deliberately replayed. Rotation
 refuses HTTP redirects and session probes require uncached, direct responses;
 authentication responses carry `Cache-Control: no-store`. These safeguards do
 not prove exactly-once HTTP delivery: abrupt-close fixture tracing observed
-multiple arrivals carrying the same per-fetch diagnostic ID. The current refresh
-endpoint has no public receipt reconciliation contract for that duplication;
-transport-level authentication recovery remains unresolved. See
+multiple arrivals carrying the same per-fetch diagnostic ID. Refresh now carries
+one random intent; the server returns the same still-current pair for duplicate
+deliveries within a fixed thirty-second maximum window. Changed/missing intents
+retain reuse revocation, and uncertain application submissions remain blocked.
+The [refresh-intent decision](decisions/0004-refresh-intent-receipts.md) documents
+receipt storage, original expiry, account fences and the captured-request tradeoff. See
 [browser connection recovery](client-login.md#browser-connection-recovery).
 
 ## Workflow inventory

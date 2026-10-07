@@ -80,6 +80,47 @@ describe('api', () => {
     ]);
   });
 
+  it('attaches one fresh intent per rotation without persisting it or resubmitting after loss', async () => {
+    const intents: string[] = [];
+    let signedIn = false;
+    let loseResponse = false;
+    fetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      calls.push(path);
+      if (path === '/v1/auth/session')
+        return new Response(null, { status: signedIn ? 204 : 401 });
+      if (path === '/v1/auth/refresh') {
+        const intent = new Headers(init?.headers).get(
+          'X-Plowshare-Refresh-Intent',
+        );
+        if (intent === null) throw new Error('refresh omitted its intent');
+        intents.push(intent);
+        if (loseResponse) throw new TypeError('response lost');
+        signedIn = true;
+        return new Response(null, { status: 204 });
+      }
+      return signedIn
+        ? new Response('[]', { status: 200 })
+        : new Response(null, { status: 401 });
+    });
+    await api.get('/v1/jobs');
+    expect(intents[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(storage.length).toBe(0);
+    signedIn = false;
+    loseResponse = true;
+    await expect(api.get('/v1/jobs')).rejects.toThrow('response lost');
+    expect(intents[1]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(intents[1]).not.toBe(intents[0]);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBe(
+      'pending',
+    );
+    await expect(api.get('/v1/jobs')).rejects.toThrow(/uncertain/);
+    expect(intents).toHaveLength(2);
+  });
+
   it('gives up rather than looping when the refresh itself is refused', async () => {
     // THE SELF-INFLICTED LOGOUT THIS GUARDS AGAINST: a spent refresh token
     // retires the whole chain on the server, so a client that retries a

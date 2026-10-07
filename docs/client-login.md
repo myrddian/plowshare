@@ -192,23 +192,20 @@ a per-tab fallback.
 
 This controls application submissions, not exactly-once HTTP delivery. An abrupt
 connection-close fixture received duplicate arrivals for one instrumented fetch.
-The current refresh endpoint has no request-id/receipt reconciliation contract;
-transport-level duplication remains an unresolved authentication boundary and
-requires a server-owned design rather than a client retry workaround.
-This observation is consistent with Chromium's
-[network transaction retry logic](https://chromium.googlesource.com/chromium/src/+/HEAD/net/http/http_network_transaction.cc#2392),
-which can resend on a reused connection when no response headers arrived.
-That source comparison does not identify the exact stack responsible for the
-fixture's arrivals.
-
-The existing server deliberately revokes the whole session chain when an
-unexpired spent refresh token is reused. Account sessions retain only token
-digests, so they cannot return the previously issued cookie pair as a receipt.
-A new request identifier by itself would not distinguish a duplicate transport
-delivery from replay of the entire captured request. This slice preserves reuse
-revocation: it adds no grace interval, stored plaintext tokens or automatic
-resubmission. If a direct session probe cannot establish access after uncertain
-rotation, reload and sign in again. Admitted work remains on the server.
+The refresh endpoint now accepts one explicit rotation intent and retains a
+bounded server-owned receipt, so identical physical deliveries receive the same
+cookie pair rather than rotating twice or retiring the session. The browser
+creates one intent per new fetch. The neutral TypeScript SDK accepts an optional
+validated intent from its caller. Neither initiates replay after uncertain
+delivery. Missing/different intents retain spent-token reuse revocation. Receipt recovery lasts at most thirty seconds, checks current
+account/chain and successor authority, and preserves original token/cookie
+expiry. It stores reconstruction metadata and digests, not plaintext tokens.
+Exact captured parent-and-intent replay is indistinguishable from duplicate
+delivery within that fixed window; see the
+[refresh-intent decision](decisions/0004-refresh-intent-receipts.md) for the
+explicit tradeoff and compatibility contract.
+If a direct session probe cannot establish access after uncertain rotation,
+reload and sign in again. Admitted work remains on the server.
 
 A refused single-use bootstrap token cannot be renewed by reloading. Use an
 existing account, or ask the operator for the current handoff from the configured

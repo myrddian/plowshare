@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -149,6 +150,88 @@ class AuthControllerTest {
     assertEquals(204, response.getStatus());
     assertEquals("", response.getContentAsString());
     verify(store).revoke("logout-access");
+  }
+
+  @Test
+  void identical_refresh_delivery_repairs_cookies_with_original_remaining_expiry()
+      throws Exception {
+    Ticking clock = new Ticking();
+    var properties = new AuthProperties();
+    var store =
+        new TokenStore(
+            clock,
+            properties.getAccessLifetime(),
+            properties.getRefreshLifetime(),
+            properties.getTicketLifetime());
+    var parent = store.issuePair();
+    String intent = java.util.UUID.randomUUID().toString();
+    var mvc = standalone(store, properties);
+    var first =
+        mvc.perform(
+                post("/v1/auth/refresh")
+                    .header(RefreshIntent.HEADER, intent)
+                    .cookie(new jakarta.servlet.http.Cookie("ps_refresh", parent.refresh())))
+            .andReturn()
+            .getResponse();
+    clock.advance(Duration.ofSeconds(5));
+    var duplicate =
+        mvc.perform(
+                post("/v1/auth/refresh")
+                    .header(RefreshIntent.HEADER, intent)
+                    .cookie(new jakarta.servlet.http.Cookie("ps_refresh", parent.refresh())))
+            .andReturn()
+            .getResponse();
+    assertEquals(204, first.getStatus());
+    assertEquals(204, duplicate.getStatus());
+    assertTrue(duplicate.getContentAsString().isEmpty());
+    var firstCookies = setCookies(first);
+    var repaired = setCookies(duplicate);
+    assertTrue(value(firstCookies.get("ps_access")).equals(value(repaired.get("ps_access"))));
+    assertTrue(value(firstCookies.get("ps_refresh")).equals(value(repaired.get("ps_refresh"))));
+    assertEquals(
+        Long.toString(properties.getAccessLifetime().minusSeconds(5).toSeconds()),
+        attributes(repaired.get("ps_access")).get("max-age"));
+    assertEquals(
+        Long.toString(properties.getRefreshLifetime().minusSeconds(5).toSeconds()),
+        attributes(repaired.get("ps_refresh")).get("max-age"));
+    assertTrue(store.validAccess(value(repaired.get("ps_access"))));
+  }
+
+  @Test
+  void invalid_or_repeated_intent_headers_are_rejected_before_spending_any_credential()
+      throws Exception {
+    var store = realStore();
+    var parent = store.issuePair();
+    var mvc = standalone(store, new AuthProperties());
+    for (String malformed :
+        java.util.List.of(
+            "",
+            "garbage",
+            "F612B939-AA97-4938-B55D-B3C25F0FDC43",
+            "00000000-0000-0000-0000-000000000000",
+            java.util.UUID.randomUUID() + "," + java.util.UUID.randomUUID())) {
+      var response =
+          mvc.perform(
+                  post("/v1/auth/refresh")
+                      .header(RefreshIntent.HEADER, malformed)
+                      .cookie(new jakarta.servlet.http.Cookie("ps_refresh", parent.refresh())))
+              .andReturn()
+              .getResponse();
+      assertEquals(400, response.getStatus());
+      assertTrue(setCookies(response).isEmpty());
+    }
+    var repeated =
+        mvc.perform(
+                post("/v1/auth/refresh")
+                    .header(
+                        RefreshIntent.HEADER,
+                        java.util.UUID.randomUUID().toString(),
+                        java.util.UUID.randomUUID().toString())
+                    .cookie(new jakarta.servlet.http.Cookie("ps_refresh", parent.refresh())))
+            .andReturn()
+            .getResponse();
+    assertEquals(400, repeated.getStatus());
+    assertTrue(store.refresh(parent.refresh()).isPresent());
   }
 
   // --- the cookies, attribute by attribute ---------------------------------

@@ -98,24 +98,13 @@ import java.util.function.Function;
  *
  * <h2>Reuse retires the chain, which costs a live session on purpose</h2>
  *
- * <p>A refresh token is single-use, so a <em>spent</em> one is only ever presented for one reason:
- * somebody else has a copy. The legitimate client rotated and holds the new pair. <b>Refusing the
- * call and stopping there would leave the thief holding a live pair</b>, renewed every fifteen
- * minutes, invisibly and indefinitely — rotation alone detects nothing. So the reuse is the signal,
- * and the answer is to retire the whole chain: both parties are logged out, and only the one who
- * can read the machine's own stdout — where the bootstrap token is printed once — or {@code
- * ~/.config/plowshare/console-token} — where the operator token is written at mode 600 — starts a
- * new session.
- *
- * <p><b>The price is that a client which double-submits logs itself out.</b> Two browser tabs
- * refreshing in the same instant is enough — one wins and the other presents a token that was spent
- * microseconds ago. That is the documented behaviour rather than an accident, and the alternative
- * was considered: a short <em>grace window</em> in which the immediately preceding refresh token
- * replays the pair it already produced instead of counting as reuse. It is rejected here because it
- * needs the store to remember what each spent token produced, and because the window is exactly the
- * interval in which a stolen token is most likely to be used — which is to say it weakens the
- * signal in the case the signal exists for. If the console turns out to double-submit, this
- * paragraph is what to revisit, and the fix belongs in the console.
+ * <p>Refresh without an intent retains strict single-use reuse revocation. The browser's explicit
+ * intent supports a narrow exception for physical duplicate HTTP delivery: the same parent and
+ * intent can reconstruct the same still-current pair for at most thirty seconds. Different/missing
+ * intents, an expired receipt or a spent successor still retire the chain. No duplicate extends
+ * token or chain expiry. Metadata contains no plaintext bearer tokens. Exact captured
+ * parent-and-intent replay is indistinguishable from duplicate transport delivery in that fixed
+ * window; this tradeoff is documented in the refresh-intent decision.
  *
  * <p><b>The operator token sits on no chain a refresh can reach</b>, because it has no refresh
  * partner and {@link #acceptOperator(String)} gives it a chain of its own. So a browser that
@@ -408,6 +397,9 @@ public final class TokenStore {
    * from one that was never issued, and those two have to be answered differently.
    */
   private record Refresh(String chain, Instant expiresAt, boolean spent) {}
+
+  /** Non-secret reconstruction metadata, swept with the same bounded budget as grants. */
+  private final Map<String, RefreshReceipt> refreshReceipts = new ConcurrentHashMap<>();
 
   /**
    * What {@link #accountChains} keeps under a chain id — the two facts {@link #issuePair(String,
@@ -1131,11 +1123,26 @@ public final class TokenStore {
    * @return the new pair, or nothing at all
    */
   public Optional<Pair> refresh(String presented) {
+    return rotate(presented, Optional.empty()).map(RefreshRotation::pair);
+  }
+
+  /** Coalesce one intent's duplicate deliveries without accepting arbitrary spent-token reuse. */
+  public Optional<RefreshRotation> refresh(String presented, RefreshIntent intent) {
+    return rotate(presented, Optional.of(java.util.Objects.requireNonNull(intent, "intent")));
+  }
+
+  private Optional<RefreshRotation> rotate(String presented, Optional<RefreshIntent> intent) {
     if (presented == null || presented.isBlank()) {
       return Optional.empty();
     }
     String hash = Tokens.hash(presented);
-    if (durable != null && !refreshGrants.containsKey(hash)) return durable.refresh(presented);
+    if (durable != null && !refreshGrants.containsKey(hash)) {
+      return intent.isPresent()
+          ? durable.refresh(presented, intent.get())
+          : durable
+              .refresh(presented)
+              .map(pair -> new RefreshRotation(pair, accessLifetime, refreshLifetime));
+    }
     // Behind the "is this anything?" check, and outside the lock. See the
     // class note on where the sweep rides.
     if (refreshGrants.containsKey(hash)) {
@@ -1152,16 +1159,44 @@ public final class TokenStore {
         refreshGrants.remove(hash, grant);
         return Optional.empty();
       }
-      if (!chains.containsKey(grant.chain())) {
+      Instant chainExpiry = chains.get(grant.chain());
+      if (chainExpiry == null || !now.isBefore(chainExpiry)) {
         return Optional.empty();
       }
       if (grant.spent()) {
+        RefreshReceipt receipt = refreshReceipts.get(hash);
+        if (receipt != null
+            && intent.isPresent()
+            && receipt.intent().equals(intent.get())
+            && now.isBefore(receipt.expiresAt(accessLifetime, refreshLifetime))) {
+          Pair pair = receipt.pair(presented);
+          Access access = accessGrants.get(Tokens.hash(pair.access()));
+          Refresh successor = refreshGrants.get(Tokens.hash(pair.refresh()));
+          if (access != null
+              && successor != null
+              && !successor.spent()
+              && access.chain().equals(grant.chain())
+              && successor.chain().equals(grant.chain())
+              && now.isBefore(access.expiresAt())
+              && now.isBefore(successor.expiresAt()))
+            return Optional.of(
+                new RefreshRotation(
+                    pair,
+                    Duration.between(now, access.expiresAt()),
+                    Duration.between(now, successor.expiresAt())));
+        }
         chains.remove(grant.chain());
         return Optional.empty();
       }
       refreshGrants.put(hash, new Refresh(grant.chain(), grant.expiresAt(), true));
       renewChain(grant.chain(), now);
-      return Optional.of(issueOn(grant.chain(), now));
+      if (intent.isEmpty())
+        return Optional.of(
+            new RefreshRotation(issueOn(grant.chain(), now), accessLifetime, refreshLifetime));
+      RefreshReceipt receipt = new RefreshReceipt(intent.get(), Tokens.mint(), now);
+      Pair pair = issueOn(grant.chain(), now, receipt.pair(presented));
+      refreshReceipts.put(hash, receipt);
+      return Optional.of(new RefreshRotation(pair, accessLifetime, refreshLifetime));
     } finally {
       rotation.unlock();
     }
@@ -1181,8 +1216,12 @@ public final class TokenStore {
    * not let a chain's clock run out from under a session that is still being used.
    */
   private Pair issueOn(String chain, Instant now) {
-    String access = Tokens.mint();
-    String refresh = Tokens.mint();
+    return issueOn(chain, now, new Pair(Tokens.mint(), Tokens.mint()));
+  }
+
+  private Pair issueOn(String chain, Instant now, Pair pair) {
+    String access = pair.access();
+    String refresh = pair.refresh();
     accessGrants.put(Tokens.hash(access), new Access(chain, now.plus(accessLifetime)));
     refreshGrants.put(Tokens.hash(refresh), new Refresh(chain, now.plus(refreshLifetime), false));
     return new Pair(access, refresh);
@@ -1212,6 +1251,7 @@ public final class TokenStore {
    */
   private void sweep() {
     Instant now = clock.instant();
+    drop(refreshReceipts, now, receipt -> receipt.expiresAt(accessLifetime, refreshLifetime));
     drop(accessGrants, now, Access::expiresAt);
     drop(refreshGrants, now, Refresh::expiresAt);
     // A chain's value IS its expiry, so the accessor is the identity. Spelt
@@ -1261,7 +1301,7 @@ public final class TokenStore {
   }
 
   /**
-   * How many records this store is holding, across all five maps.
+   * How many records this store is holding, including bounded refresh receipts.
    *
    * <p>Package-private and for {@code TokenStoreTest} alone, which asserts exact counts rather than
    * "fewer than before" — a sweep that dropped one record per call and never caught up would
@@ -1276,7 +1316,8 @@ public final class TokenStore {
    * this map does not outlive the chain itself.
    */
   int trackedRecords() {
-    return accessGrants.size()
+    return refreshReceipts.size()
+        + accessGrants.size()
         + refreshGrants.size()
         + chains.size()
         + tickets.size()

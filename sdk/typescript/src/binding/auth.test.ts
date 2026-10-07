@@ -1,5 +1,5 @@
 import { isList } from './values.ts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 /** The id every door in this file listens under. Named rather than random so
  *  an assertion can read it back off the socket URL. */
@@ -331,6 +331,27 @@ describe('refreshing speaks cookies, because that endpoint never learned anythin
     expect(calls[0]?.path).toBe('/v1/auth/refresh');
     expect(calls[0]?.method).toBe('POST');
     expect(calls[0]?.headers['Cookie']).toBe('ps_refresh=refresh-1');
+  });
+
+  it('validates and sends an explicit intent without replaying after response loss', async () => {
+    const { door, calls } = doorway({
+      '/v1/auth/refresh': {
+        status: 204,
+        cookies: issued('access-2', 'refresh-2'),
+      },
+    });
+    const intent = 'f612b939-aa97-4938-b55d-b3c25f0fdc43';
+    await refresh(door, PAIR, intent);
+    expect(calls[0]?.headers['X-Plowshare-Refresh-Intent']).toBe(intent);
+    await expect(refresh(door, PAIR, 'invalid')).rejects.toThrow(
+      'Invalid refresh intent',
+    );
+    expect(calls).toHaveLength(1);
+    const lost = vi.fn(() => Promise.reject(new TypeError('response lost')));
+    await expect(
+      refresh({ ...door, fetch: lost }, PAIR, intent),
+    ).rejects.toThrow('response lost');
+    expect(lost).toHaveBeenCalledTimes(1);
   });
 
   it('reads the rotated pair out of Set-Cookie, since the body carries none', async () => {
