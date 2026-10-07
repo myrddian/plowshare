@@ -94,6 +94,9 @@ class SourceIsTextTest {
   private static final Set<String> BINARY_ASSETS =
       Set.of(
           "gradle/wrapper/gradle-wrapper.jar",
+          "client-assets/fonts/BarlowCondensed-ExtraBold.ttf",
+          "client-assets/fonts/Lato-Regular.ttf",
+          "client-assets/fonts/Lato-Bold.ttf",
           "plowshare-desktop/assets/icons/source.png",
           "plowshare-desktop/assets/icons/plowshare.png",
           "plowshare-desktop/assets/icons/plowshare.icns",
@@ -158,7 +161,7 @@ class SourceIsTextTest {
   }
 
   @Test
-  void the_only_unreadable_files_are_the_wrapper_and_application_icons() throws IOException {
+  void the_only_unreadable_files_are_the_explicit_binary_assets() throws IOException {
     // The wider statement, for the invariant that scans the whole tracked
     // tree rather than only src. Build outputs and tool directories are
     // skipped because they are not tracked and are full of legitimate
