@@ -12,6 +12,22 @@ means a public operation exists but the browser has no dedicated workflow.
 **Unavailable** means the current public contracts cannot provide the named
 capability. These labels describe client coverage, not a permission grant.
 
+## Transport paths
+
+Most application workflows use the shared WebSocket. Screen calls such as
+`transport.get('/v1/jobs')` retain historical HTTP-looking names, but
+[socketTransport](../plowshare-console/src/transport.ts) maps them to operations
+such as `job.list` and calls the socket's `ask` method. The
+[shell](../plowshare-console/src/screens/shell.ts) supplies that transport to
+conversations, jobs, projects, proposals, memory and document search. Information,
+usage, inbox and approval workflows also use socket operations.
+
+Authentication/session/password flows, multipart document uploads and live
+runtime configuration remain explicit HTTP boundaries. A stale comment mentioning
+`GET /v1/jobs` is not evidence of an HTTP request. Source mapping and the packaged
+client assets must be checked separately from server image revision labels and
+authenticated runtime observations.
+
 ## Workflow inventory
 
 | Workflow                            | Browser coverage                                                                                                                                                                                                                                                                                                                                                                     | Other client / public contract evidence                                                                                                                                         | Implementation and test evidence                                                                                                                                                                                                                                                                                                                                                                                                |
