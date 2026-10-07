@@ -74,10 +74,16 @@ class ShippedExposureTest {
    * pass for a directory in which everything was exported.
    */
   @Test
-  void the_shipped_front_doors_are_the_interlocutor_the_coder_the_reviewer_and_the_three_readers() {
+  void the_shipped_front_doors_include_both_coder_variants() {
     assertEquals(
         Set.of(
-            "interlocutor", "coder", "code_reviewer", "librarian", "close_reader", "image_reader"),
+            "interlocutor",
+            "coder",
+            "coder_minimal",
+            "code_reviewer",
+            "librarian",
+            "close_reader",
+            "image_reader"),
         new AgentRegistry(shipped()).exportedNames());
   }
 

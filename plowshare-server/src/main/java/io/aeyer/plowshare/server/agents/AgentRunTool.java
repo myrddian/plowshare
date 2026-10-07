@@ -560,6 +560,16 @@ public final class AgentRunTool implements AgentTool {
           + callable;
     }
 
+    // Resolution may use a different tier than the caller's admission. An alias never makes
+    // that difference permission to widen the caller's filesystem authority.
+    if (AgentRegistry.escalatingGrant(caller, callee).isPresent()) {
+      return "the agent '"
+          + wanted
+          + "' resolves to '"
+          + callee.name()
+          + "', whose workspace grants exceed the caller's; delegation is refused";
+    }
+
     // THE THREE REFUSALS, IN THE ORDER A CALLER WOULD WANT THEM ANSWERED.
     // Each is a tool result and not an exception, for the reason the
     // undeclared-callee refusal above is one: the model can correct any of
@@ -662,7 +672,11 @@ public final class AgentRunTool implements AgentTool {
     runtime
         .activity()
         .delegated(
-            transcript.conversationId(), caller.name(), wanted, task, child.conversationId());
+            transcript.conversationId(),
+            caller.name(),
+            callee.name(),
+            task,
+            child.conversationId());
 
     // The full form, called directly and on this thread. Not
     // JobStore.submit: that builds a fresh Budget from the child's own
@@ -762,7 +776,7 @@ public final class AgentRunTool implements AgentTool {
     if (outcome.ending() != Outcome.Ending.AWAITING) {
       runtime
           .activity()
-          .delegateReturned(transcript.conversationId(), caller.name(), wanted, outcome);
+          .delegateReturned(transcript.conversationId(), caller.name(), callee.name(), outcome);
     }
 
     if (outcome.ending() == Outcome.Ending.AWAITING && end != null) {
@@ -770,7 +784,7 @@ public final class AgentRunTool implements AgentTool {
     }
 
     if (propagates(outcome.ending())) {
-      throw new SubAgentFailed(wanted, outcome);
+      throw new SubAgentFailed(callee.name(), outcome);
     }
     // A RETURNED DELEGATION IS PROGRESS for a caller that conducts an orchestration. Measured
     // 2026-09-28, orc_3187D648AC346812: a conductor with no children did an hour of work
@@ -789,8 +803,8 @@ public final class AgentRunTool implements AgentTool {
       if (!outcome.answered()) throw new ScriptedDelegateStopped(outcome);
       return outcome.text();
     }
-    String rendered = render(wanted, pictures, outcome);
-    String facts = runtime.activity().delegationFacts(child.conversationId(), wanted);
+    String rendered = render(callee.name(), pictures, outcome);
+    String facts = runtime.activity().delegationFacts(child.conversationId(), callee.name());
     return facts == null ? rendered : rendered + "\n\n" + facts;
   }
 

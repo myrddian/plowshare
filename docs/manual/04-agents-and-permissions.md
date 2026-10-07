@@ -18,6 +18,55 @@ existing definition as a starting point and preserve its supported field names.
 Names of tools, delegates, orchestration grants and model bindings must resolve.
 An unknown field is not a harmless way to attach your own configuration.
 
+## Agent aliases and guidance
+
+An agent may declare a logical `alias` shared by several concrete definitions.
+The caller can invoke that alias while the server selects one complete definition
+using the effective harness profile of its model. It does not combine prompts or
+inherit grants between variants.
+
+```yaml
+name: coder_minimal
+alias: coder
+guidance: minimal
+model: reasoning
+```
+
+`guidance` is optional and accepts `minimal`, `standard`, or `guided`, ordered
+from least to most. Selection first takes an exact profile match, then a variant
+without `guidance`, then the least-guided variant. An unset or custom harness
+profile follows the same fallback rule. Each alias allows at most one variant
+per guidance level and one unqualified default; duplicates are refused visibly.
+All variants must use the same `model` binding. If that binding can route to models
+with different effective harness profiles, the variants are disabled with an
+explanation; use a single-profile binding or an explicit model.
+
+A concrete variant name such as `coder_minimal` always selects that definition.
+An existing definition may retain the logical name itself by declaring
+`name: coder` and `alias: coder` without guidance. That name then addresses the
+family, and the same file supplies its default. A logical alias cannot collide
+with a concrete definition that has not declared membership in that family.
+Bots and orchestration conductors do not accept aliases.
+
+The shipped `coder` is the unqualified default. When its `reasoning` model has
+the `minimal` harness profile, the alias selects `coder_minimal`, whose tools are
+`file_roots`, `file_read`, `file_edit`, and `run`. Other profiles use the existing
+coder unless another matching variant is authored.
+
+Listings expose the alias and concrete variants, with the selected variant's
+capabilities and origin. When the alias selects a differently named variant, its
+description names that selection. Run receipts, job submissions, delegated logs,
+and execution events use the selected concrete identity. A submitted run retains
+its immutable definition even if files change afterwards; future resolutions may
+select a new definition. Approval continuations use the recorded concrete identity;
+they do not select another variant if the model profile changes while approval is pending.
+
+A `calls: [coder]` grant is validated against every possible variant, including
+cycle detection, delegation eligibility and workspace grants. The selected
+variant must still satisfy the normal execution authorization. An alias never
+expands a caller's authority or bypasses `exported`. Orchestration conductor grants
+and acceptance checker restrictions are also validated against every variant.
+
 ## Definition sources and precedence
 
 Definitions can come from shipped resources, server-global configuration, account

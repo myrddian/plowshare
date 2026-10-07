@@ -950,7 +950,7 @@ public final class DefinitionResolver implements SessionCloseListener {
     // must find no refusalsFor entry from this attempt -- the two maps
     // must never disagree, and the whole-project fallback it records is
     // the only account of what happened.
-    AgentRegistry registry = new AgentRegistry(merged);
+    AgentRegistry registry = bootSet.replacing(merged);
     refusals.put(key, Map.copyOf(refused));
     return registry;
   }

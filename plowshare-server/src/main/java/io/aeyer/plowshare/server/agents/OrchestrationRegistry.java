@@ -256,7 +256,8 @@ public final class OrchestrationRegistry {
    * Why this orchestration's conductor may not call its callees through {@code agents}, or empty
    * when it may: each callee is served, delegable, and holds no grant the conductor does not.
    * Package private so {@link OrchestrationResolver} can re-ask it of a boot definition against a
-   * project's agents.
+   * project's agents. An alias is checked against every variant, so changing the effective harness
+   * profile cannot widen the conductor's grants.
    *
    * <p>Says nothing about {@code orchestrations:} grants — {@link #grantEscalationRefusal} is that
    * half, and it deliberately takes a finished map rather than {@code agents}: unlike a callee,
@@ -270,34 +271,40 @@ public final class OrchestrationRegistry {
     // Not checked: calls without agent_run. OrchestrationParser.parse grants it to a conductor
     // that names calls (spec §4.3).
     for (String callee : conductor.calls()) {
-      Optional<AgentDefinition> found = agents.find(callee);
-      if (found.isEmpty()) {
+      List<AgentDefinition> targets = AgentAliases.targets(agents.byName(), callee);
+      if (targets.isEmpty()) {
         return Optional.of(
             refusal + " calls '" + callee + "', which is not an agent this tier serves");
       }
-      if (found.get().bot() || !found.get().delegable()) {
-        return Optional.of(
-            refusal + " calls '" + callee + "', which is not delegable: an agent can never run it");
-      }
-      Optional<Grant> escalating = AgentRegistry.escalatingGrant(conductor, found.get());
-      if (escalating.isPresent()) {
-        return Optional.of(
-            refusal
-                + " calls '"
-                + callee
-                + "', which is granted "
-                + escalating.get().declaration()
-                + " — a grant the conductor '"
-                + definition.name()
-                + "' does not hold: it "
-                + AgentRegistry.holdings(conductor)
-                + ". A callee may hold fewer grants"
-                + " than its caller and never more, or delegation is how an agent widens"
-                + " its own access, one file over. Narrow '"
-                + callee
-                + "', or widen '"
-                + definition.name()
-                + "'");
+      // Validate every possible selection, rather than only today's harness profile.
+      for (AgentDefinition target : targets) {
+        if (target.bot() || !target.delegable()) {
+          return Optional.of(
+              refusal
+                  + " calls '"
+                  + callee
+                  + "', which is not delegable: an agent can never run it");
+        }
+        Optional<Grant> escalating = AgentRegistry.escalatingGrant(conductor, target);
+        if (escalating.isPresent()) {
+          return Optional.of(
+              refusal
+                  + " calls '"
+                  + callee
+                  + "', which is granted "
+                  + escalating.get().declaration()
+                  + " — a grant the conductor '"
+                  + definition.name()
+                  + "' does not hold: it "
+                  + AgentRegistry.holdings(conductor)
+                  + ". A callee may hold fewer grants"
+                  + " than its caller and never more, or delegation is how an agent widens"
+                  + " its own access, one file over. Narrow '"
+                  + callee
+                  + "', or widen '"
+                  + definition.name()
+                  + "'");
+        }
       }
     }
     return checkerRefusal(definition, agents, refusal);
@@ -328,8 +335,8 @@ public final class OrchestrationRegistry {
     if (name == null) {
       return Optional.empty();
     }
-    Optional<AgentDefinition> found = agents.find(name);
-    if (found.isEmpty()) {
+    List<AgentDefinition> targets = AgentAliases.targets(agents.byName(), name);
+    if (targets.isEmpty()) {
       return Optional.of(
           refusal
               + " names the checker '"
@@ -337,27 +344,29 @@ public final class OrchestrationRegistry {
               + "', which is not an agent"
               + " this tier serves");
     }
-    AgentDefinition checker = found.get();
-    List<String> beyond =
-        checker.tools().stream().filter(tool -> !CHECKER_TOOLS.contains(tool)).toList();
-    if (!beyond.isEmpty() || !checker.calls().isEmpty()) {
-      return Optional.of(
-          refusal
-              + " names the checker '"
-              + name
-              + "', which holds "
-              + (beyond.isEmpty() ? "calls " + checker.calls() : "the tools " + beyond)
-              + ": a checker reads the project and nothing more — "
-              + new TreeSet<>(CHECKER_TOOLS)
-              + " at most, and no calls");
-    }
-    if (checker.delegable()) {
-      return Optional.of(
-          refusal
-              + " names the checker '"
-              + name
-              + "', which is delegable:"
-              + " the harness runs a checker, and a conductor must never be able to");
+    // A checker alias must retain its read-only, undelegable contract for every profile.
+    for (AgentDefinition checker : targets) {
+      List<String> beyond =
+          checker.tools().stream().filter(tool -> !CHECKER_TOOLS.contains(tool)).toList();
+      if (!beyond.isEmpty() || !checker.calls().isEmpty()) {
+        return Optional.of(
+            refusal
+                + " names the checker '"
+                + name
+                + "', which holds "
+                + (beyond.isEmpty() ? "calls " + checker.calls() : "the tools " + beyond)
+                + ": a checker reads the project and nothing more — "
+                + new TreeSet<>(CHECKER_TOOLS)
+                + " at most, and no calls");
+      }
+      if (checker.delegable()) {
+        return Optional.of(
+            refusal
+                + " names the checker '"
+                + name
+                + "', which is delegable:"
+                + " the harness runs a checker, and a conductor must never be able to");
+      }
     }
     return Optional.empty();
   }

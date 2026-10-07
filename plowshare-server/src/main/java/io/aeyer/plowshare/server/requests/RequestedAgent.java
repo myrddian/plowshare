@@ -157,7 +157,19 @@ public final class RequestedAgent {
    */
   public static AgentDefinition toRun(
       AgentRegistry registry, Supplier<Set<String>> offered, String name) {
-    AgentDefinition definition = definitionOrRefuse(registry, offered, name);
+    return exported(definitionOrRefuse(registry, offered, name), offered, name);
+  }
+
+  /** Continues a recorded concrete identity, with the same exposure checks as a fresh run. */
+  public static AgentDefinition toContinue(
+      AgentRegistry registry, Supplier<Set<String>> offered, String name) {
+    AgentDefinition definition =
+        registry.findConcrete(name).orElseThrow(() -> missing(offered, name));
+    return exported(definition, offered, name);
+  }
+
+  private static AgentDefinition exported(
+      AgentDefinition definition, Supplier<Set<String>> offered, String name) {
     if (!definition.exported()) {
       throw new CallerFault(
           "the agent '"
@@ -218,12 +230,16 @@ public final class RequestedAgent {
     // which is never that set. The lookup and the list answer two different
     // questions and only one of them may be enumerated.
     if (name == null || !registry.names().contains(name)) {
-      throw new CallerFault(
-          "there is no agent called '"
-              + name
-              + "'; this server runs "
-              + new TreeSet<>(offered.get()));
+      throw missing(offered, name);
     }
     return registry.get(name);
+  }
+
+  private static CallerFault missing(Supplier<Set<String>> offered, String name) {
+    return new CallerFault(
+        "there is no agent called '"
+            + name
+            + "'; this server runs "
+            + new TreeSet<>(offered.get()));
   }
 }

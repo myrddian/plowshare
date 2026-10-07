@@ -785,6 +785,21 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   /**
+   * Every wire model a binding may route to, without reserving a pool or starting inference. Prompt
+   * selection uses the whole set: a class that spans different harness profiles cannot truthfully
+   * select one variant before load balancing picks a model.
+   */
+  public Set<String> wireModelsFor(String specifier) {
+    String target = resolveSpecifier(specifier);
+    Set<String> models = new java.util.TreeSet<>();
+    for (LlmPool pool : pools) {
+      String model = pool.resolve(target);
+      if (model != null) models.add(model);
+    }
+    return Set.copyOf(models);
+  }
+
+  /**
    * Every pool, in the order the operator declared them. The swarm scheduler reads its ceilings
    * from here (spec 2026-09-29 §5); nothing routes through this.
    */

@@ -186,6 +186,8 @@ public final class AgentRegistry {
   private static final Set<String> KNOWN_KEYS =
       Set.of(
           NAME,
+          "alias",
+          "guidance",
           "display-name",
           DESCRIPTION,
           MODEL,
@@ -311,6 +313,8 @@ public final class AgentRegistry {
   private static final Set<String> AUTHORS_A_MEMORY = Set.of(MemoryTools.WRITE_NAME);
 
   private final Map<String, AgentDefinition> byName;
+  private final AgentGuidance guidance;
+  private final Map<String, List<AgentDefinition>> aliases;
   private final Map<String, String> disabled;
   private final Map<String, String> withheldEdges;
   private final Map<String, String> withheldTools;
@@ -436,13 +440,21 @@ public final class AgentRegistry {
    * typo it was always meant to catch.
    */
   public AgentRegistry(Loaded loaded) {
+    this(loaded, AgentGuidance.NONE);
+  }
+
+  /** Uses model guidance to select aliases; concrete definitions remain immutable and named. */
+  public AgentRegistry(Loaded loaded, AgentGuidance guidance) {
     Objects.requireNonNull(loaded, "loaded");
     Map<String, AgentDefinition> copy = Map.copyOf(loaded.enabled());
     requireKeysAreNames(copy);
     Set<String> defined = new TreeSet<>(copy.keySet());
     defined.addAll(loaded.disabled().keySet());
+    defined.addAll(AgentAliases.families(copy).keySet());
     requireValidSet(copy, defined);
     this.byName = copy;
+    this.guidance = Objects.requireNonNull(guidance, "guidance");
+    this.aliases = AgentAliases.families(copy);
     this.disabled = Collections.unmodifiableMap(new TreeMap<>(loaded.disabled()));
     this.withheldEdges = Collections.unmodifiableMap(new TreeMap<>(loaded.withheldEdges()));
     this.withheldTools = Collections.unmodifiableMap(new TreeMap<>(loaded.withheldTools()));
@@ -472,6 +484,9 @@ public final class AgentRegistry {
    *     was refused is not a typo in its caller's file
    */
   private static void requireValidSet(Map<String, AgentDefinition> byName, Set<String> defined) {
+    Map<String, String> aliasFaults = AgentAliases.faults(byName);
+    if (!aliasFaults.isEmpty())
+      throw new IllegalStateException(new TreeMap<>(aliasFaults).values().iterator().next());
     // Over a copy, because the drop passes rewrite the callers they narrow
     // and this door narrows nothing: a map handed in by a caller is either
     // valid as written or refused. `required` is "everything" here for the
@@ -539,7 +554,8 @@ public final class AgentRegistry {
   }
 
   /**
-   * The definition registered under {@code name}.
+   * The concrete definition addressed by {@code name}, or the variant selected for an alias. Alias
+   * selection returns the variant's own identity, never a renamed executable definition.
    *
    * <p>Every callee named by a loaded definition was checked to exist at load, so a miss here came
    * from outside the graph — an MCP request naming an agent nobody wrote. That is a caller's
@@ -556,7 +572,8 @@ public final class AgentRegistry {
   }
 
   /**
-   * The definition registered under {@code name}, or empty when this process serves no such agent.
+   * The concrete definition addressed by {@code name}, or empty when this process serves none. A
+   * logical alias resolves its model profile before selecting one immutable variant.
    *
    * <p>{@link #get}'s question without {@link #get}'s answer to a miss, for the one caller that has
    * to ask before it has anywhere to report a failure. {@code AgentRunTool} builds its schema in
@@ -570,12 +587,22 @@ public final class AgentRegistry {
    * #get} is written in terms of it so the two cannot disagree about what is registered.
    */
   public Optional<AgentDefinition> find(String name) {
-    return Optional.ofNullable(byName.get(name));
+    List<AgentDefinition> candidates = aliases.get(name);
+    if (candidates == null) return Optional.ofNullable(byName.get(name));
+    return Optional.of(
+        AgentAliases.select(candidates, guidance.profileFor(candidates.getFirst().model())));
+  }
+
+  /** Looks up a recorded concrete identity without reselecting a logical alias on continuation. */
+  public Optional<AgentDefinition> findConcrete(String name) {
+    return name == null ? Optional.empty() : Optional.ofNullable(byName.get(name));
   }
 
   /** The names this registry serves, sorted, for messages and listings. */
   public Set<String> names() {
-    return Collections.unmodifiableSet(new TreeSet<>(byName.keySet()));
+    TreeSet<String> names = new TreeSet<>(byName.keySet());
+    names.addAll(aliases.keySet());
+    return Collections.unmodifiableSet(names);
   }
 
   /**
@@ -594,6 +621,11 @@ public final class AgentRegistry {
     return Map.copyOf(byName);
   }
 
+  /** Revalidates a merged tier while retaining this registry's model-guidance resolver. */
+  AgentRegistry replacing(Map<String, AgentDefinition> definitions) {
+    return new AgentRegistry(new Loaded(definitions, Map.of(), Map.of()), guidance);
+  }
+
   /**
    * The names anything outside this server may name, sorted.
    *
@@ -610,6 +642,10 @@ public final class AgentRegistry {
       if (definition.exported()) {
         exported.add(definition.name());
       }
+    }
+    for (String alias : aliases.keySet()) {
+      if (get(alias).exported()) exported.add(alias);
+      else exported.remove(alias);
     }
     return Collections.unmodifiableSet(exported);
   }
@@ -834,10 +870,15 @@ public final class AgentRegistry {
       }
     }
 
-    // Every name an entry here claims, whether or not that entry parsed.
-    // Fixed before any disabling, because the unknown-callee check asks
-    // whether a name was ever written and not whether it is being served.
+    // Capture alias addresses before disabling a malformed family. Calls to a known but
+    // disabled alias stay inert grants, exactly like calls to disabled concrete definitions.
+    List<Fault> aliasFaults =
+        new TreeMap<>(AgentAliases.faults(enabled))
+            .entrySet().stream().map(entry -> new Fault(entry.getKey(), entry.getValue())).toList();
+    Set<String> aliasesDefined = AgentAliases.families(enabled).keySet();
+    refuse(enabled, disabled, required, aliasFaults);
     Set<String> defined = new TreeSet<>(enabled.keySet());
+    defined.addAll(aliasesDefined);
     defined.addAll(disabled.keySet());
     // Names this source may name without defining, because some other
     // already-validated set defines them -- see this overload's own
@@ -1138,6 +1179,13 @@ public final class AgentRegistry {
 
     boolean board = requireBoolean(entry, keys, BOARD, false);
     boolean bot = requireBoolean(entry, keys, BOT, false);
+    String alias = optionalString(entry, keys, "alias");
+    String guidance = optionalString(entry, keys, "guidance");
+    try {
+      AgentAliases.validateSelection(name, alias, guidance, bot);
+    } catch (IllegalArgumentException invalid) {
+      throw new IllegalStateException(refusal(entry) + ": " + invalid.getMessage(), invalid);
+    }
 
     return new Parsed(
         new AgentDefinition(
@@ -1163,7 +1211,9 @@ public final class AgentRegistry {
             board,
             requireStringList(entry, keys, SKILLS),
             optionalString(entry, keys, "display-name"),
-            entry.origin()),
+            entry.origin(),
+            alias,
+            guidance),
         Collections.unmodifiableMap(new LinkedHashMap<>(extras)));
   }
 
@@ -2009,8 +2059,12 @@ public final class AgentRegistry {
           withheld.put(callerName + " -> " + calleeName, reason);
           continue;
         }
-        AgentDefinition callee = byName.get(calleeName);
-        if (callee != null && (callee.bot() || !callee.delegable())) {
+        AgentDefinition callee =
+            AgentAliases.targets(byName, calleeName).stream()
+                .filter(target -> target.bot() || !target.delegable())
+                .findFirst()
+                .orElse(null);
+        if (callee != null) {
           String reason =
               "the agent '"
                   + callerName
@@ -2024,7 +2078,7 @@ public final class AgentRegistry {
                   + " refusal from '"
                   + calleeName
                   + "'";
-          if (required.test(callerName) || required.test(calleeName)) {
+          if (required.test(callerName) || required.test(callee.name())) {
             throw new IllegalStateException(reason);
           }
           withheld.put(callerName + " -> " + calleeName, reason);
@@ -2084,8 +2138,13 @@ public final class AgentRegistry {
       AgentDefinition caller = byName.get(callerName);
       List<String> kept = new ArrayList<>();
       for (String calleeName : caller.calls()) {
-        AgentDefinition callee = byName.get(calleeName);
-        if (callee == null) {
+        List<AgentDefinition> targets = AgentAliases.targets(byName, calleeName);
+        AgentDefinition callee =
+            targets.stream()
+                .filter(target -> escalatingGrant(caller, target).isPresent())
+                .findFirst()
+                .orElse(null);
+        if (targets.isEmpty()) {
           // A callee that is defined and not served. The grant is
           // inert either way, and the edge is left as the file wrote
           // it: nothing here is wrong, and rewriting the caller would
@@ -2093,7 +2152,7 @@ public final class AgentRegistry {
           kept.add(calleeName);
           continue;
         }
-        Grant escalating = escalatingGrant(caller, callee).orElse(null);
+        Grant escalating = callee == null ? null : escalatingGrant(caller, callee).orElseThrow();
         if (escalating == null) {
           kept.add(calleeName);
           continue;
@@ -2117,7 +2176,7 @@ public final class AgentRegistry {
                 + "', or widen '"
                 + callerName
                 + "'";
-        if (required.test(callerName) || required.test(calleeName)) {
+        if (required.test(callerName) || required.test(callee.name())) {
           throw new IllegalStateException(reason);
         }
         withheld.put(callerName + " -> " + calleeName, reason);
@@ -2177,7 +2236,9 @@ public final class AgentRegistry {
         caller.board(),
         caller.skills(),
         caller.displayName(),
-        caller.origin());
+        caller.origin(),
+        caller.alias(),
+        caller.guidance());
   }
 
   /**
@@ -2344,16 +2405,10 @@ public final class AgentRegistry {
     }
     marks.put(name, Mark.ON_STACK);
     path.add(name);
-    for (String callee : byName.get(name).calls()) {
-      // Absent when the callee was defined and not served. Not an edge in
-      // any graph this walk is about: an inert grant cannot be a step in a
-      // job tree, because no job is ever started down it.
-      if (!byName.containsKey(callee)) {
-        continue;
-      }
-      List<String> cycle = walk(callee, byName, marks, path);
-      if (cycle != null) {
-        return cycle;
+    for (String requested : byName.get(name).calls()) {
+      for (AgentDefinition callee : AgentAliases.targets(byName, requested)) {
+        List<String> cycle = walk(callee.name(), byName, marks, path);
+        if (cycle != null) return cycle;
       }
     }
     path.remove(path.size() - 1);

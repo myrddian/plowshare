@@ -52,7 +52,8 @@ public class ApprovalsConfig {
               @Override
               public void speak(String conversation, String agent, String text, Speaker speaker) {
                 AgentDefinition definition =
-                    callers.requireAgent(agent, callers.callerForConversation(conversation, null));
+                    callers.requirePinnedAgent(
+                        agent, callers.callerForConversation(conversation, null));
                 turn.deliver(conversation, definition, text, speaker, outcome -> {});
               }
             },

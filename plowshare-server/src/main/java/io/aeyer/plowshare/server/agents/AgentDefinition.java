@@ -95,12 +95,14 @@ import java.util.Set;
  * to be told about the inbox has not asked, and every file written before this key existed keeps
  * its meaning unedited.
  *
- * <p><b>Values are taken as given, and only nullity is checked here.</b> The same division {@code
- * LlmPool} draws with {@code LlmConfig}: every definition is built by {@link AgentRegistry#load}
- * out of a parsed file, and that is where a blank model, a non-positive budget or a sampling value
- * that is not a finite number has to be refused — at boot, naming the file and the frontmatter key
- * an operator would have to edit. A second guard here would report the same fault later with less
- * to say about it. Nothing else may construct one without that check.
+ * <p><b>Inference values are taken as given, and nullity is checked here.</b> The same division
+ * {@code LlmPool} draws with {@code LlmConfig}: every definition is built by {@link
+ * AgentRegistry#load} out of a parsed file, and that is where a blank model, a non-positive budget
+ * or a sampling value that is not a finite number has to be refused — at boot, naming the file and
+ * the frontmatter key an operator would have to edit. A second guard here would report the same
+ * fault later with less to say about it. Nothing else may construct one without that check. Alias
+ * membership and its closed guidance values are also checked here, so programmatic copies retain
+ * the same selection invariants as authored definitions.
  */
 public record AgentDefinition(
     String name,
@@ -126,7 +128,62 @@ public record AgentDefinition(
     boolean board,
     List<String> skills,
     String displayName,
-    String origin) {
+    String origin,
+    String alias,
+    String guidance) {
+
+  /** Existing definitions have no alias or guidance selector. */
+  public AgentDefinition(
+      String name,
+      String description,
+      String model,
+      Sampling.Intent intent,
+      Sampling sampling,
+      List<String> tools,
+      List<String> calls,
+      List<Grant> scopes,
+      int maxTurns,
+      int maxModelCalls,
+      String prompt,
+      boolean exported,
+      boolean delegable,
+      boolean vision,
+      boolean bot,
+      boolean announcesInbox,
+      Fallback fallback,
+      List<String> orchestrations,
+      String reviewWith,
+      boolean board,
+      List<String> skills,
+      String displayName,
+      String origin) {
+    this(
+        name,
+        description,
+        model,
+        intent,
+        sampling,
+        tools,
+        calls,
+        scopes,
+        maxTurns,
+        maxModelCalls,
+        prompt,
+        exported,
+        delegable,
+        vision,
+        bot,
+        announcesInbox,
+        fallback,
+        orchestrations,
+        reviewWith,
+        board,
+        skills,
+        displayName,
+        origin,
+        null,
+        null);
+  }
 
   /** Legacy programmatic definitions have no authored display label or file origin. */
   public AgentDefinition(
@@ -418,7 +475,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /**
@@ -449,7 +508,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /** The pre-skills shape: an ordinary agent gets no implicit skill grant. */
@@ -527,7 +588,9 @@ public record AgentDefinition(
         board,
         granted,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   AgentDefinition withCalls(List<String> granted) {
@@ -554,7 +617,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /** The pre-board shape: an undeclared grant allows no topic openings. */
@@ -877,6 +942,7 @@ public record AgentDefinition(
    * by tests rather than merely asserted to differ.
    */
   public AgentDefinition {
+    AgentAliases.validateSelection(name, alias, guidance, bot);
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(description, "description");
     Objects.requireNonNull(model, "model");
@@ -946,7 +1012,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   public AgentDefinition withTools(List<String> tools) {
@@ -973,7 +1041,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /**
@@ -1006,7 +1076,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /**
@@ -1048,7 +1120,9 @@ public record AgentDefinition(
         board,
         skills,
         displayName,
-        origin);
+        origin,
+        alias,
+        guidance);
   }
 
   /**
