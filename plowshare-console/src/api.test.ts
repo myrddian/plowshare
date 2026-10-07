@@ -347,6 +347,46 @@ describe('refresh coordination across browser tabs', () => {
 });
 
 describe('session recovery availability', () => {
+  it('requires current, direct authority for every probe and refuses redirect replay of refresh', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    fetchMock.mockImplementation(async (path: string, init: RequestInit) => {
+      calls.push(path);
+      expect(init.cache).toBe('no-store');
+      expect(init.redirect).toBe('error');
+      expect(init.credentials).toBe('same-origin');
+      if (path === '/v1/auth/refresh') {
+        // Fetch rejects a redirect rather than resending this POST. Delivery
+        // to the first endpoint is still uncertain, so another owner may only probe.
+        throw new TypeError('redirect refused');
+      }
+      return new Response(null, { status: 401 });
+    });
+    await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+    vi.resetModules();
+    const reloaded = await import('./api');
+    await expect(reloaded.recoverSession()).resolves.toBe('unavailable');
+    expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBe(
+      'pending',
+    );
+  });
+
+  it('reconciles an uncertain refresh only with an uncached, direct session probe', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    storage.setItem('plowshare-session-refresh-uncertain', 'pending');
+    fetchMock.mockImplementation(async (path: string, init: RequestInit) => {
+      calls.push(path);
+      expect(init.cache).toBe('no-store');
+      expect(init.redirect).toBe('error');
+      return new Response(null, { status: 204 });
+    });
+    await isolated.reconcileSessionRefresh();
+    expect(calls).toEqual(['/v1/auth/session']);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBeNull();
+  });
+
   it.each(['lost', 'unhealthy'])(
     'keeps an uncertain %s refresh distinct from sign-out and does not replay it',
     async (failure) => {

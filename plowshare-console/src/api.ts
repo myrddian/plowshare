@@ -105,6 +105,19 @@ let refreshInFlight: Promise<boolean> | null = null;
 const REFRESH_UNCERTAIN = 'plowshare-session-refresh-uncertain';
 const REFRESH_LOCK = 'plowshare-session-refresh';
 
+/** Read the cookie session from the server, never from a cached or redirected
+ * response. A stale 204 cannot establish current authority or reconcile a
+ * possibly spent refresh cookie. This probe does not renew either cookie. */
+export function probeCookieSession(): Promise<Response> {
+  return fetch('/v1/auth/session', {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
 /** After login or reload establishes a session, reconcile an older uncertain
  * rotation under the same lock. The extra probe is only needed when a marker
  * exists; its failure leaves the marker intact and never submits a refresh. */
@@ -117,11 +130,7 @@ export async function reconcileSessionRefresh(): Promise<void> {
     return;
   await locks.request(REFRESH_LOCK, async () => {
     if (window.localStorage.getItem(REFRESH_UNCERTAIN) === null) return;
-    const probe = await fetch('/v1/auth/session', {
-      method: 'GET',
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(10_000),
-    });
+    const probe = await probeCookieSession();
     if (probe.status === 204) window.localStorage.removeItem(REFRESH_UNCERTAIN);
   });
 }
@@ -147,6 +156,10 @@ function refreshOnce(): Promise<boolean> {
       const response = await fetch(REFRESH_PATH, {
         method: 'POST',
         credentials: 'same-origin',
+        cache: 'no-store',
+        // Following 307/308 would submit the rotating mutation again at the
+        // redirect target. Refuse all redirects and retain uncertainty instead.
+        redirect: 'error',
         signal: AbortSignal.timeout(10_000),
       });
       if (
@@ -168,11 +181,7 @@ function refreshOnce(): Promise<boolean> {
           'Automatic session refresh requires browser Web Locks. Reload to sign in, or use a secure console origin in a supported browser.',
         );
       return await locks.request(REFRESH_LOCK, async () => {
-        const probe = await fetch('/v1/auth/session', {
-          method: 'GET',
-          credentials: 'same-origin',
-          signal: AbortSignal.timeout(10_000),
-        });
+        const probe = await probeCookieSession();
         if (probe.status === 204) {
           window.localStorage.removeItem(REFRESH_UNCERTAIN);
           return true;
@@ -445,6 +454,9 @@ export async function recoverSession(): Promise<
 > {
   try {
     const response = await request('/v1/auth/session', {
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     });
     if (response.status === 204) await reconcileSessionRefresh();

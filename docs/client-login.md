@@ -174,6 +174,14 @@ error or unexpected session response shows an unavailable state with **Retry
 connection**; it does not establish that the account is signed out. Retry reads
 session status without renewing a bootstrap token or submitting work.
 
+Session probes bypass browser caches and refuse redirects. Authentication
+responses, including login, refresh and refused session probes, carry
+`Cache-Control: no-store` from the server filter. A cached successful probe cannot
+establish current authority after revocation or reconcile uncertain rotation.
+Refresh also refuses redirects: following a 307 or 308 would submit the rotating
+POST to another target. A redirect failure preserves the uncertainty marker;
+subsequent recovery only probes the session and does not repeat that rotation.
+
 Automatic cookie rotation requires Web Locks and writable browser storage. The
 origin lock serializes participating tabs, and a non-secret uncertainty marker
 prevents another tab or reload from repeating a rotation whose reply was lost.
@@ -187,6 +195,20 @@ connection-close fixture received duplicate arrivals for one instrumented fetch.
 The current refresh endpoint has no request-id/receipt reconciliation contract;
 transport-level duplication remains an unresolved authentication boundary and
 requires a server-owned design rather than a client retry workaround.
+This observation is consistent with Chromium's
+[network transaction retry logic](https://chromium.googlesource.com/chromium/src/+/HEAD/net/http/http_network_transaction.cc#2392),
+which can resend on a reused connection when no response headers arrived.
+That source comparison does not identify the exact stack responsible for the
+fixture's arrivals.
+
+The existing server deliberately revokes the whole session chain when an
+unexpired spent refresh token is reused. Account sessions retain only token
+digests, so they cannot return the previously issued cookie pair as a receipt.
+A new request identifier by itself would not distinguish a duplicate transport
+delivery from replay of the entire captured request. This slice preserves reuse
+revocation: it adds no grace interval, stored plaintext tokens or automatic
+resubmission. If a direct session probe cannot establish access after uncertain
+rotation, reload and sign in again. Admitted work remains on the server.
 
 A refused single-use bootstrap token cannot be renewed by reloading. Use an
 existing account, or ask the operator for the current handoff from the configured

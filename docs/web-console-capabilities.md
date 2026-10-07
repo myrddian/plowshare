@@ -28,7 +28,9 @@ runtime configuration remain explicit HTTP boundaries. A stale comment mentionin
 client assets must be checked separately from server image revision labels and
 authenticated runtime observations.
 
-Application refreshes are coordinated and never deliberately replayed. This does
+Client refresh calls are coordinated and never deliberately replayed. Rotation
+refuses HTTP redirects and session probes require uncached, direct responses;
+authentication responses carry `Cache-Control: no-store`. These safeguards do
 not prove exactly-once HTTP delivery: abrupt-close fixture tracing observed
 multiple arrivals carrying the same per-fetch diagnostic ID. The current refresh
 endpoint has no public receipt reconciliation contract for that duplication;

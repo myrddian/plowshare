@@ -1,5 +1,5 @@
 import { background } from './background.ts';
-import { reconcileSessionRefresh } from './api';
+import { probeCookieSession, reconcileSessionRefresh } from './api';
 import { bootstrapFromUrl, type BootstrapOutcome } from './auth';
 import { createLogin } from './screens/login';
 import { createPassword } from './screens/password';
@@ -82,11 +82,7 @@ export type SessionState =
 export async function probeSession(): Promise<SessionState> {
   let response: Response;
   try {
-    response = await fetch('/v1/auth/session', {
-      method: 'GET',
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(10_000),
-    });
+    response = await probeCookieSession();
   } catch {
     return 'unavailable';
   }

@@ -90,6 +90,20 @@ describe('gate', () => {
 describe('probeSession, and gate acting on what it reports', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
+  it('bypasses cached authority and refuses a redirect during startup', async () => {
+    fetchMock.mockRejectedValue(new TypeError('redirect refused'));
+    await expect(probeSession()).resolves.toBe('unavailable');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/auth/session',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'error',
+        credentials: 'same-origin',
+      }),
+    );
+  });
+
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

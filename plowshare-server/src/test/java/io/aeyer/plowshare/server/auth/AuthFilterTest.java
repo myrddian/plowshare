@@ -764,6 +764,47 @@ class AuthFilterTest {
 
   // --- what a refusal may not say -----------------------------------------
 
+  @Test
+  void authentication_responses_are_not_cacheable_even_when_refused_or_auth_is_disabled()
+      throws Exception {
+    AuthProperties properties = new AuthProperties();
+    TokenStore store =
+        new TokenStore(
+            new Ticking(),
+            properties.getAccessLifetime(),
+            properties.getRefreshLifetime(),
+            properties.getTicketLifetime());
+    String access = store.issuePair().access();
+    for (boolean enabled : List.of(true, false)) {
+      properties.setEnabled(enabled);
+      AuthFilter filter = new AuthFilter(store, properties);
+      for (String route : List.of("/v1/auth/session", "/v1/auth/login", "/v1/auth/refresh")) {
+        for (boolean authenticated : List.of(true, false)) {
+          MockHttpServletRequest request = new MockHttpServletRequest("GET", route);
+          request.setServletPath(route);
+          if (authenticated) request.addHeader("Authorization", "Bearer " + access);
+          MockHttpServletResponse response = new MockHttpServletResponse();
+          filter.doFilter(request, response, (req, res) -> response.setStatus(204));
+          assertEquals("no-store", response.getHeader("Cache-Control"));
+          assertEquals(
+              enabled && !authenticated && route.equals("/v1/auth/session") ? 401 : 204,
+              response.getStatus());
+        }
+      }
+    }
+  }
+
+  @Test
+  void authentication_cache_policy_does_not_replace_static_asset_caching() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/console.js");
+    request.setServletPath("/console.js");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    new AuthFilter(tokens, new AuthProperties())
+        .doFilter(
+            request, response, (req, res) -> response.setHeader("Cache-Control", "max-age=60"));
+    assertEquals("max-age=60", response.getHeader("Cache-Control"));
+  }
+
   /**
    * An expired token is refused, and the refusal names no token.
    *
