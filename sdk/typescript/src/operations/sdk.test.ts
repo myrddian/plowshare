@@ -48,6 +48,72 @@ class Wire implements Socket {
 }
 
 describe('validated public SDK contracts', () => {
+  it('exposes typed Relay methods without acknowledging reads or replaying foreign replies', async () => {
+    const wire = new Wire(),
+      client = new Plowshare({ socket: wire });
+    const id = '11111111-1111-1111-1111-111111111111';
+    const published = client.publishRelay({
+      requestId: id,
+      project: 'fixture',
+      topic: 'checks.requests',
+      text: 'complete message',
+      occurredAt: '2026-10-08T00:00:00Z',
+    });
+    wire.answer('OK', {
+      requestId: id,
+      project: 'fixture',
+      topic: 'checks.requests',
+      position: '1',
+      publishedAt: '2026-10-08T00:00:00Z',
+    });
+    expectTypeOf(requirePayload(await published)).toEqualTypeOf<
+      Replies['relay.publish']
+    >();
+    const consumption = {
+      project: 'fixture',
+      topic: 'checks.requests',
+      group: 'detectors',
+      consumerId: id,
+      start: 'OLDEST_RETAINED' as const,
+    };
+    const reading = client.consumeRelay(consumption);
+    const empty = {
+      ...consumption,
+      status: 'EMPTY',
+      batchId: null,
+      fence: null,
+      through: '0',
+      expiresAt: null,
+      expiredThrough: null,
+      events: [],
+    };
+    wire.answer('OK', empty);
+    expectTypeOf(requirePayload(await reading)).toEqualTypeOf<
+      Replies['relay.consume']
+    >();
+    expect(wire.sent).toHaveLength(2);
+    const acknowledgement = client.acknowledgeRelay({
+      project: 'fixture',
+      topic: 'checks.requests',
+      group: 'detectors',
+      consumerId: id,
+      batchId: id,
+      fence: '1',
+    });
+    wire.answer('BAD_REQUEST');
+    const refused = await acknowledgement;
+    expect(() => requirePayload(refused)).toThrow(Refusal);
+    const foreign = client.consumeRelay(consumption);
+    wire.answer('OK', {
+      ...empty,
+      consumerId: '22222222-2222-2222-2222-222222222222',
+    });
+    await expect(foreign).rejects.toMatchObject({
+      delivery: 'INVALID_RESPONSE',
+    });
+    expect(wire.sent).toHaveLength(4);
+    client.close();
+  });
   it('pairs typed results with their operation and strips unknown output fields', async () => {
     const wire = new Wire(),
       client = new Plowshare({ socket: wire });

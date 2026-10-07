@@ -1,0 +1,943 @@
+{
+  "categories": [
+    {
+      "category_name": "prompt_injection_data_exfiltration",
+      "description": "Detects attempts to extract training data, internal information, or user data through prompts",
+      "default_action": "BLOCK",
+      "identifier_words": [
+        "extract",
+        "leak",
+        "exfiltrate",
+        "dump",
+        "retrieve",
+        "access",
+        "steal",
+        "obtain",
+        "harvest",
+        "scrape",
+        "collect",
+        "gather",
+        "expose",
+        "export",
+        "download",
+        "copy",
+        "siphon"
+      ],
+      "additional_block_words": [
+        "training data",
+        "training set",
+        "training examples",
+        "internal data",
+        "internal information",
+        "database contents",
+        "database records",
+        "user data",
+        "user records",
+        "user information",
+        "personal data",
+        "private information",
+        "private data",
+        "confidential data",
+        "confidential information",
+        "sensitive data",
+        "sensitive information",
+        "customer data",
+        "customer records",
+        "employee data",
+        "employee records",
+        "credentials",
+        "passwords",
+        "API keys",
+        "access tokens",
+        "secret keys",
+        "encryption keys",
+        "private keys",
+        "session tokens",
+        "authentication tokens",
+        "model weights",
+        "model parameters",
+        "source code",
+        "proprietary code",
+        "intellectual property"
+      ],
+      "always_block_keywords": [
+        {
+          "keyword": "extract training data",
+          "severity": "high"
+        },
+        {
+          "keyword": "leak internal data",
+          "severity": "high"
+        },
+        {
+          "keyword": "dump database",
+          "severity": "high"
+        },
+        {
+          "keyword": "dump all records",
+          "severity": "high"
+        },
+        {
+          "keyword": "show all user data",
+          "severity": "high"
+        },
+        {
+          "keyword": "list all users",
+          "severity": "medium"
+        },
+        {
+          "keyword": "list all passwords",
+          "severity": "high"
+        },
+        {
+          "keyword": "show all API keys",
+          "severity": "high"
+        },
+        {
+          "keyword": "reveal all credentials",
+          "severity": "high"
+        },
+        {
+          "keyword": "expose customer data",
+          "severity": "high"
+        },
+        {
+          "keyword": "steal user information",
+          "severity": "high"
+        },
+        {
+          "keyword": "exfiltrate data",
+          "severity": "high"
+        },
+        {
+          "keyword": "harvest email addresses",
+          "severity": "high"
+        },
+        {
+          "keyword": "scrape personal information",
+          "severity": "high"
+        },
+        {
+          "keyword": "extract model weights",
+          "severity": "high"
+        },
+        {
+          "keyword": "steal source code",
+          "severity": "high"
+        },
+        {
+          "keyword": "copy proprietary code",
+          "severity": "high"
+        },
+        {
+          "keyword": "download private data",
+          "severity": "high"
+        },
+        {
+          "keyword": "access confidential files",
+          "severity": "high"
+        },
+        {
+          "keyword": "retrieve secret keys",
+          "severity": "high"
+        }
+      ],
+      "exceptions": [
+        "data extraction pipeline",
+        "ETL",
+        "data science",
+        "data engineering",
+        "data migration",
+        "backup and recovery",
+        "data export feature",
+        "GDPR data request",
+        "right to access",
+        "data portability",
+        "legitimate data access",
+        "authorized data retrieval",
+        "data loss prevention",
+        "DLP"
+      ]
+    },
+    {
+      "category_name": "prompt_injection_jailbreak",
+      "description": "Detects jailbreak attempts including DAN, roleplay attacks, and safety bypass requests",
+      "default_action": "BLOCK",
+      "identifier_words": [
+        "pretend",
+        "roleplay",
+        "act as",
+        "imagine you are",
+        "suppose you are",
+        "you are now",
+        "behave as",
+        "respond as",
+        "simulate",
+        "emulate",
+        "impersonate",
+        "transform into",
+        "become",
+        "play the role",
+        "switch to",
+        "enter",
+        "enable",
+        "activate",
+        "turn on"
+      ],
+      "additional_block_words": [
+        "no restrictions",
+        "no rules",
+        "no guidelines",
+        "no filters",
+        "no limitations",
+        "no boundaries",
+        "no censorship",
+        "no moderation",
+        "no safety",
+        "no ethical",
+        "bypass",
+        "override",
+        "unrestricted",
+        "unfiltered",
+        "uncensored",
+        "unmoderated",
+        "unlimited",
+        "without limits",
+        "without restrictions",
+        "without rules",
+        "without guidelines",
+        "without filters",
+        "anything mode",
+        "god mode",
+        "developer mode",
+        "debug mode",
+        "test mode",
+        "admin mode",
+        "root mode",
+        "superuser",
+        "evil mode",
+        "chaos mode",
+        "unrestricted mode",
+        "opposite mode"
+      ],
+      "always_block_keywords": [
+        {
+          "keyword": "DAN mode",
+          "severity": "high"
+        },
+        {
+          "keyword": "Do Anything Now",
+          "severity": "high"
+        },
+        {
+          "keyword": "developer mode enabled",
+          "severity": "high"
+        },
+        {
+          "keyword": "jailbreak",
+          "severity": "high"
+        },
+        {
+          "keyword": "jailbroken",
+          "severity": "high"
+        },
+        {
+          "keyword": "bypass safety",
+          "severity": "high"
+        },
+        {
+          "keyword": "bypass filters",
+          "severity": "high"
+        },
+        {
+          "keyword": "bypass content filter",
+          "severity": "high"
+        },
+        {
+          "keyword": "bypass moderation",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore safety guidelines",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore content policy",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore ethical guidelines",
+          "severity": "high"
+        },
+        {
+          "keyword": "without restrictions",
+          "severity": "medium"
+        },
+        {
+          "keyword": "without safety",
+          "severity": "high"
+        },
+        {
+          "keyword": "without filters",
+          "severity": "medium"
+        },
+        {
+          "keyword": "remove all restrictions",
+          "severity": "high"
+        },
+        {
+          "keyword": "disable safety",
+          "severity": "high"
+        },
+        {
+          "keyword": "disable content filter",
+          "severity": "high"
+        },
+        {
+          "keyword": "disable moderation",
+          "severity": "high"
+        },
+        {
+          "keyword": "turn off safety",
+          "severity": "high"
+        },
+        {
+          "keyword": "turn off filters",
+          "severity": "high"
+        },
+        {
+          "keyword": "respond in base64",
+          "severity": "high"
+        },
+        {
+          "keyword": "encode your response",
+          "severity": "medium"
+        },
+        {
+          "keyword": "answer in rot13",
+          "severity": "high"
+        },
+        {
+          "keyword": "respond in hex",
+          "severity": "high"
+        },
+        {
+          "keyword": "use pig latin",
+          "severity": "medium"
+        },
+        {
+          "keyword": "respond backwards",
+          "severity": "medium"
+        },
+        {
+          "keyword": "spell it out letter by letter",
+          "severity": "medium"
+        }
+      ],
+      "exceptions": [
+        "jailbreak prevention",
+        "security research",
+        "red team",
+        "red teaming",
+        "AI safety research",
+        "AI alignment",
+        "prompt injection defense",
+        "how to prevent jailbreaks",
+        "jailbreak detection",
+        "content moderation research",
+        "safety evaluation"
+      ]
+    },
+    {
+      "category_name": "prompt_injection_malicious_code",
+      "description": "Detects attempts to inject or execute malicious code via prompts",
+      "default_action": "BLOCK",
+      "identifier_words": [
+        "execute",
+        "run",
+        "eval",
+        "exec",
+        "spawn",
+        "system",
+        "shell",
+        "invoke",
+        "call",
+        "launch",
+        "process",
+        "compile",
+        "interpret",
+        "inject"
+      ],
+      "additional_block_words": [
+        "rm -rf",
+        "rm -f",
+        "chmod 777",
+        "chmod +x",
+        "sudo",
+        "su root",
+        "curl | bash",
+        "curl | sh",
+        "wget -O -",
+        "wget | sh",
+        "/etc/passwd",
+        "/etc/shadow",
+        "mkfs",
+        "dd if=",
+        "> /dev/sda",
+        "fork bomb",
+        "crontab",
+        "nc -e",
+        "netcat",
+        "ncat",
+        "reverse shell",
+        "powershell -enc",
+        "powershell -e",
+        "base64 -d",
+        "base64 --decode",
+        "<script>",
+        "javascript:",
+        "onerror=",
+        "onload=",
+        "document.cookie",
+        "innerHTML",
+        "__import__",
+        "os.system",
+        "subprocess",
+        "os.popen",
+        "importlib"
+      ],
+      "always_block_keywords": [
+        {
+          "keyword": "rm -rf /",
+          "severity": "high"
+        },
+        {
+          "keyword": "rm -rf /*",
+          "severity": "high"
+        },
+        {
+          "keyword": "rm -rf ~",
+          "severity": "high"
+        },
+        {
+          "keyword": ":(){ :|:& };:",
+          "severity": "high"
+        },
+        {
+          "keyword": "> /dev/sda",
+          "severity": "high"
+        },
+        {
+          "keyword": "mkfs.ext4 /dev/sda",
+          "severity": "high"
+        },
+        {
+          "keyword": "dd if=/dev/zero of=/dev/sda",
+          "severity": "high"
+        },
+        {
+          "keyword": "curl | sh",
+          "severity": "high"
+        },
+        {
+          "keyword": "curl | bash",
+          "severity": "high"
+        },
+        {
+          "keyword": "wget | sh",
+          "severity": "high"
+        },
+        {
+          "keyword": "wget | bash",
+          "severity": "high"
+        },
+        {
+          "keyword": "eval(base64",
+          "severity": "high"
+        },
+        {
+          "keyword": "eval(atob(",
+          "severity": "high"
+        },
+        {
+          "keyword": "python -c 'import os",
+          "severity": "high"
+        },
+        {
+          "keyword": "python3 -c 'import os",
+          "severity": "high"
+        },
+        {
+          "keyword": "bash -i >& /dev/tcp",
+          "severity": "high"
+        },
+        {
+          "keyword": "nc -e /bin/sh",
+          "severity": "high"
+        },
+        {
+          "keyword": "nc -e /bin/bash",
+          "severity": "high"
+        },
+        {
+          "keyword": "sudo chmod 777 /",
+          "severity": "high"
+        },
+        {
+          "keyword": "echo ALL=(ALL) NOPASSWD",
+          "severity": "high"
+        },
+        {
+          "keyword": "cat /etc/shadow",
+          "severity": "high"
+        },
+        {
+          "keyword": "<script>alert(",
+          "severity": "medium"
+        },
+        {
+          "keyword": "<script>document.cookie",
+          "severity": "high"
+        },
+        {
+          "keyword": "javascript:void",
+          "severity": "medium"
+        },
+        {
+          "keyword": "powershell -encodedcommand",
+          "severity": "high"
+        },
+        {
+          "keyword": "powershell -enc",
+          "severity": "high"
+        }
+      ],
+      "exceptions": [
+        "code review",
+        "security audit",
+        "security testing",
+        "explain this command",
+        "what does this code do",
+        "vulnerability assessment",
+        "penetration test",
+        "CTF challenge",
+        "security training",
+        "defensive security",
+        "how to prevent",
+        "how to protect",
+        "secure coding",
+        "code analysis"
+      ]
+    },
+    {
+      "category_name": "prompt_injection_sql",
+      "description": "Detects SQL injection attempts embedded in prompts",
+      "default_action": "BLOCK",
+      "identifier_words": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "DROP",
+        "ALTER",
+        "CREATE",
+        "EXEC",
+        "EXECUTE",
+        "TRUNCATE",
+        "GRANT",
+        "REVOKE",
+        "UNION",
+        "SHUTDOWN"
+      ],
+      "additional_block_words": [
+        "1=1",
+        "OR true",
+        "OR 1",
+        "--",
+        "xp_cmdshell",
+        "information_schema",
+        "sys.tables",
+        "sysobjects",
+        "pg_catalog",
+        "pg_tables",
+        "INTO OUTFILE",
+        "INTO DUMPFILE",
+        "LOAD_FILE",
+        "BENCHMARK",
+        "WAITFOR",
+        "HAVING 1=1",
+        "ORDER BY 1",
+        "schema_name",
+        "@@version",
+        "drop table",
+        "drop database",
+        "drop schema",
+        "truncate table",
+        "delete from",
+        "alter table",
+        "union select",
+        "union all select",
+        "grant all"
+      ],
+      "always_block_keywords": [
+        {
+          "keyword": "'; DROP TABLE",
+          "severity": "high"
+        },
+        {
+          "keyword": "'; DELETE FROM",
+          "severity": "high"
+        },
+        {
+          "keyword": "' OR '1'='1",
+          "severity": "high"
+        },
+        {
+          "keyword": "' OR 1=1--",
+          "severity": "high"
+        },
+        {
+          "keyword": "' OR 1=1 --",
+          "severity": "high"
+        },
+        {
+          "keyword": "UNION SELECT * FROM",
+          "severity": "high"
+        },
+        {
+          "keyword": "UNION ALL SELECT",
+          "severity": "high"
+        },
+        {
+          "keyword": "'; EXEC xp_cmdshell",
+          "severity": "high"
+        },
+        {
+          "keyword": "1; DROP TABLE",
+          "severity": "high"
+        },
+        {
+          "keyword": "' UNION SELECT NULL",
+          "severity": "high"
+        },
+        {
+          "keyword": "' UNION SELECT",
+          "severity": "high"
+        },
+        {
+          "keyword": "UNION SELECT NULL",
+          "severity": "high"
+        },
+        {
+          "keyword": "SELECT password FROM",
+          "severity": "high"
+        },
+        {
+          "keyword": "DELETE FROM users",
+          "severity": "high"
+        },
+        {
+          "keyword": "DROP DATABASE",
+          "severity": "high"
+        },
+        {
+          "keyword": "DROP TABLE users",
+          "severity": "high"
+        },
+        {
+          "keyword": "' OR ''='",
+          "severity": "high"
+        },
+        {
+          "keyword": "admin'--",
+          "severity": "high"
+        },
+        {
+          "keyword": "1' OR '1'='1",
+          "severity": "high"
+        },
+        {
+          "keyword": "INFORMATION_SCHEMA.TABLES",
+          "severity": "high"
+        },
+        {
+          "keyword": "INFORMATION_SCHEMA.COLUMNS",
+          "severity": "high"
+        },
+        {
+          "keyword": "INTO OUTFILE",
+          "severity": "high"
+        },
+        {
+          "keyword": "INTO DUMPFILE",
+          "severity": "high"
+        },
+        {
+          "keyword": "LOAD_FILE",
+          "severity": "high"
+        },
+        {
+          "keyword": "WAITFOR DELAY",
+          "severity": "high"
+        },
+        {
+          "keyword": "'; SHUTDOWN --",
+          "severity": "high"
+        },
+        {
+          "keyword": "'; EXEC sp_",
+          "severity": "high"
+        },
+        {
+          "keyword": "xp_cmdshell",
+          "severity": "high"
+        },
+        {
+          "keyword": "sp_addlogin",
+          "severity": "high"
+        },
+        {
+          "keyword": "sp_addsrvrolemember",
+          "severity": "high"
+        },
+        {
+          "keyword": "ORDER BY 1--",
+          "severity": "high"
+        },
+        {
+          "keyword": "GROUP BY 1--",
+          "severity": "high"
+        },
+        {
+          "keyword": "HAVING 1=1",
+          "severity": "high"
+        }
+      ],
+      "exceptions": [
+        "SQL tutorial",
+        "learn SQL",
+        "explain SQL",
+        "what is SQL injection",
+        "SQL syntax",
+        "SQL documentation",
+        "database design",
+        "SQL best practices",
+        "SQL injection prevention",
+        "protect against SQL injection",
+        "how to prevent",
+        "how to protect",
+        "how to defend",
+        "parameterized query",
+        "parameterized queries",
+        "prepared statement",
+        "prepared statements",
+        "SQL training",
+        "database course",
+        "how to sanitize",
+        "how to validate",
+        "research on",
+        "security research",
+        "security audit",
+        "penetration testing"
+      ]
+    },
+    {
+      "category_name": "prompt_injection_system_prompt",
+      "description": "Detects attempts to extract, reveal, or override system prompts and instructions",
+      "default_action": "BLOCK",
+      "identifier_words": [
+        "reveal",
+        "show",
+        "print",
+        "output",
+        "display",
+        "tell me",
+        "repeat",
+        "disclose",
+        "share",
+        "give me",
+        "what is",
+        "what are",
+        "list",
+        "write out",
+        "copy",
+        "paste",
+        "recite",
+        "read back",
+        "type out",
+        "echo"
+      ],
+      "additional_block_words": [
+        "system prompt",
+        "system message",
+        "system instructions",
+        "initial instructions",
+        "initial prompt",
+        "hidden instructions",
+        "hidden prompt",
+        "original prompt",
+        "original instructions",
+        "pre-prompt",
+        "preprompt",
+        "meta-prompt",
+        "meta prompt",
+        "developer instructions",
+        "developer prompt",
+        "above instructions",
+        "previous instructions",
+        "prior instructions",
+        "opening message",
+        "configuration prompt",
+        "base prompt",
+        "root prompt",
+        "master prompt",
+        "custom instructions",
+        "secret instructions",
+        "confidential instructions",
+        "internal instructions",
+        "rules you follow",
+        "guidelines you follow",
+        "instructions you were given",
+        "prompt you were given"
+      ],
+      "always_block_keywords": [
+        {
+          "keyword": "ignore previous instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore all instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore all previous instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore prior instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore above instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "ignore the above",
+          "severity": "high"
+        },
+        {
+          "keyword": "disregard previous instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "disregard all instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "disregard above",
+          "severity": "high"
+        },
+        {
+          "keyword": "disregard your instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "forget your instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "forget all instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "forget everything above",
+          "severity": "high"
+        },
+        {
+          "keyword": "forget your previous instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "override your instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "override previous instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "you are now",
+          "severity": "medium"
+        },
+        {
+          "keyword": "new persona",
+          "severity": "medium"
+        },
+        {
+          "keyword": "act as DAN",
+          "severity": "high"
+        },
+        {
+          "keyword": "you are DAN",
+          "severity": "high"
+        },
+        {
+          "keyword": "switch to a new persona",
+          "severity": "high"
+        },
+        {
+          "keyword": "new role assignment",
+          "severity": "medium"
+        },
+        {
+          "keyword": "your new instructions are",
+          "severity": "high"
+        },
+        {
+          "keyword": "your new role is",
+          "severity": "medium"
+        },
+        {
+          "keyword": "repeat your system prompt",
+          "severity": "high"
+        },
+        {
+          "keyword": "print your system prompt",
+          "severity": "high"
+        },
+        {
+          "keyword": "show me your system prompt",
+          "severity": "high"
+        },
+        {
+          "keyword": "output your instructions",
+          "severity": "high"
+        },
+        {
+          "keyword": "what was your system prompt",
+          "severity": "high"
+        },
+        {
+          "keyword": "reveal your prompt",
+          "severity": "high"
+        },
+        {
+          "keyword": "display your instructions",
+          "severity": "high"
+        }
+      ],
+      "exceptions": [
+        "prompt engineering tutorial",
+        "explain system prompts",
+        "what is a system prompt",
+        "how to write a system prompt",
+        "system prompt best practices",
+        "prompt design",
+        "prompt template",
+        "prompt engineering",
+        "chatbot development",
+        "LLM security research"
+      ]
+    }
+  ]
+}

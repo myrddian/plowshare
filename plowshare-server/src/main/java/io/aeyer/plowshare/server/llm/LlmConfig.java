@@ -185,12 +185,14 @@ public class LlmConfig implements EnvironmentAware {
       LlmProperties props,
       ObjectMapper mapper,
       ObjectProvider<TokenLedger> ledger,
-      ObjectProvider<InferenceAccounting> accounting) {
+      ObjectProvider<InferenceAccounting> accounting,
+      ObjectProvider<io.aeyer.plowshare.server.security.ChatFiltering> filtering) {
     return buildDispatcher(
         props,
         mapper,
         ledger.getIfAvailable(),
-        accounting.getIfAvailable(() -> InferenceAccounting.NONE));
+        accounting.getIfAvailable(() -> InferenceAccounting.NONE),
+        filtering.getIfAvailable(() -> io.aeyer.plowshare.server.security.ChatFiltering.NONE));
   }
 
   /** Own local tokenizer resources separately from chat's explicitly estimated context meter. */
@@ -212,14 +214,20 @@ public class LlmConfig implements EnvironmentAware {
 
   /** Compatibility for fixtures that explicitly supply the old success-only ledger. */
   public LlmDispatcher llmDispatcher(LlmProperties props, ObjectMapper mapper, TokenLedger ledger) {
-    return buildDispatcher(props, mapper, ledger, InferenceAccounting.NONE);
+    return buildDispatcher(
+        props,
+        mapper,
+        ledger,
+        InferenceAccounting.NONE,
+        io.aeyer.plowshare.server.security.ChatFiltering.NONE);
   }
 
   private LlmDispatcher buildDispatcher(
       LlmProperties props,
       ObjectMapper mapper,
       TokenLedger ledger,
-      InferenceAccounting accounting) {
+      InferenceAccounting accounting,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering) {
 
     var dual =
         environment == null
@@ -353,7 +361,8 @@ public class LlmConfig implements EnvironmentAware {
               props::systemSpecifier,
               accounting,
               props.getPromptTimeout(),
-              props.getFoldTimeout());
+              props.getFoldTimeout(),
+              filtering);
       requireEmbeddingModelIsServed(dispatcher, props);
       if (dual != null && dual.enabled()) dispatcher.requireServed(dual.code().modelId());
       log.info(

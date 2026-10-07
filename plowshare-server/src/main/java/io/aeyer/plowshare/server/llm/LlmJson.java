@@ -14,8 +14,8 @@ import java.util.List;
 
 /**
  * Pure, bounded parsing of model-emitted JSON, shared by Java callers and Graal scripts. Recovery
- * combines Aletheia 851668f's deep-research, enrichment and graph readers. It decides syntax only:
- * callers still validate shape, references and judgments.
+ * repairs common formatting errors without deciding schema or meaning: callers still validate
+ * shape, references and judgments.
  */
 public final class LlmJson {
   public static final int MAX_INPUT = 524288;
@@ -103,7 +103,7 @@ public final class LlmJson {
     if (parsed != null) return parsed;
     parsed = attempt("literal_quotes", repairUnescapedQuotes(commas), STRICT, attempts);
     if (parsed != null) return parsed;
-    // Preserve lone backslashes (including LaTeX) before Aletheia's broad escape fallback.
+    // Preserve lone backslashes (including LaTeX) before the broad escape fallback.
     String preserved = escapeLoneBackslashes(commas);
     parsed = attempt("literal_backslashes", preserved, STRICT, attempts);
     if (parsed != null) return parsed;
@@ -115,7 +115,7 @@ public final class LlmJson {
             "structural_and_literal_quotes", repairUnescapedQuotes(structural), STRICT, attempts);
     if (parsed != null) return parsed;
     String fallback = commas.replace("\\\"", "\"").replaceAll("\\\\([^\"\\\\bfnrt/u])", "$1");
-    parsed = attempt("aletheia_escape_fallback", repairUnescapedQuotes(fallback), STRICT, attempts);
+    parsed = attempt("escape_fallback", repairUnescapedQuotes(fallback), STRICT, attempts);
     return parsed != null ? parsed : new Recovery(null, null, List.copyOf(attempts));
   }
 

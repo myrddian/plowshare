@@ -95,6 +95,27 @@ for (const [causation, valid] of [
   [{ rootId: 'root', parentId: null, depth: -2 }, false],
   [{ rootId: 'root', parentId: 'parent', depth: 1.5 }, false],
 ]) result('relay.log', { ...relayPage, events: [{ ...relayPage.events[0], causation }] }, valid);
+// Generic topic ports preserve their project, consumer and explicit batch authority.
+const publish = {requestId:receipt,project:'fixture',topic:'checks.requests',text:'opaque application JSON',occurredAt:'2026-10-07T00:00:00Z'};
+input('relay.publish',publish,true);
+for(const change of [{text:' '},{text:'\0bad'},{requestId:'bad'},{topic:'System Topic'},{parentTopic:'checks.source'},{occurredAt:'invalid'},{publisher:'forged'},{requestId:receipt.toUpperCase().replace('11111111','ABCDEFAB')}]) input('relay.publish',{...publish,...change},false);
+input('relay.publish',{...publish,parentTopic:'checks.source',parentEventId:'event'},true);
+const consume = {project:'fixture',topic:'checks.requests',group:'detectors',consumerId:receipt,start:'OLDEST_RETAINED'};
+input('relay.consume',consume,true);
+for(const change of [{group:' '},{consumerId:'bad'},{limit:0},{limit:101},{waitMs:30001},{waitMs:1.5},{start:'EARLIEST'}]) input('relay.consume',{...consume,...change},false);
+const batch={project:'fixture',topic:'checks.requests',group:'detectors',consumerId:receipt,status:'DATA',batchId:receipt,fence:'1',through:'1',expiresAt:'2026-10-07T00:00:30Z',expiredThrough:null,events:relayPage.events};
+result('relay.consume',batch,true);
+for(const change of [{events:[]},{batchId:null},{fence:'0'},{fence:'9223372036854775808'},{status:'EMPTY'},{expiredThrough:'1'},{through:'-1'}]) result('relay.consume',{...batch,...change},false);
+const empty={...batch,status:'EMPTY',batchId:null,fence:null,expiresAt:null,events:[]};
+result('relay.consume',empty,true);
+result('relay.consume',{...empty,status:'BUSY'},true);
+result('relay.consume',{...batch,status:'GAP',events:[],expiredThrough:'1'},true);
+result('relay.consume',{...batch,status:'GAP',events:[]},false);
+const ack={project:'fixture',topic:'checks.requests',group:'detectors',consumerId:receipt,batchId:receipt,fence:'1'};
+input('relay.ack',ack,true);
+for(const change of [{fence:'0'},{fence:'01'},{batchId:'bad'},{expiredThrough:'9223372036854775808'}]) input('relay.ack',{...ack,...change},false);
+result('relay.publish',{requestId:receipt,project:'fixture',topic:'checks.requests',position:'1',publishedAt:publish.occurredAt},true);
+result('relay.ack',{project:'fixture',topic:'checks.requests',group:'detectors',batchId:receipt,through:'1',gap:false},true);
 const message = { parts: [{ text: 'hello' }] };
 input('outgoing.send', { requestId: receipt, peer: 'fixture', message }, true);
 for (const requestId of ['bad', ''])

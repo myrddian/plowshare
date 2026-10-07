@@ -690,6 +690,9 @@ public final class FrameTypes {
   public static final String RELAY_OPERATE = "relay.operate";
   public static final String RELAY_PROCESS = "relay.process";
   public static final String RELAY_LOG = "relay.log";
+  public static final String RELAY_PUBLISH = "relay.publish";
+  public static final String RELAY_CONSUME = "relay.consume";
+  public static final String RELAY_ACK = "relay.ack";
 
   public static final String ORCHESTRATION_START = "orchestration.start";
 

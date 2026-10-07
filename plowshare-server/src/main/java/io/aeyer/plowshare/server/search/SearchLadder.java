@@ -16,14 +16,10 @@ import org.slf4j.LoggerFactory;
  *
  * <h2>Exactly one provider is dialled — there is no fan-out</h2>
  *
- * <p>This is not fan-out defaulted off; there is no fan-out mode at all. Aletheia's dispatcher
- * calls every eligible handler for a query and merges whatever comes back, which spends every
- * provider's quota — including the ones billed per call — on every single question, whether or not
- * the cheapest one would have answered it. The ladder this class walks exists so that the free
- * provider serves all the ordinary traffic and the metered one is only ever dialled once the free
- * one is unavailable. Calling more than one rung per search would bill every configured provider
- * for every query, which is the exact cost this design is trying to avoid rather than an
- * optimisation left for later.
+ * <p>The ladder stops at the first successful answer to conserve provider quotas, including those
+ * billed per call. Operators can place a free provider before a metered one so ordinary traffic
+ * reaches the metered provider only when earlier rungs are unavailable. There is no fan-out mode:
+ * results from multiple providers are never merged for one search.
  *
  * <h2>No sufficiency test — a thin or empty answer is still the answer</h2>
  *

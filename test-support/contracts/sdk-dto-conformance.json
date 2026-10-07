@@ -1015,6 +1015,705 @@
   },
   {
     "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": " ",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "\u0000bad",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "bad",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "System Topic",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z",
+      "parentTopic": "checks.source"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "invalid"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z",
+      "publisher": "forged"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "ABCDEFAB-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "text": "opaque application JSON",
+      "occurredAt": "2026-10-07T00:00:00Z",
+      "parentTopic": "checks.source",
+      "parentEventId": "event"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": " ",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "bad",
+      "start": "OLDEST_RETAINED"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED",
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED",
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED",
+      "waitMs": 30001
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "OLDEST_RETAINED",
+      "waitMs": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "start": "EARLIEST"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": null,
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "0",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "9223372036854775808",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "EMPTY",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": "1",
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "DATA",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "-1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": [
+        {
+          "position": "1",
+          "eventId": "source:event",
+          "publisher": "system.source",
+          "occurredAt": "2026-10-06T00:00:00Z",
+          "publishedAt": "2026-10-06T00:00:00Z",
+          "correlationId": null,
+          "causationId": null,
+          "payload": {
+            "kind": "LIFECYCLE",
+            "text": null,
+            "schedule": null,
+            "emits": null,
+            "fireAt": null,
+            "lifecycle": {
+              "source": "job.ended",
+              "subject": "job_fixture",
+              "state": "ANSWERED",
+              "context": null,
+              "related": null
+            }
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "EMPTY",
+      "batchId": null,
+      "fence": null,
+      "through": "1",
+      "expiresAt": null,
+      "expiredThrough": null,
+      "events": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "BUSY",
+      "batchId": null,
+      "fence": null,
+      "through": "1",
+      "expiresAt": null,
+      "expiredThrough": null,
+      "events": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "GAP",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": "1",
+      "events": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.consume",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "GAP",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "through": "1",
+      "expiresAt": "2026-10-07T00:00:30Z",
+      "expiredThrough": null,
+      "events": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "0"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "01"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "batchId": "bad",
+      "fence": "1"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "fence": "1",
+      "expiredThrough": "9223372036854775808"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture",
+      "topic": "checks.requests",
+      "position": "1",
+      "publishedAt": "2026-10-07T00:00:00Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "relay.ack",
+    "value": {
+      "project": "fixture",
+      "topic": "checks.requests",
+      "group": "detectors",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "through": "1",
+      "gap": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
     "operation": "outgoing.send",
     "value": {
       "requestId": "11111111-1111-1111-1111-111111111111",

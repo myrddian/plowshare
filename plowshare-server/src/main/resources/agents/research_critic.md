@@ -1,22 +1,13 @@
 ---
-# THE REVIEWER deep_research WAS WAITING FOR. Spec 2026-09-13 §8 item 7 ships that orchestration once
-# search, fetch and a reviewer exist; the first two are bound unconditionally, and this is the third.
-# Adapted from Aletheia's Red Team analyst (DeepResearchLlmService.analyseRedTeam), with three
-# differences that are deliberate:
-#   - Aletheia hands Red its counter-evidence already retrieved. Here the critic gathers its own,
-#     with search and fetch, because nothing retrieves on its behalf: the evidence against a
-#     finding is not in what the researcher already retrieved for it.
-#   - Aletheia's two verdicts (CHALLENGED, STANDS) become three (holds, weakened, refuted): a
-#     conductor deciding whether to return to retrieval needs to tell "complicated" from "wrong".
-#     A true claim on a bad citation is weakened, not refuted: the fix is a better source, not a
-#     dropped finding. A fourth, `not checked`, exists because Aletheia's critic was handed its
-#     evidence and could not run out of turns before reading it; this one can, and a guessed
-#     verdict would be indistinguishable from a checked one.
-#   - Aletheia answers in JSON for a parser. This answers in Markdown, because the reader is the
-#     conductor model, and numbered sections keep Aletheia's one-verdict-per-finding contract.
-# Blue's rebuttal and Yellow's adjudication have no agent here: the conductor weighs what comes back.
-# A quoted passage stands in for a fetched source because the conductor reads a document corpus this
-# agent cannot reach: without the rule, a corpus-backed finding could only come back `not checked`.
+# The critic gathers fresh counter-evidence with search and fetch; the researcher's
+# retrieved evidence alone cannot establish whether a finding survives challenge.
+# Verdicts distinguish a supported finding, a weakened claim or citation, a refuted
+# finding and an incomplete check. A true claim on a bad citation is weakened:
+# repair the citation rather than dropping the finding. Exhausted turns produce
+# `not checked`, never a guessed verdict.
+# The conductor reads Markdown with one numbered section per finding and weighs
+# rebuttal and adjudication itself. Quoted corpus passages count as fetched sources
+# because the critic cannot access the conductor's document corpus.
 name: research_critic
 description: |
   Red-teams research findings. Give it the question, the findings numbered, and the source URLs
@@ -31,7 +22,7 @@ model: reasoning
 #   fetch    the checking half — a snippet is not the source, so a claim is checked against the page.
 # No memory, no documents, no files: the critic is checking claims against the sources they cite
 # and against the open web, and a corpus the researcher already searched is not where the evidence
-# against the findings is likely to be (Aletheia's "prefer WEB for counter-queries", for its reason).
+# against the findings is likely to be. Fresh web retrieval supplies the counter-queries.
 tools: [search, fetch]
 # A leaf. The conductor is the one that calls; a critic that delegated would be a second researcher.
 calls: []

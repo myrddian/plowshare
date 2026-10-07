@@ -17,8 +17,31 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composes the broker, independent workers and adapters to owning lifecycle/inbox contracts. */
 @Configuration
-@EnableConfigurationProperties({RelayProperties.class, RelayWorkerProperties.class})
+@EnableConfigurationProperties({
+  RelayProperties.class,
+  RelayWorkerProperties.class,
+  RelayPortProperties.class
+})
 public class RelayConfiguration {
+  @Bean
+  @DependsOnDatabaseInitialization
+  public RelayPortRepository relayPortRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
+    return new JdbcRelayPortRepository(jdbc, transactions, relay);
+  }
+
+  @Bean
+  public RelayPorts relayPorts(
+      Relay relay,
+      RelayPortRepository repository,
+      RelayPortProperties properties,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      RelayProperties relayProperties) {
+    return new ProjectRelayPorts(
+        relay, repository, properties, members, projects, relayProperties.getMaxForwardingHops());
+  }
+
   @Bean
   @DependsOnDatabaseInitialization
   public RelayRepository relayRepository(JdbcTemplate jdbc, UnitOfWork transactions) {

@@ -1,10 +1,10 @@
 // plowshare-script v1
-// Adapted from Aletheia 851668f. Workflow and report assembly are code; model calls supply judgments.
+// Workflow and report assembly are code; model calls supply judgments.
 // Usage, stages, worker schemas and source audit: docs/scripted-research.md.
 // Runtime contract, installation and recovery: docs/scripted-orchestrations.md.
 export const manifest = {
   name: 'deep_research',
-  description: 'Scripted Aletheia research: decomposes objectives, retains evidence, gathers fresh counter-evidence, adjudicates findings, expands and edits each revised finding and stores a detailed cited draft report.',
+  description: 'Scripted research: decomposes objectives, retains evidence, gathers fresh counter-evidence, adjudicates findings, expands and edits each revised finding and stores a detailed cited draft report.',
   model: 'reasoning', tools: ['search', 'information_read', 'information_write'],
   calls: ['research_analyst'], scopes: [], 'max-turns': 2000, 'max-model-calls': 400,
   'max-returns': 2, triggers: ['deep research', 'research report', '/research'],
@@ -381,7 +381,7 @@ function validateQueries(queries, objective) {
   for(const q of rows(queries)) {
     const query=optionalText(q?.query,null,1000);if(!query) continue;
     const proposed=label(q.type),type=TYPES.includes(proposed)?proposed:'TOPIC_CENTRIC';
-    // Aletheia's entity anchor filter, scoped to this objective; adversarial queries are exempt.
+    // Entity anchor filtering is scoped to this objective; adversarial queries are exempt.
     if(type!=='ADVERSARIAL' && objective.anchors.length && !objective.anchors.some(a=>query.toLowerCase().includes(a.toLowerCase()))) continue;
     if(!unique.some(v=>v.query.toLowerCase()===query.toLowerCase())) unique.push({query,type,objective:objective.id,sub_question:optionalText(q.sub_question,objective.objective),expected_evidence:optionalText(q.expected_evidence,objective.expected_evidence)});
   }

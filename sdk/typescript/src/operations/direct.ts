@@ -233,6 +233,9 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'job.status',
   'job.cancel',
   'relay.operate',
+  'relay.publish',
+  'relay.consume',
+  'relay.ack',
   'relay.process',
   'relay.topics',
   'relay.log',
@@ -299,6 +302,40 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
             : 'invalid-response',
         outcome,
       };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
+  if (
+    asked.type === 'relay.publish' ||
+    asked.type === 'relay.consume' ||
+    asked.type === 'relay.ack'
+  ) {
+    if (outcome.code !== 'OK') return { kind: 'refused', outcome };
+    try {
+      const reply = decodeReply(asked.type, outcome.payload);
+      let matches =
+        reply.project === asked.payload.project &&
+        reply.topic === asked.payload.topic;
+      if (asked.type === 'relay.publish')
+        matches &&=
+          decodeReply('relay.publish', outcome.payload).requestId ===
+          asked.payload.requestId;
+      if (asked.type === 'relay.consume') {
+        const batch = decodeReply('relay.consume', outcome.payload);
+        matches &&=
+          batch.group === asked.payload.group &&
+          batch.consumerId === asked.payload.consumerId &&
+          batch.events.length <= (asked.payload.limit ?? 100);
+      }
+      if (asked.type === 'relay.ack') {
+        const ack = decodeReply('relay.ack', outcome.payload);
+        matches &&=
+          ack.group === asked.payload.group &&
+          ack.batchId === asked.payload.batchId &&
+          ack.gap === (asked.payload.expiredThrough != null);
+      }
+      return { kind: matches ? 'completed' : 'invalid-response', outcome };
     } catch {
       return { kind: 'invalid-response', outcome };
     }
