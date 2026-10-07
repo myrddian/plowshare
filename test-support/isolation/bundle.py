@@ -33,10 +33,14 @@ def main() -> None:
             "plowshare-protocol/build/classes/java/main",
             "plowshare-server/build/isolation-acceptance",
             "sdk/node/build",
-            "sdk/typescript/build",
             "test-support/isolation",
         ]:
             shutil.copytree(repository / name, stage / name)
+        # Only the published neutral SDK directories; omit test output and compiler caches.
+        for part in ["binding", "jobs", "operations"]:
+            name = Path("sdk/typescript/build") / part
+            shutil.copytree(repository / name, stage / name,
+                            ignore=shutil.ignore_patterns("*.tsbuildinfo"))
         test = Path("plowshare-protocol/build/classes/java/test/io/aeyer/plowshare/protocol")
         (stage / test).mkdir(parents=True)
         shutil.copy2(repository / test / "BubblewrapAcceptance.class", stage / test)
