@@ -1338,6 +1338,44 @@ describe('the changes both clients answer alike', () => {
 describe.skipIf(process.platform === 'win32')('a run', () => {
   const OPTED_IN = 'local:\n  mode: open\n';
 
+  it('requires local sandbox consent and never treats an isolated operation as a raw run', async () => {
+    await environment(OPTED_IN);
+    let starts = 0;
+    const answer = enforcing(root, true, {
+      run(command, access) {
+        starts++;
+        expect(command.argv).toEqual(['test-program']);
+        expect(access.roots).toEqual([root]);
+        expect(
+          access.permits(join(root, '.plowshare', 'environment.yml')),
+        ).toBe(false);
+        return Promise.resolve({
+          exitCode: 0,
+          timedOut: false,
+          cancelled: false,
+          stdout: '',
+          stdoutCut: 0,
+          stderr: '',
+          stderrCut: 0,
+          millis: 1,
+        });
+      },
+    });
+    const request = {
+      id: 'isolated',
+      op: 'run_isolated',
+      path: root,
+      argv: ['test-program'],
+    };
+    expect((await answer(request)).outcome).toBe('refused');
+    expect(starts).toBe(0);
+    await environment(OPTED_IN + '  isolation: bubblewrap\n');
+    expect((await answer(request)).outcome).toBe('ok');
+    expect(starts).toBe(1);
+    expect((await answer({ ...request, op: 'run' })).outcome).toBe('ok');
+    expect(starts).toBe(2);
+  });
+
   async function environment(text: string): Promise<void> {
     await writeFile(join(root, '.plowshare', 'environment.yml'), text);
   }

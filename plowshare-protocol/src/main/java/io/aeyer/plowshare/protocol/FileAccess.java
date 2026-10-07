@@ -239,6 +239,11 @@ public final class FileAccess {
     return granted.stream().filter(this::permits).toList();
   }
 
+  /** Canonical exclusions, for OS policy compilers; the immutable snapshot owns these values. */
+  public List<Path> exclusions() {
+    return List.copyOf(excluded);
+  }
+
   /**
    * May this path be touched?
    *

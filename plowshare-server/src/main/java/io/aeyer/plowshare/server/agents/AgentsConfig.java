@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.protocol.Bubblewrap;
+import io.aeyer.plowshare.protocol.CommandIsolation;
 import io.aeyer.plowshare.server.agents.curator.Curator;
 import io.aeyer.plowshare.server.agents.learner.Learner;
 import io.aeyer.plowshare.server.agents.learner.Reminder;
@@ -25,6 +27,7 @@ import io.aeyer.plowshare.server.documents.DocumentsProperties;
 import io.aeyer.plowshare.server.documents.RetrievalService;
 import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.AbsentPresence;
+import io.aeyer.plowshare.server.files.CommandIsolationProperties;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.LocalProvider;
 import io.aeyer.plowshare.server.files.RemoteProvider;
@@ -142,9 +145,28 @@ import org.springframework.jdbc.core.JdbcTemplate;
   // PlowshareServerApplication and again here on the same terms as the two
   // above: a context that imports this configuration and not that one --
   // AgentsConfigTest -- has to be able to start.
-  JobsProperties.class
+  JobsProperties.class, CommandIsolationProperties.class
 })
 public class AgentsConfig {
+
+  /**
+   * Composition owns installation paths; an unconfigured installation refuses isolated commands.
+   */
+  @Bean
+  public CommandIsolation commandIsolation(CommandIsolationProperties properties) {
+    if (properties.getBubblewrap().isBlank()
+        && properties.getLauncher().isBlank()
+        && properties.getRuntimeRoots().isEmpty()
+        && properties.getScratchRoot().isBlank()) {
+      return CommandIsolation.UNAVAILABLE;
+    }
+    return new Bubblewrap(
+        new Bubblewrap.Configuration(
+            Path.of(properties.getBubblewrap()),
+            Path.of(properties.getLauncher()),
+            properties.getRuntimeRoots().stream().map(Path::of).toList(),
+            Path.of(properties.getScratchRoot())));
+  }
 
   private static final Logger log = LoggerFactory.getLogger(AgentsConfig.class);
 
@@ -347,6 +369,26 @@ public class AgentsConfig {
     return hooks;
   }
 
+  /** Manual composition without an installed command isolation backend. */
+  public RunProviders runProviders(
+      ProjectStore projects,
+      SessionChannel channel,
+      SessionRegistry sessions,
+      PresenceRegistry presences,
+      ImageStore images,
+      UnionRouting unions,
+      ProjectMembers members) {
+    return runProviders(
+        projects,
+        channel,
+        sessions,
+        presences,
+        images,
+        unions,
+        members,
+        CommandIsolation.UNAVAILABLE);
+  }
+
   /**
    * The filesystems a run may reach: this server's own disk, leashed by the running job's project
    * and the running agent's grants, <b>plus the disk of the machine that roots the project, when
@@ -454,7 +496,8 @@ public class AgentsConfig {
       PresenceRegistry presences,
       ImageStore images,
       UnionRouting unions,
-      ProjectMembers members) {
+      ProjectMembers members,
+      CommandIsolation isolation) {
     return (home, grants, sessionId, owner) -> {
       if (!home.isGlobal() && owner != null)
         members.requireRole(
@@ -462,7 +505,7 @@ public class AgentsConfig {
       // Conversion stays on the server. Source-capable remote clients
       // stream fenced bytes over the file WS; image storage uses the
       // run's Home. Older clients retain their existing text protocol.
-      FileProvider local = new LocalProvider(projects, home, grants, images);
+      FileProvider local = new LocalProvider(projects, home, grants, images, isolation);
       // The global tier has no place, so it can only mean the caller's own
       // machine; a named project means the machine that roots it, and
       // `sessionId` is not consulted at all on that path.

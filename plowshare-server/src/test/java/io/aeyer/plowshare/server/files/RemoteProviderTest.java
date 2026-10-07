@@ -1004,6 +1004,27 @@ class RemoteProviderTest {
   }
 
   @Test
+  void an_isolated_run_uses_a_distinct_operation_and_never_retries_an_old_client() {
+    Timed channel = new Timed(request -> FileReply.refused(request.id(), "unknown file operation"));
+    var provider = new RemoteProvider(channel, SESSION, WRITE);
+    var isolated =
+        OPEN.with(
+            io.aeyer.plowshare.protocol.EnvironmentFile.parse("local:\n  isolation: bubblewrap\n")
+                .local());
+    assertThrows(
+        WorkspaceRefusedException.class,
+        () ->
+            provider.run(
+                Path.of("/laptop/repo"),
+                List.of("test-program"),
+                isolated,
+                java.time.Duration.ofSeconds(1),
+                () -> false));
+    assertEquals(1, channel.sent.size());
+    assertEquals(FileRequest.RUN_ISOLATED, channel.sent.getFirst().op());
+  }
+
+  @Test
   void a_run_carries_its_stdin_to_the_client_and_none_when_it_has_none() {
     Timed channel =
         new Timed(

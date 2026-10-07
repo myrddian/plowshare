@@ -267,6 +267,12 @@ public record FileRequest(
   public static final String RUN = "run";
 
   /**
+   * A command requiring the client's configured bubblewrap boundary. A distinct operation prevents
+   * older clients from silently ignoring a new isolation field and executing an unconfined command.
+   */
+  public static final String RUN_ISOLATED = "run_isolated";
+
+  /**
    * Kill the {@link #RUN} whose request id is {@link #path}. Answered with an ok reply carrying
    * nothing, whether or not that command was still running.
    */
@@ -364,9 +370,27 @@ public record FileRequest(
       long outputBytes,
       boolean shells,
       String stdin) {
+    return run(id, cwd, argv, env, inherit, timeoutMillis, outputBytes, shells, stdin, "none");
+  }
+
+  /** Builds a command request without allowing an isolated request to become an ordinary run. */
+  public static FileRequest run(
+      String id,
+      String cwd,
+      List<String> argv,
+      Map<String, String> env,
+      List<String> inherit,
+      long timeoutMillis,
+      long outputBytes,
+      boolean shells,
+      String stdin,
+      String isolation) {
+    if (!"none".equals(isolation) && !"bubblewrap".equals(isolation)) {
+      throw new IllegalArgumentException("unsupported command isolation");
+    }
     return new FileRequest(
         id,
-        RUN,
+        "bubblewrap".equals(isolation) ? RUN_ISOLATED : RUN,
         cwd,
         null,
         null,

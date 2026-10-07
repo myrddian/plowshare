@@ -207,9 +207,11 @@ configuration and data remain excluded. This policy applies to workspace file
 operations; SDK requests to change framework definitions retain their separate
 administrative and project permissions.
 
-Command execution is refused when the project's writable areas are restricted.
-A working directory alone cannot prevent a command writing elsewhere, so
-commands need a filesystem sandbox before they can honor that policy.
+Unisolated command execution is refused when the project's writable areas are
+restricted. On Linux, commands using the configured `bubblewrap` backend can read
+the permitted workspace and write only its granted areas. An empty write policy
+or missing agent write grant still refuses commands. See [command isolation](command-isolation.md)
+for installation, supported workspace topology and refusal behavior.
 
 ## Recognize a project from its files
 
@@ -440,8 +442,10 @@ replace it with `{"version": 1, "name": "its-existing-name"}` and add settings.
 | `access.accounts` | Explicit Application account grants, capped by server membership |
 
 Command modes are `off`, `gated`, `ask` and `open`. `timeout` uses seconds or minutes
-(e.g. `90s`), `output` uses `KiB` or `MiB`, and `isolation` currently accepts only
-`none`. `inherit` is a list of host variable names; `env` maps names to strings.
+(e.g. `90s`), `output` uses `KiB` or `MiB`, and `isolation` accepts `none` or
+`bubblewrap`. The latter requires a configured Linux backend on the executing
+machine and never falls back to an unisolated command. `inherit` is a list of host
+variable names; `env` maps names to strings.
 A client manifest's `commands.server` never authorizes server commands. Server-owned
 configuration controls that side, and each client rechecks its own local policy
 before running a command. Agent file mutations cannot change a root project

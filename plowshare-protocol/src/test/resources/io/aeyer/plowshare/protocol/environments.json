@@ -44,5 +44,6 @@
   {"name": "refuse non boolean automatic increase 1", "text": "caps:\n  auto-increase: 1\n", "refusedLine": 2},
   {"name": "refuse non boolean automatic increase yes", "text": "caps:\n  auto-increase: yes\n", "refusedLine": 2},
   {"name": "refuse non boolean automatic increase null", "text": "caps:\n  auto-increase: null\n", "refusedLine": 2},
-  {"name": "refuse non boolean automatic increase True", "text": "caps:\n  auto-increase: True\n", "refusedLine": 2}
+  {"name": "refuse non boolean automatic increase True", "text": "caps:\n  auto-increase: True\n", "refusedLine": 2},
+  {"name": "Linux bubblewrap isolation", "text": "local:\n  isolation: bubblewrap\n", "expect": {"local": {"isolation": "bubblewrap"}, "server": null}}
 ]

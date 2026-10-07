@@ -31,11 +31,10 @@ import java.util.function.BooleanSupplier;
  *
  * <h2>What it does not do</h2>
  *
- * <p><b>It does not isolate.</b> A command it starts can read anything its OS user can, hidden
- * paths included — the fence judges the working directory and a gate judges the command line, and
- * neither reaches inside a process. {@code environment.yml}'s {@code isolation} is where that will
- * change; today it accepts only {@code none}, and saying so is better than a check that looks like
- * a sandbox.
+ * <p>This process primitive does not isolate by itself. Callers requesting isolation execute it
+ * through {@link CommandIsolation}, which supplies the namespace wrapper and file policy. A raw
+ * command can read anything its OS user can; a working directory and command gate do not contain
+ * it.
  *
  * <p>It does not check the working directory against a fence either. That is each caller's, because
  * each has its own {@code permitted}.
