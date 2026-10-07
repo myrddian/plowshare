@@ -211,6 +211,27 @@ public record AgentView(
         origin);
   }
 
+  /** Lists a logical address with the selected variant's capabilities and visible identity. */
+  public AgentView addressedAs(String address) {
+    if (name.equals(address)) return this;
+    return new AgentView(
+        address,
+        tools,
+        calls,
+        scopes,
+        served,
+        withheld,
+        bot,
+        description + " (" + address + " resolves to " + name + ")",
+        preferred,
+        model,
+        orchestrations,
+        skills,
+        commands,
+        displayName,
+        origin);
+  }
+
   public AgentView withSkillRefusals(List<String> reasons) {
     var all = new java.util.ArrayList<>(withheld);
     all.addAll(reasons);

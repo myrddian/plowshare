@@ -374,7 +374,7 @@ public final class Runs {
       Speaker speaker,
       Consumer<Outcome> ended) {
     DefinitionResolver.Caller caller = callers.callerForConversation(conversation, null);
-    AgentDefinition definition = callers.requireAgent(agent, caller);
+    AgentDefinition definition = callers.requirePinnedAgent(agent, caller);
     String id = turns.speakToApprovedRun(conversation, definition, utterance, speaker, ended);
     return new Started(id, definition.name());
   }

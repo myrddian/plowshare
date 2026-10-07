@@ -191,6 +191,14 @@ public final class Callers implements WorkCallers {
         name);
   }
 
+  /** Approval continuations name the recorded concrete agent, even when it also bears an alias. */
+  public AgentDefinition requirePinnedAgent(String name, DefinitionResolver.Caller caller) {
+    return RequestedAgent.toContinue(
+        resolver.forCaller(caller),
+        () -> resolver.forCaller(caller.withoutSession()).exportedNames(),
+        name);
+  }
+
   /**
    * The agent a read names — a price, a projection — against {@code caller}'s own resolved set,
    * exactly as {@link #requireAgent} looks one up, and without {@code exported}'s check, which

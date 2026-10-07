@@ -53,7 +53,15 @@ final class OrchestrationParser {
    * fallback} is refused with the rest.
    */
   static final Set<String> NOT_FOR_A_CONDUCTOR =
-      Set.of("exported", "delegable", "bot", "announces-inbox", "fallback", "board");
+      Set.of(
+          "exported",
+          "delegable",
+          "bot",
+          "announces-inbox",
+          "fallback",
+          "board",
+          "alias",
+          "guidance");
 
   /**
    * Tool names a conductor never declares, because the harness hands them to a run rather than a
