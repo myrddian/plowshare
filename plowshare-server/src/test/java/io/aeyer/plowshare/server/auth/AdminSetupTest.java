@@ -73,7 +73,10 @@ class AdminSetupTest {
     mvc =
         MockMvcBuilders.standaloneSetup(
                 new AuthController(tokens, auth, accounts, hasher, attempts),
-                new ProjectController(projects, new PresenceRegistry()))
+                new ProjectController(
+                    projects,
+                    new PresenceRegistry(),
+                    io.aeyer.plowshare.server.ws.TestProjectMembers.allowed()))
             .addFilters(new AuthFilter(tokens, auth).withAccounts(accounts))
             .build();
     temporary = Tokens.mint();

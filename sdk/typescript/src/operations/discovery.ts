@@ -8,6 +8,7 @@ import { OPERATION_SCHEMAS } from './operation-schemas.ts';
 
 /** Explicit mutation classification shared by help and recovery. No operation is replayed. */
 const MUTATIONS = new Set<string>([
+  'application.file.save',
   'admin.service.account.create',
   'admin.service.account.update',
   'admin.service.token.create',
@@ -267,7 +268,7 @@ export function discovery(target = '') {
       'Help and validation are offline. Execution needs authenticated WS and existing account/project grants.',
     replay: 'disabled',
     projectModel:
-      'A server-side scope of work managed by the Plowshare agent framework: agents, skills, conversations, memory, information and any server workspace files. SDK integrations submit tasks within that scope. --project selects it; project create provisions a MANAGED server workspace or registers a DISJOINT pipeline workspace without client sync. writePaths limits server writes to relative areas; DISJOINT defaults to no writes. Creation requires an administrator. project define registers an existing workspace. --root explicitly serves local files.',
+      'A server-side scope of work managed by the Plowshare agent framework: agents, skills, conversations, memory, information and any server workspace files. SDK integrations submit tasks within that scope. --project selects it. Listings group authorized Applications separately from Projects used for external work. An Application has a valid root plowshare.json and explicit account grants; MANAGED server projects are Applications. project create provisions a MANAGED Application or registers a DISJOINT pipeline workspace without client sync. writePaths limits server writes to relative areas; DISJOINT defaults to no writes. Creation requires an administrator. project define registers an existing workspace. --root explicitly serves local files.',
     conversationPolicy: {
       command: 'agent run',
       default:

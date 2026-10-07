@@ -36,6 +36,7 @@ export interface ProjectManifest extends ProjectManifestSettings {
 }
 
 export interface Marked {
+  readonly application?: boolean;
   /** Canonical: the directory holding `.plowshare/`, and the root that is served. */
   readonly root: string;
   readonly project: string;
@@ -47,6 +48,8 @@ export interface Marked {
 export async function markedName(
   directory: string,
 ): Promise<string | undefined> {
+  const application = await applicationManifest(directory);
+  if (application) return application.name;
   for (const file of ['plowshare', PROJECT_FILE]) {
     const text = await markerText(directory, join(DEFINITIONS, file));
     if (text !== undefined) {
@@ -136,6 +139,7 @@ export function projectManifest(text: string): ProjectManifest {
   return {
     version: 1,
     name: record['name'],
+    ...(checked.access === undefined ? {} : { access: checked.access }),
     ...(checked.caps === undefined ? {} : { caps: { ...checked.caps } }),
     ...(commands === undefined ? {} : { commands: structuredClone(commands) }),
     ...(checked.skills === undefined
@@ -160,6 +164,17 @@ export function projectManifest(text: string): ProjectManifest {
           },
         }),
   };
+}
+
+/** Only a strictly valid root JSON file establishes an application; malformed files never fall back. */
+async function applicationManifest(
+  directory: string,
+): Promise<ProjectManifest | undefined> {
+  const text = await markerText(directory, 'plowshare.json');
+  if (text === undefined) return undefined;
+  if (!text.trimStart().startsWith('{'))
+    throw new Error('plowshare.json must contain an application JSON object');
+  return projectManifest(text);
 }
 
 function validProjectName(value: unknown): value is string {
@@ -200,12 +215,15 @@ export async function readProjectManifestFile(
   { file: string; source: string; manifest: ProjectManifest } | undefined
 > {
   for (const file of [
+    'plowshare.json',
     join(DEFINITIONS, 'plowshare'),
     join(DEFINITIONS, PROJECT_FILE),
     'plowshare',
   ]) {
     const text = await markerText(directory, file);
     if (text === undefined) continue;
+    if (file === 'plowshare.json' && !text.trimStart().startsWith('{'))
+      throw new Error('plowshare.json must contain an application JSON object');
     if (
       file !== 'plowshare' &&
       !text.trimStart().startsWith('{') &&
@@ -240,7 +258,10 @@ export async function resolveMarked(
     (row) =>
       (row.name === found.project &&
         (row.type === undefined ||
-          ['STANDARD', 'LOCAL', 'UNION'].includes(row.type))) ||
+          (found.application
+            ? ['STANDARD', 'LOCAL', 'UNION', 'MANAGED', 'DISJOINT']
+            : ['STANDARD', 'LOCAL', 'UNION']
+          ).includes(row.type))) ||
       (row.workspace === found.root &&
         row.machine === machine &&
         row.type !== 'DISJOINT'),
@@ -274,6 +295,14 @@ export async function resolveMarked(
 export async function discover(from: string): Promise<Marked | undefined> {
   let at = await realpath(from);
   for (;;) {
+    const application = await applicationManifest(at);
+    if (application)
+      return {
+        root: at,
+        project: application.name,
+        kind: 'DISJOINT',
+        application: true,
+      };
     const project = await markedName(at);
     if (project !== undefined) {
       return { root: at, project };
@@ -314,7 +343,9 @@ export class AlreadyMarked extends Error {
  */
 export async function mark(root: string, project: string): Promise<Marked> {
   if (clientProject(project)) {
-    const text = await markerText(root, 'plowshare');
+    const text =
+      (await markerText(root, 'plowshare.json')) ??
+      (await markerText(root, 'plowshare'));
     if (text === undefined || markerName(text) !== projectLabel(project))
       throw new Error('Client project manifest changed; nothing was marked');
     return { root, project, kind: 'DISJOINT' };

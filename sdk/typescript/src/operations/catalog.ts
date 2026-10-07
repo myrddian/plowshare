@@ -154,6 +154,14 @@ export interface ExtendedPayloads
     readonly handle: string;
     readonly id: string;
   };
+  'application.files': { readonly project: string; readonly path?: string };
+  'application.file.read': { readonly project: string; readonly path: string };
+  'application.file.save': {
+    readonly project: string;
+    readonly path: string;
+    readonly text: string;
+    readonly revision: string;
+  };
   'project.list': Record<string, never>;
   'project.attach': {
     readonly name: string;
@@ -309,6 +317,9 @@ export const CLI_OPERATIONS = {
 
   'project attach': 'project.attach',
   'project create': 'project.create',
+  'application files': 'application.files',
+  'application read': 'application.file.read',
+  'application save': 'application.file.save',
   'project list': 'project.list',
   'project define': 'project.define',
   'project lend': 'project.lend',

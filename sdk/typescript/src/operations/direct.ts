@@ -577,6 +577,14 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   )
     return { kind: 'invalid-response', outcome };
   if (
+    (asked.type === 'application.files' ||
+      asked.type === 'application.file.read' ||
+      asked.type === 'application.file.save') &&
+    (body?.['project'] !== asked.payload['project'] ||
+      body?.['path'] !== (asked.payload['path'] ?? ''))
+  )
+    return { kind: 'invalid-response', outcome };
+  if (
     asked.type === 'conversation.lifecycle' &&
     body?.['id'] !== asked.payload.conversation
   )

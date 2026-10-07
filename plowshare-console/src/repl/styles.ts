@@ -831,6 +831,13 @@ body {
 /* --cite and not --seam: the id that is the citation is not a fold, and --seam
    means a fold and only a fold. */
 .hit [data-citation] .value { color: var(--cite); }
+.application-files { margin-block: 1rem; }
+.application-source { margin-block: .8rem; }
+.application-source input { max-width: 100%; }
+.application-source button { margin: .25rem; max-width: 100%; overflow-wrap: anywhere; }
+.application-entries { display: flex; flex-wrap: wrap; gap: .3rem; margin-block: .8rem; }
+.application-editor textarea { width: 100%; min-height: 20rem; resize: vertical; font: inherit; tab-size: 2; }
+.application-file-title, .application-permission { overflow-wrap: anywhere; }
 .mode-note, .reach { margin: .2rem 0; color: var(--dim); }
 `;
 

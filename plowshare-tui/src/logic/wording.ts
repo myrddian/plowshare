@@ -929,7 +929,7 @@ export function describeCommand(command: string): string {
         '; auto-increase on|off renews steps and budget'
       );
     case PROJECTS_COMMAND:
-      return 'the projects this server holds';
+      return 'the Applications and Projects available to your account';
     case CONVERSATIONS_COMMAND:
       return 'what is open in the home you are in';
     case INBOX_COMMAND:
@@ -960,7 +960,7 @@ export function describeCommand(command: string): string {
     case HERE_COMMAND:
       return 'make this directory a project and lend it its files';
     case PROJECT_COMMAND:
-      return 'move to another project, or create and administer a server project with a JSON payload';
+      return 'move to an Application or Project, or create and administer a server Application or DISJOINT registration with a JSON payload';
     case CD_COMMAND:
       return 'stand somewhere else, and root the project found there';
     case SYNC_COMMAND:
@@ -1601,34 +1601,37 @@ export function describeUnmarked(root: string, why: string): string {
 }
 
 /**
- * The projects, one line each: the name, and nothing else about them.
- *
- * <p><b>The name is the whole of what this listing is for.</b> It is the word a
- * person chose, and it is what `PLOWSHARE_PROJECT` takes — so a listing of names
- * answers the question somebody opens it with, which is which of these to put in
- * that variable.
- *
- * <p><b>What is deliberately left out.</b> A `ProjectView` also carries the
- * workspace, the lent directories and the effective exclusions, and
- * `ProjectListHandler` says what that adds up to: a map of this server's disk
- * and of where its secrets are fenced off. A scrollback gets piped, pasted and
- * grepped, and none of those three is needed to pick a name.
- *
- * @returns one line per project, or a single sentence when there are none — a
- *     listing that printed nothing would be indistinguishable from a command
- *     that did not run
+ * Authorized scopes grouped as Applications and Projects, with Personal separate.
+ * Names remain usable with `PLOWSHARE_PROJECT`; workspace paths and exclusions
+ * stay out of scrollback. Manifest identity, rather than file location or
+ * DISJOINT lifecycle ownership, decides which group a scope belongs to.
  */
 export function describeProjects(rows: readonly Project[]): string[] {
-  if (rows.length === 0) {
-    return ['no projects have been defined on this server'];
-  }
-  return rows.map((row) =>
-    row.kind === 'personal'
-      ? `Personal · ${row.name}`
-      : row.type === 'DISJOINT'
-        ? `${row.displayName ?? row.name} · DISJOINT · no sync`
-        : row.name,
-  );
+  const group = (label: string, entries: readonly Project[]): string[] => [
+    `${label}:`,
+    ...(entries.length
+      ? entries.map((row) =>
+          row.type === 'DISJOINT'
+            ? `  ${row.displayName ?? row.name} · DISJOINT · no sync`
+            : `  ${row.name}`,
+        )
+      : [`  No ${label} available to this account.`]),
+  ];
+  return [
+    ...group(
+      'Applications',
+      rows.filter((row) => row.kind === 'application'),
+    ),
+    ...group(
+      'Projects',
+      rows.filter(
+        (row) => row.kind !== 'application' && row.kind !== 'personal',
+      ),
+    ),
+    ...rows
+      .filter((row) => row.kind === 'personal')
+      .map((row) => `Personal · ${row.name}`),
+  ];
 }
 
 /**

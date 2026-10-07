@@ -11,6 +11,7 @@ class ProjectFileTest {
   void agent_mutations_cannot_enable_project_policy_but_the_existing_cli_remains_editable(
       @TempDir Path root) throws Exception {
     Path manifest = root.resolve("plowshare");
+    assertFalse(ProjectFile.modelMayChange(root, root.resolve("plowshare.json")));
     assertFalse(ProjectFile.modelMayChange(root, manifest));
     Files.writeString(
         manifest, "{\"version\":1,\"name\":\"house\",\"caps\":{\"autoIncrease\":true}}");

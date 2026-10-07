@@ -1449,12 +1449,12 @@ export function whoAnswers(rows: readonly Agent[], named?: string): Chosen {
 const ADMIN_USAGE =
   'Use /admin status|accounts|account create|account update|account reset|sessions|session revoke|audit|pricing list|pricing set|service accounts|service account create|service account update|service tokens|service token create|service token rotate|service token revoke. Service token creation needs handle, name and scopes [{project,role}]; expiresInDays defaults to 30 (1–365). Account operations and session reads take a JSON payload with handle; audit accepts handle, before and limit. Pricing set needs billingRoute, model, expectedVersion from pricing list, mode and decimal-string rates in a JSON payload.';
 
-/** Server management keeps /project NAME as local navigation. */
+/** Application source and server management commands keep /project NAME as local navigation. */
 export function serverCommand(line: string, project?: string) {
   const text = line.trim();
   if (text === '/admin') return { kind: 'usage' as const, said: ADMIN_USAGE };
   if (
-    !/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
+    !/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|application\s+(?:files|read|save)|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
       text,
     )
   )

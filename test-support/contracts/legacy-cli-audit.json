@@ -330,7 +330,7 @@
   },
   "reviewedDifferences": [
     "Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --server and --url select the explicit server origin, --root replaces --workspace, and global options may precede or follow the command.",
-    "Structured Outcome JSON replaces Java prose; raw fields and incomplete/refused outcomes remain visible.",
+    "JSON mode returns structured Outcomes with raw fields and incomplete/refused outcomes. Human project listings group Applications and Projects and omit filesystem paths; --json preserves the project.list reply.",
     "Java exits 0 success, 1 incomplete/nonanswered, 2 usage/refusal/unavailable. TS exits 0 success, 1 refusal/unavailable job ending, 2 usage/auth bootstrap, 3 accepted/running/cancelling, 4 incomplete/nonanswered, 5 unknown/deadline/protocol.",
     "Global scope is explicit with --global or JSON project:null; blank project is refused. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.",
     "One memory.read per invocation replaces Java multi-id reads; no implicit provenance defaults for JSON writes/resolutions.",
@@ -340,9 +340,9 @@
   "evidence": {
     "sources": {
       "test-support/contracts/legacy-cli-baseline.json": "57483661334a470cef344b7b6b046446560bfcbb645e1b78a961b1ecc8e311c7",
-      "sdk/typescript/src/operations/catalog.ts": "aa760264432ee74ddc0272ceffa54c5ce2ace1eb4014ce6fd5a6f7b6a9258842",
-      "sdk/typescript/src/operations/direct.ts": "1fcfa90964869558780cf7075e64964ae0eb424aa3c6213235dc11ab7e8eb97d",
-      "plowshare-cli/src/run.ts": "6e49703abc07b32bee9beba0b72f6b4812883adb6e7c515ec67a0b7d880f4a63"
+      "sdk/typescript/src/operations/catalog.ts": "35e4c4133fa8e45d7cee24c7aa5e08210b964492ef930cf9b8e5286e5239cea1",
+      "sdk/typescript/src/operations/direct.ts": "87f2cf406a5b319fc282c93f04e1f244139e3889143237f890c7e673747dda37",
+      "plowshare-cli/src/run.ts": "f2d77d73ec80f2dd1bfab6194a00f24cc9f22b11d246f0b38dd4771095d8cecf"
     },
     "runtime": [
       "plowshare-cli/src/socket.test.ts",

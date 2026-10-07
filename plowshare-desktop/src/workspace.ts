@@ -113,20 +113,40 @@ export class DesktopWorkspace {
     const byId = <T extends { id: string }>(rows: T[]) => [
       ...new Map(rows.map((row) => [row.id, row])).values(),
     ];
-    for (const child of this.children.values()) {
+    // The account listing is authoritative for registered projects. Saved folders and
+    // older sessions cannot restore revoked access, including after restarting the desktop.
+    // Private client attachments are visible only through their own session; a listing error
+    // preserves the last known view while the server continues to recheck every request.
+    const accountProjects = new Set(state.projects.map((row) => row.name));
+    const unavailableProjects = new Set(
+      state.projectListError
+        ? []
+        : [
+            ...this.saved.map((row) => row.name),
+            ...[...this.children.values()].flatMap((child) =>
+              child.state.projects.map((row) => row.name),
+            ),
+          ].filter(
+            (name) => !name.startsWith('client:') && !accountProjects.has(name),
+          ),
+    );
+    for (const [project, child] of this.children) {
+      if (unavailableProjects.has(project)) continue;
       // Account refreshes are authoritative; an older child snapshot must not hide a moved server path.
       state.projects = [
         ...new Map(
-          [...child.state.projects, ...state.projects].map((row) => [
-            row.name,
-            row,
-          ]),
+          [
+            ...child.state.projects.filter(
+              (row) => !unavailableProjects.has(row.name),
+            ),
+            ...state.projects,
+          ].map((row) => [row.name, row]),
         ).values(),
       ];
       state.conversations = byId([
         ...state.conversations,
         ...child.state.conversations,
-      ]);
+      ]).filter((row) => !row.project || !unavailableProjects.has(row.project));
       state.jobs = byId([...state.jobs, ...child.state.jobs]);
       state.approvals = byId([...state.approvals, ...child.state.approvals]);
       state.answeringApprovals = [
@@ -150,34 +170,38 @@ export class DesktopWorkspace {
           ...state.projects,
         ].map((row) => [row.name, row]),
       ).values(),
-    ];
-    state.projectFolders = this.saved.map((row) => {
-      const child = this.children.get(row.name);
-      const files = child?.state.files ?? { status: 'off' as const };
-      const sync = child?.state.sync;
-      const error = this.errors.get(row.name);
-      return {
-        name: row.name,
-        path: row.path,
-        machine: row.machine,
-        enabled: row.enabled,
-        connected: child?.state.connected ?? false,
-        files,
-        ...(sync === undefined ? {} : { sync }),
-        ...(error === undefined ? {} : { error }),
-      };
-    });
+    ].filter((row) => !unavailableProjects.has(row.name));
+    state.projectFolders = this.saved
+      .filter((row) => !unavailableProjects.has(row.name))
+      .map((row) => {
+        const child = this.children.get(row.name);
+        const files = child?.state.files ?? { status: 'off' as const };
+        const sync = child?.state.sync;
+        const error = this.errors.get(row.name);
+        return {
+          name: row.name,
+          path: row.path,
+          machine: row.machine,
+          enabled: row.enabled,
+          connected: child?.state.connected ?? false,
+          files,
+          ...(sync === undefined ? {} : { sync }),
+          ...(error === undefined ? {} : { error }),
+        };
+      });
     if (state.personal && this.errors.has(state.personal.project))
       state.personal.error = this.errors.get(state.personal.project);
     state.projectConfigError = this.configError;
     state.localMachine = thisMachine(process.env, hostname());
     state.projectPreparing = [...this.attachments.keys()];
-    state.files = this.children.get(this.scope)?.state.files ?? {
+    const visibleChild = unavailableProjects.has(this.scope)
+      ? undefined
+      : this.children.get(this.scope);
+    state.files = visibleChild?.state.files ?? {
       status: 'off',
     };
-    state.sync = this.children.get(this.scope)?.state.sync;
-    state.liveHistory =
-      this.children.get(this.scope)?.state.liveHistory ?? state.liveHistory;
+    state.sync = visibleChild?.state.sync;
+    state.liveHistory = visibleChild?.state.liveHistory ?? state.liveHistory;
     return state;
   }
   private emit() {

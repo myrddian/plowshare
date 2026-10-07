@@ -827,5 +827,40 @@
       "configured": [],
       "updatedAt": "2026-10-04T00:00:00Z"
     }
+  },
+  "application.files": {
+    "code": "OK",
+    "payload": {
+      "project": "app",
+      "path": "",
+      "entries": [
+        {
+          "path": "plowshare.json",
+          "name": "plowshare.json",
+          "directory": false
+        }
+      ],
+      "more": false
+    }
+  },
+  "application.file.read": {
+    "code": "OK",
+    "payload": {
+      "project": "app",
+      "path": "plowshare.json",
+      "text": "{}",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": false
+    }
+  },
+  "application.file.save": {
+    "code": "OK",
+    "payload": {
+      "project": "app",
+      "path": "plowshare.json",
+      "text": "{}",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "writable": false
+    }
   }
 }

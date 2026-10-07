@@ -77,9 +77,10 @@ class ServerProjectFramesTest {
     assertEquals(List.of("."), row.writePaths());
     assertEquals(
         new com.fasterxml.jackson.databind.ObjectMapper()
-            .readTree("{\"version\":1,\"name\":\"home-assistant\"}"),
+            .readTree(
+                "{\"version\":1,\"name\":\"home-assistant\",\"access\":{\"accounts\":[{\"handle\":\"owner\",\"role\":\"MANAGER\"}]}}"),
         new com.fasterxml.jackson.databind.ObjectMapper()
-            .readTree(Files.readString(row.workspace().resolve(".plowshare/project"))));
+            .readTree(Files.readString(row.workspace().resolve("plowshare.json"))));
     assertTrue(new JdbcProjectMembers(jdbc).isMember("home-assistant", "owner"));
     assertThrows(RuntimeException.class, () -> create(Map.of("name", "home-assistant")));
     assertEquals(row.workspace(), projects.find("home-assistant").orElseThrow().workspace());
@@ -90,6 +91,35 @@ class ServerProjectFramesTest {
         RuntimeException.class,
         () -> create.handle(Map.of("name", "denied"), new Asking("s", "member")));
     assertNull(projects.id("denied"));
+  }
+
+  @Test
+  void disjointApplicationKeepsPipelineSourceAndRechecksExplicitAccess() throws Exception {
+    Path root = Files.createDirectory(tmp.resolve("chatbot"));
+    String manifest =
+        "{\"version\":1,\"name\":\"chatbot\",\"access\":{\"accounts\":[{\"handle\":\"member\",\"role\":\"VIEWER\"}]}}";
+    Files.writeString(root.resolve("plowshare.json"), manifest);
+    var outcome =
+        create.handle(
+            Map.of("name", "chatbot", "type", "DISJOINT", "workspace", root.toString()),
+            new Asking("s", "owner"));
+    assertEquals(
+        "application", ((io.aeyer.plowshare.server.api.ProjectView) outcome.payload()).kind());
+    assertEquals(manifest, Files.readString(root.resolve("plowshare.json")));
+    assertTrue(projects.find("chatbot").orElseThrow().readOnly());
+    var stored = new JdbcProjectMembers(jdbc);
+    stored.add("chatbot", "member");
+    var policy =
+        new io.aeyer.plowshare.server.agents.WorkspaceApplicationPolicy(
+            projects, new JdbcApplicationRegistrations(jdbc));
+    var effective = new ApplicationProjectMembers(stored, policy);
+    assertFalse(effective.mayUse("chatbot", "owner"));
+    assertEquals(Optional.of(ProjectRole.VIEWER), effective.role("chatbot", "member"));
+    Files.delete(root.resolve("plowshare.json"));
+    assertFalse(effective.mayUse("chatbot", "member"));
+    assertFalse(effective.mayUse("chatbot", "owner"));
+    Files.writeString(root.resolve("plowshare.json"), manifest);
+    assertTrue(effective.mayUse("chatbot", "member"));
   }
 
   @Test

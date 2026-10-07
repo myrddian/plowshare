@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN application_boundary BOOLEAN NOT NULL DEFAULT FALSE;

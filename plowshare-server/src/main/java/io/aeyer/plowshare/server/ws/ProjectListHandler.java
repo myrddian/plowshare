@@ -65,9 +65,11 @@ public final class ProjectListHandler implements FrameHandler {
   public Outcome handle(Map<String, Object> payload, Asking asking) {
     return Outcome.ok(
         projects.allForSession(asking.handle(), asking.sessionId()).stream()
+            .filter(project -> members.mayUse(project.name(), asking.handle()))
             .map(
                 project ->
                     view(project)
+                        .application(members.application(project.name()))
                         .withRole(
                             members
                                 .role(project.name(), asking.handle())

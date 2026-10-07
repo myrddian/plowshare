@@ -464,9 +464,20 @@ public final class ProjectStore implements ProjectWorkspaces {
         });
   }
 
+  /** Validated source provisioning result; authority adoption commits with project creation. */
+  public record ServerWorkspace(Path root, boolean application) {
+    public ServerWorkspace {
+      Objects.requireNonNull(root);
+    }
+  }
+
   /** Atomic create; an existing project can never be overwritten by a retried request. */
   public ProjectRecord createServer(
-      String name, String type, List<String> writePaths, String handle, Supplier<Path> workspace) {
+      String name,
+      String type,
+      List<String> writePaths,
+      String handle,
+      Supplier<ServerWorkspace> workspace) {
     new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
     ordinary(name);
     return withCreator(
@@ -479,16 +490,18 @@ public final class ProjectStore implements ProjectWorkspaces {
                   name)
               .isEmpty())
             throw new ArchiveRefusedException("Project already exists; creation was not repeated");
-          defineLending(name, workspace.get(), List.of(), List.of());
+          ServerWorkspace source = workspace.get();
+          defineLending(name, source.root(), List.of(), List.of());
           jdbc.update(
               connection -> {
                 PreparedStatement statement =
                     connection.prepareStatement(
-                        "UPDATE projects SET project_type = ?, write_paths = ? WHERE name = ?");
+                        "UPDATE projects SET project_type = ?, write_paths = ?, application_boundary = application_boundary OR ? WHERE name = ?");
                 statement.setString(1, type);
                 statement.setArray(
                     2, connection.createArrayOf("text", writePaths.toArray(String[]::new)));
-                statement.setString(3, name);
+                statement.setBoolean(3, type.equals("MANAGED") || source.application());
+                statement.setString(4, name);
                 return statement;
               });
           return find(name).orElseThrow();

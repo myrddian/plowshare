@@ -5,6 +5,7 @@ import { ownedEvent, background } from './events.ts';
 import { displayText } from 'plowshare-client-ts/binding/values';
 import { botDisplayName, botDetails } from './bot-details.ts';
 import { installPaneResize } from './pane-resize.ts';
+import { installApplication } from './application.ts';
 import { installProjectAccess } from './project-access.ts';
 import { installServerAdmin } from './server-admin.ts';
 import { installOperator } from './operator.ts';
@@ -112,6 +113,12 @@ const commandControls = installCommands(
     localStorage.removeItem(key);
   },
 );
+const application = installApplication(
+  $('#application-panel'),
+  () => state,
+  request,
+  chooseScope,
+);
 const approvalControls = installApprovalControls(
   document,
   () => state,
@@ -144,6 +151,7 @@ let busy = false;
 let connectionError = '';
 let sidebarHidden = false;
 let projectsCollapsed = false;
+let applicationsCollapsed = false;
 let personalCollapsed = false;
 let personalConversationsCollapsed = false;
 let personalBotsCollapsed = true;
@@ -307,6 +315,7 @@ async function loadHistory(id = selected, before?: number) {
   }
 }
 async function choose(id: string) {
+  application.close();
   personalVisible = false;
   const row = state.conversations.find((row) => row.id === id);
   if (!row) return;
@@ -337,6 +346,7 @@ async function choose(id: string) {
   await loadHistory(id);
 }
 async function chooseScope(nextScope: string) {
+  application.close();
   personalVisible = false;
   await request({ action: 'workspace-chat' });
   if (selected) drafts[selected] = draft.value;
@@ -461,10 +471,13 @@ function render() {
       : '',
   );
   renderPersonal();
-  setHTML(
-    $('#conversations'),
+  const projectRows = (application: boolean) =>
     state.projects
-      .filter((row) => row.kind !== 'personal')
+      .filter(
+        (row) =>
+          row.kind !== 'personal' &&
+          (row.kind === 'application') === application,
+      )
       .map((row) => row.name)
       .map((project, index) => {
         const folder = state.projectFolders?.find(
@@ -485,9 +498,21 @@ function render() {
           ? (filterExpansion[project] ?? true)
           : (projectExpansion[project] ?? scope === project);
         const items = expanded ? conversationRows(project) : '';
-        return `<section class="project-group"><div class="project-heading" ${scope === project ? 'data-current="true"' : ''}><button class="project-toggle icon-button" data-project-toggle="${esc(project)}" aria-expanded="${expanded}" aria-controls="project-conversations-${index}" aria-label="${expanded ? 'Collapse' : 'Expand'} ${esc(scopeName(project))}">${icon('chevron')}</button><button class="project-row" data-project="${esc(project)}" ${scope === project ? 'aria-current="true"' : ''} title="${esc([location, folder?.error].filter(Boolean).join(' · ') || 'Open project')}"><span class="project-name">${esc(scopeName(project))}${location ? `<small class="project-location">${esc(location)}</small>` : ''}</span>${folder ? `<small class="project-presence ${folder.files.status}" aria-label="${esc(folder.error ? 'Files unavailable' : folder.files.status)}">${icon(folder.files.status === 'ready' ? 'check' : folder.error || folder.files.status === 'lost' ? 'alert' : 'folder')}</small>` : ''}</button><button type="button" data-project-access="${esc(project)}" aria-label="Access for ${esc(scopeName(project))}" ${!state.connected ? 'disabled' : ''}>Access</button></div><div id="project-conversations-${index}" class="project-conversations" ${expanded ? '' : 'hidden'}>${items || '<p class="no-running">No conversations loaded.</p>'}</div></section>`;
+        return `<section class="project-group"><div class="project-heading" ${scope === project ? 'data-current="true"' : ''}><button class="project-toggle icon-button" data-project-toggle="${esc(project)}" aria-expanded="${expanded}" aria-controls="project-conversations-${application ? 'application' : 'external'}-${index}" aria-label="${expanded ? 'Collapse' : 'Expand'} ${esc(scopeName(project))}">${icon('chevron')}</button><button class="project-row" data-project="${esc(project)}" ${scope === project ? 'aria-current="true"' : ''} title="${esc([location, folder?.error].filter(Boolean).join(' · ') || 'Open project')}"><span class="project-name">${esc(scopeName(project))}${location ? `<small class="project-location">${esc(location)}</small>` : ''}</span>${folder ? `<small class="project-presence ${folder.files.status}" aria-label="${esc(folder.error ? 'Files unavailable' : folder.files.status)}">${icon(folder.files.status === 'ready' ? 'check' : folder.error || folder.files.status === 'lost' ? 'alert' : 'folder')}</small>` : ''}</button><button type="button" data-project-access="${esc(project)}" aria-label="Access for ${esc(scopeName(project))}" ${!state.connected ? 'disabled' : ''}>Access</button></div><div id="project-conversations-${application ? 'application' : 'external'}-${index}" class="project-conversations" ${expanded ? '' : 'hidden'}>${items || '<p class="no-running">No conversations loaded.</p>'}</div></section>`;
       })
-      .join(''),
+      .join('');
+  const projectListError = state.projectListError
+    ? `<p class="no-running" role="alert">${esc(state.projectListError)}</p>`
+    : '';
+  const emptyProjects = (application: boolean) =>
+    `<p class="no-running" role="status">${state.connected ? (application ? 'No Applications available to this account.' : 'No Projects available.') : state.mode === 'live' ? 'Connect to load workspaces.' : application ? 'No sample Applications.' : 'No sample Projects.'}</p>`;
+  setHTML(
+    $('#application-conversations'),
+    projectListError + (projectRows(true) || emptyProjects(true)),
+  );
+  setHTML(
+    $('#conversations'),
+    projectListError + (projectRows(false) || emptyProjects(false)),
   );
   const jobs = state.jobs.filter(activeJob);
   $('#running-count').textContent = String(jobs.length);
@@ -1061,7 +1086,10 @@ function renderPersonal() {
   if ($('#personal-panel').hidden === showPersonal)
     $('#personal-panel').hidden = !showPersonal;
   // Background state updates must not reveal chat underneath an embedded page.
-  const hideStage = workspaceRoute.kind !== 'chat' || showPersonal;
+  if (workspaceRoute.kind !== 'chat') application.close();
+  application.render();
+  const hideStage =
+    workspaceRoute.kind !== 'chat' || showPersonal || application.visible;
   if (stage.hidden !== hideStage) stage.hidden = hideStage;
   if (!showPersonal || !personal) return;
   $('#personal-title').textContent = personalSectionName(
@@ -1331,32 +1359,44 @@ $('#dismiss-error').addEventListener('click', () => {
 $('#new-conversation').addEventListener('click', () =>
   background(newConversation()),
 );
-$('#conversations').addEventListener('click', (event) => {
-  const toggle = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-project-toggle]',
-  );
-  if (toggle) {
-    const project = toggle.dataset.projectToggle!;
-    const expansion = $<HTMLInputElement>('#conversation-filter').value
-      ? filterExpansion
-      : projectExpansion;
-    expansion[project] = toggle.getAttribute('aria-expanded') !== 'true';
-    render();
-    persist();
-    return;
-  }
-  const project = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-project]',
-  )?.dataset.project;
-  if (project !== undefined) {
-    background(chooseScope(project));
-    return;
-  }
-  const id = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-conversation]',
-  )?.dataset.conversation;
-  if (id) background(choose(id));
-});
+for (const navigation of ['#conversations', '#application-conversations'])
+  $(navigation).addEventListener('click', (event) => {
+    const toggle = (event.target as HTMLElement).closest<HTMLElement>(
+      '[data-project-toggle]',
+    );
+    if (toggle) {
+      const project = toggle.dataset.projectToggle!;
+      const expansion = $<HTMLInputElement>('#conversation-filter').value
+        ? filterExpansion
+        : projectExpansion;
+      expansion[project] = toggle.getAttribute('aria-expanded') !== 'true';
+      render();
+      persist();
+      return;
+    }
+    const project = (event.target as HTMLElement).closest<HTMLElement>(
+      '[data-project]',
+    )?.dataset.project;
+    if (project !== undefined) {
+      background(
+        (async () => {
+          await chooseScope(project);
+          if (
+            state.projects.find((row) => row.name === project)?.kind ===
+            'application'
+          ) {
+            application.open(project);
+            renderPersonal();
+          }
+        })(),
+      );
+      return;
+    }
+    const id = (event.target as HTMLElement).closest<HTMLElement>(
+      '[data-conversation]',
+    )?.dataset.conversation;
+    if (id) background(choose(id));
+  });
 $('#running-jobs').addEventListener('click', (event) => {
   if ((event.target as HTMLElement).closest('[data-information-job]')) {
     action({ action: 'library', view: 'sources', project: scope || null });
@@ -1699,6 +1739,7 @@ function persistLayout() {
       JSON.stringify({
         sidebarHidden,
         projectsCollapsed,
+        applicationsCollapsed,
         personalCollapsed,
         personalConversationsCollapsed,
         personalBotsCollapsed,
@@ -1730,6 +1771,7 @@ try {
   if (!isObject(layout)) throw new Error('Unreadable saved layout.');
   sidebarHidden = layout.sidebarHidden === true;
   projectsCollapsed = layout.projectsCollapsed === true;
+  applicationsCollapsed = layout.applicationsCollapsed === true;
   personalCollapsed = layout.personalCollapsed === true;
   personalConversationsCollapsed =
     layout.personalConversationsCollapsed === true;
@@ -1746,6 +1788,16 @@ function setProjectsCollapsed(collapsed: boolean) {
   $('#project-add').hidden = collapsed;
   persistLayout();
 }
+function setApplicationsCollapsed(collapsed: boolean) {
+  applicationsCollapsed = collapsed;
+  $('#sidebar-applications').hidden = collapsed;
+  $('#applications-toggle').setAttribute('aria-expanded', String(!collapsed));
+  persistLayout();
+}
+setApplicationsCollapsed(applicationsCollapsed);
+$('#applications-toggle').addEventListener('click', () =>
+  setApplicationsCollapsed(!applicationsCollapsed),
+);
 setProjectsCollapsed(projectsCollapsed);
 $('#projects-toggle').addEventListener('click', () =>
   setProjectsCollapsed(!projectsCollapsed),

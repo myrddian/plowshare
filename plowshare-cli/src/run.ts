@@ -1,4 +1,5 @@
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
+import { projects, type Project } from 'plowshare-client-ts/operations/views';
 import { isList } from 'plowshare-client-ts/binding/values';
 import { discover } from 'plowshare-client-node/marker';
 import { createRequire } from 'node:module';
@@ -65,6 +66,34 @@ function fields(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : {};
+}
+
+/** Human listings keep Application identity separate from external project work. */
+function projectListing(rows: readonly Project[]): string {
+  const group = (label: string, entries: readonly Project[]): string => {
+    const lines = entries.length
+      ? entries.map(
+          (row) =>
+            `  ${row.name}${row.type === 'DISJOINT' ? ' · DISJOINT · no sync' : ''}`,
+        )
+      : [`  No ${label} available to this account.`];
+    return [`${label}:`, ...lines].join('\n');
+  };
+  return [
+    group(
+      'Applications',
+      rows.filter((row) => row.kind === 'application'),
+    ),
+    group(
+      'Projects',
+      rows.filter(
+        (row) => row.kind !== 'application' && row.kind !== 'personal',
+      ),
+    ),
+    ...rows
+      .filter((row) => row.kind === 'personal')
+      .map((row) => `Personal · ${row.name}`),
+  ].join('\n');
 }
 
 /** Offline help and payload validation need no origin; all online paths fail before
@@ -849,10 +878,16 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       );
     } else {
       const conversation = identifiers['conversation']?.id;
+      const projectRows =
+        operation === 'project.list' && result.kind === 'completed'
+          ? projects(result.outcome)
+          : undefined;
       const detail =
-        result.outcome.payload === undefined
-          ? ''
-          : '\n' + JSON.stringify(result.outcome.payload, null, 2);
+        projectRows !== undefined
+          ? '\n' + projectListing(projectRows)
+          : result.outcome.payload === undefined
+            ? ''
+            : '\n' + JSON.stringify(result.outcome.payload, null, 2);
       const said =
         result.outcome.said === undefined ? '' : '\n' + result.outcome.said;
       io.stdout(

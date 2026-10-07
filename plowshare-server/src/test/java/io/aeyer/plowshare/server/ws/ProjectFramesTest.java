@@ -88,7 +88,10 @@ class ProjectFramesTest {
     // FrameParity.endpointsOf and not a bare standaloneSetup: what the
     // deployed server's converters do is what a frame is being compared
     // against, and that class's javadoc has the argument.
-    mvc = FrameParity.endpointsOf(new ProjectController(projects, presences));
+    mvc =
+        FrameParity.endpointsOf(
+            new ProjectController(
+                projects, presences, io.aeyer.plowshare.server.ws.TestProjectMembers.allowed()));
     // Through the area rather than through a literal map: this is the
     // registration the handlers are reached by in production, and a test
     // that built its own map would pass for a type nobody wired.
@@ -99,8 +102,7 @@ class ProjectFramesTest {
                     new ProjectFrames(
                         projects,
                         presences,
-                        org.mockito.Mockito.mock(
-                            io.aeyer.plowshare.server.archive.ProjectMembers.class),
+                        TestProjectMembers.allowed(),
                         new io.aeyer.plowshare.server.auth.AuthProperties())));
   }
 

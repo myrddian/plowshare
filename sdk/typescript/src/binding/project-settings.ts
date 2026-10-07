@@ -21,6 +21,7 @@ export interface ProjectCommandPolicy {
   readonly isolation?: string;
 }
 export interface ProjectManifestSettings {
+  readonly access?: ApplicationAccess;
   readonly caps?: Caps;
   readonly commands?: {
     readonly local?: ProjectCommandPolicy;
@@ -30,6 +31,51 @@ export interface ProjectManifestSettings {
     Record<string, { readonly agentVisible: boolean }>
   >;
   readonly defaultBot?: string;
+}
+
+/** Deployed account ceilings, intersected with authenticated server membership. */
+export interface ApplicationAccess {
+  readonly accounts: readonly {
+    readonly handle: string;
+    readonly role: 'VIEWER' | 'CONTRIBUTOR' | 'MANAGER';
+  }[];
+}
+
+export function applicationAccess(value: unknown): ApplicationAccess {
+  const access = object(value, 'Application access');
+  if (
+    Object.keys(access).some((key) => key !== 'accounts') ||
+    !isList(access.accounts) ||
+    access.accounts.length > 256
+  )
+    throw new Error('Application access needs a bounded accounts list');
+  const handles = new Set<string>();
+  const accounts = access.accounts.map(
+    (entry): ApplicationAccess['accounts'][number] => {
+      const grant = object(entry, 'Application account grant');
+      const role = grant.role;
+      if (
+        Object.keys(grant).some((key) => !['handle', 'role'].includes(key)) ||
+        typeof grant.handle !== 'string' ||
+        !grant.handle.trim() ||
+        grant.handle !== grant.handle.trim() ||
+        grant.handle.length > 512 ||
+        Array.from(grant.handle).some((char) => {
+          const code = char.charCodeAt(0);
+          return code < 32 || (code >= 127 && code <= 159);
+        }) ||
+        (role !== 'VIEWER' && role !== 'CONTRIBUTOR' && role !== 'MANAGER') ||
+        handles.has(grant.handle)
+      )
+        throw new Error('Invalid or duplicate application account grant');
+      handles.add(grant.handle);
+      return {
+        handle: grant.handle,
+        role,
+      };
+    },
+  );
+  return { accounts };
 }
 export interface ProjectSettings extends Omit<
   ProjectManifestSettings,
@@ -95,6 +141,8 @@ function commandSection(value: unknown): Section {
 /** Validate recognized settings while preserving other integration/application properties. */
 export function projectSettings(value: unknown): ProjectSettings {
   const record = object(value, 'Project settings');
+  const access =
+    record.access === undefined ? undefined : applicationAccess(record.access);
   let caps: Caps | undefined;
   if (record.caps !== undefined) {
     const values = object(record.caps, 'Project caps');
@@ -151,6 +199,7 @@ export function projectSettings(value: unknown): ProjectSettings {
   )
     throw new Error('Invalid defaultBot');
   return {
+    ...(access === undefined ? {} : { access }),
     ...(caps === undefined ? {} : { caps }),
     ...(commands === undefined ? {} : { commands }),
     ...(record.skills === undefined

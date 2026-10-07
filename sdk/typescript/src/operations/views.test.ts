@@ -111,3 +111,8 @@ describe('shared client response readers', () => {
     ).toEqual({ id: 'a', state: 'allowed', busy: true, note: 'running' });
   });
 });
+
+it('preserves Application classification through the shared project decoder', () => {
+  const payload = [{ name: 'chatbot', kind: 'application', type: 'DISJOINT' }];
+  expect(projects({ code: 'OK', payload })).toEqual(payload);
+});

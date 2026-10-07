@@ -33,6 +33,7 @@ function fixture(
     string,
     NonNullable<ReturnType<typeof agentWire>['commands']>
   >();
+  let serverProjects = [projectWire('Research'), projectWire('Writing')];
   const sessions: {
     id: string;
     closed: boolean;
@@ -95,11 +96,7 @@ function fixture(
           if (type === 'project.list')
             return {
               code: 'OK',
-              payload: [
-                projectWire('Research'),
-                projectWire('Writing'),
-                ...local,
-              ],
+              payload: [...serverProjects, ...local],
             };
           if (type === 'project.attach') {
             const value = decodePayload('project.attach', payload);
@@ -217,8 +214,12 @@ function fixture(
   return {
     workspace,
     savedWrites,
+    store,
     sessions,
     catalogs,
+    setServerProjects: (rows: ReturnType<typeof projectWire>[]) => {
+      serverProjects = rows;
+    },
     delayPeer: () => {
       let release!: () => void;
       peerWait = new Promise((resolve) => {
@@ -699,5 +700,61 @@ await test('manifest folders use their own project connection and are not persis
   } finally {
     await workspace.shutdown();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test('an offline project session cannot resurrect a revoked Application in account navigation', async () => {
+  const { workspace, sessions, setServerProjects } = fixture();
+  setServerProjects([
+    projectWire('Research', { kind: 'application' }),
+    projectWire('Writing'),
+  ]);
+  try {
+    await connect(workspace);
+    await workspace.dispatch({ action: 'scope', project: 'Research' });
+    const child = sessions.find((row) =>
+      row.calls.some(
+        (call) =>
+          call.type === 'agent.list' && call.payload.project === 'Research',
+      ),
+    );
+    assert.ok(child);
+    child.drop();
+    setServerProjects([projectWire('Writing')]);
+    await workspace.dispatch({ action: 'refresh' });
+    assert.ok(!workspace.state.projects.some((row) => row.name === 'Research'));
+    assert.ok(
+      !workspace.state.conversations.some((row) => row.project === 'Research'),
+    );
+    await assert.rejects(
+      workspace.dispatch({ action: 'scope', project: 'Research' }),
+      /available project/,
+    );
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('saved folders do not expose a registered project absent from a successful account listing', async () => {
+  const { workspace, store, setServerProjects } = fixture();
+  setServerProjects([projectWire('Writing')]);
+  store.list = async () => [
+    {
+      server: 'http://localhost:8080',
+      account: 'alice',
+      name: 'Research',
+      path: '/fixture/research',
+      machine: 'fixture',
+      enabled: false,
+    },
+  ];
+  try {
+    await connect(workspace);
+    assert.ok(!workspace.state.projects.some((row) => row.name === 'Research'));
+    assert.ok(
+      !workspace.state.projectFolders?.some((row) => row.name === 'Research'),
+    );
+  } finally {
+    await workspace.shutdown();
   }
 });
