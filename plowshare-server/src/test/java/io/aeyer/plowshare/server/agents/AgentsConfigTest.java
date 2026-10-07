@@ -42,6 +42,7 @@ import io.aeyer.plowshare.server.documents.DocumentStore;
 import io.aeyer.plowshare.server.documents.RetrievalService;
 import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileStores;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.Mode;
 import io.aeyer.plowshare.server.files.RunProviders;
@@ -127,6 +128,7 @@ class AgentsConfigTest {
         // directory is created beside the module this suite runs in --
         // which is DataProperties' whole argument for the blank.
         .withUserConfiguration(AgentsConfig.class, DataConfig.class)
+        .withBean(FileStores.class, () -> FileStores.NONE)
         .withBean(LlmDispatcher.class, () -> dispatcher)
         // THE SHIPPED PROFILES, and read(null) is what a server with no
         // sampling directory gets -- which is the state most of these

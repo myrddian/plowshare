@@ -1,3 +1,4 @@
+import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import type { DesktopState, Reply, Request } from '../shared.ts';
 import { ownedEvent } from './events.ts';
 
@@ -10,7 +11,7 @@ export function installApplication(
 ) {
   host.innerHTML = `<header><div><div class="eyebrow">APPLICATION</div><h2 data-title></h2></div><button data-close>Conversations</button></header>
     <p data-summary></p><nav aria-label="Application views"><button data-files>Files</button><button data-runtime>Runtime definitions</button><button data-memory>Memory</button><button data-board>Boards</button><button data-settings>Access</button></nav>
-    <section data-source hidden><form data-location><label>Relative path<input data-path autocomplete="off" placeholder="Folder or file inside this Application"></label><button data-browse>Browse folder</button><button data-open>Read file</button></form>
+    <section data-source hidden><label data-area-label hidden>File location<select data-area aria-label="Application file location"></select></label><form data-location><label>Relative path<input data-path autocomplete="off" placeholder="Folder or file inside this Application"></label><button data-browse>Browse folder</button><button data-open>Read file</button></form>
     <p data-status role="status"></p><p data-error role="alert" hidden></p><div data-entries></div>
     <section data-editor hidden><h3 data-file-title></h3><p data-permission></p><label>File content<textarea data-text spellcheck="false" aria-label="Application file content"></textarea></label>
     <div class="application-actions"><button data-read-current>Read current file</button><button data-use-current hidden>Use current file and discard draft</button><button data-save>Save file</button></div></section></section>`;
@@ -25,8 +26,10 @@ export function installApplication(
     string,
     { text: string; revision: string; original: string }
   >();
+  let location: FileStoreReference | undefined;
+  const selectedLocation = () => (location ? { location } : {});
   const documentKey = () =>
-    `${project}\0${state().applicationFiles?.document?.path ?? ''}`;
+    `${project}\0${JSON.stringify(location ?? null)}\0${state().applicationFiles?.document?.path ?? ''}`;
   const run = (work: () => Promise<unknown>) =>
     ownedEvent(async () => {
       try {
@@ -39,6 +42,27 @@ export function installApplication(
             : 'The Application view could not be opened.';
       }
     });
+  get<HTMLSelectElement>('[data-area]').addEventListener(
+    'change',
+    run(async () => {
+      const row = state().projects.find((row) => row.name === project);
+      const index = get<HTMLSelectElement>('[data-area]').selectedIndex;
+      location =
+        index > 0
+          ? row?.writableAreas?.filter(
+              (area) =>
+                area.store !== row.applicationRoot?.store ||
+                area.path !== row.applicationRoot?.path,
+            )[index - 1]
+          : undefined;
+      rendered = '';
+      await request({
+        action: 'application-files',
+        project,
+        ...selectedLocation(),
+      });
+    }),
+  );
   const close = () => {
     shown = false;
     host.hidden = true;
@@ -55,7 +79,11 @@ export function installApplication(
     run(async () => {
       files = true;
       render();
-      await request({ action: 'application-files', project });
+      await request({
+        action: 'application-files',
+        project,
+        ...selectedLocation(),
+      });
     }),
   );
   get('[data-runtime]').addEventListener(
@@ -85,6 +113,7 @@ export function installApplication(
         await request({
           action: 'application-files',
           project,
+          ...selectedLocation(),
           path: get<HTMLInputElement>('[data-path]').value,
         });
       })();
@@ -97,6 +126,7 @@ export function installApplication(
       request({
         action: 'application-file-read',
         project,
+        ...selectedLocation(),
         path: get<HTMLInputElement>('[data-path]').value,
       }),
     ),
@@ -107,6 +137,7 @@ export function installApplication(
       request({
         action: 'application-file-read',
         project,
+        ...selectedLocation(),
         path: state().applicationFiles!.document!.path,
       }),
     ),
@@ -130,6 +161,7 @@ export function installApplication(
       await request({
         action: 'application-file-save',
         project,
+        ...selectedLocation(),
         path: document.path,
         text: draft.text,
         revision: draft.revision,
@@ -152,10 +184,36 @@ export function installApplication(
     if (!shown || !row) return;
     get('[data-title]').textContent = row.displayName ?? row.name;
     get('[data-summary]').textContent =
-      `${row.type === 'DISJOINT' ? 'Source lifecycle managed externally' : 'Source lifecycle managed by Plowshare'} · ${row.role?.toLowerCase() ?? 'access granted'}`;
+      `${row.applicationRoot ? `${row.applicationRoot.store}/${row.applicationRoot.path} · ` : ''}${row.type === 'DISJOINT' ? 'Source lifecycle managed externally' : 'Source lifecycle managed by Plowshare'} · ${row.role?.toLowerCase() ?? 'access granted'}`;
+    const areaSelect = get<HTMLSelectElement>('[data-area]');
+    const areaStamp = JSON.stringify([row.applicationRoot, row.writableAreas]);
+    if (areaSelect.dataset.stamp !== areaStamp) {
+      areaSelect.dataset.stamp = areaStamp;
+      areaSelect.replaceChildren();
+      const sourceOption = document.createElement('option');
+      sourceOption.textContent = 'Application source';
+      areaSelect.append(sourceOption);
+      for (const area of row.writableAreas ?? []) {
+        if (
+          area.store === row.applicationRoot?.store &&
+          area.path === row.applicationRoot?.path
+        )
+          continue;
+        const option = document.createElement('option');
+        option.textContent = `${area.store}/${area.path || ''}`;
+        areaSelect.append(option);
+      }
+      location = undefined;
+      rendered = '';
+    }
+    get('[data-area-label]').hidden = areaSelect.options.length < 2;
+    areaSelect.disabled =
+      !!current.applicationFiles?.loading || !!current.applicationFiles?.saving;
     get('[data-source]').hidden = !files;
     const value =
-      current.applicationFiles?.project === project
+      current.applicationFiles?.project === project &&
+      current.applicationFiles.location?.store === location?.store &&
+      current.applicationFiles.location?.path === location?.path
         ? current.applicationFiles
         : undefined;
     get('[data-error]').hidden = !value?.error;
@@ -183,6 +241,7 @@ export function installApplication(
             request({
               action: 'application-files',
               project,
+              ...selectedLocation(),
               path: listing.path.includes('/')
                 ? listing.path.slice(0, listing.path.lastIndexOf('/'))
                 : '',
@@ -203,6 +262,7 @@ export function installApplication(
                 ? 'application-files'
                 : 'application-file-read',
               project,
+              ...selectedLocation(),
               path: entry.path,
             }),
           ),
@@ -259,6 +319,10 @@ export function installApplication(
       return shown;
     },
     open(name: string) {
+      if (project !== name) {
+        location = undefined;
+        get<HTMLSelectElement>('[data-area]').selectedIndex = 0;
+      }
       project = name;
       shown = true;
       files = false;

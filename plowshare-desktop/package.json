@@ -23,6 +23,7 @@
     "test:panes": "node scripts/build.mjs && node scripts/panes-smoke.mjs",
     "test:navigation": "node scripts/build.mjs && node --experimental-strip-types scripts/navigation-smoke.mjs",
     "test:applications": "node scripts/build.mjs && node --experimental-strip-types scripts/applications-smoke.mjs",
+    "test:application-storage": "node scripts/build.mjs && node --experimental-strip-types scripts/application-storage-smoke.mjs",
     "test:projects": "node scripts/build.mjs && node --experimental-strip-types scripts/projects-smoke.mjs",
     "test:personal": "node scripts/build.mjs && node --experimental-strip-types scripts/personal-smoke.mjs",
     "test:bots": "node scripts/build.mjs && node --experimental-strip-types scripts/bots-smoke.mjs",

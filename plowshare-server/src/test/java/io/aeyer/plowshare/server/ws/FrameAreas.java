@@ -81,7 +81,7 @@ final class FrameAreas {
   static List<FrameArea> mocked() {
     List<FrameArea> areas = new ArrayList<>();
     for (Class<?> type : declared()) {
-      Constructor<?> only = type.getDeclaredConstructors()[0];
+      Constructor<?> only = productionConstructor(type);
       Object[] services = new Object[only.getParameterCount()];
       for (int at = 0; at < services.length; at++) {
         Class<?> parameter = only.getParameterTypes()[at];
@@ -120,7 +120,7 @@ final class FrameAreas {
   static List<Class<?>> servicesNeeded() {
     List<Class<?>> needed = new ArrayList<>();
     for (Class<?> type : declared()) {
-      for (Class<?> service : type.getDeclaredConstructors()[0].getParameterTypes()) {
+      for (Class<?> service : productionConstructor(type).getParameterTypes()) {
         if (!service.isPrimitive() && service != String.class && !needed.contains(service)) {
           needed.add(service);
         }
@@ -138,7 +138,25 @@ final class FrameAreas {
         }
       }
     }
-    return needed;
+    // A concrete repository mock also supplies its capability interfaces. Registering a second
+    // mock for an interface would create an ambiguity that production's single bean does not have.
+    return needed.stream()
+        .filter(
+            service ->
+                needed.stream()
+                    .noneMatch(other -> other != service && service.isAssignableFrom(other)))
+        .toList();
+  }
+
+  /** Compatibility constructors are not Spring's production composition contract. */
+  private static Constructor<?> productionConstructor(Class<?> type) {
+    return java.util.Arrays.stream(type.getDeclaredConstructors())
+        .filter(
+            constructor ->
+                constructor.isAnnotationPresent(
+                    org.springframework.beans.factory.annotation.Autowired.class))
+        .findFirst()
+        .orElseGet(() -> type.getDeclaredConstructors()[0]);
   }
 
   /**

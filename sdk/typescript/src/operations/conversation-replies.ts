@@ -1,4 +1,8 @@
 import { utf8Length } from '../binding/files.ts';
+import {
+  fileStoreReference,
+  type FileStoreReference,
+} from '../binding/filestores.ts';
 import type { Outcome } from '../binding/envelope.ts';
 import {
   bool,
@@ -42,6 +46,8 @@ export interface ProjectView {
   readonly displayName?: string;
   readonly routingIdentity?: string;
   readonly role?: ProjectRole | null;
+  readonly applicationRoot?: FileStoreReference | null;
+  readonly writableAreas?: readonly FileStoreReference[] | null;
 }
 export type ProjectRole = 'VIEWER' | 'CONTRIBUTOR' | 'MANAGER';
 export interface ProjectGrant {
@@ -321,6 +327,7 @@ export interface ApplicationFileListing {
   readonly path: string;
   readonly entries: readonly ApplicationFileEntry[];
   readonly more: boolean;
+  readonly location?: FileStoreReference | null;
 }
 export interface ApplicationFileDocument {
   readonly project: string;
@@ -328,6 +335,7 @@ export interface ApplicationFileDocument {
   readonly text: string;
   readonly revision: string;
   readonly writable: boolean;
+  readonly location?: FileStoreReference | null;
 }
 
 export interface ConversationReplies {
@@ -363,6 +371,8 @@ export interface ConversationReplies {
   'application.files': ApplicationFileListing;
   'application.file.read': ApplicationFileDocument;
   'application.file.save': ApplicationFileDocument;
+  'application.create': ProjectView;
+  'application.storage.set': ProjectView;
   'project.list': readonly ProjectView[];
   'project.attach': ProjectView;
   'project.create': ProjectView;
@@ -388,7 +398,45 @@ const conversation = record({
   noBudget: bool,
   title: nullable(text),
 });
+// Reply extensions are allowed; schema decoding projects them away. Input references remain strict.
+const wireFileStoreReference = (value: unknown): boolean =>
+  object(value) &&
+  fileStoreReference({ store: value['store'], path: value['path'] });
+
+/** Validate portable placement and editor selectors after schema projection. */
+export function validateFileStoreReplies(type: string, value: unknown): void {
+  const rows = type === 'project.list' ? value : [value];
+  if (!Array.isArray(rows)) return;
+  for (const raw of rows) {
+    if (!object(raw)) continue;
+    for (const key of ['applicationRoot', 'location']) {
+      if (
+        raw[key] !== undefined &&
+        raw[key] !== null &&
+        !wireFileStoreReference(raw[key])
+      )
+        throw new Error('Invalid FileStore reference in reply');
+    }
+    const areas = raw['writableAreas'];
+    if (
+      areas !== undefined &&
+      areas !== null &&
+      (!Array.isArray(areas) ||
+        areas.length > 100 ||
+        !areas.every(wireFileStoreReference))
+    )
+      throw new Error('Invalid writable areas in reply');
+  }
+}
 const project = record({
+  applicationRoot: (value) =>
+    value === undefined || value === null || wireFileStoreReference(value),
+  writableAreas: (value) =>
+    value === undefined ||
+    value === null ||
+    (Array.isArray(value) &&
+      value.length <= 100 &&
+      value.every(wireFileStoreReference)),
   routingIdentity: (value) => value === undefined || named(value),
   displayName: (value) => value === undefined || named(value),
   name: named,
@@ -649,6 +697,8 @@ const applicationPath: Check = (value) =>
           part.toLowerCase() !== '.git',
       ));
 const applicationDocument = record({
+  location: (value) =>
+    value === undefined || value === null || wireFileStoreReference(value),
   project: named,
   path: (value) => named(value) && applicationPath(value),
   text: (value) =>
@@ -730,6 +780,8 @@ const readers = {
   'project.create': project,
   'application.files': record(
     {
+      location: (value) =>
+        value === undefined || value === null || wireFileStoreReference(value),
       project: named,
       path: applicationPath,
       entries: list(
@@ -758,6 +810,8 @@ const readers = {
       );
     },
   ),
+  'application.create': project,
+  'application.storage.set': project,
   'application.file.read': applicationDocument,
   'application.file.save': applicationDocument,
   'project.list': list(project),

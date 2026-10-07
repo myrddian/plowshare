@@ -2,6 +2,74 @@ import { it, expect } from 'vitest';
 import { applicationFiles } from './application-files';
 import type { EventStream, FrameOutcome } from '../events';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+it('keeps drafts and saves scoped to the chosen writable area', async () => {
+  const location = { store: 'outputs', path: 'reports' };
+  const calls: { type: string; payload: unknown }[] = [];
+  const stream: EventStream = {
+    close() {},
+    status: () => ({ state: 'open', attempt: 0, retryInMs: null }),
+    async ask(type, payload): Promise<FrameOutcome> {
+      calls.push({ type, payload });
+      const selected = (payload as { location?: typeof location }).location;
+      return {
+        code: 'OK',
+        payload:
+          type === 'application.files'
+            ? {
+                project: 'app',
+                path: '',
+                entries: [{ path: 'a.txt', name: 'a.txt', directory: false }],
+                more: false,
+                ...(selected ? { location: selected } : {}),
+              }
+            : {
+                project: 'app',
+                path: 'a.txt',
+                text: selected ? 'output' : 'source',
+                revision: 'a'.repeat(64),
+                writable: true,
+                ...(selected ? { location: selected } : {}),
+              },
+      };
+    },
+  };
+  const view = applicationFiles(
+    'app',
+    () => stream,
+    { store: 'applications', path: 'chatbot' },
+    [location],
+  );
+  document.body.replaceChildren(view);
+  const click = async (label: string) => {
+    [...view.querySelectorAll('button')]
+      .find((row) => row.textContent === label)!
+      .click();
+    await tick();
+  };
+  await click('Files');
+  await click('a.txt');
+  const editor = view.querySelector('textarea')!;
+  editor.value = 'source draft';
+  editor.dispatchEvent(new Event('input'));
+  const selector = view.querySelector('select')!;
+  selector.selectedIndex = 1;
+  selector.dispatchEvent(new Event('change'));
+  await tick();
+  await click('a.txt');
+  expect(editor.value).toBe('output');
+  editor.value = 'output draft';
+  editor.dispatchEvent(new Event('input'));
+  await click('Save file');
+  expect(calls.at(-1)).toMatchObject({
+    type: 'application.file.save',
+    payload: { location, text: 'output draft' },
+  });
+  selector.selectedIndex = 0;
+  selector.dispatchEvent(new Event('change'));
+  await tick();
+  await click('a.txt');
+  expect(editor.value).toBe('source draft');
+});
 it('browses server text, retains a draft and reconciles a lost save without replay', async () => {
   const calls: string[] = [];
   let fail = false;

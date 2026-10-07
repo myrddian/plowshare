@@ -14,6 +14,15 @@ Source locations are grouped here; Gradle commands and distribution executable
 names remain stable. See the [coding standards](../docs/coding-standards.md) for
 the SDK boundary and [SDKs](../sdk/README.md) for the client libraries.
 
+A2A and Home Assistant include deployable Application templates under
+`examples/application/`, each identified by its root `plowshare.json`. Register
+these roots as Applications so authorized clients list them under **Applications**.
+The templates have empty `access.accounts` lists: add explicit deployment account
+grants and matching server membership before use. Adapter credentials, endpoints
+and journals stay in private deployment configuration. The adapter processes
+continue to use the public SDK; a repository directory name or an adapter binding's
+`project` field does not establish an Application boundary.
+
 `extensions/` is reserved for services that extend Plowshare capabilities, such
 as its search providers. External-system adapters belong in `integrations/`.
 

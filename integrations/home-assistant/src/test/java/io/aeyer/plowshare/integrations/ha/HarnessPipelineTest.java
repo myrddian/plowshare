@@ -93,18 +93,24 @@ class HarnessPipelineTest {
             + " CONFLICT DO NOTHING",
         account);
     Path workspace = Files.createDirectory(directory.resolve("workspace"));
-    Path examples = Path.of(System.getProperty("integration.examples")).resolve("project");
+    Path examples = Path.of(System.getProperty("integration.examples")).resolve("application");
     var manifest =
         (com.fasterxml.jackson.databind.node.ObjectNode)
-            Json.parse(Files.readString(examples.resolve("plowshare")));
+            Json.parse(Files.readString(examples.resolve("plowshare.json")));
     manifest.put("name", name);
-    Files.writeString(workspace.resolve("plowshare"), manifest.toString());
+    manifest
+        .withObject("access")
+        .withArray("accounts")
+        .addObject()
+        .put("handle", account)
+        .put("role", "MANAGER");
+    Files.writeString(workspace.resolve("plowshare.json"), manifest.toString());
     projects.define(name, workspace, List.of(), account);
     Long id = jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, name);
-    try (var paths = Files.walk(examples)) {
+    Path definitions = examples.resolve(".plowshare");
+    try (var paths = Files.walk(definitions)) {
       for (Path source : paths.toList()) {
-        if (source.equals(examples.resolve("plowshare"))) continue;
-        Path target = layout.agentsFor(id).getParent().resolve(examples.relativize(source));
+        Path target = layout.agentsFor(id).getParent().resolve(definitions.relativize(source));
         if (Files.isDirectory(source)) Files.createDirectories(target);
         else Files.copy(source, target);
       }

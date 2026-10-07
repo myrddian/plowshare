@@ -6,7 +6,7 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.11.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.squareup.okhttp3:mockwebserver:$okhttpVersion")
-    // Validate optional project examples with current loaders; never ship server code.
+    // Validate bundled Application examples with current loaders; never ship server code.
     testImplementation(project(":plowshare-server")) { isTransitive = false }
     testImplementation(files(rootProject.project(":plowshare-server").configurations.named("runtimeClasspath")))
     testImplementation("org.springframework.boot:spring-boot-starter-test:3.3.5")
@@ -16,6 +16,7 @@ dependencies {
 application { mainClass.set("io.aeyer.plowshare.integrations.Main") }
 distributions { main { contents { from("examples") { into("examples") } } } }
 tasks.test {
+    inputs.dir("examples").withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("integration.worker.classpath", sourceSets.main.get().runtimeClasspath.asPath)
     systemProperty("integration.examples", file("examples").absolutePath)
 }

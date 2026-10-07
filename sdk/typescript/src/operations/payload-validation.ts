@@ -2,6 +2,7 @@ import { isList, isObject, displayText } from '../binding/values.ts';
 import type { Operation } from './direct.ts';
 import type { ExtendedPayloads } from './catalog.ts';
 import { utf8Length } from '../binding/files.ts';
+import { fileStoreReference } from '../binding/filestores.ts';
 import { relayPayloadProblem } from './relay.ts';
 import { informationPayloadProblem } from './information-validation.ts';
 import { schedulePayloadProblem } from './schedule-files.ts';
@@ -406,9 +407,20 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
-  'application.files': [['project'], ['path']],
-  'application.file.read': [['project', 'path'], []],
-  'application.file.save': [['project', 'path', 'revision'], ['text']],
+  'application.create': [
+    ['name', 'applicationRoot', 'writableAreas'],
+    ['type'],
+  ],
+  'application.storage.set': [
+    ['project', 'applicationRoot', 'writableAreas'],
+    [],
+  ],
+  'application.files': [['project'], ['path', 'location']],
+  'application.file.read': [['project', 'path'], ['location']],
+  'application.file.save': [
+    ['project', 'path', 'revision'],
+    ['text', 'location'],
+  ],
   'project.list': [[], []],
   'project.attach': [['name', 'workspace', 'machine'], []],
   'project.create': [['name'], ['workspace', 'type', 'writePaths']],
@@ -496,6 +508,7 @@ export const SHAPES: Record<
   ];
 };
 export const SCOPED: readonly ExtendedOperation[] = [
+  'application.storage.set',
   'application.files',
   'application.file.read',
   'application.file.save',
@@ -574,7 +587,13 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
-  if (type.startsWith('application.')) {
+  if (
+    type.startsWith('application.') &&
+    type !== 'application.storage.set' &&
+    type !== 'application.create'
+  ) {
+    if ('location' in body && !fileStoreReference(body['location']))
+      return 'Use a valid FileStore location';
     if (
       typeof body['project'] !== 'string' ||
       !body['project'].trim() ||
@@ -646,7 +665,31 @@ export function commandProblem(
     )
       return 'requestId must be a UUID retained for receipt recovery';
   }
-  if (type === 'project.create') {
+  if (type === 'application.create' || type === 'application.storage.set') {
+    const root = body['applicationRoot'],
+      areas = body['writableAreas'];
+    if (root !== undefined || type.startsWith('application.')) {
+      if (
+        !fileStoreReference(root) ||
+        !isList(areas) ||
+        areas.length > 100 ||
+        !areas.every(fileStoreReference) ||
+        new Set(areas.map((area) => `${area.store}\0${area.path}`)).size !==
+          areas.length
+      )
+        return 'Use a valid applicationRoot and at most 100 distinct writableAreas';
+      if ('workspace' in body || 'writePaths' in body)
+        return 'Do not mix FileStore placement with legacy workspace/writePaths';
+    } else if (areas !== undefined)
+      return 'writableAreas needs an applicationRoot';
+  }
+  if (
+    'location' in body &&
+    type.startsWith('application.') &&
+    !fileStoreReference(body['location'])
+  )
+    return 'Use a valid FileStore location';
+  if (type === 'project.create' || type === 'application.create') {
     if (
       body['type'] !== undefined &&
       !['MANAGED', 'DISJOINT'].includes(displayText(body['type']))
@@ -654,6 +697,7 @@ export function commandProblem(
       return 'type must be MANAGED or DISJOINT';
     if (
       body['type'] === 'DISJOINT' &&
+      body['applicationRoot'] === undefined &&
       (typeof body['workspace'] !== 'string' || !body['workspace'].trim())
     )
       return 'DISJOINT needs an existing server workspace';
@@ -746,6 +790,8 @@ export function commandProblem(
       !NUMBER_FIELDS.includes(key) &&
       !BOOLEAN_FIELDS.includes(key) &&
       key !== 'scopes' &&
+      key !== 'applicationRoot' &&
+      key !== 'writableAreas' &&
       !(type === 'outgoing.send' && key === 'message') &&
       (typeof body[key] !== 'string' || body[key].trim() === '')
     )

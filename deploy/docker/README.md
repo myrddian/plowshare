@@ -19,14 +19,18 @@ entry point: its grants determine the skills, workflows and specialists it can
 use. The public Agent Card advertises its granted skills and workflows; ordinary
 messages are handled by that agent within the configured project.
 
-Create a project whose workspace is reachable **inside the server container**.
+Create an Application whose root is reachable **inside the server container**.
 The overlay mounts a private host workspace at `/workspaces/a2a` in the server.
 Create `${PLOWSHARE_STATE_ROOT}/workspaces/a2a` owned by UID 1000 before starting,
 or set `PLOWSHARE_A2A_WORKSPACE_HOST` to an existing dedicated directory. Keep
 workspaces outside the server-owned data/config trees, which file tools exclude.
-Define `/workspaces/a2a` as the project workspace. Do not use the host's
-`/srv/plowshare/...` path as a container workspace. Grant account membership and configure agents/skills through
-the normal Plowshare tools. See [receiving and command semantics](../../docs/a2a-receiving.md).
+Install the [A2A Application manifest](../../integrations/a2a/examples/application/plowshare.json)
+as `/workspaces/a2a/plowshare.json`, preserving an existing registration's name.
+Add explicit account grants and matching server membership; the template has no
+implicit access. Register or adopt this root with a server FileStore alias whose
+location is inside the container. Do not use the host's `/srv/plowshare/...` path
+as the container location. Install agents/skills through the normal Plowshare
+tools. See [receiving and Application setup](../../docs/a2a-receiving.md).
 
 Store the following in `/srv/plowshare/config/a2a.json`, mode 0600, with your own
 project and external address:

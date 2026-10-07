@@ -54,7 +54,42 @@ public record ProjectView(
     List<String> writePaths,
     String displayName,
     String routingIdentity,
-    io.aeyer.plowshare.server.archive.ProjectRole role) {
+    io.aeyer.plowshare.server.archive.ProjectRole role,
+    io.aeyer.plowshare.protocol.FileStoreReference applicationRoot,
+    List<io.aeyer.plowshare.protocol.FileStoreReference> writableAreas) {
+
+  /** Compatibility construction for projects without an admitted FileStore placement. */
+  public ProjectView(
+      String name,
+      String workspace,
+      List<String> lent,
+      List<String> exclusions,
+      String machine,
+      List<String> members,
+      String kind,
+      String type,
+      boolean readOnly,
+      List<String> writePaths,
+      String displayName,
+      String routingIdentity,
+      io.aeyer.plowshare.server.archive.ProjectRole role) {
+    this(
+        name,
+        workspace,
+        lent,
+        exclusions,
+        machine,
+        members,
+        kind,
+        type,
+        readOnly,
+        writePaths,
+        displayName,
+        routingIdentity,
+        role,
+        null,
+        null);
+  }
 
   public ProjectView(
       String name,
@@ -99,7 +134,9 @@ public record ProjectView(
         writePaths,
         displayName,
         routingIdentity,
-        role == null ? null : io.aeyer.plowshare.server.archive.ProjectRole.parse(role));
+        role == null ? null : io.aeyer.plowshare.server.archive.ProjectRole.parse(role),
+        applicationRoot,
+        writableAreas);
   }
 
   /** Applications are identified by a validated manifest, independently of workspace ownership. */
@@ -117,7 +154,9 @@ public record ProjectView(
         writePaths,
         displayName,
         routingIdentity,
-        role);
+        role,
+        applicationRoot,
+        writableAreas);
   }
 
   public ProjectView(
@@ -264,6 +303,11 @@ public record ProjectView(
         "project",
         project.type(),
         project.readOnly(),
-        project.writePaths());
+        project.writePaths(),
+        io.aeyer.plowshare.server.archive.ClientProjects.label(project.name()),
+        project.name(),
+        null,
+        project.placement() == null ? null : project.placement().applicationRoot(),
+        project.placement() == null ? null : project.placement().writableAreas());
   }
 }

@@ -39,6 +39,8 @@ const MUTATIONS = new Set<string>([
   'job.limits',
   'project.attach',
   'project.create',
+  'application.create',
+  'application.storage.set',
   'project.define',
   'project.lend',
   'project.unlend',
@@ -196,6 +198,17 @@ const examples: Record<string, unknown> = {
     workspace: '/home/me/integration',
     machine: 'client',
   },
+  'application.create': {
+    name: 'mychatbot',
+    type: 'DISJOINT',
+    applicationRoot: { store: 'applications', path: 'mychatbot' },
+    writableAreas: [{ store: 'artifacts', path: 'mychatbot' }],
+  },
+  'application.storage.set': {
+    project: 'mychatbot',
+    applicationRoot: { store: 'applications', path: 'mychatbot' },
+    writableAreas: [{ store: 'artifacts', path: 'mychatbot' }],
+  },
   'project.create': {
     name: 'home-assistant',
     type: 'DISJOINT',
@@ -270,7 +283,7 @@ export function discovery(target = '') {
       'Help and validation are offline. Execution needs authenticated WS and existing account/project grants.',
     replay: 'disabled',
     projectModel:
-      'A server-side scope of work managed by the Plowshare agent framework: agents, skills, conversations, memory, information and any server workspace files. SDK integrations submit tasks within that scope. --project selects it. Listings group authorized Applications separately from Projects used for external work. An Application has a valid root plowshare.json and explicit account grants; MANAGED server projects are Applications. project create provisions a MANAGED Application or registers a DISJOINT pipeline workspace without client sync. writePaths limits server writes to relative areas; DISJOINT defaults to no writes. Creation requires an administrator. project define registers an existing workspace. --root explicitly serves local files.',
+      'A server-side scope of work managed by the Plowshare agent framework: agents, skills, conversations, memory, information and any server workspace files. SDK integrations submit tasks within that scope. --project selects it. Listings group authorized Applications separately from Projects used for external work. An Application has a valid root plowshare.json and explicit account grants; MANAGED server projects are Applications. project create provisions a MANAGED Application or registers a DISJOINT pipeline workspace without client sync. application create accepts applicationRoot and writableAreas using host-local FileStore aliases and relative paths; application storage set explicitly adopts an existing Application without changing its source directory. Legacy workspace/writePaths retain their original meaning; DISJOINT defaults to no writes. Creation requires an administrator. project define registers an existing workspace. --root explicitly serves local files.',
     conversationPolicy: {
       command: 'agent run',
       default:

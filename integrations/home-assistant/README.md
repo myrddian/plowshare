@@ -2,7 +2,7 @@
 
 This adapter supplies selected HA states, configured service actions and selected
 state_changed observations to the [external integration runtime](../runtime/README.md).
-Home Assistant owns devices and immediate automation. A Plowshare project owns
+Home Assistant owns devices and immediate automation. A Plowshare Application owns
 agents, skills, orchestration and investigation. The adapter uses the existing
 [HA WebSocket API](https://developers.home-assistant.io/docs/api/websocket/);
 Plowshare requests use its existing WebSocket SDK. There is no HTTP fallback or
@@ -21,7 +21,9 @@ then replace the example origins, project, entity and action mappings. Set the
 PLOWSHARE_TOKEN and HA_TOKEN environment variables using your normal secret
 management. Configuration stores environment-variable names, never tokens.
 Both endpoints are HTTP(S) origins; HA connects to /api/websocket and Plowshare to
-/v1/events. The configured Plowshare account needs Contributor access to the selected project.
+/v1/events. The configured Plowshare account needs a `CONTRIBUTOR` grant in the
+Application's `plowshare.json` and matching server membership. The binding's
+`project` field keeps its protocol name and selects that Application.
 Use a [Plowshare service account and project-scoped token](../../docs/server-administration.md#service-accounts-and-scoped-tokens) for this adapter. Its `pss_` credential belongs to Plowshare; the Home Assistant token remains a separate credential. Inject both through the configured environment variables. Rotate the same Plowshare token to retain integration work identity.
 
 Check the file without credentials, network connections or journal creation:
@@ -98,11 +100,11 @@ Retain each intended request UUID and work ID. Follow existing work using
 outgoing_read/outgoing.status. Replacing an uncertain action with a fresh UUID can
 repeat a physical effect. No HA remote task is invented to bypass claim fencing.
 
-## Project and pipeline
+## Application and pipeline
 
 The example declarative route starts investigate_office_heat through the configured
 house_coordinator agent and sends its completed result through send_report. Adapt
-the [optional project examples](examples/project) to your existing resource tiers:
+the [Application example](examples/application) to your existing resource tiers:
 
 - Agent and orchestration definitions under .plowshare/agents and
   .plowshare/orchestrations for a connected project, or the corresponding server
@@ -124,32 +126,44 @@ as drafts for the existing validation/install workflow.
 
 ## First installation and live acceptance
 
-1. Create or choose a server project through project administration. The sample
-   uses `home-assistant`. Install the agent, orchestration and skill through the
-   existing project resource workflow before starting the external runtime.
-2. Copy [the project JSON example](examples/project/plowshare) into the registered
-   workspace's selected identity file, preserving its existing project name.
-   If a higher-priority marker already exists, update that marker instead of
-   creating a shadowed root file. This holds execution caps, command policy and
-   skill visibility. Set `caps.autoIncrease` to `true` when this project should
-   approve additional finite execution chunks for long-lived work. See
-   [project settings](../../docs/projects.md#project-runtime-configuration).
-3. Copy the connection config into a private operator directory. Match the project
+1. Copy [the Application example](examples/application) to a directory in a server
+   FileStore. Its root `plowshare.json` identifies `home-assistant`; its
+   `.plowshare/` directories hold the agent, orchestration and skill source.
+   Preserve the existing name when converting an already registered project.
+2. Edit the deployed root [plowshare.json](examples/application/plowshare.json)
+   through the operator source-management workflow. Add explicit `access.accounts`
+   grants for the operator and the service account owner's authenticated handle;
+   templates have no grants and are hidden by default. Grant matching server
+   membership separately. Keep command modes off unless deliberately enabled.
+   Set `caps.autoIncrease` to `true` when this Application should approve additional
+   finite execution chunks. See [Application access](../../docs/projects.md#applications-and-projects).
+3. Register a new checkout with `application.create`, `type: "DISJOINT"`, its
+   FileStore `applicationRoot` and explicit `writableAreas`; an empty list admits
+   no runtime writes. A Plowshare-owned `MANAGED` Application can instead be
+   provisioned through Application creation. For an existing registration, add the
+   valid root manifest at its current source and optionally adopt alias placement
+   with `application.storage.set`; keep its name and durable work. Follow
+   [creation and adoption](../../docs/projects.md#create-or-adopt-an-alias-based-application).
+   Install the `.plowshare/` resources through the existing project resource
+   workflow before starting the runtime. A headless SDK session does not serve
+   these files merely because they are present in the checkout.
+4. Copy the connection config into a private operator directory. Match the project
    name, select real entity aliases and configure the notification action. Supply
    its token environment variables, then run `--check`. The checked-in example
    origins intentionally cannot connect to a real deployment.
-4. Launch the runtime and ask the project agent for selected office evidence.
+5. Launch the runtime and ask the Application agent for selected office evidence.
    Confirm that the reply distinguishes available, missing and unavailable
    readings. Reuse recorded work IDs to inspect pending work.
-5. With your chosen reversible action, verify its acknowledgment and a subsequent
+6. With your chosen reversible action, verify its acknowledgment and a subsequent
    physical state observation separately. Exercise the configured threshold
    crossing and confirm one investigation and one delivered report. Repeat with
    the optional JS handler if it will be used. These are live acceptance steps;
    a passing `--check` or fixture does not substitute for them.
 
-The project JSON holds project runtime settings. Connection mappings, credential
-references and the integration journal stay in the private adapter deployment.
-There is no default live connection or preinstalled HA project.
+The root Application manifest holds runtime settings and access grants. Connection
+mappings, credential references and the integration journal stay in the private
+adapter deployment.
+There is no default live connection or preinstalled HA Application.
 
 For custom routing, copy [office.mjs](examples/office.mjs) beside the private config
 and add "script": "office.mjs" to the house binding. It replaces the declarative
@@ -162,7 +176,7 @@ an oversized report fails validation visibly instead of silently truncating it.
 The protocol fixtures cover both WebSocket transports, scripted event-to-pipeline
 delivery, outbox reads, reconnect snapshots, policy refusal and lost acknowledgment.
 `HarnessPipelineTest` also boots the actual Plowshare server against migrated
-PostgreSQL, installs the project examples, and uses authenticated SDK sessions and
+PostgreSQL, installs the Application examples, and uses authenticated SDK sessions and
 the real model/tool harness. A deterministic model transport issues `outgoing_peers`,
 `outgoing_send` and `outgoing_read`; the returned HA evidence drives the report.
 Available and unavailable sensors remain distinct. Declarative and JS event routes
