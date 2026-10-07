@@ -43,26 +43,33 @@ export function createInbox(options: InboxOptions): Screen {
   let stream: EventStream | null = null;
   let stopped = false,
     offset = 0;
+  let active = true;
+  let epoch = 0;
+  let fresh = false;
   let held: InboxPage | null = null;
   const limit = 50;
   const blocked = new Map<string, string>();
   const refresh = reconciliation({
-    available: () => stream?.status().state === 'open',
+    available: canRead,
     pollMs: options.pollMs === undefined ? 5000 : options.pollMs,
     async read() {
       const socket = stream;
       if (socket === null) return;
       const pageOffset = offset;
+      const stamp = epoch;
+      fresh = false;
+      disableReceipts();
       element.setAttribute('aria-busy', 'true');
       try {
         const page = await socketWorkRecords(socket).inbox(pageOffset, limit);
-        if (stopped || pageOffset !== offset) return;
+        if (!canRead() || stamp !== epoch || pageOffset !== offset) return;
         held = page;
+        fresh = true;
         error.hidden = true;
         draw();
         status.textContent = `Inbox page ${pageOffset / limit + 1}. Saved deliveries are reconciled from server state.`;
       } catch (problem) {
-        if (stopped || pageOffset !== offset) return;
+        if (!canRead() || stamp !== epoch || pageOffset !== offset) return;
         error.textContent = problemText(
           problem,
           'The inbox could not be read.',
@@ -107,7 +114,8 @@ export function createInbox(options: InboxOptions): Screen {
       item.answer ?? item.about ?? 'No result text was supplied.',
     );
     const mark = button('mark-read', 'mark read');
-    mark.disabled = item.readAt !== null || blocked.has(item.id);
+    mark.disabled =
+      !canRead() || !fresh || item.readAt !== null || blocked.has(item.id);
     mark.addEventListener('click', () => background(markRead(item.id)));
     article.append(meta, answer, recordLinks(item.conversation), mark);
     const message = blocked.get(item.id);
@@ -120,7 +128,7 @@ export function createInbox(options: InboxOptions): Screen {
   }
 
   async function markRead(id: string): Promise<void> {
-    if (stream === null || stopped || blocked.has(id)) return;
+    if (!canRead() || !fresh || stream === null || blocked.has(id)) return;
     blocked.set(id, 'Sending read receipt…');
     draw();
     try {
@@ -155,16 +163,60 @@ export function createInbox(options: InboxOptions): Screen {
 
   reload.addEventListener('click', () => background(refresh.refresh()));
   previous.addEventListener('click', () => {
+    pause();
     offset = Math.max(0, offset - limit);
     background(refresh.refresh());
   });
   next.addEventListener('click', () => {
+    pause();
     offset += limit;
     background(refresh.refresh());
   });
+
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      active &&
+      options.root.ownerDocument.visibilityState !== 'hidden' &&
+      stream?.status().state === 'open' &&
+      !stream.status().signedOut
+    );
+  }
+
+  function disableReceipts(): void {
+    for (const control of rows.querySelectorAll<HTMLButtonElement>('button'))
+      control.disabled = true;
+  }
+
+  /** Page, visibility and connection changes invalidate in-flight reads even
+   * when a later page has the same offset. Receipts remain explicit effects. */
+  function pause(): void {
+    ++epoch;
+    fresh = false;
+    disableReceipts();
+  }
+
+  function visibilityChanged(): void {
+    pause();
+    refresh.setActive(
+      active && options.root.ownerDocument.visibilityState !== 'hidden',
+    );
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
+
   return {
     element: () => element,
-    setActive: refresh.setActive,
+    setActive(next) {
+      if (stopped || active === next) return;
+      active = next;
+      pause();
+      refresh.setActive(
+        active && options.root.ownerDocument.visibilityState !== 'hidden',
+      );
+    },
     async load() {
       if (stopped) return;
       if (stream === null) {
@@ -177,7 +229,10 @@ export function createInbox(options: InboxOptions): Screen {
             if (asInboxChanged(frame) !== null) background(refresh.refresh());
           },
           onStatus: (next) => {
-            if (next.state === 'open') background(refresh.refresh());
+            if (stopped) return;
+            pause();
+            if (next.state === 'open' && !next.signedOut)
+              background(refresh.refresh());
           },
         });
       }
@@ -185,6 +240,11 @@ export function createInbox(options: InboxOptions): Screen {
     },
     destroy() {
       stopped = true;
+      ++epoch;
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
       refresh.stop();
       stream?.close();
       stream = null;

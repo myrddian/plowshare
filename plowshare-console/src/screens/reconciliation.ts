@@ -23,7 +23,14 @@ export function reconciliation(options: {
     timer = null;
   }
   function schedule(): void {
-    if (stopped || !active || options.pollMs === null || timer !== null) return;
+    if (
+      stopped ||
+      !active ||
+      !options.available() ||
+      options.pollMs === null ||
+      timer !== null
+    )
+      return;
     timer = setTimeout(() => {
       timer = null;
       background(refresh());

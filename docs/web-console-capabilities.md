@@ -107,6 +107,14 @@ bound server work or response size for unpaged `job.list` and `approval.list`.
 Adding server paging would be a separate contract decision, not a reason to
 pretend the existing replies are pages.
 
+Jobs, Inbox and the overview also pause reads when the browser tab is hidden.
+Navigation, page changes and socket loss invalidate pending snapshots, including
+replies from an older visit to the same page. Cached jobs and inbox deliveries
+remain available for inspection, but cancellation, budget changes, continuation
+and read-receipt controls require a fresh successful read on the active
+connection. A refused or unreadable read does not re-enable these controls.
+Server authorization still decides every effect; reconnect never resubmits one.
+
 The Workbench keeps overview, inbox, approvals, chat and jobs in primary
 navigation; the remaining views are reachable through Browse & settings. The
 overview inspector is a selection within the current bounded window. A refreshed

@@ -51,6 +51,8 @@ export function createOverview(options: {
   let stream: EventStream | null = null;
   let stopped = false,
     offset = 0;
+  let active = true;
+  let epoch = 0;
   const limit = 30;
   let selected: string | null = null;
   let records = new Map<string, { row: HTMLElement; kind: string }>();
@@ -93,12 +95,13 @@ export function createOverview(options: {
   }
   inspect();
   const refresh = reconciliation({
-    available: () => stream?.status().state === 'open',
+    available: canRead,
     pollMs: options.pollMs === undefined ? 5000 : options.pollMs,
     async read() {
       const socket = stream;
       if (socket === null) return;
       const pageOffset = offset;
+      const stamp = epoch;
       element.setAttribute('aria-busy', 'true');
       // Independent capabilities fail independently. A denied queue does not
       // erase a successfully read inbox, and a failed read is never a zero count.
@@ -108,7 +111,10 @@ export function createOverview(options: {
         socketWorkRecords(socket).inbox(0, 10),
         socketWorkRecords(socket).firings(pageOffset, limit),
       ]);
-      if (stopped || pageOffset !== offset) return;
+      if (!canRead() || stamp !== epoch || pageOffset !== offset) {
+        element.setAttribute('aria-busy', 'false');
+        return;
+      }
       const [jobs, approvals, inbox, firings] = results;
       records = new Map();
       const sections: HTMLElement[] = [];
@@ -305,16 +311,54 @@ export function createOverview(options: {
   }
   reload.addEventListener('click', () => background(refresh.refresh()));
   previous.addEventListener('click', () => {
+    pause();
     offset = Math.max(0, offset - limit);
     background(refresh.refresh());
   });
   next.addEventListener('click', () => {
+    pause();
     offset += limit;
     background(refresh.refresh());
   });
+
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      active &&
+      options.root.ownerDocument.visibilityState !== 'hidden' &&
+      stream?.status().state === 'open' &&
+      !stream.status().signedOut
+    );
+  }
+
+  /** A late snapshot cannot represent the connection or page returned to.
+   * Existing records remain visible with an explicit stale-state notice. */
+  function pause(): void {
+    ++epoch;
+    status.textContent =
+      'The displayed work snapshot may be stale. Reconnect or refresh to inspect current records.';
+  }
+  function visibilityChanged(): void {
+    pause();
+    refresh.setActive(
+      active && options.root.ownerDocument.visibilityState !== 'hidden',
+    );
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
+
   return {
     element: () => element,
-    setActive: refresh.setActive,
+    setActive(next) {
+      if (stopped || active === next) return;
+      active = next;
+      pause();
+      refresh.setActive(
+        active && options.root.ownerDocument.visibilityState !== 'hidden',
+      );
+    },
     async load() {
       if (stopped) return;
       stream ??= options.openStream({
@@ -324,13 +368,21 @@ export function createOverview(options: {
             background(refresh.refresh());
         },
         onStatus: (next) => {
-          if (next.state === 'open') background(refresh.refresh());
+          if (stopped) return;
+          pause();
+          if (next.state === 'open' && !next.signedOut)
+            background(refresh.refresh());
         },
       });
       await refresh.refresh();
     },
     destroy() {
       stopped = true;
+      ++epoch;
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
       refresh.stop();
       stream?.close();
       stream = null;

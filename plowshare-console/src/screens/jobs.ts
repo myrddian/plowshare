@@ -188,6 +188,8 @@ export function createJobs(options: JobsOptions): Screen {
   let held: readonly JobView[] = [];
   let page = 0;
   let active = true;
+  let fresh = false;
+  let epoch = 0;
   let selected: string | null = null;
   let selectionEpoch = 0;
   const blocked = new Map<string, string>();
@@ -245,7 +247,11 @@ export function createJobs(options: JobsOptions): Screen {
     if (stopped) return;
     if (problem instanceof ApiError && problem.status < 500) {
       blocked.delete(key);
-      control.disabled = false;
+      // A refusal may reflect changed access or lifecycle. Keep all cached
+      // controls closed until the next authorized snapshot, even for this ID.
+      fresh = false;
+      disableActions();
+      control.disabled = true;
     } else
       blocked.set(
         key,
@@ -400,9 +406,9 @@ export function createJobs(options: JobsOptions): Screen {
     const resume = button('continue', 'continue this run');
     resume.dataset['continue'] = id;
     const key = `continue:${id}`;
-    resume.disabled = blocked.has(key);
+    resume.disabled = !canAct() || blocked.has(key);
     resume.addEventListener('click', () => {
-      if (blocked.has(key)) return;
+      if (!canAct() || blocked.has(key)) return;
       if (grantField !== null) {
         const value = parsePositiveWholeNumber(amount.value);
         if (value === null) {
@@ -569,9 +575,9 @@ export function createJobs(options: JobsOptions): Screen {
     const raise = button('raise', 'raise the ceiling');
     raise.dataset['raise'] = id;
     const key = `limits:${id}`;
-    raise.disabled = blocked.has(key);
+    raise.disabled = !canAct() || blocked.has(key);
     raise.addEventListener('click', () => {
-      if (blocked.has(key)) return;
+      if (!canAct() || blocked.has(key)) return;
       const by = parsePositiveWholeNumber(amount.value);
       if (by === null) {
         // Refused here and not sent for the server to refuse: neither
@@ -677,11 +683,12 @@ export function createJobs(options: JobsOptions): Screen {
     stop.dataset['cancel'] = id;
     const key = `cancel:${id}`;
     stop.disabled =
+      !canAct() ||
       blocked.has(key) ||
       job.cancelRequested === true ||
       job.state !== 'RUNNING';
     stop.addEventListener('click', () => {
-      if (blocked.has(key)) return;
+      if (!canAct() || blocked.has(key)) return;
       blocked.set(key, 'Cancellation requested; waiting for server state.');
       stop.disabled = true;
       void transport
@@ -759,7 +766,7 @@ export function createJobs(options: JobsOptions): Screen {
         nothing(
           'This process is holding no jobs. That is an answer and not a failure — and on' +
             ' a server that has been restarted it is the ordinary one, because these live' +
-            ' in this process’s memory. What earlier runs produced is in the archive.',
+            ' in this process’s memory. Inspect retained conversations or inbox deliveries for earlier results.',
         ),
       );
       return;
@@ -798,6 +805,9 @@ export function createJobs(options: JobsOptions): Screen {
   // --- the server ----------------------------------------------------------
 
   async function read(): Promise<void> {
+    const stamp = epoch;
+    fresh = false;
+    disableActions();
     let listed: readonly JobView[];
     try {
       listed = (await transport.get('/v1/jobs')) ?? [];
@@ -806,7 +816,7 @@ export function createJobs(options: JobsOptions): Screen {
       // answer is not a server with no jobs on it, and drawing one would
       // be this screen concluding from a failure the same way it refuses
       // to conclude from silence.
-      if (stopped) return;
+      if (!canRead() || stamp !== epoch) return;
       body.querySelector('[data-list-error]')?.remove();
       const error = trouble(
         problemText(problem, 'The jobs could not be listed.'),
@@ -815,8 +825,9 @@ export function createJobs(options: JobsOptions): Screen {
       body.prepend(error);
       return;
     }
-    if (stopped) return;
+    if (!canRead() || stamp !== epoch) return;
     held = listed;
+    fresh = true;
     draw();
     if (selected !== null) await showRecord(selected);
   }
@@ -830,7 +841,7 @@ export function createJobs(options: JobsOptions): Screen {
    * driving it does not have to wait for a clock.
    */
   async function refresh(): Promise<void> {
-    if (stopped || !active) return;
+    if (!canRead()) return;
     if (reading) {
       asked = true;
       return;
@@ -841,14 +852,14 @@ export function createJobs(options: JobsOptions): Screen {
     } finally {
       reading = false;
     }
-    if (asked && !stopped && active) {
+    if (asked && canRead()) {
       asked = false;
       await refresh();
     }
   }
 
   function schedulePoll(): void {
-    if (pollMs === null || stopped || !active || timer !== null) {
+    if (pollMs === null || !canRead() || timer !== null) {
       return;
     }
     timer = setTimeout(() => {
@@ -865,7 +876,10 @@ export function createJobs(options: JobsOptions): Screen {
         session: options.session,
         onEvent,
         onStatus: (status) => {
-          if (status.state === 'open' && stream !== null) background(refresh());
+          if (stopped) return;
+          if (status.state === 'open' && !status.signedOut)
+            background(refresh().finally(schedulePoll));
+          else pause();
         },
       });
     }
@@ -875,16 +889,19 @@ export function createJobs(options: JobsOptions): Screen {
 
   async function showRecord(id: string): Promise<void> {
     selected = id;
+    if (!canRead()) return;
     const epoch = ++selectionEpoch;
     try {
       const job =
         held.find((row) => row.id === id) ??
         (await transport.get(`/v1/jobs/${encodeURIComponent(id)}`));
-      if (stopped || epoch !== selectionEpoch) return;
+      if (!canRead() || epoch !== selectionEpoch) return;
       if (!job) throw new Error('The server did not return this job.');
+      if (job.id !== id)
+        throw new Error('The server returned a different job.');
       detail.replaceChildren(el('h3', '', 'Selected job'), drawJob(job));
     } catch (problem) {
-      if (stopped || epoch !== selectionEpoch) return;
+      if (!canRead() || epoch !== selectionEpoch) return;
       detail.replaceChildren(
         trouble(problemText(problem, 'This job is unavailable.')),
         el(
@@ -895,18 +912,67 @@ export function createJobs(options: JobsOptions): Screen {
       );
     }
   }
+
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      active &&
+      options.root.ownerDocument.visibilityState !== 'hidden' &&
+      stream?.status().state === 'open' &&
+      !stream.status().signedOut
+    );
+  }
+
+  function canAct(): boolean {
+    return fresh && canRead();
+  }
+
+  function disableActions(): void {
+    for (const control of body.querySelectorAll<HTMLButtonElement>(
+      '[data-cancel], [data-raise], [data-continue]',
+    ))
+      control.disabled = true;
+  }
+
+  /** A snapshot belongs to its visible connection generation. Navigation or
+   * socket loss fences late reads and requires a fresh read before effects. */
+  function pause(): void {
+    ++epoch;
+    ++selectionEpoch;
+    fresh = false;
+    asked = false;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    disableActions();
+  }
+
+  function visibilityChanged(): void {
+    if (!canRead()) pause();
+    else background(refresh().finally(schedulePoll));
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
+
   return {
     element: () => shell,
     showRecord,
     setActive(next) {
+      if (stopped || active === next) return;
       active = next;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
+      pause();
       if (active && !stopped) background(refresh().finally(schedulePoll));
     },
     load,
     destroy(): void {
       stopped = true;
+      ++epoch;
+      ++selectionEpoch;
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;

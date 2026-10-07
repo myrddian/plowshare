@@ -44,6 +44,7 @@ const job = {
 let screen: Screen | undefined;
 afterEach(() => {
   screen?.destroy();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -94,6 +95,46 @@ function fixture(pollMs: number | null = null) {
 }
 
 describe('the work overview', () => {
+  it('rejects a late result from a prior connection and shows the recovered retained record', async () => {
+    const view = fixture();
+    await view.screen.load();
+    let resolve: (reply: FrameOutcome) => void = () => {};
+    view.ask.mockImplementationOnce(
+      () =>
+        new Promise<FrameOutcome>((accept) => {
+          resolve = accept;
+        }),
+    );
+    const flight = view.screen.load();
+    view.status('reconnecting');
+    view.replies['inbox.list'] = {
+      code: 'OK',
+      payload: { items: [{ ...saved, answer: 'recovered result' }], unread: 1 },
+    };
+    view.status('open');
+    resolve({ code: 'OK', payload: [{ ...job, id: 'job_obsolete' }] });
+    await flight;
+    expect(view.root.textContent).not.toContain('job_obsolete');
+    expect(view.root.textContent).toContain('recovered result');
+    expect(view.root.getAttribute('aria-busy')).not.toBe('true');
+  });
+
+  it('does not poll or render late replies while the browser tab is hidden', async () => {
+    const view = fixture();
+    await view.screen.load();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    visibility.mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    view.ask.mockClear();
+    view.push();
+    await view.screen.load();
+    expect(view.ask).not.toHaveBeenCalled();
+    expect(view.root.textContent).toContain('may be stale');
+    visibility.mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.waitFor(() => expect(view.ask).toHaveBeenCalledTimes(4));
+  });
+
   it('separates admission, running state, cancellation request and retained results', async () => {
     const view = fixture();
     await view.screen.load();

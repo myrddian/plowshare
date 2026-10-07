@@ -1,7 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reconciliation } from './reconciliation';
 
+afterEach(() => vi.useRealTimers());
+
 describe('snapshot refresh ownership', () => {
+  it('stops polling an unavailable connection and resumes on an explicit recovery read', async () => {
+    vi.useFakeTimers();
+    let available = true;
+    const read = vi.fn(async () => {});
+    const owner = reconciliation({
+      read,
+      available: () => available,
+      pollMs: 100,
+    });
+    await owner.refresh();
+    available = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    available = true;
+    await owner.refresh();
+    expect(read).toHaveBeenCalledTimes(2);
+    owner.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('coalesces a burst into one trailing read and does not overlap reads', async () => {
     let finish: (() => void) | undefined;
     let reads = 0;
