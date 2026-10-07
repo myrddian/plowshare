@@ -326,6 +326,62 @@ class FileWiringTest {
 
   // --- what the boot knows -----------------------------------------------------
 
+  @Test
+  void skill_validation_uses_the_existing_pre_and_post_stages(@TempDir Path dir) throws Exception {
+    Path root = Files.createDirectories(dir.resolve("workspace")).toRealPath();
+    Path skill = root.resolve("Resources/skills/weather/SKILL.md");
+    var provider =
+        io.aeyer.plowshare.server.files.LocalProvider.over(
+            io.aeyer.plowshare.protocol.FileAccess.of(List.of(root), List.of()),
+            List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)));
+    var json = new com.fasterxml.jackson.databind.ObjectMapper();
+    String valid = "---\nname: weather\ndescription: Capture weather\n---\nRead weather.\n";
+    var scripted = new Scripted();
+    for (Map<String, String> arguments :
+        List.of(
+            Map.of("path", skill.toString(), "content", "No frontmatter"),
+            Map.of("path", skill.toString(), "content", valid),
+            Map.of(
+                "path",
+                skill.toString(),
+                "old",
+                "description: Capture weather",
+                "new",
+                "description: true"))) {
+      scripted.then(
+          new Completion(
+              "",
+              "tool_calls",
+              TokenUsage.UNKNOWN,
+              List.of(
+                  new ToolCall(
+                      "edit-" + scripted.steps.size(),
+                      "file_edit",
+                      json.writeValueAsString(arguments)))));
+    }
+    scripted.then(done());
+    var runtime =
+        new JobRuntime(dispatcherOver(scripted), List.of(), null, new Recording(provider));
+    new SkillsConfig().skillFileChecks(runtime);
+    Path definitions = dir.resolve("definitions");
+    write(definitions, "writer", "[file_edit]", "[workspace:write]");
+    Outcome outcome =
+        runtime.run(
+            agent(definitions, "writer", runtime),
+            "write a skill",
+            Home.of("project"),
+            generous(),
+            null);
+    assertEquals(Outcome.Ending.ANSWERED, outcome.ending());
+    String results = scripted.toolResults();
+    assertTrue(results.contains("nothing was written"), results);
+    assertTrue(results.contains("saved skill source is valid"), results);
+    assertTrue(results.contains("edit was saved, but the skill source is invalid"), results);
+    assertEquals(
+        valid.replace("description: Capture weather", "description: true"),
+        Files.readString(skill));
+  }
+
   /**
    * The file tools' names are in the known set exactly when the runtime holds something to build
    * them from.
