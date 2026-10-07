@@ -1,3 +1,4 @@
+import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import type { FileStoreState } from 'plowshare-client-node/filestores';
 import type {
   ApplicationFileListing,
@@ -148,6 +149,7 @@ export interface DesktopState {
   localFileStores?: FileStoreState;
   applicationFiles?: {
     project: string;
+    location?: FileStoreReference;
     loading: boolean;
     saving: boolean;
     listing?: ApplicationFileListing;
@@ -325,10 +327,21 @@ export type Request =
   | { action: 'filestore-choose' }
   | { action: 'filestore-setup'; alias: string; root: string }
   | { action: 'application-runtime'; project: string }
-  | { action: 'application-files'; project: string; path?: string }
-  | { action: 'application-file-read'; project: string; path: string }
+  | {
+      action: 'application-files';
+      project: string;
+      path?: string;
+      location?: FileStoreReference;
+    }
+  | {
+      action: 'application-file-read';
+      project: string;
+      path: string;
+      location?: FileStoreReference;
+    }
   | {
       action: 'application-file-save';
+      location?: FileStoreReference;
       project: string;
       path: string;
       text: string;
@@ -385,6 +398,8 @@ export type Request =
   | (ServerAdminCall & { action: 'server-admin' })
   | {
       action: 'server-project-create';
+      applicationRoot?: FileStoreReference;
+      writableAreas?: FileStoreReference[];
       name: string;
       workspace?: string;
       type?: 'MANAGED' | 'DISJOINT';

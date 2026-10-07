@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.aeyer.plowshare.protocol.FilterReview;
-import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
@@ -15,6 +14,7 @@ import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayLogRepository;
 import io.aeyer.plowshare.server.relay.RelayPayload;
 import io.aeyer.plowshare.server.relay.RelayPortProperties;
+import io.aeyer.plowshare.server.relay.RelayReviewCausation;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -86,6 +86,7 @@ public final class RelayMessageReview implements MessageReview {
     relay.registerTopic(responseTopic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     long cursor = relay.topic(responseTopic).lastPosition();
     String requestId = UUID.randomUUID().toString();
+    var causation = RelayReviewCausation.root(requestId);
     String hash = RelayPort.hash(role + "\0" + text);
     final String encoded;
     try {
@@ -107,7 +108,7 @@ public final class RelayMessageReview implements MessageReview {
             requestId,
             null,
             new RelayPayload.Text(encoded),
-            new RelayCausation(requestId, null, 0)));
+            causation));
     long deadline =
         System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(binding.timeoutSeconds());
     while (System.nanoTime() < deadline) {
@@ -124,7 +125,7 @@ public final class RelayMessageReview implements MessageReview {
             || event.causation().depth() != 1
             || !requestId.equals(event.causationId())
             || !requestId.equals(event.causation().parentId())
-            || !requestId.equals(event.causation().rootId())
+            || !causation.rootId().equals(event.causation().rootId())
             || !(event.payload() instanceof RelayPayload.Text payload))
           throw refused("response_identity");
         final FilterReview.Response response;

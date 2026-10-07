@@ -95,7 +95,11 @@ class RelayMessageReviewTest {
                               "accepted"));
               var cause =
                   parent
-                      ? new RelayCausation(r.requestId(), r.requestId(), 1)
+                      ? new RelayCausation(
+                          io.aeyer.plowshare.server.relay.RelayReviewCausation.root(r.requestId())
+                              .rootId(),
+                          r.requestId(),
+                          1)
                       : new RelayCausation(r.requestId(), null, 0);
               var publication =
                   new Relay.Publication(

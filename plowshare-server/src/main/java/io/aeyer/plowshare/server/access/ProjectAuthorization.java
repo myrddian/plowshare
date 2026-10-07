@@ -228,7 +228,11 @@ public class ProjectAuthorization {
         && !operation.equals("admin.status")
         && (!serviceOperation(operation) || SERVER.contains(operation)))
       throw new CallerFault("This operation is outside service-token project scopes");
-    if (operation.startsWith("admin.") || SERVER.contains(operation)) {
+    if (Set.of("application.create", "application.storage.set").contains(operation) && service)
+      throw new CallerFault("Service tokens cannot admit Application storage");
+    if (Set.of("application.create", "application.storage.set").contains(operation)
+        || operation.startsWith("admin.")
+        || SERVER.contains(operation)) {
       if (!operation.equals("admin.status")) accounts.requireServerAdmin(account);
       return;
     }

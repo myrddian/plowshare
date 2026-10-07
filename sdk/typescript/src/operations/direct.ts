@@ -618,7 +618,9 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
       asked.type === 'application.file.read' ||
       asked.type === 'application.file.save') &&
     (body?.['project'] !== asked.payload['project'] ||
-      body?.['path'] !== (asked.payload['path'] ?? ''))
+      body?.['path'] !== (asked.payload['path'] ?? '') ||
+      fields(body?.['location'])?.['store'] !== asked.payload.location?.store ||
+      fields(body?.['location'])?.['path'] !== asked.payload.location?.path)
   )
     return { kind: 'invalid-response', outcome };
   if (

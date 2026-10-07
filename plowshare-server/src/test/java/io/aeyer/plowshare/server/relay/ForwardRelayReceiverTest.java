@@ -45,6 +45,23 @@ class ForwardRelayReceiverTest {
   }
 
   @Test
+  void review_requests_and_sdk_reply_descendants_cannot_be_forwarded() {
+    var root = RelayReviewCausation.root("00000000-0000-4000-8000-000000000001");
+    var request =
+        new RelayReceiver.Request(ACCESS, delivery(RelayDeliveries.State.DISPATCHING, false));
+    for (var cause : java.util.List.of(root, root.next("review-request", 8))) {
+      when(history.causation(any(), eq(8))).thenReturn(Optional.of(cause));
+      assertEquals(
+          "receiver.review-protocol.refused",
+          assertThrows(RelayReceiver.Refused.class, () -> forward.require(request)).code());
+      assertEquals(
+          "receiver.review-protocol.refused",
+          assertThrows(RelayReceiver.Refused.class, () -> forward.dispatch(request)).code());
+    }
+    verify(relay, never()).publish(any(), any());
+  }
+
+  @Test
   void incompatible_topic_is_refused_before_publication_without_changing_its_policy() {
     when(relay.topic(target))
         .thenReturn(

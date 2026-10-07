@@ -1,3 +1,4 @@
+import { parseFileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import { installFileStores } from './filestores.ts';
 import { isObject } from 'plowshare-client-ts/binding/values';
 import { readPreferences, type Preferences } from './preferences.ts';
@@ -2693,6 +2694,7 @@ $('#server-setup').addEventListener(
   }),
 );
 $('#server-project-add').addEventListener('click', () => {
+  $<HTMLFormElement>('#server-project-form').reset();
   $('#server-project-error').hidden = true;
   $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
   $<HTMLInputElement>('#server-project-writes').value = '.';
@@ -2701,10 +2703,22 @@ $('#server-project-add').addEventListener('click', () => {
     'Leave the path blank to provision a server workspace.';
   $<HTMLDialogElement>('#server-project-dialog').showModal();
 });
+$('#server-project-filestore').addEventListener('change', () => {
+  const aliases = $<HTMLInputElement>('#server-project-filestore').checked;
+  $<HTMLInputElement>('#server-project-workspace').required =
+    aliases ||
+    $<HTMLSelectElement>('#server-project-type').value === 'DISJOINT';
+  $<HTMLInputElement>('#server-project-writes').value = aliases ? '' : '.';
+  $('#server-project-path-note').textContent = aliases
+    ? 'Use a server FileStore alias and relative path, such as applications/mychatbot. Writable areas also use alias/path. Blank means read only. Server aliases are independent of local FileStores.'
+    : 'Use the existing absolute server source-directory format.';
+});
 $('#server-project-type').addEventListener('change', () => {
+  if ($<HTMLInputElement>('#server-project-filestore').checked) return;
   const disjoint =
     $<HTMLSelectElement>('#server-project-type').value === 'DISJOINT';
-  $<HTMLInputElement>('#server-project-workspace').required = disjoint;
+  $<HTMLInputElement>('#server-project-workspace').required =
+    disjoint || $<HTMLInputElement>('#server-project-filestore').checked;
   $<HTMLInputElement>('#server-project-writes').value = disjoint ? '' : '.';
   $('#server-project-path-note').textContent = disjoint
     ? 'Choose an existing server checkout managed by your pipeline. Plowshare will not sync it to clients.'
@@ -2721,16 +2735,25 @@ $('#server-project-form').addEventListener(
       button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
     button.disabled = true;
     try {
+      const root = $<HTMLInputElement>('#server-project-workspace').value;
+      const writes = $<HTMLInputElement>('#server-project-writes')
+        .value.split(',')
+        .map((path) => path.trim())
+        .filter(Boolean);
+      const placement = $<HTMLInputElement>(
+        '#server-project-filestore',
+      ).checked;
       await request({
         action: 'server-project-create',
         name: $<HTMLInputElement>('#server-project-name').value,
-        workspace: $<HTMLInputElement>('#server-project-workspace').value,
         type: $<HTMLSelectElement>('#server-project-type').value as
           'MANAGED' | 'DISJOINT',
-        writePaths: $<HTMLInputElement>('#server-project-writes')
-          .value.split(',')
-          .map((path) => path.trim())
-          .filter(Boolean),
+        ...(placement
+          ? {
+              applicationRoot: parseFileStoreReference(root),
+              writableAreas: writes.map(parseFileStoreReference),
+            }
+          : { workspace: root, writePaths: writes }),
       });
       $<HTMLDialogElement>('#server-project-dialog').close();
       form.reset();

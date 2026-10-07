@@ -42,22 +42,30 @@ all visible skills, selected specialist agents, and several workflows. Its tools
 delegation grants, scopes and budgets still govern every incoming message.
 It does not give external callers direct access to every agent or project.
 
-Configure the receiving project through the normal project tools. The workspace
-must be a path inside the server container or an explicitly provided workspace
-provider. To define a server-owned root with the Java SDK:
+Configure the receiving **Application** with a valid root `plowshare.json`. The
+distribution includes [an Application template](../integrations/a2a/examples/application/plowshare.json).
+Copy it to a dedicated directory in a configured server FileStore, preserve its
+name (or the existing registered name), and add explicit `access.accounts` grants
+for the operator and adapter account. A service token uses its owner's grant.
+The template has no grants; matching server membership is also required.
 
-```java
-sdk.request("project.define", Map.of(
-    "name", "a2a",
-    "workspace", "/workspaces/a2a"
-)).requirePayload();
+Register an independently managed checkout through the CLI, for example with the
+operator-configured `applications` FileStore:
+
+```sh
+bin/plowshare-cli application create '{"name":"a2a","type":"DISJOINT","applicationRoot":{"store":"applications","path":"a2a"},"writableAreas":[]}'
 ```
 
-This path belongs to the server container, not the SDK process. A server-owned
-workspace uses the server's local file provider and needs no live client presence.
-For Docker, mount the directory containing the intended repository at that path;
-creating an empty workspace directory does not create a repository checkout.
-Client-owned workspaces instead require a file-provider session on their machine.
+Aliases resolve inside the server container or host, independently of the SDK
+process. `DISJOINT` leaves source lifecycle ownership with the checkout's operator;
+Plowshare can instead provision a `MANAGED` Application. An empty `writableAreas`
+list grants no runtime writes. See [Application placement](projects.md#create-or-adopt-an-alias-based-application).
+For an existing A2A registration shown under Projects, install the valid root
+manifest at its current source without changing its name or recreating its durable
+work; optional `application.storage.set` adopts FileStore placement. Authorized
+clients then list it under **Applications**. For Docker, mount the actual source
+directory at its configured container location; creating an empty directory does
+not create a repository checkout.
 
 Server-owned project definitions live under
 `<data>/projects/<project-id>/agents`, `skills`, and `orchestrations`; global
@@ -74,9 +82,10 @@ For Docker, run the adapter as the `a2a-receiver` sidecar from
 [`compose.a2a.yaml`](../deploy/docker/compose.a2a.yaml), beside the Plowshare server.
 See the [Docker receiving setup](../deploy/docker/README.md#a2a-general-purpose-receiver).
 
-Use a server with database migration V108, an existing project accessible to the
-adapter's account, and an **exported** agent served from the server's definitions
-for that project. Client-local definitions and filesystem presence are not used.
+Use an Application-capable server with the message-ingress migrations, a registered
+Application accessible to the adapter's account, and an **exported** agent served
+from the server's definitions for that Application. Client-local definitions and
+filesystem presence are not used.
 The selected agent's existing tools, skill grants, orchestration grants and limits
 still apply. Configure these through the normal
 [agent and skill definitions](skills-and-agent-rules.md).

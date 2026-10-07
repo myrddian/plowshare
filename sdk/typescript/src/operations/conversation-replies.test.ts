@@ -326,10 +326,15 @@ describe('complete conversation, agent and project WS replies', () => {
         'ApplicationFileListing',
         'files/ApplicationFiles',
         'Listing',
-        [],
+        ['location'],
         { Entry: 'ApplicationFileEntry' },
       ],
-      ['ApplicationFileDocument', 'files/ApplicationFiles', 'Document', []],
+      [
+        'ApplicationFileDocument',
+        'files/ApplicationFiles',
+        'Document',
+        ['location'],
+      ],
 
       ['ServiceAccount', 'auth/ServiceAccounts', 'Account', []],
       ['ServiceScope', 'auth/ServiceAccounts', 'Scope', []],
@@ -412,8 +417,12 @@ describe('complete conversation, agent and project WS replies', () => {
         'ProjectView',
         'api/ProjectView',
         'ProjectView',
-        ['machine', 'role'],
-        { 'io.aeyer.plowshare.server.archive.ProjectRole': 'ProjectRole' },
+        ['machine', 'role', 'applicationRoot', 'writableAreas'],
+        {
+          'io.aeyer.plowshare.server.archive.ProjectRole': 'ProjectRole',
+          'io.aeyer.plowshare.protocol.FileStoreReference':
+            'FileStoreReference',
+        },
       ],
       ['ProjectMembers', 'ws/ProjectMemberHandler', 'Changed', []],
       ['ProjectGrant', 'archive/ProjectMembers', 'Grant', []],
@@ -566,6 +575,9 @@ describe('complete conversation, agent and project WS replies', () => {
         dto.members.map((member) => {
           const field = member as ts.PropertySignature;
           const extension =
+            ((type === 'ApplicationFileDocument' ||
+              type === 'ApplicationFileListing') &&
+              field.name.getText(source) === 'location') ||
             (type === 'EntryView' &&
               ['job', 'source'].includes(field.name.getText(source))) ||
             (type === 'AgentView' &&
@@ -581,6 +593,8 @@ describe('complete conversation, agent and project WS replies', () => {
                 'writePaths',
                 'displayName',
                 'routingIdentity',
+                'applicationRoot',
+                'writableAreas',
               ].includes(field.name.getText(source)));
           if (extension) expect(field.questionToken, type).toBeDefined();
           else expect(field.questionToken, type).toBeUndefined();

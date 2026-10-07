@@ -1,3 +1,7 @@
+import {
+  fileStoreReference,
+  type FileStoreReference,
+} from '../binding/filestores.ts';
 import { isList } from '../binding/values.ts';
 import { commandEntry, type CommandEntry } from './conversation-replies.ts';
 // Shared domain readers. Unknown fields are tolerated; frontend rendering stays outside this module.
@@ -60,6 +64,8 @@ export interface Project {
   readonly displayName?: string;
   readonly routingIdentity?: string;
   readonly writePaths?: readonly string[];
+  readonly applicationRoot?: FileStoreReference;
+  readonly writableAreas?: readonly FileStoreReference[];
 
   /** Where the files are on the machine that holds them. Never resolved here. */
   readonly workspace?: string;
@@ -373,6 +379,13 @@ export function projects(answer: Answer): Project[] | undefined {
         ...(isList(fields['writePaths']) &&
         fields['writePaths'].every((path) => typeof path === 'string')
           ? { writePaths: fields['writePaths'] }
+          : {}),
+        ...(fileStoreReference(fields['applicationRoot'])
+          ? { applicationRoot: fields['applicationRoot'] }
+          : {}),
+        ...(isList(fields['writableAreas']) &&
+        fields['writableAreas'].every(fileStoreReference)
+          ? { writableAreas: fields['writableAreas'] }
           : {}),
         ...(workspace === undefined ? {} : { workspace }),
         ...(machine === undefined ? {} : { machine }),

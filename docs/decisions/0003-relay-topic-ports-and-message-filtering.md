@@ -49,7 +49,10 @@ A model-boundary interface applies bundled MIT keyword rules, configurable
 sensitive-data regex policies, and optional external input review. The external
 review protocol is application JSON in configured TEXT topics. Acceptance
 requires the configured authenticated reviewer, exact request identity and source
-hash, and a response derived from the retained request. An accepted response
+hash, and a response derived from the retained request. Review chains use a
+reserved server-owned root and refuse native work and
+forwarding, so routing a held review cannot recursively start filtered work.
+SDK request/reply publication preserves that root. An accepted response
 returns the full replacement text, which is checked again locally. A delivery ack
 is never acceptance. Reviewer subjects cannot recursively filter each other in
 the same project.

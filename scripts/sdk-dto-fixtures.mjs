@@ -203,6 +203,33 @@ push(
   },
   true,
 );
+// Portable host references must have identical strict semantics in every SDK.
+const root = { store: 'applications', path: 'chatbot' };
+const area = { store: 'outputs', path: 'chatbot/reports' };
+input('application.create', { name: 'chatbot', applicationRoot: root, writableAreas: [area] }, true);
+input('application.storage.set', { project: 'chatbot', applicationRoot: root, writableAreas: [] }, true);
+input('application.create', { name: 'chatbot', applicationRoot: root }, false);
+input('application.create', { name: 'chatbot', applicationRoot: root, writableAreas: [area, area] }, false);
+input('project.create', { name: 'chatbot', applicationRoot: root, writableAreas: [] }, false);
+input('application.create', { name: 'chatbot', workspace: '/legacy', applicationRoot: root, writableAreas: [] }, false);
+const file = { project: 'chatbot', path: 'report.md', text: '', revision: 'a'.repeat(64), writable: true, location: area };
+result('application.file.read', file, true);
+result('application.file.read', { ...file, location: { ...area, future: true } }, true);
+const placedProject = { name: 'chatbot', workspace: '/fixture', machine: null, members: [], lent: [], exclusions: [], applicationRoot: root, writableAreas: [area] };
+result('application.create', placedProject, true);
+result('application.storage.set', { ...placedProject, writableAreas: Array(101).fill(area) }, false);
+for (const invalid of [
+  { store: 'Upper', path: '' }, { store: 'outputs', path: '../secret' },
+  { store: 'outputs', path: '/absolute' }, { store: 'outputs', path: 'a//b' },
+  { store: 'outputs', path: 'a/./b' }, { store: 'outputs', path: 'a\\b' },
+  { store: 'outputs', path: 'a:stream' }, { store: 'outputs', path: '.GiT/config' },
+  { store: 'outputs', path: 'a\u0085' }, { store: 'outputs', path: '' , extra: true },
+]) {
+  input('application.file.read', { project: 'chatbot', path: 'report.md', location: invalid }, false);
+  // Unknown reply fields are projected away for forward compatibility.
+  if (!('extra' in invalid)) result('application.file.read', { ...file, location: invalid }, false);
+}
+input('application.files', { project: 'chatbot', location: { store: 'outputs', path: '' } }, true);
 for (const test of cases) {
   let accepted = true;
   try {

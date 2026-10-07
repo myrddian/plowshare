@@ -33,6 +33,8 @@ import java.util.regex.Pattern;
  * now, both readings ask through it, and the constant below names a handler that really exists.
  */
 public final class FrameTypes {
+  public static final String APPLICATION_CREATE = "application.create";
+  public static final String APPLICATION_STORAGE_SET = "application.storage.set";
   public static final String APPLICATION_FILES = "application.files";
   public static final String APPLICATION_FILE_READ = "application.file.read";
   public static final String APPLICATION_FILE_SAVE = "application.file.save";

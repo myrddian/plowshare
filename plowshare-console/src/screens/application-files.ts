@@ -1,3 +1,4 @@
+import type { FileStoreReference } from '../../../sdk/typescript/src/binding/filestores.ts';
 import { outcomeIn } from '../../../sdk/typescript/src/binding/envelope.ts';
 import type { EventStream } from '../events';
 import {
@@ -14,12 +15,45 @@ import { button, el, input, labelled, problemText } from './dom';
 export function applicationFiles(
   project: string,
   stream: () => EventStream | null,
+  applicationRoot?: FileStoreReference,
+  writableAreas: readonly FileStoreReference[] = [],
 ): HTMLElement {
   const section = el('section', 'application-files');
   const toggle = button('files', 'Files');
   const content = el('div', 'application-source');
   content.hidden = true;
   const path = input('path', 'relative folder or file');
+  const areas = writableAreas.filter(
+    (area) =>
+      area.store !== applicationRoot?.store ||
+      area.path !== applicationRoot?.path,
+  );
+  const areaSelect = document.createElement('select');
+  areaSelect.setAttribute('aria-label', 'Application file location');
+  for (const label of [
+    'Application source',
+    ...areas.map((area) => `${area.store}/${area.path}`),
+  ]) {
+    const option = document.createElement('option');
+    option.textContent = label;
+    areaSelect.append(option);
+  }
+  let location: FileStoreReference | undefined;
+  const selectedLocation = () => (location ? { location } : {});
+  const draftKey = (path: string) =>
+    `${JSON.stringify(location ?? null)}\0${path}`;
+  areaSelect.hidden = areas.length === 0;
+  areaSelect.addEventListener('change', () => {
+    location =
+      areaSelect.selectedIndex > 0
+        ? areas[areaSelect.selectedIndex - 1]
+        : undefined;
+    source = undefined;
+    editor.hidden = true;
+    uncertain = false;
+    background(run(() => list('')));
+  });
+
   const browse = button('browse', 'Browse folder'),
     open = button('read', 'Read file');
   const status = el('p', 'application-status'),
@@ -39,6 +73,7 @@ export function applicationFiles(
   discard.hidden = true;
   editor.append(title, permission, text, readCurrent, discard, save);
   content.append(
+    areaSelect,
     labelled('Relative path', path),
     browse,
     open,
@@ -56,10 +91,17 @@ export function applicationFiles(
     { text: string; revision: string; original: string }
   >();
   function render() {
-    for (const control of [browse, open, readCurrent, toggle, discard])
+    for (const control of [
+      browse,
+      open,
+      readCurrent,
+      toggle,
+      discard,
+      areaSelect,
+    ])
       control.disabled = busy;
     text.readOnly = busy || !source?.writable;
-    const draft = source ? drafts.get(source.path) : undefined;
+    const draft = source ? drafts.get(draftKey(source.path)) : undefined;
     save.disabled =
       busy ||
       uncertain ||
@@ -111,7 +153,13 @@ export function applicationFiles(
   async function list(relative: string) {
     const value = decodeReply(
       'application.files',
-      await ask(request('application.files', { project, path: relative })),
+      await ask(
+        request('application.files', {
+          project,
+          path: relative,
+          ...selectedLocation(),
+        }),
+      ),
     );
     if (!section.isConnected) return;
     source = undefined;
@@ -160,7 +208,13 @@ export function applicationFiles(
   async function read(relative: string) {
     const value = decodeReply(
       'application.file.read',
-      await ask(request('application.file.read', { project, path: relative })),
+      await ask(
+        request('application.file.read', {
+          project,
+          path: relative,
+          ...selectedLocation(),
+        }),
+      ),
     );
     if (!section.isConnected) return;
     source = value;
@@ -168,14 +222,14 @@ export function applicationFiles(
     path.value = value.path;
     editor.hidden = false;
     title.textContent = value.path;
-    let draft = drafts.get(value.path);
+    let draft = drafts.get(draftKey(value.path));
     if (!draft || draft.text === draft.original || draft.text === value.text) {
       draft = {
         text: value.text,
         original: value.text,
         revision: value.revision,
       };
-      drafts.set(value.path, draft);
+      drafts.set(draftKey(value.path), draft);
     }
     text.value = draft.text;
   }
@@ -192,7 +246,7 @@ export function applicationFiles(
   });
   discard.addEventListener('click', () => {
     if (source) {
-      drafts.set(source.path, {
+      drafts.set(draftKey(source.path), {
         text: source.text,
         original: source.text,
         revision: source.revision,
@@ -203,7 +257,7 @@ export function applicationFiles(
   });
   text.addEventListener('input', () => {
     if (source) {
-      const draft = drafts.get(source.path);
+      const draft = drafts.get(draftKey(source.path));
       if (draft) draft.text = text.value;
       render();
     }
@@ -212,7 +266,7 @@ export function applicationFiles(
     background(
       run(async () => {
         if (!source || !source.writable || uncertain) return;
-        const draft = drafts.get(source.path);
+        const draft = drafts.get(draftKey(source.path));
         if (!draft || draft.revision !== source.revision) return;
         uncertain = true;
         try {
@@ -221,6 +275,7 @@ export function applicationFiles(
             await ask(
               request('application.file.save', {
                 project,
+                ...selectedLocation(),
                 path: source.path,
                 text: draft.text,
                 revision: draft.revision,
@@ -229,7 +284,7 @@ export function applicationFiles(
           );
           source = saved;
           uncertain = false;
-          drafts.set(saved.path, {
+          drafts.set(draftKey(saved.path), {
             text: saved.text,
             original: saved.text,
             revision: saved.revision,

@@ -113,7 +113,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * key and not {@code AgentsProperties}', which is evidence the old sentence's premise never
  * generalised past the one path it happened to name.
  */
-public final class ProjectStore implements ProjectWorkspaces {
+public final class ProjectStore implements ServerProjects {
 
   /*
    * `lent` sits between `workspace` and `exclusions` because that is the order
@@ -123,7 +123,7 @@ public final class ProjectStore implements ProjectWorkspaces {
    * `RETURNING` list an operator reads in a log should read like the rule.
    */
   private static final String COLUMNS =
-      "name, workspace, lent, exclusions, project_type, write_paths";
+      "name, workspace, lent, exclusions, project_type, write_paths, application_storage";
 
   /*
    * WHAT THIS TABLE HOLDS CHANGED IN V14, AND EVERY QUERY BELOW PAYS FOR IT
@@ -224,7 +224,7 @@ public final class ProjectStore implements ProjectWorkspaces {
                 lent       = EXCLUDED.lent,
                 exclusions = EXCLUDED.exclusions,
                 defined_at = now()
-            WHERE projects.machine IS NULL
+            WHERE projects.machine IS NULL AND projects.application_storage IS NULL
             """;
 
   /*
@@ -261,7 +261,7 @@ public final class ProjectStore implements ProjectWorkspaces {
             WHERE name = ?"""
           + " AND "
           + IS_THIS_SERVERS
-          + " RETURNING "
+          + " AND application_storage IS NULL RETURNING "
           + COLUMNS;
 
   /*
@@ -292,7 +292,7 @@ public final class ProjectStore implements ProjectWorkspaces {
             WHERE name = ?"""
           + " AND "
           + IS_THIS_SERVERS
-          + " RETURNING "
+          + " AND application_storage IS NULL RETURNING "
           + COLUMNS;
 
   /*
@@ -339,6 +339,7 @@ public final class ProjectStore implements ProjectWorkspaces {
   private final Path tokenFile;
   private final Path exportDir;
   private final Path dataDir;
+  private final io.aeyer.plowshare.server.files.FileStores fileStores;
 
   /**
    * @param jdbc where the rows live
@@ -385,6 +386,25 @@ public final class ProjectStore implements ProjectWorkspaces {
       Path tokenFile,
       Path exportDir,
       Path dataDir) {
+    this(
+        jdbc,
+        configFile,
+        samplingDir,
+        tokenFile,
+        exportDir,
+        dataDir,
+        io.aeyer.plowshare.server.files.FileStores.NONE);
+  }
+
+  /** Alias placement is resolved on this server; legacy construction never guesses a registry. */
+  public ProjectStore(
+      JdbcTemplate jdbc,
+      Path configFile,
+      Path samplingDir,
+      Path tokenFile,
+      Path exportDir,
+      Path dataDir,
+      io.aeyer.plowshare.server.files.FileStores fileStores) {
     this.jdbc = jdbc;
     // Held as given and absolutised in mandatoryExclusions, not both. Doing
     // it here as well would be a second normalisation with no observable
@@ -394,6 +414,7 @@ public final class ProjectStore implements ProjectWorkspaces {
     this.tokenFile = tokenFile;
     this.exportDir = exportDir;
     this.dataDir = dataDir;
+    this.fileStores = Objects.requireNonNull(fileStores);
   }
 
   /**
@@ -464,13 +485,6 @@ public final class ProjectStore implements ProjectWorkspaces {
         });
   }
 
-  /** Validated source provisioning result; authority adoption commits with project creation. */
-  public record ServerWorkspace(Path root, boolean application) {
-    public ServerWorkspace {
-      Objects.requireNonNull(root);
-    }
-  }
-
   /** Atomic create; an existing project can never be overwritten by a retried request. */
   public ProjectRecord createServer(
       String name,
@@ -496,14 +510,46 @@ public final class ProjectStore implements ProjectWorkspaces {
               connection -> {
                 PreparedStatement statement =
                     connection.prepareStatement(
-                        "UPDATE projects SET project_type = ?, write_paths = ?, application_boundary = application_boundary OR ? WHERE name = ?");
+                        "UPDATE projects SET project_type = ?, write_paths = ?, application_boundary = application_boundary OR ?, application_storage = ?::jsonb WHERE name = ?");
                 statement.setString(1, type);
                 statement.setArray(
                     2, connection.createArrayOf("text", writePaths.toArray(String[]::new)));
                 statement.setBoolean(3, type.equals("MANAGED") || source.application());
-                statement.setString(4, name);
+                statement.setString(4, ApplicationPlacementCodec.encode(source.placement()));
+                statement.setString(5, name);
                 return statement;
               });
+          return find(name).orElseThrow();
+        });
+  }
+
+  @Override
+  public ProjectRecord place(String name, ApplicationPlacement placement, String handle) {
+    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    ordinary(name);
+    return withCreator(
+        name,
+        handle,
+        () -> {
+          ProjectRecord existing =
+              find(name)
+                  .orElseThrow(
+                      () -> new ArchiveRefusedException("Choose an existing server Application"));
+          if (!existing.serverProject())
+            throw new ArchiveRefusedException(
+                "FileStore placement needs a managed or disjoint server Application");
+          var resolved = fileStores.resolve(placement);
+          if (!io.aeyer.plowshare.protocol.FileAccess.canonical(existing.workspace())
+              .equals(resolved.root()))
+            throw new ArchiveRefusedException(
+                "Placement must name the current Application root; move source through its owning lifecycle first");
+          int changed =
+              jdbc.update(
+                  "UPDATE projects SET application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', lent = '{}', defined_at = now() WHERE name = ? AND machine IS NULL AND workspace IS NOT NULL",
+                  ApplicationPlacementCodec.encode(placement),
+                  name);
+          if (changed != 1)
+            throw new ArchiveRefusedException("Application placement changed concurrently");
           return find(name).orElseThrow();
         });
   }
@@ -580,6 +626,7 @@ public final class ProjectStore implements ProjectWorkspaces {
       String name, Path workspace, List<Path> lent, List<Path> exclusions) {
     ordinary(name);
     String project = named(name);
+    refuseLegacyPlacement(project);
     ProjectRecord record =
         new ProjectRecord(
             project,
@@ -654,6 +701,7 @@ public final class ProjectStore implements ProjectWorkspaces {
   public ProjectRecord lend(String name, List<Path> roots) {
     ordinary(name);
     String project = named(name);
+    refuseLegacyPlacement(project);
     // Empty is refused HERE and nowhere else in this file, and the asymmetry
     // is deliberate: an empty `exclusions` on a define is a whole definition
     // that fences nothing, which is a real thing to say, while an empty list
@@ -698,6 +746,7 @@ public final class ProjectStore implements ProjectWorkspaces {
   public ProjectRecord unlend(String name, List<Path> roots) {
     ordinary(name);
     String project = named(name);
+    refuseLegacyPlacement(project);
     List<Path> removing = absolutised(roots, "roots");
     if (removing.isEmpty()) {
       throw new ValidationException(
@@ -872,6 +921,7 @@ public final class ProjectStore implements ProjectWorkspaces {
   public ProjectRecord moveWorkspace(String name, Path workspace) {
     ordinary(name);
     String project = named(name);
+    refuseLegacyPlacement(project);
     Path resolved = validWorkspace(project, workspace);
     List<ProjectRecord> updated =
         ArchiveUnavailableException.translating(
@@ -881,7 +931,7 @@ public final class ProjectStore implements ProjectWorkspaces {
                     "UPDATE projects SET workspace = ?, defined_at = now()"
                         + " WHERE name = ? AND personal_owner IS NULL AND "
                         + IS_THIS_SERVERS
-                        + " RETURNING "
+                        + " AND application_storage IS NULL RETURNING "
                         + COLUMNS,
                     ROW_MAPPER,
                     resolved.toString(),
@@ -1014,7 +1064,7 @@ public final class ProjectStore implements ProjectWorkspaces {
                         + IS_THIS_SERVERS,
                     ROW_MAPPER,
                     wanted));
-    return found.isEmpty() ? Optional.empty() : Optional.of(found.get(0));
+    return found.isEmpty() ? Optional.empty() : Optional.of(resolved(found.get(0)));
   }
 
   /** Internal project identity lookup for scoped configuration readers. */
@@ -1175,21 +1225,22 @@ public final class ProjectStore implements ProjectWorkspaces {
       var grants = new JdbcProjectMembers(jdbc);
       return all().stream().filter(row -> grants.mayUse(row.name(), handle)).toList();
     }
-    return ArchiveUnavailableException.translating(
-        "list the projects",
-        () ->
-            jdbc.query(
-                "SELECT "
-                    + COLUMNS
-                    + " FROM projects WHERE workspace IS NOT NULL"
-                    + " AND name NOT LIKE 'client:%' AND (personal_owner IS NULL OR personal_owner = ?)"
-                    + " AND (personal_owner = ? OR EXISTS (SELECT 1 FROM admins a WHERE a.handle = ? AND a.enabled AND a.server_admin AND NOT a.bootstrap)"
-                    + " OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = projects.id AND m.handle = ?)) ORDER BY name",
-                ROW_MAPPER,
-                handle,
-                handle,
-                handle,
-                handle));
+    return availableRows(
+        ArchiveUnavailableException.translating(
+            "list the projects",
+            () ->
+                jdbc.query(
+                    "SELECT "
+                        + COLUMNS
+                        + " FROM projects WHERE workspace IS NOT NULL"
+                        + " AND name NOT LIKE 'client:%' AND (personal_owner IS NULL OR personal_owner = ?)"
+                        + " AND (personal_owner = ? OR EXISTS (SELECT 1 FROM admins a WHERE a.handle = ? AND a.enabled AND a.server_admin AND NOT a.bootstrap)"
+                        + " OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = projects.id AND m.handle = ?)) ORDER BY name",
+                    ROW_MAPPER,
+                    handle,
+                    handle,
+                    handle,
+                    handle)));
   }
 
   private void ordinary(String name) {
@@ -1203,15 +1254,16 @@ public final class ProjectStore implements ProjectWorkspaces {
   }
 
   public List<ProjectRecord> all() {
-    return ArchiveUnavailableException.translating(
-        "list the projects",
-        () ->
-            jdbc.query(
-                "SELECT "
-                    + COLUMNS
-                    + " FROM projects WHERE workspace IS NOT NULL"
-                    + " ORDER BY name",
-                ROW_MAPPER));
+    return availableRows(
+        ArchiveUnavailableException.translating(
+            "list the projects",
+            () ->
+                jdbc.query(
+                    "SELECT "
+                        + COLUMNS
+                        + " FROM projects WHERE workspace IS NOT NULL"
+                        + " ORDER BY name",
+                    ROW_MAPPER)));
   }
 
   /**
@@ -1240,6 +1292,10 @@ public final class ProjectStore implements ProjectWorkspaces {
    * client on another machine, and a row that still lent {@code /Users/example/keys} would hand
    * that path to whoever re-defined the name next, having never been told it was there. Clearing it
    * means "this project has no place" is one fact and not a place with an empty middle.
+   *
+   * <p>Alias placement and its writable areas are also revoked. Retaining a dormant placement would
+   * prevent deliberate re-registration through the legacy guard. The durable Application boundary
+   * remains adopted, so revocation cannot restore External access.
    *
    * <p>One project, never the table: the {@code WHERE} is the whole of the difference between this
    * and wiping every workspace on the server, and {@code
@@ -1280,7 +1336,7 @@ public final class ProjectStore implements ProjectWorkspaces {
             () ->
                 jdbc.update(
                     "UPDATE projects SET workspace = NULL, lent = '{}',"
-                        + " exclusions = '{}', defined_at = now()"
+                        + " exclusions = '{}', write_paths = CASE WHEN application_storage IS NULL THEN write_paths ELSE '{}'::text[] END, application_storage = NULL, defined_at = now()"
                         + " WHERE name = ? AND personal_owner IS NULL AND "
                         + IS_THIS_SERVERS,
                     wanted));
@@ -1348,6 +1404,9 @@ public final class ProjectStore implements ProjectWorkspaces {
         new LinkedHashSet<>(
             mandatoryExclusions(configFile, samplingDir, tokenFile, exportDir, dataDir));
     all.addAll(project.exclusions());
+    fileStores
+        .configurationFile()
+        .ifPresent(path -> all.add(io.aeyer.plowshare.protocol.FileAccess.canonical(path)));
     return List.copyOf(all);
   }
 
@@ -1912,7 +1971,7 @@ public final class ProjectStore implements ProjectWorkspaces {
    * no test could reach and no caller could cause, which is the shape
    * ProposalStore.utc rejects for the same reason.
    */
-  private static final RowMapper<ProjectRecord> ROW_MAPPER =
+  private final RowMapper<ProjectRecord> ROW_MAPPER =
       (rs, rowNum) ->
           new ProjectRecord(
               rs.getString("name"),
@@ -1920,7 +1979,60 @@ public final class ProjectStore implements ProjectWorkspaces {
               paths(rs.getArray("lent")),
               paths(rs.getArray("exclusions")),
               rs.getString("project_type"),
-              List.of((String[]) rs.getArray("write_paths").getArray()));
+              List.of((String[]) rs.getArray("write_paths").getArray()),
+              ApplicationPlacementCodec.decode(rs.getString("application_storage")),
+              List.of());
+
+  private void refuseLegacyPlacement(String name) {
+    String project = named(name);
+    if (!ArchiveUnavailableException.translating(
+            "read a project's Application placement",
+            () ->
+                jdbc.queryForList(
+                    "SELECT 1 FROM projects WHERE name = ? AND application_storage IS NOT NULL",
+                    Integer.class,
+                    project))
+        .isEmpty())
+      throw new ArchiveRefusedException(
+          "Use application.storage.set for an alias-based Application; legacy workspace and lending changes are refused");
+  }
+
+  /**
+   * Listings omit unavailable placements; direct reads refuse without using the stored legacy path.
+   */
+  private List<ProjectRecord> availableRows(List<ProjectRecord> rows) {
+    List<ProjectRecord> available = new ArrayList<>();
+    for (ProjectRecord row : rows) {
+      try {
+        available.add(resolved(row));
+      } catch (io.aeyer.plowshare.server.files.WorkspaceRefusedException unavailable) {
+        // An unavailable host alias is not an alternative grant over the historical absolute root.
+      }
+    }
+    return List.copyOf(available);
+  }
+
+  private ProjectRecord resolved(ProjectRecord project) {
+    if (project.placement() == null) return project;
+    var placement = fileStores.resolve(project.placement());
+    if (!java.nio.file.Files.isDirectory(placement.root(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        || placement.writableAreas().stream()
+            .anyMatch(
+                path ->
+                    !java.nio.file.Files.isDirectory(
+                        path, java.nio.file.LinkOption.NOFOLLOW_LINKS)))
+      throw new io.aeyer.plowshare.server.files.WorkspaceRefusedException(
+          "Application source and writable-area directories must exist on this server");
+    return new ProjectRecord(
+        project.name(),
+        placement.root(),
+        List.of(),
+        project.exclusions(),
+        project.type(),
+        List.of(),
+        project.placement(),
+        placement.writableAreas());
+  }
 
   /*
    * Shared by both arrays for the reason the null branch is still absent: both

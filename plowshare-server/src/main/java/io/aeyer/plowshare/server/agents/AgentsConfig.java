@@ -234,7 +234,8 @@ public class AgentsConfig {
       LlmProperties llm,
       AuthProperties auth,
       ConversationsProperties conversations,
-      DataLayout data) {
+      DataLayout data,
+      io.aeyer.plowshare.server.files.FileStores fileStores) {
     String token = auth.getTokenFile();
     String exports = conversations.getRetention().getExportDirectory();
     return new ProjectStore(
@@ -265,7 +266,8 @@ public class AgentsConfig {
         // null for the deployment that keeps no data directory -- which
         // is every context that did not come through
         // PlowshareServerApplication.main.
-        data.root());
+        data.root(),
+        fileStores);
   }
 
   /**

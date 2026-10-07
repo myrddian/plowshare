@@ -166,6 +166,10 @@ The response publication sets `correlationId` to the request ID and
 `parentTopic`/`parentEventId` to the held request's topic/event. Publisher identity
 comes from authentication. A configured reviewer cannot approve unrelated text,
 a wrong hash, a malformed response or a response without matching ancestry.
+Review requests and SDK reply descendants carry a reserved server-owned causation
+root. Native Relay work and forwarding refuse those chains, preventing a held
+review from starting filtered work that creates another review. Detectors use
+the SDK request/response path; ordinary topic ingress retains its normal routing.
 Approved text is rechecked locally. A batch acknowledgement only records delivery.
 
 Each untrusted nonblank text part in the current model conversation is reviewed
