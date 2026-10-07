@@ -11,6 +11,8 @@ final class RelayEffectBound {
         history
             .causation(input, maximum)
             .orElseThrow(() -> new RelayReceiver.Refused("receiver.causation-unavailable"));
+    if (RelayReviewCausation.isReview(cause))
+      throw new RelayReceiver.Refused("receiver.review-protocol.refused");
     if (cause.depth() < 0) throw new RelayReceiver.Refused("receiver.causation-unavailable");
     if (cause.depth() >= maximum)
       throw new RelayReceiver.Refused("receiver.causation-limit.refused");

@@ -2,6 +2,7 @@ package io.aeyer.plowshare.sdk;
 
 import io.aeyer.plowshare.protocol.RelayControl;
 import io.aeyer.plowshare.protocol.RelayLog;
+import io.aeyer.plowshare.protocol.RelayPort;
 import java.io.IOException;
 import java.util.Objects;
 
@@ -11,6 +12,41 @@ public final class RelayClient {
 
   public RelayClient(Plowshare connection) {
     this.connection = Objects.requireNonNull(connection);
+  }
+
+  /** Explicit ingress. Retain the request UUID and reconcile uncertain delivery without replay. */
+  public RelayPort.Published publish(RelayPort.Publish request) throws IOException {
+    var result = connection.exchange("relay.publish", request, RelayPort.Published.class);
+    if (!request.requestId().equals(result.requestId())
+        || !request.project().equals(result.project())
+        || !request.topic().equals(result.topic()))
+      throw new IOException("Foreign Relay publication");
+    return result;
+  }
+
+  /** Bounded long-poll egress. Receiving a batch never advances the group's durable cursor. */
+  public RelayPort.Batch consume(RelayPort.Consume request) throws IOException {
+    var result = connection.exchange("relay.consume", request, RelayPort.Batch.class);
+    if (!request.project().equals(result.project())
+        || !request.topic().equals(result.topic())
+        || !request.group().equals(result.group())
+        || !request.consumerId().equals(result.consumerId()))
+      throw new IOException("Foreign Relay consumer batch");
+    if (result.events().size() > (request.limit() == null ? 100 : request.limit()))
+      throw new IOException("Relay batch exceeded requested limit");
+    return result;
+  }
+
+  /** Explicit whole-batch acknowledgement; stale or expired tokens are refused by the server. */
+  public RelayPort.Acknowledged acknowledge(RelayPort.Ack request) throws IOException {
+    var result = connection.exchange("relay.ack", request, RelayPort.Acknowledged.class);
+    if (!request.project().equals(result.project())
+        || !request.topic().equals(result.topic())
+        || !request.group().equals(result.group())
+        || !request.batchId().equals(result.batchId())
+        || result.gap() != (request.expiredThrough() != null))
+      throw new IOException("Foreign Relay acknowledgement");
+    return result;
   }
 
   /** Submit one bounded pass. Uncertain transport delivery must not be retried automatically. */

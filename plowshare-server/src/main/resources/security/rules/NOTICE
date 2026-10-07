@@ -1,0 +1,6 @@
+Third-party prompt-injection rule and sensitive-pattern data.
+Copyright (c) 2023 Berri AI. MIT license: see LICENSE.
+Source revision: 7b439d9138382e6e4b6b0498336c017157dee28e.
+Original data files: categories/prompt_injection_*.yaml and patterns.json.
+categories.json is a mechanical JSON representation of the five included YAML files.
+The Java evaluator is a Plowshare implementation. Only local keyword and regex data is included.

@@ -292,7 +292,7 @@ refusal and disconnect receipts. Console/TUI/desktop tests cover scope and stale
 reply handling; native Electron smoke exercises the library, evidence, asks and
 publication refusal. Shared hook fixtures use the actual script runtime.
 
-The shipped research workflow now uses the [scripted Aletheia driver](scripted-research.md):
+The shipped research workflow now uses the [scripted research driver](scripted-research.md):
 objective decomposition, two evidence waves, author/editor expansion, rebuttal,
 adjudication and detailed retained reports. OSINT entities/relations, automatic
 monitoring and live factual-quality benchmarking remain separate work.

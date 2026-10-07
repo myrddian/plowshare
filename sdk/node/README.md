@@ -21,6 +21,14 @@ local npm archive with `pnpm pack`. The published dependency metadata uses the
 core package version; the local pnpm workspace override keeps repository development
 linked. See [the shared SDK contract](../../docs/sdks.md).
 
+The client exposes `publishRelay(request)`, `consumeRelay(request)` and
+`acknowledgeRelay(request)` for configured topic ingress and consumer-group egress.
+The package root exports `RelayPublishRequest`, `RelayConsumeRequest`,
+`RelayAckRequest`, `RelayBatch`, `FilterReviewRequest` and `FilterReviewResponse`.
+Consumption is a bounded long poll; handle the issued batch before explicitly
+acknowledging it. See [Relay topic ports](../../docs/relay.md#sdk-topic-ports) for
+delivery leases, retention gaps and recovery.
+
 
 Filesystem and process adapters extracted from the TUI. This package depends
 on the neutral `plowshare-client-ts` runtime, Node built-ins and the `ws` transport; it imports

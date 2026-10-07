@@ -75,6 +75,18 @@ export const SHAPES: Record<
   ExtendedOperation,
   readonly [readonly string[], readonly string[]]
 > = {
+  'relay.publish': [
+    ['requestId', 'project', 'topic', 'text', 'occurredAt'],
+    ['correlationId', 'parentTopic', 'parentEventId'],
+  ],
+  'relay.consume': [
+    ['project', 'topic', 'group', 'consumerId', 'start'],
+    ['limit', 'waitMs'],
+  ],
+  'relay.ack': [
+    ['project', 'topic', 'group', 'consumerId', 'batchId', 'fence'],
+    ['expiredThrough'],
+  ],
   'relay.operate': [
     ['requestId', 'project', 'topic', 'topicGeneration', 'action', 'reason'],
     [

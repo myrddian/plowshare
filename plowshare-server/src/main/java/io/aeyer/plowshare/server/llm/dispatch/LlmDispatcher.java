@@ -32,6 +32,7 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(LlmDispatcher.class);
 
+  private final io.aeyer.plowshare.server.security.ChatFiltering filtering;
   private final List<LlmPool> pools;
   private final TokenLedger ledger;
   private final InferenceAccounting accounting;
@@ -114,6 +115,25 @@ public final class LlmDispatcher implements AutoCloseable {
       InferenceAccounting accounting,
       Duration promptTimeout,
       Duration foldTimeout) {
+    this(
+        pools,
+        ledger,
+        systemBinding,
+        accounting,
+        promptTimeout,
+        foldTimeout,
+        io.aeyer.plowshare.server.security.ChatFiltering.NONE);
+  }
+
+  public LlmDispatcher(
+      List<LlmPool> pools,
+      TokenLedger ledger,
+      UnaryOperator<String> systemBinding,
+      InferenceAccounting accounting,
+      Duration promptTimeout,
+      Duration foldTimeout,
+      io.aeyer.plowshare.server.security.ChatFiltering filtering) {
+    this.filtering = Objects.requireNonNull(filtering);
     this.promptTimeout = promptTimeout;
     this.foldTimeout = foldTimeout;
     this.pools = List.copyOf(pools);
@@ -150,34 +170,36 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Completion complete(ChatRequest request) {
-    Routing routing = route(request.specifier(), Lane.CHAT);
-    Sampling sampling = carried(routing, request.sampling());
+    ChatRequest filtered = filtering.input(request, () -> false);
+    Routing routing = route(filtered.specifier(), Lane.CHAT);
+    Sampling sampling = carried(routing, filtered.sampling());
     InferenceObserver observer =
         accounting.begin(
             routing.pool().name(),
             routing.wireModel(),
-            request.specifier(),
+            filtered.specifier(),
             Lane.CHAT,
-            request.attribution());
+            filtered.attribution());
     if (routing.pool().automaticCounting())
       preflight(
           observer,
           routing,
-          () -> routing.pool().countChat(routing.wireModel(), request.withSampling(sampling)));
+          () -> routing.pool().countChat(routing.wireModel(), filtered.withSampling(sampling)));
     Completion completion =
         routing
             .pool()
             .complete(
                 routing.wireModel(),
-                request.messages(),
+                filtered.messages(),
                 sampling,
-                request.tools(),
-                request.toolChoice(),
-                request.submitTimeout(),
+                filtered.tools(),
+                filtered.toolChoice(),
+                filtered.submitTimeout(),
                 observer,
                 promptTimeout);
-    return recorded(routing, request.specifier(), Lane.CHAT, completion)
-        .captured(observer.capture());
+    return filtering.output(
+        recorded(routing, filtered.specifier(), Lane.CHAT, completion)
+            .captured(observer.capture()));
   }
 
   /**
@@ -244,34 +266,40 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private Completion stream(
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
-    Routing routing = route(request.specifier(), Lane.CHAT);
-    Sampling sampling = carried(routing, request.sampling());
+    ChatRequest filtered = filtering.input(request, abandoned);
+    Routing routing = route(filtered.specifier(), Lane.CHAT);
+    Sampling sampling = carried(routing, filtered.sampling());
     InferenceObserver observer =
         accounting.begin(
             routing.pool().name(),
             routing.wireModel(),
-            request.specifier(),
+            filtered.specifier(),
             Lane.CHAT,
-            request.attribution());
+            filtered.attribution());
     if (routing.pool().automaticCounting())
       preflight(
           observer,
           routing,
-          () -> routing.pool().countChat(routing.wireModel(), request.withSampling(sampling)));
+          () -> routing.pool().countChat(routing.wireModel(), filtered.withSampling(sampling)));
     Completion completion =
         routing.pool().stream(
             routing.wireModel(),
-            request.messages(),
+            filtered.messages(),
             sampling,
-            request.tools(),
-            sink,
+            filtered.tools(),
+            filtering.bufferOutput() ? Deltas.DISCARDING : sink,
             abandoned,
-            request.toolChoice(),
-            request.submitTimeout(),
+            filtered.toolChoice(),
+            filtered.submitTimeout(),
             observer,
             fold ? foldTimeoutFor(routing.pool()) : promptTimeout);
-    return recorded(routing, request.specifier(), Lane.CHAT, completion)
-        .captured(observer.capture());
+    Completion approved =
+        filtering.output(
+            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
+                .captured(observer.capture()));
+    if (filtering.bufferOutput() && !approved.content().isEmpty() && !abandoned.getAsBoolean())
+      sink.answered(approved.content());
+    return approved;
   }
 
   /**
@@ -782,37 +810,43 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   public Completion streamOn(
       String pool, ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
+    ChatRequest filtered = filtering.input(request, abandoned);
     LlmPool named =
         pools.stream()
             .filter(candidate -> candidate.name().equals(pool))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("no pool is named '" + pool + "'"));
-    String wireModel = named.resolve(resolveSpecifier(request.specifier()));
+    String wireModel = named.resolve(resolveSpecifier(filtered.specifier()));
     if (wireModel == null) {
-      throw new UnknownSpecifierException(request.specifier(), named.describe());
+      throw new UnknownSpecifierException(filtered.specifier(), named.describe());
     }
     Routing routing = new Routing(named, wireModel);
-    Sampling sampling = carried(routing, request.sampling());
+    Sampling sampling = carried(routing, filtered.sampling());
     InferenceObserver observer =
         accounting.begin(
-            named.name(), wireModel, request.specifier(), Lane.CHAT, request.attribution());
+            named.name(), wireModel, filtered.specifier(), Lane.CHAT, filtered.attribution());
     if (named.automaticCounting())
       preflight(
-          observer, routing, () -> named.countChat(wireModel, request.withSampling(sampling)));
+          observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));
     Completion completion =
         named.stream(
             wireModel,
-            request.messages(),
+            filtered.messages(),
             sampling,
-            request.tools(),
-            sink,
+            filtered.tools(),
+            filtering.bufferOutput() ? Deltas.DISCARDING : sink,
             abandoned,
-            request.toolChoice(),
-            request.submitTimeout(),
+            filtered.toolChoice(),
+            filtered.submitTimeout(),
             observer,
             promptTimeout);
-    return recorded(routing, request.specifier(), Lane.CHAT, completion)
-        .captured(observer.capture());
+    Completion approved =
+        filtering.output(
+            recorded(routing, filtered.specifier(), Lane.CHAT, completion)
+                .captured(observer.capture()));
+    if (filtering.bufferOutput() && !approved.content().isEmpty() && !abandoned.getAsBoolean())
+      sink.answered(approved.content());
+    return approved;
   }
 
   private record Routing(LlmPool pool, String wireModel) {}

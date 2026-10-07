@@ -11,7 +11,7 @@ an offered orchestration tool in a conversation; inspect, answer and cancel via
 existing controls. This feature adds no REST API or separate script-start endpoint.
 
 This guide is for people and agents writing, reviewing or debugging scripts.
-For the shipped application, read the [Aletheia research guide](scripted-research.md).
+For the shipped application, read the [scripted research guide](scripted-research.md).
 For a small complete starting point, use
 [catalogue_inventory.js](examples/scripted-orchestrations/catalogue_inventory.js).
 This example lists the first page of the current information catalogue and finishes

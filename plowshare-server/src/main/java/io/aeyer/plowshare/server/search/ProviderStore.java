@@ -37,17 +37,14 @@ import org.springframework.stereotype.Repository;
  *
  * <h2>{@link #recordOutcome} is one statement, not a read-modify-write</h2>
  *
- * <p>Aletheia's {@code SearchHandlerDispatcher.recordHealth} reads the health row, mutates the
- * in-memory copy, and writes it back — once per handler per query — and its own comment says it
- * re-reads <em>so as not to clobber concurrent updates</em>, which is the tell that the
- * read-modify-write has a window and the author knew it. Two ladder rungs answering close together
- * for the same provider (unlikely for one query, not unlikely across the concurrent queries a
- * server actually serves) can interleave a read from one with a write from the other, and whichever
- * finishes last wins with a stale base. {@link #recordOutcome} has no such window: the {@code CASE
- * WHEN} lives inside the {@code UPDATE} itself, so "was the last outcome a success" and "write the
- * new one" are the same statement, and Postgres's own row lock serialises two concurrent outcomes
- * for one provider rather than this class needing to. It also costs one round trip instead of two,
- * on every terminal search outcome this server ever records. Spec §3.
+ * <p>A read-modify-write health update can lose concurrent outcomes. Two ladder rungs answering
+ * close together for the same provider (unlikely for one query, not unlikely across the concurrent
+ * queries a server actually serves) can interleave a read from one with a write from the other, and
+ * whichever finishes last wins with a stale base. {@link #recordOutcome} has no such window: the
+ * {@code CASE WHEN} lives inside the {@code UPDATE} itself, so "was the last outcome a success" and
+ * "write the new one" are the same statement, and Postgres's own row lock serialises two concurrent
+ * outcomes for one provider rather than this class needing to. It also costs one round trip instead
+ * of two, on every terminal search outcome this server ever records. Spec §3.
  *
  * <h2>Hand-written {@link JdbcTemplate}, following {@code EntryStore}</h2>
  *
