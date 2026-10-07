@@ -10,7 +10,10 @@ Bubblewrap must be installed by the operator. Plowshare requires support for
 `--new-session`; the [bubblewrap manual](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)
 describes these namespace and descriptor options. The acceptance fixture uses Ubuntu 24.04's bubblewrap 0.9.0.
 The host must permit unprivileged user namespaces and the required mount/PID
-namespaces. Configuration or probe failure refuses the command before user code
+namespaces. Container seccomp, masked paths and AppArmor policy must also permit
+the backend; kernel support alone is insufficient. An existing server image
+without bubblewrap is not an enabled installation. The disposable acceptance
+fixture is separate from live service deployment policy. Configuration or probe failure refuses the command before user code
 starts. There is no unisolated retry. macOS and Windows refuse `bubblewrap`.
 
 ## Configure the executing machine

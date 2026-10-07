@@ -60,3 +60,11 @@ private policy files while retaining live owners and unrelated entries.
 verification, the same disposable container can have finite deployment budgets
 (e.g. Docker `--memory=1g --pids-limit=128 --cpus=1`). Those are container-wide
 budgets, not per-command quotas implemented by bubblewrap.
+
+On Linux Docker hosts with AppArmor enabled, the default container profile may
+also deny bubblewrap's mount propagation (`Failed to make / slave: Permission
+denied`). This disposable fixture additionally needs
+`--security-opt apparmor=unconfined` on those hosts. Do not weaken a live server's
+profile to run acceptance: production needs a deliberately reviewed deployment
+policy. The fixture mounts only public acceptance artifacts and runs as a
+non-root account without added capabilities, host secrets or Docker sockets.
