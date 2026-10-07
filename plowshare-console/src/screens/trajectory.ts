@@ -1,3 +1,10 @@
+import { trajectoryEntry } from '../../../sdk/typescript/src/operations/trajectory-entry.ts';
+import {
+  stepsOf,
+  type Step,
+} from '../../../sdk/typescript/src/operations/trajectory.ts';
+import type { EntryPageView as RetainedPage } from '../../../sdk/typescript/src/operations/conversation-replies.ts';
+import { trajectorySummary } from './trajectory-summary';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import { isList } from '../../../sdk/typescript/src/binding/values.ts';
@@ -779,6 +786,7 @@ export interface Trajectory extends Screen {
 
 /** One reading's state: the page in hand, and where in the log it starts. */
 interface Held {
+  steps: readonly Step[];
   page: EntryPageView | null;
   offset: number;
 }
@@ -811,7 +819,7 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
   let picked = 0;
 
   function emptyHeld(): Held {
-    return { page: null, offset: 0 };
+    return { page: null, offset: 0, steps: [] };
   }
 
   const shell = el('section', 'screen trajectory');
@@ -896,7 +904,14 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
   const asideWhat = document.createElement('summary');
   asideWhat.textContent = 'about this reading, and filtering the page';
   aside.append(asideWhat, tabNote, filters);
-  body.append(strip, shownToModel, window_, listed, aside, economics);
+  const breakdown = el('div', 'trajectory-breakdown');
+  const full = document.createElement('details');
+  full.className = 'trajectory-full';
+  full.open = true;
+  const fullLabel = document.createElement('summary');
+  fullLabel.textContent = 'Full retained record, model projection and timeline';
+  full.append(fullLabel, strip, shownToModel, listed);
+  body.append(breakdown, window_, full, aside, economics);
   shell.append(head, body);
   options.root.replaceChildren(shell);
 
@@ -1644,11 +1659,13 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
 
   function drawEntries(): void {
     const page = held[underlyingReading(reading)].page;
+    breakdown.hidden = reading !== 'trajectory';
     if (page === null) {
       return;
     }
     const entries = isList(page.entries) ? page.entries : [];
     if (reading === 'trajectory') {
+      breakdown.replaceChildren(trajectorySummary(held.trajectory.steps));
       drawStrip(entries);
     }
     offerKinds(entries);
@@ -1972,7 +1989,7 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
     const mine = picked;
     const wire = underlyingReading(reading);
     const at = held[wire];
-    let fetched: EntryPageView;
+    let fetched: RetainedPage;
     try {
       fetched = await transport.get(
         `/v1/conversations/${encodeURIComponent(id)}/${wire}?offset=${at.offset}&limit=${PAGE}`,
@@ -1982,6 +1999,9 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
         return;
       }
       at.page = null;
+      at.steps = [];
+      breakdown.replaceChildren();
+      full.open = true;
       listed.replaceChildren(
         trouble(
           problemText(
@@ -1998,6 +2018,7 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
       return;
     }
     at.page = fetched;
+    at.steps = stepsOf(fetched.entries.map(trajectoryEntry));
     drawEntries();
   }
 
@@ -2044,6 +2065,7 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
    */
   async function choose(name: Reading): Promise<void> {
     reading = name;
+    full.open = name !== 'trajectory';
     drawTabs();
     if (held[underlyingReading(name)].page === null) {
       await fetchPage();
@@ -2102,6 +2124,7 @@ export function createTrajectory(options: TrajectoryOptions): Trajectory {
    */
   async function show(id: string): Promise<void> {
     picked += 1;
+    breakdown.replaceChildren();
     void drawProjection(id, picked).catch(() => undefined);
     conversation = id;
     // Kept in step for the standalone case, and inert in the composed one:

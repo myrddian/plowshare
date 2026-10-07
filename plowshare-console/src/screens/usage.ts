@@ -15,7 +15,10 @@ export function createUsage(options: {
 }): Screen {
   let closed = false,
     opened = false;
-  const held: { watch?: UsageWatch } = {};
+  const held: {
+    watch?: UsageWatch;
+    panel?: ReturnType<typeof mountUsagePanel>;
+  } = {};
   const stream: EventStream = options.openStream({
     session: options.session,
     onEvent: (frame) => {
@@ -32,7 +35,9 @@ export function createUsage(options: {
     },
   });
   const client = new UsageClient(checkedTransport(stream));
-  const activeWatch = new UsageWatch(client, (state) => panel?.update(state));
+  const activeWatch = new UsageWatch(client, (state) =>
+    held.panel?.update(state),
+  );
   held.watch = activeWatch;
   const panel = mountUsagePanel(options.root, {
     select: (type, filter) => activeWatch.open(type, filter),
@@ -40,6 +45,10 @@ export function createUsage(options: {
     project: options.project,
     storage: localStorage,
   });
+  // Panel construction selects synchronously. Replay that initial state once
+  // its renderer exists, rather than reading a const in its temporal dead zone.
+  held.panel = panel;
+  panel.update(activeWatch.state);
   return {
     element: () => options.root,
     async load() {

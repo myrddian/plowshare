@@ -38,7 +38,7 @@ authenticated runtime observations.
 | Work overview and results           | **Partial:** current jobs, pending approvals, inbox outcomes and firing records link to their owning records. Reconnect reconciles retained snapshots; events are hints. It cannot enumerate every kind of durable work.                                                                                                                                                             | Desktop activity/runs and TUI run commands cover orchestration records. Public job, inbox, approval and firing operations are distinct owners.                                  | [Overview](../plowshare-console/src/screens/overview.ts), [tests](../plowshare-console/src/screens/overview.test.ts), [work adapter](../plowshare-console/src/work.ts), [reconciliation tests](../plowshare-console/src/screens/reconciliation.test.ts).                                                                                                                                                                        |
 | Jobs and limits                     | **Partial:** current-process jobs, status, cancellation request and explicit budget/turn-limit changes. Client windows bound rendering; `job.list` itself is unpaged. **Unavailable:** historical job enumeration or lookup after a server restart through these operations.                                                                                                         | Job metadata is persisted, but the public list/status handlers address the in-process store. Desktop/TUI consumers have the same contract limit.                                | [Jobs](../plowshare-console/src/screens/jobs.ts), [tests](../plowshare-console/src/screens/jobs.test.ts), [list handler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/JobListHandler.java), [job store](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobStore.java), [durability test source](../plowshare-server/src/test/java/io/aeyer/plowshare/server/agents/DurableJobsTest.java). |
 | Inbox                               | **Supported:** paged durable deliveries, retained result inspection, owning conversation links and explicit acknowledgement. An inbox outcome is not a universal job-history record.                                                                                                                                                                                                 | Public inbox operations preserve deliveries independently of live event receipt.                                                                                                | [Inbox](../plowshare-console/src/screens/inbox.ts), [tests](../plowshare-console/src/screens/inbox.test.ts), [typed operations](../sdk/typescript/src/operations/administration.ts).                                                                                                                                                                                                                                            |
-| Approvals                           | **Partial:** account-wide pending approvals use validated DTOs, show command argument boundaries and distinguish decision receipt from continuation. Older chat approvals and project standing-grant controls still use unchecked response casts and weaker uncertain-delivery handling.                                                                                             | Desktop/TUI have approval controls; public `approval.list`, `approval.answer` and `approval.revoke` already support this responsibility.                                        | [Account approvals](../plowshare-console/src/screens/approvals.ts), [tests](../plowshare-console/src/screens/approvals.test.ts), [adapter](../plowshare-console/src/approvals.ts), [chat controls](../plowshare-console/src/repl/repl.ts), [standing grants](../plowshare-console/src/screens/projects.ts), [server tests](../plowshare-server/src/test/java/io/aeyer/plowshare/server/ws/ApprovalFramesTest.java).             |
+| Approvals                           | **Partial:** account-wide pending approvals use validated DTOs, show command argument boundaries and distinguish decision receipt from continuation. Chat approvals use the same checked helper and retain explicit conversation/project decisions. Project standing-grant listing/revocation still needs a checked response boundary.                                               | Desktop/TUI have approval controls; public `approval.list`, `approval.answer` and `approval.revoke` already support this responsibility.                                        | [Account approvals](../plowshare-console/src/screens/approvals.ts), [tests](../plowshare-console/src/screens/approvals.test.ts), [adapter](../plowshare-console/src/approvals.ts), [chat controls](../plowshare-console/src/repl/repl.ts), [standing grants](../plowshare-console/src/screens/projects.ts), [server tests](../plowshare-server/src/test/java/io/aeyer/plowshare/server/ws/ApprovalFramesTest.java).             |
 | Projects and workspaces             | **Partial:** authorized projects, workspace moves, lent roots, leashes, exclusions and standing grants. There is no full project creation, membership or role administration workflow. Application projects support file browsing, reads and revision-fenced saves.                                                                                                                  | Desktop workspace controls and TUI project commands use existing project/access operations. File containment and save authority remain server responsibilities.                 | [Projects](../plowshare-console/src/screens/projects.ts), [tests](../plowshare-console/src/screens/projects.test.ts), [application files](../plowshare-console/src/screens/application-files.ts), [tests](../plowshare-console/src/screens/application-files.test.ts), [public catalog](../sdk/typescript/src/operations/catalog.ts).                                                                                           |
 | Proposals                           | **Supported:** view and resolve proposals through the existing owner. Large-list presentation still needs a bounded window.                                                                                                                                                                                                                                                          | Existing proposal operations are shared with other clients.                                                                                                                     | [Proposals](../plowshare-console/src/screens/proposals.ts), [tests](../plowshare-console/src/screens/proposals.test.ts).                                                                                                                                                                                                                                                                                                        |
 | Memory                              | **Partial:** index, lazy body reads, recall, navigation, digests and explicit invalidation. Index rendering is not windowed and inherits the shell's project context.                                                                                                                                                                                                                | The public memory operations already support these actions; broader project navigation is a client concern.                                                                     | [Memory](../plowshare-console/src/screens/memory.ts), [tests](../plowshare-console/src/screens/memory.test.ts), [digest tests](../plowshare-console/src/screens/digests.test.ts), [server tests](../plowshare-server/src/test/java/io/aeyer/plowshare/server/ws/MemoryFramesTest.java).                                                                                                                                         |
@@ -98,21 +98,32 @@ bound server work or response size for unpaged `job.list` and `approval.list`.
 Adding server paging would be a separate contract decision, not a reason to
 pretend the existing replies are pages.
 
-The older chat approval and project standing-grant controls need the same checked
-response boundary and uncertain-delivery behavior as the account approvals
-screen. In particular, malformed lists can currently appear empty, a malformed
-answer can appear acknowledged, and controls can be re-enabled after an unknown
-receipt. The older chat renderer also joins arguments for display and does not
-fully represent a multi-command approval. These are client regressions to address
-through the existing contracts.
+The Workbench keeps overview, inbox, approvals, chat and jobs in primary
+navigation; the remaining views are reachable through Browse & settings. The
+overview inspector is a selection within the current bounded window. A refreshed
+or unreadable record replaces its previous contents; it never establishes a
+historical outcome from cached job state.
 
-Usage initialization also needs an explicit construction boundary. The panel
-starts selection while mounting; `UsageWatch.open` emits synchronously and the
-screen callback reads the panel before its `const` binding is initialized.
-Optional chaining does not protect a binding in that state. Install the callback
-against an initialized owner and reconcile unreadable responses through validated
-public DTOs. A failed usage read is not a zero-cost report or evidence of a
-server authorization refusal.
+Command discovery uses the selected agent's server-provided catalogue and the
+same draft/completion model as Desktop. Completion only prepares a draft. A skill
+without a prescribed context requires an explicit context choice. The browser
+does not expose Desktop-only local commands or native file/credential adapters.
+The catalogue renders forty matches and slash completion twenty; local search
+finds other returned commands. This bounds rendering, not an unpaged server reply.
+
+The trajectory breakdown projects validated retained entries into the shared
+TUI/Desktop step model. It pairs calls with results on the current page and keeps
+orphan results and compaction history. Missing results are explicitly page-local,
+not proof of a running job. The full retained record, projection, timeline and
+accounting remain accessible alongside the breakdown.
+
+Chat approvals now use the account approvals screen's checked response helper.
+Malformed lists fail a read; malformed, mismatched or lost decision receipts leave
+controls closed until a fresh retained read. Neither path replays a decision.
+Command display preserves argument boundaries and compound command lists.
+Conversation and project grants still require their existing explicit controls
+and current server authority. Usage construction installs the renderer owner
+after mounting and replays the initial synchronous watch state.
 
 Document restart guidance still claims sequential job IDs can repeat, although
 current jobs use durable identifiers. Keep the true current-process history limit
@@ -122,7 +133,8 @@ Document ingest polling needs visibility ownership. Memory, project and proposal
 lists need bounded presentation where their current operations return a full
 collection. Catalogue and retrieval usability, project context selection and
 missing administration/workflow screens are separate client coverage changes.
-The public-contract limitations are historical jobs, unpaged list response sizes
+Broader Desktop/TUI parity, including orchestration run/stage/question screens,
+boards and schedules, remains separate work. The public-contract limitations are historical jobs, unpaged list response sizes
 and arbitrary boot model/pool editing; they must remain explicit until separately
 designed platform capabilities exist.
 

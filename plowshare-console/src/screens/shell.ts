@@ -85,10 +85,10 @@ export const VIEWS = [
   'inbox',
   'approvals',
   'chat',
+  'jobs',
   'documents',
   'information',
   'usage',
-  'jobs',
   'proposals',
   'memory',
   'projects',
@@ -290,6 +290,15 @@ export function createShell(options: ShellOptions): Shell {
 
   const shell = el('div', 'shell');
   const rail = el('nav', 'rail');
+  rail.setAttribute('aria-label', 'Console navigation');
+  const brand = el('div', 'console-brand');
+  brand.append(el('strong', '', 'Plowshare'), el('span', 'note', 'Workbench'));
+  const browse = document.createElement('details');
+  browse.className = 'rail-browse';
+  const browseLabel = document.createElement('summary');
+  browseLabel.textContent = 'Browse & settings';
+  browse.append(browseLabel);
+  const primary = el('div', 'rail-primary');
   const railGroups: Readonly<Record<'work' | 'system', HTMLElement>> = {
     work: el('div', 'rail-group'),
     system: el('div', 'rail-group'),
@@ -315,7 +324,9 @@ export function createShell(options: ShellOptions): Shell {
       background(show(name));
     });
     buttons.set(name, control);
-    railGroups[GROUPS[name]].append(control);
+    if (['overview', 'inbox', 'approvals', 'chat', 'jobs'].includes(name))
+      primary.append(control);
+    else railGroups[GROUPS[name]].append(control);
 
     const host = el('div', 'view');
     host.dataset['view'] = name;
@@ -405,7 +416,8 @@ export function createShell(options: ShellOptions): Shell {
   foot.append(streamLabel);
   showStream({ state: 'connecting', attempt: 0, retryInMs: null });
 
-  rail.append(railGroups.work, railGroups.system, foot);
+  browse.append(railGroups.work, railGroups.system);
+  rail.append(brand, primary, browse, foot);
   shell.append(rail, stage);
   options.root.replaceChildren(shell);
 
@@ -509,6 +521,8 @@ export function createShell(options: ShellOptions): Shell {
   ): Promise<void> {
     if (stopped) return;
     showing = name;
+    if (!['overview', 'inbox', 'approvals', 'chat', 'jobs'].includes(name))
+      browse.open = true;
     for (const each of VIEWS) {
       const host = hosts.get(each);
       const control = buttons.get(each);

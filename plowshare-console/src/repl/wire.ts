@@ -1,3 +1,5 @@
+import type { CommandEntry } from '../../../sdk/typescript/src/operations/conversation-replies.ts';
+
 /**
  * The shapes this server sends, written down once.
  *
@@ -118,6 +120,7 @@ export interface AgentView {
   readonly scopes: readonly string[];
   readonly served: boolean;
   readonly withheld: readonly string[];
+  readonly commands?: readonly CommandEntry[];
 }
 
 /** What `POST /v1/agents/{name}/runs` answers with, before the run has done anything. */
@@ -297,6 +300,7 @@ export function asJobEvent(frame: unknown): JobEventFrame | null {
  * first argument, the server's suggestion and not a rule.
  */
 export interface ApprovalView {
+  readonly commands?: readonly (readonly string[])[] | null;
   readonly id: string;
   readonly conversation: string;
   readonly agent: string;

@@ -237,3 +237,48 @@ describe('the work overview', () => {
     expect(view.ask).toHaveBeenCalledTimes(8);
   });
 });
+
+it('reconciles the selected inspector from a fresh record and clears it on an unavailable read', async () => {
+  const view = fixture();
+  await view.screen.load();
+  view.root
+    .querySelector<HTMLButtonElement>('.work-row .inspect-record')!
+    .click();
+  const inspector = view.root.querySelector('.work-inspection')!;
+  expect(inspector.textContent).toContain('RUNNING');
+  view.replies['job.list'] = {
+    code: 'OK',
+    payload: [
+      {
+        ...job,
+        state: 'DONE',
+        cancelRequested: false,
+        outcome: {
+          ending: 'CANCELLED',
+          answered: false,
+          resumable: false,
+          text: '',
+          steps: 1,
+          modelCalls: 1,
+          detail: '',
+          pace: null,
+        },
+      },
+    ],
+  };
+  view.status('reconnecting');
+  view.status('open');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(inspector.textContent).toContain('CANCELLED');
+  expect(inspector.textContent).not.toContain('RUNNING');
+  view.replies['job.list'] = { code: 'FORBIDDEN' };
+  view.push();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(inspector.textContent).toContain('could not be read');
+  expect(inspector.textContent).not.toContain('CANCELLED');
+  expect(
+    view.ask.mock.calls.every(([type]) =>
+      ['job.list', 'approval.list', 'inbox.list', 'firing.list'].includes(type),
+    ),
+  ).toBe(true);
+});

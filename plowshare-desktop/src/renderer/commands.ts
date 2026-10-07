@@ -1,3 +1,8 @@
+import {
+  commandDraft,
+  workflowArguments,
+  commandOffers as sharedCommandOffers,
+} from 'plowshare-client-ts/operations/command-model';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { ownedEvent } from './events.ts';
 import type { CommandEntry } from 'plowshare-client-ts/operations/conversation-replies';
@@ -28,29 +33,14 @@ export const desktopCommands = [
   ['/cancel', 'Stop the current chat job'],
 ] as const;
 
-export function composerCommand(
-  text: string,
-): { name: string; argumentsText: string } | undefined {
-  if (text.trim() === '/') return { name: '/', argumentsText: '' };
-  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
-  return match
-    ? { name: `/${match[1]}`, argumentsText: match[2] ?? '' }
-    : undefined;
-}
+export {
+  composerCommand,
+  commandDraft,
+  workflowArguments,
+} from 'plowshare-client-ts/operations/command-model';
 
 export function commandOffers(text: string, commands: readonly CommandEntry[]) {
-  if (!/^\/[^\s]*$/.test(text)) return [];
-  const query = text.toLowerCase();
-  return [
-    ...desktopCommands.map(([command, description]) => ({
-      command,
-      description,
-    })),
-    ...commands.map((command) => ({
-      command: command.command,
-      description: command.description,
-    })),
-  ].filter((command) => command.command.toLowerCase().startsWith(query));
+  return sharedCommandOffers(text, commands, desktopCommands);
 }
 
 /** Completion prepares a draft; Enter/Tab never launches the highlighted command. */
@@ -143,40 +133,6 @@ const esc = (text: string) =>
         character
       ]!,
   );
-
-export function commandDraft(
-  command: CommandEntry,
-  mode: string,
-  argumentsText: string,
-): string {
-  if (
-    command.kind === 'skill' &&
-    command.mode === null &&
-    !['INHERITED', 'SUMMARISED', 'NEW', 'DIRECT'].includes(mode)
-  ) {
-    throw new Error('Choose how the skill receives context.');
-  }
-  let existing = argumentsText.startsWith(command.command + ' ')
-    ? argumentsText.slice(command.command.length + 1)
-    : argumentsText;
-  if (command.kind === 'skill' && command.mode === null)
-    existing = existing.replace(
-      /^--mode=(INHERITED|SUMMARISED|NEW|DIRECT)(?:\s|$)/,
-      '',
-    );
-  return `${command.command}${command.kind === 'skill' && command.mode === null ? ` --mode=${mode}` : ''} ${existing}`;
-}
-
-export function workflowArguments(command: CommandEntry, text: string): string {
-  if (command.kind !== 'orchestration')
-    throw new Error('Choose an orchestration command.');
-  const request = text.startsWith(command.command + ' ')
-    ? text.slice(command.command.length + 1)
-    : text;
-  if (!request.trim())
-    throw new Error('Describe the work in the message box first.');
-  return request;
-}
 
 /** Display only server-provided metadata; selecting a command prepares an editable draft. */
 export function installCommands(

@@ -1,3 +1,4 @@
+import { socketApprovals, ApprovalRefused } from '../approvals';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import { ApiError } from '../api';
@@ -15,6 +16,7 @@ import {
   type Entry,
 } from './render';
 import { mountStyles } from './styles';
+import { mountCommands } from './commands';
 import {
   asJobEvent,
   ENDED,
@@ -22,9 +24,7 @@ import {
   STARTED,
   TOOL_CALLED,
   type AgentView,
-  type ApprovalAnswered,
   type ApprovalDecision,
-  type ApprovalList,
   type ApprovalView,
   type ConversationView,
   type JobView,
@@ -323,6 +323,9 @@ export function createRepl(options: ReplOptions): Repl {
   const input = document.createElement('textarea');
   const send = document.createElement('button');
   const hint = el('span', 'hint');
+  const commandHost = el('div', 'chat-commands');
+  const commandControls = mountCommands(commandHost, input);
+  let offeredAgents: readonly AgentView[] = [];
 
   // There is no allowance field, and its absence is a decision rather than a
   // simplification.
@@ -379,7 +382,7 @@ export function createRepl(options: ReplOptions): Repl {
   offer.append(offerNote, grantButton, finishButton);
   runPanel.append(runHead, activity, offer);
   form.className = 'prompt';
-  form.append(input, send, hint);
+  form.append(commandHost, input, send, hint);
   shell.append(head, scrollback, approvals, runPanel, form);
   options.root.replaceChildren(shell);
 
@@ -454,6 +457,7 @@ export function createRepl(options: ReplOptions): Repl {
     const closed = conversationId === null || spent || jobId !== null;
     input.disabled = closed;
     send.disabled = closed;
+    commandControls.setEnabled(!closed);
     if (conversationId === null) {
       hint.textContent = 'open or choose a conversation first';
     } else if (spent) {
@@ -742,7 +746,9 @@ export function createRepl(options: ReplOptions): Repl {
 
   // --- approvals -------------------------------------------------------------
 
+  let approvalReading = 0;
   function clearApprovals(): void {
+    approvalReading += 1;
     approvals.replaceChildren();
     approvals.hidden = true;
   }
@@ -760,15 +766,27 @@ export function createRepl(options: ReplOptions): Repl {
     if (asked === null) {
       return;
     }
-    let outcome;
+    const reading = ++approvalReading;
+    let listed;
     try {
-      if (stream === null) {
+      if (stream === null)
         throw new Error(
-          'the event socket is not open; "approval.list" was not sent',
+          'The connection is unavailable. Refresh to read approvals.',
         );
-      }
-      outcome = await stream.ask('approval.list', { conversation: asked });
+      listed = await socketApprovals(stream).list(asked);
     } catch (problem) {
+      if (conversationId === asked && reading === approvalReading) {
+        const failure = el(
+          'p',
+          'approval-note',
+          problem instanceof Error
+            ? problem.message
+            : 'Approvals could not be read. Reopen the conversation to retry.',
+        );
+        failure.setAttribute('role', 'alert');
+        approvals.replaceChildren(failure);
+        approvals.hidden = false;
+      }
       if (loud) {
         refusal(
           problem instanceof Error
@@ -779,20 +797,10 @@ export function createRepl(options: ReplOptions): Repl {
       return;
     }
     // A switch while the list was out: these are another conversation's.
-    if (conversationId !== asked) {
+    if (conversationId !== asked || reading !== approvalReading) {
       return;
     }
-    if (outcome.code !== 'OK') {
-      if (loud) {
-        refusal(
-          outcome.said ?? 'The questions this run asked could not be read.',
-        );
-      }
-      return;
-    }
-    const open = (
-      (outcome.payload as ApprovalList | undefined)?.approvals ?? []
-    ).filter((one) => one.state === 'asked');
+    const open = listed.filter((one) => one.state === 'asked');
     approvals.replaceChildren(
       ...open.map((one) =>
         renderApproval(one, (decision, prefix) =>
@@ -820,34 +828,33 @@ export function createRepl(options: ReplOptions): Repl {
     decision: ApprovalDecision,
     prefix: readonly string[] | null,
   ): Promise<ApprovalResult> {
-    const payload =
-      decision === 'project'
-        ? { id: view.id, decision, prefix: [...(prefix ?? [])] }
-        : { id: view.id, decision };
-    let outcome;
+    const owningConversation = conversationId;
+    let reply;
     try {
-      if (stream === null) {
-        throw new Error(
-          'the event socket is not open; "approval.answer" was not sent',
+      if (stream === null)
+        throw new ApprovalRefused(
+          'The connection is unavailable; the decision was not sent.',
         );
-      }
-      outcome = await stream.ask('approval.answer', payload);
+      reply = await socketApprovals(stream).answer(
+        view.id,
+        decision,
+        prefix ?? undefined,
+      );
     } catch (problem) {
+      const refused = problem instanceof ApprovalRefused;
       return {
         answered: false,
-        note:
-          problem instanceof Error
-            ? problem.message
-            : 'That answer could not be sent.',
+        uncertain: !refused,
+        note: refused
+          ? problem.message
+          : 'Decision delivery is uncertain. Refresh to read the retained approval before making another decision.',
       };
     }
-    if (outcome.code !== 'OK') {
+    if (conversationId !== owningConversation)
       return {
-        answered: false,
-        note: outcome.said ?? 'The server did not take that answer.',
+        answered: true,
+        note: 'Decision recorded for the original conversation. Open its retained record to inspect continuation.',
       };
-    }
-    const reply = outcome.payload as ApprovalAnswered | undefined;
     if (typeof reply?.job === 'string' && reply.job !== '') {
       follow(reply.job);
       return { answered: true, note: null };
@@ -1267,6 +1274,12 @@ export function createRepl(options: ReplOptions): Repl {
 
   agents.addEventListener('change', () => {
     agent = agents.value;
+    const selected = offeredAgents.find((row) => row.name === agent);
+    commandControls.update(
+      selected?.commands,
+      !input.disabled,
+      selected?.withheld,
+    );
   });
 
   form.addEventListener('submit', (submitted: Event) => {
@@ -1301,8 +1314,7 @@ export function createRepl(options: ReplOptions): Repl {
           status.state === 'open' &&
           stream !== null &&
           lastEnding === 'AWAITING' &&
-          jobId === null &&
-          approvals.childElementCount === 0
+          jobId === null
         ) {
           background(showApprovals(false));
         }
@@ -1345,6 +1357,7 @@ export function createRepl(options: ReplOptions): Repl {
         return [] as AgentView[];
       });
     const offered = listed ?? [];
+    offeredAgents = offered;
     // A disabled agent stays on the list and cannot be chosen. The server
     // sends it deliberately -- an agent that merely vanished would be met at
     // first use with no explanation -- and what this picker owes it is a row
@@ -1368,6 +1381,12 @@ export function createRepl(options: ReplOptions): Repl {
       agent = runnable[0] as string;
       agents.value = agent;
     }
+    const selected = offered.find((row) => row.name === agent);
+    commandControls.update(
+      selected?.commands,
+      !input.disabled,
+      selected?.withheld,
+    );
     if (!ownChooser) {
       // No select to fill, and `switchTo` reads the row it needs itself.
       // Asking here would be one request per build for a control that is

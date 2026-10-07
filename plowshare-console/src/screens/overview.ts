@@ -20,17 +20,23 @@ export function createOverview(options: {
   const element = el('section', 'screen work-overview');
   const head = el('header', 'screen-head');
   const reload = button('reload', 'Refresh work');
-  head.append(el('h2', 'screen-title', 'work overview'), reload);
+  head.append(el('h2', 'screen-title', 'Work overview'), reload);
   const body = el('div', 'screen-body');
   const status = el('p', 'work-status', 'Connecting to read server work…');
   status.setAttribute('role', 'status');
   const summaries = el('div', 'work-summaries');
+  const workbench = el('div', 'workbench');
+  const inspector = el('aside', 'work-inspector');
+  inspector.setAttribute('aria-label', 'Selected work record');
+  const inspection = el('div', 'work-inspection');
+  inspector.append(el('h3', '', 'Record inspector'), inspection);
+  workbench.append(summaries, inspector);
   const admissions = el('section', 'work-admissions');
   const previous = button('previous', 'Previous admissions');
   const next = button('next', 'Next admissions');
   body.append(
     status,
-    summaries,
+    workbench,
     admissions,
     previous,
     next,
@@ -46,6 +52,46 @@ export function createOverview(options: {
   let stopped = false,
     offset = 0;
   const limit = 30;
+  let selected: string | null = null;
+  let records = new Map<string, { row: HTMLElement; kind: string }>();
+  function inspect(): void {
+    for (const [key, record] of records) {
+      record.row.dataset['selected'] = String(key === selected);
+      record.row
+        .querySelector('button')
+        ?.setAttribute('aria-pressed', String(key === selected));
+    }
+    const record = selected === null ? undefined : records.get(selected);
+    inspection.replaceChildren();
+    if (record === undefined) {
+      inspection.append(
+        nothing(
+          selected === null
+            ? 'Select a record to inspect its state and open the owning conversation, job or approval.'
+            : 'This record is no longer in the current window or could not be read. Refresh or open its owning record.',
+        ),
+      );
+      return;
+    }
+    inspection.append(el('p', 'note', record.kind));
+    for (const child of record.row.children) {
+      if (!child.matches('.inspect-record'))
+        inspection.append(child.cloneNode(true));
+    }
+  }
+  function offer(row: HTMLElement, key: string, kind: string): void {
+    const pick = button('inspect', 'Inspect');
+    pick.setAttribute('aria-label', `Inspect ${kind} ${key}`);
+    pick.className = 'inspect-record';
+    pick.setAttribute('aria-pressed', 'false');
+    pick.addEventListener('click', () => {
+      selected = key;
+      inspect();
+    });
+    row.prepend(pick);
+    records.set(key, { row, kind });
+  }
+  inspect();
   const refresh = reconciliation({
     available: () => stream?.status().state === 'open',
     pollMs: options.pollMs === undefined ? 5000 : options.pollMs,
@@ -64,6 +110,7 @@ export function createOverview(options: {
       ]);
       if (stopped || pageOffset !== offset) return;
       const [jobs, approvals, inbox, firings] = results;
+      records = new Map();
       const sections: HTMLElement[] = [];
       function section(title: string): HTMLElement {
         const node = el('section', 'work-summary');
@@ -91,6 +138,11 @@ export function createOverview(options: {
         for (const job of recent) {
           const row = el('article', 'work-row');
           row.append(
+            el(
+              'strong',
+              'work-row-title',
+              `${job.agent} · ${job.state}${job.outcome == null ? '' : ' · ' + job.outcome.ending}`,
+            ),
             recordLink('jobs', job.id, job.id),
             field('state', job.state),
             field(
@@ -107,6 +159,7 @@ export function createOverview(options: {
               ),
             );
           row.append(recordLinks(job.conversation));
+          offer(row, 'job:' + job.id, 'Current process job');
           runs.append(row);
         }
         if (held.length > recent.length)
@@ -128,10 +181,20 @@ export function createOverview(options: {
         for (const request of requests.slice(0, 20)) {
           const row = el('article', 'work-row');
           row.append(
+            el(
+              'strong',
+              'work-row-title',
+              `${request.agent} · Awaiting approval`,
+            ),
             field('request', request.id),
             field('agent', request.agent),
             recordLinks(request.askedIn || request.conversation),
           );
+          const review = document.createElement('a');
+          review.href = '#approvals';
+          review.textContent = 'Review this request in approvals';
+          row.append(review);
+          offer(row, 'approval:' + request.id, 'Approval request');
           waiting.append(row);
         }
         const link = document.createElement('a');
@@ -154,6 +217,11 @@ export function createOverview(options: {
         for (const item of inbox.value.items) {
           const row = el('article', 'work-row');
           row.append(
+            el(
+              'strong',
+              'work-row-title',
+              `${item.ending ?? item.kind} · ${item.arrivedAt}`,
+            ),
             field('arrived', item.arrivedAt),
             field('ending', item.ending ?? item.kind),
             el(
@@ -163,6 +231,7 @@ export function createOverview(options: {
             ),
             recordLinks(item.conversation),
           );
+          offer(row, 'inbox:' + item.id, 'Retained inbox delivery');
           delivered.append(row);
         }
         if (inbox.value.items.length === 0)
@@ -180,6 +249,7 @@ export function createOverview(options: {
           ),
         );
       summaries.replaceChildren(...sections);
+      inspect();
       admissions.replaceChildren(
         el(
           'h3',

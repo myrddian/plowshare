@@ -497,7 +497,7 @@ describe('a question a run asked', () => {
 
     expect(block.dataset['approval']).toBe('apr_1');
     expect(block.querySelector('[data-approval-command]')?.textContent).toBe(
-      './gradlew test --tests Foo',
+      JSON.stringify([['./gradlew', 'test', '--tests', 'Foo']], null, 2),
     );
     expect(
       block.querySelector('[data-detail="side"] .value')?.textContent,

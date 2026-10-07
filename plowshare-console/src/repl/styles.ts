@@ -67,10 +67,10 @@ export const STYLES = `
        section heading, --step-2 is the one title a screen has. There is no
        --plain to go with --strong: 400 is what body already computes to and a
        token nothing referenced was a fifth name for the default. */
-    --step--1: 11px;
-    --step-0: 13px;
-    --step-1: 15px;
-    --step-2: 20px;
+    --step--1: 12px;
+    --step-0: 14px;
+    --step-1: 16px;
+    --step-2: 24px;
     --strong: 600;
 }
 @media (prefers-color-scheme: dark) {
@@ -88,10 +88,10 @@ export const STYLES = `
         --bound: #d9a441;
         --cite: #5fb3c7;
 
-        --step--1: 11px;
-        --step-0: 13px;
-        --step-1: 15px;
-        --step-2: 20px;
+        --step--1: 12px;
+        --step-0: 14px;
+        --step-1: 16px;
+        --step-2: 24px;
         --strong: 600;
     }
 }
@@ -104,7 +104,7 @@ html, body { height: 100%; margin: 0; }
 body {
     background: var(--paper);
     color: var(--ink);
-    font: 13px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: var(--step-0);
 }
 #console { height: 100%; display: flex; flex-direction: column; }
@@ -249,7 +249,7 @@ body {
 .approval-note[data-approval-note="refused"] { color: var(--refused); }
 
 .prompt {
-    display: flex; gap: .6rem; align-items: flex-end;
+    display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-end;
     border-top: 1px solid var(--rule); padding: .6rem .9rem;
 }
 .prompt textarea {
@@ -257,21 +257,27 @@ body {
     border: 1px solid var(--rule); border-radius: 3px; padding: .35rem .5rem;
     resize: vertical; min-height: 2.6em;
 }
-.prompt .hint { color: var(--dim); }
+.prompt .hint { color: var(--dim); flex-basis: 100%; }
+.chat-commands { flex-basis: 100%; min-width: 0; }
 
-/* ---- the shell: a rail of six views, one of which holds the REPL ------- */
+/* Workbench navigation keeps primary work visible and secondary views reachable. */
 
-.shell { display: grid; grid-template-columns: 12rem minmax(0, 1fr); height: 100%; min-height: 0; }
+.shell { display: grid; grid-template-columns: 13rem minmax(0, 1fr); height: 100%; min-height: 0; }
 .rail {
     display: flex; flex-direction: column; gap: .6rem;
-    padding: .6rem .5rem; border-right: 1px solid var(--rule);
+    padding: 1.2rem .75rem; border-right: 1px solid var(--rule); overflow-y: auto;
 }
-.rail-group { display: flex; flex-direction: column; gap: .15rem; }
+.rail-group, .rail-primary { display: flex; flex-direction: column; gap: .25rem; }
+.console-brand { display: flex; flex-direction: column; padding: .25rem .5rem 1.25rem; }
+.console-brand strong { font-size: var(--step-1); }
+.rail-browse { margin-top: .75rem; }
+.rail-browse summary { padding: .5rem; cursor: pointer; color: var(--dim); }
+.rail-browse .rail-group { margin-top: .5rem; }
 .rail button {
     font: inherit; color: var(--dim); background: transparent; cursor: pointer;
-    text-align: left; border: 1px solid transparent; border-radius: 3px; padding: .15rem .5rem;
+    text-align: left; border: 1px solid transparent; border-radius: 6px; padding: .55rem .65rem; text-transform: capitalize;
 }
-.rail button[aria-current="page"] { color: var(--ink); border-color: var(--rule); }
+.rail button[aria-current="page"] { color: var(--you); border-color: var(--rule); background: color-mix(in srgb, var(--you) 8%, var(--paper)); font-weight: var(--strong); }
 /* The socket's state, once for the tab. Pushed down and no longer along:
    margin-top rather than the margin-left it carried inside the REPL's header,
    because the rail is a column and this sits at the foot of it. */
@@ -282,7 +288,39 @@ body {
 .stage > * { flex: 1 1 auto; min-width: 0; }
 
 /* Work records remain readable as the browser panel narrows. */
-.work-summaries { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+.workbench { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 1fr); gap: 1.5rem; align-items: start; }
+.work-summaries { display: grid; gap: 1rem; }
+.work-inspector { position: sticky; top: 0; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; min-width: 0; }
+.work-inspector h3 { margin-top: 0; }
+.work-inspection { overflow-wrap: anywhere; }
+.work-row-title { display: block; margin-bottom: .25rem; }
+.work-summaries .work-row > .field, .work-summaries .work-row > .record-links { display: none; }
+.work-summaries .work-row > .result-preview { max-height: 4.5rem; font-family: inherit; }
+.work-row[data-selected="true"] { border-left: 3px solid var(--you); padding-left: .75rem; }
+.work-row > .inspect-record { float: right; margin: 0 0 .5rem .5rem; }
+.work-summary h3 { margin-bottom: .25rem; }
+.work-status { color: var(--dim); }
+.work-admissions { margin-top: 1.5rem; }
+.work-overview .screen-body { padding: 1.25rem 1.5rem; }
+.command-catalog { border-bottom: 1px solid var(--rule); padding-block: .35rem; }
+.command-catalog summary { cursor: pointer; }
+.command-catalog input, .command-catalog select { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--rule); max-width: 100%; padding: .3rem; }
+.command-cards { max-height: 16rem; overflow-y: auto; display: grid; gap: .5rem; }
+.command-card { padding: .5rem; border: 1px solid var(--rule); border-radius: 4px; }
+.command-card p { margin: .3rem 0; }
+.command-card button { margin-left: .4rem; }
+.command-completions { max-height: 12rem; overflow-y: auto; display: grid; }
+.command-completions button { text-align: left; padding: .4rem; }
+.command-completions button[aria-selected="true"] { border-color: var(--you); }
+.trajectory-summary { display: grid; gap: .5rem; margin-block: 1rem; }
+.trajectory-step { padding: .65rem .8rem; border: 1px solid var(--rule); border-radius: 6px; min-width: 0; }
+.trajectory-step summary { cursor: pointer; font-weight: var(--strong); }
+.trajectory-step[data-standing="fail"] { border-left: 3px solid var(--refused); }
+.trajectory-step[data-standing="waiting"] { border-left: 3px solid var(--bound); }
+.trajectory-step pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto; }
+.trajectory-full > summary { cursor: pointer; color: var(--dim); padding-block: .75rem; }
+pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
 .work-summary, .work-admissions { min-width: 0; }
 .work-row, .inbox-item { padding: .6rem 0; border-bottom: 1px solid var(--rule); }
 .record-links { display: flex; gap: .75rem; flex-wrap: wrap; margin: .4rem 0; }
@@ -856,7 +894,14 @@ body {
 @media (max-width: 720px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .rail { flex-direction: row; flex-wrap: wrap; gap: .25rem; border-right: 0; border-bottom: 1px solid var(--rule); }
-  .rail-group { display: contents; }
+  .rail-primary { flex-direction: row; flex-wrap: wrap; flex-basis: 100%; }
+  .rail-group { display: flex; }
+  .console-brand { flex-direction: row; gap: .5rem; padding: 0 .5rem; align-items: baseline; }
+  .rail-browse { margin-top: 0; }
+  .rail-browse[open] { flex-basis: 100%; }
+  .workbench { grid-template-columns: minmax(0, 1fr); }
+  .work-inspector { position: static; }
+  .work-overview .screen-body { padding: .75rem; }
   .rail-foot { flex-basis: 100%; margin-top: 0; }
   .chat-surface { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .chat-side { max-height: 25vh; border-right: 0; border-bottom: 1px solid var(--rule); }

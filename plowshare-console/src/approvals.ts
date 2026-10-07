@@ -6,13 +6,18 @@ import { decodeReply } from '../../sdk/typescript/src/operations/schema.ts';
 import { checkedTransport } from '../../sdk/typescript/src/operations/transport.ts';
 import type { EventStream } from './events';
 
-export type ApprovalDecision = 'once' | 'deny';
+export type ApprovalDecision = 'once' | 'conversation' | 'project' | 'deny';
 
-/** Account-wide pending requests. Decisions affect only the displayed request;
+/** Account-wide or explicitly conversation-scoped requests. Decisions affect
+ * only the displayed request;
  * the server retains ownership, access checks and continuation authority. */
 export interface Approvals {
-  list(): Promise<readonly ApprovalView[]>;
-  answer(id: string, decision: ApprovalDecision): Promise<ApprovalAnswered>;
+  list(conversation?: string): Promise<readonly ApprovalView[]>;
+  answer(
+    id: string,
+    decision: ApprovalDecision,
+    prefix?: readonly string[],
+  ): Promise<ApprovalAnswered>;
 }
 
 /** An explicit server refusal establishes that this decision was not accepted. */
@@ -23,8 +28,11 @@ export class ApprovalRefused extends Error {}
 export function socketApprovals(stream: EventStream): Approvals {
   const transport = checkedTransport(stream);
   return {
-    async list() {
-      const answer = await transport.ask('approval.list', { mine: true });
+    async list(conversation) {
+      const answer = await transport.ask(
+        'approval.list',
+        conversation === undefined ? { mine: true } : { conversation },
+      );
       if (answer.code !== 'OK') {
         throw new ApprovalRefused(
           answer.said ?? 'Approvals could not be read.',
@@ -32,8 +40,13 @@ export function socketApprovals(stream: EventStream): Approvals {
       }
       return decodeReply('approval.list', answer.payload).approvals;
     },
-    async answer(id, decision) {
-      const answer = await transport.ask('approval.answer', { id, decision });
+    async answer(id, decision, prefix) {
+      const answer = await transport.ask(
+        'approval.answer',
+        decision === 'project'
+          ? { id, decision, prefix: [...(prefix ?? [])] }
+          : { id, decision },
+      );
       if (answer.code !== 'OK') {
         // A handler can fail after recording a decision but before returning
         // its continuation receipt. Internal failure does not prove refusal.
