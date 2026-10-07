@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plowshare-network-privacy"
+version = "0.1.0"
+description = "Python network privacy Application using Plowshare SDK and Relay"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["plowshare-sdk==0.1.0", "aiohttp>=3.12,<4"]
+
+[project.scripts]
+plowshare-privacy = "plowshare_privacy.cli:main"
+
+[project.optional-dependencies]
+check = ["mypy==2.4.0", "ruff==0.16.10", "build==1.6.1"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["plowshare_privacy*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+plowshare_privacy = ["web/*", "py.typed"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

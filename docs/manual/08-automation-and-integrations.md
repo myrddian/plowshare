@@ -1,5 +1,15 @@
 # Automation and integrations
 
+The [Python Network Privacy Application](../../integrations/network-privacy/README.md)
+shows a complete SDK consumer with its own web interface. A project schedule
+publishes collection occurrences through Relay; Python retains bounded network
+observations in the project information store and publishes completion. Relay
+starts an agent investigation for a baseline or changed evidence. The collector
+runs wherever its explicitly configured network scope is reachable, independently
+of whether Plowshare and inference run locally or in the cloud. The
+[named tool façade](../relay-tools.md) lets agents call external capabilities
+through equivalent Java, TypeScript/Node, Python, Go and .NET SDK interfaces.
+
 ## Recurring work on the server
 
 Schedules, triggers, events, firings and inbox deliveries connect ongoing work to

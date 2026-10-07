@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "observed_at": "2026-01-01T00:00:00+00:00",
+  "tcp": [{"address": "192.0.2.10", "port": 443, "status": "open"}],
+  "dns": [{"device": "living-room-tv", "domain": "streaming.example", "queries": 12}]
+}

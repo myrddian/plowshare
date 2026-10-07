@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "topics": {
+    "schedule.due": {"retentionDays": 4, "maxRecords": 10000},
+    "privacy.scan.requests": {"retentionDays": 4, "maxRecords": 10000},
+    "privacy.scan.completed": {"retentionDays": 4, "maxRecords": 10000}
+  }
+}
