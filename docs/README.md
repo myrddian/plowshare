@@ -5,6 +5,7 @@
 - [Installation and distributions](distributions.md)
 - [Docker deployment](../deploy/docker/README.md)
 - [Shared login](client-login.md)
+- [Web console capabilities](web-console-capabilities.md)
 - [CLI](../plowshare-cli/README.md)
 - [MCP server](../plowshare-mcp/README.md)
 - [Desktop](../plowshare-desktop/README.md)
