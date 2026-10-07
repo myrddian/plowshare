@@ -174,6 +174,14 @@ error or unexpected session response shows an unavailable state with **Retry
 connection**; it does not establish that the account is signed out. Retry reads
 session status without renewing a bootstrap token or submitting work.
 
+Automatic cookie rotation requires Web Locks and writable browser storage. The
+origin lock serializes participating tabs, and a non-secret uncertainty marker
+prevents another tab or reload from repeating a rotation whose reply was lost.
+A successful access probe under that lock reconciles the marker. Browsers without
+Web Locks (including unsupported or insecure origins) keep existing sessions but
+require explicit sign-in after expiry; they never rotate shared cookies through
+a per-tab fallback.
+
 A refused single-use bootstrap token cannot be renewed by reloading. Use an
 existing account, or ask the operator for the current handoff from the configured
 protected token file when setting up a new installation.

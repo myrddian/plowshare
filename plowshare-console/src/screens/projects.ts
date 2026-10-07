@@ -3,7 +3,9 @@ import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import { isList } from '../../../sdk/typescript/src/binding/values.ts';
 import type { EventStream, EventStreamOptions } from '../events';
-import type { ApprovalList, ApprovalRevoked, ApprovalView } from '../repl/wire';
+import { socketProjectGrants, type ProjectGrants } from '../approvals';
+import { createProjectGrants } from './project-grants';
+export { NOTHING_APPROVED } from './project-grants';
 import {
   button,
   el,
@@ -135,11 +137,6 @@ export const NOTHING_LENT =
   'Nothing else is lent to this project. Its jobs reach the workspace above and nothing' +
   ' beside it.';
 
-/** What an empty approved-commands list means: nothing runs here without asking. */
-export const NOTHING_APPROVED =
-  'No command is approved for this whole project. A run that asks is asked again each time,' +
-  ' unless a person allowed it for one conversation.';
-
 export interface ProjectsOptions {
   readonly root: HTMLElement;
   readonly transport?: Transport;
@@ -194,126 +191,22 @@ export function createProjects(options: ProjectsOptions): Screen {
       const section = el('section', 'approved');
       section.dataset['approved'] = textOf(project.name);
       card.append(section);
-      background(approved(section, textOf(project.name)));
+      if (grants !== null) {
+        const panel = createProjectGrants({
+          root: section,
+          project: project.name,
+          client: grants,
+          active:
+            active &&
+            stream?.status().state === 'open' &&
+            !stream.status().signedOut,
+          blocked,
+        });
+        grantPanels.add(panel);
+        background(panel.load());
+      }
     }
     return card;
-  }
-
-  /**
-   * The commands a person allowed for this whole project, each revocable.
-   *
-   * `approval.list { project }` and `approval.revoke`, over the socket -- there
-   * is no HTTP for either. A project approval is a leading part of a command on
-   * one side, any directory there; it is drawn as that prefix, because the
-   * prefix is what it allows, and the command that was first asked about is
-   * only where it came from.
-   */
-  async function approved(section: HTMLElement, name: string): Promise<void> {
-    const headed = (...rest: HTMLElement[]): void => {
-      section.replaceChildren(
-        el('div', 'approved-head', 'approved commands'),
-        ...rest,
-      );
-    };
-    if (stream === null || stream.status().state !== 'open') {
-      const waiting = el('p', 'nothing', 'connecting…');
-      waiting.dataset['connecting'] = '';
-      headed(waiting);
-      return;
-    }
-    let outcome;
-    try {
-      outcome = await stream.ask('approval.list', { project: name });
-    } catch (problem) {
-      headed(
-        trouble(
-          problemText(problem, 'The approved commands could not be listed.'),
-        ),
-      );
-      return;
-    }
-    if (outcome.code !== 'OK') {
-      headed(
-        trouble(outcome.said ?? 'The approved commands could not be listed.'),
-      );
-      return;
-    }
-    const standing =
-      (outcome.payload as ApprovalList | undefined)?.approvals ?? [];
-    if (standing.length === 0) {
-      headed(nothing(NOTHING_APPROVED));
-      return;
-    }
-    const list = el('ul', 'approved-list');
-    list.append(...standing.map((one) => approval(section, name, one)));
-    headed(list);
-  }
-
-  function approval(
-    section: HTMLElement,
-    name: string,
-    one: ApprovalView,
-  ): HTMLElement {
-    const item = el('li', 'approved-item');
-    item.dataset['approval'] = textOf(one.id);
-    const prefix = isList(one.prefix) ? one.prefix : one.command;
-    const words = el(
-      'code',
-      'approved-prefix',
-      (prefix ?? []).map(textOf).join(' '),
-    );
-    const where = el(
-      'span',
-      'approved-side',
-      `${textOf(one.side)} side, any directory`,
-    );
-    const revoke = button('revoke', 'Revoke');
-    revoke.dataset['revoke'] = textOf(one.id);
-    revoke.addEventListener('click', () => {
-      revoke.disabled = true;
-      background(
-        (async (): Promise<void> => {
-          let outcome;
-          try {
-            if (stream === null) {
-              throw new Error(
-                'the event socket is not open; "approval.revoke" was not sent',
-              );
-            }
-            outcome = await stream.ask('approval.revoke', { id: one.id });
-          } catch (problem) {
-            revoke.disabled = false;
-            item.append(
-              trouble(
-                problemText(problem, 'That approval could not be revoked.'),
-              ),
-            );
-            return;
-          }
-          if (outcome.code !== 'OK') {
-            revoke.disabled = false;
-            item.append(
-              trouble(outcome.said ?? 'That approval could not be revoked.'),
-            );
-            return;
-          }
-          // Re-read either way: `revoked: false` is an approval that was no
-          // longer standing, and the list should stop showing it too.
-          if (
-            (outcome.payload as ApprovalRevoked | undefined)?.revoked !== true
-          ) {
-            item.append(
-              trouble(
-                'That approval was no longer standing; nothing was changed.',
-              ),
-            );
-          }
-          await approved(section, name);
-        })(),
-      );
-    });
-    item.append(words, where, revoke);
-    return item;
   }
 
   /**
@@ -448,34 +341,67 @@ export function createProjects(options: ProjectsOptions): Screen {
 
   let stream: EventStream | null = null;
   let stopped = false;
+  let active = true;
+  let epoch = 0;
+  let reading = false;
+  let asked = false;
+  let grants: ProjectGrants | null = null;
+  const grantPanels = new Set<Screen>();
+  const blocked = new Map<string, string>();
+
+  function clearGrants(): void {
+    for (const panel of grantPanels) panel.destroy();
+    grantPanels.clear();
+  }
 
   async function load(): Promise<void> {
-    if (options.openStream !== undefined && stream === null && !stopped) {
+    if (stopped || !active) return;
+    if (options.openStream !== undefined && stream === null) {
       stream = options.openStream({
         session: options.session ?? '',
         onEvent: () => {},
-        // Built before the socket opened, a card says "connecting"; the
-        // open is what fills it in.
         onStatus: (status) => {
-          if (status.state === 'open' && stream !== null) {
-            for (const section of body.querySelectorAll<HTMLElement>(
-              '[data-approved]',
-            )) {
-              background(approved(section, section.dataset['approved'] ?? ''));
-            }
+          if (stopped) return;
+          for (const panel of grantPanels) {
+            panel.setActive?.(
+              active && status.state === 'open' && !status.signedOut,
+            );
           }
         },
       });
+      grants = socketProjectGrants(stream);
     }
+    if (reading) {
+      asked = true;
+      return;
+    }
+    reading = true;
+    try {
+      do {
+        asked = false;
+        await readProjects();
+      } while (asked && !stopped && active);
+    } finally {
+      reading = false;
+    }
+  }
+
+  async function readProjects(): Promise<void> {
+    const stamp = epoch;
+    for (const panel of grantPanels) panel.setActive?.(false);
     let projects: readonly ProjectView[];
     try {
       projects = (await transport.get('/v1/projects')) ?? [];
     } catch (problem) {
+      if (stopped || !active || stamp !== epoch) return;
+      clearGrants();
       body.replaceChildren(
         trouble(problemText(problem, 'The projects could not be listed.')),
       );
       return;
     }
+    if (stopped || !active || stamp !== epoch) return;
+    clearGrants();
     const personal = projects.filter((project) => project.kind === 'personal');
     const ordinary = projects.filter((project) => project.kind !== 'personal');
     const personalRows = personal.map(() => {
@@ -515,10 +441,21 @@ export function createProjects(options: ProjectsOptions): Screen {
   return {
     element: () => shell,
     load,
+    setActive(next): void {
+      if (stopped || active === next) return;
+      active = next;
+      ++epoch;
+      asked = false;
+      for (const panel of grantPanels) panel.setActive?.(false);
+      if (active) background(load());
+    },
     destroy(): void {
       // No timer; the socket subscription, when there is one, is the only
       // thing to let go of.
       stopped = true;
+      ++epoch;
+      asked = false;
+      clearGrants();
       stream?.close();
       stream = null;
     },

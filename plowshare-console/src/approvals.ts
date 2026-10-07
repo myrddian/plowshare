@@ -1,5 +1,6 @@
 import type {
   ApprovalAnswered,
+  ApprovalRevoked,
   ApprovalView,
 } from '../../sdk/typescript/src/operations/administrative-replies.ts';
 import { decodeReply } from '../../sdk/typescript/src/operations/schema.ts';
@@ -22,6 +23,50 @@ export interface Approvals {
 
 /** An explicit server refusal establishes that this decision was not accepted. */
 export class ApprovalRefused extends Error {}
+
+/** Standing project grants remain server-owned. Reads require current project
+ * access; revocation requires an explicit selection and is never replayed. */
+export interface ProjectGrants {
+  list(project: string): Promise<readonly ApprovalView[]>;
+  revoke(id: string): Promise<ApprovalRevoked>;
+}
+
+export function socketProjectGrants(stream: EventStream): ProjectGrants {
+  const transport = checkedTransport(stream);
+  return {
+    async list(project) {
+      const answer = await transport.ask('approval.list', { project });
+      if (answer.code !== 'OK')
+        throw new ApprovalRefused(
+          answer.said ?? 'Project grants could not be read.',
+        );
+      const grants = decodeReply('approval.list', answer.payload).approvals;
+      if (
+        grants.some(
+          (grant) => grant.state !== 'allowed' || grant.scope !== 'project',
+        )
+      )
+        throw new Error(
+          'The project grant list contains a request that is not standing.',
+        );
+      return grants;
+    },
+    async revoke(id) {
+      const answer = await transport.ask('approval.revoke', { id });
+      if (answer.code !== 'OK') {
+        if (answer.code === 'INTERNAL_ERROR')
+          throw new Error('Grant revocation is unknown after a server error.');
+        throw new ApprovalRefused(
+          answer.said ?? 'That revocation was refused.',
+        );
+      }
+      const receipt = decodeReply('approval.revoke', answer.payload);
+      if (receipt.id !== id)
+        throw new Error('The revocation receipt names another grant.');
+      return receipt;
+    },
+  };
+}
 
 /** Reuse the tab's socket. Decode before exposing DTOs; never replay a decision
  * after a lost or malformed reply, since the server may already have applied it. */

@@ -1,4 +1,5 @@
 import { background } from './background.ts';
+import { reconcileSessionRefresh } from './api';
 import { bootstrapFromUrl, type BootstrapOutcome } from './auth';
 import { createLogin } from './screens/login';
 import { createPassword } from './screens/password';
@@ -94,6 +95,11 @@ export async function probeSession(): Promise<SessionState> {
   const flag = response.headers.get('X-Plowshare-Must-Change-Password');
   if (flag !== null && flag !== 'true' && flag !== 'false')
     return 'unavailable';
+  try {
+    await reconcileSessionRefresh();
+  } catch {
+    return 'unavailable';
+  }
   return flag === 'true' ? 'flagged' : 'signed-in';
 }
 
@@ -121,11 +127,15 @@ function mountPassword(host: HTMLElement): void {
  * `password.ts`'s screen for a flagged one.
  */
 function afterSignIn(host: HTMLElement, mustChangePassword: boolean): void {
-  if (mustChangePassword) {
-    mountPassword(host);
-  } else {
-    mountShell(host);
-  }
+  background(
+    reconcileSessionRefresh().then(
+      () => {
+        if (mustChangePassword) mountPassword(host);
+        else mountShell(host);
+      },
+      () => mountUnavailable(host, () => gate(host)),
+    ),
+  );
 }
 
 /** `login.ts`'s form, wired to {@link afterSignIn} on success. */

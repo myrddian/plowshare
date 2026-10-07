@@ -308,3 +308,57 @@ describe('the approval SDK boundary', () => {
     expect(ask).not.toHaveBeenCalled();
   });
 });
+
+it('disables stale approval controls while disconnected and requires a fresh read before another decision', async () => {
+  const view = fixture();
+  await view.screen.load();
+  view.status('closed');
+  view.click('Allow once');
+  expect(view.ask).toHaveBeenCalledOnce();
+  expect(
+    view.root.querySelector<HTMLButtonElement>('.approval-decision')?.disabled,
+  ).toBe(true);
+  view.status('open');
+  await vi.waitFor(() => expect(view.ask).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(
+      view.root.querySelector<HTMLButtonElement>('.approval-decision')
+        ?.disabled,
+    ).toBe(false),
+  );
+});
+
+it('pauses hidden-tab reads and fences a pending approval snapshot after returning', async () => {
+  vi.useFakeTimers();
+  const view = fixture('open', 100);
+  await view.screen.load();
+  let finish: ((result: FrameOutcome) => void) | undefined;
+  view.ask.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = view.screen.load();
+  const visibility = vi.spyOn(document, 'visibilityState', 'get');
+  visibility.mockReturnValue('hidden');
+  document.dispatchEvent(new Event('visibilitychange'));
+  view.click('Allow once');
+  await vi.advanceTimersByTimeAsync(500);
+  expect(view.ask).toHaveBeenCalledTimes(2);
+  view.requests([]);
+  visibility.mockReturnValue('visible');
+  document.dispatchEvent(new Event('visibilitychange'));
+  if (!finish) throw new Error('Expected pending read');
+  finish({
+    code: 'OK',
+    payload: { approvals: [{ ...approval, id: 'obsolete' }] },
+  });
+  await pending;
+  expect(view.root.textContent).not.toContain('obsolete');
+  expect(view.root.querySelector('[data-approval]')).toBeNull();
+  expect(
+    view.ask.mock.calls.filter(([type]) => type === 'approval.answer'),
+  ).toHaveLength(0);
+  visibility.mockRestore();
+});

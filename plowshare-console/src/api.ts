@@ -35,9 +35,8 @@ export const REFRESH_PATH = '/v1/auth/refresh';
  */
 export const SIGNED_OUT =
   'This console is no longer signed in. Reload this page and sign in again on the screen it' +
-  ' lands on. If nobody knows a password yet, reopen the bootstrap URL the server printed' +
-  ' when it started — the line beginning "Plowshare console:" — and restart the server if' +
-  ' that token has already been spent; it is single-use.';
+  ' lands on. For first-time setup, ask the operator for the current bootstrap handoff' +
+  ' from the configured protected token file. Reloading cannot renew a single-use token.';
 
 /**
  * A response the server refused, carried with the status that says how.
@@ -99,9 +98,33 @@ export class ApiError extends Error {
  * one.
  */
 let refreshInFlight: Promise<boolean> | null = null;
-// A lost rotation response might already have spent the cookie. This tab must
-// not repeat it. A successful locked access probe can establish recovery.
-let refreshUncertain = false;
+// Stored under the origin lock before rotation. It contains no credential or
+// work record: another tab (or reload after a crash) must know that the shared
+// HttpOnly cookie may already have been spent. Only a definitive response or a
+// successful locked access probe clears it. Storage failure prevents rotation.
+const REFRESH_UNCERTAIN = 'plowshare-session-refresh-uncertain';
+const REFRESH_LOCK = 'plowshare-session-refresh';
+
+/** After login or reload establishes a session, reconcile an older uncertain
+ * rotation under the same lock. The extra probe is only needed when a marker
+ * exists; its failure leaves the marker intact and never submits a refresh. */
+export async function reconcileSessionRefresh(): Promise<void> {
+  const locks = globalThis.navigator?.locks;
+  if (
+    locks === undefined ||
+    window.localStorage.getItem(REFRESH_UNCERTAIN) === null
+  )
+    return;
+  await locks.request(REFRESH_LOCK, async () => {
+    if (window.localStorage.getItem(REFRESH_UNCERTAIN) === null) return;
+    const probe = await fetch('/v1/auth/session', {
+      method: 'GET',
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (probe.status === 204) window.localStorage.removeItem(REFRESH_UNCERTAIN);
+  });
+}
 
 /**
  * Rotate the cookie pair, at most once concurrently.
@@ -111,25 +134,27 @@ let refreshUncertain = false;
  *
  * Cooperate across browser tabs before rotating a shared cookie pair. Under
  * the origin lock, re-probe: another tab may already have rotated successfully.
- * Browsers without Web Locks retain the per-tab single-flight guarantee. */
+ * Without Web Locks, automatic rotation is unavailable: a per-tab latch cannot
+ * protect a cookie shared by other tabs, so failing closed avoids retiring it. */
 function refreshOnce(): Promise<boolean> {
   if (refreshInFlight === null) {
     const rotate = async (): Promise<boolean> => {
-      if (refreshUncertain)
+      if (window.localStorage.getItem(REFRESH_UNCERTAIN) !== null)
         throw new Error(
           'Session refresh delivery is uncertain. Reload to recheck your session.',
         );
-      refreshUncertain = true;
+      window.localStorage.setItem(REFRESH_UNCERTAIN, 'pending');
       const response = await fetch(REFRESH_PATH, {
         method: 'POST',
         credentials: 'same-origin',
+        signal: AbortSignal.timeout(10_000),
       });
       if (
         response.status === 204 ||
         response.status === 401 ||
         response.status === 403
       ) {
-        refreshUncertain = false;
+        window.localStorage.removeItem(REFRESH_UNCERTAIN);
         return response.status === 204;
       }
       throw new Error(
@@ -138,14 +163,18 @@ function refreshOnce(): Promise<boolean> {
     };
     const locks = globalThis.navigator?.locks;
     const work: Promise<boolean> = (async () => {
-      if (locks === undefined) return await rotate();
-      return await locks.request('plowshare-session-refresh', async () => {
+      if (locks === undefined)
+        throw new Error(
+          'Automatic session refresh requires browser Web Locks. Reload to sign in, or use a secure console origin in a supported browser.',
+        );
+      return await locks.request(REFRESH_LOCK, async () => {
         const probe = await fetch('/v1/auth/session', {
           method: 'GET',
           credentials: 'same-origin',
+          signal: AbortSignal.timeout(10_000),
         });
         if (probe.status === 204) {
-          refreshUncertain = false;
+          window.localStorage.removeItem(REFRESH_UNCERTAIN);
           return true;
         }
         if (probe.status === 403) return false;
@@ -168,12 +197,14 @@ function refreshOnce(): Promise<boolean> {
  * "never loop" is a claim about a number:
  *
  * - anything but 401 -- **1 call**, answered or thrown.
- * - 401, refresh 204, retry succeeds -- **3 calls**.
- * - 401, refresh 204, retry 401 -- **3 calls**, then {@link SIGNED_OUT}. The
+ * - 401, locked probe 204, retry succeeds -- **3 calls**, no rotation.
+ * - 401, locked probe 401, refresh 204, retry succeeds -- **4 calls**.
+ * - 401, locked probe 401, refresh 204, retry 401 -- **4 calls**, then {@link SIGNED_OUT}. The
  *   second 401 is not refreshed again; a fresh access cookie that is refused
  *   immediately is not an expiry.
- * - 401, refresh refused -- **2 calls**, then {@link SIGNED_OUT}. The refresh
+ * - 401, locked probe 401, refresh refused -- **3 calls**, then {@link SIGNED_OUT}. The refresh
  *   is not retried, ever: see this file's header.
+ * - No cross-tab lock or an uncertain rotation -- unavailable, without rotation.
  *
  * @param path an absolute path on this origin, like `/v1/jobs`. Never a full
  *     URL: a caller that could name a host could send the cookie somewhere else
@@ -413,7 +444,10 @@ export async function recoverSession(): Promise<
   'ready' | 'signed-out' | 'unavailable'
 > {
   try {
-    const response = await request('/v1/auth/session');
+    const response = await request('/v1/auth/session', {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 204) await reconcileSessionRefresh();
     return response.status === 204
       ? 'ready'
       : response.status === 403

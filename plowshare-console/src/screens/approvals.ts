@@ -65,6 +65,8 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   let offset = 0;
   const windowSize = 30;
   let reading = false;
+  let epoch = 0;
+  let fresh = false;
   let asked = false;
   let held: readonly ApprovalView[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -83,7 +85,11 @@ export function createApprovals(options: ApprovalsOptions): Screen {
     next.disabled = offset + windowSize >= pending.length;
     rows.replaceChildren(
       ...(pending.length === 0
-        ? [nothing('No approvals are waiting for your account.')]
+        ? [
+            fresh
+              ? nothing('No approvals are waiting for your account.')
+              : el('p', 'note', 'Connecting to read current approvals…'),
+          ]
         : pending.slice(offset, offset + windowSize).map(row)),
     );
   }
@@ -113,7 +119,7 @@ export function createApprovals(options: ApprovalsOptions): Screen {
       ['deny', 'Deny'],
     ] as const) {
       const control = button('approval-decision', label);
-      control.disabled = blocked.has(request.id);
+      control.disabled = !canRead() || !fresh || blocked.has(request.id);
       control.addEventListener('click', () =>
         background(answer(request.id, decision)),
       );
@@ -126,7 +132,7 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   }
 
   async function answer(id: string, decision: ApprovalDecision): Promise<void> {
-    if (stopped || client === null || blocked.has(id)) return;
+    if (!canRead() || !fresh || client === null || blocked.has(id)) return;
     blocked.set(id, 'Sending decision…');
     draw();
     try {
@@ -158,13 +164,7 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   }
 
   async function refresh(): Promise<void> {
-    if (
-      stopped ||
-      !active ||
-      client === null ||
-      stream?.status().state !== 'open'
-    )
-      return;
+    if (!canRead() || client === null || stream === null) return;
     if (reading) {
       asked = true;
       return;
@@ -175,14 +175,18 @@ export function createApprovals(options: ApprovalsOptions): Screen {
     try {
       do {
         asked = false;
+        const stamp = epoch;
+        fresh = false;
+        draw();
         try {
           const snapshot = await client.list();
-          if (stopped) return;
+          if (stopped || !canRead() || stamp !== epoch) continue;
           held = snapshot;
+          fresh = true;
           error.hidden = true;
           draw();
         } catch (problem) {
-          if (stopped) return;
+          if (stopped || !canRead() || stamp !== epoch) continue;
           // Keep the previous rows. An unreadable snapshot is not an empty queue.
           error.textContent = problemText(
             problem,
@@ -190,30 +194,62 @@ export function createApprovals(options: ApprovalsOptions): Screen {
           );
           error.hidden = false;
         }
-      } while (asked && !stopped && stream.status().state === 'open');
+      } while (asked && canRead());
     } finally {
       reading = false;
-      reload.disabled = false;
-      element.setAttribute('aria-busy', 'false');
+      if (!stopped) {
+        reload.disabled = false;
+        element.setAttribute('aria-busy', 'false');
+      }
     }
   }
 
   function poll(): void {
-    if (stopped || !active || timer !== null || pollMs === null) return;
+    if (!canRead() || timer !== null || pollMs === null) return;
     timer = setTimeout(() => {
       timer = null;
       background(refresh().finally(poll));
     }, pollMs);
   }
 
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      active &&
+      options.root.ownerDocument.visibilityState !== 'hidden' &&
+      stream?.status().state === 'open' &&
+      !stream.status().signedOut
+    );
+  }
+
+  /** Navigation, tab visibility and socket loss invalidate authorization hints
+   * immediately. A fresh retained read is required before another decision. */
+  function pause(): void {
+    ++epoch;
+    fresh = false;
+    asked = false;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    draw();
+  }
+
+  function visibilityChanged(): void {
+    if (!canRead()) pause();
+    else background(refresh().finally(poll));
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
+
   reload.addEventListener('click', () => background(refresh()));
   return {
     element: () => element,
     setActive(next) {
+      if (stopped || active === next) return;
       active = next;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      if (active && !stopped) background(refresh().finally(poll));
+      pause();
+      if (active) background(refresh().finally(poll));
     },
     async load() {
       if (stopped) return;
@@ -227,7 +263,10 @@ export function createApprovals(options: ApprovalsOptions): Screen {
             if (asJobEvent(frame) !== null) background(refresh());
           },
           onStatus: (next) => {
-            if (next.state === 'open') background(refresh());
+            if (stopped) return;
+            if (next.state === 'open' && !next.signedOut)
+              background(refresh().finally(poll));
+            else pause();
           },
         });
         client = socketApprovals(stream);
@@ -237,6 +276,11 @@ export function createApprovals(options: ApprovalsOptions): Screen {
     },
     destroy() {
       stopped = true;
+      ++epoch;
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
       if (timer !== null) clearTimeout(timer);
       stream?.close();
       stream = null;
