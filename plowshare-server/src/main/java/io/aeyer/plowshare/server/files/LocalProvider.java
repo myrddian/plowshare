@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
+import io.aeyer.plowshare.protocol.CommandIsolation;
 import io.aeyer.plowshare.protocol.CommandRunner;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.FileAccess;
@@ -15,7 +16,7 @@ import io.aeyer.plowshare.protocol.Replacement;
 import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
-import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.archive.ProjectWorkspaces;
 import io.aeyer.plowshare.server.archive.ValidationException;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.images.StoredImage;
@@ -167,7 +168,7 @@ public final class LocalProvider implements FileProvider {
   /** The empty leash: no root, nothing permitted, used for every absence. */
   private static final FileAccess NOTHING = FileAccess.of(List.of(), List.of());
 
-  private final ProjectStore projects;
+  private final ProjectWorkspaces projects;
   private final Home home;
 
   /**
@@ -183,6 +184,7 @@ public final class LocalProvider implements FileProvider {
 
   private final boolean anyGrant;
   private final boolean writable;
+  private final CommandIsolation isolation;
 
   /**
    * Non-null only for {@link #over}: a leash nobody looks up, because it is not a project's row.
@@ -198,7 +200,7 @@ public final class LocalProvider implements FileProvider {
    * @param grants what the agent's definition declared. Empty is an ordinary answer and means this
    *     agent reaches no file at all
    */
-  public LocalProvider(ProjectStore projects, Home home, List<Grant> grants) {
+  public LocalProvider(ProjectWorkspaces projects, Home home, List<Grant> grants) {
     this(projects, home, grants, ImageStore.NONE);
   }
 
@@ -209,12 +211,28 @@ public final class LocalProvider implements FileProvider {
    *     ImageStore#NONE} for a deployment that names none, which is every one that keeps no data
    *     directory and is the three-argument form above
    */
-  public LocalProvider(ProjectStore projects, Home home, List<Grant> grants, ImageStore images) {
-    this(projects, home, grants, images, null);
+  public LocalProvider(
+      ProjectWorkspaces projects, Home home, List<Grant> grants, ImageStore images) {
+    this(projects, home, grants, images, null, CommandIsolation.UNAVAILABLE);
+  }
+
+  /** The execution backend is supplied by server composition, never by a project or command. */
+  public LocalProvider(
+      ProjectWorkspaces projects,
+      Home home,
+      List<Grant> grants,
+      ImageStore images,
+      CommandIsolation isolation) {
+    this(projects, home, grants, images, null, isolation);
   }
 
   private LocalProvider(
-      ProjectStore projects, Home home, List<Grant> grants, ImageStore images, FileAccess fixed) {
+      ProjectWorkspaces projects,
+      Home home,
+      List<Grant> grants,
+      ImageStore images,
+      FileAccess fixed,
+      CommandIsolation isolation) {
     this.projects = projects;
     this.home = home;
     this.images = Objects.requireNonNull(images, "images");
@@ -227,6 +245,7 @@ public final class LocalProvider implements FileProvider {
     // why comparing modes here instead would be the copy that drifts.
     this.writable = grants.stream().anyMatch(grant -> grant.allows(Mode.WRITE));
     this.fixed = fixed;
+    this.isolation = Objects.requireNonNull(isolation);
   }
 
   /**
@@ -236,7 +255,12 @@ public final class LocalProvider implements FileProvider {
    */
   public static LocalProvider over(FileAccess access, List<Grant> grants) {
     return new LocalProvider(
-        null, null, grants, ImageStore.NONE, Objects.requireNonNull(access, "access"));
+        null,
+        null,
+        grants,
+        ImageStore.NONE,
+        Objects.requireNonNull(access, "access"),
+        CommandIsolation.UNAVAILABLE);
   }
 
   @Override
@@ -1038,9 +1062,9 @@ public final class LocalProvider implements FileProvider {
   /**
    * {@inheritDoc}
    *
-   * <p>On this server, as this server's OS user, which is why the server side of every environment
-   * defaults to {@code off}: nothing separates one project's command from another project's
-   * workspace.
+   * <p>Server command modes still default to {@code off}. An admitted {@code bubblewrap} command
+   * uses the current read/write fence through the installed isolation backend. An admitted {@code
+   * none} command runs as the server OS user and cannot honor restricted writable areas.
    */
   @Override
   public CommandRunner.Outcome run(
@@ -1061,17 +1085,32 @@ public final class LocalProvider implements FileProvider {
       Duration timeout,
       String stdin,
       BooleanSupplier cancelled) {
-    Path directory = writable(reachable(leash()), cwd, "run a command in", "run in");
+    Leash leash = reachable(leash());
+    boolean isolated = "bubblewrap".equals(side.isolation());
+    if (!isolated && !"none".equals(side.isolation())) {
+      throw new WorkspaceRefusedException("unsupported command isolation");
+    }
+    Path directory =
+        isolated
+            ? permitted(leash, cwd, "run a command in")
+            : writable(leash, cwd, "run a command in", "run in");
+    if (!writable)
+      throw new WorkspaceRefusedException("command execution requires a workspace write grant");
+    if (isolated && leash.writeAccess().roots().isEmpty()) {
+      throw new WorkspaceRefusedException("command execution requires a configured writable area");
+    }
     if (!Files.isDirectory(directory)) {
       throw new WorkspaceRefusedException(
           "path " + cwd + " is not a directory, so a command" + " cannot run in it");
     }
     try {
-      return CommandRunner.run(
+      var command =
           new CommandRunner.Command(
-              argv, directory, side.env(), side.inherit(), timeout, side.outputBytes(), stdin),
-          System.getenv(),
-          cancelled);
+              argv, directory, side.env(), side.inherit(), timeout, side.outputBytes(), stdin);
+      if (isolated)
+        return isolation.run(
+            command, leash.access(), leash.writeAccess(), System.getenv(), cancelled);
+      return CommandRunner.run(command, System.getenv(), cancelled);
     } catch (CommandRunner.Refused refused) {
       throw new WorkspaceRefusedException(refused.getMessage());
     }

@@ -19,9 +19,9 @@ import { errorMessage } from 'plowshare-client-ts/binding/values';
  *
  * <h2>What it does not do</h2>
  *
- * <p><b>It does not isolate</b>, and it does not judge the working directory against
- * a fence: a command it starts can read anything this OS user can, hidden paths
- * included. The enforcer judges `cwd`; nothing reaches inside a process.
+ * <p>This process primitive does not isolate by itself. The enforcer uses `CommandIsolation`
+ * for a configured bubblewrap command; that backend wraps argv with the mount/namespace policy.
+ * Raw execution still has the OS user's access; a working directory does not contain it.
  *
  * <h2>One difference from the Java, stated</h2>
  *

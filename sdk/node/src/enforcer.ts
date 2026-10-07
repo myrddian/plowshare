@@ -89,6 +89,9 @@ import {
 } from 'plowshare-client-ts/binding/environment';
 import type { Side } from 'plowshare-client-ts/binding/environment';
 import { readProjectManifest } from './marker.js';
+import { configuredIsolation } from './isolation.js';
+import type { CommandIsolation } from './isolation.js';
+import type { Command } from './runner.js';
 import { projectSettings } from 'plowshare-client-ts/binding/project-settings';
 import {
   ABSOLUTE_PATTERN,
@@ -127,6 +130,7 @@ import {
   ROOT_GONE,
   ROOT_NOT_DIRECTORY,
   RUN,
+  RUN_ISOLATED,
   SOURCE,
   SOURCE_CHUNK_BYTES,
   STAT,
@@ -285,6 +289,7 @@ class Vanished extends Error {
 export function enforcing(
   root: string,
   attendance: boolean | AbortSignal = true,
+  isolation: CommandIsolation = configuredIsolation(process.env),
 ): Answering & { close(): void } {
   const attended = typeof attendance === 'boolean' ? attendance : true;
   const lifetime = typeof attendance === 'boolean' ? undefined : attendance;
@@ -304,6 +309,7 @@ export function enforcing(
         running,
         defaults,
         environmentLines,
+        isolation,
         lifetime,
       );
     } catch (trouble) {
@@ -362,6 +368,7 @@ async function answered(
   running: Map<string, AbortController>,
   defaults: Side,
   environmentLines: readonly string[],
+  isolation: CommandIsolation,
   lifetime?: AbortSignal,
 ): Promise<FileReply> {
   if (
@@ -446,7 +453,8 @@ async function answered(
     case MOVE:
       return { id, outcome: REPLY_OK, result: await move(root, request) };
     case RUN:
-      return await run(root, request, running, defaults, lifetime);
+    case RUN_ISOLATED:
+      return await run(root, request, running, defaults, isolation, lifetime);
     case CANCEL:
       // Answered ok whether or not it was still running: a run that already
       // ended has nothing left to kill, and its own answer says how it ended.
@@ -1436,6 +1444,7 @@ async function run(
   request: FileRequest,
   running: Map<string, AbortController>,
   defaults: Side,
+  isolation: CommandIsolation,
   lifetime?: AbortSignal,
 ): Promise<FileReply> {
   const { side, unreadable } = await ownSide(root, defaults);
@@ -1449,6 +1458,11 @@ async function run(
     throw new Refused(
       "this machine's .plowshare/environment.yml does not allow commands to run" +
         ' here; its local mode is off',
+    );
+  }
+  if (request.op === RUN_ISOLATED && side.isolation !== 'bubblewrap') {
+    throw new Refused(
+      'this machine must explicitly enable bubblewrap isolation before an isolated command can run',
     );
   }
   const argv = request.argv ?? [];
@@ -1473,23 +1487,33 @@ async function run(
   lifetime?.addEventListener('abort', withdrawn, { once: true });
   running.set(request.id, cancel);
   try {
-    const outcome = await runCommand(
-      {
-        argv,
-        cwd,
-        env: request.env ?? {},
-        // Only what this machine's own file also names: a server may narrow which
-        // host variables a command sees, and may not reach for one this file did not.
-        inherit: (request.inherit ?? []).filter((name) =>
-          side.inherit.includes(name),
-        ),
-        timeoutMillis: bounded(request.timeoutMillis, side.timeoutMillis),
-        outputBytes: bounded(request.outputBytes, side.outputBytes),
-        ...(request.stdin === undefined ? {} : { stdin: request.stdin }),
-      },
-      process.env,
-      cancel.signal,
-    );
+    const command: Command = {
+      argv,
+      cwd,
+      env: request.env ?? {},
+      // Only what this machine's own file also names: a server may narrow which
+      // host variables a command sees, and may not reach for one this file did not.
+      inherit: (request.inherit ?? []).filter((name) =>
+        side.inherit.includes(name),
+      ),
+      timeoutMillis: bounded(request.timeoutMillis, side.timeoutMillis),
+      outputBytes: bounded(request.outputBytes, side.outputBytes),
+      ...(request.stdin === undefined ? {} : { stdin: request.stdin }),
+    };
+    const resolvedRoot = await canonical(root);
+    const outcome =
+      side.isolation === 'bubblewrap'
+        ? await isolation.run(
+            command,
+            {
+              roots: [resolvedRoot],
+              writeRoots: [resolvedRoot],
+              permits: (path) => allows(resolvedRoot, path, 'reading'),
+            },
+            process.env,
+            cancel.signal,
+          )
+        : await runCommand(command, process.env, cancel.signal);
     return {
       id: request.id,
       outcome: REPLY_OK,

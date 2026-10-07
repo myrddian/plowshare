@@ -44,6 +44,10 @@
       "types": "./build/runner.d.ts",
       "import": "./build/runner.js"
     },
+    "./isolation": {
+      "types": "./build/isolation.d.ts",
+      "import": "./build/isolation.js"
+    },
     "./rooter": {
       "types": "./build/rooter.d.ts",
       "import": "./build/rooter.js"
