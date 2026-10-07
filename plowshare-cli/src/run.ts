@@ -1,4 +1,10 @@
 import {
+  FileStores,
+  manageFileStores,
+  localStorePath,
+} from 'plowshare-client-node/filestores';
+import type { FileStoreDefault } from 'plowshare-client-node/filestores';
+import {
   Connections,
   manageConnections,
   resolveConnection,
@@ -58,6 +64,9 @@ export interface IO {
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
   readonly stdin: (signal: AbortSignal) => Promise<string>;
+  readonly fileStoreSetup?: (
+    signal: AbortSignal,
+  ) => Promise<FileStoreDefault | undefined>;
   readonly setup?: (
     signal: AbortSignal,
   ) => Promise<{ handle: string; password: string }>;
@@ -306,6 +315,26 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       );
       return 0;
     }
+    const fileStores = new FileStores(userConfigDirectory(io.env));
+    if (opts.commandParts?.[0] === 'filestore') {
+      if (opts.validate)
+        throw new Usage(
+          '--validate is for server payloads. FileStore setup is an explicit local configuration action.',
+        );
+      const setupPrompt = io.fileStoreSetup;
+      const state = await manageFileStores(
+        fileStores,
+        opts.commandParts.slice(1),
+        setupPrompt ? () => setupPrompt(control.signal) : undefined,
+      ).catch((cause: unknown) => {
+        throw new Usage(
+          cause instanceof Error ? cause.message : 'Invalid FileStore request.',
+          { cause },
+        );
+      });
+      io.stdout(JSON.stringify(state, null, json ? undefined : 2) + '\n');
+      return 'status' in state && state.status !== 'loaded' ? 2 : 0;
+    }
     const registry = new Connections(userConfigDirectory(io.env));
     if (opts.commandParts?.[0] === 'connection') {
       const config = await manageConnections(
@@ -506,7 +535,9 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
     let directory: string | undefined;
     if (opts.root !== undefined) {
       try {
-        directory = await canonicalRoot(opts.root);
+        directory = await canonicalRoot(
+          await localStorePath(fileStores, opts.root),
+        );
         const found = await discover(directory);
         if (found && opts.project && found.project !== opts.project)
           throw new Usage('The checkout marker belongs to a different project');

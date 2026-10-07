@@ -1,3 +1,4 @@
+import { installFileStores } from './filestores.ts';
 import { isObject } from 'plowshare-client-ts/binding/values';
 import { readPreferences, type Preferences } from './preferences.ts';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
@@ -422,7 +423,9 @@ function openConnect() {
 const serverAdministration = installServerAdmin(request);
 const projectAccess = installProjectAccess(request);
 
+const localFileStores = installFileStores(request);
 function render() {
+  localFileStores.update(state);
   serverAdministration.update(state);
   projectAccess.update(state);
   if (!state) return;

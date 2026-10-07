@@ -1,4 +1,10 @@
 import {
+  FileStores,
+  manageFileStores,
+  promptFileStore,
+  localStorePath,
+} from 'plowshare-client-node/filestores';
+import {
   Connections,
   manageConnections,
   resolveConnection,
@@ -5831,6 +5837,17 @@ export function unreachable(trouble: unknown): boolean {
 }
 
 export async function run(args: readonly string[] = []): Promise<void> {
+  const fileStores = new FileStores(userConfigDirectory());
+  if (args[0] === 'filestore') {
+    process.stdout.write(
+      JSON.stringify(
+        await manageFileStores(fileStores, args.slice(1), promptFileStore),
+        null,
+        2,
+      ) + '\n',
+    );
+    return;
+  }
   const registry = new Connections(userConfigDirectory());
   if (args[0] === 'connection') {
     process.stdout.write(
@@ -5870,7 +5887,10 @@ export async function run(args: readonly string[] = []): Promise<void> {
   // WHERE THE PERSON STARTED, WHICH IS NOT process.cwd(). bin/plowshare-talk
   // changes into the client's own directory to run it, so the directory a
   // person means arrives in PLOWSHARE_HERE; run directly, cwd is right.
-  const here = process.env['PLOWSHARE_HERE'] ?? process.cwd();
+  const here = await localStorePath(
+    fileStores,
+    process.env['PLOWSHARE_HERE'] ?? process.cwd(),
+  );
   // WHICH SURFACE, AND IT IS BOTH STREAMS RATHER THAN ONE.
   //
   // <b>The Ink surface needs raw mode, and raw mode needs a terminal on the
@@ -5883,6 +5903,15 @@ export async function run(args: readonly string[] = []): Promise<void> {
   const colour = coloured(process.stdout);
   const interactive =
     process.stdin.isTTY === true && process.stdout.isTTY === true;
+  let storeState = await fileStores.load();
+  if (storeState.status === 'needs-setup' && interactive) {
+    const input = await promptFileStore();
+    if (input) storeState = await fileStores.initialize(input);
+  }
+  if (storeState.status !== 'loaded')
+    process.stderr.write(
+      storeState.message + ' Use filestore setup or filestore status.\n',
+    );
   // Asked BEFORE Ink mounts: the terminal's answers arrive on stdin, and once
   // Ink is reading stdin they would arrive as typing. See `probe.ts`.
   const probe =

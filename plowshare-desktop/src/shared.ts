@@ -1,3 +1,4 @@
+import type { FileStoreState } from 'plowshare-client-node/filestores';
 import type {
   ApplicationFileListing,
   ApplicationFileDocument,
@@ -144,6 +145,7 @@ export interface History {
   error?: string;
 }
 export interface DesktopState {
+  localFileStores?: FileStoreState;
   applicationFiles?: {
     project: string;
     loading: boolean;
@@ -319,6 +321,9 @@ export interface ContextReading extends Load {
   sample?: boolean;
 }
 export type Request =
+  | { action: 'filestore-load' }
+  | { action: 'filestore-choose' }
+  | { action: 'filestore-setup'; alias: string; root: string }
   | { action: 'application-runtime'; project: string }
   | { action: 'application-files'; project: string; path?: string }
   | { action: 'application-file-read'; project: string; path: string }
@@ -604,6 +609,7 @@ export type Request =
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' };
 export interface Reply {
+  fileStoreRoot?: string;
   relay?: RelayReplies['relay.topics' | 'relay.log'];
   relayControl?: RelayReplies['relay.operate'];
   administration?: Replies[ServerAdminOperation | ProjectAccessOperation];

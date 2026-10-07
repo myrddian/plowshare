@@ -165,3 +165,73 @@ Bootstrap/operator tokens and single-use WS tickets retain their ephemeral behav
 Authentication, refresh, ticket acquisition and logout use HTTP. Supported
 application operations and file bytes continue over WS; PDF/image conversion
 continues on the server. The existing Git-object HTTP exception is unchanged.
+
+
+## Local FileStores
+
+GUI, CLI and TUI use the same host registry at `filestore.js` inside the shared
+Plowshare user configuration directory (`PLOWSHARE_CONFIG_DIR`, otherwise the
+existing user configuration location). These aliases describe directories on this
+computer, independently of named server/account connections. Connection-owned
+credentials, Personal replicas and recovery state keep their existing isolation.
+Registering a FileStore does not connect to a server or authorize an agent to
+access its files.
+
+```sh
+bin/plowshare-cli filestore status
+bin/plowshare-cli filestore setup applications /absolute/path/to/applications
+bin/plowshare-talk filestore status
+bin/plowshare-cli filestore resolve applications mychatbot
+```
+
+`filestore setup` without arguments prompts on an interactive terminal; a blank
+alias skips setup. Noninteractive callers must supply the alias and absolute
+root. The TUI also offers setup before mounting its interactive surface when the
+registry is absent. The desktop shows **Set up local FileStores**, with an alias,
+a directory chooser and reload/error states. **Local FileStores** in the
+connection dialog opens the existing definition and its resolved locations.
+
+A registry is a trusted, host-owned JavaScript module, with only a default export:
+
+```js
+export default {
+  version: 1,
+  defaultStore: 'applications',
+  fileStores: {
+    applications: { root: '/absolute/path/to/applications' },
+    data: { root: '/absolute/path/to/data' },
+  },
+};
+```
+
+Aliases start with a lowercase letter, followed by letters, digits, underscores
+or hyphens (at most 64 characters). Roots must be absolute directories; symlink
+roots, traversal, invalid field types and unknown configuration fields are
+refused. Up to 100 stores and 64 KiB of JavaScript are supported. Evaluation has a two-second limit and runs away from the UI event
+loop. Modules execute
+as local user configuration, not as a sandbox; relative module imports are not
+supported. Never obtain this file from an Application or remote project.
+
+All definitions are validated before creating directories. Every load recreates
+missing configured directories and rechecks availability. Invalid or unreadable
+registries and creation failures stay visible as `unavailable`; existing files
+are preserved. There is no fallback to another store or host. After correcting
+the definition or directory permissions, reload it.
+
+Successful setup saves `fileStoreDefault: {alias, root}` alongside the existing
+connections in `config.json`. This bootstrap policy is deliberately outside the
+registry: if `filestore.js` is absent, all clients can recreate it and the default
+store. `filestore default ALIAS ABSOLUTE_ROOT` explicitly sets this policy. It does
+not overwrite a present registry. Without a configured policy, an absent registry
+returns `needs-setup`; Plowshare never guesses a development root. Concurrent
+clients serialize initialization and configuration changes; setup refuses to
+replace an existing registry. Edit the host definition to add more aliases.
+
+For an explicit local file grant, CLI `--root store:applications/mychatbot`
+resolves the alias on this computer before opening the normal fenced file
+channel. TUI `PLOWSHARE_HERE=store:applications/mychatbot` selects its starting
+location the same way. Relative references must remain inside the canonical
+store, including through symlinks. Existing absolute-root workflows still work.
+User approvals, project membership, exclusions and local command settings remain
+authoritative. Portable server/Application FileStore references and Application
+runtime writable areas are a separate server capability.

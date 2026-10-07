@@ -1,3 +1,4 @@
+import { FileStores } from 'plowshare-client-node/filestores';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { decodeDesktopRequest } from './request-boundary.ts';
 import { WorkspacePage } from './workspace-page.ts';
@@ -145,6 +146,7 @@ const client = new DesktopWorkspace(
   serverConnector,
   new ConnectionConfig(configDirectory),
   new JobJournal(configDirectory),
+  new FileStores(configDirectory),
 );
 
 function sendWorkspace() {
@@ -1026,6 +1028,21 @@ background(
           request.revision,
           request.chapter,
         ).then(() => ({ state: client.state }));
+      if (request?.action === 'filestore-choose') {
+        if (!main)
+          throw new Error('Open local FileStores from the main window.');
+        const choice = await dialog.showOpenDialog(window!, {
+          title: 'Choose a local FileStore directory',
+          buttonLabel: 'Use directory',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        return {
+          state: client.state,
+          ...(!choice.canceled && choice.filePaths[0]
+            ? { fileStoreRoot: choice.filePaths[0] }
+            : {}),
+        };
+      }
       if (request?.action === 'application-runtime') {
         if (
           !main ||
@@ -1078,7 +1095,10 @@ background(
             (row) =>
               row.name === request.project &&
               row.machine === thisMachine(process.env, hostname()),
-          )?.workspace;
+          )?.workspace ??
+          client.state.localFileStores?.stores.find(
+            (row) => row.alias === client.state.localFileStores?.defaultStore,
+          )?.root;
         return dialog
           .showOpenDialog(window!, {
             title: 'Allow project file access',

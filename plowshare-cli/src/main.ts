@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { promptFileStore } from 'plowshare-client-node/filestores';
 import { promptLogin, promptNewPassword, promptSetup } from './login.js';
 import { run } from './run.js';
 
@@ -9,6 +10,7 @@ process.once('SIGTERM', stop);
 process.exitCode = await run(process.argv.slice(2), {
   env: process.env,
   login: promptLogin,
+  fileStoreSetup: promptFileStore,
   setup: promptSetup,
   newPassword: promptNewPassword,
   stdout: (text) => {

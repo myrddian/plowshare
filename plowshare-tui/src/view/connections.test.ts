@@ -41,3 +41,29 @@ test('TUI management uses the shared registry and selection fails before creatin
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('TUI FileStore management uses the same host registry without a server or terminal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plowshare-tui-filestores-'));
+  vi.stubEnv('PLOWSHARE_CONFIG_DIR', join(root, 'config'));
+  const write = vi
+    .spyOn(process.stdout, 'write')
+    .mockImplementation(() => true);
+  try {
+    await run(['filestore', 'status']);
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('needs-setup'));
+    await run(['filestore', 'setup', 'apps', join(root, 'apps')]);
+    expect(
+      (await new Connections(join(root, 'config')).load()).fileStoreDefault
+        ?.alias,
+    ).toBe('apps');
+    await run(['filestore', 'resolve', 'apps', '']);
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('loaded'));
+    await expect(
+      run(['filestore', 'resolve', 'apps', '../foreign']),
+    ).rejects.toThrow('relative FileStore');
+  } finally {
+    write.mockRestore();
+    vi.unstubAllEnvs();
+    await rm(root, { recursive: true, force: true });
+  }
+});

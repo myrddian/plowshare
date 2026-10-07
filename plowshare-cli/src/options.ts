@@ -3,6 +3,7 @@ import { isPayloadCommand } from 'plowshare-client-ts/operations/commands';
 export const HELP = `First-run setup: plowshare-cli --server <server-origin> setup
 Usage: plowshare-cli [options] setup|login|logout
        plowshare-cli connection list|add|select|rename|remove ARGS...
+       plowshare-cli filestore status|setup|default|resolve ARGS...
        plowshare-cli [options] memory <verb> [JSON payload or text]
        plowshare-cli [options] search <text or JSON payload>
        plowshare-cli [options] job status|poll|result|wait|cancel <job-id>
@@ -67,7 +68,7 @@ Options (before or after the command; -- ends option parsing):
   --payload -            read the command's JSON payload from stdin
   --wait                 wait for an accepted job or job status/cancel
   --watch                wait with live job progress (JSON is newline-delimited)
-  --root /ABSOLUTE/PATH   explicitly serve fenced local files; commands default off
+  --root PATH             absolute directory or store:ALIAS/RELATIVE_PATH; explicit file grant
   --sync                 reconnect an enabled union while rooted; never enables it
   --poll-ms N            status polling interval (default 1000)
   --timeout-ms N         whole invocation deadline (default 30000)

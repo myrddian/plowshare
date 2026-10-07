@@ -64,7 +64,7 @@ export class ConnectionConfig implements ConnectionStore {
       if (errorCode(error) !== 'ENOENT') throw error;
       exists = false;
     }
-    if (!exists) {
+    if (!exists || config.connectionSetupPending) {
       // Preserve the old preference; only metadata is imported, never a password.
       for (const directory of new Set([
         this.directory,

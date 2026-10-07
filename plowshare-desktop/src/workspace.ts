@@ -1,3 +1,7 @@
+import type {
+  FileStoreRegistry,
+  FileStoreState,
+} from 'plowshare-client-node/filestores';
 import { connectionName } from 'plowshare-client-node/connections';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import type { JobStore, SavedJob } from './job-store.ts';
@@ -64,6 +68,8 @@ export class DesktopWorkspace {
   private namedConnections: NonNullable<DesktopState['namedConnections']> = [];
   private localPreferences: DesktopState['localPreferences'];
   private selectedConnection: string | undefined;
+  private localFileStores: FileStoreState | undefined;
+  private fileStores: FileStoreRegistry | undefined;
   private switches: Promise<unknown> = Promise.resolve();
   constructor(
     changed: (state: DesktopState) => void,
@@ -71,11 +77,13 @@ export class DesktopWorkspace {
     connector: Connector = serverConnector,
     connectionStore?: ConnectionStore,
     jobStore?: JobStore,
+    fileStores?: FileStoreRegistry,
   ) {
     this.changed = changed;
     this.store = store;
     this.connectionStore = connectionStore;
     this.jobStore = jobStore;
+    this.fileStores = fileStores;
     this.control = new DesktopClient((state) => {
       const lost = this.connected && !state.connected;
       this.connected = state.connected;
@@ -111,6 +119,8 @@ export class DesktopWorkspace {
   }
   get state(): DesktopState {
     const state = structuredClone(this.control.state);
+    if (this.localFileStores)
+      state.localFileStores = structuredClone(this.localFileStores);
     if (this.localPreferences !== undefined)
       state.localPreferences = structuredClone(this.localPreferences);
     state.namedConnections = structuredClone(this.namedConnections);
@@ -649,7 +659,25 @@ export class DesktopWorkspace {
   private async dispatchRequest(request: Request): Promise<Reply> {
     if (!request || typeof request !== 'object')
       throw new Error('Invalid desktop request.');
+    if (
+      request.action === 'filestore-load' ||
+      request.action === 'filestore-setup'
+    ) {
+      if (!this.fileStores)
+        throw new Error('Local FileStore configuration is unavailable.');
+      this.localFileStores =
+        request.action === 'filestore-setup'
+          ? await this.fileStores.initialize({
+              alias: request.alias,
+              root: request.root,
+            })
+          : await this.fileStores.load();
+      this.emit();
+      return { state: this.state };
+    }
     if (request.action === 'bootstrap') {
+      if (this.fileStores && !this.localFileStores)
+        this.localFileStores = await this.fileStores.load();
       if (this.restoring) return this.restoring;
       if (this.initialized || !this.connectionStore)
         return { state: this.state };
