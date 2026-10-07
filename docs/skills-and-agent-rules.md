@@ -39,6 +39,36 @@ and `allowed-tools`. Metadata values must be strings. `allowed-tools` is a
 space-separated string; it declares a constraint, never a new permission.
 Unsupported fields and duplicate YAML keys are refused visibly.
 
+The harness uses its existing `tool.pre` and `tool.post` stages to check
+`file_edit` operations on `SKILL.md` packages and legacy `skills.yml` policies in
+Plowshare skill directories. `tool.pre` checks complete `content` using the same
+discovery parsers and denies invalid source before writing. `tool.post` reads
+acknowledged edits through the run's authorized filesystem provider and checks
+the saved snapshot, including partial edits and any arguments rewritten by later
+hooks. Results include correction guidance for missing frontmatter, duplicate
+keys and other invalid fields. The `file_edit` tool is unchanged.
+Each refusal identifies the file, preserves the precise parser reason (including
+YAML line and column diagnostics), and gives a correction for that violation.
+Independent field failures are collected in deterministic order rather than
+stopping at the first one. Broken YAML or frontmatter fences stop field checks;
+the response explains that further failures may remain after repairing the syntax.
+Every format rejection also includes a deterministic valid example for the file
+type. A package example uses its valid directory name, required name and
+description fields, and an instruction body. A policy example uses one entry
+with `agentVisible: false`. These are reference scaffolds, not replacement
+instructions or decisions about the author's desired visibility or execution mode.
+For example, a duplicate key reports which key was repeated and asks for its
+entries to be merged; it does not suggest replacing valid frontmatter.
+
+Post validation happens after saving: an invalid file remains saved and discovery
+continues to refuse it until repaired. The harness never invents a description,
+chooses a context mode, changes visibility or rewrites the file automatically.
+If the provider cannot supply a complete bounded snapshot (including older
+clients without raw snapshot support), the result says validation is unverified
+and retains the acknowledged edit. Inspect the saved file before making a
+correction; do not replay the acknowledged mutation. Validation observes a
+snapshot, so a later external edit still requires fresh discovery validation.
+
 Plowshare's extensions are `agent`, `mode` and `agentVisible`. `agent` defaults to
 `interlocutor`; `mode` may be `INHERITED`, `SUMMARISED`, `NEW`, or `DIRECT`.
 `DIRECT` cannot select another agent. An absent mode remains unresolved until

@@ -1,6 +1,9 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.hooks.Hooks;
 import io.aeyer.plowshare.server.images.ImageStore;
+import java.util.function.Function;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,6 +11,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Skills attach to the ordinary runtime after its core beans have been built. */
 @Configuration
 public class SkillsConfig {
+  /** Skill checks use the existing hook contract with each run's authorized file router. */
+  @Bean
+  public Function<ProviderRouter, Hooks> skillFileChecks(JobRuntime runtime) {
+    Function<ProviderRouter, Hooks> checks = SkillFileHooks::new;
+    runtime.useFileChecks(checks);
+    return checks;
+  }
+
   @Bean
   public ScopedFileRules scopedFileRules(
       AgentRules rules, io.aeyer.plowshare.server.files.RunProviders files, JobRuntime runtime) {

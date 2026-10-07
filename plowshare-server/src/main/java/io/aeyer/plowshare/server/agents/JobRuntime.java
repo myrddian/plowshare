@@ -330,6 +330,20 @@ public final class JobRuntime {
     this.fileRules = Objects.requireNonNull(rules);
   }
 
+  private volatile Function<ProviderRouter, Hooks> fileChecks = router -> Hooks.NONE;
+
+  /** Wires per-run filesystem checks into the existing tool.pre/tool.post chain. */
+  public void useFileChecks(Function<ProviderRouter, Hooks> checks) {
+    fileChecks = Objects.requireNonNull(checks);
+  }
+
+  private Hooks fileChecksFor(AgentDefinition definition, String session, String owner) {
+    return files == null
+        ? Hooks.NONE
+        : fileChecks.apply(
+            new ProviderRouter(at -> files.forRun(at, definition.scopes(), session, owner)));
+  }
+
   private volatile SkillRuntime skills;
   private volatile BoundCommands boundCommands;
 
@@ -1497,6 +1511,7 @@ public final class JobRuntime {
             ? ownerOf(callerHandle, session, conversation)
             : transcript.usage().accountHandle();
     if (informationInputs != null) informationInputs.requireLog(conversation, owner);
+    Hooks skillChecks = fileChecksFor(definition, session, owner);
     HookContext declared =
         new HookContext(
                 definition.name(),
@@ -1507,7 +1522,8 @@ public final class JobRuntime {
                 HookContext.SERVER)
             .inLog(transcript.origin().wireName())
             .withUsage(transcript.usage());
-    InTurnHooks runHooks = new InTurnHooks(declared, () -> activeHooks(route, harnessRun));
+    InTurnHooks runHooks =
+        new InTurnHooks(declared, () -> activeHooks(route, harnessRun, skillChecks));
     TurnEnd end = new TurnEnd();
     // A script may use file capabilities but cannot turn a command into an unchecked check.
     Commands.Port commands =
@@ -1520,7 +1536,11 @@ public final class JobRuntime {
                 declared,
                 (context, arguments) -> {
                   ToolPre judged =
-                      toolPre(activeHooks(route, harnessRun), context, RunTool.NAME, arguments);
+                      toolPre(
+                          activeHooks(route, harnessRun, skillChecks),
+                          context,
+                          RunTool.NAME,
+                          arguments);
                   runHooks.record(judged.records());
                   return judged;
                 });
@@ -1682,7 +1702,7 @@ public final class JobRuntime {
       AgentTool tool = offered.get(name);
       if (tool == null)
         throw new IllegalStateException("script requested an ungranted tool: " + name);
-      var pre = toolPre(activeHooks(route, harnessRun), context, name, arguments);
+      var pre = toolPre(activeHooks(route, harnessRun, skillChecks), context, name, arguments);
       pre.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       if (pre.isDenied())
         return pauseScript(
@@ -1747,7 +1767,9 @@ public final class JobRuntime {
         scripts.executed(conversation, pending.sequence(), raw);
         watch.scriptProgress(taken, budget.spent() - callsBefore);
       }
-      ToolPost post = toolPost(activeHooks(route, harnessRun), context, name, pre.arguments(), raw);
+      ToolPost post =
+          toolPost(
+              activeHooks(route, harnessRun, skillChecks), context, name, pre.arguments(), raw);
       post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       runHooks.drain().forEach(record -> transcript.record(LoggedEntry.hook(record)));
       if (withheld(post))
@@ -1835,14 +1857,6 @@ public final class JobRuntime {
                 transcript.conversationId(),
                 HookContext.SERVER)
             .withUsage(transcript.usage());
-    // THE RUN'S IN-TURN LOG STAGES (spec 2026-09-28-hooks-reach-the-log, slices 2 and 3):
-    // stage.* and approval.pre, asked of the same chain as every run stage — this run's
-    // profile, then the project's — with its log's origin, so `origins:` filters them. What
-    // they park is written with the tool call in flight, below.
-    InTurnHooks runHooks =
-        new InTurnHooks(
-            declared.inLog(transcript.origin() == null ? null : transcript.origin().wireName()),
-            () -> activeHooks(route, harnessRun));
     // MADE FIRST, BEFORE ANY PROVIDER IS ASKED: this run's own TurnEnd, handed to every
     // provider through Context#end so a caller-side tool built inside one of them can end
     // this run's turn (spec 2026-09-27 §2) without waiting for the provider to mint its own.
@@ -1858,6 +1872,15 @@ public final class JobRuntime {
             ? ownerOf(callerHandle, sessionId, transcript.conversationId())
             : transcript.usage().accountHandle();
     if (informationInputs != null) informationInputs.requireLog(transcript.conversationId(), owner);
+    Hooks skillChecks = fileChecksFor(definition, sessionId, owner);
+    // THE RUN'S IN-TURN LOG STAGES (spec 2026-09-28-hooks-reach-the-log, slices 2 and 3):
+    // stage.* and approval.pre, asked of the same chain as every run stage — this run's
+    // profile and filesystem checks, then the project's — with its log's origin, so `origins:`
+    // filters them. What they park is written with the tool call in flight, below.
+    InTurnHooks runHooks =
+        new InTurnHooks(
+            declared.inLog(transcript.origin() == null ? null : transcript.origin().wireName()),
+            () -> activeHooks(route, harnessRun, skillChecks));
     requireSystemModelCapabilities(definition, transcript);
     RunExtras.Extras extras;
     try {
@@ -1880,7 +1903,11 @@ public final class JobRuntime {
                     // Spec §5.2: the verdict on a check's command is a hook decision like
                     // any other, written with the call that judged it — not thrown away.
                     ToolPre judged =
-                        toolPre(activeHooks(route, harnessRun), context, RunTool.NAME, arguments);
+                        toolPre(
+                            activeHooks(route, harnessRun, skillChecks),
+                            context,
+                            RunTool.NAME,
+                            arguments);
                     runHooks.record(judged.records());
                     return judged;
                   });
@@ -2038,7 +2065,7 @@ public final class JobRuntime {
     // after an unrecorded message would move up a place and end the shared
     // prefix there. A volatile addition is not recorded as a message, so it goes
     // last, where the reminder's own placement argument applies to it too.
-    PromptPre pre = promptPre(activeHooks(route, harnessRun), hookContext, userPrompt);
+    PromptPre pre = promptPre(activeHooks(route, harnessRun, skillChecks), hookContext, userPrompt);
     // After, not before: the profile just asked for heard it through the chain, and
     // only one a reroute builds later still needs telling.
     harnessRun.spoke(hookContext, userPrompt);
@@ -2630,7 +2657,8 @@ public final class JobRuntime {
       // THE MODEL'S ANSWER: a reply that asked for no tool, or declined the forced one, and is
       // not a call the validator made for it -- that one goes down the tool path below.
       if ((completion.toolCalls().isEmpty() || declined) && madeForTheModel == null) {
-        PromptPost post = promptPost(activeHooks(route, harnessRun), hookContext, said, List.of());
+        PromptPost post =
+            promptPost(activeHooks(route, harnessRun, skillChecks), hookContext, said, List.of());
         if (definition.reviewWith() != null && !answerReviewed) {
           post.records().forEach(record -> transcript.record(LoggedEntry.hook(record)));
           AgentTool delegate = offered.get(AgentRunTool.NAME);
@@ -2726,7 +2754,7 @@ public final class JobRuntime {
       // the record as a diagnostic, and the call is what that reply meant.
       PromptPost post =
           promptPost(
-              activeHooks(route, harnessRun),
+              activeHooks(route, harnessRun, skillChecks),
               hookContext,
               madeForTheModel != null || completion.content() == null ? "" : completion.content(),
               asked.stream().map(ToolCall::name).toList());
@@ -2865,7 +2893,7 @@ public final class JobRuntime {
           result = fenced;
           told = ToolLines.REFUSED;
         } else {
-          Hooks active = activeHooks(route, harnessRun);
+          Hooks active = activeHooks(route, harnessRun, skillChecks);
           // run's gate stands around the chain and is no hook's to leave out:
           // RunTool says why.
           ToolPre preTool =
@@ -2917,7 +2945,7 @@ public final class JobRuntime {
                       wanted.name());
               ToolPost postTool =
                   toolPost(
-                      activeHooks(route, harnessRun),
+                      activeHooks(route, harnessRun, skillChecks),
                       hookContext,
                       wanted.name(),
                       preTool.arguments(),
@@ -3058,7 +3086,7 @@ public final class JobRuntime {
       // tool results, which the contract does not allow.
       StepPost afterStep =
           stepPost(
-              activeHooks(route, harnessRun),
+              activeHooks(route, harnessRun, skillChecks),
               hookContext.withUsage(usageFor(transcript, definition, steps)),
               new Step(
                   steps,
@@ -4573,11 +4601,11 @@ public final class JobRuntime {
 
   /**
    * The hooks for the next step: the harness profile of the model the route will send to, then
-   * {@link #useHooks}' chain, which is the project's and then the person's local hooks (spec
-   * 2026-09-30-local-hooks-are-served decision 5). Asked per stage, so a run rerouted to its
-   * fallback model runs that model's profile from then on.
+   * filesystem checks, then {@link #useHooks}' chain, which is the project's and then the person's
+   * local hooks (spec 2026-09-30-local-hooks-are-served decision 5). Asked per stage, so a run
+   * rerouted to its fallback model runs that model's profile from then on.
    */
-  private Hooks activeHooks(Rerouting route, HarnessRun harnessRun) {
+  private Hooks activeHooks(Rerouting route, HarnessRun harnessRun, Hooks skillChecks) {
     String wireModel;
     try {
       wireModel = dispatcher.wireModelFor(route.specifier());
@@ -4586,7 +4614,7 @@ public final class JobRuntime {
       // runs the default profile until then.
       wireModel = null;
     }
-    return Hooks.chain(harnessRun.forModel(wireModel), hooks);
+    return Hooks.chain(harnessRun.forModel(wireModel), skillChecks, hooks);
   }
 
   /**
