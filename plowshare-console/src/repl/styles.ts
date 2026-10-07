@@ -261,7 +261,7 @@ body {
 
 /* ---- the shell: a rail of six views, one of which holds the REPL ------- */
 
-.shell { display: grid; grid-template-columns: 12rem 1fr; height: 100%; min-height: 0; }
+.shell { display: grid; grid-template-columns: 12rem minmax(0, 1fr); height: 100%; min-height: 0; }
 .rail {
     display: flex; flex-direction: column; gap: .6rem;
     padding: .6rem .5rem; border-right: 1px solid var(--rule);
@@ -280,6 +280,18 @@ body {
 .stream[data-state="reconnecting"], .stream[data-state="closed"] { color: var(--refused); }
 .stage { min-height: 0; overflow: hidden; display: flex; }
 .stage > * { flex: 1 1 auto; min-width: 0; }
+
+/* Work records remain readable as the browser panel narrows. */
+.work-summaries { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+.work-summary, .work-admissions { min-width: 0; }
+.work-row, .inbox-item { padding: .6rem 0; border-bottom: 1px solid var(--rule); }
+.record-links { display: flex; gap: .75rem; flex-wrap: wrap; margin: .4rem 0; }
+.record-links a, .work-overview a { color: var(--you); overflow-wrap: anywhere; }
+.result-preview, .inbox-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+.result-preview { max-height: 12rem; overflow: auto; }
+.approval-rows { display: grid; gap: .75rem; }
+.inbox-paging { display: flex; gap: .75rem; margin: .75rem 0; }
+.rail button[data-stale]::after { content: " · stale"; }
 
 /* ---- the chat surface: the tree, then the conversation ----------------- */
 
@@ -353,6 +365,7 @@ body {
 }
 .chat-side label { font-size: var(--step--1); color: var(--dim); }
 .chat-side .lifecycle-move, .chat-side select, .chat-side input { font-size: var(--step--1); }
+.chat-side select { max-width: 100%; min-width: 0; }
 
 /* A section heading, so the tree has a top level the eye can find. */
 .chat-side .side-title {
@@ -622,7 +635,7 @@ body {
 .entry-row[data-kind="runtime_note"] .entry-head { color: var(--runtime); }
 .entry-row[data-kind="plan"] .entry-head { color: var(--cite); }
 
-.screen { display: grid; grid-template-rows: auto 1fr; height: 100%; min-height: 0; }
+.screen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; }
 .screen-head {
     display: flex; gap: .75rem 1.25rem; align-items: baseline; flex-wrap: wrap;
     padding: .6rem .9rem; border-bottom: 1px solid var(--rule);
@@ -692,6 +705,7 @@ body {
 .job[data-state="RUNNING"] .state { color: var(--agent); }
 .job .cancel-requested { color: var(--refused); }
 .job .ending { color: var(--dim); }
+.job .body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .window-note { color: var(--dim); font-style: italic; margin: 0 0 .5rem; }
 
 .proposal .finality { color: var(--refused); font-style: normal; }
@@ -839,6 +853,19 @@ body {
 .application-editor textarea { width: 100%; min-height: 20rem; resize: vertical; font: inherit; tab-size: 2; }
 .application-file-title, .application-permission { overflow-wrap: anywhere; }
 .mode-note, .reach { margin: .2rem 0; color: var(--dim); }
+@media (max-width: 720px) {
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .rail { flex-direction: row; flex-wrap: wrap; gap: .25rem; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .rail-group { display: contents; }
+  .rail-foot { flex-basis: 100%; margin-top: 0; }
+  .chat-surface { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .chat-side { max-height: 25vh; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .field { flex-wrap: wrap; }
+  .jobs .field .label, .pending-approvals .field .label, .work-overview .field .label {
+    flex-basis: 100%; text-align: left;
+  }
+}
+
 `;
 
 /**

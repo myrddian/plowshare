@@ -7,13 +7,13 @@ work through different interfaces. Capability coverage and presentation differ.
 A client reconnect establishes a new connection to durable state; it does not
 repeat the last mutation to reconstruct the screen.
 
-| Client | Useful for | Work stays where? |
-| --- | --- | --- |
-| Desktop | Conversations, project navigation, Library reading, reports and inspection | Server; explicit local file presence stays on the client |
-| TUI | Terminal conversations, commands, project work and live run inspection | Server; attached checkout stays on the client |
-| CLI | Explicit operations, scripting, status and repair | Server; local files only with an explicit root |
-| Web console | Browser access to its implemented conversation and management surfaces | Server |
-| MCP | Exposing Plowshare operations to another tool-using host | Plowshare owns the submitted work; the host owns its own session |
+| Client      | Useful for                                                                 | Work stays where?                                                |
+| ----------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Desktop     | Conversations, project navigation, Library reading, reports and inspection | Server; explicit local file presence stays on the client         |
+| TUI         | Terminal conversations, commands, project work and live run inspection     | Server; attached checkout stays on the client                    |
+| CLI         | Explicit operations, scripting, status and repair                          | Server; local files only with an explicit root                   |
+| Web console | Browser access to its implemented conversation and management surfaces     | Server                                                           |
+| MCP         | Exposing Plowshare operations to another tool-using host                   | Plowshare owns the submitted work; the host owns its own session |
 
 The repository clients use shared TypeScript transport and operation contracts.
 The Java client remains available for existing tooling. SDK consumers can use
@@ -96,6 +96,31 @@ An approval presents the particular pending operation and its identity. Answer
 that displayed request; do not reuse another run's approval key. Declining,
 leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
+
+The web console opens on a **work overview** with current-process jobs,
+pending approvals, retained inbox results and paged scheduled/event admissions.
+A queued admission, a started job, a cancellation request and a terminal outcome
+are shown separately. The job list and job lookup describe what the current
+server process holds; they cannot enumerate historical jobs after a server
+restart. Use **Open retained conversation** or the inbox to inspect saved results.
+Work-record links, back/forward and reload select records through read-only
+operations. Hidden work screens pause their polls and reconcile when revisited.
+Inbox pages hold at most 50 deliveries, job windows at most 60 runs, approval
+windows at most 30 requests, and admission pages at most 30 records. An admission
+page may be short after authorization filtering; Next still checks later windows.
+Job and approval windows bound rendering; their existing list operations return
+the full authorized process/account listing and do not offer server pagination.
+
+The web console's **approvals** view lists pending requests across the signed-in
+account, including requests from background work outside the selected chat.
+Review the exact command arguments, execution side, directory, reason and source
+conversation, then choose **Allow once** or **Deny**. Command sets are displayed
+in full and answered together. The server checks authority and owns any continuation;
+a recorded decision can stand while its conversation is busy. This view polls
+and refreshes after reconnects. **Refresh approvals** reads the pending queue
+without repeating a decision. If delivery is uncertain, the request's controls
+stay disabled in this tab while the queue reconciles. Inspect the server state
+before deciding whether another action is needed.
 
 The inbox holds durable deliveries and read receipts. Opening the application or
 seeing an unread count is not proof that an item was read. Open the item to read

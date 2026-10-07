@@ -1,156 +1,191 @@
-import { background } from '../background.ts';
+import type {
+  InboxItem,
+  InboxPage,
+} from '../../../sdk/typescript/src/operations/administrative-replies.ts';
+import { background } from '../background';
 import type { EventStream, EventStreamOptions } from '../events';
-import { button, el, trouble } from './dom';
+import { socketWorkRecords, WorkRefused } from '../work';
+import { button, el, nothing, problemText } from './dom';
+import { reconciliation } from './reconciliation';
+import { recordLinks } from './record-link';
 import type { Screen } from './screen';
-import { asInboxChanged, type InboxItemView, type InboxPage } from './wire';
+import { asInboxChanged } from './wire';
 
 export interface InboxOptions {
   readonly root: HTMLElement;
   readonly openStream: (options: EventStreamOptions) => EventStream;
   readonly session: string;
+  readonly pollMs?: number | null;
 }
 
-/**
- * INBOX: what scheduled and event-started runs left for the signed-in account. The console's
- * first screen spoken entirely over frames: inbox.list, inbox.read, and the inbox.changed push.
- */
+/** Retained account deliveries are read from the server, including after reload.
+ * A read receipt is explicit user input; polling never marks an item read. */
 export function createInbox(options: InboxOptions): Screen {
-  const element = el('section', 'inbox');
-  options.root.append(element);
+  const element = el('section', 'screen inbox');
+  const heading = el('h2', 'screen-title', 'inbox');
+  const reload = button('reload', 'Refresh inbox');
+  const head = el('header', 'screen-head');
+  head.append(heading, reload);
+  const body = el('div', 'screen-body');
+  const status = el('p', 'inbox-status');
+  status.setAttribute('role', 'status');
+  const error = el('p', 'trouble');
+  error.setAttribute('role', 'alert');
+  error.hidden = true;
+  const rows = el('div', 'inbox-rows');
+  const previous = button('previous', 'Previous inbox page');
+  const next = button('next', 'Next inbox page');
+  const paging = el('div', 'inbox-paging');
+  paging.append(previous, next);
+  body.append(status, error, rows, paging);
+  element.append(head, body);
+  options.root.replaceChildren(element);
   let stream: EventStream | null = null;
-  let stopped = false;
+  let stopped = false,
+    offset = 0;
+  let held: InboxPage | null = null;
+  const limit = 50;
+  const blocked = new Map<string, string>();
+  const refresh = reconciliation({
+    available: () => stream?.status().state === 'open',
+    pollMs: options.pollMs === undefined ? 5000 : options.pollMs,
+    async read() {
+      const socket = stream;
+      if (socket === null) return;
+      const pageOffset = offset;
+      element.setAttribute('aria-busy', 'true');
+      try {
+        const page = await socketWorkRecords(socket).inbox(pageOffset, limit);
+        if (stopped || pageOffset !== offset) return;
+        held = page;
+        error.hidden = true;
+        draw();
+        status.textContent = `Inbox page ${pageOffset / limit + 1}. Saved deliveries are reconciled from server state.`;
+      } catch (problem) {
+        if (stopped || pageOffset !== offset) return;
+        error.textContent = problemText(
+          problem,
+          'The inbox could not be read.',
+        );
+        error.dataset['trouble'] = '';
+        error.hidden = false;
+        status.textContent =
+          held === null
+            ? 'No inbox snapshot is available. Refresh to retry.'
+            : 'The displayed inbox snapshot may be stale. Refresh to retry.';
+      } finally {
+        element.setAttribute('aria-busy', 'false');
+      }
+    },
+  });
 
-  async function refresh(): Promise<void> {
-    if (stream === null || stopped) {
-      return;
-    }
-    let outcome;
-    try {
-      outcome = await stream.ask('inbox.list', { limit: 50 });
-    } catch (problem) {
-      element.replaceChildren(
-        trouble(
-          problem instanceof Error
-            ? problem.message
-            : 'The inbox could not be read.',
-        ),
-      );
-      return;
-    }
-    if (outcome.code !== 'OK') {
-      element.replaceChildren(
-        trouble(outcome.said ?? 'The inbox could not be read.'),
-      );
-      return;
-    }
-    draw(outcome.payload as InboxPage);
-  }
-
-  /** "Waiting on the socket," rather than the trouble a premature `ask` would show. */
-  function showConnecting(): void {
-    const waiting = el('p', 'inbox-connecting', 'connecting…');
-    waiting.dataset['connecting'] = '';
-    element.replaceChildren(waiting);
-  }
-
-  /**
-   * Replace any trouble already shown on one item's row with this one, rather
-   * than stacking a fresh paragraph under every failed retry.
-   */
-  function showItemTrouble(article: HTMLElement, text: string): void {
-    article.querySelector('[data-trouble]')?.remove();
-    article.append(trouble(text));
-  }
-
-  function draw(page: InboxPage): void {
-    const heading = el('h2', 'inbox-heading');
+  function draw(): void {
+    if (held === null) return;
     heading.textContent =
-      page.unread === 0 ? 'inbox' : `inbox · ${page.unread} unread`;
-    if (page.items.length === 0) {
-      const empty = el('p', 'inbox-empty');
-      empty.textContent =
-        'Nothing has arrived. Scheduled runs with no conversation land here.';
-      element.replaceChildren(heading, empty);
-      return;
-    }
-    element.replaceChildren(heading, ...page.items.map(row));
+      held.unread === 0 ? 'inbox' : `inbox · ${held.unread} unread`;
+    rows.replaceChildren(
+      ...(held.items.length === 0
+        ? [nothing('No saved deliveries in this inbox page.')]
+        : held.items.map(row)),
+    );
+    previous.disabled = offset === 0;
+    next.disabled = held.items.length < limit;
   }
 
-  function row(item: InboxItemView): HTMLElement {
+  function row(item: InboxItem): HTMLElement {
     const article = el('article', 'inbox-item');
     article.dataset['item'] = item.id;
     article.dataset['unread'] = String(item.readAt === null);
-    const meta = el('div', 'inbox-meta');
-    meta.textContent = `${item.arrivedAt} · ${item.ending} · ${item.conversation}`;
-    const answer = el('pre', 'inbox-answer');
-    answer.textContent = item.answer;
-    const open = button('mark-read', 'mark read');
-    open.addEventListener('click', () => {
-      open.disabled = true;
-      background(
-        (async (): Promise<void> => {
-          let outcome;
-          try {
-            if (stream === null) {
-              throw new Error(
-                'the event socket is not open; "inbox.read" was not sent',
-              );
-            }
-            outcome = await stream.ask('inbox.read', { items: [item.id] });
-          } catch (problem) {
-            open.disabled = false;
-            showItemTrouble(
-              article,
-              problem instanceof Error
-                ? problem.message
-                : 'That item could not be marked read.',
-            );
-            return;
-          }
-          if (outcome.code !== 'OK') {
-            open.disabled = false;
-            showItemTrouble(
-              article,
-              outcome.said ?? 'That item could not be marked read.',
-            );
-            return;
-          }
-          await refresh();
-        })(),
-      );
-    });
-    open.disabled = item.readAt !== null;
-    article.append(meta, answer, open);
+    const meta = el(
+      'div',
+      'inbox-meta',
+      `${item.arrivedAt} · ${item.ending ?? item.kind}`,
+    );
+    const answer = el(
+      'pre',
+      'inbox-answer',
+      item.answer ?? item.about ?? 'No result text was supplied.',
+    );
+    const mark = button('mark-read', 'mark read');
+    mark.disabled = item.readAt !== null || blocked.has(item.id);
+    mark.addEventListener('click', () => background(markRead(item.id)));
+    article.append(meta, answer, recordLinks(item.conversation), mark);
+    const message = blocked.get(item.id);
+    if (message !== undefined) {
+      const note = el('p', 'trouble', message);
+      note.dataset['trouble'] = '';
+      article.append(note);
+    }
     return article;
   }
 
+  async function markRead(id: string): Promise<void> {
+    if (stream === null || stopped || blocked.has(id)) return;
+    blocked.set(id, 'Sending read receipt…');
+    draw();
+    try {
+      await socketWorkRecords(stream).markRead(id);
+      if (stopped) return;
+      blocked.set(id, 'Read receipt recorded. Refreshing…');
+    } catch (problem) {
+      if (stopped) return;
+      if (problem instanceof WorkRefused) {
+        blocked.delete(id);
+        status.textContent = problem.message;
+        // A confirmed refusal permits an explicit retry and remains on the row.
+        draw();
+        const article = [
+          ...rows.querySelectorAll<HTMLElement>('[data-item]'),
+        ].find((node) => node.dataset['item'] === id);
+        const note = el('p', 'trouble', problem.message);
+        note.dataset['trouble'] = '';
+        article?.append(note);
+        return;
+      }
+      blocked.set(
+        id,
+        problemText(problem, 'Read receipt delivery is uncertain.') +
+          ' Delivery is uncertain; the receipt was not replayed.',
+      );
+      draw();
+      return;
+    }
+    await refresh.refresh();
+  }
+
+  reload.addEventListener('click', () => background(refresh.refresh()));
+  previous.addEventListener('click', () => {
+    offset = Math.max(0, offset - limit);
+    background(refresh.refresh());
+  });
+  next.addEventListener('click', () => {
+    offset += limit;
+    background(refresh.refresh());
+  });
   return {
     element: () => element,
-    async load(): Promise<void> {
-      if (stream === null && !stopped) {
+    setActive: refresh.setActive,
+    async load() {
+      if (stopped) return;
+      if (stream === null) {
+        const waiting = el('p', 'inbox-connecting', 'connecting…');
+        waiting.dataset['connecting'] = '';
+        rows.replaceChildren(waiting);
         stream = options.openStream({
           session: options.session,
           onEvent: (frame) => {
-            if (asInboxChanged(frame) !== null) background(refresh());
+            if (asInboxChanged(frame) !== null) background(refresh.refresh());
           },
-          onStatus: (status) => {
-            if (status.state === 'open') background(refresh());
+          onStatus: (next) => {
+            if (next.state === 'open') background(refresh.refresh());
           },
         });
       }
-      // A freshly opened socket reports `connecting`, and `ask` rejects
-      // immediately on anything but `open` -- calling `refresh` here
-      // regardless would flash a trouble message that `onStatus('open')`
-      // corrects a moment later. Wait for that transition instead of
-      // racing it.
-      if (stream !== null && stream.status().state === 'open') {
-        await refresh();
-      } else {
-        showConnecting();
-      }
+      await refresh.refresh();
     },
-    destroy(): void {
+    destroy() {
       stopped = true;
+      refresh.stop();
       stream?.close();
       stream = null;
     },

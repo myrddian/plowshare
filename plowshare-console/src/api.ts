@@ -87,7 +87,7 @@ export class ApiError extends Error {
 /**
  * The refresh in flight, or null.
  *
- * **This latch is the whole defence against a self-inflicted logout.** Two
+ * **This latch coordinates callers in one tab.** Two
  * screens polling at once both meet the 401 that follows an access cookie
  * expiring; without this they would both `POST /v1/auth/refresh`, the second
  * with the cookie the first has already spent, and the server would retire the
@@ -99,25 +99,64 @@ export class ApiError extends Error {
  * one.
  */
 let refreshInFlight: Promise<boolean> | null = null;
+// A lost rotation response might already have spent the cookie. This tab must
+// not repeat it. A successful locked access probe can establish recovery.
+let refreshUncertain = false;
 
 /**
  * Rotate the cookie pair, at most once concurrently.
  *
- * @returns whether the server issued a new pair. A rejection is reported as
- *     `false` rather than thrown: a transport failure and a refused refresh
- *     leave the caller with the same single option, which is to stop.
- */
+ * @returns whether the server established access. Only an explicit credential
+ *     refusal returns false; unavailable or uncertain responses throw.
+ *
+ * Cooperate across browser tabs before rotating a shared cookie pair. Under
+ * the origin lock, re-probe: another tab may already have rotated successfully.
+ * Browsers without Web Locks retain the per-tab single-flight guarantee. */
 function refreshOnce(): Promise<boolean> {
   if (refreshInFlight === null) {
-    refreshInFlight = fetch(REFRESH_PATH, {
-      method: 'POST',
-      credentials: 'same-origin',
-    })
-      .then((response) => response.status === 204)
-      .catch(() => false)
-      .finally(() => {
-        refreshInFlight = null;
+    const rotate = async (): Promise<boolean> => {
+      if (refreshUncertain)
+        throw new Error(
+          'Session refresh delivery is uncertain. Reload to recheck your session.',
+        );
+      refreshUncertain = true;
+      const response = await fetch(REFRESH_PATH, {
+        method: 'POST',
+        credentials: 'same-origin',
       });
+      if (
+        response.status === 204 ||
+        response.status === 401 ||
+        response.status === 403
+      ) {
+        refreshUncertain = false;
+        return response.status === 204;
+      }
+      throw new Error(
+        'Session refresh is unavailable. Reload to recheck your session.',
+      );
+    };
+    const locks = globalThis.navigator?.locks;
+    const work: Promise<boolean> = (async () => {
+      if (locks === undefined) return await rotate();
+      return await locks.request('plowshare-session-refresh', async () => {
+        const probe = await fetch('/v1/auth/session', {
+          method: 'GET',
+          credentials: 'same-origin',
+        });
+        if (probe.status === 204) {
+          refreshUncertain = false;
+          return true;
+        }
+        if (probe.status === 403) return false;
+        if (probe.status !== 401)
+          throw new Error('Session status is unavailable.');
+        return await rotate();
+      });
+    })();
+    refreshInFlight = work.finally(() => {
+      refreshInFlight = null;
+    });
   }
   return refreshInFlight;
 }
@@ -367,3 +406,22 @@ async function body(response: Response): Promise<unknown> {
  * of it in one line and a screen can import exactly the verb it uses.
  */
 export const api = { request, get, post, put };
+
+/** Re-establish cookie/session availability before reconnecting the browser
+ * listener. A refusal closes the listener; network trouble retains backoff. */
+export async function recoverSession(): Promise<
+  'ready' | 'signed-out' | 'unavailable'
+> {
+  try {
+    const response = await request('/v1/auth/session');
+    return response.status === 204
+      ? 'ready'
+      : response.status === 403
+        ? 'signed-out'
+        : 'unavailable';
+  } catch (problem) {
+    return problem instanceof ApiError && problem.status === 401
+      ? 'signed-out'
+      : 'unavailable';
+  }
+}

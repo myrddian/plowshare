@@ -34,6 +34,7 @@ function fakeStream(replies: Record<string, FrameOutcome | Error>) {
 const item = {
   id: 'inb_1',
   handle: 'enzo',
+  kind: 'firing',
   firing: 'fir_1',
   conversation: 'cnv_1',
   ending: 'ANSWERED',
@@ -48,7 +49,12 @@ describe('the INBOX screen', () => {
       'inbox.list': { code: 'OK', payload: { items: [item], unread: 1 } },
     });
     const root = document.createElement('div');
-    const screen = createInbox({ root, openStream: stream.open, session: 's' });
+    const screen = createInbox({
+      root,
+      openStream: stream.open,
+      pollMs: null,
+      session: 's',
+    });
     await screen.load();
     expect(root.textContent).toContain('three PRs need review');
     expect(root.querySelector('[data-unread="true"]')).not.toBeNull();
@@ -60,7 +66,12 @@ describe('the INBOX screen', () => {
       'inbox.read': { code: 'OK', payload: { marked: 1, unread: 0 } },
     });
     const root = document.createElement('div');
-    const screen = createInbox({ root, openStream: stream.open, session: 's' });
+    const screen = createInbox({
+      root,
+      openStream: stream.open,
+      pollMs: null,
+      session: 's',
+    });
     await screen.load();
     (
       root.querySelector('[data-item="inb_1"] button') as HTMLButtonElement
@@ -75,6 +86,7 @@ describe('the INBOX screen', () => {
     const screen = createInbox({
       root: document.createElement('div'),
       openStream: stream.open,
+      pollMs: null,
       session: 's',
     });
     await screen.load();
@@ -90,14 +102,19 @@ describe('the INBOX screen', () => {
       },
     });
     const root = document.createElement('div');
-    await createInbox({ root, openStream: stream.open, session: 's' }).load();
+    await createInbox({
+      root,
+      openStream: stream.open,
+      pollMs: null,
+      session: 's',
+    }).load();
     expect(root.textContent).toContain('signed in as an account');
   });
 });
 
 describe('marking an item read can fail', () => {
   it(
-    're-enables the button and shows trouble when the ask itself is refused, with no' +
+    'keeps uncertain read receipts blocked and shows trouble with no' +
       ' unhandled rejection',
     async () => {
       const stream = fakeStream({
@@ -110,6 +127,7 @@ describe('marking an item read can fail', () => {
       const screen = createInbox({
         root,
         openStream: stream.open,
+        pollMs: null,
         session: 's',
       });
       await screen.load();
@@ -118,9 +136,16 @@ describe('marking an item read can fail', () => {
         '[data-item="inb_1"] button',
       ) as HTMLButtonElement;
       button.click();
-      expect(button.disabled).toBe(true);
+      expect(
+        root.querySelector<HTMLButtonElement>('[data-item="inb_1"] button')
+          ?.disabled,
+      ).toBe(true);
 
-      await vi.waitFor(() => expect(button.disabled).toBe(false));
+      await vi.waitFor(() =>
+        expect(
+          root.querySelector('[data-item="inb_1"] [data-trouble]')?.textContent,
+        ).toContain('not open'),
+      );
       expect(
         root.querySelector('[data-item="inb_1"] [data-trouble]')?.textContent,
       ).toContain('not open');
@@ -136,7 +161,12 @@ describe('marking an item read can fail', () => {
       },
     });
     const root = document.createElement('div');
-    const screen = createInbox({ root, openStream: stream.open, session: 's' });
+    const screen = createInbox({
+      root,
+      openStream: stream.open,
+      pollMs: null,
+      session: 's',
+    });
     await screen.load();
 
     const button = root.querySelector(
@@ -144,7 +174,11 @@ describe('marking an item read can fail', () => {
     ) as HTMLButtonElement;
     button.click();
 
-    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector('[data-item="inb_1"] [data-trouble]')?.textContent,
+      ).toContain('signed in as an account'),
+    );
     expect(
       root.querySelector('[data-item="inb_1"] [data-trouble]')?.textContent,
     ).toContain('signed in as an account');
@@ -154,6 +188,7 @@ describe('marking an item read can fail', () => {
 describe('the first load, before the socket has finished connecting', () => {
   it('does not ask while still connecting, and asks once the socket opens', async () => {
     let onStatus: ((status: StreamStatus) => void) | undefined;
+    let state: StreamStatus['state'] = 'connecting';
     const ask = vi.fn(() =>
       Promise.resolve({ code: 'OK', payload: { items: [], unread: 0 } }),
     );
@@ -161,7 +196,7 @@ describe('the first load, before the socket has finished connecting', () => {
       onStatus = options.onStatus;
       return {
         status: (): StreamStatus => ({
-          state: 'connecting',
+          state,
           attempt: 0,
           retryInMs: null,
         }),
@@ -170,13 +205,19 @@ describe('the first load, before the socket has finished connecting', () => {
       };
     };
     const root = document.createElement('div');
-    const screen = createInbox({ root, openStream: open, session: 's' });
+    const screen = createInbox({
+      root,
+      openStream: open,
+      pollMs: null,
+      session: 's',
+    });
 
     await screen.load();
 
     expect(ask).not.toHaveBeenCalled();
     expect(root.querySelector('[data-trouble]')).toBeNull();
 
+    state = 'open';
     onStatus?.({ state: 'open', attempt: 0, retryInMs: null });
     await vi.waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
   });

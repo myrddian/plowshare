@@ -80,3 +80,25 @@ describe('checked console transport', () => {
     ).toThrow();
   });
 });
+
+describe('job admission is a supported success outcome', () => {
+  it('accepts a submitted job handle without reporting a terminal outcome', async () => {
+    const { transport, ask } = fixture({
+      code: 'ACCEPTED',
+      payload: {
+        id: 'job_admitted',
+        agent: 'reviewer',
+        conversation: 'cnv_1',
+        conversationId: null,
+      },
+    });
+    const admitted = await transport.post('/v1/agents/reviewer/runs', {
+      task: 'Review',
+      session: 's',
+      conversation: 'cnv_1',
+    });
+    expect(admitted.id).toBe('job_admitted');
+    expect(admitted).not.toHaveProperty('outcome');
+    expect(ask).toHaveBeenCalledOnce();
+  });
+});

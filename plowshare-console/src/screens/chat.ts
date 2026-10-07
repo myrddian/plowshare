@@ -436,6 +436,14 @@ export function createChat(options: ChatOptions): Screen {
 
   return {
     element: () => surface,
+    async showRecord(id) {
+      complaint.replaceChildren();
+      surface.dataset['record'] = id;
+      tab = 'trajectory';
+      drawTabs();
+      await Promise.all([repl.switchTo(id), reading.show(id)]);
+      await reading.choose('trajectory');
+    },
     load: async (): Promise<void> => {
       await picker.load();
       // The reading too, and not only the two that were here: its tabs

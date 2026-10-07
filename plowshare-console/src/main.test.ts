@@ -29,12 +29,14 @@ function fakeDeps(probe: () => Promise<SessionState>): GateDeps & {
   readonly mountShell: ReturnType<typeof vi.fn>;
   readonly mountLogin: ReturnType<typeof vi.fn>;
   readonly mountPassword: ReturnType<typeof vi.fn>;
+  readonly mountUnavailable: ReturnType<typeof vi.fn>;
 } {
   return {
     probe,
     mountShell: vi.fn(),
     mountLogin: vi.fn(),
     mountPassword: vi.fn(),
+    mountUnavailable: vi.fn(),
   };
 }
 
@@ -143,14 +145,15 @@ describe('probeSession, and gate acting on what it reports', () => {
     expect(deps.mountLogin).toHaveBeenCalledWith(host);
   });
 
-  it('a transport failure reads as signed out, and gates to login rather than a blank page', async () => {
+  it('a transport failure remains distinct from signed out and offers an availability screen', async () => {
     fetchMock.mockRejectedValue(new TypeError('offline'));
 
-    await expect(probeSession()).resolves.toBe('signed-out');
+    await expect(probeSession()).resolves.toBe('unavailable');
 
     const deps = fakeDeps(probeSession);
     await gate(host, deps);
-    expect(deps.mountLogin).toHaveBeenCalledWith(host);
+    expect(deps.mountUnavailable).toHaveBeenCalledWith(host);
+    expect(deps.mountLogin).not.toHaveBeenCalled();
     expect(deps.mountShell).not.toHaveBeenCalled();
     expect(deps.mountPassword).not.toHaveBeenCalled();
   });

@@ -1,3 +1,5 @@
+import { ApiError } from '../api';
+import { recordLinks } from './record-link';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import {
@@ -36,7 +38,7 @@ import type { Screen, Transport } from './screen';
  * overflow rather than let a slow listener hold a job's turn. The stream is
  * droppable *by design*, so **nothing on this screen is derived from an event**:
  * a frame arriving means only "ask again now", and every field of every row
- * comes from `GET /v1/jobs`. The failure this prevents is precise -- a job whose
+ * comes from the typed `job.list` operation. The failure this prevents is precise -- a job whose
  * events were dropped rendering as a job that did nothing -- and the REPL
  * solved it the same way, by making a frame move a poll forward rather than
  * move a state.
@@ -67,7 +69,8 @@ import type { Screen, Transport } from './screen';
  * entirely. That is on the roadmap and is deliberately not fixed from the
  * console. What this screen does about it is refuse to fall over: it draws a
  * window of the most recent runs by default, says how many the process is
- * holding, and leaves drawing all of them to somebody who asks for it.
+ * holding, and pages through bounded windows on request. The supported operation
+ * still returns the whole process listing; client windowing cannot bound that reply.
  */
 
 /** The two verbs and the socket a test replaces. */
@@ -147,7 +150,9 @@ function parsePositiveWholeNumber(raw: string): number | null {
     return null;
   }
   const value = Number(trimmed);
-  return value > 0 ? value : null;
+  return Number.isSafeInteger(value) && value > 0 && value <= 2147483647
+    ? value
+    : null;
 }
 
 /**
@@ -181,7 +186,13 @@ export function createJobs(options: JobsOptions): Screen {
   const pollMs = options.pollMs === undefined ? POLL_MS : options.pollMs;
 
   let held: readonly JobView[] = [];
-  let all = false;
+  let page = 0;
+  let active = true;
+  let selected: string | null = null;
+  let selectionEpoch = 0;
+  const blocked = new Map<string, string>();
+  const raiseAmounts = new Map<string, string>();
+  const continuationAmounts = new Map<string, string>();
   let stream: EventStream | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -193,7 +204,10 @@ export function createJobs(options: JobsOptions): Screen {
   const shell = el('section', 'screen jobs');
   const head = el('header', 'screen-head');
   const reload = button('reload', 'reload');
-  const widen = button('widen', 'draw all of them');
+  const widen = button('widen', 'Next jobs page');
+  const previous = button('previous', 'Previous jobs page');
+  previous.hidden = true;
+  const detail = el('div', 'job-selection');
   const body = el('div', 'screen-body');
   body.dataset['jobs'] = '';
   widen.hidden = true;
@@ -203,7 +217,8 @@ export function createJobs(options: JobsOptions): Screen {
   // once, at the rail's foot, where it is on screen whichever view is
   // showing. A copy here was a second [data-stream] element saying the same
   // thing about the same socket beside the first.
-  head.append(el('h2', 'screen-title', 'jobs'), reload, widen);
+  head.append(el('h2', 'screen-title', 'jobs'), reload, previous, widen);
+  body.append(detail);
   shell.append(head, body);
   options.root.replaceChildren(shell);
 
@@ -211,9 +226,35 @@ export function createJobs(options: JobsOptions): Screen {
     background(refresh());
   });
   widen.addEventListener('click', () => {
-    all = true;
+    page += 1;
     draw();
   });
+
+  previous.addEventListener('click', () => {
+    page = Math.max(0, page - 1);
+    draw();
+  });
+
+  function failure(
+    key: string,
+    control: HTMLButtonElement,
+    card: HTMLElement,
+    problem: unknown,
+    fallback: string,
+  ): void {
+    if (stopped) return;
+    if (problem instanceof ApiError && problem.status < 500) {
+      blocked.delete(key);
+      control.disabled = false;
+    } else
+      blocked.set(
+        key,
+        'Delivery is uncertain. This action was not replayed. Inspect server state before acting again.',
+      );
+    card.append(trouble(problemText(problem, fallback)));
+    const note = blocked.get(key);
+    if (note) card.append(trouble(note));
+  }
 
   /**
    * A frame moves the poll forward and moves nothing else.
@@ -333,7 +374,7 @@ export function createJobs(options: JobsOptions): Screen {
     came: OutcomeView,
     id: string,
     card: HTMLElement,
-  ): HTMLButtonElement | null {
+  ): HTMLElement | null {
     if (
       came.resumable !== true ||
       job.conversation === null ||
@@ -342,15 +383,45 @@ export function createJobs(options: JobsOptions): Screen {
       return null;
     }
     const conversation = job.conversation;
+    const grant = grantBody(job, came);
+    const grantField =
+      grant.maxTurns !== undefined
+        ? 'maxTurns'
+        : grant.maxModelCalls !== undefined
+          ? 'maxModelCalls'
+          : null;
+    const amount = input('Continuation allowance', 'Positive whole number');
+    if (grantField !== null) {
+      amount.value = continuationAmounts.get(id) ?? String(grant[grantField]);
+      amount.addEventListener('input', () =>
+        continuationAmounts.set(id, amount.value),
+      );
+    }
     const resume = button('continue', 'continue this run');
     resume.dataset['continue'] = id;
+    const key = `continue:${id}`;
+    resume.disabled = blocked.has(key);
     resume.addEventListener('click', () => {
+      if (blocked.has(key)) return;
+      if (grantField !== null) {
+        const value = parsePositiveWholeNumber(amount.value);
+        if (value === null) {
+          card.append(
+            trouble(
+              'Choose a positive whole-number continuation allowance within the supported range.',
+            ),
+          );
+          return;
+        }
+        grant[grantField] = value;
+      }
+      blocked.set(key, 'Continuation requested. Inspect the resulting job.');
       resume.disabled = true;
       background(
         transport
           .post(
             `/v1/conversations/${encodeURIComponent(conversation)}/resume`,
-            grantBody(job, came),
+            grant,
           )
           .then(
             // The continued run is a new job under the same conversation;
@@ -358,17 +429,29 @@ export function createJobs(options: JobsOptions): Screen {
             // rule as `cancel` and the raise control above it.
             () => refresh(),
             (problem: unknown) => {
-              resume.disabled = false;
-              card.append(
-                trouble(
-                  problemText(problem, 'That run could not be continued.'),
-                ),
+              failure(
+                key,
+                resume,
+                card,
+                problem,
+                'That run could not be continued.',
               );
             },
           ),
       );
     });
-    return resume;
+    const controls = el('div', 'continue-control');
+    if (grantField !== null)
+      controls.append(
+        labelled(
+          grantField === 'maxTurns'
+            ? 'Continuation turn cap'
+            : 'New total model-call budget',
+          amount,
+        ),
+      );
+    controls.append(resume);
+    return controls;
   }
 
   /**
@@ -481,10 +564,14 @@ export function createJobs(options: JobsOptions): Screen {
       return null;
     }
     const amount = input('raise by', 'how many more');
-    amount.value = String(DEFAULT_RAISE_BY);
+    amount.value = raiseAmounts.get(id) ?? String(DEFAULT_RAISE_BY);
+    amount.addEventListener('input', () => raiseAmounts.set(id, amount.value));
     const raise = button('raise', 'raise the ceiling');
     raise.dataset['raise'] = id;
+    const key = `limits:${id}`;
+    raise.disabled = blocked.has(key);
     raise.addEventListener('click', () => {
+      if (blocked.has(key)) return;
       const by = parsePositiveWholeNumber(amount.value);
       if (by === null) {
         // Refused here and not sent for the server to refuse: neither
@@ -509,6 +596,19 @@ export function createJobs(options: JobsOptions): Screen {
       if (raisesBudget && typeof bounds.maxModelCalls === 'number') {
         body.maxModelCalls = bounds.maxModelCalls + by;
       }
+      if (
+        Object.values(body).some(
+          (value) => !Number.isSafeInteger(value) || value > 2147483647,
+        )
+      ) {
+        card.append(
+          trouble(
+            'The resulting limit exceeds the supported whole-number range.',
+          ),
+        );
+        return;
+      }
+      blocked.set(key, 'Sending limit change…');
       raise.disabled = true;
       // One `.then` with both handlers, and not a `.then().catch()`
       // pair: the two-argument form settles on the *first* microtask
@@ -524,13 +624,17 @@ export function createJobs(options: JobsOptions): Screen {
           // the answer believed, because what a run's ceiling now is
           // comes from the listing and not from echoing back what was
           // asked.
-          () => refresh(),
+          () => {
+            blocked.delete(key);
+            return refresh();
+          },
           (problem: unknown) => {
-            raise.disabled = false;
-            card.append(
-              trouble(
-                problemText(problem, 'That run’s ceiling could not be raised.'),
-              ),
+            failure(
+              key,
+              raise,
+              card,
+              problem,
+              'That run’s ceiling could not be raised.',
             );
           },
         ),
@@ -571,7 +675,14 @@ export function createJobs(options: JobsOptions): Screen {
 
     const stop = button('cancel', 'ask this run to stop');
     stop.dataset['cancel'] = id;
+    const key = `cancel:${id}`;
+    stop.disabled =
+      blocked.has(key) ||
+      job.cancelRequested === true ||
+      job.state !== 'RUNNING';
     stop.addEventListener('click', () => {
+      if (blocked.has(key)) return;
+      blocked.set(key, 'Cancellation requested; waiting for server state.');
       stop.disabled = true;
       void transport
         .post(`/v1/jobs/${encodeURIComponent(id)}/cancel`)
@@ -581,11 +692,12 @@ export function createJobs(options: JobsOptions): Screen {
         // the listing.
         .then(() => refresh())
         .catch((problem: unknown) => {
-          stop.disabled = false;
-          card.append(
-            trouble(
-              problemText(problem, 'That run could not be asked to stop.'),
-            ),
+          failure(
+            key,
+            stop,
+            card,
+            problem,
+            'That run could not be asked to stop.',
           );
         });
     });
@@ -595,7 +707,11 @@ export function createJobs(options: JobsOptions): Screen {
     if (raise !== null) {
       line.append(raise);
     }
-    card.append(line);
+    card.append(line, recordLinks(job.conversation));
+    for (const verb of ['cancel', 'limits', 'continue']) {
+      const note = blocked.get(`${verb}:${id}`);
+      if (note) card.append(el('p', 'note', note));
+    }
 
     if (bounds === null || bounds === undefined) {
       // Not an empty row and not a guess: a curator pass carries its
@@ -636,7 +752,10 @@ export function createJobs(options: JobsOptions): Screen {
 
   function draw(): void {
     if (held.length === 0) {
+      widen.hidden = true;
+      previous.hidden = true;
       body.replaceChildren(
+        detail,
         nothing(
           'This process is holding no jobs. That is an answer and not a failure — and on' +
             ' a server that has been restarted it is the ordinary one, because these live' +
@@ -648,8 +767,10 @@ export function createJobs(options: JobsOptions): Screen {
     // Newest first: this list is read to see what just happened, and the
     // listing arrives newest last.
     const newestFirst = [...held].reverse();
-    const shown = all ? newestFirst : newestFirst.slice(0, WINDOW);
-    widen.hidden = all || held.length <= WINDOW;
+    page = Math.min(page, Math.max(0, Math.ceil(held.length / WINDOW) - 1));
+    const shown = newestFirst.slice(page * WINDOW, (page + 1) * WINDOW);
+    widen.hidden = (page + 1) * WINDOW >= held.length;
+    previous.hidden = page === 0;
 
     const nodes: HTMLElement[] = [];
     const note = el(
@@ -658,7 +779,7 @@ export function createJobs(options: JobsOptions): Screen {
       held.length === shown.length
         ? `this process is holding ${describeCount(held.length, 'run', 'runs')}, all drawn`
         : `this process is holding ${describeCount(held.length, 'run', 'runs')};` +
-            ` the most recent ${shown.length} are drawn`,
+            ` page ${page + 1} shows ${shown.length} runs`,
     );
     note.dataset['window'] = String(shown.length);
     note.dataset['held'] = String(held.length);
@@ -671,7 +792,7 @@ export function createJobs(options: JobsOptions): Screen {
           ' again after a restart. It is what this process is holding and not a history.',
       ),
     );
-    body.replaceChildren(...nodes, ...shown.map(drawJob));
+    body.replaceChildren(detail, ...nodes, ...shown.map(drawJob));
   }
 
   // --- the server ----------------------------------------------------------
@@ -685,13 +806,19 @@ export function createJobs(options: JobsOptions): Screen {
       // answer is not a server with no jobs on it, and drawing one would
       // be this screen concluding from a failure the same way it refuses
       // to conclude from silence.
-      body.prepend(
-        trouble(problemText(problem, 'The jobs could not be listed.')),
+      if (stopped) return;
+      body.querySelector('[data-list-error]')?.remove();
+      const error = trouble(
+        problemText(problem, 'The jobs could not be listed.'),
       );
+      error.dataset['listError'] = '';
+      body.prepend(error);
       return;
     }
+    if (stopped) return;
     held = listed;
     draw();
+    if (selected !== null) await showRecord(selected);
   }
 
   /**
@@ -703,6 +830,7 @@ export function createJobs(options: JobsOptions): Screen {
    * driving it does not have to wait for a clock.
    */
   async function refresh(): Promise<void> {
+    if (stopped || !active) return;
     if (reading) {
       asked = true;
       return;
@@ -713,14 +841,14 @@ export function createJobs(options: JobsOptions): Screen {
     } finally {
       reading = false;
     }
-    if (asked && !stopped) {
+    if (asked && !stopped && active) {
       asked = false;
       await refresh();
     }
   }
 
   function schedulePoll(): void {
-    if (pollMs === null || stopped || timer !== null) {
+    if (pollMs === null || stopped || !active || timer !== null) {
       return;
     }
     timer = setTimeout(() => {
@@ -731,16 +859,51 @@ export function createJobs(options: JobsOptions): Screen {
 
   async function load(): Promise<void> {
     if (stream === null && !stopped) {
-      // No `onStatus`: this screen subscribes to be told a run moved, and
-      // the socket's own state is reported at the rail's foot.
-      stream = openSocket({ session: options.session, onEvent });
+      // Reconnect reconciles the listing; the socket's state is reported once
+      // at the rail's foot.
+      stream = openSocket({
+        session: options.session,
+        onEvent,
+        onStatus: (status) => {
+          if (status.state === 'open' && stream !== null) background(refresh());
+        },
+      });
     }
     await refresh();
     schedulePoll();
   }
 
+  async function showRecord(id: string): Promise<void> {
+    selected = id;
+    const epoch = ++selectionEpoch;
+    try {
+      const job =
+        held.find((row) => row.id === id) ??
+        (await transport.get(`/v1/jobs/${encodeURIComponent(id)}`));
+      if (stopped || epoch !== selectionEpoch) return;
+      if (!job) throw new Error('The server did not return this job.');
+      detail.replaceChildren(el('h3', '', 'Selected job'), drawJob(job));
+    } catch (problem) {
+      if (stopped || epoch !== selectionEpoch) return;
+      detail.replaceChildren(
+        trouble(problemText(problem, 'This job is unavailable.')),
+        el(
+          'p',
+          'note',
+          'Historic job lookup is unavailable after the server process loses the job. Read its retained conversation or inbox delivery instead.',
+        ),
+      );
+    }
+  }
   return {
     element: () => shell,
+    showRecord,
+    setActive(next) {
+      active = next;
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (active && !stopped) background(refresh().finally(schedulePoll));
+    },
     load,
     destroy(): void {
       stopped = true;

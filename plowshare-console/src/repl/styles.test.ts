@@ -69,6 +69,12 @@ function parse(css: string): readonly Rule[] {
     if (opens < 0) {
       break;
     }
+    // Whitespace after an at-rule can put its closing brace in the next
+    // selector's prefix. Determine scope from the next opening brace too.
+    if (mediaEnds >= 0 && opens > mediaEnds) {
+      media = null;
+      mediaEnds = -1;
+    }
     // A `}` between here and the brace closed a block; it is never part of
     // a selector, so it is whitespace as far as this is concerned.
     const head = source.slice(at, opens).replace(/}/g, ' ').trim();

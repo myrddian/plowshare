@@ -83,7 +83,7 @@ function scopeAt(hash: string): Window {
   return {
     location: { hash },
     history: {
-      replaceState: (_state: unknown, _title: string, url: string): void => {
+      pushState: (_state: unknown, _title: string, url: string): void => {
         rewritten.push(url);
       },
     },
@@ -119,17 +119,19 @@ afterEach(() => {
 describe('eight views and no router', () => {
   it('offers every view in the nav, with inbox first', () => {
     expect(
-      [...root.querySelectorAll('[data-nav]')].map((node) => node.textContent),
+      [...root.querySelectorAll<HTMLElement>('[data-nav]')].map(
+        (node) => node.dataset['nav'],
+      ),
     ).toEqual([...VIEWS]);
   });
 
-  it('lands on chat and marks it as the one showing', async () => {
+  it('lands on the work overview and marks it as the one showing', async () => {
     await shell.start();
 
-    expect(shell.current()).toBe('chat');
-    expect(host('chat').hidden).toBe(false);
+    expect(shell.current()).toBe('overview');
+    expect(host('overview').hidden).toBe(false);
     expect(host('jobs').hidden).toBe(true);
-    expect(nav('chat').getAttribute('aria-current')).toBe('page');
+    expect(nav('overview').getAttribute('aria-current')).toBe('page');
     expect(nav('jobs').getAttribute('aria-current')).toBeNull();
   });
 
@@ -163,6 +165,7 @@ describe('eight views and no router', () => {
     // socket: it is the reason this console exists, and coming back has to
     // land on what was left.
     await shell.start();
+    await shell.show('chat');
     const chat = host('chat').firstElementChild;
     await shell.show('jobs');
     await shell.show('chat');
@@ -188,9 +191,9 @@ describe('eight views and no router', () => {
     await another.start();
 
     expect(another.current()).toBe('memory');
-    expect(other.rewritten).toEqual(['#memory']);
+    expect(other.rewritten).toEqual([]);
     await another.show('jobs');
-    expect(other.rewritten).toEqual(['#memory', '#jobs']);
+    expect(other.rewritten).toEqual(['#jobs']);
     another.destroy();
   });
 
@@ -207,7 +210,7 @@ describe('eight views and no router', () => {
     // that would not change view because it could not rewrite decoration
     // would be broken over decoration.
     const hostile = scopeAt('') as Window & { rewritten: string[] };
-    (hostile.history as unknown as { replaceState: () => void }).replaceState =
+    (hostile.history as unknown as { pushState: () => void }).pushState =
       () => {
         throw new Error('SecurityError');
       };
@@ -353,7 +356,7 @@ describe('the inbox badge', () => {
       // synchronously, as this fake reports it -- so INBOX's badge, which
       // subscribes right after in the same `start()`, hits exactly the moment
       // a `badgeStream` read in its own temporal dead zone would throw.
-      const ask = vi.fn(() =>
+      const ask = vi.fn((_type: string, _payload?: { unread?: boolean }) =>
         Promise.resolve({ code: 'OK', payload: { items: [], unread: 2 } }),
       );
       const alreadyOpen = (options: EventStreamOptions): EventStream => {
@@ -380,7 +383,11 @@ describe('the inbox badge', () => {
 
       await another.start();
 
-      expect(ask).toHaveBeenCalledTimes(1);
+      expect(
+        ask.mock.calls.filter(
+          (call) => call[0] === 'inbox.list' && call[1]?.unread === true,
+        ),
+      ).toHaveLength(1);
       expect(ask).toHaveBeenCalledWith('inbox.list', {
         unread: true,
         limit: 1,
@@ -388,4 +395,45 @@ describe('the inbox badge', () => {
       another.destroy();
     },
   );
+});
+
+describe('read-only owning-record routes', () => {
+  it('restores a job deep link on reload and follows back/forward without a mutation', async () => {
+    window.history.replaceState(null, '', '#jobs?record=job_saved');
+    const read = transport();
+    get.mockImplementation(async (path: string) => {
+      if (path === '/v1/jobs/job_saved')
+        return {
+          id: 'job_saved',
+          agent: 'reviewer',
+          state: 'RUNNING',
+          cancelRequested: false,
+          conversation: 'cnv_saved',
+          limits: null,
+          outcome: null,
+        };
+      return [];
+    });
+    const another = createShell({
+      root,
+      transport: read,
+      openStream: opener,
+      scope: window,
+      session: 'route-tab',
+      pollMs: null,
+    });
+    await another.start();
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'job_saved',
+    );
+    expect(post).not.toHaveBeenCalled();
+    await another.show('inbox');
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('jobs'));
+    window.history.forward();
+    await vi.waitFor(() => expect(another.current()).toBe('inbox'));
+    expect(post).not.toHaveBeenCalled();
+    another.destroy();
+    window.history.replaceState(null, '', '#');
+  });
 });

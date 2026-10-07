@@ -790,7 +790,7 @@ describe('a list nothing reaps', () => {
     );
   });
 
-  it('draws all of them when somebody asks', async () => {
+  it('pages the remaining runs without growing the DOM window', async () => {
     server.jobs = Array.from({ length: WINDOW + 5 }, (_, at) =>
       done({
         id: `job_${String(at).padStart(6, '0')}`,
@@ -800,7 +800,7 @@ describe('a list nothing reaps', () => {
 
     (root.querySelector('button.widen') as HTMLButtonElement).click();
 
-    expect(rows()).toHaveLength(WINDOW + 5);
+    expect(rows()).toHaveLength(5);
     expect(
       (root.querySelector('button.widen') as HTMLButtonElement).hidden,
     ).toBe(true);
@@ -858,6 +858,90 @@ describe('rendering is escaping', () => {
  * it and `chat` reads the same one -- so its state is said once, at the rail's
  * foot. What stays here is this screen's own half of it.
  */
+describe('authoritative actions across reconciliation', () => {
+  it.each(['cancel', 'raise'])(
+    'does not replay an uncertain %s after a redraw',
+    async (action) => {
+      await screen.load();
+      post.mockRejectedValueOnce(new Error('connection lost after send'));
+      (root.querySelector(`[data-${action}]`) as HTMLButtonElement).click();
+      await vi.waitFor(() =>
+        expect(root.textContent).toContain('Delivery is uncertain'),
+      );
+      await screen.load();
+      const control = root.querySelector(
+        `[data-${action}]`,
+      ) as HTMLButtonElement;
+      expect(control.disabled).toBe(true);
+      control.click();
+      expect(post).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('retains the explicit continuation allowance across polling and validates it before sending', async () => {
+    server.jobs = [
+      done({
+        conversation: 'cnv_1',
+        outcome: resumableOutcome({ ending: 'TURN_CAP', resumable: true }),
+      }),
+    ];
+    await screen.load();
+    let amount = root.querySelector(
+      '.continue-control input',
+    ) as HTMLInputElement;
+    amount.value = '2147483648';
+    amount.dispatchEvent(new Event('input'));
+    await screen.load();
+    amount = root.querySelector('.continue-control input') as HTMLInputElement;
+    expect(amount.value).toBe('2147483648');
+    (root.querySelector('[data-continue]') as HTMLButtonElement).click();
+    expect(post).not.toHaveBeenCalled();
+    amount.value = '7';
+    amount.dispatchEvent(new Event('input'));
+    (root.querySelector('[data-continue]') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/v1/conversations/cnv_1/resume', {
+        session: 'session-under-test',
+        maxTurns: 7,
+      }),
+    );
+  });
+
+  it('rejects a raise that would overflow the server integer limit', async () => {
+    server.jobs = [
+      job({
+        limits: {
+          maxTurns: 2147483640,
+          noTurnCap: false,
+          maxModelCalls: 40,
+          noBudget: false,
+          modelCallsSpent: 0,
+        },
+      }),
+    ];
+    await screen.load();
+    (root.querySelector('[data-raise]') as HTMLButtonElement).click();
+    expect(post).not.toHaveBeenCalled();
+    expect(root.textContent).toContain('supported whole-number range');
+  });
+
+  it('keeps controls blocked when a server error does not establish whether cancellation applied', async () => {
+    await screen.load();
+    post.mockRejectedValueOnce(
+      new ApiError('Server failed while answering', 500),
+    );
+    (root.querySelector('[data-cancel]') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain('Delivery is uncertain'),
+    );
+    await screen.load();
+    expect(
+      (root.querySelector('[data-cancel]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the stream’s state', () => {
   it("says nothing about the socket, which is the rail's to report", async () => {
     await screen.load();

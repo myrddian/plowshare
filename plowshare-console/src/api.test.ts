@@ -268,3 +268,92 @@ describe('a refusal reaches the person who caused it', () => {
     await expect(api.get('/v1/jobs')).rejects.toMatchObject({ said: null });
   });
 });
+
+describe('refresh coordination across browser tabs', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
+  });
+
+  it('serializes independent tab refresh owners and rechecks the shared access cookie', async () => {
+    let tail = Promise.resolve();
+    const lock = vi.fn((_name: string, callback: () => Promise<boolean>) => {
+      const result = tail.then(callback);
+      tail = result.then(() => undefined);
+      return result;
+    });
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: lock },
+    });
+    let signedIn = false;
+    fetchMock.mockImplementation(async (path: string) => {
+      calls.push(path);
+      if (path === '/v1/auth/refresh') {
+        signedIn = true;
+        return new Response(null, { status: 204 });
+      }
+      if (path === '/v1/auth/session')
+        return new Response(null, { status: signedIn ? 204 : 401 });
+      return signedIn
+        ? new Response('[]', { status: 200 })
+        : new Response(null, { status: 401 });
+    });
+    const first = await import('./api');
+    vi.resetModules();
+    const second = await import('./api');
+    await Promise.all([
+      first.api.get('/v1/jobs'),
+      second.api.get('/v1/projects'),
+    ]);
+    expect(lock).toHaveBeenCalledTimes(2);
+    expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
+  });
+});
+
+describe('session recovery availability', () => {
+  it.each(['lost', 'unhealthy'])(
+    'keeps an uncertain %s refresh distinct from sign-out and does not replay it',
+    async (failure) => {
+      vi.resetModules();
+      const isolated = await import('./api');
+      fetchMock.mockImplementation(async (path: string) => {
+        calls.push(path);
+        if (path === '/v1/auth/refresh') {
+          if (failure === 'lost') throw new Error('connection lost');
+          return new Response(null, { status: 503 });
+        }
+        return new Response(null, { status: 401 });
+      });
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it('does not rotate when the locked session probe is unhealthy', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: (_name: string, callback: () => Promise<boolean>) =>
+          callback(),
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    try {
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        '/v1/auth/refresh',
+        expect.anything(),
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+});

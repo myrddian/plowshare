@@ -35,9 +35,11 @@ import { mountStyles } from './repl/styles';
  *    the same flag `AuthController.login` puts on its own response header,
  *    so a fresh sign-in reaches the same fork as a reload would without
  *    asking the server a second time.
+ * 4. **Session status unavailable** -- a retryable availability screen. A
+ *    network failure or unhealthy server does not establish that a session ended.
  *
  * `absent`, `exchanged` and `refused` -- {@link BootstrapOutcome} -- are a
- * separate question from the three above and orthogonal to it: they say
+ * separate question from the four above and orthogonal to it: they say
  * whether *this page load* just spent a bootstrap token, not whether a
  * session exists now. A `refused` token still gates on {@link probeSession}
  * rather than assuming signed-out, because the cookie in the jar from an
@@ -58,7 +60,8 @@ const MESSAGES: Readonly<Record<BootstrapOutcome, string>> = {
 };
 
 /** `GET /v1/auth/session`'s two questions, folded into one answer for {@link gate}. */
-export type SessionState = 'signed-out' | 'signed-in' | 'flagged';
+export type SessionState =
+  'signed-out' | 'signed-in' | 'flagged' | 'unavailable';
 
 /**
  * `GET /v1/auth/session`: is there a session, and must it still change its
@@ -71,10 +74,9 @@ export type SessionState = 'signed-out' | 'signed-in' | 'flagged';
  * no business touching. `credentials: 'same-origin'` is still set, because an
  * existing `ps_access` cookie is exactly what this call is trying to find.
  *
- * A transport failure reads as `'signed-out'` rather than throwing: this
- * function runs before any screen exists to show a caught error, and a
- * console that cannot reach its own server has nothing better to offer than
- * the sign-in form it would show a browser with no cookie at all.
+ * An unreachable or unhealthy server is distinct from signed-out. The gate
+ * offers a read-only retry without asking the operator to enter credentials
+ * into a screen that has not established whether a session already exists.
  */
 export async function probeSession(): Promise<SessionState> {
   let response: Response;
@@ -84,11 +86,10 @@ export async function probeSession(): Promise<SessionState> {
       credentials: 'same-origin',
     });
   } catch {
-    return 'signed-out';
+    return 'unavailable';
   }
-  if (response.status !== 204) {
-    return 'signed-out';
-  }
+  if (response.status === 401 || response.status === 403) return 'signed-out';
+  if (response.status !== 204) return 'unavailable';
   return response.headers.get('X-Plowshare-Must-Change-Password') === 'true'
     ? 'flagged'
     : 'signed-in';
@@ -135,7 +136,7 @@ function mountLogin(host: HTMLElement): void {
 }
 
 /**
- * The three screens {@link gate} can mount, as one object so a test can
+ * The four screens {@link gate} can mount, as one object so a test can
  * replace them without stubbing `fetch` or exercising `createShell`'s real
  * socket and polling. {@link probeSession} is included for the same reason:
  * a test wants to choose the session state directly rather than construct a
@@ -146,6 +147,7 @@ export interface GateDeps {
   readonly mountShell: (host: HTMLElement) => void;
   readonly mountLogin: (host: HTMLElement) => void;
   readonly mountPassword: (host: HTMLElement) => void;
+  readonly mountUnavailable: (host: HTMLElement) => void;
 }
 
 const REAL_DEPS: GateDeps = {
@@ -153,10 +155,11 @@ const REAL_DEPS: GateDeps = {
   mountShell,
   mountLogin,
   mountPassword,
+  mountUnavailable,
 };
 
 /**
- * Route `host` to one of the three screens this file's header describes, per
+ * Route `host` to one of the four screens this file's header describes, per
  * {@link probeSession}'s answer -- or per `deps.probe`'s, for a test that
  * wants to choose the answer directly.
  *
@@ -173,13 +176,33 @@ export async function gate(
   deps: GateDeps = REAL_DEPS,
 ): Promise<void> {
   const state = await deps.probe();
-  if (state === 'signed-out') {
+  if (state === 'unavailable') {
+    deps.mountUnavailable(host);
+  } else if (state === 'signed-out') {
     deps.mountLogin(host);
   } else if (state === 'flagged') {
     deps.mountPassword(host);
   } else {
     deps.mountShell(host);
   }
+}
+
+/** Availability failure has a visible retry and never spends refresh cookies. */
+function mountUnavailable(host: HTMLElement): void {
+  const panel = document.createElement('section');
+  const message = document.createElement('p');
+  message.setAttribute('role', 'alert');
+  message.textContent =
+    'The server could not be reached or is unavailable. Your session state has not been established.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = 'Retry connection';
+  retry.addEventListener('click', () => {
+    retry.disabled = true;
+    background(gate(host));
+  });
+  panel.append(message, retry);
+  host.replaceChildren(panel);
 }
 
 function render(outcome: BootstrapOutcome): void {

@@ -456,3 +456,63 @@ it('forwards uncorrelated accounting envelopes while retaining request correlati
   });
   stream.close();
 });
+
+describe('browser session recovery before reconnect', () => {
+  it('stops reconnecting when HTTP recovery establishes a signed-out session', async () => {
+    const recoverSession = vi.fn(async () => 'signed-out' as const);
+    const stream = openEventStream({
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+      recoverSession,
+    });
+    latest().open();
+    latest().drop();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(recoverSession).toHaveBeenCalledOnce();
+    expect(stream.status()).toMatchObject({ state: 'closed', signedOut: true });
+    expect(open).toHaveBeenCalledOnce();
+    stream.close();
+  });
+
+  it('reconnects read-only after refresh but never replays a lost frame', async () => {
+    const stream = openEventStream({
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+      recoverSession: async () => 'ready',
+      baseDelayMs: 100,
+    });
+    latest().open();
+    const pending = stream.ask('approval.answer', {
+      id: 'apr_1',
+      decision: 'once',
+    });
+    const rejected = expect(pending).rejects.toThrow('socket closed');
+    latest().drop();
+    await rejected;
+    await vi.advanceTimersByTimeAsync(100);
+    latest().open();
+    expect(FakeSocket.opened).toHaveLength(2);
+    expect(latest().sent).toHaveLength(0);
+    stream.close();
+  });
+
+  it('does not reconnect if teardown happens during session recovery', async () => {
+    let finish: ((state: 'ready') => void) | undefined;
+    const stream = openEventStream({
+      session: 's',
+      onEvent: vi.fn(),
+      open,
+      recoverSession: () =>
+        new Promise<'ready'>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    latest().drop();
+    stream.close();
+    finish?.('ready');
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(open).toHaveBeenCalledOnce();
+  });
+});
