@@ -15,7 +15,7 @@ try {
   app = await electron.launch({ executablePath, args: [resolve('.')], env });
   const page = await app.firstWindow();
   await page.locator('#connection-button').waitFor();
-  await page.locator('#connection-button').click();
+  await page.locator('#connect-sidebar').click();
   await page.locator('#server-url').fill(fixture.base);
   await page.locator('#connection-form details summary').click();
   await page.locator('#setup-temporary').fill('fixture-temporary');

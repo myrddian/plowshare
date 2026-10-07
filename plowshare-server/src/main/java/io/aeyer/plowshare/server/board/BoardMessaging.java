@@ -67,6 +67,21 @@ public final class BoardMessaging
         TurnCap cap,
         Consumer<Outcome> ended);
 
+    /** Starts a message turn with an explicit source; older fixture voices can ignore metadata. */
+    default String speakFrom(
+        Instance instance,
+        AgentDefinition definition,
+        String utterance,
+        Budget lease,
+        TurnCap cap,
+        Consumer<Outcome> ended,
+        io.aeyer.plowshare.server.agents.Speaker source,
+        boolean command) {
+      return command
+          ? speakCommand(instance, definition, utterance, lease, cap, ended)
+          : speak(instance, definition, utterance, lease, cap, ended);
+    }
+
     default String speakCommand(
         Instance instance,
         AgentDefinition definition,
@@ -1151,22 +1166,26 @@ public final class BoardMessaging
                   : externalCommand(message)
                       .map(
                           command ->
-                              voice.speakCommand(
+                              voice.speakFrom(
                                   recipient,
                                   definition,
                                   command,
                                   lease,
                                   TurnCap.from(definition),
-                                  finished))
+                                  finished,
+                                  io.aeyer.plowshare.server.agents.Speaker.message(message),
+                                  true))
                       .orElseGet(
                           () ->
-                              voice.speak(
+                              voice.speakFrom(
                                   recipient,
                                   definition,
                                   utterance,
                                   lease,
                                   TurnCap.from(definition),
-                                  finished));
+                                  finished,
+                                  io.aeyer.plowshare.server.agents.Speaker.message(message),
+                                  false));
       // A stop can commit between the durable start claim and JobStore submission.
       // Once submission returns, cancellation still reaches that exact job.
       if (Boolean.TRUE.equals(repository.terminated(message))) cancelJob.accept(job);
@@ -1252,7 +1271,9 @@ public final class BoardMessaging
       String job,
       Instant deadlineAt,
       Instant postedAt,
-      String body) {}
+      String body,
+      String conversation,
+      String sourceConversation) {}
 
   private java.util.function.BiPredicate<String, String> logVisible =
       (conversation, account) -> true;
@@ -1426,13 +1447,17 @@ public final class BoardMessaging
             ? state.termination()
             : route.handled()
                 ? "handled"
-                : state.awaiting() ? "awaiting" : job != null ? "running" : "queued",
+                : state.awaiting()
+                    ? "awaiting"
+                    : !repository.runningJobs(message).isEmpty() ? "running" : "queued",
         route.ending(),
         finalReply(message).orElse(null),
         job,
         state.deadline(),
         posted.postedAt(),
-        posted.body());
+        posted.body(),
+        recipient.conversation(),
+        sender.conversation());
   }
 
   public Delivery cancel(String message, String account) {

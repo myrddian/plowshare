@@ -2,6 +2,7 @@ import type {
   ApplicationFileListing,
   ApplicationFileDocument,
 } from 'plowshare-client-ts/operations/conversation-replies';
+import type { Preference } from './renderer/preferences.ts';
 import type { JobNotification } from 'plowshare-client-ts/operations/push';
 import type { ServerAdminCall } from './admin-input.ts';
 import type { InformationCall } from 'plowshare-client-ts/operations/information';
@@ -157,6 +158,15 @@ export interface DesktopState {
   mode: 'demo' | 'live';
   connected: boolean;
   connection: string;
+  localPreferences?: Preference;
+  namedConnections?: {
+    key: string;
+    name: string;
+    server: string;
+    account: string;
+    reconnect: boolean;
+  }[];
+  selectedConnection?: string;
   base: string;
   handle: string;
   projects: Project[];
@@ -171,6 +181,7 @@ export interface DesktopState {
         text?: string;
         note?: string;
         error?: string | undefined;
+        warning?: string | undefined;
         botLatest?: Record<string, string>;
         botsError?: string;
       }
@@ -381,13 +392,29 @@ export type Request =
       handle: string;
       password: string;
     }
-  | { action: 'connect'; base: string; handle: string; password: string }
+  | {
+      action: 'connect';
+      base: string;
+      handle: string;
+      password: string;
+      name?: string;
+    }
+  | { action: 'connection-select'; name: string }
+  | {
+      action: 'connection-preferences';
+      server: string;
+      account: string;
+      preference: Preference;
+    }
+  | { action: 'connection-rename'; name: string; nextName: string }
+  | { action: 'connection-remove'; name: string }
   | {
       action: 'personal-section';
       section: 'In' | 'Out' | 'Resources' | 'Archive' | 'Planning' | 'Bots';
       path?: string;
     }
   | { action: 'personal-bots' }
+  | { action: 'personal-recreate' }
   | { action: 'files-choose'; project?: string }
   | { action: 'files-withdraw'; project?: string }
   | { action: 'sync-refresh'; project: string }

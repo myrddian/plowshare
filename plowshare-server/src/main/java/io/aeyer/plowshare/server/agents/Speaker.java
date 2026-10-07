@@ -84,6 +84,26 @@ public record Speaker(Kind kind, String name) {
     return new Speaker(Kind.HARNESS, "event " + Objects.requireNonNull(trigger, "trigger"));
   }
 
+  /** A direct message's durable identity, redeemable through authorized messaging reads. */
+  public static Speaker message(String message) {
+    return new Speaker(Kind.HARNESS, "message " + sourceId(message));
+  }
+
+  /** A Relay delivery's identity; distinct from its event and effect-budget ancestry. */
+  public static Speaker relay(java.util.UUID delivery) {
+    return new Speaker(Kind.HARNESS, "relay " + Objects.requireNonNull(delivery));
+  }
+
+  private static String sourceId(String value) {
+    if (value == null
+        || value.isBlank()
+        || value.length() > 256
+        || value.chars().anyMatch(Character::isWhitespace)) {
+      throw new IllegalArgumentException("source identity must be a bounded nonblank token");
+    }
+    return value;
+  }
+
   /**
    * What a stored row says about who spoke it, read back. Only an utterance has a speaker, and one
    * written before {@code V57} has none recorded and is read as a person's — which is what every

@@ -18,6 +18,7 @@ import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.ProjectCaps;
 import io.aeyer.plowshare.server.agents.RunLimits;
 import io.aeyer.plowshare.server.agents.RunTool;
+import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.StructuredAnswers;
 import io.aeyer.plowshare.server.agents.StructuredQuestions;
 import io.aeyer.plowshare.server.agents.Turn;
@@ -239,7 +240,35 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       String callerSession,
       String parent,
       int depth,
-      RelayCausation causation) {
+      RelayCausation causation,
+      Speaker source) {
+    public Start(
+        OrchestrationDefinition definition,
+        Home home,
+        String request,
+        String context,
+        String callerConversation,
+        String callerAgent,
+        String callerHandle,
+        String callerSession,
+        String parent,
+        int depth,
+        RelayCausation causation) {
+      this(
+          definition,
+          home,
+          request,
+          context,
+          callerConversation,
+          callerAgent,
+          callerHandle,
+          callerSession,
+          parent,
+          depth,
+          causation,
+          null);
+    }
+
     public Start(
         OrchestrationDefinition definition,
         Home home,
@@ -878,7 +907,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                 .toString()
             : Utterances.start(
                 definition.name(), start.request(), start.context(), own, parentDir, phase);
-    speakOrFail(run, conductor, utterance, null);
+    speakOrFail(run, conductor, utterance, null, start.source());
     return store.find(run.id()).orElse(run);
   }
 
@@ -3932,8 +3961,17 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    */
   private boolean speakOrFail(
       OrchestrationRecord run, AgentDefinition conductor, String utterance, Integer maxModelCalls) {
+    return speakOrFail(run, conductor, utterance, maxModelCalls, null);
+  }
+
+  private boolean speakOrFail(
+      OrchestrationRecord run,
+      AgentDefinition conductor,
+      String utterance,
+      Integer maxModelCalls,
+      Speaker source) {
     try {
-      return speak(run, conductor, utterance, maxModelCalls);
+      return speak(run, conductor, utterance, maxModelCalls, source);
     } catch (Turn.Refused refused) {
       stopAndTell(run.id(), OrchestrationState.FAILED, refused.getMessage());
       return false;
@@ -4025,6 +4063,15 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    */
   private boolean speak(
       OrchestrationRecord run, AgentDefinition conductor, String utterance, Integer maxModelCalls) {
+    return speak(run, conductor, utterance, maxModelCalls, null);
+  }
+
+  private boolean speak(
+      OrchestrationRecord run,
+      AgentDefinition conductor,
+      String utterance,
+      Integer maxModelCalls,
+      Speaker source) {
     String id = run.id();
     if (store.find(id).filter(live -> live.endedAt() == null).isEmpty()) {
       log.info(
@@ -4051,13 +4098,23 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       total = pending > spent ? pending : budgetExhausted(run) ? null : spent + 1;
     }
     try {
-      voice.speak(
-          run.conductorConversation(),
-          conductor,
-          utterance,
-          liveSession(run.callerSession()),
-          total,
-          outcome -> ended(id, outcome));
+      if (source != null) {
+        voice.speakFrom(
+            run.conductorConversation(),
+            conductor,
+            utterance,
+            liveSession(run.callerSession()),
+            total,
+            outcome -> ended(id, outcome),
+            source);
+      } else
+        voice.speak(
+            run.conductorConversation(),
+            conductor,
+            utterance,
+            liveSession(run.callerSession()),
+            total,
+            outcome -> ended(id, outcome));
     } catch (RuntimeException refused) {
       // No turn took it, so the next one still should.
       if (pending != null && maxModelCalls == null) {

@@ -82,11 +82,11 @@ async function fixture(name, args, settings = {}) {
   }
 }
 
-test('TUI refuses an unspecified origin before starting a client', async () => {
+test('TUI delegates saved-connection selection to the shared client boundary', async () => {
   const result = await fixture('plowshare-talk', []);
-  assert.equal(result.code, 2);
-  assert.equal(result.output, '');
-  assert.match(result.error, /supply --url or PLOWSHARE_URL/);
+  assert.equal(result.code, 0, result.error);
+  assert.equal(JSON.parse(result.output).url, null);
+  assert.equal(JSON.parse(result.output).args.at(-1), 'src/view/main.ts');
 });
 
 test('TUI forwards explicit selection and retains the caller project root', async () => {
@@ -153,4 +153,10 @@ test('simple launcher help works without endpoint configuration', async () => {
     assert.equal(result.code, 0, result.error);
     assert.match(result.output, /Usage:/);
   }
+});
+
+test('TUI forwards connection management without requiring an origin', async () => {
+ const result = await fixture('plowshare-talk', ['connection', 'list']);
+ assert.equal(result.code, 0, result.error);
+ assert.deepEqual(JSON.parse(result.output).args.slice(-3), ['src/view/main.ts', 'connection', 'list']);
 });

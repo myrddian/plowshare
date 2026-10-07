@@ -55,7 +55,7 @@ public final class JdbcJobLog implements JobLog {
 
   private static final String COLUMNS =
       "j.id, p.name AS project, j.agent, j.started_at, j.ended_at, j.ending, j.steps,"
-          + " j.model_calls";
+          + " j.model_calls, j.conversation_id";
 
   /*
    * LEFT JOIN and not an inner one, for ConversationStore.FROM_CONVERSATIONS'
@@ -243,7 +243,8 @@ public final class JdbcJobLog implements JobLog {
             ended,
             ending == null ? null : Outcome.Ending.valueOf(ending),
             box(rs, "steps"),
-            box(rs, "model_calls"));
+            box(rs, "model_calls"),
+            rs.getString("conversation_id"));
       };
 
   private static OffsetDateTime utc(Instant instant) {

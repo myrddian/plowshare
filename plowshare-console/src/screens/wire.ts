@@ -298,6 +298,11 @@ export interface EntryView {
   readonly wireModel: string | null | undefined;
   readonly completion: string | null | undefined;
   readonly outcome: string | null | undefined;
+  readonly job?: string | null;
+  readonly source?: {
+    readonly kind: string;
+    readonly reference: string | null;
+  } | null;
 }
 
 /**

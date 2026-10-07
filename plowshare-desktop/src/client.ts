@@ -1,3 +1,4 @@
+import { connectionAccount } from 'plowshare-client-node/connections';
 import { jobNotification } from 'plowshare-client-ts/operations/push';
 import {
   decodeReply,
@@ -27,7 +28,11 @@ import {
 import { ScheduleClient } from './schedules.ts';
 import { RunClient } from './runs.ts';
 import { inspectionConversation } from './shared.ts';
-import { Credentials, savedOrLogin } from 'plowshare-client-node/credentials';
+import {
+  Credentials,
+  CredentialError,
+  savedOrLogin,
+} from 'plowshare-client-node/credentials';
 import { fieldsOf } from 'plowshare-client-ts/operations/response';
 import {
   acceptedJobOf,
@@ -126,7 +131,9 @@ export function validatedLogin(request: {
   password: unknown;
 }) {
   const handle =
-    request.handle === '' ? '' : text(request.handle, 'handle', 256);
+    request.handle === ''
+      ? ''
+      : connectionAccount(text(request.handle, 'handle', 64));
   const password =
     request.password === '' ? '' : text(request.password, 'password', 4096);
   if (password && !handle) throw new Error('Enter a handle with the password.');
@@ -144,7 +151,10 @@ function ok(answer: Outcome, expected = 'OK'): Outcome {
     );
   return answer;
 }
-function blank(base: string, handle: string): DesktopState {
+export function emptyConnectionState(
+  base: string,
+  handle: string,
+): DesktopState {
   return {
     mode: 'live',
     connected: false,
@@ -184,6 +194,8 @@ export type Connector = (
 ) => Promise<Connected>;
 
 /** Use the shared neutral auth/envelope/operation code; Electron stays outside it. */
+export class ConnectionUnavailable extends Error {}
+
 export const serverConnector: Connector = async (
   base,
   handle,
@@ -201,13 +213,18 @@ export const serverConnector: Connector = async (
           redirect: 'error',
         });
       } catch {
-        throw new Error(
+        throw new ConnectionUnavailable(
           `Could not reach ${base}. Check that your Plowshare server is running.`,
         );
       }
     },
   };
-  const store = new Credentials(base);
+  const store = new Credentials(
+    base,
+    undefined,
+    undefined,
+    handle || undefined,
+  );
   const signed = await savedOrLogin(
     door,
     store,
@@ -215,7 +232,9 @@ export const serverConnector: Connector = async (
     password || undefined,
   ).catch((error: unknown) => {
     if (error instanceof SignInRefused)
-      throw new Error('Sign-in failed. Check your handle and password.');
+      throw new CredentialError(
+        'Sign-in failed. Check your handle and password.',
+      );
     throw error;
   });
   if (signed.setupRequired)
@@ -592,7 +611,12 @@ export class DesktopClient {
   async login(request: { base: unknown; handle: unknown; password: unknown }) {
     const login = validatedLogin(request);
     if (!login.password && this.connector === serverConnector) {
-      const saved = await new Credentials(login.base).session();
+      const saved = await new Credentials(
+        login.base,
+        undefined,
+        undefined,
+        login.handle || undefined,
+      ).session();
       if (login.handle && login.handle !== saved.handle)
         throw new Error(
           'The saved session belongs to another account. Enter its handle or sign in with a password.',
@@ -627,7 +651,11 @@ export class DesktopClient {
     const handle = text(request.handle, 'administrator handle', 64),
       password = text(request.password, 'administrator password', 4096);
     await finishSetup(door, signed.tokens.access, temporary, handle, password);
-    await new Credentials(base).login(door, handle, password);
+    await new Credentials(base, undefined, undefined, handle).login(
+      door,
+      handle,
+      password,
+    );
     return { base, handle };
   }
   private readonly usageClient = new UsageClient({
@@ -1133,7 +1161,7 @@ export class DesktopClient {
           previous.base === base &&
           previous.handle === handle
             ? { ...previous, connected: false, connection: 'Connecting…' }
-            : blank(base, handle);
+            : emptyConnectionState(base, handle);
         this.state.connection = 'Connecting…';
         if (this.state.jobs !== previous.jobs) {
           this.lifecycle.reset();
@@ -1226,7 +1254,12 @@ export class DesktopClient {
             this.connection?.close();
             this.connection = undefined;
             this.disconnected();
-            this.state.connection = 'Connection failed';
+            this.state.connection =
+              error instanceof ConnectionUnavailable
+                ? 'Offline · reconnect when the server is available'
+                : error instanceof CredentialError
+                  ? 'Authentication required'
+                  : 'Connection failed';
             this.emit();
           }
           throw error;

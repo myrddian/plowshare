@@ -3,30 +3,29 @@
 set -euo pipefail
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --url|--agent|--project)
+        --url|--server|--connection|--account|--agent|--project)
             if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
                 echo 'plowshare-talk: option requires a value; see --help.' >&2
                 exit 2
             fi
             case "$1" in
-                --url) export PLOWSHARE_URL="$2" ;;
+                --url|--server) export PLOWSHARE_URL="$2" ;;
+                --connection) export PLOWSHARE_CONNECTION="$2" ;;
+                --account) export PLOWSHARE_ACCOUNT="$2" ;;
                 --agent) export PLOWSHARE_AGENT="$2" ;;
                 --project) export PLOWSHARE_PROJECT="$2" ;;
             esac
             shift 2 ;;
         -h|--help)
-            echo 'Usage: bin/plowshare-talk --url URL [--agent NAME] [--project NAME]'
+            echo 'Usage: bin/plowshare-talk [--connection NAME | --url URL] [--account HANDLE] [--agent NAME] [--project NAME]'
+            echo 'Manage: bin/plowshare-talk connection list|add|select|rename|remove ARGS...'
             echo 'Or: bin/plowshare-talk conversation|memory ARGS...'
             echo 'PLOWSHARE_URL can supply the server origin. Login is shared with the CLI.'
             exit 0 ;;
-        conversation|memory) break ;;
+        conversation|memory|information|usage|connection) break ;;
         *) echo 'plowshare-talk: unknown option; see --help.' >&2; exit 2 ;;
     esac
 done
-if [[ $# -eq 0 && -z "${PLOWSHARE_URL:-}" ]]; then
-    echo 'plowshare-talk: supply --url or PLOWSHARE_URL.' >&2
-    exit 2
-fi
 readonly REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLIENT="$REPO/plowshare-tui"
 if ! command -v node >/dev/null || ! node -e 'const [major,minor]=process.versions.node.split(".").map(Number);process.exit(major>22||(major===22&&minor>=13)?0:1)'; then
@@ -40,7 +39,7 @@ fi
 # Preserve the caller's project root before moving into the client source tree.
 export PLOWSHARE_HERE="$PWD"
 cd "$CLIENT"
-if [[ $# -gt 0 ]]; then
+if [[ $# -gt 0 && "$1" != connection ]]; then
     exec node --experimental-strip-types src/view/retrieval-cli.ts "$@"
 fi
-exec node --experimental-strip-types src/view/main.ts
+exec node --experimental-strip-types src/view/main.ts "$@"

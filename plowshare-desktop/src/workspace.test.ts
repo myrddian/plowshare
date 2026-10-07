@@ -7,7 +7,8 @@ import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
 import { mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
+import { thisMachine } from 'plowshare-client-node/marker';
 import { join } from 'node:path';
 import {
   agentWire,
@@ -40,6 +41,9 @@ function fixture(
     calls: WsRequest[];
     drop: () => void;
   }[] = [];
+  const fileClaims: string[] = [];
+  let fileRefusal: string | undefined;
+  const storedProjects: SavedProject[] = [];
   let peerWait = Promise.resolve();
   const create = async (
     _push: (value: unknown) => void,
@@ -62,17 +66,24 @@ function fixture(
             openFiles: async (
               claim: Parameters<NonNullable<Connected['openFiles']>>[0],
             ) => {
+              fileClaims.push(claim.project);
               const listeners = new Map<string, (event: Arrival) => void>();
-              setTimeout(
-                () =>
+              setTimeout(() => {
+                if (fileRefusal) {
+                  const closing = {
+                    data: undefined,
+                    code: 1003,
+                    reason: fileRefusal,
+                  };
+                  listeners.get('close')?.(closing);
+                } else
                   listeners.get('message')?.({
                     data: JSON.stringify({
                       ready: true,
                       project: claim.project,
                     }),
-                  }),
-                1,
-              );
+                  });
+              }, 1);
               return {
                 addEventListener(type: string, fn: (event: Arrival) => void) {
                   listeners.set(type, fn);
@@ -196,7 +207,7 @@ function fixture(
   ) => ({ ...(await create(push, closed)), handle: handle || 'alice' });
   const store: ProjectStore = {
     async list() {
-      return [];
+      return [...storedProjects];
     },
     async put(value) {
       savedWrites.push(value);
@@ -219,6 +230,11 @@ function fixture(
     catalogs,
     setServerProjects: (rows: ReturnType<typeof projectWire>[]) => {
       serverProjects = rows;
+    },
+    storedProjects,
+    fileClaims,
+    refuseFiles: (reason?: string) => {
+      fileRefusal = reason;
     },
     delayPeer: () => {
       let release!: () => void;
@@ -754,6 +770,64 @@ await test('saved folders do not expose a registered project absent from a succe
     assert.ok(
       !workspace.state.projectFolders?.some((row) => row.name === 'Research'),
     );
+  } finally {
+    await workspace.shutdown();
+  }
+});
+
+await test('a refused saved folder is not retried by navigation or run preparation; explicit reconnect recovers', async (t) => {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), 'plowshare-refused-')),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const { workspace, storedProjects, fileClaims, refuseFiles } = fixture(
+    undefined,
+    undefined,
+    true,
+  );
+  storedProjects.push({
+    server: 'http://localhost:8080',
+    account: 'alice',
+    name: 'Research',
+    path: root,
+    machine: thisMachine(process.env, hostname()),
+    enabled: true,
+  });
+  refuseFiles('Project is rooted elsewhere. Use the original directory.');
+  try {
+    await connect(workspace);
+    assert.deepEqual(fileClaims, ['Research']);
+    for (let i = 0; i < 3; i++) {
+      const reply = await workspace.dispatch({
+        action: 'scope',
+        project: 'Research',
+      });
+      assert.match(reply.notice ?? '', /rooted elsewhere/);
+      await assert.rejects(
+        workspace.dispatch({
+          action: 'run',
+          conversation: 'Research-chat',
+          text: 'Do work',
+          agent: 'a',
+        }),
+        /rooted elsewhere/,
+      );
+    }
+    assert.deepEqual(fileClaims, ['Research']);
+    assert.equal(workspace.state.connected, true);
+    await assert.rejects(readFile(join(root, '.plowshare/project')), {
+      code: 'ENOENT',
+    });
+    await assert.rejects(
+      workspace.dispatch({ action: 'project-open', project: 'Research' }),
+      /rooted elsewhere/,
+    );
+    assert.equal(fileClaims.length, 2);
+    refuseFiles();
+    await workspace.dispatch({ action: 'project-open', project: 'Research' });
+    await workspace.dispatch({ action: 'scope', project: 'Research' });
+    assert.equal(fileClaims.length, 3);
+    assert.equal(workspace.state.files.status, 'ready');
   } finally {
     await workspace.shutdown();
   }

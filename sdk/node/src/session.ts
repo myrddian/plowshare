@@ -217,9 +217,11 @@ export async function authenticate(
       presenceLost = false;
       try {
         await presence.root({ project, root: directory, machine: hostname() });
-      } catch {
+      } catch (error) {
+        presenceLost = true;
         throw new Error(
-          `could not open a file channel for '${project}'; this client is now serving no files at all; root explicitly again once the server is reachable`,
+          `Could not root '${project}': ${error instanceof Error ? error.message : 'file channel unavailable'}. This client is serving no files; resolve the refusal and root explicitly again.`,
+          { cause: error },
         );
       }
       const current = presence.current();
@@ -257,6 +259,8 @@ export function authenticateConfigured(
   // Explicit environment credentials remain ephemeral for automation and existing callers.
   const handle = env['PLOWSHARE_HANDLE'] ?? '',
     password = env['PLOWSHARE_PASSWORD'] ?? '';
+  if (handle && !password && options.credentials)
+    return authenticate(base, '', '', signal, diagnostic, options);
   if (handle || password) {
     if (!handle.trim() || !password)
       throw new Error(
@@ -266,7 +270,9 @@ export function authenticateConfigured(
   }
   return authenticate(base, '', '', signal, diagnostic, {
     ...options,
-    credentials: new Credentials(base, credentialDirectory(env), signal),
+    credentials:
+      options.credentials ??
+      new Credentials(base, credentialDirectory(env), signal),
   });
 }
 

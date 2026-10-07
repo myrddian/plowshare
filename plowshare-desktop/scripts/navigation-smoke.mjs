@@ -43,7 +43,7 @@ try {
   const divider = main.locator('.pane-resizer[data-pane="sidebar"]');
   await divider.press('ArrowRight');
   await expect.poll(async () => (await viewBounds()).bounds.x).toBe(Math.round(hostBounds.x + 16));
-  await main.locator('#connection-button').click();
+  await main.locator('#connect-sidebar').click();
   await expect(main.locator('#connection-dialog')).toBeVisible();
   await expect.poll(async () => (await viewBounds()).visible).toBe(false);
   await main.locator('#close-dialog').click();

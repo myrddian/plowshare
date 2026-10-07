@@ -8,7 +8,11 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import {
+  personalDirectory,
+  preparePersonalStore,
+} from 'plowshare-client-node/personal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Outcome as Answer } from 'plowshare-client-ts/binding/envelope';
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
@@ -159,6 +163,95 @@ afterEach(async () => {
 });
 
 describe('syncer', () => {
+  it('Personal recovery shares the connection lock and fences the previous sync runtime', async () => {
+    const project = 'personal:enzo';
+    root = await personalDirectory('http://unused', 'enzo', project, top);
+    await writeFile(join(root, 'a.txt'), 'Old unsynced data');
+    const server = new FakeServer();
+    const { sync } = make(server, [2, 50], {
+      strict: true,
+      claim: { project, machine: 'laptop', root },
+    });
+    try {
+      await sync.run({ kind: 'on' });
+      const lock = join(dirname(root), 'personal-store.lock');
+      await mkdir(lock);
+      const before = server.sent.length;
+      const pending = sync.connect();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(server.sent).toHaveLength(before);
+      } finally {
+        await rm(lock, { recursive: true });
+        await pending;
+      }
+      await writeFile(join(root, '.plowshare', 'personal.json'), '{corrupt');
+      const recreated = await preparePersonalStore(
+        'http://unused',
+        'enzo',
+        project,
+        top,
+      );
+      expect(recreated.warning).toContain('previous store is intact');
+      await writeFile(join(root, 'a.txt'), 'Fresh replacement');
+      const after = server.sent.length;
+      await expect(sync.connect()).rejects.toThrow('local store was replaced');
+      expect(server.sent).toHaveLength(after);
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe(
+        'Fresh replacement',
+      );
+    } finally {
+      sync.stop();
+    }
+  });
+  it('two independent runtimes serialize reconciliation of one checkout and preserve edits', async () => {
+    const server = new FakeServer();
+    const first = make(server, [2, 50], { strict: true });
+    const second = make(server, [2, 50], { strict: true });
+    try {
+      await first.sync.run({ kind: 'on' });
+      await Promise.all([first.sync.connect(), second.sync.connect()]);
+      expect(server.sent.filter((type) => type === 'union.ready')).toHaveLength(
+        3,
+      );
+      await writeFile(join(root, 'a.txt'), 'shared edit\n');
+      await Promise.all([first.sync.connect(), second.sync.connect()]);
+      expect(
+        execFileSync('git', [
+          '--git-dir',
+          hub,
+          'show',
+          'main:a.txt',
+        ]).toString(),
+      ).toBe('shared edit\n');
+      expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('shared edit\n');
+      await expect(
+        readFile(join(root, '.plowshare', 'sync.lock')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      first.sync.stop();
+      second.sync.stop();
+    }
+  });
+
+  it('a stopped client waiting for another checkout writer never sends a queued operation', async () => {
+    const server = new FakeServer();
+    const lifetime = new AbortController();
+    const { sync } = make(server, [2, 50], {
+      signal: lifetime.signal,
+      strict: true,
+    });
+    const lock = join(root, '.plowshare', 'sync.lock');
+    await mkdir(lock, { recursive: true });
+    const pending = sync.run({ kind: 'on' });
+    lifetime.abort();
+    sync.stop();
+    await expect(pending).rejects.toThrow();
+    expect(server.sent).toHaveLength(0);
+    // Cancellation does not remove the other writer's lock.
+    await expect(mkdir(lock)).rejects.toMatchObject({ code: 'EEXIST' });
+  });
+
   it('/sync on pushes a snapshot and goes live', async () => {
     const server = new FakeServer();
     const { sync } = make(server);

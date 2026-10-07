@@ -770,6 +770,11 @@ export interface Entry {
   readonly speaker?: string;
   /** The person's handle, or the harness source: `orchestration <id>`, `approval <id>`, `event <id>`, `harness`. */
   readonly speakerName?: string;
+  readonly job?: string;
+  readonly source?: {
+    readonly kind: string;
+    readonly reference: string | null;
+  };
   /** On a tool result: the id of the call it answers. */
   readonly toolCallId?: string;
   /** On an answer that asked for tools: the calls, in the order asked. */
@@ -848,6 +853,12 @@ export function entriesOf(answer: Answer): Entry[] {
     const asked = isList(calls) ? calls.length : 0;
     const speaker = textAt(fields, 'speaker');
     const speakerName = textAt(fields, 'speakerName');
+    const job = textAt(fields, 'job');
+    const sourceFields = fieldsOf(fields['source']);
+    const sourceKind = sourceFields ? textAt(sourceFields, 'kind') : undefined;
+    const sourceReference = sourceFields
+      ? textAt(sourceFields, 'reference')
+      : undefined;
     const listed = isList(calls) ? calls.flatMap(askedIn) : [];
     const toolCallId = textAt(fields, 'toolCallId');
     const outcome = textAt(fields, 'outcome');
@@ -870,6 +881,10 @@ export function entriesOf(answer: Answer): Entry[] {
       ...(asked > 0 ? { asked } : {}),
       ...(speaker === undefined ? {} : { speaker }),
       ...(speakerName === undefined ? {} : { speakerName }),
+      ...(job === undefined ? {} : { job }),
+      ...(sourceKind === undefined
+        ? {}
+        : { source: { kind: sourceKind, reference: sourceReference ?? null } }),
       ...(listed.length === 0 ? {} : { calls: listed }),
       ...(toolCallId === undefined ? {} : { toolCallId }),
       ...(outcome === undefined || outcome === '' ? {} : { outcome }),

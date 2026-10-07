@@ -14,7 +14,7 @@ export async function protocolFixture(options = {}) {
   let manualChapters = [];
   const manualRows = filter => manualChapters.filter(row => (filter?.tags ?? []).every(tag => row.tags.includes(tag)));
 
-  const eventSockets = new Map(), fileSockets = new Map();
+  const eventSockets = new Map(), fileSockets = new Map(), filePeers = new Map();
   const botLatest = new Map();
   let pricing={billingRoute:'hosted',model:'deployment',pools:['hosted'],version:'boot:',origin:'configuration',card:null,configured:[],updatedAt:null};
   const projectGrants=new Map();
@@ -133,7 +133,7 @@ export async function protocolFixture(options = {}) {
     if (req.url === '/v1/auth/setup' && setupPending) {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString());
-      if (body.temporaryPassword !== 'fixture-temporary' || body.handle !== 'fixture' || body.password !== 'fixture-password') { res.writeHead(400).end(); return; }
+      if (body.temporaryPassword !== 'fixture-temporary' || !(options.loginHandles ?? ['fixture']).includes(body.handle) || body.password !== 'fixture-password') { res.writeHead(400).end(); return; }
       setupPending = false; res.writeHead(204).end(); return;
     }
     if (req.url === '/v1/auth/login') {
@@ -143,7 +143,7 @@ export async function protocolFixture(options = {}) {
         res.writeHead(200, { 'Content-Type': 'application/json', 'X-Plowshare-Setup-Required': 'true' });
         res.end(JSON.stringify({ access, refresh: null, mustChangePassword: true })); return;
       }
-      if (body.handle !== 'fixture' || body.password !== 'fixture-password') { res.writeHead(401).end(); return; }
+      if (!(options.loginHandles ?? ['fixture']).includes(body.handle) || body.password !== 'fixture-password') { res.writeHead(401).end(); return; }
       logins++;
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ access, refresh, mustChangePassword: false }));
     } else if (req.url === '/v1/auth/refresh' && req.headers.cookie === `ps_refresh=${refresh}`) {
@@ -207,16 +207,26 @@ export async function protocolFixture(options = {}) {
       fileClaims.push(claim);
       if (refuseFiles) { connection.close(1003, 'Project is already rooted by another session'); return; }
       const holder = fileSockets.get(claim.project);
-      if (holder && holder.claim.session !== claim.session) { connection.close(1003, 'Project is already rooted by another session'); return; }
+      if (holder && holder.claim.session !== claim.session && (holder.claim.machine !== claim.machine || holder.claim.root !== claim.root)) { connection.close(1003, 'Project is rooted elsewhere; use its directory'); return; }
       fileSocket = connection; fileClaim = claim;
-      fileSockets.set(claim.project, { socket: connection, claim });
+      const peers = filePeers.get(claim.project) ?? [];
+      const at = peers.findIndex(row => row.claim.session === claim.session);
+      const peer = { socket: connection, claim };
+      if (at >= 0) peers[at] = peer; else peers.push(peer);
+      filePeers.set(claim.project, peers);
+      fileSockets.set(claim.project, peers[0]);
       projectRows.set(claim.project, { ...projectRows.get(claim.project), name: claim.project, machine: claim.machine, workspace: claim.root });
       connection.on('message', bytes => {
         const reply = JSON.parse(bytes.toString());
         const pending = filePending.get(reply.id);
         if (pending) { clearTimeout(pending.timer); filePending.delete(reply.id); pending.resolve(reply); }
       });
-      connection.on('close', () => { if (fileSockets.get(claim.project)?.socket === connection) fileSockets.delete(claim.project); if (fileSocket === connection) { fileSocket = undefined; fileClaim = undefined; } });
+      connection.on('close', () => {
+        const surviving = (filePeers.get(claim.project) ?? []).filter(row => row.socket !== connection);
+        if (surviving.length) { filePeers.set(claim.project, surviving); fileSockets.set(claim.project, surviving[0]); }
+        else { filePeers.delete(claim.project); fileSockets.delete(claim.project); }
+        if (fileSocket === connection) { fileSocket = undefined; fileClaim = undefined; }
+      });
       setTimeout(() => { if (connection.readyState === 1) connection.send(JSON.stringify({ ready: true, ...(emptyFileReady ? {} : { project: claim.project }) })); }, 20);
       return;
     }
@@ -444,7 +454,7 @@ export async function protocolFixture(options = {}) {
         }
         case 'project.list': result = refuseProjects ? { code: 'BAD_REQUEST', said: 'Project listing unavailable' } : { code: 'OK', payload: [...projectRows.values()].map(row => projectWire(row.name, row)) }; break;
         case 'agent.list': {
-          const ownsFiles = fileSockets.get(payload.project)?.claim.session === sessionId;
+          const ownsFiles = (filePeers.get(payload.project) ?? []).some(row => row.claim.session === sessionId);
           try {
             result.payload = options.agentRoster ? await options.agentRoster({ project: payload.project, session: sessionId,
               files: ownsFiles ? request => fileRequest(request, payload.project) : undefined })
@@ -618,7 +628,7 @@ export async function protocolFixture(options = {}) {
         case 'event.fire': result.payload = []; break;
         default:
           if (frame.type.startsWith('union.')) {
-            const claimed = fileSockets.get(payload.project)?.claim.session === sessionId;
+            const claimed = (filePeers.get(payload.project) ?? []).some(row => row.claim.session === sessionId);
             if (options.union) result = await options.union.ask(frame.type, payload, claimed);
             else if (frame.type === 'union.status') result = {code:'OK',payload:claimed ? {eligible:true,enabled:false,state:'OFFLINE',syncHidden:[],maxFileBytes:5242880,openConflicts:0,url:`/v1/sync/${encodeURIComponent(payload.project)}.git`} : {eligible:false,enabled:false}};
             else if (frame.type === 'union.conflict.list') result = {code:'OK',payload:{conflicts:[]}};
@@ -635,7 +645,7 @@ export async function protocolFixture(options = {}) {
     setInformationReadError(value) { informationReadError=value; },
     get eventSession() { return eventSession; },
     get fileClaim() { return fileClaim; },
-    get liveFileClaims() { return [...fileSockets.values()].map(row => row.claim); },
+    get liveFileClaims() { return [...filePeers.values()].flat().map(row => row.claim); },
     get rotations() { return rotations; },
     setApplicationFile(project, path, text, writable = false) { const files = applicationSources.get(project) ?? new Map(); files.set(path, { text, writable }); applicationSources.set(project, files); },
     removeServerProject(project) { projectRows.delete(project); },

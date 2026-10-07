@@ -4702,6 +4702,9 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         "handle": {
           "$ref": "#/$defs/shape3"
         },
+        "name": {
+          "$ref": "#/$defs/shape3"
+        },
         "password": {
           "$ref": "#/$defs/shape3"
         }
@@ -4715,47 +4718,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       "additionalProperties": false
     },
     "shape373": {
-      "const": "personal-section"
-    },
-    "shape375": {
-      "const": "In"
-    },
-    "shape376": {
-      "const": "Out"
-    },
-    "shape377": {
-      "const": "Resources"
-    },
-    "shape378": {
-      "const": "Archive"
-    },
-    "shape379": {
-      "const": "Planning"
-    },
-    "shape380": {
-      "const": "Bots"
-    },
-    "shape374": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/shape375"
-        },
-        {
-          "$ref": "#/$defs/shape376"
-        },
-        {
-          "$ref": "#/$defs/shape377"
-        },
-        {
-          "$ref": "#/$defs/shape378"
-        },
-        {
-          "$ref": "#/$defs/shape379"
-        },
-        {
-          "$ref": "#/$defs/shape380"
-        }
-      ]
+      "const": "connection-select"
     },
     "shape372": {
       "type": "object",
@@ -4763,11 +4726,182 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         "action": {
           "$ref": "#/$defs/shape373"
         },
+        "name": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "shape375": {
+      "const": "connection-preferences"
+    },
+    "shape377": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {
+        "$ref": "#/$defs/shape3"
+      }
+    },
+    "shape378": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {
+        "$ref": "#/$defs/shape14"
+      }
+    },
+    "shape376": {
+      "type": "object",
+      "properties": {
+        "chosenAgents": {
+          "$ref": "#/$defs/shape377"
+        },
+        "drafts": {
+          "$ref": "#/$defs/shape377"
+        },
+        "personalBotExpansion": {
+          "$ref": "#/$defs/shape378"
+        },
+        "projectExpansion": {
+          "$ref": "#/$defs/shape378"
+        },
+        "scope": {
+          "$ref": "#/$defs/shape3"
+        },
+        "selected": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "drafts",
+        "scope",
+        "selected"
+      ],
+      "additionalProperties": false
+    },
+    "shape374": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/shape3"
+        },
+        "action": {
+          "$ref": "#/$defs/shape375"
+        },
+        "preference": {
+          "$ref": "#/$defs/shape376"
+        },
+        "server": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "account",
+        "action",
+        "preference",
+        "server"
+      ],
+      "additionalProperties": false
+    },
+    "shape380": {
+      "const": "connection-rename"
+    },
+    "shape379": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape380"
+        },
+        "name": {
+          "$ref": "#/$defs/shape3"
+        },
+        "nextName": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "nextName"
+      ],
+      "additionalProperties": false
+    },
+    "shape382": {
+      "const": "connection-remove"
+    },
+    "shape381": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape382"
+        },
+        "name": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "shape384": {
+      "const": "personal-section"
+    },
+    "shape386": {
+      "const": "In"
+    },
+    "shape387": {
+      "const": "Out"
+    },
+    "shape388": {
+      "const": "Resources"
+    },
+    "shape389": {
+      "const": "Archive"
+    },
+    "shape390": {
+      "const": "Planning"
+    },
+    "shape391": {
+      "const": "Bots"
+    },
+    "shape385": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape386"
+        },
+        {
+          "$ref": "#/$defs/shape387"
+        },
+        {
+          "$ref": "#/$defs/shape388"
+        },
+        {
+          "$ref": "#/$defs/shape389"
+        },
+        {
+          "$ref": "#/$defs/shape390"
+        },
+        {
+          "$ref": "#/$defs/shape391"
+        }
+      ]
+    },
+    "shape383": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape384"
+        },
         "path": {
           "$ref": "#/$defs/shape3"
         },
         "section": {
-          "$ref": "#/$defs/shape374"
+          "$ref": "#/$defs/shape385"
         }
       },
       "required": [
@@ -4776,14 +4910,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape382": {
+    "shape393": {
       "const": "personal-bots"
     },
-    "shape381": {
+    "shape392": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape382"
+          "$ref": "#/$defs/shape393"
         }
       },
       "required": [
@@ -4791,14 +4925,29 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape384": {
+    "shape395": {
+      "const": "personal-recreate"
+    },
+    "shape394": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape395"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape397": {
       "const": "files-choose"
     },
-    "shape383": {
+    "shape396": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape384"
+          "$ref": "#/$defs/shape397"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -4809,14 +4958,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape386": {
+    "shape399": {
       "const": "files-withdraw"
     },
-    "shape385": {
+    "shape398": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape386"
+          "$ref": "#/$defs/shape399"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -4827,14 +4976,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape388": {
+    "shape401": {
       "const": "sync-refresh"
     },
-    "shape387": {
+    "shape400": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape388"
+          "$ref": "#/$defs/shape401"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -4846,14 +4995,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape390": {
+    "shape403": {
       "const": "sync-inspect"
     },
-    "shape389": {
+    "shape402": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape390"
+          "$ref": "#/$defs/shape403"
         },
         "path": {
           "$ref": "#/$defs/shape3"
@@ -4869,42 +5018,42 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape392": {
+    "shape405": {
       "const": "sync-change"
     },
-    "shape394": {
+    "shape407": {
       "const": "on"
     },
-    "shape395": {
+    "shape408": {
       "const": "off"
     },
-    "shape396": {
+    "shape409": {
       "const": "now"
     },
-    "shape393": {
+    "shape406": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape394"
+          "$ref": "#/$defs/shape407"
         },
         {
-          "$ref": "#/$defs/shape395"
+          "$ref": "#/$defs/shape408"
         },
         {
-          "$ref": "#/$defs/shape396"
+          "$ref": "#/$defs/shape409"
         }
       ]
     },
-    "shape391": {
+    "shape404": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape392"
+          "$ref": "#/$defs/shape405"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
         },
         "kind": {
-          "$ref": "#/$defs/shape393"
+          "$ref": "#/$defs/shape406"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -4918,39 +5067,39 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape398": {
+    "shape411": {
       "const": "sync-resolve"
     },
-    "shape400": {
+    "shape413": {
       "const": "mine"
     },
-    "shape401": {
+    "shape414": {
       "const": "theirs"
     },
-    "shape402": {
+    "shape415": {
       "const": "done"
     },
-    "shape399": {
+    "shape412": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape400"
+          "$ref": "#/$defs/shape413"
         },
         {
-          "$ref": "#/$defs/shape401"
+          "$ref": "#/$defs/shape414"
         },
         {
-          "$ref": "#/$defs/shape402"
+          "$ref": "#/$defs/shape415"
         }
       ]
     },
-    "shape397": {
+    "shape410": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape398"
+          "$ref": "#/$defs/shape411"
         },
         "how": {
-          "$ref": "#/$defs/shape399"
+          "$ref": "#/$defs/shape412"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
@@ -4970,27 +5119,27 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape405": {
+    "shape418": {
       "const": "project-open"
     },
-    "shape406": {
+    "shape419": {
       "const": "project-remove"
     },
-    "shape404": {
+    "shape417": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape405"
+          "$ref": "#/$defs/shape418"
         },
         {
-          "$ref": "#/$defs/shape406"
+          "$ref": "#/$defs/shape419"
         }
       ]
     },
-    "shape403": {
+    "shape416": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape404"
+          "$ref": "#/$defs/shape417"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -5002,27 +5151,27 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape409": {
+    "shape422": {
       "const": "scope"
     },
-    "shape410": {
+    "shape423": {
       "const": "create"
     },
-    "shape408": {
+    "shape421": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape409"
+          "$ref": "#/$defs/shape422"
         },
         {
-          "$ref": "#/$defs/shape410"
+          "$ref": "#/$defs/shape423"
         }
       ]
     },
-    "shape407": {
+    "shape420": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape408"
+          "$ref": "#/$defs/shape421"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -5033,14 +5182,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape412": {
+    "shape425": {
       "const": "history"
     },
-    "shape411": {
+    "shape424": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape412"
+          "$ref": "#/$defs/shape425"
         },
         "before": {
           "$ref": "#/$defs/shape23"
@@ -5055,14 +5204,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape414": {
+    "shape427": {
       "const": "select"
     },
-    "shape413": {
+    "shape426": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape414"
+          "$ref": "#/$defs/shape427"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -5073,14 +5222,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape416": {
+    "shape429": {
       "const": "trajectory"
     },
-    "shape415": {
+    "shape428": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape416"
+          "$ref": "#/$defs/shape429"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -5092,14 +5241,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape418": {
+    "shape431": {
       "const": "board-post-topics"
     },
-    "shape417": {
+    "shape430": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape418"
+          "$ref": "#/$defs/shape431"
         },
         "more": {
           "$ref": "#/$defs/shape14"
@@ -5114,14 +5263,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape420": {
+    "shape433": {
       "const": "board-create"
     },
-    "shape419": {
+    "shape432": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape420"
+          "$ref": "#/$defs/shape433"
         },
         "body": {
           "$ref": "#/$defs/shape3"
@@ -5152,14 +5301,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape422": {
+    "shape435": {
       "const": "board-retry"
     },
-    "shape421": {
+    "shape434": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape422"
+          "$ref": "#/$defs/shape435"
         },
         "maxTurns": {
           "$ref": "#/$defs/shape23"
@@ -5190,14 +5339,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape424": {
+    "shape437": {
       "const": "board-post"
     },
-    "shape423": {
+    "shape436": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape424"
+          "$ref": "#/$defs/shape437"
         },
         "body": {
           "$ref": "#/$defs/shape3"
@@ -5221,14 +5370,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape426": {
+    "shape439": {
       "const": "workspace-chat"
     },
-    "shape425": {
+    "shape438": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape426"
+          "$ref": "#/$defs/shape439"
         },
         "manage": {
           "$ref": "#/$defs/shape14"
@@ -5239,14 +5388,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape428": {
+    "shape441": {
       "const": "workspace-layout"
     },
-    "shape427": {
+    "shape440": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape428"
+          "$ref": "#/$defs/shape441"
         },
         "height": {
           "$ref": "#/$defs/shape23"
@@ -5274,14 +5423,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape430": {
+    "shape443": {
       "const": "workspace-refresh"
     },
-    "shape429": {
+    "shape442": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape430"
+          "$ref": "#/$defs/shape443"
         }
       },
       "required": [
@@ -5289,45 +5438,45 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape432": {
+    "shape445": {
       "const": "library"
     },
-    "shape434": {
+    "shape447": {
       "const": "sources"
     },
-    "shape435": {
+    "shape448": {
       "const": "documents"
     },
-    "shape436": {
+    "shape449": {
       "const": "memories"
     },
-    "shape437": {
+    "shape450": {
       "const": "manual"
     },
-    "shape433": {
+    "shape446": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape207"
         },
         {
-          "$ref": "#/$defs/shape434"
+          "$ref": "#/$defs/shape447"
         },
         {
-          "$ref": "#/$defs/shape435"
+          "$ref": "#/$defs/shape448"
         },
         {
-          "$ref": "#/$defs/shape436"
+          "$ref": "#/$defs/shape449"
         },
         {
-          "$ref": "#/$defs/shape437"
+          "$ref": "#/$defs/shape450"
         }
       ]
     },
-    "shape431": {
+    "shape444": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape432"
+          "$ref": "#/$defs/shape445"
         },
         "chapter": {
           "$ref": "#/$defs/shape3"
@@ -5339,7 +5488,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape3"
         },
         "view": {
-          "$ref": "#/$defs/shape433"
+          "$ref": "#/$defs/shape446"
         }
       },
       "required": [
@@ -5348,14 +5497,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape439": {
+    "shape452": {
       "const": "library-view"
     },
-    "shape438": {
+    "shape451": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape439"
+          "$ref": "#/$defs/shape452"
         },
         "chapter": {
           "$ref": "#/$defs/shape3"
@@ -5367,7 +5516,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape3"
         },
         "view": {
-          "$ref": "#/$defs/shape433"
+          "$ref": "#/$defs/shape446"
         }
       },
       "required": [
@@ -5377,27 +5526,27 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape442": {
+    "shape455": {
       "const": "library-refresh"
     },
-    "shape443": {
+    "shape456": {
       "const": "library-citations"
     },
-    "shape441": {
+    "shape454": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape442"
+          "$ref": "#/$defs/shape455"
         },
         {
-          "$ref": "#/$defs/shape443"
+          "$ref": "#/$defs/shape456"
         }
       ]
     },
-    "shape440": {
+    "shape453": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape441"
+          "$ref": "#/$defs/shape454"
         }
       },
       "required": [
@@ -5405,14 +5554,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape445": {
+    "shape458": {
       "const": "library-documents"
     },
-    "shape444": {
+    "shape457": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape445"
+          "$ref": "#/$defs/shape458"
         },
         "more": {
           "$ref": "#/$defs/shape14"
@@ -5427,39 +5576,39 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape448": {
+    "shape461": {
       "const": "library-document"
     },
-    "shape449": {
+    "shape462": {
       "const": "library-memory"
     },
-    "shape450": {
+    "shape463": {
       "const": "library-chunk"
     },
-    "shape451": {
+    "shape464": {
       "const": "library-conversation"
     },
-    "shape447": {
+    "shape460": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape448"
+          "$ref": "#/$defs/shape461"
         },
         {
-          "$ref": "#/$defs/shape449"
+          "$ref": "#/$defs/shape462"
         },
         {
-          "$ref": "#/$defs/shape450"
+          "$ref": "#/$defs/shape463"
         },
         {
-          "$ref": "#/$defs/shape451"
+          "$ref": "#/$defs/shape464"
         }
       ]
     },
-    "shape446": {
+    "shape459": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape447"
+          "$ref": "#/$defs/shape460"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -5471,14 +5620,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape453": {
+    "shape466": {
       "const": "library-source-text"
     },
-    "shape452": {
+    "shape465": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape453"
+          "$ref": "#/$defs/shape466"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -5494,14 +5643,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape455": {
+    "shape468": {
       "const": "library-stance"
     },
-    "shape454": {
+    "shape467": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape455"
+          "$ref": "#/$defs/shape468"
         },
         "claim": {
           "$ref": "#/$defs/shape3"
@@ -5513,19 +5662,19 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape457": {
+    "shape470": {
       "const": "library-search"
     },
-    "shape459": {
+    "shape472": {
       "const": "retrieve"
     },
-    "shape460": {
+    "shape473": {
       "const": "recall"
     },
-    "shape461": {
+    "shape474": {
       "const": "navigate"
     },
-    "shape458": {
+    "shape471": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape210"
@@ -5534,52 +5683,52 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape122"
         },
         {
-          "$ref": "#/$defs/shape435"
+          "$ref": "#/$defs/shape448"
         },
         {
-          "$ref": "#/$defs/shape459"
+          "$ref": "#/$defs/shape472"
         },
         {
-          "$ref": "#/$defs/shape460"
+          "$ref": "#/$defs/shape473"
         },
         {
-          "$ref": "#/$defs/shape461"
+          "$ref": "#/$defs/shape474"
         }
       ]
     },
-    "shape463": {
+    "shape476": {
       "const": "lexical"
     },
-    "shape464": {
+    "shape477": {
       "const": "semantic"
     },
-    "shape465": {
+    "shape478": {
       "const": "hybrid"
     },
-    "shape462": {
+    "shape475": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape463"
+          "$ref": "#/$defs/shape476"
         },
         {
-          "$ref": "#/$defs/shape464"
+          "$ref": "#/$defs/shape477"
         },
         {
-          "$ref": "#/$defs/shape465"
+          "$ref": "#/$defs/shape478"
         }
       ]
     },
-    "shape456": {
+    "shape469": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape457"
+          "$ref": "#/$defs/shape470"
         },
         "kind": {
-          "$ref": "#/$defs/shape458"
+          "$ref": "#/$defs/shape471"
         },
         "mode": {
-          "$ref": "#/$defs/shape462"
+          "$ref": "#/$defs/shape475"
         },
         "more": {
           "$ref": "#/$defs/shape14"
@@ -5596,51 +5745,51 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape467": {
+    "shape480": {
       "const": "library-maintain"
     },
-    "shape469": {
+    "shape482": {
       "const": "invalidate"
     },
-    "shape470": {
+    "shape483": {
       "const": "resolve"
     },
-    "shape471": {
+    "shape484": {
       "const": "reembed"
     },
-    "shape472": {
+    "shape485": {
       "const": "reconsider"
     },
-    "shape468": {
+    "shape481": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape469"
+          "$ref": "#/$defs/shape482"
         },
         {
-          "$ref": "#/$defs/shape470"
+          "$ref": "#/$defs/shape483"
         },
         {
-          "$ref": "#/$defs/shape471"
+          "$ref": "#/$defs/shape484"
         },
         {
-          "$ref": "#/$defs/shape472"
+          "$ref": "#/$defs/shape485"
         }
       ]
     },
-    "shape466": {
+    "shape479": {
       "type": "object",
       "properties": {
         "accept": {
           "$ref": "#/$defs/shape14"
         },
         "action": {
-          "$ref": "#/$defs/shape467"
+          "$ref": "#/$defs/shape480"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
         },
         "kind": {
-          "$ref": "#/$defs/shape468"
+          "$ref": "#/$defs/shape481"
         },
         "reason": {
           "$ref": "#/$defs/shape3"
@@ -5654,14 +5803,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape474": {
+    "shape487": {
       "const": "builder-outputs"
     },
-    "shape473": {
+    "shape486": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape474"
+          "$ref": "#/$defs/shape487"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -5673,14 +5822,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape476": {
+    "shape489": {
       "const": "builder-trajectory"
     },
-    "shape475": {
+    "shape488": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape476"
+          "$ref": "#/$defs/shape489"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -5692,14 +5841,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape478": {
+    "shape491": {
       "const": "builder-prepare"
     },
-    "shape477": {
+    "shape490": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape478"
+          "$ref": "#/$defs/shape491"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -5711,14 +5860,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape480": {
+    "shape493": {
       "const": "builder-start"
     },
-    "shape479": {
+    "shape492": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape480"
+          "$ref": "#/$defs/shape493"
         },
         "agent": {
           "$ref": "#/$defs/shape3"
@@ -5741,184 +5890,184 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape482": {
+    "shape495": {
       "const": "activity"
     },
-    "shape484": {
+    "shape497": {
       "const": "inbox"
     },
-    "shape485": {
+    "shape498": {
       "const": "runs"
     },
-    "shape486": {
+    "shape499": {
       "const": "definitions"
     },
-    "shape487": {
+    "shape500": {
       "const": "schedules"
     },
-    "shape488": {
+    "shape501": {
       "const": "builder"
     },
-    "shape483": {
+    "shape496": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape484"
+          "$ref": "#/$defs/shape497"
         },
         {
-          "$ref": "#/$defs/shape485"
+          "$ref": "#/$defs/shape498"
         },
         {
-          "$ref": "#/$defs/shape486"
+          "$ref": "#/$defs/shape499"
         },
         {
-          "$ref": "#/$defs/shape487"
+          "$ref": "#/$defs/shape500"
         },
         {
-          "$ref": "#/$defs/shape488"
+          "$ref": "#/$defs/shape501"
         }
       ]
     },
-    "shape481": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape482"
-        },
-        "view": {
-          "$ref": "#/$defs/shape483"
-        }
-      },
-      "required": [
-        "action",
-        "view"
-      ],
-      "additionalProperties": false
-    },
-    "shape490": {
-      "const": "activity-view"
-    },
-    "shape489": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape490"
-        },
-        "view": {
-          "$ref": "#/$defs/shape483"
-        }
-      },
-      "required": [
-        "action",
-        "view"
-      ],
-      "additionalProperties": false
-    },
-    "shape492": {
-      "const": "activity-refresh"
-    },
-    "shape491": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape492"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "additionalProperties": false
-    },
     "shape494": {
-      "const": "question-refresh"
-    },
-    "shape493": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape494"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "additionalProperties": false
-    },
-    "shape496": {
-      "const": "inbox-read"
-    },
-    "shape495": {
-      "type": "object",
-      "properties": {
-        "action": {
+          "$ref": "#/$defs/shape495"
+        },
+        "view": {
           "$ref": "#/$defs/shape496"
-        },
-        "id": {
-          "$ref": "#/$defs/shape3"
         }
       },
       "required": [
         "action",
-        "id"
+        "view"
       ],
       "additionalProperties": false
-    },
-    "shape498": {
-      "const": "inbox-more"
-    },
-    "shape497": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape498"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "additionalProperties": false
-    },
-    "shape500": {
-      "const": "run-detail"
-    },
-    "shape499": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape500"
-        },
-        "id": {
-          "$ref": "#/$defs/shape3"
-        }
-      },
-      "required": [
-        "action",
-        "id"
-      ],
-      "additionalProperties": false
-    },
-    "shape502": {
-      "const": "schedule-refresh"
-    },
-    "shape501": {
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/shape502"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "additionalProperties": false
-    },
-    "shape504": {
-      "const": "schedule-preview"
     },
     "shape503": {
+      "const": "activity-view"
+    },
+    "shape502": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape504"
+          "$ref": "#/$defs/shape503"
+        },
+        "view": {
+          "$ref": "#/$defs/shape496"
+        }
+      },
+      "required": [
+        "action",
+        "view"
+      ],
+      "additionalProperties": false
+    },
+    "shape505": {
+      "const": "activity-refresh"
+    },
+    "shape504": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape505"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape507": {
+      "const": "question-refresh"
+    },
+    "shape506": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape507"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape509": {
+      "const": "inbox-read"
+    },
+    "shape508": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape509"
+        },
+        "id": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "action",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "shape511": {
+      "const": "inbox-more"
+    },
+    "shape510": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape511"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape513": {
+      "const": "run-detail"
+    },
+    "shape512": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape513"
+        },
+        "id": {
+          "$ref": "#/$defs/shape3"
+        }
+      },
+      "required": [
+        "action",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "shape515": {
+      "const": "schedule-refresh"
+    },
+    "shape514": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape515"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape517": {
+      "const": "schedule-preview"
+    },
+    "shape516": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape517"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -5940,60 +6089,60 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape506": {
+    "shape519": {
       "const": "schedule-save"
     },
-    "shape510": {
+    "shape523": {
       "const": "skill"
     },
-    "shape511": {
+    "shape524": {
       "const": "orchestration"
     },
-    "shape509": {
+    "shape522": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape52"
         },
         {
-          "$ref": "#/$defs/shape510"
+          "$ref": "#/$defs/shape523"
         },
         {
-          "$ref": "#/$defs/shape511"
+          "$ref": "#/$defs/shape524"
         }
       ]
     },
-    "shape513": {
+    "shape526": {
       "const": "INHERITED"
     },
-    "shape514": {
+    "shape527": {
       "const": "SUMMARISED"
     },
-    "shape515": {
+    "shape528": {
       "const": "NEW"
     },
-    "shape516": {
+    "shape529": {
       "const": "DIRECT"
     },
-    "shape512": {
+    "shape525": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape25"
         },
         {
-          "$ref": "#/$defs/shape513"
+          "$ref": "#/$defs/shape526"
         },
         {
-          "$ref": "#/$defs/shape514"
+          "$ref": "#/$defs/shape527"
         },
         {
-          "$ref": "#/$defs/shape515"
+          "$ref": "#/$defs/shape528"
         },
         {
-          "$ref": "#/$defs/shape516"
+          "$ref": "#/$defs/shape529"
         }
       ]
     },
-    "shape508": {
+    "shape521": {
       "type": "object",
       "properties": {
         "agent": {
@@ -6003,10 +6152,10 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape3"
         },
         "kind": {
-          "$ref": "#/$defs/shape509"
+          "$ref": "#/$defs/shape522"
         },
         "mode": {
-          "$ref": "#/$defs/shape512"
+          "$ref": "#/$defs/shape525"
         },
         "name": {
           "$ref": "#/$defs/shape41"
@@ -6021,7 +6170,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape518": {
+    "shape531": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape25"
@@ -6031,14 +6180,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         }
       ]
     },
-    "shape517": {
+    "shape530": {
       "type": "object",
       "properties": {
         "maxModelCalls": {
-          "$ref": "#/$defs/shape518"
+          "$ref": "#/$defs/shape531"
         },
         "maxTurns": {
-          "$ref": "#/$defs/shape518"
+          "$ref": "#/$defs/shape531"
         },
         "queueCap": {
           "$ref": "#/$defs/shape23"
@@ -6051,33 +6200,33 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape521": {
+    "shape534": {
       "const": "mailbox"
     },
-    "shape522": {
+    "shape535": {
       "const": "message"
     },
-    "shape520": {
+    "shape533": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape122"
         },
         {
-          "$ref": "#/$defs/shape521"
+          "$ref": "#/$defs/shape534"
         },
         {
-          "$ref": "#/$defs/shape522"
+          "$ref": "#/$defs/shape535"
         }
       ]
     },
-    "shape519": {
+    "shape532": {
       "type": "object",
       "properties": {
         "conversation": {
           "$ref": "#/$defs/shape41"
         },
         "kind": {
-          "$ref": "#/$defs/shape520"
+          "$ref": "#/$defs/shape533"
         },
         "project": {
           "$ref": "#/$defs/shape41"
@@ -6098,29 +6247,29 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape523": {
+    "shape536": {
       "const": 1
     },
-    "shape507": {
+    "shape520": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape508"
+          "$ref": "#/$defs/shape521"
         },
         "cron": {
           "$ref": "#/$defs/shape3"
         },
         "limits": {
-          "$ref": "#/$defs/shape517"
+          "$ref": "#/$defs/shape530"
         },
         "paused": {
           "$ref": "#/$defs/shape14"
         },
         "target": {
-          "$ref": "#/$defs/shape519"
+          "$ref": "#/$defs/shape532"
         },
         "version": {
-          "$ref": "#/$defs/shape523"
+          "$ref": "#/$defs/shape536"
         },
         "zone": {
           "$ref": "#/$defs/shape3"
@@ -6137,30 +6286,30 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape525": {
+    "shape538": {
       "const": "server"
     },
-    "shape526": {
+    "shape539": {
       "const": "workspace"
     },
-    "shape524": {
+    "shape537": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape525"
+          "$ref": "#/$defs/shape538"
         },
         {
-          "$ref": "#/$defs/shape526"
+          "$ref": "#/$defs/shape539"
         }
       ]
     },
-    "shape505": {
+    "shape518": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape506"
+          "$ref": "#/$defs/shape519"
         },
         "definition": {
-          "$ref": "#/$defs/shape507"
+          "$ref": "#/$defs/shape520"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
@@ -6169,7 +6318,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape3"
         },
         "source": {
-          "$ref": "#/$defs/shape524"
+          "$ref": "#/$defs/shape537"
         }
       },
       "required": [
@@ -6178,17 +6327,17 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape528": {
+    "shape541": {
       "const": "schedule-file-save"
     },
-    "shape527": {
+    "shape540": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape528"
+          "$ref": "#/$defs/shape541"
         },
         "definition": {
-          "$ref": "#/$defs/shape507"
+          "$ref": "#/$defs/shape520"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
@@ -6203,7 +6352,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape3"
         },
         "source": {
-          "$ref": "#/$defs/shape524"
+          "$ref": "#/$defs/shape537"
         }
       },
       "required": [
@@ -6215,20 +6364,20 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape530": {
+    "shape543": {
       "const": "schedule-sync"
     },
-    "shape529": {
+    "shape542": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape530"
+          "$ref": "#/$defs/shape543"
         },
         "project": {
           "$ref": "#/$defs/shape3"
         },
         "source": {
-          "$ref": "#/$defs/shape524"
+          "$ref": "#/$defs/shape537"
         }
       },
       "required": [
@@ -6237,36 +6386,36 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape532": {
+    "shape545": {
       "const": "schedule-change"
     },
-    "shape534": {
+    "shape547": {
       "const": "schedule"
     },
-    "shape535": {
+    "shape548": {
       "const": "trigger"
     },
-    "shape533": {
+    "shape546": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape534"
+          "$ref": "#/$defs/shape547"
         },
         {
-          "$ref": "#/$defs/shape535"
+          "$ref": "#/$defs/shape548"
         }
       ]
     },
-    "shape531": {
+    "shape544": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape532"
+          "$ref": "#/$defs/shape545"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
         },
         "kind": {
-          "$ref": "#/$defs/shape533"
+          "$ref": "#/$defs/shape546"
         },
         "name": {
           "$ref": "#/$defs/shape3"
@@ -6283,14 +6432,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape537": {
+    "shape550": {
       "const": "schedule-fire"
     },
-    "shape536": {
+    "shape549": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape537"
+          "$ref": "#/$defs/shape550"
         },
         "identity": {
           "$ref": "#/$defs/shape3"
@@ -6306,14 +6455,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape539": {
+    "shape552": {
       "const": "run-definitions"
     },
-    "shape538": {
+    "shape551": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape539"
+          "$ref": "#/$defs/shape552"
         },
         "project": {
           "$ref": "#/$defs/shape3"
@@ -6324,14 +6473,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape541": {
+    "shape554": {
       "const": "run-record"
     },
-    "shape540": {
+    "shape553": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape541"
+          "$ref": "#/$defs/shape554"
         },
         "before": {
           "$ref": "#/$defs/shape23"
@@ -6349,10 +6498,10 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape543": {
+    "shape556": {
       "const": "run-answer"
     },
-    "shape545": {
+    "shape558": {
       "type": "object",
       "properties": {
         "chosen": {
@@ -6374,23 +6523,23 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape544": {
+    "shape557": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/shape545"
+        "$ref": "#/$defs/shape558"
       }
     },
-    "shape542": {
+    "shape555": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape543"
+          "$ref": "#/$defs/shape556"
         },
         "answer": {
           "$ref": "#/$defs/shape3"
         },
         "choices": {
-          "$ref": "#/$defs/shape544"
+          "$ref": "#/$defs/shape557"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -6406,14 +6555,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape547": {
+    "shape560": {
       "const": "run-cancel"
     },
-    "shape546": {
+    "shape559": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape547"
+          "$ref": "#/$defs/shape560"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -6425,14 +6574,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape549": {
+    "shape562": {
       "const": "run-resume"
     },
-    "shape548": {
+    "shape561": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape549"
+          "$ref": "#/$defs/shape562"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -6444,33 +6593,33 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape551": {
+    "shape564": {
       "const": "run-trajectory"
     },
-    "shape553": {
+    "shape566": {
       "const": "conductor"
     },
-    "shape554": {
+    "shape567": {
       "const": "caller"
     },
-    "shape552": {
+    "shape565": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape553"
+          "$ref": "#/$defs/shape566"
         },
         {
-          "$ref": "#/$defs/shape554"
+          "$ref": "#/$defs/shape567"
         }
       ]
     },
-    "shape550": {
+    "shape563": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape551"
+          "$ref": "#/$defs/shape564"
         },
         "actor": {
-          "$ref": "#/$defs/shape552"
+          "$ref": "#/$defs/shape565"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -6483,14 +6632,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape556": {
+    "shape569": {
       "const": "run-stage-trajectory"
     },
-    "shape555": {
+    "shape568": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape556"
+          "$ref": "#/$defs/shape569"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -6506,14 +6655,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape558": {
+    "shape571": {
       "const": "delegate-trajectory"
     },
-    "shape557": {
+    "shape570": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape558"
+          "$ref": "#/$defs/shape571"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -6529,49 +6678,49 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape561": {
+    "shape574": {
       "const": "board-inspection"
     },
-    "shape562": {
+    "shape575": {
       "const": "board-view"
     },
-    "shape560": {
+    "shape573": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape561"
+          "$ref": "#/$defs/shape574"
         },
         {
-          "$ref": "#/$defs/shape562"
+          "$ref": "#/$defs/shape575"
         }
       ]
     },
-    "shape564": {
+    "shape577": {
       "const": "board"
     },
-    "shape565": {
+    "shape578": {
       "const": "swarm"
     },
-    "shape563": {
+    "shape576": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape564"
+          "$ref": "#/$defs/shape577"
         },
         {
-          "$ref": "#/$defs/shape565"
+          "$ref": "#/$defs/shape578"
         }
       ]
     },
-    "shape559": {
+    "shape572": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape560"
+          "$ref": "#/$defs/shape573"
         },
         "project": {
           "$ref": "#/$defs/shape3"
         },
         "view": {
-          "$ref": "#/$defs/shape563"
+          "$ref": "#/$defs/shape576"
         }
       },
       "required": [
@@ -6580,27 +6729,27 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape568": {
+    "shape581": {
       "const": "board-refresh"
     },
-    "shape569": {
+    "shape582": {
       "const": "board-more"
     },
-    "shape567": {
+    "shape580": {
       "anyOf": [
         {
-          "$ref": "#/$defs/shape568"
+          "$ref": "#/$defs/shape581"
         },
         {
-          "$ref": "#/$defs/shape569"
+          "$ref": "#/$defs/shape582"
         }
       ]
     },
-    "shape566": {
+    "shape579": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape567"
+          "$ref": "#/$defs/shape580"
         }
       },
       "required": [
@@ -6608,14 +6757,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape571": {
+    "shape584": {
       "const": "board-topic"
     },
-    "shape570": {
+    "shape583": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape571"
+          "$ref": "#/$defs/shape584"
         },
         "topic": {
           "$ref": "#/$defs/shape3"
@@ -6627,14 +6776,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape573": {
+    "shape586": {
       "const": "board-trajectory"
     },
-    "shape572": {
+    "shape585": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape573"
+          "$ref": "#/$defs/shape586"
         },
         "conversation": {
           "$ref": "#/$defs/shape3"
@@ -6646,14 +6795,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape575": {
+    "shape588": {
       "const": "context"
     },
-    "shape574": {
+    "shape587": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape575"
+          "$ref": "#/$defs/shape588"
         },
         "agent": {
           "$ref": "#/$defs/shape3"
@@ -6669,14 +6818,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape577": {
+    "shape590": {
       "const": "open-link"
     },
-    "shape576": {
+    "shape589": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape577"
+          "$ref": "#/$defs/shape590"
         },
         "url": {
           "$ref": "#/$defs/shape3"
@@ -6688,14 +6837,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape579": {
+    "shape592": {
       "const": "copy-text"
     },
-    "shape578": {
+    "shape591": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape579"
+          "$ref": "#/$defs/shape592"
         },
         "text": {
           "$ref": "#/$defs/shape3"
@@ -6707,14 +6856,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape581": {
+    "shape594": {
       "const": "workflow-start"
     },
-    "shape580": {
+    "shape593": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape581"
+          "$ref": "#/$defs/shape594"
         },
         "agent": {
           "$ref": "#/$defs/shape3"
@@ -6742,7 +6891,7 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape582": {
+    "shape595": {
       "type": "object",
       "properties": {
         "action": {
@@ -6766,14 +6915,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape584": {
+    "shape597": {
       "const": "cancel"
     },
-    "shape583": {
+    "shape596": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape584"
+          "$ref": "#/$defs/shape597"
         },
         "job": {
           "$ref": "#/$defs/shape3"
@@ -6785,10 +6934,10 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
-    "shape586": {
+    "shape599": {
       "const": "answer"
     },
-    "shape587": {
+    "shape600": {
       "anyOf": [
         {
           "$ref": "#/$defs/shape121"
@@ -6798,14 +6947,14 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         }
       ]
     },
-    "shape585": {
+    "shape598": {
       "type": "object",
       "properties": {
         "action": {
-          "$ref": "#/$defs/shape586"
+          "$ref": "#/$defs/shape599"
         },
         "decision": {
-          "$ref": "#/$defs/shape587"
+          "$ref": "#/$defs/shape600"
         },
         "id": {
           "$ref": "#/$defs/shape3"
@@ -7094,64 +7243,67 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape372"
         },
         {
+          "$ref": "#/$defs/shape374"
+        },
+        {
+          "$ref": "#/$defs/shape379"
+        },
+        {
           "$ref": "#/$defs/shape381"
         },
         {
           "$ref": "#/$defs/shape383"
         },
         {
-          "$ref": "#/$defs/shape385"
+          "$ref": "#/$defs/shape392"
         },
         {
-          "$ref": "#/$defs/shape387"
+          "$ref": "#/$defs/shape394"
         },
         {
-          "$ref": "#/$defs/shape389"
+          "$ref": "#/$defs/shape396"
         },
         {
-          "$ref": "#/$defs/shape391"
+          "$ref": "#/$defs/shape398"
         },
         {
-          "$ref": "#/$defs/shape397"
+          "$ref": "#/$defs/shape400"
         },
         {
-          "$ref": "#/$defs/shape403"
+          "$ref": "#/$defs/shape402"
         },
         {
-          "$ref": "#/$defs/shape407"
+          "$ref": "#/$defs/shape404"
         },
         {
-          "$ref": "#/$defs/shape411"
+          "$ref": "#/$defs/shape410"
         },
         {
-          "$ref": "#/$defs/shape413"
+          "$ref": "#/$defs/shape416"
         },
         {
-          "$ref": "#/$defs/shape415"
+          "$ref": "#/$defs/shape420"
         },
         {
-          "$ref": "#/$defs/shape417"
+          "$ref": "#/$defs/shape424"
         },
         {
-          "$ref": "#/$defs/shape419"
+          "$ref": "#/$defs/shape426"
         },
         {
-          "$ref": "#/$defs/shape421"
+          "$ref": "#/$defs/shape428"
         },
         {
-          "$ref": "#/$defs/shape423"
+          "$ref": "#/$defs/shape430"
         },
         {
-          "$ref": "#/$defs/shape425"
+          "$ref": "#/$defs/shape432"
         },
         {
-          "$ref": "#/$defs/shape427"
+          "$ref": "#/$defs/shape434"
         },
         {
-          "$ref": "#/$defs/shape429"
-        },
-        {
-          "$ref": "#/$defs/shape431"
+          "$ref": "#/$defs/shape436"
         },
         {
           "$ref": "#/$defs/shape438"
@@ -7160,79 +7312,76 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape440"
         },
         {
+          "$ref": "#/$defs/shape442"
+        },
+        {
           "$ref": "#/$defs/shape444"
         },
         {
-          "$ref": "#/$defs/shape446"
+          "$ref": "#/$defs/shape451"
         },
         {
-          "$ref": "#/$defs/shape452"
+          "$ref": "#/$defs/shape453"
         },
         {
-          "$ref": "#/$defs/shape454"
+          "$ref": "#/$defs/shape457"
         },
         {
-          "$ref": "#/$defs/shape456"
+          "$ref": "#/$defs/shape459"
         },
         {
-          "$ref": "#/$defs/shape466"
+          "$ref": "#/$defs/shape465"
         },
         {
-          "$ref": "#/$defs/shape473"
+          "$ref": "#/$defs/shape467"
         },
         {
-          "$ref": "#/$defs/shape475"
-        },
-        {
-          "$ref": "#/$defs/shape477"
+          "$ref": "#/$defs/shape469"
         },
         {
           "$ref": "#/$defs/shape479"
         },
         {
-          "$ref": "#/$defs/shape481"
+          "$ref": "#/$defs/shape486"
         },
         {
-          "$ref": "#/$defs/shape489"
+          "$ref": "#/$defs/shape488"
         },
         {
-          "$ref": "#/$defs/shape491"
+          "$ref": "#/$defs/shape490"
         },
         {
-          "$ref": "#/$defs/shape493"
+          "$ref": "#/$defs/shape492"
         },
         {
-          "$ref": "#/$defs/shape495"
+          "$ref": "#/$defs/shape494"
         },
         {
-          "$ref": "#/$defs/shape497"
+          "$ref": "#/$defs/shape502"
         },
         {
-          "$ref": "#/$defs/shape499"
+          "$ref": "#/$defs/shape504"
         },
         {
-          "$ref": "#/$defs/shape501"
+          "$ref": "#/$defs/shape506"
         },
         {
-          "$ref": "#/$defs/shape503"
+          "$ref": "#/$defs/shape508"
         },
         {
-          "$ref": "#/$defs/shape505"
+          "$ref": "#/$defs/shape510"
         },
         {
-          "$ref": "#/$defs/shape527"
+          "$ref": "#/$defs/shape512"
         },
         {
-          "$ref": "#/$defs/shape529"
+          "$ref": "#/$defs/shape514"
         },
         {
-          "$ref": "#/$defs/shape531"
+          "$ref": "#/$defs/shape516"
         },
         {
-          "$ref": "#/$defs/shape536"
-        },
-        {
-          "$ref": "#/$defs/shape538"
+          "$ref": "#/$defs/shape518"
         },
         {
           "$ref": "#/$defs/shape540"
@@ -7241,25 +7390,31 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape542"
         },
         {
-          "$ref": "#/$defs/shape546"
+          "$ref": "#/$defs/shape544"
         },
         {
-          "$ref": "#/$defs/shape548"
+          "$ref": "#/$defs/shape549"
         },
         {
-          "$ref": "#/$defs/shape550"
+          "$ref": "#/$defs/shape551"
+        },
+        {
+          "$ref": "#/$defs/shape553"
         },
         {
           "$ref": "#/$defs/shape555"
         },
         {
-          "$ref": "#/$defs/shape557"
-        },
-        {
           "$ref": "#/$defs/shape559"
         },
         {
-          "$ref": "#/$defs/shape566"
+          "$ref": "#/$defs/shape561"
+        },
+        {
+          "$ref": "#/$defs/shape563"
+        },
+        {
+          "$ref": "#/$defs/shape568"
         },
         {
           "$ref": "#/$defs/shape570"
@@ -7268,25 +7423,34 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
           "$ref": "#/$defs/shape572"
         },
         {
-          "$ref": "#/$defs/shape574"
-        },
-        {
-          "$ref": "#/$defs/shape576"
-        },
-        {
-          "$ref": "#/$defs/shape578"
-        },
-        {
-          "$ref": "#/$defs/shape580"
-        },
-        {
-          "$ref": "#/$defs/shape582"
+          "$ref": "#/$defs/shape579"
         },
         {
           "$ref": "#/$defs/shape583"
         },
         {
           "$ref": "#/$defs/shape585"
+        },
+        {
+          "$ref": "#/$defs/shape587"
+        },
+        {
+          "$ref": "#/$defs/shape589"
+        },
+        {
+          "$ref": "#/$defs/shape591"
+        },
+        {
+          "$ref": "#/$defs/shape593"
+        },
+        {
+          "$ref": "#/$defs/shape595"
+        },
+        {
+          "$ref": "#/$defs/shape596"
+        },
+        {
+          "$ref": "#/$defs/shape598"
         }
       ]
     }

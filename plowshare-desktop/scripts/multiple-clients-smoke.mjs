@@ -1,0 +1,60 @@
+import { _electron as electron, expect } from 'playwright/test';
+import executablePath from 'electron';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { protocolFixture } from './protocol-fixture.mjs';
+const directory = await mkdtemp(join(tmpdir(), 'plowshare-multiple-clients-'));
+const fixture = await protocolFixture();
+const project = 'personal:' + Buffer.from('fixture').toString('hex');
+fixture.addServerProject({ name: project, kind: 'personal', workspace: '/personal' });
+const apps = new Set();
+const envAt = (config, profile) => {
+  const env = { ...process.env, PLOWSHARE_CONFIG_DIR: config, PLOWSHARE_DESKTOP_PROFILE: profile };
+  for (const key of ['ELECTRON_RUN_AS_NODE', 'PLOWSHARE_DESKTOP_CONFIG', 'PLOWSHARE_CONNECTION', 'PLOWSHARE_HANDLE', 'PLOWSHARE_PASSWORD', 'PLOWSHARE_ACCOUNT', 'PLOWSHARE_TOKEN', 'PLOWSHARE_URL']) delete env[key];
+  return env;
+};
+const launch = async (config, name) => {
+  const app = await electron.launch({ executablePath, args: [resolve('.')], env: envAt(config, join(directory, name)) });
+  apps.add(app);
+  const page = await app.firstWindow();
+  await page.locator('#connection-button').waitFor();
+  await page.evaluate(() => window.plowshare.request({ action: 'bootstrap' }));
+  return { app, page };
+};
+const state = page => page.evaluate(async () => (await window.plowshare.request({ action: 'bootstrap' })).state);
+const login = page => page.evaluate(base => window.plowshare.request({ action: 'connect', name: 'Shared', base, handle: 'fixture', password: 'fixture-password' }), fixture.base);
+try {
+  const config = join(directory, 'shared');
+  const first = await launch(config, 'first-profile');
+  await login(first.page);
+  await expect.poll(() => fixture.liveFileClaims.length).toBe(1);
+  const second = await launch(config, 'second-profile');
+  await expect.poll(() => fixture.liveFileClaims.length).toBe(2);
+  const a = await state(first.page), b = await state(second.page);
+  assert.equal(a.connected, true); assert.equal(b.connected, true);
+  assert.equal(a.personal.root, b.personal.root);
+  assert.equal(a.personal.error, undefined); assert.equal(b.personal.error, undefined);
+  assert.ok(a.projectFolders.find(row => row.name === project).connected);
+  assert.ok(b.projectFolders.find(row => row.name === project).connected);
+  assert.equal(fixture.loginCount(), 1, 'the second process reused the saved session');
+  await first.app.close(); apps.delete(first.app);
+  await expect.poll(() => fixture.liveFileClaims.length).toBe(1);
+  await second.page.evaluate(project => window.plowshare.request({ action: 'scope', project }), project);
+  assert.equal((await state(second.page)).files.status, 'ready');
+  const wrong = await launch(join(directory, 'different-root'), 'wrong-profile');
+  await login(wrong.page);
+  assert.match((await state(wrong.page)).personal.error, /rooted elsewhere/);
+  const before = fixture.fileClaims.length;
+  for (let i = 0; i < 3; i++) await wrong.page.evaluate(project => window.plowshare.request({ action: 'scope', project }), project);
+  assert.equal(fixture.fileClaims.length, before, 'navigation did not repeat the refused claim');
+  assert.equal((await state(wrong.page)).connected, true, 'the account connection remains usable');
+  assert.equal((await state(second.page)).files.status, 'ready');
+  await mkdir('build/smoke', { recursive: true });
+  await second.page.screenshot({ path: 'build/smoke/multiple-clients.png' });
+  console.log('PASS: two native client processes share Personal and saved credentials; closing one preserves the other; a different root is refused once without disconnecting account browsing.');
+} finally {
+  await Promise.allSettled([...apps].map(app => app.close()));
+  await fixture.close(); await rm(directory, { recursive: true, force: true });
+}

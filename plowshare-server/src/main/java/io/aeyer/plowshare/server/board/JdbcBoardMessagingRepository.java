@@ -428,7 +428,7 @@ public final class JdbcBoardMessagingRepository implements BoardMessagingReposit
     return jdbc
         .queryForList(
             "SELECT job_id FROM firings WHERE data->>'direct_message' = ?"
-                + " AND status = 'started' AND finished_at IS NULL AND job_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+                + " AND job_id IS NOT NULL AND job_id <> 'pending' ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 1",
             String.class,
             message)
         .stream()

@@ -1,3 +1,9 @@
+import {
+  Connections,
+  manageConnections,
+  resolveConnection,
+  userConfigDirectory,
+} from 'plowshare-client-node/connections';
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { projects, type Project } from 'plowshare-client-ts/operations/views';
 import { isList } from 'plowshare-client-ts/binding/values';
@@ -146,6 +152,7 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
   let connection: Session | undefined;
   let syncing: Syncer | undefined;
   let rooted = false,
+    openingFiles = false,
     syncFailed = false;
   let operation: string | undefined, job: string | undefined;
   const identifiers: Record<string, { type: string; id: string }> = {};
@@ -171,7 +178,12 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const recovery = (code: string): Record<string, unknown> => {
     let nextActions: unknown[];
-    if (code === 'SERVER_REFUSED')
+    if (code === 'FILES_UNAVAILABLE')
+      nextActions = [
+        { action: 'inspect-file-root' },
+        { action: 'reconnect-files' },
+      ];
+    else if (code === 'SERVER_REFUSED')
       nextActions = [
         { action: 'correct-input', operation },
         { action: 'check-authority', operation },
@@ -294,6 +306,49 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       );
       return 0;
     }
+    const registry = new Connections(userConfigDirectory(io.env));
+    if (opts.commandParts?.[0] === 'connection') {
+      const config = await manageConnections(
+        registry,
+        opts.commandParts.slice(1),
+      ).catch((cause: unknown) => {
+        throw new Usage(
+          cause instanceof Error
+            ? cause.message
+            : 'Invalid connection management request.',
+          { cause },
+        );
+      });
+      io.stdout(JSON.stringify(config, null, json ? undefined : 2) + '\n');
+      return 0;
+    }
+    const selected = opts.validate
+      ? undefined
+      : await resolveConnection(
+          registry,
+          {
+            ...(opts.connectionName === undefined
+              ? {}
+              : { name: opts.connectionName }),
+            ...(opts.base === undefined ? {} : { server: opts.base }),
+            ...(opts.account === undefined ? {} : { account: opts.account }),
+          },
+          io.env,
+        ).catch((cause: unknown) => {
+          throw new Usage(
+            cause instanceof Error
+              ? cause.message
+              : 'Invalid connection selection.',
+            { cause },
+          );
+        });
+    if (selected && io.env['PLOWSHARE_TOKEN'])
+      throw new Usage(
+        'Named user connections cannot be combined with a service token.',
+      );
+    if (selected) opts = { ...opts, base: selected.server };
+    const selectedAccount =
+      selected?.account ?? opts.account ?? io.env['PLOWSHARE_ACCOUNT'];
     timer = setTimeout(
       () => {
         deadline = true;
@@ -314,10 +369,11 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
           '--validate applies to ordinary operation payloads; login/logout do not take it',
         );
       const base = requireServer(opts.base);
-      const store = new Credentials(
+      let store = new Credentials(
         base,
         credentialDirectory(io.env),
         control.signal,
+        selectedAccount,
       );
       const door = {
         base,
@@ -340,8 +396,19 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
           handle = entered.handle;
           password = entered.password;
         }
+        handle ??= selectedAccount;
+        if (selectedAccount && handle !== selectedAccount)
+          throw new Usage(
+            'Login handle conflicts with the selected connection.',
+          );
         if (!handle?.trim() || !password)
           throw new Usage('Provide both login handle and password.');
+        store = new Credentials(
+          base,
+          credentialDirectory(io.env),
+          control.signal,
+          handle,
+        );
         let signed = await store.login(door, handle, password);
         if (signed.setupRequired) {
           if (opts.command !== 'setup')
@@ -368,6 +435,12 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
             nextHandle,
             nextPassword,
           );
+          store = new Credentials(
+            base,
+            credentialDirectory(io.env),
+            control.signal,
+            nextHandle,
+          );
           signed = await store.login(door, nextHandle, nextPassword);
         } else if (opts.command === 'setup')
           throw new Usage(
@@ -380,6 +453,20 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
           signed = await store.login(door, handle, next);
           if (signed.mustChangePassword) throw new MustChangePassword();
         }
+        const session = await store.session();
+        if (selectedAccount && session.handle !== selectedAccount)
+          throw new Usage('The login belongs to another account.');
+        await registry.put({
+          name:
+            selected?.name ??
+            (await registry.load()).connections.find(
+              (row) => row.server === base && row.account === session.handle,
+            )?.name ??
+            `${session.handle} @ ${new URL(base).host}`,
+          server: base,
+          account: session.handle,
+          reconnect: true,
+        });
       } else await store.logout(door);
       io.stdout(
         json
@@ -595,6 +682,16 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       control.signal,
       () => undefined,
       {
+        ...(selectedAccount === undefined
+          ? {}
+          : {
+              credentials: new Credentials(
+                base,
+                credentialDirectory(io.env),
+                control.signal,
+                selectedAccount,
+              ),
+            }),
         onPresenceLost: () => {
           if (active && !control.signal.aborted) {
             lost = true;
@@ -634,7 +731,9 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       else io.stdout(`${status}: ${JSON.stringify(extra)}\n`);
     };
     if (directory !== undefined) {
+      openingFiles = true;
       const claim = (await connection.root(opts.project!, directory)).current;
+      openingFiles = false;
       control.signal.throwIfAborted();
       if (claim.project !== opts.project) {
         const payload = parsed.request.payload as Record<string, unknown>;
@@ -955,6 +1054,13 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
           : 'interrupted or deadline reached before the operation was submitted',
         5,
         failureCode,
+      );
+    if (openingFiles)
+      return fail(
+        'error',
+        'file presence was refused or unavailable; check whether another client roots this project at a different directory, review account access, then reconnect files explicitly; no operation was submitted',
+        5,
+        'FILES_UNAVAILABLE',
       );
     return fail(
       submitted ? 'unknown' : 'error',

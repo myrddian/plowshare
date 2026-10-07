@@ -472,6 +472,8 @@ await test(
       ]).done;
       assert.equal(result.code, 5);
       assert.equal(fake.frames.length, 0);
+      assert.match(result.stdout + result.stderr, /refused/);
+      assert.equal(fake.claims.length, 1, 'a rejected root is attempted once');
       assert.doesNotMatch(
         result.stdout,
         /"status":"rooted"|"status":"serving"/,

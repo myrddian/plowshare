@@ -445,6 +445,7 @@ describe('complete conversation, agent and project WS replies', () => {
       ['LifecycleView', 'api/LifecycleView', 'LifecycleView', []],
       ['TurnView', 'api/TurnView', 'TurnView', ['promptTokens']],
       ['CompactionView', 'api/CompactionView', 'CompactionView', []],
+      ['SourceView', 'api/EntryView', 'SourceView', ['reference']],
       ['OpenedView', 'api/EntryView', 'OpenedView', []],
       ['AskedView', 'api/EntryView', 'AskedView', ['salient', 'opened']],
       [
@@ -465,6 +466,8 @@ describe('complete conversation, agent and project WS replies', () => {
           'speaker',
           'speakerName',
           'outcome',
+          'job',
+          'source',
         ],
       ],
       [
@@ -563,6 +566,8 @@ describe('complete conversation, agent and project WS replies', () => {
         dto.members.map((member) => {
           const field = member as ts.PropertySignature;
           const extension =
+            (type === 'EntryView' &&
+              ['job', 'source'].includes(field.name.getText(source))) ||
             (type === 'AgentView' &&
               ['skills', 'commands', 'displayName', 'origin'].includes(
                 field.name.getText(source),

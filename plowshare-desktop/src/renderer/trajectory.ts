@@ -413,6 +413,16 @@ function renderDetail() {
   }
   if (row.step?.entry.supersededBy !== undefined)
     body += `<p class="history-note">Folded into model summary #${row.step.entry.supersededBy}. The original entry remains in your history.</p>`;
+  const recorded =
+    row.step?.kind === 'call' ? row.step.result : row.step?.entry;
+  if (recorded?.job) body += section('Job', recorded.job);
+  if (recorded?.source)
+    body += section(
+      'Origin',
+      recorded.source.kind === 'unknown'
+        ? 'Origin not recorded'
+        : `${recorded.source.kind} · ${recorded.source.reference ?? ''}`,
+    );
   body += `<details class="trajectory-raw"><summary>Record details ${copyButton('Copy displayed record', 'record')}</summary><pre>${esc(JSON.stringify(row.step ?? row.job, null, 2))}</pre></details>`;
   detail.innerHTML = body;
   if (following && nearBottom) detail.scrollTop = detail.scrollHeight;

@@ -11,7 +11,7 @@ const env={...process.env,PLOWSHARE_CONFIG_DIR:directory,PLOWSHARE_DESKTOP_PROFI
 let app;
 try {
   app=await electron.launch({executablePath,args:[resolve('.')],env});const page=await app.firstWindow();
-  await page.locator('#connection-button').click();await page.locator('#server-url').fill(fixture.base);await page.locator('#handle').fill('fixture');await page.locator('#password').fill('fixture-password');await page.locator('#submit-connection').click();
+  await page.locator('#connect-sidebar').click();await page.locator('#server-url').fill(fixture.base);await page.locator('#handle').fill('fixture');await page.locator('#password').fill('fixture-password');await page.locator('#submit-connection').click();
   await expect(page.locator('#connection-label')).toHaveText('Connected');await page.locator('#server-admin-open').click();await page.locator('#server-admin-dialog [data-pricing]').click();
   const dialog=page.locator('#pricing-admin-dialog');await expect(dialog.locator('[data-target]')).toHaveText('hosted / deployment');
   await expect(dialog.locator('[name="mode"]')).toHaveValue('UNPRICED');

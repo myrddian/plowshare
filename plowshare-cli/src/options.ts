@@ -2,6 +2,7 @@ import { isPayloadCommand } from 'plowshare-client-ts/operations/commands';
 
 export const HELP = `First-run setup: plowshare-cli --server <server-origin> setup
 Usage: plowshare-cli [options] setup|login|logout
+       plowshare-cli connection list|add|select|rename|remove ARGS...
        plowshare-cli [options] memory <verb> [JSON payload or text]
        plowshare-cli [options] search <text or JSON payload>
        plowshare-cli [options] job status|poll|result|wait|cancel <job-id>
@@ -57,6 +58,8 @@ Options (before or after the command; -- ends option parsing):
   --standalone           agent run without a reusable conversation; supports images
   --validate             validate input offline; show operation and effective scope
   --json                 JSON result on stdout (observers/root/sync emit NDJSON)
+  --connection NAME     saved connection (or PLOWSHARE_CONNECTION)
+  --account HANDLE      explicit account with --server
   --server ORIGIN        server HTTP(S) origin (or PLOWSHARE_URL; required online)
   --url ORIGIN           alias for --server
   --project NAME         server framework project (PLOWSHARE_PROJECT otherwise)
@@ -87,6 +90,9 @@ export interface Options {
   readonly newConversation: boolean;
   readonly standalone: boolean;
   readonly base: string | undefined;
+  readonly connectionName?: string;
+  readonly account?: string;
+  readonly commandParts?: readonly string[];
   readonly project?: string;
   readonly command: string;
   readonly inputPayload: boolean;
@@ -114,6 +120,7 @@ export function options(
     version = false;
   let root: string | undefined,
     sync = false;
+  let connectionName: string | undefined, account: string | undefined;
   let url = env['PLOWSHARE_URL'];
   let project = env['PLOWSHARE_PROJECT'] || undefined;
   let pollMs = 1000,
@@ -182,6 +189,12 @@ export function options(
         break;
       case '--sync':
         sync = true;
+        break;
+      case '--connection':
+        connectionName = value(flag);
+        break;
+      case '--account':
+        account = value(flag);
         break;
       case '--server':
       case '--url':
@@ -289,6 +302,9 @@ export function options(
     newConversation,
     standalone,
     base,
+    commandParts: parts,
+    ...(connectionName === undefined ? {} : { connectionName }),
+    ...(account === undefined ? {} : { account }),
     ...(project === undefined ? {} : { project }),
     ...(root === undefined ? {} : { root }),
     sync,

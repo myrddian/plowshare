@@ -704,11 +704,17 @@ await test(
           });
           assert.equal(response.isError, true);
           assert.match(JSON.stringify(response), /serving no files/);
-          await peer.call('agent_run', {
+          const blocked = await peer.call('agent_run', {
             agent: 'fixture',
             task: 'after refusal',
           });
-          assert.equal(fake.frames.at(-1)?.payload['session'], null);
+          assert.equal(blocked.isError, true);
+          assert.match(JSON.stringify(blocked), /root explicitly again/);
+          assert.equal(
+            fake.frames.some((frame) => frame.type === 'agent.run'),
+            false,
+            'a refused local root cannot silently submit against another client or the global scope',
+          );
         } finally {
           await peer.client.close();
           await fake.close();

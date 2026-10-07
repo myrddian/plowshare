@@ -6739,6 +6739,7 @@
             "OpenedView",
             "AskedView",
             "EntryView",
+            "SourceView",
             "EntryPageView",
             "TokenCount",
             "MeasuredTurn",

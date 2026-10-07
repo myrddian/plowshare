@@ -169,7 +169,7 @@ try {
   /* Start with a clean view if a local draft is unreadable. */
 }
 
-function persist() {
+function persist(save = true) {
   if (!identity) return;
   preferences[identity] = {
     selected,
@@ -179,13 +179,33 @@ function persist() {
     chosenAgents,
     personalBotExpansion,
   };
-  try {
-    localStorage.setItem(
-      'plowshare.desktop.ui.v1',
-      JSON.stringify(preferences),
-    );
-  } catch {
-    /* Drafts still remain in this window if storage is full. */
+  if (!save) return;
+  if (state?.mode === 'live' && state.handle) {
+    const owner = identity;
+    const preference = preferences[identity];
+    if (preference)
+      void window.plowshare
+        .request({
+          action: 'connection-preferences',
+          server: state.base,
+          account: state.handle,
+          preference,
+        })
+        .catch((reason: unknown) => {
+          if (owner === identity)
+            error(
+              reason instanceof Error ? reason.message : errorMessage(reason),
+            );
+        });
+  } else {
+    try {
+      localStorage.setItem(
+        'plowshare.desktop.ui.v1',
+        JSON.stringify(preferences),
+      );
+    } catch {
+      /* Demo drafts remain available in this window. */
+    }
   }
 }
 function key(next: DesktopState) {
@@ -211,9 +231,10 @@ function update(next: DesktopState) {
   }
   const nextIdentity = key(next);
   if (nextIdentity !== identity) {
-    persist();
+    persist(false);
     identity = nextIdentity;
-    const saved = preferences[identity];
+    delete draft.dataset.conversation;
+    const saved = next.localPreferences ?? preferences[identity];
     drafts = saved?.drafts ?? {};
     selected = saved?.selected ?? '';
     scope = saved?.scope ?? (next.mode === 'demo' ? 'Research' : '');
@@ -268,7 +289,7 @@ function update(next: DesktopState) {
     signature = '';
   }
   render();
-  persist();
+  persist(state.mode === 'demo');
   followSelection();
 }
 function followSelection() {
@@ -295,9 +316,11 @@ async function request(command: Request) {
   return reply;
 }
 function action(command: Request) {
-  void request(command).catch((reason: unknown) =>
-    error(reason instanceof Error ? reason.message : errorMessage(reason)),
-  );
+  const owner = identity;
+  void request(command).catch((reason: unknown) => {
+    if (owner === identity)
+      error(reason instanceof Error ? reason.message : errorMessage(reason));
+  });
 }
 async function loadHistory(id = selected, before?: number) {
   if (!id || historyBusy.has(id)) return;
@@ -386,6 +409,8 @@ async function newConversation() {
   }
 }
 function openConnect() {
+  $<HTMLInputElement>('#connection-name').value =
+    state.selectedConnection ?? '';
   $<HTMLInputElement>('#server-url').value = state.base;
   $<HTMLInputElement>('#handle').value = state.handle;
   $<HTMLInputElement>('#password').value = '';
@@ -401,6 +426,9 @@ function render() {
   serverAdministration.update(state);
   projectAccess.update(state);
   if (!state) return;
+  const recoveryWarning = $('#personal-recovery-warning');
+  recoveryWarning.textContent = state.personal?.warning ?? '';
+  recoveryWarning.hidden = state.mode !== 'live' || !state.personal?.warning;
   renderFiles();
   $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
   questionPopup.update(state, scope, selected);
@@ -544,7 +572,12 @@ function render() {
     ? title(selected)
     : 'New conversation';
   $('#chat-title').textContent = selected ? title(selected) : 'An open field';
-  $('#connection-label').textContent = state.connection;
+  $('#connection-label').textContent = [
+    state.selectedConnection,
+    state.connection,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   $('#chat-footer-mode').textContent =
     state.mode === 'demo'
       ? 'Local demo · no model calls'
@@ -1349,7 +1382,89 @@ document.addEventListener('click', (event) => {
     action({ action: 'open-link', url: link.dataset.webLink });
   }
 });
-$('#connection-button').addEventListener('click', openConnect);
+const connectionMenu = $<HTMLElement>('#connection-menu');
+$('#connection-button').addEventListener('click', () => {
+  connectionMenu.innerHTML =
+    (state.namedConnections ?? [])
+      .map(
+        (row) =>
+          `<button type="button" data-connection="${esc(row.name)}" ${row.name === state.selectedConnection ? 'aria-current="true"' : ''}><strong>${esc(row.name)}</strong><small>${esc(row.account)} · ${esc(row.server)}</small></button>`,
+      )
+      .join('') +
+    '<button type="button" id="connection-manage">Add / manage connection…</button>';
+  connectionMenu.showPopover();
+  $('#connection-button').setAttribute('aria-expanded', 'true');
+  connectionMenu.querySelector<HTMLButtonElement>('button')?.focus();
+});
+connectionMenu.addEventListener('toggle', () =>
+  $('#connection-button').setAttribute(
+    'aria-expanded',
+    String(connectionMenu.matches(':popover-open')),
+  ),
+);
+connectionMenu.addEventListener('keydown', (event) => {
+  const buttons = [
+    ...connectionMenu.querySelectorAll<HTMLButtonElement>('button'),
+  ];
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const index =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? buttons.length - 1
+          : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) %
+            buttons.length;
+    buttons[index]?.focus();
+  }
+});
+connectionMenu.addEventListener(
+  'click',
+  ownedEvent(async (event: MouseEvent) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      'button',
+    );
+    if (!button) return;
+    connectionMenu.hidePopover();
+    if (button.id === 'connection-manage') {
+      openConnect();
+      return;
+    }
+    if (button.dataset.connection) {
+      try {
+        await request({
+          action: 'connection-select',
+          name: button.dataset.connection,
+        });
+      } catch (reason) {
+        openConnect();
+        $('#connect-error').textContent =
+          reason instanceof Error ? reason.message : errorMessage(reason);
+        $('#connect-error').hidden = false;
+      }
+    }
+  }),
+);
+for (const action of ['connection-rename', 'connection-remove'] as const) {
+  $('#' + action).addEventListener(
+    'click',
+    ownedEvent(async () => {
+      if (!state.selectedConnection)
+        throw new Error('Select a saved connection first.');
+      await request(
+        action === 'connection-rename'
+          ? {
+              action,
+              name: state.selectedConnection,
+              nextName: $<HTMLInputElement>('#connection-name').value,
+            }
+          : { action, name: state.selectedConnection },
+      );
+      dialog.close();
+    }),
+  );
+}
 $('#connect-sidebar').addEventListener('click', openConnect);
 $('#notice-connect').addEventListener('click', openConnect);
 $('#close-dialog').addEventListener('click', () => dialog.close());
@@ -2045,6 +2160,9 @@ $('#connection-form').addEventListener(
     try {
       await request({
         action: 'connect',
+        ...($<HTMLInputElement>('#connection-name').value.trim()
+          ? { name: $<HTMLInputElement>('#connection-name').value.trim() }
+          : {}),
         base: $<HTMLInputElement>('#server-url').value,
         handle: $<HTMLInputElement>('#handle').value,
         password,
@@ -2096,11 +2214,13 @@ const deniedFileAccess = new Set<string>();
 const fileAccessKey = () => `${identity}:${scope}`;
 function renderFiles() {
   renderSync(state, scope, addingProject);
+  const personal = scope === state.personal?.project && !addingProject;
   const folder = state.projectFolders?.find((row) => row.name === scope);
   const recorded = state.projects.find((row) => row.name === scope);
-  const recordedLocation = recorded?.workspace
-    ? `${recorded.machine ?? 'Server'} · ${recorded.workspace}`
-    : '';
+  const recordedLocation =
+    !personal && recorded?.workspace
+      ? `${recorded.machine ?? 'Server'} · ${recorded.workspace}`
+      : '';
   const localLocation = folder ? `${folder.machine} · ${folder.path}` : '';
   const recoverable =
     !!recorded?.workspace &&
@@ -2121,17 +2241,29 @@ function renderFiles() {
     files.status === 'opening' || state.projectPreparing?.includes(scope);
   $('#file-access-title').textContent = connecting
     ? 'Connecting file access…'
-    : files.status === 'lost'
-      ? 'Restore file access'
-      : 'Allow file access';
-  $('#file-access-description').textContent =
-    folder || recoverable
+    : personal
+      ? 'Personal file access unavailable'
+      : files.status === 'lost'
+        ? 'Restore file access'
+        : 'Allow file access';
+  $('#file-access-description').textContent = personal
+    ? 'Personal uses the selected connection’s default store. Retry to reconnect its files.'
+    : folder || recoverable
       ? `Allow agents to read and change files in ${folder?.path ?? recorded!.workspace}. Access is remembered on this computer; disconnect it in Project files.`
       : `Choose a local folder${scope ? ` for ${scope}` : ' to add a project'}. Agents can read and change files inside it. Access is remembered on this computer.`;
   $('#file-access-error').textContent =
-    fileAccessError || folder?.error || files.detail || '';
+    fileAccessError ||
+    folder?.error ||
+    files.detail ||
+    (personal ? state.personal?.error : '') ||
+    '';
   $('#file-access-error').hidden = !$('#file-access-error').textContent;
-  $('#file-access-allow').textContent = connecting ? 'Connecting…' : 'Approve';
+  $('#file-access-allow').textContent = connecting
+    ? 'Connecting…'
+    : personal
+      ? 'Retry'
+      : 'Approve';
+  $('#file-access-deny').hidden = personal;
   $<HTMLButtonElement>('#file-access-allow').disabled =
     filePicking || !!connecting;
   $<HTMLButtonElement>('#file-access-deny').disabled =
@@ -2143,27 +2275,35 @@ function renderFiles() {
         ? files.project === scope
           ? 'Files connected'
           : `Files: ${files.project}`
-        : denied
-          ? 'File access denied'
-          : files.status === 'lost'
-            ? 'Files disconnected'
-            : 'Connect files';
+        : personal
+          ? 'Personal files unavailable'
+          : denied
+            ? 'File access denied'
+            : files.status === 'lost'
+              ? 'Files disconnected'
+              : 'Connect files';
   $('#files-open').title = files.root
     ? `${files.project} · ${files.root}${files.detail ? ` · ${files.detail}` : ''}`
-    : 'Connect a local project folder';
+    : personal
+      ? 'Personal files in this connection’s default store'
+      : 'Connect a local project folder';
   $('#files-open').dataset.status = files.status;
   $('#files-title').textContent = addingProject
     ? 'Add project'
-    : 'Project file access';
+    : personal
+      ? 'Personal file access'
+      : 'Project file access';
   $('#files-description').textContent = addingProject
     ? 'Choose a folder. Its Plowshare marker or folder name identifies the project on the server.'
-    : ready
-      ? `Serving ${files.project}${files.project !== scope ? ' · another workspace' : ''}`
-      : files.status === 'opening'
-        ? `Connecting ${files.project}…`
-        : files.status === 'lost'
-          ? `File access lost for ${files.project}. Choose the folder again.`
-          : `Choose a folder for ${scope || 'a new project'}.`;
+    : personal
+      ? 'Personal files use the selected connection’s default store. Recreating it preserves the current store in a dated recovery directory.'
+      : ready
+        ? `Serving ${files.project}${files.project !== scope ? ' · another workspace' : ''}`
+        : files.status === 'opening'
+          ? `Connecting ${files.project}…`
+          : files.status === 'lost'
+            ? `File access lost for ${files.project}. Choose the folder again.`
+            : `Choose a folder for ${scope || 'a new project'}.`;
   $('#files-root').textContent = addingProject
     ? ''
     : [
@@ -2179,13 +2319,22 @@ function renderFiles() {
   $('#files-detail').textContent =
     state.projectConfigError ??
     state.projectListError ??
-    (addingProject ? '' : (folder?.error ?? files.detail ?? ''));
-  $('#files-withdraw').hidden = addingProject || !ready;
+    (addingProject
+      ? ''
+      : (folder?.error ??
+        files.detail ??
+        (personal ? state.personal?.error : undefined) ??
+        ''));
+  $('#files-withdraw').hidden = addingProject || personal || !ready;
   $('#files-reopen').hidden =
-    addingProject || (!folder && !recoverable) || ready;
+    addingProject || (!personal && !folder && !recoverable) || ready;
   $('#files-reopen').innerHTML =
-    `${icon('refresh')}${folder ? 'Reconnect files' : 'Connect recorded folder'}`;
-  $('#files-forget').hidden = addingProject || !folder;
+    `${icon('refresh')}${personal ? 'Retry Personal files' : folder ? 'Reconnect files' : 'Connect recorded folder'}`;
+  $('#files-forget').hidden = addingProject || personal || !folder;
+  $('#files-choose').hidden = personal;
+  $('#files-recreate').hidden = addingProject || !personal;
+  $<HTMLButtonElement>('#files-recreate').disabled =
+    filePicking || files.status === 'opening' || !state.connected;
   $<HTMLButtonElement>('#files-reopen').disabled =
     filePicking || !state.connected;
   $<HTMLButtonElement>('#files-forget').disabled =
@@ -2230,7 +2379,7 @@ $('#file-access-allow').addEventListener(
     renderFiles();
     try {
       const reply = await request(
-        saved || recoverable
+        project === state.personal?.project || saved || recoverable
           ? { action: 'project-open', project }
           : { action: 'files-choose', ...(project ? { project } : {}) },
       );
@@ -2309,6 +2458,24 @@ $('#files-withdraw').addEventListener(
       });
     } catch (error) {
       $('#files-error').textContent = errorMessage(error);
+      $('#files-error').hidden = false;
+    } finally {
+      filePicking = false;
+      renderFiles();
+    }
+  }),
+);
+
+$('#files-recreate').addEventListener(
+  'click',
+  ownedEvent(async () => {
+    filePicking = true;
+    $('#files-error').hidden = true;
+    renderFiles();
+    try {
+      await request({ action: 'personal-recreate' });
+    } catch (reason) {
+      $('#files-error').textContent = errorMessage(reason);
       $('#files-error').hidden = false;
     } finally {
       filePicking = false;

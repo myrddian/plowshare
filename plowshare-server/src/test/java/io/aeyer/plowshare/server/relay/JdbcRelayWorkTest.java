@@ -210,6 +210,13 @@ class JdbcRelayWorkTest {
     String conversation = conversation();
     var receipt = new RelayDeliveries.Receipt("job", "job_fixture");
     executions.accepted(request, receipt, conversation);
+    // A recovery inspection may race or repeat, but may never replace a proven link.
+    executions.accepted(request, receipt, conversation);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            executions.accepted(
+                request, new RelayDeliveries.Receipt("job", "job_conflict"), conversation));
     deliveries.accepted(request.delivery().claim(), receipt, AT);
     var owner = logs.read(topic, 0, 100, "operator");
     var other = logs.read(topic, 0, 100, "reader");

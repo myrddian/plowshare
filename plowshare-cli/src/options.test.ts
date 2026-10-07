@@ -95,13 +95,15 @@ await test('server and url select the origin before or after commands and overri
   );
 });
 
-await test('online commands require a server before credentials, prompts or stdin are used', async () => {
+await test('online commands without a saved connection require a server before credentials, prompts or stdin are used', async (t) => {
+  const config = await mkdtemp(join(tmpdir(), 'plowshare-cli-no-connections-'));
+  t.after(() => rm(config, { recursive: true, force: true }));
   let output = '';
   const forbidden = async (): Promise<never> => {
     throw new Error('must not prompt or read');
   };
   const io = {
-    env: {},
+    env: { PLOWSHARE_CONFIG_DIR: config },
     stdout: (text: string) => {
       output += text;
     },
@@ -454,4 +456,65 @@ await test('targeted help, group help, aliases and version work offline without 
   assert.equal(await run(['--version', '--json'], io), 0);
   assert.equal(field(json(output), ['status']), 'version');
   assert.equal(reads, 0);
+});
+
+await test('CLI manages shared named connections including names with spaces and refuses a conflicting selection offline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'plowshare-cli-connections-'));
+  try {
+    let output = '',
+      failure = '';
+    const invoke = (args: string[]) =>
+      run(args, {
+        env: { PLOWSHARE_CONFIG_DIR: directory },
+        stdout: (text) => {
+          output = text;
+        },
+        stderr: (text) => {
+          failure = text;
+        },
+        stdin: async () => {
+          throw new Error(
+            'No stdin is needed for local connection management.',
+          );
+        },
+      });
+    assert.equal(
+      await invoke([
+        'connection',
+        'add',
+        'A name with spaces',
+        'https://server.example',
+        'alice',
+      ]),
+      0,
+    );
+    assert.ok(output.includes('A name with spaces'));
+    assert.equal(
+      await invoke([
+        'connection',
+        'rename',
+        'A name with spaces',
+        'Renamed account',
+      ]),
+      0,
+    );
+    assert.equal(await invoke(['connection', 'select', 'Renamed account']), 0);
+    assert.equal(
+      await invoke([
+        '--connection',
+        'Renamed account',
+        '--server',
+        'https://foreign.example',
+        'memory',
+        'index',
+      ]),
+      2,
+    );
+    assert.match(failure, /conflicts/);
+    assert.equal(await invoke(['connection', 'remove', 'Renamed account']), 0);
+    assert.equal(await invoke(['connection', 'list']), 0);
+    assert.deepEqual(list(json(output), ['connections']), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

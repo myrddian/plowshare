@@ -126,9 +126,9 @@ public final class EntryStore {
                                  invocation, produced_by, dispatch, model_specifier, model_pool,
                                  wire_model, completion, finish_reason, prompt_tokens,
                                  completion_tokens, reasoning_tokens, sent_at, fallback_reason,
-                                 first_token_ms, speaker, speaker_name, outcome, salients)
+                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id)
             SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB)
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?
               FROM entries
              WHERE conversation_id = ?
             RETURNING %s"""
@@ -800,7 +800,7 @@ public final class EntryStore {
                       FROM jsonb_array_elements(entries.tool_calls)
                            WITH ORDINALITY AS each(call, asked)) AS tool_calls,
                    handle, recorded_at, took_ms,
-                   dispatch, wire_model, completion, speaker, speaker_name, outcome
+                   dispatch, wire_model, completion, speaker, speaker_name, outcome, job_id
               FROM entries
              WHERE conversation_id = ?%s""";
 
@@ -1233,6 +1233,12 @@ public final class EntryStore {
    *     Untranslated, and the class javadoc says why
    */
   public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry) {
+    return append(conversationId, turnOrdinal, entry, null);
+  }
+
+  /** Records the immutable owning job; null means an unbound or legacy entry, never a guess. */
+  public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry, String job) {
+    if (job != null) ArchiveValues.identity(job, "job id");
     String conversation = ConversationStore.named(conversationId);
     String kind = entry.kind().wireName();
     String role = entry.kind().role().map(chatRole -> chatRole.wireName()).orElse(null);
@@ -1294,6 +1300,7 @@ public final class EntryStore {
                       speaker == null ? null : speaker.name(),
                       entry.outcome(),
                       salients,
+                      job,
                       conversation);
                 }));
   }
@@ -2838,7 +2845,8 @@ public final class EntryStore {
                   rs.getString("speaker"),
                   rs.getString("speaker_name")),
               // V62, and null for every row but a TOOL_RESULT and for one written before it.
-              rs.getString("outcome"));
+              rs.getString("outcome"),
+              rs.getString("job_id"));
 
   private static final RowMapper<StoredResults.Result> LISTING_MAPPER =
       (rs, rowNum) ->

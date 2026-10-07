@@ -9,6 +9,7 @@ import {
   named,
   noContent,
   nullable,
+  object,
   positive,
   record,
   strings,
@@ -149,6 +150,13 @@ export interface EntryView {
   readonly speaker: string | null;
   readonly speakerName: string | null;
   readonly outcome: string | null;
+  /** Actual owning job; absent on older peers and null on unbound historical entries. */
+  readonly job?: string | null;
+  readonly source?: SourceView | null;
+}
+export interface SourceView {
+  readonly kind: string;
+  readonly reference: string | null;
 }
 export interface EntryPageView {
   readonly entries: readonly EntryView[];
@@ -446,6 +454,35 @@ const asked = record({
   salient: nullable(text),
   opened: nullable(opened),
 });
+const source = record(
+  {
+    kind: (value) =>
+      typeof value === 'string' &&
+      [
+        'unknown',
+        'person',
+        'message',
+        'relay',
+        'board',
+        'event',
+        'approval',
+        'orchestration',
+      ].includes(value),
+    reference: nullable(named),
+  },
+  (row) => (row['kind'] === 'unknown') === (row['reference'] === null),
+);
+/** Validate additive provenance at the generated decoder boundary as well as WS outcome reads. */
+export function validateEntryOrigins(type: string, value: unknown): void {
+  if (type !== 'conversation.chat' && type !== 'conversation.trajectory')
+    return;
+  const origins = record({
+    job: (found) => found === undefined || nullable(named)(found),
+    source: (found) => found === undefined || nullable(source)(found),
+  });
+  if (!object(value) || !list(origins)(value['entries']))
+    throw new Error('Invalid recorded entry origin');
+}
 const entry = record({
   ordinal: positive,
   turnOrdinal: count,
@@ -466,6 +503,8 @@ const entry = record({
   speaker: nullable(text),
   speakerName: nullable(text),
   outcome: nullable(text),
+  job: (value) => value === undefined || nullable(named)(value),
+  source: (value) => value === undefined || nullable(source)(value),
 });
 const page = record(
   {
