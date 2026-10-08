@@ -185,7 +185,10 @@ public final class SkillRuntime {
             RUN,
             "{\"name\":\"review\",\"arguments\":\"Review this change\",\"invocation\":\"UUID\",\"mode\":\"NEW\"}");
     String name = ToolArguments.requireText(args, "name", RUN, "the granted skill");
-    String input = ToolArguments.requireText(args, "arguments", RUN, "the user's request");
+    // A self-contained skill needs no extra task text. Preserve supplied user data exactly so
+    // dispatch and receipt comparisons share the original bound arguments, including whitespace.
+    String input =
+        ToolArguments.requireExactText(args, "arguments", RUN, "the user's inputs (may be empty)");
     UUID id =
         uuid(ToolArguments.requireText(args, "invocation", RUN, "the stable invocation UUID"));
     String requested = ToolArguments.optionalText(args, "mode", value -> bad("mode must be text"));
@@ -232,7 +235,8 @@ public final class SkillRuntime {
     if (skill.mode() != null && skill.mode() != mode)
       throw bad("The requested mode conflicts with the skill's declared mode. Nothing ran.");
     if (mode == SkillDefinition.Mode.DIRECT && skill.agentSpecified()) {
-      throw bad("DIRECT cannot select another agent. Nothing ran.");
+      throw bad(
+          "DIRECT cannot select another agent. Choose --mode=INHERITED, SUMMARISED or NEW for this skill, or remove its agent field. Nothing ran.");
     }
     if ((mode == SkillDefinition.Mode.INHERITED || mode == SkillDefinition.Mode.SUMMARISED)
         && contexts == null) {
@@ -489,7 +493,8 @@ public final class SkillRuntime {
                   "name",
                   ToolArguments.string("The granted, model-visible skill name."),
                   "arguments",
-                  ToolArguments.string("The task and relevant inputs as data."),
+                  ToolArguments.string(
+                      "The task and relevant inputs as data; use an empty string for a self-contained skill."),
                   "invocation",
                   ToolArguments.string("The stable invocation UUID."),
                   "mode",

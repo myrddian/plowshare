@@ -45,10 +45,12 @@ export function commandOffers(text: string, commands: readonly CommandEntry[]) {
     ...desktopCommands.map(([command, description]) => ({
       command,
       description,
+      argumentHint: '',
     })),
     ...commands.map((command) => ({
       command: command.command,
       description: command.description,
+      argumentHint: command.argumentHint,
     })),
   ].filter((command) => command.command.toLowerCase().startsWith(query));
 }
@@ -73,7 +75,7 @@ export function installCommandPicker(
     const html = offers
       .map(
         (offer, index) =>
-          `<button type="button" role="option" tabindex="-1" id="slash-option-${index}" data-slash-index="${index}" aria-selected="${index === active}"><code>${esc(offer.command)}</code><span>${esc(offer.description)}</span></button>`,
+          `<button type="button" role="option" tabindex="-1" id="slash-option-${index}" data-slash-index="${index}" aria-selected="${index === active}"><code>${esc(offer.command)}</code><span>${esc(offer.description)}${offer.argumentHint ? ` · ${esc(offer.argumentHint)}` : ''}</span></button>`,
       )
       .join('');
     if (html !== stamp) {
@@ -149,22 +151,26 @@ export function commandDraft(
   mode: string,
   argumentsText: string,
 ): string {
+  const selectedMode = mode || 'DIRECT';
   if (
     command.kind === 'skill' &&
     command.mode === null &&
-    !['INHERITED', 'SUMMARISED', 'NEW', 'DIRECT'].includes(mode)
+    !['INHERITED', 'SUMMARISED', 'NEW', 'DIRECT'].includes(selectedMode)
   ) {
-    throw new Error('Choose how the skill receives context.');
+    throw new Error('Unknown skill context mode.');
   }
-  let existing = argumentsText.startsWith(command.command + ' ')
-    ? argumentsText.slice(command.command.length + 1)
-    : argumentsText;
+  let existing =
+    argumentsText === command.command
+      ? ''
+      : argumentsText.startsWith(command.command + ' ')
+        ? argumentsText.slice(command.command.length + 1)
+        : argumentsText;
   if (command.kind === 'skill' && command.mode === null)
     existing = existing.replace(
       /^--mode=(INHERITED|SUMMARISED|NEW|DIRECT)(?:\s|$)/,
       '',
     );
-  return `${command.command}${command.kind === 'skill' && command.mode === null ? ` --mode=${mode}` : ''} ${existing}`;
+  return `${command.command}${command.kind === 'skill' && command.mode === null ? ` --mode=${selectedMode}` : ''} ${existing}`;
 }
 
 export function workflowArguments(command: CommandEntry, text: string): string {
@@ -258,7 +264,7 @@ export function installCommands(
           .map((command, index) =>
             command.kind !== kind
               ? ''
-              : `<div class="command-card"><button type="button" data-command-index="${index}" ${enabled ? '' : 'disabled'} title="Prepare ${esc(command.command)}"><code>${esc(command.command)}</code></button><p>${esc(command.description)}</p><small>${esc(command.mode ?? (command.kind === 'skill' ? 'Choose context' : 'Orchestration'))} · ${esc(command.executor)}</small>${command.kind === 'skill' && command.mode === null ? `<label>Context <select aria-label="Context for ${esc(command.command)}"><option value="">Choose…</option><option value="INHERITED">Inherited log</option><option value="SUMMARISED">Summarised context</option><option value="NEW">New context</option><option value="DIRECT">Current agent</option></select></label>` : ''}<small>${esc(command.argumentHint)}</small>${command.kind === 'orchestration' && start ? `<button type="button" data-command-index="${index}" data-command-start ${enabled ? '' : 'disabled'}>Start workflow</button><p role="status"></p>` : ''}<p role="alert" hidden></p></div>`,
+              : `<div class="command-card"><button type="button" data-command-index="${index}" ${enabled ? '' : 'disabled'} title="Prepare ${esc(command.command)}"><code>${esc(command.command)}</code></button><p>${esc(command.description)}</p><small>${esc(command.mode ?? (command.kind === 'skill' ? 'DIRECT (default)' : 'Orchestration'))} · ${esc(command.executor)}</small>${command.kind === 'skill' && command.mode === null ? `<label>Context <select aria-label="Context for ${esc(command.command)}"><option value="DIRECT">Current agent (default)</option><option value="INHERITED">Inherited log</option><option value="SUMMARISED">Summarised context</option><option value="NEW">New context</option></select></label>` : ''}<small>${esc(command.argumentHint)}</small>${command.kind === 'orchestration' && start ? `<button type="button" data-command-index="${index}" data-command-start ${enabled ? '' : 'disabled'}>Start workflow</button><p role="status"></p>` : ''}<p role="alert" hidden></p></div>`,
           )
           .join('');
       root.innerHTML = `<div class="command-list"><p class="context-note">${commands.length} available · type / in the message box or select a command to prepare a draft.</p>${!catalogAvailable ? '<p class="side-note">Command discovery is unavailable. Refresh or update the server to load skills and orchestrations.</p>' : ''}<h3>Skills</h3>${cards('skill') || '<p class="side-note">No skills available to this bot in this project. Check its skill grants and connected resources.</p>'}<h3>Orchestrations</h3>${cards('orchestration') || '<p class="side-note">No orchestrations available to this bot in this project.</p>'}${diagnostics.length ? `<h3>Unavailable</h3>${diagnostics.map((reason) => `<p class="side-note">${esc(reason)}</p>`).join('')}` : ''}<h3>Workspace commands</h3>${desktopCommands.map(([command, description]) => `<button type="button" data-native-command="${esc(command)}"><code>${esc(command)}</code></button><p class="side-note">${esc(description)}</p>`).join('')}</div>`;

@@ -36,7 +36,8 @@ class ScheduleActionAuthorityTest {
             "hash",
             "text",
             true,
-            false);
+            false,
+            "Optional arguments; may be omitted");
     when(skills.forCaller(caller))
         .thenReturn(
             new SkillResolver.Catalog(

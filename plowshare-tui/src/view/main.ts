@@ -4309,7 +4309,7 @@ export async function converse(talking: Talking): Promise<void> {
       ),
       (chosen.agent.commands ?? []).map((command) => ({
         name: command.command,
-        detail: `${command.description} · ${command.mode ?? (command.kind === 'skill' ? 'specify --mode=INHERITED|SUMMARISED|NEW|DIRECT' : 'orchestration')} · ${command.executor}`,
+        detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
       })),
     );
     if (!starting) {
@@ -5104,7 +5104,7 @@ export async function converse(talking: Talking): Promise<void> {
             ),
             (selected?.commands ?? []).map((command) => ({
               name: command.command,
-              detail: `${command.description} · ${command.mode ?? (command.kind === 'skill' ? 'specify --mode=INHERITED|SUMMARISED|NEW|DIRECT' : 'orchestration')} · ${command.executor}`,
+              detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
             })),
           );
           place = { ...now, who: selected ?? { ...now.who, commands: [] } };
@@ -5552,7 +5552,7 @@ export async function converse(talking: Talking): Promise<void> {
               ...describeHelp(),
               ...(now.who.commands ?? []).map(
                 (command) =>
-                  `${command.command} ${command.argumentHint} — ${command.description}${command.kind === 'skill' && command.mode === null ? ' (specify --mode=INHERITED|SUMMARISED|NEW|DIRECT)' : ''}`,
+                  `${command.command} ${command.argumentHint} — ${command.description}${command.kind === 'skill' && command.mode === null ? ' (DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate)' : ''}`,
               ),
             ]),
           );

@@ -1133,7 +1133,7 @@ export function describeCommandCatalog(
   const heading = `${entries.length} ${only === 'skill' ? 'skills' : 'commands'} available to ${agent.name}`;
   const lines = entries.map(
     (command) =>
-      `${command.command} ${command.argumentHint} — ${command.description} · ${command.executor}${command.kind === 'skill' && command.mode === null ? ' (specify --mode=INHERITED|SUMMARISED|NEW|DIRECT)' : command.mode ? ` · ${command.mode}` : ''}`,
+      `${command.command} ${command.argumentHint} — ${command.description} · ${command.executor}${command.kind === 'skill' && command.mode === null ? ' (DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate)' : command.mode ? ` · ${command.mode}` : ''}`,
   );
   return [
     heading,

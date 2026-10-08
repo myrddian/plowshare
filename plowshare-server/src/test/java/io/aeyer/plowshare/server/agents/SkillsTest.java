@@ -68,6 +68,25 @@ class SkillsTest {
   }
 
   @Test
+  void argument_hints_are_validated_and_projected_for_human_discovery() {
+    assertEquals("Optional arguments; may be omitted", parse("review", "").argumentHint());
+    var skill = parse("review", "argument-hint: '[change or path to review]'\n");
+    var catalog =
+        new SkillResolver.Catalog(
+            Map.of("review", new SkillResolver.Resolved(skill, null)), Map.of());
+    var command = CommandCatalog.of(agent("skills: [review]\n"), catalog, Map.of()).getFirst();
+    assertEquals("[change or path to review]", command.argumentHint());
+    assertEquals("worker", command.executor());
+    assertNull(command.mode());
+    assertEquals(skill.argumentHint(), skill.withAgentVisible(true).argumentHint());
+    assertThrows(IllegalArgumentException.class, () -> parse("review", "argument-hint: 42\n"));
+    assertThrows(IllegalArgumentException.class, () -> parse("review", "argument-hint: ''\n"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parse("review", "argument-hint: '" + "a".repeat(1025) + "'\n"));
+  }
+
+  @Test
   void strict_yaml_and_execution_conflicts_are_visible_failures() {
     assertThrows(RuntimeException.class, () -> parse("review", "name: review\n"));
     assertThrows(RuntimeException.class, () -> parse("review", "metadata: {author: 7}\n"));
