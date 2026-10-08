@@ -40,6 +40,21 @@ class WorkspaceApplicationFilesTest {
   }
 
   @Test
+  void server_authority_is_readable_but_not_directly_editable_even_with_source_write_access()
+      throws Exception {
+    row = new ProjectRecord("app", root, List.of(), List.of(), "DISJOINT", List.of("."));
+    when(projects.find("app")).thenReturn(Optional.of(row));
+    when(projects.effectiveExclusions(row)).thenReturn(List.of());
+    when(members.mayManage("app", "reader")).thenReturn(true);
+    Files.createDirectory(root.resolve("server"));
+    Files.writeString(root.resolve("server/tools.json"), "{\"version\":1,\"bindings\":[]}");
+    var source = files.read(caller, "server/tools.json");
+    assertFalse(source.writable());
+    assertThrows(
+        CallerFault.class, () -> files.save(caller, source.path(), "changed", source.revision()));
+  }
+
+  @Test
   void lists_and_reads_server_files_without_a_local_attachment() {
     var listing = files.list(caller, "");
     assertEquals(

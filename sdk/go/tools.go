@@ -420,6 +420,52 @@ func NewToolProvider(ports ToolRelayPorts, binding ToolBinding, tools []Register
 	}
 	return &ToolProvider{ports: ports, binding: binding, tools: cloneTools(tools), journal: journal, consumer: identity()}, nil
 }
+
+// PublishCatalog publishes/renews declarations with a retained caller UUID; never auto-replays.
+func (p *ToolProvider) PublishCatalog(ctx context.Context, requestID string) error {
+	tools := make([]ToolDeclaration, 0, len(p.tools))
+	for _, tool := range p.tools {
+		declaration := tool.Declaration
+		if declaration.Parameters == nil {
+			declaration.Parameters = []ToolParameter{}
+		}
+		tools = append(tools, declaration)
+	}
+	return p.catalog(ctx, requestID, tools)
+}
+
+// WithdrawCatalog removes declarations; uncertain effects still require reconciliation.
+func (p *ToolProvider) WithdrawCatalog(ctx context.Context, requestID string) error {
+	return p.catalog(ctx, requestID, []ToolDeclaration{})
+}
+func (p *ToolProvider) catalog(ctx context.Context, requestID string, tools []ToolDeclaration) error {
+	if !toolUUID.MatchString(requestID) || len(tools) > 128 {
+		return errors.New("invalid tool catalogue identity or size")
+	}
+	data, err := json.Marshal(struct {
+		Version string            `json:"version"`
+		Tools   []ToolDeclaration `json:"tools"`
+	}{"plowshare-tool-catalog/1", tools})
+	if err != nil {
+		return err
+	}
+	if err := toolText(string(data), 65536, false); err != nil {
+		return err
+	}
+	topic := "tool." + p.binding.Provider + ".catalog"
+	reply, err := p.ports.RelayPublish(ctx, RelayPublishRequest{Project: p.binding.Project, Topic: topic, RequestId: requestID, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Text: string(data)})
+	if err != nil {
+		return err
+	}
+	receipt, err := reply.RequirePayload()
+	if err != nil {
+		return err
+	}
+	if receipt.RequestId != requestID || receipt.Project != p.binding.Project || receipt.Topic != topic {
+		return errors.New("foreign tool catalogue publication receipt")
+	}
+	return nil
+}
 func cloneTools(tools []RegisteredTool) []RegisteredTool {
 	result := append([]RegisteredTool(nil), tools...)
 	for i := range result {

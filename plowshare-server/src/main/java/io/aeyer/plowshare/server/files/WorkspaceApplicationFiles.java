@@ -188,6 +188,8 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
         source.path().startsWith(applicationRoot)
             ? applicationRoot.relativize(source.path()).toString().replace('\\', '/')
             : "";
+    // Provider authority is installed through reviewed Application deployments, never file edits.
+    if (relative.equals("server") || relative.startsWith("server/")) return false;
     // Editing runtime definitions or the access/routing manifest needs definition-management
     // authority.
     boolean configuration =

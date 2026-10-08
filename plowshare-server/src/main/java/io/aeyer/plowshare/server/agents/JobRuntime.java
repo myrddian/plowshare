@@ -939,6 +939,41 @@ public final class JobRuntime {
     this.byName = Collections.unmodifiableMap(map);
   }
 
+  private String runGranted(
+      AgentTool tool,
+      String arguments,
+      Home home,
+      AgentDefinition definition,
+      String session,
+      UsageAttribution owner) {
+    // Built-ins created per run (files, results, delegation) share the same live grant check.
+    // Dynamic proxies check their pinned definition and access themselves; run extras keep their
+    // owning lifecycle authority.
+    if (knownTools().contains(tool.schema().name())
+        && definition.tools().contains(tool.schema().name())) {
+      var refused =
+          scopedTools.checkAccess(home, definition.name(), session, tool.schema().name(), owner);
+      if (refused.isPresent()) return refused.get().render();
+    }
+    return owner == null ? tool.run(arguments, home) : tool.run(arguments, home, owner);
+  }
+
+  private ScopedTools scopedTools = ScopedTools.NONE;
+
+  public void useScopedTools(ScopedTools tools) {
+    scopedTools = Objects.requireNonNull(tools);
+  }
+
+  public ScopedTools scopedTools() {
+    return scopedTools;
+  }
+
+  public Set<String> knownTools(Long project) {
+    var names = new TreeSet<>(knownTools());
+    names.addAll(scopedTools.names(project));
+    return Set.copyOf(names);
+  }
+
   /**
    * The exact set of tool names this boot serves, for {@code AgentRegistry.load}.
    *
@@ -1564,7 +1599,16 @@ public final class JobRuntime {
     transcript.record(LoggedEntry.utterance(message, transcript.speaker()));
     Map<String, AgentTool> offered =
         offeredTo(
-            definition, budget, cancelled, session, transcript, List.of(), extras, owner, runHooks);
+            definition,
+            budget,
+            cancelled,
+            session,
+            transcript,
+            List.of(),
+            extras,
+            owner,
+            runHooks,
+            home);
     offered.replaceAll(
         (name, tool) ->
             tool instanceof AgentRunTool delegate
@@ -1743,8 +1787,14 @@ public final class JobRuntime {
           raw =
               usable(
                   transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                      ? tool.run(pre.arguments(), home)
-                      : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
+                      ? runGranted(tool, pre.arguments(), home, definition, session, null)
+                      : runGranted(
+                          tool,
+                          pre.arguments(),
+                          home,
+                          definition,
+                          session,
+                          usageFor(transcript, definition, taken)),
                   name);
         } catch (AgentRunTool.SubAgentFailed child) {
           // A dependency failure is an ordinary terminal child outcome, not a runtime bug.
@@ -1951,7 +2001,16 @@ public final class JobRuntime {
     Scheduling.Turn turn = turnFor(definition, transcript, sessionId, home, owner, end);
     Map<String, AgentTool> offered =
         offeredTo(
-            definition, budget, cancelled, sessionId, transcript, images, extras, owner, runHooks);
+            definition,
+            budget,
+            cancelled,
+            sessionId,
+            transcript,
+            images,
+            extras,
+            owner,
+            runHooks,
+            home);
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -2939,9 +2998,14 @@ public final class JobRuntime {
               result =
                   usable(
                       transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                          ? tool.run(preTool.arguments(), home)
-                          : tool.run(
-                              preTool.arguments(), home, usageFor(transcript, definition, steps)),
+                          ? runGranted(tool, preTool.arguments(), home, definition, sessionId, null)
+                          : runGranted(
+                              tool,
+                              preTool.arguments(),
+                              home,
+                              definition,
+                              sessionId,
+                              usageFor(transcript, definition, steps)),
                       wanted.name());
               ToolPost postTool =
                   toolPost(
@@ -3226,6 +3290,10 @@ public final class JobRuntime {
    *     #offeredTo} warns about once per run
    */
   public List<ToolSchema> schemasOfferedTo(AgentDefinition definition) {
+    return schemasOfferedTo(definition, null);
+  }
+
+  public List<ToolSchema> schemasOfferedTo(AgentDefinition definition, Home home) {
     // No extras: this is a fact about the agent, and extras are a fact about a run.
     return offeredTo(
             definition,
@@ -3236,7 +3304,8 @@ public final class JobRuntime {
             List.of(),
             RunExtras.Extras.NONE,
             null,
-            RunHooks.NONE)
+            RunHooks.NONE,
+            home)
         .values()
         .stream()
         .map(AgentTool::schema)
@@ -3267,7 +3336,12 @@ public final class JobRuntime {
       List<Content.Image> images,
       RunExtras.Extras extras,
       String callerHandle,
-      RunHooks runHooks) {
+      RunHooks runHooks,
+      Home toolHome) {
+    Map<String, AgentTool> live = new java.util.HashMap<>();
+    scopedTools
+        .tools(toolHome, definition.name(), sessionId, cancelled)
+        .forEach(tool -> live.put(tool.schema().name(), tool));
     // One router for the whole run because there is nothing per-tool about
     // it: four would be four identical objects over one seam. It buys no
     // consistency between the tools and must not be described as if it did
@@ -3434,6 +3508,7 @@ public final class JobRuntime {
         continue;
       }
       AgentTool tool = byName.get(name);
+      if (tool == null) tool = live.get(name);
       if (tool == null) {
         // HANDED BY THE RUN, NOT MISSING: a conductor's Studio tools (and any other name a
         // run's extras supply) are declared but built per run, below.

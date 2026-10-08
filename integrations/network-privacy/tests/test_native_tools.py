@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -14,12 +15,57 @@ from plowshare.tools import ToolAttention, ToolCall
 from support import CountingCollector, FixturePort, MemoryReceipts, configuration
 
 from plowshare_privacy.journal import FileReceipts, Publication, ScanOrigin
-from plowshare_privacy.native_tools import DECLARATIONS, registered
+from plowshare_privacy.native_tools import DECLARATIONS, CataloguedProvider, registered
 from plowshare_privacy.tools import WorkerTools
 from plowshare_privacy.worker import Worker
 
 
 class NativeToolsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_catalogue_intent_precedes_publication_and_restart_never_replays_uuid(
+        self,
+    ) -> None:
+        class Provider:
+            def __init__(self) -> None:
+                self.publications: list[str] = []
+                self.calls = 0
+                self.fail = False
+
+            async def publish_catalog(self, request_id: str) -> None:
+                self.publications.append(request_id)
+                rows = receipts.read_text().splitlines()
+                self_record = json.loads(rows[-1])
+                if self_record != {"request_id": request_id, "state": "publishing"}:
+                    raise AssertionError("Publication intent was not durable first")
+                if self.fail:
+                    raise ToolAttention("Catalogue outcome is uncertain")
+
+            async def poll(self) -> int:
+                self.calls += 1
+                return 0
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            receipts = directory / "tool-catalogue.jsonl"
+            provider = Provider()
+            facade = CataloguedProvider(provider, directory)
+            await facade.poll()
+            await facade.poll()
+            self.assertEqual(len(provider.publications), 1)
+            self.assertEqual(provider.calls, 2)
+            provider.fail = True
+            facade.next_renewal = 0
+            with self.assertRaises(ToolAttention):
+                await facade.poll()
+            self.assertEqual(provider.calls, 2)
+            lost_id = provider.publications[-1]
+            provider.fail = False
+            await CataloguedProvider(provider, directory).poll()
+            self.assertNotEqual(provider.publications[-1], lost_id)
+            self.assertEqual(len(provider.publications), 3)
+            self.assertEqual(
+                json.loads(receipts.read_text().splitlines()[-1])["state"], "published"
+            )
+
     def test_scan_parent_is_durable_immutable_and_legacy_requests_remain_readable(
         self,
     ) -> None:

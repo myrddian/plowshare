@@ -18,6 +18,9 @@ mychatbot/
     active.json
     topics.json
     privacy/routes.js
+  server/
+    tools.json
+    ports.json
   swarm/
     privacy-review.md
     incident-response.json
@@ -73,7 +76,7 @@ role checks. Invalid, unreadable, linked, oversized or missing adopted manifests
 close access. Adoption is recorded durably, so deleting the manifest or restarting
 the server cannot turn the Application back into a legacy External. Repair the
 manifest through its authorized source-management workflow. Agents cannot create,
-edit, delete or move the root `plowshare.json` through workspace file tools.
+edit, delete or move the root `plowshare.json` or `server/` authority through workspace file tools.
 
 ## Deploy, update and activate an Application
 
@@ -106,7 +109,10 @@ Application agents, bots, skills, orchestrations, instructions, hooks and schedu
 load directly from that registered root: `agents/`, `bots/`, `skills/`,
 `orchestrations/`, `hooks/`, `schedules/` and `AGENTS.md`. Runtime settings use
 root `skills.yml`, `environment.yml` and `plowshare.json`; named swarms use
-`swarm/` and Relay uses `Relay/`. Deployment refuses `.plowshare/` source. These resources work without a connected client.
+`swarm/`, Relay uses `Relay/`, and project tool/provider and port declarations use
+`server/tools.json` and `server/ports.json` (see [live tools](relay-tools.md)).
+They are validated before agent grants and activated without a server restart.
+These are narrow capabilities, not an arbitrary global server overlay. Deployment refuses `.plowshare/` source. These resources work without a connected client.
 Clients cannot replace the deployed Application tier. Server schedules are enrolled
 for reconciliation on first deployment; they retain ordinary owner permission and
 pause rules. Update packaged schedule definitions with a new source deployment.

@@ -309,6 +309,18 @@ public final class DefinitionResolver implements SessionCloseListener {
 
   private final DataLayout data;
   private final LongPredicate projectExists;
+  private ScopedTools scopedTools = ScopedTools.NONE;
+
+  public void useScopedTools(ScopedTools tools) {
+    scopedTools = Objects.requireNonNull(tools);
+  }
+
+  private Set<String> knownTools(Long project) {
+    var names = new java.util.TreeSet<>(knownTools);
+    names.addAll(scopedTools.names(project));
+    return Set.copyOf(names);
+  }
+
   private final Set<String> knownTools;
   private final Set<String> required;
   private final SessionChannel channel;
@@ -767,7 +779,8 @@ public final class DefinitionResolver implements SessionCloseListener {
    */
   private Stamp stamp(Long projectId) {
     return new Stamp(
-        fingerprint(agentsDirectory(projectId)), fingerprint(botsDirectory(projectId)));
+        fingerprint(agentsDirectory(projectId)) + scopedTools.revision(projectId),
+        fingerprint(botsDirectory(projectId)));
   }
 
   /** Package-private so OrchestrationResolver stamps its directory the same way. */
@@ -894,7 +907,8 @@ public final class DefinitionResolver implements SessionCloseListener {
     // not read as a typo and withheld before the merge below ever sees it
     // -- see AgentRegistry's four-Set `read` overload and this class's own
     // javadoc.
-    AgentRegistry.Loaded read = AgentRegistry.read(tier, knownTools, Set.of(), bootSet.names());
+    AgentRegistry.Loaded read =
+        AgentRegistry.read(tier, knownTools(key.projectId()), Set.of(), bootSet.names());
     // The questions the registry cannot answer for itself -- is this model
     // served, does it see, and what sampling will it actually send -- asked
     // of a project's own definitions with the same lambda AgentsConfig asks

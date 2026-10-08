@@ -31,6 +31,35 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
             limit));
   }
 
+  @Override
+  public Head latest(Relay.TopicKey key) {
+    Objects.requireNonNull(key);
+    String scope = RelayScopeCodec.write(key);
+    return work.inTransaction(
+        () -> {
+          var topic =
+              jdbc
+                  .query(
+                      "SELECT * FROM relay_topics WHERE scope_key=? AND name=? FOR SHARE",
+                      (row, index) -> topic(row),
+                      scope,
+                      key.name())
+                  .stream()
+                  .findFirst();
+          if (topic.isEmpty()) return new Head(0, java.util.Optional.empty());
+          var publication =
+              jdbc
+                  .query(
+                      "SELECT * FROM relay_publications WHERE scope_key=? AND topic=? ORDER BY position DESC LIMIT 1",
+                      (row, index) -> publication(row, topic.get()),
+                      scope,
+                      key.name())
+                  .stream()
+                  .findFirst();
+          return new Head(topic.get().lastPosition(), publication);
+        });
+  }
+
   public Snapshot read(Relay.TopicKey key, long after, int limit, String account) {
     Objects.requireNonNull(key);
     RelayValues.limit(limit, 100);

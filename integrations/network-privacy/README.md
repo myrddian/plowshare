@@ -103,22 +103,26 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
    account grants and matching server project membership for the operator and
    collector. The supplied manifest has **no grants**. Use a project-scoped service credential;
    the collector needs work access for evidence uploads and reading for reports.
-2. Configure a server FileStore and grant the deploying administrator MANAGER
+2. Replace provider account placeholders in the private Application root
+   `server/tools.json` and `server/ports.json`, matching the manifest account
+   grant and project membership. Configure a server FileStore and grant the deploying administrator MANAGER
    access to its destination. Read `application.deployment.status`, then use
    `application deploy ./private-application '<deployment JSON>'` or Desktop
    **Applications → Deploy**. See the [deployment walkthrough](#deploy-the-plowshare-application).
 3. Deployed agents, orchestrations and schedules load from root `agents/`,
    `orchestrations/` and `schedules/`; named swarms
    load from `swarm/` and Relay from root `Relay/`. They need no desktop file
-   session. Verify effective rosters after configuring the server tools below.
-4. Merge [server-ports.json](examples/server-ports.json) into private **server
-   deployment configuration**, replace its account/project/groups, and load it
-   using the documented [JSON/YAML deployment configuration](../../docs/message-filtering.md#configuration-format).
-   Install the named-tool bindings described below alongside these ports, then
-   restart the server to apply both and verify rosters, model bindings and routes. Project Relay files alone do not grant
-   SDK ingress/egress. The collector receives EGRESS on `schedule.due` and the
-   request topic, and INGRESS on requests and completions. It initiates an
-   authenticated outbound WebSocket to the explicit Plowshare origin.
+   session. Verify effective rosters after deploying the Application-owned tools below.
+4. Before deployment, replace provider account placeholders in the private
+   Application's [`server/tools.json`](network-privacy-watch/server/tools.json)
+   and [`server/ports.json`](network-privacy-watch/server/ports.json). Match the
+   authenticated Python account, manifest grant and project membership. These
+   declarations deploy with the Application; no global server edit or restart
+   is needed. The collector receives EGRESS on `schedule.due` and the request
+   topic, and INGRESS on requests/completions. It initiates an authenticated
+   outbound WebSocket to the explicit Plowshare origin. Bootstrap tool schemas
+   validate the coordinator before Python starts; the provider publishes and
+   renews its live catalogue while serving.
 5. The package contains a paused server schedule named `network_scan`. After deployment
    and source reconciliation, inspect `schedule.files` for its actual internal name
    and set `config.schedule` to that name. Review timing and resume it through the
@@ -148,8 +152,8 @@ The Application is [network-privacy-watch](network-privacy-watch). Its root mani
 and resources run inside Plowshare; the Python collector and web UI are deployed
 separately on a host with access to the configured network.
 
-Prepare a private copy with explicit account grants, configured models, named-tool
-bindings and Relay port grants. As a server administrator, read status and deploy
+Prepare a private copy with explicit account grants, configured models and named-tool
+declarations in `server/`. As a server administrator, read status and deploy
 that copy using your configured server FileStore alias:
 
 ```sh
@@ -165,14 +169,15 @@ activation. No copy into an unrelated definitions directory is needed. The
 covers limits, authorization, identity preservation, rollback and recovery.
 
 Deployment enrolls the packaged paused schedule for server reconciliation. It
-does not configure global model/tool bindings or Relay ingress/egress grants.
+does not launch the Python service or configure global model bindings. Its
+`server/` declarations provide the scoped tool/provider and Relay port authority.
 Keep those explicit configuration steps above and verify them before resuming
 collection. Deployment does not execute Python, change a device or modify a
 firewall. DISJOINT adoption remains available for a separately managed pipeline.
 
 ## Run the Python web interface
 
-Install the native tool bindings described below and set the explicit provider
+Configure the Application-owned native tool declarations described below and set the explicit provider
 name/account variables before enabling agent calls.
 
 Provide the web listener explicitly:
@@ -251,8 +256,8 @@ async Python handler for each capability; Plowshare installs the façade into it
 normal tool registry. The model never constructs a Relay envelope or selects a
 provider or topic.
 
-Export the matching server bindings **offline**, using the actual project and
-provider account from private configuration:
+For legacy server startup bindings, the SDK can still export matching declarations
+**offline**, using the actual project and provider account from private configuration:
 
 ```sh
 : "${PRIVACY_TOOL_PROVIDER:?Set the tool provider name}"
@@ -260,12 +265,24 @@ provider account from private configuration:
 build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" --tool-provider "$PRIVACY_TOOL_PROVIDER" --tool-account "$PRIVACY_TOOL_ACCOUNT" tool-bindings
 ```
 
-Merge that output into private server deployment configuration, alongside the
-schedule/scan [ports](examples/server-ports.json), and restart the server. A
-[placeholder export](examples/server-tool-bindings.json) shows the six declarations.
+That exporter remains available for legacy startup bindings. For this Application,
+use its root `server/tools.json`: the shipped six bootstrap declarations omit
+`project`, which is derived from the Application. Replace the provider account
+there and in `server/ports.json`; keep `provider` equal to the configured Python
+provider name. Do this **before** deploying. Global tool/port fragments are no
+longer required for this workflow.
+
+The collector publishes `plowshare-tool-catalog/1` through the SDK and renews it
+while polling (100 seconds by default for the packaged 300-second lease).
+`--tool-catalog-renew-seconds` must be less than the configured lease. UUIDs and
+publication states are retained in private `tool-catalogue.jsonl`. A failed
+publication stops intake with an attention state; restart publishes fresh current
+metadata and never replays a tool effect. Inspect the recorded UUID through
+Relay logs if its publication outcome is uncertain.
 The binding derives only provider request egress and result ingress; ordinary
 collection topics retain their separate port grants. Declaring handlers does not
-register them dynamically or give agents tool grants. All SDK languages offer the
+authorize catalogue publication or give agents tool grants; deployed provider
+authority enables dynamic catalogue updates. All SDK languages offer the
 same [façade](../../docs/relay-tools.md#equivalent-examples); Python implements this collector.
 
 Start `serve`, `once` or `reconcile` with those two flags before the subcommand.

@@ -372,6 +372,68 @@ class ToolProvider:
         self._consumer = str(uuid4())
         self._lock = asyncio.Lock()
 
+    async def publish_catalog(self, request_id: str) -> None:
+        """Publish/renew declarations using a retained caller UUID; never auto-replay."""
+        await self._catalog(
+            request_id, tuple(t.declaration for t in self._tools.values())
+        )
+
+    async def withdraw_catalog(self, request_id: str) -> None:
+        """Withdraw all declarations. Existing uncertain effects still require reconciliation."""
+        await self._catalog(request_id, ())
+
+    async def _catalog(
+        self, request_id: str, tools: tuple[ToolDeclaration, ...]
+    ) -> None:
+        _uuid(request_id)
+        if len(tools) > 128:
+            raise ValueError("Tool catalogue exceeds 128 declarations")
+        text = json.dumps(
+            {
+                "version": "plowshare-tool-catalog/1",
+                "tools": [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": [
+                            {
+                                "name": p.name,
+                                "type": p.type,
+                                "description": p.description,
+                                "required": p.required,
+                            }
+                            for p in t.parameters
+                        ],
+                        "timeoutSeconds": t.timeout_seconds,
+                    }
+                    for t in tools
+                ],
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        _text(text, 65536)
+        topic = f"tool.{self.provider}.catalog"
+        reply = (
+            await self._client.request(
+                dto.RelayPublishRequest(
+                    project=self.project,
+                    topic=topic,
+                    request_id=request_id,
+                    text=text,
+                    occurred_at=datetime.now(timezone.utc)
+                    .isoformat(timespec="microseconds")
+                    .replace("+00:00", "Z"),
+                )
+            )
+        ).require_payload()
+        if (
+            reply.request_id != request_id
+            or reply.project != self.project
+            or reply.topic != topic
+        ):
+            raise ToolAttention("Foreign tool catalogue publication receipt")
+
     async def poll(self) -> int:
         async with self._lock:
             # Recovery precedes new intake. A lost result write must be reconciled

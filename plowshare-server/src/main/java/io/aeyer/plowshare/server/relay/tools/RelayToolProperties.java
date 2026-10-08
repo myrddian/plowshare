@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Explicit deployment authority. SDK declarations are installed by an operator, never a model. */
 @ConfigurationProperties(value = "plowshare.relay.tools", ignoreUnknownFields = false)
-public final class RelayToolProperties {
+public final class RelayToolProperties implements RelayToolAuthority {
   private List<RelayToolDefinition> bindings = List.of();
 
   public List<RelayToolDefinition> getBindings() {

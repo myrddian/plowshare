@@ -38,7 +38,7 @@ public class RelayConfiguration {
       ProjectMembers members,
       ProjectWorkspaces projects,
       RelayProperties relayProperties,
-      io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools) {
+      io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry tools) {
     return new ProjectRelayPorts(
         relay,
         repository,

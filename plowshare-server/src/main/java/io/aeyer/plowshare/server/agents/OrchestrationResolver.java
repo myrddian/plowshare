@@ -65,6 +65,18 @@ public final class OrchestrationResolver implements SessionCloseListener {
 
   private final DataLayout data;
   private final LongPredicate projectExists;
+  private ScopedTools scopedTools = ScopedTools.NONE;
+
+  public void useScopedTools(ScopedTools tools) {
+    scopedTools = Objects.requireNonNull(tools);
+  }
+
+  private Set<String> knownTools(Long project) {
+    var names = new java.util.TreeSet<>(knownTools);
+    names.addAll(scopedTools.names(project));
+    return Set.copyOf(names);
+  }
+
   private final Set<String> knownTools;
   private final SessionChannel channel;
   private final Predicate<String> sessionLive;
@@ -140,6 +152,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
     AgentRegistry agents = agentsFor.apply(caller);
     String stamp =
         DefinitionResolver.fingerprint(orchestrationsDirectory(projectId))
+            + scopedTools.revision(projectId)
             + (key.personalId() == null
                 ? ""
                 : DefinitionResolver.fingerprint(orchestrationsDirectory(key.personalId())));
@@ -172,7 +185,8 @@ public final class OrchestrationResolver implements SessionCloseListener {
           build(
               stamp,
               agents,
-              OrchestrationRegistry.read(List.copyOf(layers), knownTools, agents, checks));
+              OrchestrationRegistry.read(
+                  List.copyOf(layers), knownTools(projectId), agents, checks));
     } catch (RuntimeException brokenTier) {
       // Cached like DefinitionResolver's own fallback: warned once per stamp and agents,
       // and rebuilt when either changes.
@@ -362,14 +376,14 @@ public final class OrchestrationResolver implements SessionCloseListener {
             "trial",
             agents,
             OrchestrationRegistry.read(
-                layers(project, session, personal), knownTools, agents, checks, true));
+                layers(project, session, personal), knownTools(projectId), agents, checks, true));
     DefinitionSource withDraft = withDraft(project, name, text);
     Cached after =
         build(
             "trial",
             agents,
             OrchestrationRegistry.read(
-                layers(withDraft, session, personal), knownTools, agents, checks, true));
+                layers(withDraft, session, personal), knownTools(projectId), agents, checks, true));
     Map<String, String> newly = new LinkedHashMap<>();
     after
         .tier()

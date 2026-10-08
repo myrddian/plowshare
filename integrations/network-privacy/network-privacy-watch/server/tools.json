@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "bindings": [
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_scope",
+      "description": "Read the configured collector scope and probe limits.",
+      "parameters": [],
+      "timeoutSeconds": 30
+    },
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_scan",
+      "description": "Request a scan through Relay using a caller-retained UUID. Admission is not completion.",
+      "parameters": [],
+      "timeoutSeconds": 30
+    },
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_scan_status",
+      "description": "Read a manual request's local publication and collection receipts.",
+      "parameters": [
+        {
+          "name": "request_id",
+          "type": "STRING",
+          "description": "Canonical UUID of the retained request or scan.",
+          "required": true
+        }
+      ],
+      "timeoutSeconds": 30
+    },
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_scan_list",
+      "description": "List the latest 50 local collection receipts.",
+      "parameters": [],
+      "timeoutSeconds": 30
+    },
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_evidence",
+      "description": "Read a collection's observations, comparison, gaps and retained revision.",
+      "parameters": [
+        {
+          "name": "scan_id",
+          "type": "STRING",
+          "description": "Canonical UUID of the retained request or scan.",
+          "required": true
+        }
+      ],
+      "timeoutSeconds": 30
+    },
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "name": "network_destinations",
+      "description": "Read observed DNS destinations from a collection; queries do not prove transmitted content.",
+      "parameters": [
+        {
+          "name": "scan_id",
+          "type": "STRING",
+          "description": "Canonical UUID of the retained request or scan.",
+          "required": true
+        }
+      ],
+      "timeoutSeconds": 30
+    }
+  ],
+  "providers": [
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "prefix": "network_",
+      "leaseSeconds": 300
+    }
+  ]
+}

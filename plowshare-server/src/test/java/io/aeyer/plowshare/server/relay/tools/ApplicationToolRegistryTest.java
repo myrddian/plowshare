@@ -1,0 +1,265 @@
+package io.aeyer.plowshare.server.relay.tools;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.server.agents.*;
+import io.aeyer.plowshare.server.archive.*;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
+import io.aeyer.plowshare.server.relay.*;
+import java.nio.file.*;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.atomic.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** No database: live catalogue, scoped authority and per-call failure behavior at their seams. */
+class ApplicationToolRegistryTest {
+  @TempDir Path root;
+  final ProjectWorkspaces projects = mock(ProjectWorkspaces.class);
+  final ProjectMembers members = mock(ProjectMembers.class);
+  final ProjectNames names = mock(ProjectNames.class);
+  final RelayLogRepository logs = mock(RelayLogRepository.class);
+  final RelayToolInvocations invocations = mock(RelayToolInvocations.class);
+  final AtomicBoolean grant = new AtomicBoolean(true);
+  final AtomicReference<Instant> clock =
+      new AtomicReference<>(Instant.parse("2026-10-09T00:00:00Z"));
+  final AtomicReference<RelayLogRepository.Head> head =
+      new AtomicReference<>(new RelayLogRepository.Head(0, Optional.empty()));
+  final UsageAttribution owner =
+      UsageAttribution.project("caller", "fixture", UsageAttribution.Operation.AGENT_CHAT);
+  ApplicationToolRegistry registry;
+  static final String DECLARATION =
+      """
+      {"name":"network_scope","description":"Scope","parameters":[],"timeoutSeconds":30}
+      """;
+
+  @BeforeEach
+  void setup() throws Exception {
+    Files.createDirectory(root.resolve("server"));
+    Files.writeString(
+        root.resolve("server/tools.json"),
+        """
+        {"version":1,"bindings":[{"provider":"scanner","account":"provider","name":"network_scope","description":"Scope","parameters":[],"timeoutSeconds":30}],
+         "providers":[{"provider":"scanner","account":"provider","prefix":"network_","leaseSeconds":30}]}
+        """);
+    Files.writeString(
+        root.resolve("server/ports.json"),
+        """
+        {"version":1,"bindings":[{"topic":"schedule.due","account":"provider","direction":"EGRESS","groups":["collector"]}]}
+        """);
+    when(projects.id("fixture")).thenReturn(1L);
+    when(projects.id("other")).thenReturn(2L);
+    when(names.nameForId(1L)).thenReturn(Optional.of("fixture"));
+    when(names.nameForId(2L)).thenReturn(Optional.of("other"));
+    when(projects.personalOwner(anyString())).thenReturn(Optional.empty());
+    when(members.mayWork(anyString(), anyString())).thenReturn(true);
+    when(logs.latest(any())).thenAnswer(call -> head.get());
+    registry =
+        new ApplicationToolRegistry(
+            id -> id == 1L ? Optional.of(root) : Optional.empty(),
+            projects,
+            members,
+            names,
+            logs,
+            new RelayToolProperties(),
+            invocations,
+            (p, a, n, s, t) -> grant.get(),
+            () -> Set.of("memory_read"),
+            clock::get);
+  }
+
+  void catalogue(String declarations) {
+    long position = head.get().position() + 1;
+    var publication =
+        new Relay.Publication(
+            new Relay.TopicKey(1L, "tool.scanner.catalog"),
+            position,
+            clock.get(),
+            new Relay.Draft(
+                UUID.randomUUID().toString(),
+                RelayPort.publisher("provider"),
+                clock.get(),
+                null,
+                null,
+                new RelayPayload.Text(
+                    "{\"version\":\"plowshare-tool-catalog/1\",\"tools\":["
+                        + declarations
+                        + "]}")));
+    head.set(new RelayLogRepository.Head(position, Optional.of(publication)));
+  }
+
+  AgentTool tool() {
+    var tool = registry.tools(Home.of("fixture"), "coordinator", null, () -> false).getFirst();
+    tool.calledAs("call");
+    return tool;
+  }
+
+  @Test
+  void staged_names_and_runtime_schemas_are_project_local_and_grant_filtered() throws Exception {
+    assertEquals(
+        Set.of("network_scope"), registry.stagedNames("fixture", root, Set.of("memory_read")));
+    assertEquals(Set.of(), registry.names(2L));
+    var runtime = new JobRuntime(mock(LlmDispatcher.class), List.of());
+    runtime.useScopedTools(registry);
+    assertFalse(runtime.knownTools().contains("network_scope"));
+    assertTrue(runtime.knownTools(1L).contains("network_scope"));
+    Path agents = Files.createDirectory(root.resolve("agents"));
+    Files.writeString(
+        agents.resolve("coordinator.md"),
+        "---\nname: coordinator\ndescription: d\nmodel: m\nmax-turns: 2\nmax-model-calls: 4\ntools: [network_scope]\n---\nRead.");
+    var definition = AgentRegistry.load(agents, runtime.knownTools(1L)).get("coordinator");
+    assertEquals(1, runtime.schemasOfferedTo(definition, Home.of("fixture")).size());
+    assertEquals(0, runtime.schemasOfferedTo(definition, Home.of("other")).size());
+  }
+
+  @Test
+  void bootstrap_schema_does_not_claim_a_connected_provider() {
+    assertTrue(tool().run("{}", Home.of("fixture"), owner).startsWith("E_NO_CONNECTION"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void every_call_checks_account_and_agent_permissions() {
+    catalogue(DECLARATION);
+    var tool = tool();
+    when(invocations.invoke(any(), any(), eq(owner), eq("call"), any()))
+        .thenReturn(
+            new RelayToolInvocations.Outcome(
+                UUID.randomUUID(), RelayToolCodec.State.COMPLETED, "scope"));
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).contains("COMPLETED"));
+    grant.set(false);
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    grant.set(true);
+    when(members.mayWork("fixture", "provider")).thenReturn(false);
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    assertTrue(tool.run("{}", Home.of("other"), owner).startsWith("E_NO_ACCESS"));
+    verify(invocations, times(1)).invoke(any(), any(), any(), anyString(), any());
+  }
+
+  @Test
+  void lease_expiry_schema_changes_and_withdrawal_are_distinct_from_revocation() {
+    catalogue(DECLARATION);
+    var tool = tool();
+    clock.set(clock.get().plusSeconds(31));
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_CONNECTION"));
+    catalogue(DECLARATION.replace("Scope", "Changed"));
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_EXEC"));
+    catalogue("");
+    assertEquals(Set.of(), registry.names(1L));
+    assertTrue(tool.run("{}", Home.of("fixture"), owner).startsWith("E_NO_EXEC"));
+    head.set(new RelayLogRepository.Head(head.get().position(), Optional.empty()));
+    assertEquals(Set.of(), registry.names(1L));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void unknown_invocations_expose_the_receipt_and_never_submit_a_replacement() {
+    catalogue(DECLARATION);
+    UUID id = UUID.randomUUID();
+    when(invocations.invoke(any(), any(), any(), anyString(), any()))
+        .thenReturn(
+            new RelayToolInvocations.Outcome(
+                id, RelayToolCodec.State.UNKNOWN, "Provider reply unavailable"));
+    String result = tool().run("{}", Home.of("fixture"), owner);
+    assertTrue(result.startsWith("E_NO_CONNECTION"));
+    assertTrue(result.contains(id.toString()));
+    assertTrue(result.contains("relay_tool_read"));
+    verify(invocations).invoke(any(), any(), any(), eq("call"), any());
+  }
+
+  @Test
+  void unexpected_failures_have_a_stable_code_without_exposing_private_exceptions() {
+    catalogue(DECLARATION);
+    when(invocations.invoke(any(), any(), any(), anyString(), any()))
+        .thenThrow(new IllegalStateException("private credential fixture"));
+    String result = tool().run("{}", Home.of("fixture"), owner);
+    assertTrue(result.startsWith("E_GENERAL_TOOL_FAILURE"));
+    assertFalse(result.contains("private credential"));
+  }
+
+  @Test
+  void ports_and_catalogue_authority_cannot_cross_account_project_or_prefix() {
+    assertTrue(
+        registry.permits(
+            "provider",
+            "fixture",
+            "schedule.due",
+            RelayPortProperties.Direction.EGRESS,
+            "collector"));
+    assertFalse(
+        registry.permits(
+            "provider", "fixture", "schedule.due", RelayPortProperties.Direction.EGRESS, "other"));
+    assertFalse(
+        registry.permits(
+            "intruder",
+            "fixture",
+            "tool.scanner.catalog",
+            RelayPortProperties.Direction.INGRESS,
+            null));
+    assertFalse(
+        registry.permits(
+            "provider",
+            "other",
+            "tool.scanner.catalog",
+            RelayPortProperties.Direction.INGRESS,
+            null));
+    var valid =
+        new RelayPort.Publish(
+            UUID.randomUUID().toString(),
+            "fixture",
+            "tool.scanner.catalog",
+            "{\"version\":\"plowshare-tool-catalog/1\",\"tools\":[" + DECLARATION + "]}",
+            clock.get(),
+            null,
+            null,
+            null);
+    registry.validateResult("provider", valid);
+    var invalid =
+        new RelayPort.Publish(
+            UUID.randomUUID().toString(),
+            "fixture",
+            "tool.scanner.catalog",
+            valid.text().replace("network_scope", "memory_read"),
+            clock.get(),
+            null,
+            null,
+            null);
+    assertThrows(CallerFault.class, () -> registry.validateResult("provider", invalid));
+    assertTrue(
+        registry.permits(
+            "provider",
+            "fixture",
+            "tool.scanner.catalog",
+            RelayPortProperties.Direction.INGRESS,
+            null));
+    catalogue(DECLARATION);
+    assertTrue(
+        registry.permits(
+            "provider",
+            "fixture",
+            "tool.scanner.network_scope.request",
+            RelayPortProperties.Direction.EGRESS,
+            "tool-provider"));
+    assertFalse(
+        registry.permits(
+            "provider",
+            "fixture",
+            "tool.scanner.network_scope.request",
+            RelayPortProperties.Direction.EGRESS,
+            "wrong"));
+  }
+
+  @Test
+  void built_in_collisions_are_refused_before_deployment() {
+    assertThrows(
+        CallerFault.class, () -> registry.stagedNames("fixture", root, Set.of("network_scope")));
+  }
+}

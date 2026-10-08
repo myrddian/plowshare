@@ -262,7 +262,8 @@ public final class SkillRuntime {
       throw bad("The selected executor would widen this caller's filesystem grants. Nothing ran.");
     }
     // Provider-specific allowed-tools expressions are not guessed into native grants.
-    if (skill.allowedTools().stream().anyMatch(tool -> !runtime.knownTools().contains(tool))) {
+    if (skill.allowedTools().stream()
+        .anyMatch(tool -> !runtime.knownTools(authority.projectId()).contains(tool))) {
       throw bad("The skill declares an unsupported allowed-tools name. Nothing ran.");
     }
     if (!executions.claim(

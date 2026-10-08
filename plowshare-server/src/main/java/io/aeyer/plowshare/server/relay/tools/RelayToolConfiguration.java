@@ -16,6 +16,41 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @EnableConfigurationProperties(RelayToolProperties.class)
 public class RelayToolConfiguration {
   @Bean
+  public ApplicationToolRegistry applicationToolRegistry(
+      io.aeyer.plowshare.server.agents.ApplicationResources resources,
+      ProjectWorkspaces projects,
+      ProjectMembers members,
+      io.aeyer.plowshare.server.archive.ProjectNames names,
+      io.aeyer.plowshare.server.relay.RelayLogRepository logs,
+      RelayToolProperties boot,
+      RelayToolInvocations invocations,
+      org.springframework.beans.factory.ObjectProvider<
+              io.aeyer.plowshare.server.agents.DefinitionResolver>
+          definitions,
+      org.springframework.beans.factory.ObjectProvider<io.aeyer.plowshare.server.agents.JobRuntime>
+          runtime) {
+    return new ApplicationToolRegistry(
+        resources,
+        projects,
+        members,
+        names,
+        logs,
+        boot,
+        invocations,
+        (project, account, agent, session, tool) ->
+            definitions
+                .getObject()
+                .forCaller(
+                    new io.aeyer.plowshare.server.agents.DefinitionResolver.Caller(
+                        project, session, account))
+                .findConcrete(agent)
+                .map(definition -> definition.tools().contains(tool))
+                .orElse(false),
+        () -> runtime.getObject().knownTools(),
+        Instant::now);
+  }
+
+  @Bean
   @DependsOnDatabaseInitialization
   public RelayToolRepository relayToolRepository(
       JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {

@@ -29,16 +29,15 @@ public class ApplicationDeploymentConfig {
       DefinitionChecks checks,
       LlmDispatcher dispatcher,
       HookEngine hooks,
-      io.aeyer.plowshare.server.relay.RelayRouteProgram relay) {
-    return (project, root) ->
-        new RuntimeApplicationPackageValidator(
-                boot.getObject(),
-                runtime.getObject().knownTools(),
-                checks,
-                new DispatcherPools(dispatcher),
-                hooks,
-                relay)
-            .validate(project, root);
+      io.aeyer.plowshare.server.relay.RelayRouteProgram relay,
+      ScopedTools scopedTools) {
+    return (project, root) -> {
+      var names = new java.util.TreeSet<>(runtime.getObject().knownTools());
+      names.addAll(scopedTools.stagedNames(project, root, names));
+      new RuntimeApplicationPackageValidator(
+              boot.getObject(), names, checks, new DispatcherPools(dispatcher), hooks, relay)
+          .validate(project, root);
+    };
   }
 
   @Bean

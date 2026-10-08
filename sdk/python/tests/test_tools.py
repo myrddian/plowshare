@@ -113,9 +113,10 @@ class Fixture:
                     "gap": False,
                 }
             elif operation == "relay.publish":
-                if payload["parentEventId"] != self.identity or payload[
-                    "requestId"
-                ] != result_request_id(self.identity):
+                if payload["topic"] != "tool.scanner.catalog" and (
+                    payload["parentEventId"] != self.identity
+                    or payload["requestId"] != result_request_id(self.identity)
+                ):
                     raise AssertionError("Invalid provider correlation")
                 self.publication = payload
                 if self.drop:
@@ -289,6 +290,54 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                     )
             with SqliteToolJournal(Path(directory), configuration=CONFIG) as reopened:
                 self.assertEqual(reopened.all()[0].phase, "done")
+
+    async def test_catalogue_publish_withdraw_and_lost_reply_do_not_execute_or_replay(
+        self,
+    ) -> None:
+        fixture = Fixture()
+        executions = 0
+
+        async def handler(call: ToolCall) -> ToolResult:
+            nonlocal executions
+            executions += 1
+            return ToolResult("COMPLETED", "unexpected")
+
+        async with serve(fixture.handle, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            with tempfile.TemporaryDirectory() as directory:
+                with SqliteToolJournal(
+                    Path(directory), configuration=CONFIG
+                ) as journal:
+                    async with await Client.connect(
+                        f"http://127.0.0.1:{port}", "fixture-token", timeout=1
+                    ) as client:
+                        provider = ToolProvider(
+                            client,
+                            project="fixture",
+                            provider="scanner",
+                            account="provider",
+                            tools=(RegisteredTool(DECLARATION, handler),),
+                            journal=journal,
+                        )
+                        await provider.publish_catalog(str(uuid4()))
+                        publication = fixture.publication
+                        assert publication is not None
+                        self.assertEqual(publication["topic"], "tool.scanner.catalog")
+                        self.assertEqual(
+                            json.loads(str(publication["text"]))["version"],
+                            "plowshare-tool-catalog/1",
+                        )
+                        await provider.withdraw_catalog(str(uuid4()))
+                        publication = fixture.publication
+                        assert publication is not None
+                        self.assertEqual(
+                            json.loads(str(publication["text"]))["tools"], []
+                        )
+                        fixture.drop = True
+                        with self.assertRaises(TransportError):
+                            await provider.publish_catalog(str(uuid4()))
+                        self.assertEqual(fixture.operations.count("relay.publish"), 3)
+                        self.assertEqual(executions, 0)
 
     async def test_named_handler_and_duplicate_delivery(self) -> None:
         await self.exercise()

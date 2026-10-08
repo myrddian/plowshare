@@ -109,7 +109,7 @@ public final class ConversationContextHandler implements FrameHandler {
             definition, callers.homeOfConversation(conversation), session, conversation);
     return ContextView.Prefix.of(
         definition,
-        runtime.schemasOfferedTo(definition),
+        runtime.schemasOfferedTo(definition, callers.homeOfConversation(conversation)),
         tokenizer,
         compaction.contextLengthOf(definition));
   }

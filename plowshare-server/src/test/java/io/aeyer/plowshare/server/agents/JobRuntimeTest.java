@@ -391,6 +391,40 @@ class JobRuntimeTest {
    * costs nothing: {@code a_declared_tool_the_runtime_does_not_hold_is_not_offered} is precisely
    * the case a too-broad set produces, and it is asserted on rather than waved through.
    */
+  @Test
+  void a_declared_builtin_grant_is_rechecked_between_calls() throws Exception {
+    Probe probe = Probe.returning("probe_read", "first permitted");
+    Scripted transport =
+        new Scripted()
+            .then(() -> asking("first", call("first", "probe_read", "{}")))
+            .then(() -> asking("second", call("second", "probe_read", "{}")))
+            .then(() -> answer("done"));
+    var runtime = runtimeOver(transport, probe);
+    var scoped = org.mockito.Mockito.mock(ScopedTools.class);
+    var checks = new AtomicInteger();
+    org.mockito.Mockito.when(
+            scoped.checkAccess(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("probe_read"),
+                org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                checks.incrementAndGet() == 1
+                    ? Optional.empty()
+                    : Optional.of(
+                        new ToolFailure(
+                            ToolFailure.Code.E_NO_ACCESS, "Grant revoked. Try another tool.")));
+    runtime.useScopedTools(scoped);
+    runtime.run(agent("reader"), "Read twice", Home.of("fixture"), generous(), null);
+    assertEquals(2, checks.get());
+    assertEquals(1, probe.seen().size());
+    assertTrue(
+        withRole(transport.conversation(2), ChatMessage.Role.TOOL).stream()
+            .anyMatch(message -> message.content().startsWith("E_NO_ACCESS")));
+  }
+
   private static final Set<String> FIXTURE_TOOLS =
       Set.of("probe_read", "probe_write", AgentRegistry.AGENT_RUN, MemoryTools.WRITE_NAME);
 

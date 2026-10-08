@@ -126,6 +126,11 @@ public static class RelayTools
         var bindings = tools.Select(t => new { binding.Project, binding.Provider, binding.Account, t.Name, t.Description, t.Parameters, t.TimeoutSeconds }).ToArray();
         return JsonSerializer.Serialize(new { plowshare = new { relay = new { tools = new { bindings } } } }, Json);
     }
+    internal static string Catalogue(IReadOnlyList<ToolDeclaration> tools) {
+        if (tools.Count > 128) throw new ArgumentException("Tool catalogue exceeds 128 declarations");
+        var text = JsonSerializer.Serialize(new { version = "plowshare-tool-catalog/1", tools }, Json);
+        Text(text,65536); return text;
+    }
     public static string ResultRequestId(string invocationId)
     {
         if (!Guid.TryParseExact(invocationId, "D", out var id) || id.ToString() != invocationId) throw new ArgumentException("Invalid tool UUID");
@@ -194,6 +199,17 @@ public sealed class ToolProvider
         var config = RelayTools.DeploymentConfig(binding, tools.Select(t => t.Declaration).ToArray());
         if (journal.Identity != RelayTools.Hash(config)) throw new ArgumentException("Foreign tool journal");
         this.ports = ports; this.binding = binding; this.tools = tools.Select(t => t with { Declaration = t.Declaration with { Parameters = Array.AsReadOnly(t.Declaration.Parameters.ToArray()) } }).ToArray(); this.journal = journal;
+    }
+    /// <summary>Publish/renew declarations using a retained caller UUID; never auto-replay.</summary>
+    public Task PublishCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId,tools.Select(t => t.Declaration).ToArray(),token);
+    /// <summary>Withdraw declarations without replaying or cancelling existing effects.</summary>
+    public Task WithdrawCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId,Array.Empty<ToolDeclaration>(),token);
+    private async Task CatalogAsync(string requestId,IReadOnlyList<ToolDeclaration> declarations,CancellationToken token) {
+        if (!Guid.TryParseExact(requestId,"D",out var id) || id.ToString()!=requestId) throw new ArgumentException("Tool identity must be a canonical UUID");
+        var topic = "tool."+binding.Provider+".catalog";
+        var reply = await ports.PublishAsync(new RelayPublishRequest { Project=binding.Project, Topic=topic, RequestId=requestId,
+            OccurredAt=DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'",System.Globalization.CultureInfo.InvariantCulture), Text=RelayTools.Catalogue(declarations) },token);
+        if(reply.RequestId!=requestId || reply.Project!=binding.Project || reply.Topic!=topic) throw new InvalidOperationException("Foreign tool catalogue publication receipt");
     }
     private async Task<IReadOnlyList<ToolReceipt>> ReceiptsAsync(CancellationToken token)
     {
