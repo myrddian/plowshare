@@ -127,6 +127,15 @@ the selected item, the reader states that it is no longer in the current page
 instead of keeping its old result. A refused receipt disables acknowledgement
 until a fresh authorized read; uncertain receipts stay blocked across reconnect.
 
+Overview approval links select the exact request with `#approvals?record=…`.
+The approvals view finds it in a freshly authorized account snapshot and opens
+its bounded thirty-request window. Reload and history restore this selection
+through reads only. A missing request is described as absent from the current
+pending list; an unreadable request remains unverified with decisions disabled.
+Neither result establishes a historic decision outcome. Decision receipts have
+separate status from the pending-list snapshot and link to a returned continuation
+job when one exists. Opening a link never answers or resumes work.
+
 The Workbench keeps overview, inbox, approvals, chat and jobs in primary
 navigation; the remaining views are reachable through Browse & settings. The
 overview inspector is a selection within the current bounded window. A refreshed

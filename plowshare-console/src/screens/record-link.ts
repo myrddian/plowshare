@@ -2,7 +2,7 @@ import { el } from './dom';
 
 /** Local deep links contain only an owning record ID, never tokens or an effect. */
 export function recordLink(
-  view: 'chat' | 'jobs',
+  view: 'chat' | 'jobs' | 'approvals',
   id: string,
   label: string,
 ): HTMLAnchorElement {

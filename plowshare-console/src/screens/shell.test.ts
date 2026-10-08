@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
-import type { EventStream, EventStreamOptions, StreamStatus } from '../events';
+import type {
+  EventStream,
+  EventStreamOptions,
+  FrameOutcome,
+  StreamStatus,
+} from '../events';
 import {
   createShell,
   multiplex,
@@ -470,5 +475,95 @@ it('suspends document reads across navigation and reconciles the selected view a
   } finally {
     shell.destroy();
     vi.useRealTimers();
+  }
+});
+
+it('restores an exact approval route on reload and history without sending a decision', async () => {
+  const originalHash = window.location.hash;
+  window.history.replaceState(null, '', '#approvals?record=apr_34');
+  const requests = Array.from({ length: 35 }, (_, index) => ({
+    id: `apr_${index}`,
+    conversation: 'cnv_saved',
+    askedIn: 'cnv_saved',
+    agent: 'reviewer',
+    side: 'server',
+    command: ['echo', 'review'],
+    cwd: '/fixture',
+    reason: 'Review this exact request',
+    state: 'asked',
+    scope: null,
+    prefix: null,
+    defaultPrefix: ['echo'],
+    createdAt: '2026-10-07T00:00:00Z',
+    answeredAt: null,
+    commands: null,
+    judged: null,
+  }));
+  const ask = vi.fn(async (type: string): Promise<FrameOutcome> =>
+    type === 'approval.list'
+      ? { code: 'OK', payload: { approvals: requests } }
+      : { code: 'OK', payload: { items: [], unread: 0 } },
+  );
+  const open = (options: EventStreamOptions): EventStream => ({
+    ...opener(options),
+    ask,
+  });
+  const another = createShell({
+    root,
+    transport: transport(),
+    openStream: open,
+    scope: window,
+    session: 'approval-route',
+    pollMs: null,
+  });
+  let restored: Shell | undefined;
+  try {
+    await another.start();
+    expect(
+      root
+        .querySelector('[data-approval="apr_34"]')
+        ?.getAttribute('data-selected'),
+    ).toBe('true');
+    expect(root.querySelectorAll('[data-approval]')).toHaveLength(5);
+    await another.show('inbox');
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('approvals'));
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector<HTMLButtonElement>(
+          '[data-approval="apr_34"] .approval-decision',
+        )?.disabled,
+      ).toBe(false),
+    );
+    window.history.forward();
+    await vi.waitFor(() => expect(another.current()).toBe('inbox'));
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('approvals'));
+    another.destroy();
+    restored = createShell({
+      root,
+      transport: transport(),
+      openStream: open,
+      scope: window,
+      session: 'approval-reload',
+      pollMs: null,
+    });
+    await restored.start();
+    expect(
+      root
+        .querySelector('[data-approval="apr_34"]')
+        ?.getAttribute('data-selected'),
+    ).toBe('true');
+    expect(window.location.hash).toBe('#approvals?record=apr_34');
+    expect(
+      ask.mock.calls.every(
+        ([type]) => type === 'approval.list' || type === 'inbox.list',
+      ),
+    ).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+  } finally {
+    another.destroy();
+    restored?.destroy();
+    window.history.replaceState(null, '', originalHash);
   }
 });

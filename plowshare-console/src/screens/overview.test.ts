@@ -323,3 +323,42 @@ it('reconciles the selected inspector from a fresh record and clears it on an un
     ),
   ).toBe(true);
 });
+
+it('links approval review to the exact request without answering it', async () => {
+  const view = fixture();
+  view.replies['approval.list'] = {
+    code: 'OK',
+    payload: {
+      approvals: [
+        {
+          id: 'apr_saved',
+          conversation: 'cnv_saved',
+          askedIn: 'cnv_saved',
+          agent: 'reviewer',
+          side: 'server',
+          command: ['echo', 'review'],
+          cwd: '/fixture',
+          reason: 'Review this request',
+          state: 'asked',
+          scope: null,
+          prefix: null,
+          defaultPrefix: ['echo'],
+          createdAt: '2026-10-07T00:00:00Z',
+          answeredAt: null,
+          commands: null,
+          judged: null,
+        },
+      ],
+    },
+  };
+  await view.screen.load();
+  expect(
+    view.root.querySelector('a[href="#approvals?record=apr_saved"]')
+      ?.textContent,
+  ).toBe('Review this request in approvals');
+  expect(
+    view.ask.mock.calls.every(([type]) =>
+      ['job.list', 'approval.list', 'inbox.list', 'firing.list'].includes(type),
+    ),
+  ).toBe(true);
+});

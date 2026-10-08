@@ -343,6 +343,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .result-preview, .inbox-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-preview { max-height: 12rem; overflow: auto; }
 .approval-rows { display: grid; gap: .75rem; }
+.pending-approvals .approval[data-selected="true"] { border: 1px solid var(--accent); border-left-width: 3px; padding: .75rem; background: var(--surface); }
+.pending-approvals .approval-head, .approval-selection, .approval-receipt { overflow-wrap: anywhere; }
+.pending-approvals .approval-head:focus, .approval-selection:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
 .inbox-paging { display: flex; gap: .75rem; margin: .75rem 0; }
 .inbox-filter { font: inherit; color: inherit; background: var(--paper); border: 1px solid var(--rule); padding: .4rem; max-width: 100%; }
 .inbox-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1.5rem; margin-top: 1rem; }

@@ -28,6 +28,8 @@ let screen: Screen | undefined;
 afterEach(() => {
   screen?.destroy();
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  document.body.replaceChildren();
 });
 
 function fixture(
@@ -361,4 +363,192 @@ it('pauses hidden-tab reads and fences a pending approval snapshot after returni
     view.ask.mock.calls.filter(([type]) => type === 'approval.answer'),
   ).toHaveLength(0);
   visibility.mockRestore();
+});
+
+describe('selected approval records', () => {
+  async function select(
+    view: ReturnType<typeof fixture>,
+    id: string,
+  ): Promise<void> {
+    if (!view.screen.showRecord)
+      throw new Error('Expected approval record selection');
+    await view.screen.showRecord(id);
+  }
+
+  it('opens the selected request in its bounded window without answering it', async () => {
+    const view = fixture();
+    view.requests(
+      Array.from({ length: 75 }, (_, index) => ({
+        ...approval,
+        id: `apr_${index}`,
+      })),
+    );
+    document.body.append(view.root);
+    await view.screen.load();
+    await select(view, 'apr_65');
+    const selected = view.root.querySelector('[data-approval="apr_65"]');
+    expect(view.root.querySelectorAll('[data-approval]')).toHaveLength(15);
+    expect(selected?.getAttribute('data-selected')).toBe('true');
+    expect(document.activeElement).toBe(selected?.querySelector('h3'));
+    expect(
+      view.root.querySelector('.approval-selection')?.textContent,
+    ).toContain('Selected request apr_65');
+    expect(
+      view.ask.mock.calls.every(([type]) => type === 'approval.list'),
+    ).toBe(true);
+    view.click('Previous approvals');
+    expect(view.root.querySelectorAll('[data-approval]')).toHaveLength(30);
+    expect(view.root.querySelector('[data-selected="true"]')).toBeNull();
+  });
+
+  it('distinguishes an absent selected request from unreadable current authority', async () => {
+    const view = fixture();
+    await view.screen.load();
+    await select(view, 'apr_1');
+    view.failure(new Error('Membership revoked'));
+    await view.screen.load();
+    expect(
+      view.root.querySelector('.approval-selection')?.textContent,
+    ).toContain('has not been verified');
+    expect(view.root.querySelector('.approval-status')?.textContent).toContain(
+      'authority could not be read',
+    );
+    expect(view.root.querySelector('[data-selected="true"]')).not.toBeNull();
+    expect(
+      [
+        ...view.root.querySelectorAll<HTMLButtonElement>('.approval-decision'),
+      ].every((control) => control.disabled),
+    ).toBe(true);
+    view.failure(undefined);
+    view.requests([{ ...approval, state: 'allowed' }]);
+    await view.screen.load();
+    expect(
+      view.root.querySelector('.approval-selection')?.textContent,
+    ).toContain('not in your current pending approval list');
+    expect(view.root.querySelector('[data-approval]')).toBeNull();
+    expect(view.root.querySelector('.approval-receipt')?.textContent).toBe('');
+    expect(
+      view.ask.mock.calls.every(([type]) => type === 'approval.list'),
+    ).toBe(true);
+  });
+
+  it('awaits reconciliation of the latest route and discards a delayed older snapshot', async () => {
+    const view = fixture();
+    await view.screen.load();
+    let finish: (result: FrameOutcome) => void = () => {};
+    view.ask.mockReturnValueOnce(
+      new Promise<FrameOutcome>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const older = select(view, 'apr_old');
+    const latest = select(view, 'apr_latest');
+    view.requests([{ ...approval, id: 'apr_latest' }]);
+    finish({
+      code: 'OK',
+      payload: {
+        approvals: [
+          { ...approval, id: 'apr_old', reason: 'Obsolete request context' },
+        ],
+      },
+    });
+    await Promise.all([older, latest]);
+    expect(
+      view.root
+        .querySelector('[data-approval="apr_latest"]')
+        ?.getAttribute('data-selected'),
+    ).toBe('true');
+    expect(view.root.textContent).not.toContain('Obsolete request context');
+    expect(view.ask).toHaveBeenCalledTimes(3);
+    expect(
+      view.ask.mock.calls.every(([type]) => type === 'approval.list'),
+    ).toBe(true);
+  });
+
+  it('rejects a removed request even if an old detached decision control is activated', async () => {
+    const view = fixture();
+    await view.screen.load();
+    const obsolete = view.root.querySelector('.approval-decision');
+    if (!obsolete) throw new Error('Expected decision control');
+    view.requests([]);
+    await view.screen.load();
+    obsolete.dispatchEvent(new Event('click'));
+    expect(
+      view.ask.mock.calls.every(([type]) => type === 'approval.list'),
+    ).toBe(true);
+  });
+
+  it('keeps a refused decision disabled while the fresh authorization read is pending or refused', async () => {
+    const view = fixture();
+    await view.screen.load();
+    let finish: (result: FrameOutcome) => void = () => {};
+    view.ask.mockResolvedValueOnce({
+      code: 'BAD_REQUEST',
+      said: 'Approval is stale',
+    });
+    view.ask.mockReturnValueOnce(
+      new Promise<FrameOutcome>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    view.click('Allow once');
+    await vi.waitFor(() =>
+      expect(
+        view.ask.mock.calls.filter(([type]) => type === 'approval.list'),
+      ).toHaveLength(2),
+    );
+    expect(view.root.querySelector('.approval-receipt')?.textContent).toContain(
+      'Approval is stale',
+    );
+    expect(
+      [
+        ...view.root.querySelectorAll<HTMLButtonElement>('.approval-decision'),
+      ].every((control) => control.disabled),
+    ).toBe(true);
+    finish({ code: 'BAD_REQUEST', said: 'Membership revoked' });
+    await vi.waitFor(() =>
+      expect(view.root.textContent).toContain('Membership revoked'),
+    );
+    view.click('Allow once');
+    expect(
+      view.ask.mock.calls.filter(([type]) => type === 'approval.answer'),
+    ).toHaveLength(1);
+    await view.screen.load();
+    expect(
+      [
+        ...view.root.querySelectorAll<HTMLButtonElement>('.approval-decision'),
+      ].every((control) => !control.disabled),
+    ).toBe(true);
+    expect(
+      view.ask.mock.calls.filter(([type]) => type === 'approval.answer'),
+    ).toHaveLength(1);
+  });
+
+  it('keeps decision receipt and current pending snapshot separate and links the returned job', async () => {
+    const view = fixture();
+    await view.screen.load();
+    await select(view, 'apr_1');
+    view.click('Allow once');
+    await vi.waitFor(() =>
+      expect(
+        view.root.querySelector('.approval-receipt')?.textContent,
+      ).toContain('Continuation job: job_1'),
+    );
+    expect(
+      view.root.querySelector('.approval-receipt a')?.getAttribute('href'),
+    ).toBe('#jobs?record=job_1');
+    expect(
+      view.root.querySelector('.approval-selection')?.textContent,
+    ).toContain('not in your current pending approval list');
+    expect(view.root.querySelector('.approval-status')?.textContent).toContain(
+      '0 pending approvals',
+    );
+    await view.screen.load();
+    expect(view.root.querySelector('.approval-receipt')?.textContent).toContain(
+      'Continuation job: job_1',
+    );
+    expect(
+      view.ask.mock.calls.filter(([type]) => type === 'approval.answer'),
+    ).toHaveLength(1);
+  });
 });

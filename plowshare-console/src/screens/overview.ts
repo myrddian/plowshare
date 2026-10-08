@@ -196,10 +196,13 @@ export function createOverview(options: {
             field('agent', request.agent),
             recordLinks(request.askedIn || request.conversation),
           );
-          const review = document.createElement('a');
-          review.href = '#approvals';
-          review.textContent = 'Review this request in approvals';
-          row.append(review);
+          row.append(
+            recordLink(
+              'approvals',
+              request.id,
+              'Review this request in approvals',
+            ),
+          );
           offer(row, 'approval:' + request.id, 'Approval request');
           waiting.append(row);
         }

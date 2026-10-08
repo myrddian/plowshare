@@ -11,6 +11,7 @@ import { asJobEvent } from '../repl/wire';
 import { button, el, field, nothing, problemText } from './dom';
 import type { Screen } from './screen';
 import { recordLinks } from './record-link';
+import { reconciliation } from './reconciliation';
 
 export interface ApprovalsOptions {
   readonly root: HTMLElement;
@@ -29,6 +30,12 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   const reload = button('reload', 'Refresh approvals');
   const status = el('p', 'approval-status');
   status.setAttribute('role', 'status');
+  const receiptStatus = el('div', 'approval-receipt');
+  receiptStatus.setAttribute('role', 'status');
+  const selectionStatus = el('p', 'approval-selection');
+  selectionStatus.setAttribute('role', 'status');
+  selectionStatus.tabIndex = -1;
+  selectionStatus.hidden = true;
   const error = el('p', 'trouble');
   error.setAttribute('role', 'alert');
   error.hidden = true;
@@ -38,10 +45,12 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   const next = button('next', 'Next approvals');
   head.append(el('h2', 'screen-title', 'approvals'), reload, previous, next);
   previous.addEventListener('click', () => {
+    selected = null;
     offset = Math.max(0, offset - windowSize);
     draw();
   });
   next.addEventListener('click', () => {
+    selected = null;
     offset += windowSize;
     draw();
   });
@@ -52,6 +61,8 @@ export function createApprovals(options: ApprovalsOptions): Screen {
       'Pending requests across your account. Review the command and its context before answering.',
     ),
     status,
+    selectionStatus,
+    receiptStatus,
     error,
     rows,
   );
@@ -64,19 +75,37 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   let active = true;
   let offset = 0;
   const windowSize = 30;
-  let reading = false;
+  let selected: string | null = null;
+  let focusSelection = false;
   let epoch = 0;
   let fresh = false;
-  let asked = false;
   let held: readonly ApprovalView[] = [];
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const pollMs = options.pollMs === undefined ? 5000 : options.pollMs;
   // IDs remain blocked across redraws. An uncertain decision cannot become a
   // fresh button merely because a poll still sees the original pending row.
   const blocked = new Map<string, string>();
+  const refresh = reconciliation({
+    available: canRead,
+    pollMs: options.pollMs === undefined ? 5000 : options.pollMs,
+    read,
+  });
 
   function draw(): void {
     const pending = held.filter((request) => request.state === 'asked');
+    const position = pending.findIndex((request) => request.id === selected);
+    if (selected !== null && fresh && position >= 0)
+      offset = Math.floor(position / windowSize) * windowSize;
+    selectionStatus.hidden = selected === null;
+    if (selected !== null) {
+      selectionStatus.textContent = !fresh
+        ? `Request ${selected} has not been verified against current server state. Refresh or reconnect before deciding.`
+        : position < 0
+          ? `Request ${selected} is not in your current pending approval list. Refresh or choose another pending request.`
+          : `Selected request ${selected}. Review its command and context before answering.`;
+    }
+    const focused = options.root.ownerDocument.activeElement;
+    const focusedId = focused?.matches('.approval-head')
+      ? focused.closest<HTMLElement>('[data-approval]')?.dataset['approval']
+      : undefined;
     offset = Math.min(
       offset,
       Math.max(0, Math.ceil(pending.length / windowSize) - 1) * windowSize,
@@ -92,12 +121,30 @@ export function createApprovals(options: ApprovalsOptions): Screen {
           ]
         : pending.slice(offset, offset + windowSize).map(row)),
     );
+    if (focusedId !== undefined)
+      findCard(focusedId)
+        ?.querySelector<HTMLElement>('h3')
+        ?.focus({ preventScroll: true });
+    if (focusSelection && fresh && selected !== null) {
+      const heading = findCard(selected)?.querySelector<HTMLElement>('h3');
+      (heading ?? selectionStatus).focus();
+      focusSelection = false;
+    }
+  }
+
+  function findCard(id: string): HTMLElement | undefined {
+    return [...rows.querySelectorAll<HTMLElement>('[data-approval]')].find(
+      (card) => card.dataset['approval'] === id,
+    );
   }
 
   function row(request: ApprovalView): HTMLElement {
     const card = el('article', 'approval');
     card.dataset['approval'] = request.id;
-    card.append(el('h3', 'approval-head', request.agent));
+    card.dataset['selected'] = String(request.id === selected);
+    const title = el('h3', 'approval-head', `${request.agent} · ${request.id}`);
+    title.tabIndex = -1;
+    card.append(title);
     // JSON argv preserves argument boundaries, including spaces and quotes.
     for (const command of request.commands ?? [request.command]) {
       card.append(el('pre', 'approval-command', JSON.stringify(command)));
@@ -133,83 +180,79 @@ export function createApprovals(options: ApprovalsOptions): Screen {
 
   async function answer(id: string, decision: ApprovalDecision): Promise<void> {
     if (!canRead() || !fresh || client === null || blocked.has(id)) return;
+    if (!held.some((request) => request.id === id && request.state === 'asked'))
+      return;
     blocked.set(id, 'Sending decision…');
     draw();
     try {
       const receipt = await client.answer(id, decision);
       if (stopped) return;
       blocked.set(id, 'Decision recorded. Refreshing pending requests…');
-      status.textContent =
-        `${id}: ${receipt.state}. ` +
-        (receipt.busy
-          ? 'The decision is recorded; the conversation is busy.'
-          : receipt.job === null
-            ? 'The server accepted the decision.'
-            : `Continuation job: ${receipt.job}.`) +
-        (receipt.note === null ? '' : ` ${receipt.note}`);
+      receiptStatus.replaceChildren(
+        el(
+          'p',
+          '',
+          `${id}: ${receipt.state}. ` +
+            (receipt.busy
+              ? 'The decision is recorded; the conversation is busy.'
+              : receipt.job === null
+                ? 'The server accepted the decision.'
+                : `Continuation job: ${receipt.job}.`) +
+            (receipt.note === null ? '' : ` ${receipt.note}`),
+        ),
+        recordLinks(null, receipt.job),
+      );
     } catch (problem) {
       if (stopped) return;
       if (problem instanceof ApprovalRefused) {
         blocked.delete(id);
-        status.textContent = problem.message;
+        fresh = false;
+        receiptStatus.replaceChildren(el('p', 'trouble', problem.message));
       } else {
         const note =
           'Delivery is uncertain. This decision was not replayed. Refresh to inspect pending requests before taking further action.';
         blocked.set(id, note);
-        status.textContent = note;
+        receiptStatus.replaceChildren(el('p', 'trouble', `${id}: ${note}`));
       }
       draw();
     }
-    await refresh();
+    await refresh.refresh();
   }
 
-  async function refresh(): Promise<void> {
-    if (!canRead() || client === null || stream === null) return;
-    if (reading) {
-      asked = true;
-      return;
-    }
-    reading = true;
+  async function read(): Promise<void> {
+    const authority = client;
+    if (authority === null) return;
+    const stamp = epoch;
+    fresh = false;
     reload.disabled = true;
     element.setAttribute('aria-busy', 'true');
+    status.textContent =
+      held.length === 0
+        ? 'Reading current pending approvals…'
+        : 'Refreshing approvals. The displayed snapshot may be stale.';
+    draw();
     try {
-      do {
-        asked = false;
-        const stamp = epoch;
-        fresh = false;
-        draw();
-        try {
-          const snapshot = await client.list();
-          if (stopped || !canRead() || stamp !== epoch) continue;
-          held = snapshot;
-          fresh = true;
-          error.hidden = true;
-          draw();
-        } catch (problem) {
-          if (stopped || !canRead() || stamp !== epoch) continue;
-          // Keep the previous rows. An unreadable snapshot is not an empty queue.
-          error.textContent = problemText(
-            problem,
-            'Approvals could not be read.',
-          );
-          error.hidden = false;
-        }
-      } while (asked && canRead());
+      const snapshot = await authority.list();
+      if (!canRead() || stamp !== epoch) return;
+      held = snapshot;
+      fresh = true;
+      error.hidden = true;
+      draw();
+      status.textContent = `${held.filter((request) => request.state === 'asked').length} pending approvals reconciled from server state.`;
+    } catch (problem) {
+      if (!canRead() || stamp !== epoch) return;
+      // Preserve context for inspection, with decisions disabled. Failure to
+      // verify the selected request is never evidence that it was answered.
+      error.textContent = problemText(problem, 'Approvals could not be read.');
+      error.hidden = false;
+      status.textContent =
+        'Current approval authority could not be read. Refresh to retry; cached requests may be stale.';
     } finally {
-      reading = false;
       if (!stopped) {
         reload.disabled = false;
         element.setAttribute('aria-busy', 'false');
       }
     }
-  }
-
-  function poll(): void {
-    if (!canRead() || timer !== null || pollMs === null) return;
-    timer = setTimeout(() => {
-      timer = null;
-      background(refresh().finally(poll));
-    }, pollMs);
   }
 
   function canRead(): boolean {
@@ -227,29 +270,41 @@ export function createApprovals(options: ApprovalsOptions): Screen {
   function pause(): void {
     ++epoch;
     fresh = false;
-    asked = false;
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
+    status.textContent =
+      'The displayed approvals may be stale. Reconnect or refresh before deciding.';
     draw();
   }
 
   function visibilityChanged(): void {
-    if (!canRead()) pause();
-    else background(refresh().finally(poll));
+    pause();
+    refresh.setActive(
+      active && options.root.ownerDocument.visibilityState !== 'hidden',
+    );
   }
   options.root.ownerDocument.addEventListener(
     'visibilitychange',
     visibilityChanged,
   );
 
-  reload.addEventListener('click', () => background(refresh()));
+  reload.addEventListener('click', () => background(refresh.refresh()));
   return {
     element: () => element,
+    async showRecord(id) {
+      if (stopped) return;
+      selected = id;
+      focusSelection = true;
+      // A deep link selects context, never authority or an answer. Invalidate
+      // any older snapshot and await the shared, coalesced read owner.
+      pause();
+      await refresh.refresh();
+    },
     setActive(next) {
       if (stopped || active === next) return;
       active = next;
       pause();
-      if (active) background(refresh().finally(poll));
+      refresh.setActive(
+        active && options.root.ownerDocument.visibilityState !== 'hidden',
+      );
     },
     async load() {
       if (stopped) return;
@@ -260,19 +315,18 @@ export function createApprovals(options: ApprovalsOptions): Screen {
         stream = options.openStream({
           session: options.session,
           onEvent: (frame) => {
-            if (asJobEvent(frame) !== null) background(refresh());
+            if (asJobEvent(frame) !== null) background(refresh.refresh());
           },
           onStatus: (next) => {
             if (stopped) return;
+            pause();
             if (next.state === 'open' && !next.signedOut)
-              background(refresh().finally(poll));
-            else pause();
+              background(refresh.refresh());
           },
         });
         client = socketApprovals(stream);
       }
-      await refresh();
-      poll();
+      await refresh.refresh();
     },
     destroy() {
       stopped = true;
@@ -281,7 +335,7 @@ export function createApprovals(options: ApprovalsOptions): Screen {
         'visibilitychange',
         visibilityChanged,
       );
-      if (timer !== null) clearTimeout(timer);
+      refresh.stop();
       stream?.close();
       stream = null;
       client = null;
