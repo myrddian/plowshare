@@ -36,6 +36,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   private final ToolGrants grants;
   private final Supplier<Set<String>> builtins;
   private final Supplier<Instant> clock;
+  private final ToolScopeConnections connections;
 
   public ApplicationToolRegistry(
       ApplicationResources resources,
@@ -48,6 +49,32 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
       ToolGrants grants,
       Supplier<Set<String>> builtins,
       Supplier<Instant> clock) {
+    this(
+        resources,
+        projects,
+        members,
+        projectNames,
+        logs,
+        boot,
+        invocations,
+        grants,
+        builtins,
+        clock,
+        ToolScopeConnections.NONE);
+  }
+
+  public ApplicationToolRegistry(
+      ApplicationResources resources,
+      ProjectWorkspaces projects,
+      ProjectMembers members,
+      ProjectNames projectNames,
+      RelayLogRepository logs,
+      RelayToolProperties boot,
+      RelayToolInvocations invocations,
+      ToolGrants grants,
+      Supplier<Set<String>> builtins,
+      Supplier<Instant> clock,
+      ToolScopeConnections connections) {
     this.resources = Objects.requireNonNull(resources);
     this.projects = Objects.requireNonNull(projects);
     this.members = Objects.requireNonNull(members);
@@ -58,6 +85,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
     this.grants = Objects.requireNonNull(grants);
     this.builtins = Objects.requireNonNull(builtins);
     this.clock = Objects.requireNonNull(clock);
+    this.connections = Objects.requireNonNull(connections);
   }
 
   private ApplicationServerSettings settings(String project) {
@@ -97,7 +125,10 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
     return settings;
   }
 
-  private record Entry(RelayToolDefinition binding, boolean available) {}
+  private record Entry(
+      RelayToolDefinition binding,
+      boolean available,
+      Optional<io.aeyer.plowshare.protocol.ToolScopes.Connection> scope) {}
 
   private record Snapshot(Map<String, Entry> entries, String revision) {
     Snapshot {
@@ -107,6 +138,46 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   private Snapshot snapshot(String project) {
     return snapshot(project, settings(project));
+  }
+
+  private ApplicationServerSettings settings(String project, String account) {
+    var base = settings(project);
+    var providers = new ArrayList<>(base.providers());
+    connections
+        .connections(project, account)
+        .forEach(
+            c ->
+                providers.add(
+                    new ApplicationServerSettings.Provider(
+                        c.provider(), c.account(), c.prefix(), c.leaseSeconds())));
+    return new ApplicationServerSettings(base.tools(), base.ports(), providers);
+  }
+
+  private Snapshot snapshot(String project, String account) {
+    return snapshot(project, settings(project, account));
+  }
+
+  private boolean assigned(Entry entry, String account, String agent, String session) {
+    try {
+      Long id = projects.id(entry.binding().project());
+      if (entry.scope().isPresent())
+        return grants.acceptsDynamic(id, account, agent, session)
+            && connections.permits(
+                entry.scope().get(), account, agent, session, entry.binding().name());
+      var policy =
+          resources
+              .root(id)
+              .map(io.aeyer.plowshare.server.applications.ApplicationToolScopes::read);
+      if (policy.isPresent() && !policy.get().toolScopes().isEmpty())
+        return account.equals(entry.binding().account())
+            && grants.acceptsDynamic(id, account, agent, session)
+            && policy
+                .get()
+                .permits(account, agent, entry.binding().provider(), entry.binding().name());
+      return grants.permits(id, account, agent, session, entry.binding().name());
+    } catch (CallerFault refused) {
+      return false; // Unreadable authority never preserves a prior grant.
+    }
   }
 
   private Snapshot snapshot(String project, ApplicationServerSettings settings) {
@@ -120,7 +191,8 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
                     new Entry(
                         t,
                         settings.providers().stream()
-                            .noneMatch(p -> p.provider().equals(t.provider())))));
+                            .noneMatch(p -> p.provider().equals(t.provider())),
+                        Optional.empty())));
     StringBuilder revision = new StringBuilder(settings.toString());
     Long id = projects.id(project);
     for (var provider : settings.providers()) {
@@ -143,7 +215,16 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
           clock.get().isBefore(publication.publishedAt().plusSeconds(provider.leaseSeconds()));
       catalogue
           .tools()
-          .forEach(t -> entries.put(t.name(), new Entry(t.bind(project, provider), available)));
+          .forEach(
+              t ->
+                  entries.put(
+                      t.name(),
+                      new Entry(
+                          t.bind(project, provider),
+                          available,
+                          connections.connections(project, provider.account()).stream()
+                              .filter(c -> c.provider().equals(provider.provider()))
+                              .findFirst())));
       revision.append(publication.event().eventId());
     }
     return new Snapshot(entries, RelayPort.hash(revision.toString()));
@@ -184,14 +265,28 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   @Override
   public String revision(Long id) {
     String project = id == null ? null : project(id);
-    return project == null ? "" : snapshot(project).revision();
+    return project == null
+        ? ""
+        : RelayPort.hash(
+            snapshot(project).revision() + connections.connections(project, null).toString());
   }
 
   @Override
   public List<AgentTool> tools(Home home, String agent, String session, BooleanSupplier cancelled) {
     if (home == null || home.isGlobal()) return List.of();
     return snapshot(home.project()).entries().values().stream()
-        .map(e -> (AgentTool) new LiveTool(e.binding(), agent, session, cancelled))
+        .map(e -> (AgentTool) new LiveTool(e, agent, session, cancelled))
+        .toList();
+  }
+
+  @Override
+  public List<AgentTool> tools(
+      Home home, String agent, String session, BooleanSupplier cancelled, String account) {
+    if (account == null) return tools(home, agent, session, cancelled);
+    if (home == null || home.isGlobal()) return List.of();
+    return snapshot(home.project(), account).entries().values().stream()
+        .filter(e -> assigned(e, account, agent, session))
+        .map(e -> (AgentTool) new LiveTool(e, agent, session, cancelled))
         .toList();
   }
 
@@ -206,8 +301,12 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
       var personal = projects.personalOwner(home.project());
       if (personal.isPresent() && !personal.get().equals(owner.accountHandle())
           || !members.mayWork(home.project(), owner.accountHandle())
-          || !grants.permits(
-              projects.id(home.project()), owner.accountHandle(), agent, session, tool))
+          || !(grants.permits(
+                  projects.id(home.project()), owner.accountHandle(), agent, session, tool)
+              || Optional.ofNullable(
+                      snapshot(home.project(), owner.accountHandle()).entries().get(tool))
+                  .map(e -> assigned(e, owner.accountHandle(), agent, session))
+                  .orElse(false)))
         return Optional.of(
             new ToolFailure(
                 E_NO_ACCESS,
@@ -227,7 +326,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
       RelayPortProperties.Direction direction,
       String group) {
     if (boot.permits(account, project, topic, direction, group)) return true;
-    var settings = settings(project);
+    var settings = settings(project, account);
     if (settings.ports().stream()
         .anyMatch(
             b ->
@@ -253,7 +352,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   @Override
   public void validateResult(String account, RelayPort.Publish request) {
-    var settings = settings(request.project());
+    var settings = settings(request.project(), account);
     var provider =
         settings.providers().stream()
             .filter(p -> p.account().equals(account) && p.topic().equals(request.topic()))
@@ -280,13 +379,15 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   private final class LiveTool implements AgentTool {
     private final RelayToolDefinition offered;
+    private final Entry entry;
     private final String agent;
     private final String session;
     private final BooleanSupplier cancelled;
     private String call;
 
-    LiveTool(RelayToolDefinition offered, String agent, String session, BooleanSupplier cancelled) {
-      this.offered = offered;
+    LiveTool(Entry entry, String agent, String session, BooleanSupplier cancelled) {
+      this.entry = entry;
+      this.offered = entry.binding();
       this.agent = agent;
       this.session = session;
       this.cancelled = cancelled;
@@ -320,7 +421,14 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
             || !members.mayWork(home.project(), owner.accountHandle())
             || !members.mayWork(home.project(), offered.account()))
           return failure(E_NO_ACCESS, "Project or provider access was revoked. Try another tool.");
-        var current = snapshot(home.project()).entries().get(offered.name());
+        if (!assigned(entry, owner.accountHandle(), agent, session))
+          return failure(
+              E_NO_ACCESS, "The provider scope or agent grant was revoked. Try another tool.");
+        if (entry.scope().isPresent()
+            && connections.connections(home.project(), owner.accountHandle()).stream()
+                .noneMatch(entry.scope().get()::equals))
+          return failure(E_NO_CONNECTION, "The provider scope is disconnected. Try another tool.");
+        var current = snapshot(home.project(), owner.accountHandle()).entries().get(offered.name());
         if (current == null) return failure(E_NO_EXEC, "The tool was withdrawn. Try another tool.");
         var denied = checkAccess(home, agent, session, offered.name(), owner);
         if (denied.isPresent()) return denied.get().render();

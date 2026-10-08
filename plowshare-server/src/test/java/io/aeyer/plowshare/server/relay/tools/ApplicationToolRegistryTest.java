@@ -258,6 +258,151 @@ class ApplicationToolRegistryTest {
   }
 
   @Test
+  void application_scope_offers_discovered_tools_only_to_its_execution_account_and_assigned_agent()
+      throws Exception {
+    Files.writeString(
+        root.resolve("server/tools.json"),
+        """
+        {"version":1,"bindings":[],"providers":[{"provider":"scanner","account":"provider","prefix":"network_","leaseSeconds":30}]}
+        """);
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        """
+        {"executionAccount":"provider","toolScopes":[{"scope":"scans","provider":"scanner","grants":["*"]}],
+         "toolGrants":[{"toolScope":"scans","agent":"coordinator"}]}
+        """);
+    var dynamic = new AtomicBoolean(true);
+    registry =
+        new ApplicationToolRegistry(
+            id -> id == 1L ? Optional.of(root) : Optional.empty(),
+            projects,
+            members,
+            names,
+            logs,
+            new RelayToolProperties(),
+            invocations,
+            new ToolGrants() {
+              public boolean permits(Long p, String a, String n, String s, String t) {
+                return false;
+              }
+
+              public boolean acceptsDynamic(Long p, String a, String n, String s) {
+                return dynamic.get();
+              }
+            },
+            () -> Set.of("memory_read"),
+            clock::get);
+    assertEquals(Set.of(), registry.stagedNames("fixture", root, Set.of("memory_read")));
+    catalogue(DECLARATION);
+    assertEquals(
+        1, registry.tools(Home.of("fixture"), "coordinator", "s", () -> false, "provider").size());
+    assertTrue(
+        registry.tools(Home.of("fixture"), "reviewer", "s", () -> false, "provider").isEmpty());
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", "s", () -> false, "caller").isEmpty());
+    var offered =
+        registry.tools(Home.of("fixture"), "coordinator", "s", () -> false, "provider").getFirst();
+    offered.calledAs("call");
+    var execution =
+        UsageAttribution.project("provider", "fixture", UsageAttribution.Operation.AGENT_CHAT);
+    dynamic.set(false);
+    assertTrue(offered.run("{}", Home.of("fixture"), execution).startsWith("E_NO_ACCESS"));
+    dynamic.set(true);
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        """
+        {"executionAccount":"provider","toolScopes":[{"scope":"scans","provider":"scanner","grants":["*"]}],"toolGrants":[]}
+        """);
+    assertTrue(offered.run("{}", Home.of("fixture"), execution).startsWith("E_NO_ACCESS"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void runtime_scopes_discover_without_application_files_and_socket_loss_is_no_connection()
+      throws Exception {
+    var dynamicGrants =
+        new ToolGrants() {
+          public boolean permits(Long p, String a, String n, String s, String t) {
+            return false;
+          }
+
+          public boolean acceptsDynamic(Long p, String a, String n, String s) {
+            return true;
+          }
+        };
+    var connected = new AtomicBoolean(true);
+    ApplicationResources external = id -> Optional.empty();
+    var scopes =
+        new SessionToolScopes(
+            external,
+            projects,
+            members,
+            dynamicGrants,
+            (a, s, c) -> connected.get(),
+            () -> Set.of("memory_read"));
+    var connection =
+        scopes.connect(
+            "caller",
+            "session",
+            "socket",
+            new io.aeyer.plowshare.protocol.ToolScopes.Connect(
+                "fixture",
+                "scans",
+                "scanner",
+                "network_",
+                List.of("*"),
+                List.of("coordinator"),
+                30));
+    registry =
+        new ApplicationToolRegistry(
+            external,
+            projects,
+            members,
+            names,
+            logs,
+            new RelayToolProperties(),
+            invocations,
+            dynamicGrants,
+            () -> Set.of("memory_read"),
+            clock::get,
+            scopes);
+    head.set(
+        new RelayLogRepository.Head(
+            1,
+            Optional.of(
+                new Relay.Publication(
+                    new Relay.TopicKey(1L, "tool." + connection.provider() + ".catalog"),
+                    1,
+                    clock.get(),
+                    new Relay.Draft(
+                        UUID.randomUUID().toString(),
+                        RelayPort.publisher("caller"),
+                        clock.get(),
+                        null,
+                        null,
+                        new RelayPayload.Text(
+                            "{\"version\":\"plowshare-tool-catalog/1\",\"tools\":["
+                                + DECLARATION
+                                + "]}"))))));
+    assertTrue(
+        registry
+            .tools(Home.of("fixture"), "coordinator", "another", () -> false, "caller")
+            .isEmpty());
+    assertTrue(
+        registry
+            .tools(Home.of("fixture"), "coordinator", "session", () -> false, "intruder")
+            .isEmpty());
+    var offered =
+        registry
+            .tools(Home.of("fixture"), "coordinator", "session", () -> false, "caller")
+            .getFirst();
+    offered.calledAs("call");
+    connected.set(false);
+    assertTrue(offered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_CONNECTION"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
   void built_in_collisions_are_refused_before_deployment() {
     assertThrows(
         CallerFault.class, () -> registry.stagedNames("fixture", root, Set.of("network_scope")));

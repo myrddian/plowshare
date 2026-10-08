@@ -40,7 +40,7 @@ class NetworkPrivacyWatchTest {
     var settings =
         io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
             "network-privacy-watch", application);
-    assertEquals(6, settings.tools().size());
+    assertEquals(0, settings.tools().size());
     assertEquals(4, settings.ports().size());
     assertEquals(1, settings.providers().size());
     Set<String> builtins =
@@ -60,6 +60,15 @@ class NetworkPrivacyWatchTest {
             new FilesystemDefinitions(application.resolve("agents")), names, Set.of());
     assertEquals(java.util.Map.of(), loaded.withheldTools());
     assertEquals(java.util.Map.of(), loaded.disabled());
+    assertTrue(loaded.enabled().get("privacy_coordinator").dynamic());
+    var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
+    assertEquals(6, policy.toolScopes().getFirst().grants().size());
+    assertTrue(
+        policy.permits(
+            policy.executionAccount(), "privacy_coordinator", "privacy-scanner", "network_scan"));
+    assertFalse(
+        policy.permits(
+            policy.executionAccount(), "privacy_analyst", "privacy-scanner", "network_scan"));
   }
 
   @Test

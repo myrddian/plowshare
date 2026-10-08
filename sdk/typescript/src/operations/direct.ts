@@ -232,6 +232,9 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   ...JOB_SUBMISSIONS,
   'job.status',
   'job.cancel',
+  'tool.scope.connect',
+  'tool.scope.list',
+  'tool.scope.disconnect',
   'relay.operate',
   'relay.publish',
   'relay.consume',
@@ -285,6 +288,40 @@ export async function dispatch(
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
   const body = fields(outcome.payload);
+  if (
+    asked.type === 'tool.scope.connect' ||
+    asked.type === 'tool.scope.list' ||
+    asked.type === 'tool.scope.disconnect'
+  ) {
+    if (outcome.code !== 'OK') return { kind: 'refused', outcome };
+    try {
+      let matches = false;
+      if (asked.type === 'tool.scope.connect') {
+        const reply = decodeReply(asked.type, outcome.payload),
+          input = asked.payload;
+        matches =
+          reply.project === input.project &&
+          reply.scope === input.scope &&
+          reply.sourceProvider === input.provider &&
+          reply.prefix === input.prefix &&
+          reply.leaseSeconds === input.leaseSeconds &&
+          JSON.stringify(reply.grants) === JSON.stringify(input.grants) &&
+          JSON.stringify(reply.agents) === JSON.stringify(input.agents);
+      } else if (asked.type === 'tool.scope.list') {
+        matches = decodeReply(asked.type, outcome.payload).connections.every(
+          (c) => c.project === asked.payload.project,
+        );
+      } else {
+        const reply = decodeReply(asked.type, outcome.payload);
+        matches =
+          reply.project === asked.payload.project &&
+          reply.scope === asked.payload.scope;
+      }
+      return { kind: matches ? 'completed' : 'invalid-response', outcome };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
   if (asked.type === 'relay.operate') {
     if (outcome.code !== 'OK') return { kind: 'refused', outcome };
     try {

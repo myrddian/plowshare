@@ -115,6 +115,17 @@ func rule(expr any, row any) any {
 				}
 			}
 			return false
+		case "contains":
+			items, ok := values[0].([]any)
+			if !ok {
+				return false
+			}
+			for _, item := range items {
+				if reflect.DeepEqual(item, values[1]) {
+					return true
+				}
+			}
+			return false
 		case "eq":
 			return reflect.DeepEqual(values[0], values[1])
 		case "gt":

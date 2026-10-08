@@ -53,7 +53,10 @@ class ContextCountFramesTest {
     when(runtime.withAgentRules(any(), any(), any(), any()))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(runtime.schemasOfferedTo(
-            org.mockito.ArgumentMatchers.eq(agent), org.mockito.ArgumentMatchers.any()))
+            org.mockito.ArgumentMatchers.eq(agent),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
         .thenReturn(tools);
     when(access.countOwner("alice", "conversation")).thenReturn(owner);
     when(models.count(any(ChatRequest.class)))
@@ -102,7 +105,10 @@ class ContextCountFramesTest {
     when(callers.homeOfConversation("conversation")).thenReturn(home);
     when(runtime.withAgentRules(original, home, "session", "conversation")).thenReturn(ruled);
     when(runtime.schemasOfferedTo(
-            org.mockito.ArgumentMatchers.eq(ruled), org.mockito.ArgumentMatchers.any()))
+            org.mockito.ArgumentMatchers.eq(ruled),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
         .thenReturn(List.of());
     var messages = List.of(ChatMessage.system(ruled.prompt()), ChatMessage.user("stored question"));
     when(compaction.projectionFor("conversation", ruled)).thenReturn(messages);
@@ -160,7 +166,10 @@ class ContextCountFramesTest {
     when(runtime.withAgentRules(any(), any(), any(), any()))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(runtime.schemasOfferedTo(
-            org.mockito.ArgumentMatchers.eq(agent), org.mockito.ArgumentMatchers.any()))
+            org.mockito.ArgumentMatchers.eq(agent),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
         .thenReturn(tools);
     when(access.countOwner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
     var asked =
@@ -226,7 +235,10 @@ class ContextCountFramesTest {
     when(runtime.withAgentRules(any(), any(), any(), any()))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(runtime.schemasOfferedTo(
-            org.mockito.ArgumentMatchers.eq(agent), org.mockito.ArgumentMatchers.any()))
+            org.mockito.ArgumentMatchers.eq(agent),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
         .thenReturn(List.of());
     when(access.countOwner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
     var result =

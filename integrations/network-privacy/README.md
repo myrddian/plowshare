@@ -119,7 +119,8 @@ including when the human manager and deployment administrator are the same perso
 
 The service account has no password login, server administrator role or Personal
 space. Its **handle** goes in project membership and `plowshare.json`. Its token's
-**principal**, returned by token creation, goes in `server/tools.json`,
+**principal**, returned by token creation, goes in root `plowshare.json` as
+`executionAccount`, in `server/tools.json`,
 `server/ports.json` and `--tool-account`. Those declarations check the authenticated
 execution identity exactly; putting the account handle there will not authorize a
 service token. Rotation preserves the principal, so it preserves retained work and
@@ -402,10 +403,13 @@ path.
 
 ## Agent tools through the SDK
 
-The coordinator explicitly grants `network_scope`, `network_scan`,
+The coordinator requests `network_scope`, `network_scan`,
 `network_scan_status`, `network_scan_list`, `network_evidence`,
-`network_destinations` and `relay_tool_read`. The SDK exposes a declaration and
-async Python handler for each capability; Plowshare installs the façade into its
+`network_destinations` and `relay_tool_read`. Its `dynamic: true` flag accepts the
+`network_scanning` provider scope explicitly assigned in root `plowshare.json`.
+That scope is limited to these six network tools and the configured execution
+principal; `relay_tool_read` retains its ordinary named built-in grant.
+The SDK exposes a declaration and async Python handler for each capability; Plowshare installs the façade into its
 normal tool registry. The model never constructs a Relay envelope or selects a
 provider or topic.
 
@@ -419,11 +423,15 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" --tool
 ```
 
 That exporter remains available for legacy startup bindings. For this Application,
-use its root `server/tools.json`: the shipped six bootstrap declarations omit
-`project`, which is derived from the Application. Replace the provider execution identity
-there and in `server/ports.json`; keep `provider` equal to the configured Python
-provider name. Do this **before** deploying. Global tool/port fragments are no
-longer required for this workflow.
+use its root `server/tools.json`: `bindings` is empty and the provider declaration
+fixes the execution account, name prefix and catalogue lease. No tool schema needs
+to be known at deployment. Root `plowshare.json` supplies `executionAccount`,
+`toolScopes` and `toolGrants`; only `privacy_coordinator` owns the network scope.
+The setup script fills the execution principal in the manifest and server files.
+For manual setup, replace it in all three files before deploying and keep
+`provider` equal to the configured Python provider name. Global tool/port fragments
+are unnecessary. Agents can deploy before the collector publishes its catalogue;
+network tools appear when that publication arrives.
 
 The collector publishes `plowshare-tool-catalog/1` through the SDK and renews it
 while polling (100 seconds by default for the packaged 300-second lease).
@@ -534,3 +542,27 @@ and a missing DNS export. Confirm a local model binding from actual request/mode
 logs if local inference is the deployment goal. Fixtures do not prove those live
 outcomes. Traffic capture, router-specific exporters and approved remediation
 integrations are natural additions using the existing public SDK boundary.
+
+## Interactive connections use the same registry
+
+An interactive CLI/TUI/desktop session can connect a provider with
+`tool scope connect` using the shared command interface:
+
+```text
+tool scope connect {"project":"coding-project","scope":"linear","provider":"linear","prefix":"linear_","grants":["*"],"agents":["ticketer"],"leaseSeconds":300}
+```
+
+The target agent must declare `dynamic: true`. The authenticated user owns this
+connection and its grants; no server JSON catalogue is required. The reply includes
+an isolated `provider` routing name and `account`. Bind the SDK tool provider to
+those returned values, publish its discovered catalogue and serve calls on the
+same authenticated event socket. `tool scope list` inspects current connections;
+`tool scope disconnect` removes one. New connections receive a fresh namespace.
+Socket loss stops tool availability; neither reconnection nor UNKNOWN effects are
+replayed automatically.
+
+Applications use the same operations under their declared service execution
+principal, but their requested provider, tools and agents must match the explicit
+manifest assignments. The packaged collector uses its deployed provider authority
+rather than the interactive connection command. See [provider scopes](../../docs/tool-scopes.md)
+for equivalent SDK operations and the present MCP transport/schema limits.

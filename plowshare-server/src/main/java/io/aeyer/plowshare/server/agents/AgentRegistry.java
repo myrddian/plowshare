@@ -188,6 +188,7 @@ public final class AgentRegistry {
           NAME,
           "alias",
           "guidance",
+          "dynamic",
           "display-name",
           DESCRIPTION,
           MODEL,
@@ -1139,6 +1140,7 @@ public final class AgentRegistry {
               + " Note that an empty 'tools' list is a different thing and is allowed");
     }
 
+    boolean dynamic = requireBoolean(entry, keys, "dynamic", false);
     List<String> tools = new ArrayList<>();
     for (String tool : requireStringList(entry, keys, TOOLS)) {
       if (BoardTools.NAMES.contains(tool)) {
@@ -1155,7 +1157,8 @@ public final class AgentRegistry {
         dropped.put(name + ": " + tool, mayNotAuthor(entry, tool));
         continue;
       }
-      if (knownTools.contains(tool)) {
+      if (knownTools.contains(tool)
+          || (dynamic && tool.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*") && tool.length() <= 64)) {
         tools.add(tool);
         continue;
       }
@@ -1213,7 +1216,8 @@ public final class AgentRegistry {
             optionalString(entry, keys, "display-name"),
             entry.origin(),
             alias,
-            guidance),
+            guidance,
+            dynamic),
         Collections.unmodifiableMap(new LinkedHashMap<>(extras)));
   }
 
@@ -2238,7 +2242,8 @@ public final class AgentRegistry {
         caller.displayName(),
         caller.origin(),
         caller.alias(),
-        caller.guidance());
+        caller.guidance(),
+        caller.dynamic());
   }
 
   /**

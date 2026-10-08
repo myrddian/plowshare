@@ -698,6 +698,9 @@ public final class FrameTypes {
   public static final String RELAY_OPERATE = "relay.operate";
   public static final String RELAY_PROCESS = "relay.process";
   public static final String RELAY_LOG = "relay.log";
+  public static final String TOOL_SCOPE_CONNECT = "tool.scope.connect";
+  public static final String TOOL_SCOPE_LIST = "tool.scope.list";
+  public static final String TOOL_SCOPE_DISCONNECT = "tool.scope.disconnect";
   public static final String RELAY_PUBLISH = "relay.publish";
   public static final String RELAY_CONSUME = "relay.consume";
   public static final String RELAY_ACK = "relay.ack";

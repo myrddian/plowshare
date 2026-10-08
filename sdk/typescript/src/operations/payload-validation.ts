@@ -22,6 +22,69 @@ export function problem(
   ) {
     return 'project must be a nonblank name or null for global';
   }
+  if (type.startsWith('tool.scope.')) {
+    const identifier = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/;
+    if (
+      'scope' in payload &&
+      (typeof payload['scope'] !== 'string' ||
+        payload['scope'].length > 64 ||
+        payload['scope'] !== payload['scope'].trim() ||
+        !identifier.test(payload['scope']))
+    )
+      return 'invalid tool scope';
+    if (type === 'tool.scope.connect') {
+      const provider = payload['provider'],
+        prefix = payload['prefix'],
+        lease = payload['leaseSeconds'];
+      if (
+        typeof provider !== 'string' ||
+        provider.length > 48 ||
+        provider !== provider.trim() ||
+        !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(provider)
+      )
+        return 'invalid scope provider';
+      if (
+        typeof prefix !== 'string' ||
+        prefix.length > 48 ||
+        prefix !== prefix.trim() ||
+        !/^[a-z][a-z0-9_]*_$/.test(prefix)
+      )
+        return 'invalid scope prefix';
+      if (
+        typeof lease !== 'number' ||
+        !Number.isInteger(lease) ||
+        lease < 1 ||
+        lease > 300
+      )
+        return 'invalid scope lease';
+      for (const field of ['grants', 'agents']) {
+        const entries = payload[field];
+        if (
+          !Array.isArray(entries) ||
+          entries.length < 1 ||
+          entries.length > 128 ||
+          new Set(entries).size !== entries.length
+        )
+          return `invalid scope ${field}`;
+        if (
+          entries.some(
+            (e: unknown) =>
+              typeof e !== 'string' ||
+              e.length > 64 ||
+              e !== e.trim() ||
+              !(
+                field === 'grants'
+                  ? /^(?:\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$/
+                  : identifier
+              ).test(e),
+          )
+        )
+          return `invalid scope ${field}`;
+        if (field === 'grants' && entries.includes('*') && entries.length !== 1)
+          return 'wildcard must be the only scope grant';
+      }
+    }
+  }
   const relayFailure = relayPayloadProblem(type, payload);
   if (relayFailure !== undefined) return relayFailure;
   const required: Partial<Record<Operation, readonly string[]>> = {
@@ -77,6 +140,20 @@ export const SHAPES: Record<
   ExtendedOperation,
   readonly [readonly string[], readonly string[]]
 > = {
+  'tool.scope.connect': [
+    [
+      'project',
+      'scope',
+      'provider',
+      'prefix',
+      'grants',
+      'agents',
+      'leaseSeconds',
+    ],
+    [],
+  ],
+  'tool.scope.list': [['project'], []],
+  'tool.scope.disconnect': [['project', 'scope'], []],
   'relay.publish': [
     ['requestId', 'project', 'topic', 'text', 'occurredAt'],
     ['correlationId', 'parentTopic', 'parentEventId'],
@@ -541,6 +618,9 @@ export const SHAPES: Record<
   ];
 };
 export const SCOPED: readonly ExtendedOperation[] = [
+  'tool.scope.connect',
+  'tool.scope.list',
+  'tool.scope.disconnect',
   'application.storage.set',
   'application.files',
   'application.file.read',
@@ -689,6 +769,7 @@ export function commandProblem(
       return 'Saving needs bounded text and its reviewed file revision';
     return undefined;
   }
+  if (type.startsWith('tool.scope.')) return problem(type, body);
   if (type === 'board.open' && 'swarm' in body && !swarmName(body['swarm']))
     return 'Choose a valid named swarm type';
   // Relay positions are decimal strings, rather than the legacy numeric paging fields.

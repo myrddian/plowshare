@@ -3294,16 +3294,21 @@ public final class JobRuntime {
   }
 
   public List<ToolSchema> schemasOfferedTo(AgentDefinition definition, Home home) {
+    return schemasOfferedTo(definition, home, null, null);
+  }
+
+  public List<ToolSchema> schemasOfferedTo(
+      AgentDefinition definition, Home home, String session, String account) {
     // No extras: this is a fact about the agent, and extras are a fact about a run.
     return offeredTo(
             definition,
             Budget.of(1),
             () -> false,
-            null,
+            session,
             Transcript.NONE,
             List.of(),
             RunExtras.Extras.NONE,
-            null,
+            account,
             RunHooks.NONE,
             home)
         .values()
@@ -3340,7 +3345,7 @@ public final class JobRuntime {
       Home toolHome) {
     Map<String, AgentTool> live = new java.util.HashMap<>();
     scopedTools
-        .tools(toolHome, definition.name(), sessionId, cancelled)
+        .tools(toolHome, definition.name(), sessionId, cancelled, callerHandle)
         .forEach(tool -> live.put(tool.schema().name(), tool));
     // One router for the whole run because there is nothing per-tool about
     // it: four would be four identical objects over one seam. It buys no
@@ -3579,6 +3584,14 @@ public final class JobRuntime {
                 informationAccess, callerHandle, informationInputs, transcript.conversationId());
       }
       offered.put(name, tool);
+    }
+    // Only the registry's owner-filtered external tools may supplement named requests.
+    // Built-ins stay under their existing explicit grants; dynamic never widens those.
+    if (definition.dynamic() && callerHandle != null) {
+      live.forEach(
+          (name, tool) -> {
+            if (!byName.containsKey(name)) offered.putIfAbsent(name, tool);
+          });
     }
     // HANDED, NOT DECLARED: after the declared loop and putIfAbsent, so a definition's own
     // tool of the same name keeps its place, as the inbox tool below does. None of these is in

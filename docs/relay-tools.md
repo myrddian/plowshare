@@ -17,6 +17,10 @@ The same façade is available in every SDK:
 | Go | `ToolDeclaration`, `RegisteredTool` | `ToolProvider` | `ToolDeploymentConfig` | `Poll`, `Reconcile` |
 | .NET | `ToolDeclaration`, `RegisteredTool` | `ToolProvider` | `DeploymentConfig` | `PollAsync`, `ReconcileAsync` |
 
+Provider scopes support tools unknown before connection, with `dynamic: true`
+agent opt-in, explicit application assignments and authenticated interactive
+connections. See [provider scopes](tool-scopes.md) for the shared SDK operations.
+
 ## Application-owned dynamic tools
 
 Built-in tools still register at startup. The live registry supplements them with

@@ -4300,5 +4300,304 @@
       ]
     },
     "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "linear_read"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*",
+        "linear_read"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "x",
+        "x"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "linear_read\n"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer",
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "Bad.Provider",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 301
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "linear",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30,
+      "account": "intruder"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.disconnect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.connect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "provider": "p-abc",
+      "prefix": "linear_",
+      "grants": [
+        "*"
+      ],
+      "agents": [
+        "ticketer"
+      ],
+      "leaseSeconds": 30,
+      "sourceProvider": "linear",
+      "account": "alice"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.list",
+    "value": {
+      "connections": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.disconnect",
+    "value": {
+      "project": "fixture",
+      "scope": "linear",
+      "disconnected": true
+    },
+    "valid": true
   }
 ]

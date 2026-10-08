@@ -69,6 +69,16 @@ public final class RuntimeApplicationPackageValidator implements ApplicationPack
               + loaded.withheldTools().keySet());
     if (loaded.enabled().keySet().stream().anyMatch(AgentsConfig.REQUIRED::contains))
       throw new CallerFault("Application cannot replace a required server agent");
+    var scopePolicy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(root);
+    if (!scopePolicy.toolScopes().isEmpty() && scopePolicy.executionAccount() == null)
+      throw new CallerFault("Application tool scopes require an explicit executionAccount");
+    for (var assignment : scopePolicy.toolGrants()) {
+      var definition = loaded.enabled().get(assignment.agent());
+      if (definition == null || !definition.dynamic())
+        throw new CallerFault(
+            "Application tool scope must assign a local agent with dynamic: true: "
+                + assignment.agent());
+    }
     var merged = new LinkedHashMap<>(boot.byName());
     merged.putAll(loaded.enabled());
     var registry = new AgentRegistry(merged);

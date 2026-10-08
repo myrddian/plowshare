@@ -805,7 +805,12 @@ public class AgentsConfig {
                               contextRuntime
                                   .getObject()
                                   .schemasOfferedTo(
-                                      definition, callers.homeOfConversation(conversation)),
+                                      definition,
+                                      callers.homeOfConversation(conversation),
+                                      session,
+                                      callers
+                                          .callerForConversation(conversation, session)
+                                          .handle()),
                               contextTokenizer.getObject(),
                               contextCompaction.getObject().contextLengthOf(definition));
                         }),

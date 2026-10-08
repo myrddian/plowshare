@@ -148,6 +148,14 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.setup.output.stat().st_mode & 0o777, 0o700)
         identity = json.loads((self.setup.output / "identity.json").read_text())
         self.assertEqual(identity["principal"], PRINCIPAL)
+        manifest = json.loads(
+            (self.setup.output / "application/plowshare.json").read_text()
+        )
+        self.assertEqual(manifest["executionAccount"], PRINCIPAL)
+        self.assertEqual(
+            manifest["toolGrants"],
+            [{"toolScope": "network_scanning", "agent": "privacy_coordinator"}],
+        )
         for name in ("tools", "ports"):
             row = json.loads(
                 (self.setup.output / f"application/server/{name}.json").read_text()

@@ -1,3 +1,4 @@
+import type { ToolScopePayloads } from './tool-scopes.ts';
 import type { ApplicationSourceFile } from './application-deployments.ts';
 import type { RelayPayloads } from './relay.ts';
 import type { MessagingPayloads } from './messaging.ts';
@@ -15,6 +16,7 @@ type Budget = { readonly maxModelCalls?: number };
 export interface ExtendedPayloads
   extends
     MessagingPayloads,
+    ToolScopePayloads,
     RelayPayloads,
     AdministrativePayloads,
     InformationPayloads,
@@ -253,6 +255,9 @@ export interface ExtendedPayloads
 
 /** Explicit operator verbs; no arbitrary frame forwarding or local filesystem claims. */
 export const CLI_OPERATIONS = {
+  'tool scope connect': 'tool.scope.connect',
+  'tool scope list': 'tool.scope.list',
+  'tool scope disconnect': 'tool.scope.disconnect',
   'relay topics': 'relay.topics',
   'relay log': 'relay.log',
   'relay operate': 'relay.operate',

@@ -1,7 +1,41 @@
 {
   "version": 1,
   "name": "network-privacy-watch",
-  "access": {"accounts": []},
-  "caps": {"steps": 60, "budget": 200, "autoIncrease": false},
-  "commands": {"local": {"mode": "off"}, "server": {"mode": "off"}}
+  "access": {
+    "accounts": []
+  },
+  "caps": {
+    "steps": 60,
+    "budget": 200,
+    "autoIncrease": false
+  },
+  "commands": {
+    "local": {
+      "mode": "off"
+    },
+    "server": {
+      "mode": "off"
+    }
+  },
+  "executionAccount": "REPLACE_WITH_PROVIDER_ACCOUNT",
+  "toolScopes": [
+    {
+      "scope": "network_scanning",
+      "provider": "privacy-scanner",
+      "grants": [
+        "network_scope",
+        "network_scan",
+        "network_scan_status",
+        "network_scan_list",
+        "network_evidence",
+        "network_destinations"
+      ]
+    }
+  ],
+  "toolGrants": [
+    {
+      "toolScope": "network_scanning",
+      "agent": "privacy_coordinator"
+    }
+  ]
 }

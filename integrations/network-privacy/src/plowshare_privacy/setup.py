@@ -192,6 +192,7 @@ def prepare(setup: Setup) -> None:
     manifest = object_fields(
         load_json(setup.source / "plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
+        {"executionAccount", "toolScopes", "toolGrants"},
     )
     if manifest["name"] != config.project or manifest["version"] != 1:
         raise ValueError("Collector and application project must match")
@@ -235,6 +236,14 @@ def prepare(setup: Setup) -> None:
 
 
 def bind_provider(setup: Setup, account: str) -> None:
+    manifest_path = setup.output / "application/plowshare.json"
+    manifest = object_fields(
+        load_json(manifest_path),
+        {"version", "name", "access", "caps", "commands"},
+        {"executionAccount", "toolScopes", "toolGrants"},
+    )
+    manifest["executionAccount"] = account
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     for name in ("tools", "ports"):
         path = setup.output / f"application/server/{name}.json"
         row = object_fields(load_json(path), {"version", "bindings"}, {"providers"})

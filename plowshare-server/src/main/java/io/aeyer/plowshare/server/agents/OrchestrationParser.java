@@ -61,7 +61,8 @@ final class OrchestrationParser {
           "fallback",
           "board",
           "alias",
-          "guidance");
+          "guidance",
+          "dynamic");
 
   /**
    * Tool names a conductor never declares, because the harness hands them to a run rather than a

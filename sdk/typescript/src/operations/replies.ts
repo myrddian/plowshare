@@ -1,3 +1,4 @@
+import type { ToolScopeReplies } from './tool-scopes.ts';
 import type { RelayReplies } from './relay.ts';
 import type { IncomingSource, IncomingCommand, AgentCard } from './external.ts';
 import type { OutgoingWork } from './outgoing.ts';
@@ -53,6 +54,7 @@ export interface ContextCount {
 export interface Replies
   extends
     MessagingReplies,
+    ToolScopeReplies,
     RelayReplies,
     UsageReplies,
     InformationReplies,

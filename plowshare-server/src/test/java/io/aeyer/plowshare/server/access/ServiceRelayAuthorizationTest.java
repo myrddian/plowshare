@@ -16,6 +16,13 @@ class ServiceRelayAuthorizationTest {
   private static final String SERVICE = "@service/00000000-0000-0000-0000-000000000001";
 
   @Test
+  void service_scope_connections_use_project_work_authority_and_list_is_read_only() {
+    assertEquals(ProjectRole.CONTRIBUTOR, ProjectAuthorization.required("tool.scope.connect"));
+    assertEquals(ProjectRole.CONTRIBUTOR, ProjectAuthorization.required("tool.scope.disconnect"));
+    assertEquals(ProjectRole.VIEWER, ProjectAuthorization.required("tool.scope.list"));
+  }
+
+  @Test
   void service_relay_operations_require_the_explicit_project_and_current_role() {
     var resources = mock(ResourceScopeRepository.class);
     var members = mock(ProjectMembers.class);

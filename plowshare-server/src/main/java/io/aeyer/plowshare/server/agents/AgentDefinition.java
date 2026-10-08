@@ -130,7 +130,65 @@ public record AgentDefinition(
     String displayName,
     String origin,
     String alias,
-    String guidance) {
+    String guidance,
+    /** Opt-in to owner-assigned runtime tools; never authority by itself. */
+    boolean dynamic) {
+
+  /** Compatibility: definitions predating provider scopes accept only named tools. */
+  public AgentDefinition(
+      String name,
+      String description,
+      String model,
+      Sampling.Intent intent,
+      Sampling sampling,
+      List<String> tools,
+      List<String> calls,
+      List<Grant> scopes,
+      int maxTurns,
+      int maxModelCalls,
+      String prompt,
+      boolean exported,
+      boolean delegable,
+      boolean vision,
+      boolean bot,
+      boolean announcesInbox,
+      Fallback fallback,
+      List<String> orchestrations,
+      String reviewWith,
+      boolean board,
+      List<String> skills,
+      String displayName,
+      String origin,
+      String alias,
+      String guidance) {
+    this(
+        name,
+        description,
+        model,
+        intent,
+        sampling,
+        tools,
+        calls,
+        scopes,
+        maxTurns,
+        maxModelCalls,
+        prompt,
+        exported,
+        delegable,
+        vision,
+        bot,
+        announcesInbox,
+        fallback,
+        orchestrations,
+        reviewWith,
+        board,
+        skills,
+        displayName,
+        origin,
+        alias,
+        guidance,
+        false);
+  }
 
   /** Existing definitions have no alias or guidance selector. */
   public AgentDefinition(
@@ -477,7 +535,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /**
@@ -510,7 +569,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /** The pre-skills shape: an ordinary agent gets no implicit skill grant. */
@@ -590,7 +650,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   AgentDefinition withCalls(List<String> granted) {
@@ -619,7 +680,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /** The pre-board shape: an undeclared grant allows no topic openings. */
@@ -1014,7 +1076,41 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
+  }
+
+  /**
+   * Narrowing execution wrappers can disable additions without changing the authored request list.
+   */
+  public AgentDefinition withDynamic(boolean allowed) {
+    return new AgentDefinition(
+        name,
+        description,
+        model,
+        intent,
+        sampling,
+        tools,
+        calls,
+        scopes,
+        maxTurns,
+        maxModelCalls,
+        prompt,
+        exported,
+        delegable,
+        vision,
+        bot,
+        announcesInbox,
+        fallback,
+        orchestrations,
+        reviewWith,
+        board,
+        skills,
+        displayName,
+        origin,
+        alias,
+        guidance,
+        allowed);
   }
 
   public AgentDefinition withTools(List<String> tools) {
@@ -1043,7 +1139,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /**
@@ -1078,7 +1175,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /**
@@ -1122,7 +1220,8 @@ public record AgentDefinition(
         displayName,
         origin,
         alias,
-        guidance);
+        guidance,
+        dynamic);
   }
 
   /**

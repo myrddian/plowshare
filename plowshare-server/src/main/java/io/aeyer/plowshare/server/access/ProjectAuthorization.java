@@ -35,6 +35,7 @@ public class ProjectAuthorization {
       Set.of(
           "project.list",
           "project.access",
+          "tool.scope.list",
           "relay.topics",
           "relay.log",
           "project.attach",
@@ -172,6 +173,9 @@ public class ProjectAuthorization {
         || Set.of(
                 "project.list",
                 "project.access",
+                "tool.scope.connect",
+                "tool.scope.list",
+                "tool.scope.disconnect",
                 "relay.topics",
                 "relay.log",
                 "relay.process",

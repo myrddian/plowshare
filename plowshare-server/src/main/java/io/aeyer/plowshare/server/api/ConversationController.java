@@ -790,7 +790,11 @@ public class ConversationController {
             definition, conversations.find(conversation).orElseThrow().home(), null, conversation);
     return ContextView.Prefix.of(
         definition,
-        runtime.schemasOfferedTo(definition, conversations.find(conversation).orElseThrow().home()),
+        runtime.schemasOfferedTo(
+            definition,
+            conversations.find(conversation).orElseThrow().home(),
+            null,
+            io.aeyer.plowshare.server.information.InformationCaller.account()),
         tokenizer,
         compaction.contextLengthOf(definition));
   }

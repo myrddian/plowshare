@@ -89,6 +89,7 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
       throw new IllegalArgumentException("Application manifest must be JSON");
     ProjectConfiguration.parse(text, project, FILE); // Validate the existing runtime settings too.
     JsonNode body = JSON.readTree(text);
+    io.aeyer.plowshare.server.applications.ApplicationToolScopes.parse(text);
     validateRouting(body.get("routing"));
     JsonNode access = body.get("access");
     if (access == null) return new Boundary(Kind.APPLICATION, Map.of());

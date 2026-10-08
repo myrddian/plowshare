@@ -8,6 +8,23 @@ import java.util.function.BooleanSupplier;
 
 /** Project-local live declarations supplement immutable built-in registration. */
 public interface ScopedTools {
+  static Set<String> reservedNames(Set<String> registered) {
+    var names = new java.util.HashSet<>(registered);
+    names.addAll(BoardTools.NAMES);
+    names.addAll(TodoTools.NAMES);
+    names.addAll(FileTools.NAMES);
+    names.addAll(
+        Set.of(
+            ResultTools.READ_NAME,
+            ResultTools.LIST_NAME,
+            AgentRunTool.NAME,
+            SkillRuntime.RUN,
+            SkillRuntime.READ,
+            "inbox_read",
+            WrittenCalls.REPLY_AS_WRITTEN));
+    return Set.copyOf(names);
+  }
+
   Set<String> names(Long project);
 
   Set<String> stagedNames(String project, Path root, Set<String> builtins);
@@ -24,6 +41,12 @@ public interface ScopedTools {
   }
 
   List<AgentTool> tools(Home home, String agent, String session, BooleanSupplier cancelled);
+
+  /** Owner-aware projection; implementations must filter runtime scope assignments here. */
+  default List<AgentTool> tools(
+      Home home, String agent, String session, BooleanSupplier cancelled, String account) {
+    return tools(home, agent, session, cancelled);
+  }
 
   ScopedTools NONE =
       new ScopedTools() {

@@ -59,7 +59,9 @@ public final class SkillRuntime {
       if (!execution.skill().allowedTools().isEmpty()) {
         var permitted = execution.skill().allowedTools();
         definition =
-            definition.withTools(definition.tools().stream().filter(permitted::contains).toList());
+            definition
+                .withTools(definition.tools().stream().filter(permitted::contains).toList())
+                .withDynamic(false);
       }
     }
     return definition;
