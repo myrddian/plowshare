@@ -153,6 +153,13 @@ Set `PLOWSHARE_FILESTORES_CONFIG_FILE` to an absolute path to the server's priva
 `filestore.js`. The version 1 registry uses the same alias/root structure as the
 client registry, with optional server account grants for direct file access:
 
+The [Docker server image](../deploy/docker/README.md#default-application-filestore)
+supplies a persistent default `applications` alias beneath the configured server
+workspace directory. It initializes a MANAGER grant for the explicitly configured
+FileStore manager or administrator handle, or no grants if neither is set. An
+explicit registry or private Spring configuration takes precedence. Application
+source stays outside private server data; the registry itself is private configuration.
+
 ```js
 export default {
   version: 1,

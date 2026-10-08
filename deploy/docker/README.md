@@ -139,6 +139,34 @@ private overlay. The server reads the overlay on top of its packaged settings; t
 Docker-specific database/data settings live in Compose.
 Review any paths in an imported overlay for the container's filesystem.
 
+### Default Application FileStore
+
+The server image initializes an `applications` FileStore on first start, including
+when an installation overlay supplies its own Compose file. It derives the storage
+root from the configured `PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY`, creating its
+`applications/` child outside private server data. The registry is retained at
+`$PLOWSHARE_DATA_DIR/filestore.js`, mode 0600. Both parent directories must already
+exist and be writable by the server user. The standard Compose mounts provide them.
+
+On first initialization, `PLOWSHARE_FILESTORES_MANAGER_HANDLE` selects the one
+account granted MANAGER access to this store. When omitted, the explicitly
+configured `PLOWSHARE_ADMIN_HANDLE` supplies that grant. If neither is configured,
+the registry starts with no grants and startup reports that a MANAGER grant is
+required. After first-run account setup, add the actual administrator handle to
+the retained registry before deploying an Application. There are no wildcard
+grants; Application manifest grants and project membership remain separate.
+
+An explicit `PLOWSHARE_FILESTORES_CONFIG_FILE` or private Spring
+`plowshare.filestores.config-file` setting takes precedence. Existing registries,
+grants, modes and ownership are never replaced on restart or upgrade. With the
+standard container paths, the default registry is `/var/lib/plowshare/filestore.js`
+and Application storage is `/var/lib/plowshare-workspaces/applications`. Back up
+both mounts. Do not place Application source in the private data/config directories.
+
+Use `applications` as the FileStore alias for CLI or Desktop deployment. Source
+launches still require an explicit registry configuration; the default is supplied
+by the image entrypoint. See [Application deployment](../../docs/projects.md#deploy-update-and-activate-an-application).
+
 State stays on plain host disk:
 
 | Host path | Contents |

@@ -47,8 +47,9 @@ management:
 # LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
   filestores:
-    # Host-side registry; blank keeps existing absolute workspace registrations usable.
-    config-file: ${PLOWSHARE_FILESTORES_CONFIG_FILE:}
+    # The Docker image supplies a persistent default; source launches remain explicit.
+    # A private Spring overlay can still replace this property entirely.
+    config-file: ${PLOWSHARE_FILESTORES_CONFIG_FILE:${PLOWSHARE_DEFAULT_FILESTORES_CONFIG_FILE:}}
   projects:
     workspace-directory: ${PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY}
   # To enable named code/prose spaces, provide both complete external model

@@ -6,6 +6,7 @@ LABEL org.opencontainers.image.title="Plowshare server" \
 WORKDIR /opt/plowshare
 COPY ${SERVER_JAR} server.jar
 COPY deploy/docker/server-entrypoint.sh /usr/local/bin/server-entrypoint
+COPY deploy/docker/server-filestores.sh /usr/local/bin/server-filestores.sh
 COPY deploy/docker/server-healthcheck.sh /usr/local/bin/server-healthcheck
 ENV PLOWSHARE_BIND=0.0.0.0 PLOWSHARE_PORT=8091 \
     PLOWSHARE_DATA_DIR=/var/lib/plowshare \

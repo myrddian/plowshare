@@ -6,4 +6,5 @@
 !deploy/
 !deploy/docker/
 !deploy/docker/server-entrypoint.sh
+!deploy/docker/server-filestores.sh
 !deploy/docker/server-healthcheck.sh
