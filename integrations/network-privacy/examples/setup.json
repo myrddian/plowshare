@@ -1,0 +1,10 @@
+{
+  "collectorConfig": "",
+  "applicationSource": "",
+  "outputDirectory": "",
+  "serviceAccount": "",
+  "managerAccount": "",
+  "deploymentAccount": "",
+  "tokenName": "network-privacy-collector",
+  "expiresInDays": 30
+}

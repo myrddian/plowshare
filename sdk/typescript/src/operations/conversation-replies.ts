@@ -115,6 +115,8 @@ export interface AgentView {
   readonly commands?: readonly CommandEntry[];
   readonly displayName?: string | null;
   readonly origin?: string | null;
+  /** Accepts owner-assigned external tools; absent means false on older servers. */
+  readonly dynamic?: boolean;
 }
 export interface DefinedAgent {
   readonly agent: AgentView;

@@ -194,6 +194,18 @@ public final class DefinitionWriter {
 
   private final AgentRegistry bootSet;
   private final DataLayout data;
+  private ScopedTools scopedTools = ScopedTools.NONE;
+
+  public void useScopedTools(ScopedTools tools) {
+    scopedTools = Objects.requireNonNull(tools);
+  }
+
+  private Set<String> knownTools(Long project) {
+    var names = new java.util.TreeSet<>(knownTools);
+    names.addAll(scopedTools.names(project));
+    return Set.copyOf(names);
+  }
+
   private final Set<String> knownTools;
   private final Set<String> required;
   private final DefinitionChecks checks;
@@ -376,7 +388,7 @@ public final class DefinitionWriter {
     // typo here and is withheld, though the very same file would have
     // loaded fine.
     AgentRegistry.Loaded read =
-        AgentRegistry.read(candidate, knownTools, Set.of(), bootSet.names());
+        AgentRegistry.read(candidate, knownTools(projectId), Set.of(), bootSet.names());
 
     requireNothingDisabled(read);
     requireNothingWithheld(read);
@@ -436,7 +448,7 @@ public final class DefinitionWriter {
       AgentRegistry.Loaded item =
           AgentRegistry.read(
               singleEntry(entry.name(), entry.origin(), entry.text()),
-              knownTools,
+              knownTools(projectId),
               Set.of(),
               bootSet.names());
       merged.putAll(item.enabled());

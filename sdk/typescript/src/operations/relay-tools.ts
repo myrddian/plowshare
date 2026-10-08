@@ -411,6 +411,46 @@ export class ToolProvider {
   private topic(tool: string, kind: 'request' | 'result'): string {
     return `tool.${this.binding.provider}.${tool}.${kind}`;
   }
+  /** Publish/renew declarations with a retained caller UUID; never auto-replay. */
+  async publishCatalog(requestId: string): Promise<void> {
+    await this.catalog(
+      requestId,
+      this.tools.map((t) => t.declaration),
+    );
+  }
+  /** Withdraw declarations without cancelling or replaying existing effects. */
+  async withdrawCatalog(requestId: string): Promise<void> {
+    await this.catalog(requestId, []);
+  }
+  private async catalog(
+    requestId: string,
+    tools: readonly ToolDeclaration[],
+  ): Promise<void> {
+    uuid(requestId);
+    if (tools.length > 128)
+      throw new Error('Tool catalogue exceeds 128 declarations');
+    const encoded = JSON.stringify({
+      version: 'plowshare-tool-catalog/1',
+      tools,
+    });
+    text(encoded, 65536);
+    const topic = `tool.${this.binding.provider}.catalog`;
+    const reply = requirePayload(
+      await this.connection.request('relay.publish', {
+        project: this.binding.project,
+        topic,
+        requestId,
+        occurredAt: this.host.now().toISOString(),
+        text: encoded,
+      }),
+    );
+    if (
+      reply.requestId !== requestId ||
+      reply.project !== this.binding.project ||
+      reply.topic !== topic
+    )
+      throw new Error('Foreign tool catalogue publication receipt');
+  }
   async poll(): Promise<number> {
     if (this.busy) throw new Error('Tool provider already has an active pass');
     this.busy = true;

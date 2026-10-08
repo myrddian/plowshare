@@ -130,7 +130,7 @@ class ConversationControllerTest {
     runtime = mock(JobRuntime.class);
     when(runtime.withAgentRules(any(), any(), any(), any()))
         .thenAnswer(invocation -> invocation.getArgument(0));
-    when(runtime.schemasOfferedTo(any()))
+    when(runtime.schemasOfferedTo(any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 ToolSchema.from(

@@ -85,6 +85,23 @@ class JdbcRelayRepositoryTest {
   }
 
   @Test
+  void catalogue_head_selects_latest_position_and_preserves_expired_history_without_offsets() {
+    var logs = new JdbcRelayLogRepository(jdbc, transactions);
+    assertEquals(
+        new RelayLogRepository.Head(0, java.util.Optional.empty()),
+        logs.latest(new Relay.TopicKey(topic.projectId(), "missing.catalog")));
+    assertEquals(new RelayLogRepository.Head(0, java.util.Optional.empty()), logs.latest(topic));
+    repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
+    repository.append(topic, draft("first"), T0);
+    var second = repository.append(topic, draft("second"), T0.plusSeconds(1));
+    assertEquals(new RelayLogRepository.Head(2, java.util.Optional.of(second)), logs.latest(topic));
+    assertEquals(0, repository.unread(a).subscription().seenThrough());
+    assertEquals(2, repository.prune(topic, T0.plus(Duration.ofDays(5)), 100));
+    assertEquals(new RelayLogRepository.Head(2, java.util.Optional.empty()), logs.latest(topic));
+    assertEquals(0, repository.unread(a).subscription().seenThrough());
+  }
+
+  @Test
   void receipt_lookup_is_scoped_and_retention_absence_remains_explicit() {
     var original = repository.append(topic, draft("shared"), T0);
     var otherTopic = new Relay.TopicKey(topic.projectId(), "release.other");

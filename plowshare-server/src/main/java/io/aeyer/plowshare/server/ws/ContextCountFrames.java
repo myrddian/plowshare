@@ -78,7 +78,8 @@ public class ContextCountFrames implements FrameArea {
     return new Projection(
         definition,
         compaction.projectionFor(conversation, definition),
-        runtime.schemasOfferedTo(definition),
+        runtime.schemasOfferedTo(
+            definition, callers.homeOfConversation(conversation), asking.sessionId(), account),
         access.countOwner(account, conversation));
   }
 

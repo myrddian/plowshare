@@ -59,7 +59,9 @@ public final class SkillRuntime {
       if (!execution.skill().allowedTools().isEmpty()) {
         var permitted = execution.skill().allowedTools();
         definition =
-            definition.withTools(definition.tools().stream().filter(permitted::contains).toList());
+            definition
+                .withTools(definition.tools().stream().filter(permitted::contains).toList())
+                .withDynamic(false);
       }
     }
     return definition;
@@ -262,7 +264,8 @@ public final class SkillRuntime {
       throw bad("The selected executor would widen this caller's filesystem grants. Nothing ran.");
     }
     // Provider-specific allowed-tools expressions are not guessed into native grants.
-    if (skill.allowedTools().stream().anyMatch(tool -> !runtime.knownTools().contains(tool))) {
+    if (skill.allowedTools().stream()
+        .anyMatch(tool -> !runtime.knownTools(authority.projectId()).contains(tool))) {
       throw bad("The skill declares an unsupported allowed-tools name. Nothing ran.");
     }
     if (!executions.claim(

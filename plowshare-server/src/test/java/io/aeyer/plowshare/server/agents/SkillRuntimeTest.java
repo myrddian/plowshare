@@ -59,7 +59,8 @@ class SkillRuntimeTest {
     when(child.conversationId()).thenReturn("child");
     when(callers.callerForConversation("parent", "session")).thenReturn(authority);
     when(callers.readAgent("interlocutor", authority)).thenReturn(executor);
-    when(runtime.knownTools()).thenReturn(java.util.Set.of("file_read"));
+    when(runtime.knownTools(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(java.util.Set.of("file_read"));
     when(runtime.activity()).thenReturn(RunActivity.NONE);
     when(parent.delegate(any(), eq(home), isNull())).thenReturn(child);
     when(executions.find("alice", id)).thenReturn(Optional.empty());

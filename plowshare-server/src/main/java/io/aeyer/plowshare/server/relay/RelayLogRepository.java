@@ -5,6 +5,17 @@ import java.util.List;
 
 /** Bounded broker log inspection, without creating subscribers or advancing offsets. */
 public interface RelayLogRepository {
+  /** Latest retained declaration, without subscribing or changing offsets. */
+  Head latest(Relay.TopicKey topic);
+
+  /** A nonzero head with no retained publication must not revive bootstrap declarations. */
+  record Head(long position, java.util.Optional<Relay.Publication> publication) {
+    public Head {
+      if (position < 0) throw new IllegalArgumentException("Negative Relay head");
+      java.util.Objects.requireNonNull(publication);
+    }
+  }
+
   List<Relay.Topic> topics(Relay.Scope scope, int limit);
 
   Snapshot read(Relay.TopicKey topic, long after, int limit, String account);

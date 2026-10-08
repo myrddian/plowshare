@@ -152,3 +152,42 @@ func TestToolInterruptedIntentNeverExecutes(t *testing.T) {
 		t.Fatal("interrupted work was repeated")
 	}
 }
+
+func TestToolCataloguePublishWithdrawAndLostReplyDoNotExecuteOrReplay(t *testing.T) {
+	ports := &fixtureToolPorts{}
+	journal := &fixtureJournal{rows: map[string]ToolReceipt{}}
+	calls := 0
+	provider, err := NewToolProvider(ports, fixtureBinding, []RegisteredTool{{fixtureDeclaration, func(context.Context, ToolCall) (ToolResult, error) {
+		calls++
+		return ToolResult{"COMPLETED", "unexpected"}, nil
+	}}}, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = provider.PublishCatalog(context.Background(), fixtureInvocation); err != nil {
+		t.Fatal(err)
+	}
+	if ports.published.Topic != "tool.scanner.catalog" {
+		t.Fatal("wrong catalogue scope")
+	}
+	var first struct {
+		Version string            `json:"version"`
+		Tools   []ToolDeclaration `json:"tools"`
+	}
+	if err = json.Unmarshal([]byte(ports.published.Text), &first); err != nil || first.Version != "plowshare-tool-catalog/1" || len(first.Tools) != 1 {
+		t.Fatal("invalid catalogue", err)
+	}
+	if err = provider.WithdrawCatalog(context.Background(), "22222222-2222-2222-2222-222222222222"); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal([]byte(ports.published.Text), &first); err != nil || len(first.Tools) != 0 {
+		t.Fatal("invalid withdrawal", err)
+	}
+	ports.loseReply = true
+	if err = provider.PublishCatalog(context.Background(), "33333333-3333-3333-3333-333333333333"); err == nil {
+		t.Fatal("lost reply accepted")
+	}
+	if calls != 0 || ports.publications != 3 {
+		t.Fatal("effect executed or catalogue replayed")
+	}
+}

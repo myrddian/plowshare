@@ -43,6 +43,7 @@ directory.
 | `orchestrations/` | Deterministic schedule action and agent investigation workflow |
 | `schedules/network_scan.json` | Packaged scan schedule, initially paused |
 | `Relay/` | Project topics and the scan-completion route |
+| `server/` | Project tool/provider catalogue and Relay port declarations |
 
 The Python service, private configuration, credentials and collector journal
 stay outside this folder. Deploying the Application does not start Python or
@@ -50,8 +51,22 @@ install its dependencies.
 
 ## Set up a deployment
 
-Follow the [integration guide](../README.md) for the exact commands and
-configuration contracts.
+Start with the [guided Python setup walkthrough](../SETUP.md). It prepares private
+configuration, selects a server FileStore, deploys the Application and provisions
+its separate execution account. The [integration guide](../README.md) documents
+the lower-level commands and configuration contracts.
+
+Start with [service account and human manager setup](../README.md#separate-the-human-manager-from-the-service-account).
+The Python setup script reads configuration, prompts for blanks, prepares private
+source and provisions a project-scoped service credential after the first paused
+deployment. The human user gets Application `MANAGER` access; the service handle
+gets `CONTRIBUTOR`. The management group is the manifest's `MANAGER` accounts with
+matching server membership. It does not require giving the user server admin.
+Relay provider/port declarations use the service token's `@service/<UUID>` principal.
+The manifest uses that principal for `executionAccount` and its owning account
+handle for membership grants. The guide also explains how to
+run investigations as that principal and the current administrator-owned schedule
+limit; setup does not transfer ownership of a deployed schedule.
 
 1. Install the Python SDK and collector. Copy the supplied
    [configuration](../examples/config.json) into a private operator directory and set the
@@ -60,15 +75,15 @@ configuration contracts.
    the configured environment variables.
 2. Make a private copy of this Application folder. Add explicit manifest account
    grants and matching server membership; the supplied manifest grants no
-   accounts. Configure the agents' model binding and review their tool grants.
+   accounts. Replace provider account placeholders with the service token principal in `server/tools.json` and
+   `server/ports.json`; configure the agents' model binding and review their tool grants.
 3. Configure a server FileStore destination. As a server administrator with
    MANAGER access to that destination, deploy the private folder using CLI
    `application deploy` or Desktop **Applications → Deploy**. Retain the request
    UUID and inspect its receipt after uncertain delivery.
-4. Install the [Relay port grants](../examples/server-ports.json) and exported named-tool
-   bindings in private server deployment configuration. Replace the placeholder
-   accounts and groups, and apply that server configuration. Application
-   deployment does not install these global bindings or grants.
+4. Verify effective tool grants and Relay routes. The `server/` declarations
+   activate with the source revision; no global server configuration edit or
+   restart is required. Python will publish its live catalogue when it starts.
 5. Read `schedule.files` for the deployed schedule's actual internal name and set
    it in the collector configuration. Start the Python web service with explicit
    provider, account, bind address and port values. Connect the dashboard using
@@ -94,3 +109,14 @@ for operator review. The collector records uncertain uploads and publications
 for read-only reconciliation instead of automatically repeating them. See the
 [recovery guide](../README.md#receipts-disconnects-and-recovery) before
 restarting a collector with an unresolved outcome.
+
+## Application-owned tools and ports
+
+Before deploying your private copy, configure [`server/`](server/README.md)
+with the external collector's authenticated execution identity (the service token
+principal when using a service account). Its provider scope assignments and
+catalogue authority are validated with the agent definitions; its
+Relay port grants activate with this Application revision. No global server
+configuration edit or restart is required. The Python process remains separately
+operated and renews its live tool catalogue lease. See the
+[integration guide](../README.md#agent-tools-through-the-sdk) for startup.

@@ -112,6 +112,81 @@
     "defaultBot": {
       "type": "string",
       "pattern": "^[\\p{L}\\p{Nd}]+(?:-[\\p{L}\\p{Nd}]+)*$"
+    },
+    "executionAccount": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "toolScopes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope",
+          "provider",
+          "grants"
+        ],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$",
+            "maxLength": 64
+          },
+          "provider": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 48
+          },
+          "grants": {
+            "oneOf": [
+              {
+                "const": [
+                  "*"
+                ]
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+                  "maxLength": 64
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "toolGrants": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "toolScope",
+          "agent"
+        ],
+        "properties": {
+          "toolScope": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$",
+            "maxLength": 64
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$",
+            "maxLength": 64
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -189,5 +264,24 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "toolScopes"
+        ],
+        "properties": {
+          "toolScopes": {
+            "minItems": 1
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "executionAccount"
+        ]
+      }
+    }
+  ]
 }

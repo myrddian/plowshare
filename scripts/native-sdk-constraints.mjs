@@ -63,6 +63,20 @@ export function constrain(graph) {
     const s = resolve(graph, ref),
       extended = SHAPES[op];
     if (s.anyOf) continue;
+    if (op.startsWith('tool.scope.')) {
+      field(s, 'scope', { ...namedSwarm, trimmed: true });
+      field(s, 'provider', { pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$', maxLength: 48, trimmed: true });
+      field(s, 'prefix', { pattern: '^[a-z][a-z0-9_]*_$', maxLength: 48, trimmed: true });
+      field(s, 'leaseSeconds', integer(1, 300));
+      if (s.properties?.grants) {
+        s.properties.grants = { type: 'array', minItems: 1, maxItems: 128, uniqueItems: true,
+          items: { type: 'string', pattern: '^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$', maxLength: 64, trimmed: true } };
+        rules(s, implies({ contains: [g('grants'), '*'] }, eq('grants', ['*'])));
+      }
+      if (s.properties?.agents) s.properties.agents = { type: 'array', minItems: 1, maxItems: 128,
+        uniqueItems: true, items: { type: 'string', ...namedSwarm, trimmed: true } };
+
+    }
     if (op === 'board.open') field(s, 'swarm', namedSwarm);
     for (const [k, v] of Object.entries(s.properties ?? {})) {
       if (

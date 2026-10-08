@@ -41,6 +41,7 @@ internal static class Validation
         {
             "and" => Bool(values.All(Present)),
             "or" => Bool(values.Any(Present)),
+            "contains" => Bool(values[0].ValueKind == JsonValueKind.Array && values[0].EnumerateArray().Any(v => JsonNode.DeepEquals(JsonNode.Parse(v.GetRawText()), JsonNode.Parse(values[1].GetRawText())))),
             "eq" => Bool(values[0].ValueKind == values[1].ValueKind && JsonNode.DeepEquals(JsonNode.Parse(values[0].GetRawText()), JsonNode.Parse(values[1].GetRawText()))),
             "gt" => Bool(values[0].ValueKind == JsonValueKind.Number && values[1].ValueKind == JsonValueKind.Number && values[0].GetDouble() > values[1].GetDouble()),
             _ => throw new JsonException("Unknown owned constraint")

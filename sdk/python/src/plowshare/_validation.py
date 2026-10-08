@@ -43,6 +43,8 @@ def _rule(rule: object, row: object) -> object:
         return all(values)
     if op == "or":
         return any(values)
+    if op == "contains":
+        return isinstance(values[0], list) and values[1] in values[0]
     if op == "eq":
         return type(values[0]) is type(values[1]) and values[0] == values[1]
     if op == "gt":

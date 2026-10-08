@@ -604,9 +604,13 @@ describe('complete conversation, agent and project WS replies', () => {
             (type === 'EntryView' &&
               ['job', 'source'].includes(field.name.getText(source))) ||
             (type === 'AgentView' &&
-              ['skills', 'commands', 'displayName', 'origin'].includes(
-                field.name.getText(source),
-              )) ||
+              [
+                'skills',
+                'commands',
+                'displayName',
+                'origin',
+                'dynamic',
+              ].includes(field.name.getText(source))) ||
             (type === 'ProjectView' &&
               [
                 'role',

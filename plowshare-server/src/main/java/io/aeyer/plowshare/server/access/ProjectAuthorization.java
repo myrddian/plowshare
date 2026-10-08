@@ -26,6 +26,7 @@ public class ProjectAuthorization {
       Set.of(
           "agent.define",
           "orchestration.define",
+          "relay.operate",
           "project.member.add",
           "project.member.remove",
           "project.member.role");
@@ -34,6 +35,9 @@ public class ProjectAuthorization {
       Set.of(
           "project.list",
           "project.access",
+          "tool.scope.list",
+          "relay.topics",
+          "relay.log",
           "project.attach",
           "conversation.list",
           "conversation.latest",
@@ -169,6 +173,16 @@ public class ProjectAuthorization {
         || Set.of(
                 "project.list",
                 "project.access",
+                "tool.scope.connect",
+                "tool.scope.list",
+                "tool.scope.disconnect",
+                "relay.topics",
+                "relay.log",
+                "relay.process",
+                "relay.operate",
+                "relay.publish",
+                "relay.consume",
+                "relay.ack",
                 "project.member.add",
                 "project.member.remove",
                 "project.member.role",

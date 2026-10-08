@@ -107,6 +107,41 @@ class RelayToolsTest {
     assertEquals(1, wire.publications);
   }
 
+  @Test
+  void catalogue_publish_withdraw_and_lost_reply_do_not_run_or_replay_handlers() throws Exception {
+    var wire = new FixturePorts(request());
+    var calls = new AtomicInteger();
+    var provider =
+        new RelayTools.Provider(
+            wire,
+            BINDING,
+            List.of(
+                new RelayTools.RegisteredTool(
+                    DECLARATION,
+                    call -> {
+                      calls.incrementAndGet();
+                      return CompletableFuture.completedFuture(
+                          new RelayTools.Result(RelayTools.State.COMPLETED, "unexpected"));
+                    })),
+            new MemoryJournal());
+    provider.publishCatalog(ID);
+    assertEquals("tool.scanner.catalog", wire.published.topic());
+    assertNull(wire.published.parentTopic());
+    assertEquals(
+        "plowshare-tool-catalog/1",
+        SdkJson.mapper().readTree(wire.published.text()).path("version").asText());
+    assertEquals(1, SdkJson.mapper().readTree(wire.published.text()).path("tools").size());
+    provider.withdrawCatalog("22222222-2222-2222-2222-222222222222");
+    assertEquals(0, SdkJson.mapper().readTree(wire.published.text()).path("tools").size());
+    wire.loseReply = true;
+    assertThrows(
+        IOException.class, () -> provider.publishCatalog("33333333-3333-3333-3333-333333333333"));
+    assertEquals(3, wire.publications);
+    assertEquals(0, calls.get());
+    assertThrows(IllegalArgumentException.class, () -> provider.publishCatalog("invalid"));
+    assertEquals(3, wire.publications);
+  }
+
   static final class MemoryJournal implements RelayTools.Journal {
     final Map<String, RelayTools.Receipt> rows = new LinkedHashMap<>();
 

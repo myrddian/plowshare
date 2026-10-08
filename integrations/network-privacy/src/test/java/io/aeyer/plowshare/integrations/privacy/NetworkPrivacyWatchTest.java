@@ -35,6 +35,43 @@ class NetworkPrivacyWatchTest {
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
   @Test
+  void application_owned_declarations_cover_coordinator_grants_without_global_bindings()
+      throws Exception {
+    var settings =
+        io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
+            "network-privacy-watch", application);
+    assertEquals(0, settings.tools().size());
+    assertEquals(4, settings.ports().size());
+    assertEquals(1, settings.providers().size());
+    Set<String> builtins =
+        TOOLS.stream()
+            .filter(name -> !name.startsWith("network_"))
+            .collect(java.util.stream.Collectors.toSet());
+    var names = new java.util.HashSet<>(builtins);
+    settings
+        .tools()
+        .forEach(
+            tool -> {
+              assertEquals("network-privacy-watch", tool.project());
+              names.add(tool.name());
+            });
+    var loaded =
+        AgentRegistry.read(
+            new FilesystemDefinitions(application.resolve("agents")), names, Set.of());
+    assertEquals(java.util.Map.of(), loaded.withheldTools());
+    assertEquals(java.util.Map.of(), loaded.disabled());
+    assertTrue(loaded.enabled().get("privacy_coordinator").dynamic());
+    var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
+    assertEquals(6, policy.toolScopes().getFirst().grants().size());
+    assertTrue(
+        policy.permits(
+            policy.executionAccount(), "privacy_coordinator", "privacy-scanner", "network_scan"));
+    assertFalse(
+        policy.permits(
+            policy.executionAccount(), "privacy_analyst", "privacy-scanner", "network_scan"));
+  }
+
+  @Test
   void complete_application_passes_the_deployment_resource_validator() throws Exception {
     try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
         var relay = new GraalRelayRouteProgram()) {

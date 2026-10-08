@@ -302,3 +302,41 @@ describe('Relay tool façade', () => {
     expect(journal.rows.get(wire.id)?.result?.state).toBe('UNKNOWN');
   });
 });
+
+describe('live tool catalogue', () => {
+  it('publishes and withdraws scoped metadata without executing or replaying handlers', async () => {
+    const wire = new Wire();
+    const client = new Plowshare({ socket: wire });
+    let calls = 0;
+    const provider = await ToolProvider.create(
+      client,
+      binding,
+      [
+        {
+          declaration,
+          handler: async () => {
+            calls++;
+            return { state: 'COMPLETED', text: 'unexpected' };
+          },
+        },
+      ],
+      new Journal(),
+      host,
+    );
+    await provider.publishCatalog('11111111-1111-1111-1111-111111111111');
+    expect(wire.published['topic']).toBe('tool.scanner.catalog');
+    expect(wire.published['parentTopic']).toBeUndefined();
+    const first: unknown = JSON.parse(String(wire.published['text']));
+    expect(fieldsOf(first)['version']).toBe('plowshare-tool-catalog/1');
+    expect(fieldsOf(first)['tools']).toEqual([declaration]);
+    await provider.withdrawCatalog('22222222-2222-2222-2222-222222222222');
+    const withdrawn: unknown = JSON.parse(String(wire.published['text']));
+    expect(fieldsOf(withdrawn)['tools']).toEqual([]);
+    wire.loseReply = true;
+    await expect(
+      provider.publishCatalog('33333333-3333-3333-3333-333333333333'),
+    ).rejects.toThrow();
+    expect(wire.publications).toBe(3);
+    expect(calls).toBe(0);
+  });
+});

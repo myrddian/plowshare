@@ -105,10 +105,12 @@ public final class ModelAcceptanceChecker implements AcceptanceChecker, UsageAwa
                             + "' does not resolve on this"
                             + " server"));
     AgentDefinition readOnly =
-        checker.withTools(
-            checker.tools().stream()
-                .filter(OrchestrationRegistry.CHECKER_TOOLS::contains)
-                .toList());
+        checker
+            .withTools(
+                checker.tools().stream()
+                    .filter(OrchestrationRegistry.CHECKER_TOOLS::contains)
+                    .toList())
+            .withDynamic(false);
     try {
       var owner = usageOwners.orchestration(brief.run(), UsageAttribution.Operation.REVIEW);
       return owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED

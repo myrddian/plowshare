@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "bindings": [],
+  "providers": [
+    {
+      "provider": "privacy-scanner",
+      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+      "prefix": "network_",
+      "leaseSeconds": 300
+    }
+  ]
+}

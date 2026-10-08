@@ -2,6 +2,7 @@
 name: privacy_coordinator
 description: Coordinates scheduled collection receipts and evidence-backed network investigations.
 model: reasoning
+dynamic: true
 tools: [information_read, information_write, memory_recall, memory_read, agent_run, network_scope, network_scan, network_scan_status, network_scan_list, network_evidence, network_destinations, relay_tool_read]
 calls: [privacy_analyst, privacy_reviewer]
 orchestrations: [privacy_tick, investigate_network]

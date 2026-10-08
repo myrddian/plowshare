@@ -1298,9 +1298,14 @@ public final class LocalProvider implements FileProvider {
               + " nothing in them is readable");
     }
     if (defined.serverProject()) {
-      FileAccess writes =
-          FileAccess.of(defined.writeRoots(), projects.effectiveExclusions(defined));
-      return new Leash(access, null, writes, defined.restrictedCommands());
+      var writeExclusions = new java.util.ArrayList<>(projects.effectiveExclusions(defined));
+      boolean application = Files.isRegularFile(defined.workspace().resolve("plowshare.json"));
+      if (application) {
+        writeExclusions.add(defined.workspace().resolve("server"));
+        writeExclusions.add(defined.workspace().resolve("plowshare.json"));
+      }
+      FileAccess writes = FileAccess.of(defined.writeRoots(), writeExclusions);
+      return new Leash(access, null, writes, defined.restrictedCommands() || application);
     }
     return new Leash(access, null);
   }

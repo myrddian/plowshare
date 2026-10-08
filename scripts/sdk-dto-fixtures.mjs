@@ -271,6 +271,22 @@ result('filestore.list', {stores:[{alias:'applications',role:'MANAGER'},{alias:'
 result('filestore.list', {stores:[{alias:'../private',role:'MANAGER'}]}, false);
 result('filestore.list', {stores:[{alias:'applications',role:'OWNER'}]}, false);
 result('filestore.list', {stores:Array(101).fill({alias:'applications',role:'MANAGER'})}, false);
+// Scope discovery is independent of grant policy; every SDK validates the same DTO boundary.
+const scopeConnection = { project: 'fixture', scope: 'linear', provider: 'linear', prefix: 'linear_',
+  grants: ['*'], agents: ['ticketer'], leaseSeconds: 30 };
+input('tool.scope.connect', scopeConnection, true);
+input('tool.scope.connect', { ...scopeConnection, grants: ['linear_read'] }, true);
+for (const change of [
+  { grants: ['*', 'linear_read'] }, { grants: [] }, { grants: ['x', 'x'] },
+  { grants: ['linear_read\n'] }, { agents: [] }, { agents: ['ticketer', 'ticketer'] },
+  { provider: 'Bad.Provider' }, { prefix: 'linear' }, { leaseSeconds: 0 },
+  { leaseSeconds: 301 }, { leaseSeconds: 1.5 }, { account: 'intruder' },
+]) input('tool.scope.connect', { ...scopeConnection, ...change }, false);
+input('tool.scope.disconnect', { project: 'fixture', scope: 'linear' }, true);
+result('tool.scope.connect', { ...scopeConnection, sourceProvider: 'linear', provider: 'p-abc', account: 'alice' }, true);
+result('tool.scope.list', { connections: [] }, true);
+result('tool.scope.disconnect', { project: 'fixture', scope: 'linear', disconnected: true }, true);
+
 for (const test of cases) {
   let accepted = true;
   try {

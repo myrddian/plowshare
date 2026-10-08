@@ -20,6 +20,30 @@ class ApplicationWritableAreasTest {
   @TempDir Path temporary;
 
   @Test
+  void legacy_application_write_roots_cannot_modify_server_authority_or_manifest()
+      throws Exception {
+    Path root = Files.createDirectory(temporary.resolve("legacy"));
+    Files.writeString(root.resolve("plowshare.json"), "{\"version\":1,\"name\":\"app\"}");
+    Files.createDirectory(root.resolve("server"));
+    Path tools =
+        Files.writeString(root.resolve("server/tools.json"), "{\"version\":1,\"bindings\":[]}");
+    var row = new ProjectRecord("app", root, List.of(), List.of(), "DISJOINT", List.of("."));
+    var projects = mock(ProjectWorkspaces.class);
+    when(projects.find("app")).thenReturn(Optional.of(row));
+    when(projects.effectiveExclusions(row)).thenReturn(List.of());
+    var provider =
+        new LocalProvider(
+            projects, Home.of("app"), List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)));
+    assertThrows(WorkspaceRefusedException.class, () -> provider.write(tools, "changed authority"));
+    assertThrows(WorkspaceRefusedException.class, () -> provider.delete(root.resolve("server")));
+    assertThrows(
+        WorkspaceRefusedException.class,
+        () -> provider.write(root.resolve("plowshare.json"), "changed grants"));
+    provider.write(root.resolve("output.txt"), "allowed");
+    assertEquals("allowed", Files.readString(root.resolve("output.txt")));
+  }
+
+  @Test
   void runtime_writes_do_not_grant_user_access_and_user_grants_do_not_widen_runtime_areas()
       throws Exception {
     Path root = Files.createDirectory(temporary.resolve("source"));

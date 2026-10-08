@@ -27,7 +27,7 @@ from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 from .collection import NetworkCollector
 from .contracts import Configuration, Snapshot, load_json
 from .journal import FileReceipts
-from .native_tools import DECLARATIONS, registered
+from .native_tools import DECLARATIONS, CataloguedProvider, registered
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
@@ -167,7 +167,9 @@ async def execute(args: argparse.Namespace) -> None:
                     tools=registered(WorkerTools(worker)),
                     journal=journal,
                 )
-                external = native
+                external = CataloguedProvider(
+                    native, config.state_directory, args.tool_catalog_renew_seconds
+                )
             if args.command == "once":
                 if external is not None:
                     await external.poll()
@@ -224,6 +226,12 @@ def main() -> None:
         "--tool-account",
         help="Authenticated provider account named in the server binding",
     )
+    parser.add_argument(
+        "--tool-catalog-renew-seconds",
+        type=float,
+        default=100,
+        help="Catalogue renewal interval, 1-100 seconds; use less than the configured provider lease",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser(
         "check", help="Validate offline without credentials, scans or journal writes"
@@ -251,6 +259,8 @@ def main() -> None:
     serve.add_argument("--bind", required=True)
     serve.add_argument("--port", required=True, type=int)
     args = parser.parse_args()
+    if not 1 <= args.tool_catalog_renew_seconds <= 100:
+        parser.error("Catalogue renewal must be between 1 and 100 seconds")
     if (
         bool(args.tool_provider) != bool(args.tool_account)
         or args.command == "tool-bindings"

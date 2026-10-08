@@ -64,6 +64,15 @@ destinations. It compares equal configured scopes and does not infer device
 disappearance from missing data or compare counts across different export windows.
 These are observations and hypotheses for an investigator, not vendor allegations.
 
+## Guided setup
+
+Use the [step-by-step setup walkthrough](SETUP.md) and installed
+`plowshare-privacy-bootstrap` helper to configure a private collector, select a
+server FileStore, deploy the paused Application, provision a separate service
+account and redeploy with its execution principal. The guide explains each identity,
+provider scope, Relay processing, Python startup and interrupted-install recovery.
+The lower-level preparation and provisioning commands below remain available.
+
 ## Install the Python application
 
 From the repository root, with Python 3.11+:
@@ -96,6 +105,158 @@ connections, scans or journal writes:
 build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
 ```
 
+## Separate the human manager from the service account
+
+Give Network Privacy Watch its own **service account**. Python collection, evidence
+uploads, tool serving and agent investigations use its project-scoped credential.
+The human user manages the Application through their own account. Do not run the
+collector with an administrator's or user's login credential.
+
+The Application's management group is its accounts with `MANAGER` grants in
+`plowshare.json`, backed by matching server project membership. It is not a separate
+named group. Here, “application admin” means `MANAGER`; it does not make the user a
+server administrator. Both grants are required: the manifest caps membership and
+cannot create or elevate it. The setup script writes one grant per account,
+including when the human manager and deployment administrator are the same person.
+
+| Identity | Application and server project role | Purpose |
+| --- | --- | --- |
+| Human manager | `MANAGER` | Inspect work, manage membership and agent definitions |
+| Deployment administrator | `MANAGER`, plus existing server administration | Deploy reviewed source and create service credentials |
+| Service account handle | `CONTRIBUTOR` | Account membership and manifest grant |
+| Service token | `CONTRIBUTOR` ceiling for this project only | Python and agent execution under `@service/<token UUID>` |
+
+The service account has no password login, server administrator role or Personal
+space. Its **handle** goes in project membership and `plowshare.json`. Its token's
+**principal**, returned by token creation, goes in root `plowshare.json` as
+`executionAccount`, in `server/tools.json`,
+`server/ports.json` and `--tool-account`. Those declarations check the authenticated
+execution identity exactly; putting the account handle there will not authorize a
+service token. Rotation preserves the principal, so it preserves retained work and
+Relay identity. Creating another token changes the principal.
+
+### Prepare and provision with Python
+
+1. Install the SDK and Python integration as above. Prepare the private collector
+   configuration first, including its explicit origin, project, collection scope
+   and state directory. Keep the packaged schedule paused. If the human manager
+   does not have an account, create one as a server administrator:
+
+   ```sh
+   bin/plowshare-cli admin account create '{"handle":"privacy-operator","serverAdmin":false}'
+   ```
+
+   The response contains a temporary password. Deliver it through your normal
+   credential process; the user completes their first password change through CLI
+   or Desktop login. Account creation alone gives no Application access.
+
+2. Copy [setup.json](examples/setup.json) into your private operator directory.
+   Fill its fields, or leave string fields empty for interactive prompts.
+   `collectorConfig` is the absolute private collector configuration path;
+   `applicationSource` is the absolute path to the supplied `network-privacy-watch`
+   folder; `outputDirectory` is a **new** private directory outside that source with
+   an existing parent. Set the service handle, human manager handle and existing
+   deployment administrator handle. `tokenName` identifies this deployment's
+   credential; `expiresInDays` is 1–365. Then run:
+
+   ```sh
+   python -m plowshare_privacy.setup --config "$PRIVACY_SETUP_CONFIG" prepare
+   ```
+
+   Use the installed virtual environment's Python. The installed
+   `plowshare-privacy-setup` command is equivalent. Preparation reads the configuration,
+   prompts for blanks and writes `outputDirectory/application` plus a filled
+   `outputDirectory/setup.json`. It adds the human manager and deployment
+   administrator as Application `MANAGER`s and the service handle as `CONTRIBUTOR`.
+   It does not connect, create accounts, scan or overwrite existing output.
+
+3. Review model bindings and the prepared grants. Deploy that private Application
+   using the [deployment walkthrough](#deploy-the-plowshare-application), as the
+   configured administrator. Keep Python stopped and the schedule paused. This
+   first deployment creates the project needed for token scopes. Do not call
+   `project create` first: its provisioned source prevents first source deployment.
+   The temporary provider declarations name the service handle until provisioning
+   replaces them with the token principal; they are not ready for service traffic.
+
+4. Provision using the **filled** setup configuration:
+
+   ```sh
+   python -m plowshare_privacy.setup --config "$PRIVACY_PRIVATE/setup.json" --login provision
+   ```
+
+   `PRIVACY_PRIVATE` is the prepared output directory. `--login` prompts invisibly
+   for the configured administrator's password, uses the public HTTP login boundary,
+   performs administrative work through typed SDK WebSocket operations and revokes
+   that temporary session afterward. It does not read or rotate Desktop/CLI saved
+   credentials. Alternatively omit `--login` and inject an existing human
+   administrator bearer through `PLOWSHARE_SETUP_TOKEN`; the script does not revoke
+   an injected session. Use your configured HTTPS origin for remote password login.
+
+   Provisioning creates or uses the enabled service account, grants the human
+   `MANAGER` membership and service `CONTRIBUTOR` membership, and issues a named
+   credential with only this project's `CONTRIBUTOR` scope. It refuses an existing
+   token with that name. The credential goes in `service-token` with POSIX mode
+   `0600`; `identity.json` retains its handle, token UUID, principal and expiry.
+   The output directory is mode `0700`. The script prints no credential or password.
+   On other operating systems, restrict the directory/file ACLs yourself.
+
+5. The script fills the private `server/` declarations with the returned principal.
+   Deploy this updated copy with a **new request UUID** and the current active
+   revision as `expectedRevision`. Verify the retained deployment receipt. Set
+   `PRIVACY_TOOL_ACCOUNT` to the `principal` in `identity.json` and
+   `PRIVACY_TOOL_PROVIDER` to `privacy-scanner`. Inject `service-token` into the
+   collector's configured `tokenEnvironment`, then start Python as described below.
+   Human administrator credentials never go into the collector or dashboard.
+
+### Run investigations as the service identity
+
+Source deployment currently enrolls the packaged schedule under the deploying
+administrator. The setup script **does not transfer schedule ownership**. Its
+scheduled `privacy_tick` action is deterministic and invokes no model; the service
+credential owns Python uploads and tools. To make the completion-triggered agents
+run under that service identity, process the project's Relay subscriptions using
+the service bearer:
+
+```sh
+export PLOWSHARE_TOKEN="$(cat "$PRIVACY_PRIVATE/service-token")"
+bin/plowshare-cli --server "$PLOWSHARE_ORIGIN" relay process '{"project":"network-privacy-watch","limit":32}'
+```
+
+Set `PLOWSHARE_ORIGIN` explicitly to the collector's configured origin. Clear any
+named human connection selection for this command. Supply credentials through your
+process secret manager in production; the `cat` command illustrates private-file
+loading without printing the token. Inspect the result and retained Relay/job state
+after a disconnect; do not blindly retry an uncertain processing call.
+
+For unattended operation, configure the existing
+[automatic Relay worker](../../docs/relay.md#automatic-subscription-workers) with
+this project and the token **principal**, or supervise explicit processing passes
+under that service credential. Do not also bind an automatic worker for this
+Application to the human account: processing identity determines investigation
+ownership. Without a worker or explicit pass, completed scans remain retained but
+do not launch an investigation. The service token cannot manage or assume the
+administrator-owned packaged schedule. Separating schedule ownership needs a
+platform lifecycle feature; this setup does not claim to provide it.
+
+### Rotation and interrupted setup
+
+Use [service token administration](../../docs/server-administration.md#service-accounts-and-scoped-tokens)
+to rotate the retained token UUID before expiry and replace the injected credential.
+Keep the same token identity and collector journal. Rotation keeps all `server/`
+bindings valid. Removing membership, revoking the token or disabling the service
+account removes its access to subsequent work.
+
+Before its first mutation, provisioning flushes `provisioning-intent.json`. Any
+later rerun is refused, including after successful setup; `provisioning-completed`
+marks confirmed completion. After a failed attempt, inspect service accounts,
+project access, named token metadata and audit history as the administrator.
+Do not delete the intent and retry blindly. If a token exists but its credential
+reply was lost, rotate that **existing token UUID** explicitly; the server cannot
+recover its old secret. Save the replacement privately and use its retained
+principal when completing the private declarations. Review and deploy the corrected
+source before starting Python. If even token creation is unconfirmed, retain the
+intent and reconcile it first. The script never reconnects or replays mutations.
+
 ## Install the Plowshare Application
 
 1. Prepare a private copy of [network-privacy-watch](network-privacy-watch). Its
@@ -103,22 +264,28 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
    account grants and matching server project membership for the operator and
    collector. The supplied manifest has **no grants**. Use a project-scoped service credential;
    the collector needs work access for evidence uploads and reading for reports.
-2. Configure a server FileStore and grant the deploying administrator MANAGER
+2. Replace provider account placeholders with the authenticated execution identity
+   (the service token principal, not its handle) in the private Application root
+   `server/tools.json` and `server/ports.json`, matching the manifest account
+   grant and project membership. Configure a server FileStore and grant the deploying administrator MANAGER
    access to its destination. Read `application.deployment.status`, then use
    `application deploy ./private-application '<deployment JSON>'` or Desktop
    **Applications → Deploy**. See the [deployment walkthrough](#deploy-the-plowshare-application).
 3. Deployed agents, orchestrations and schedules load from root `agents/`,
    `orchestrations/` and `schedules/`; named swarms
    load from `swarm/` and Relay from root `Relay/`. They need no desktop file
-   session. Verify effective rosters after configuring the server tools below.
-4. Merge [server-ports.json](examples/server-ports.json) into private **server
-   deployment configuration**, replace its account/project/groups, and load it
-   using the documented [JSON/YAML deployment configuration](../../docs/message-filtering.md#configuration-format).
-   Install the named-tool bindings described below alongside these ports, then
-   restart the server to apply both and verify rosters, model bindings and routes. Project Relay files alone do not grant
-   SDK ingress/egress. The collector receives EGRESS on `schedule.due` and the
-   request topic, and INGRESS on requests and completions. It initiates an
-   authenticated outbound WebSocket to the explicit Plowshare origin.
+   session. Verify effective rosters after deploying the Application-owned tools below.
+4. Before deployment, replace provider account placeholders in the private
+   Application's [`server/tools.json`](network-privacy-watch/server/tools.json)
+   and [`server/ports.json`](network-privacy-watch/server/ports.json). Match the
+   authenticated Python principal; its owning service handle needs the manifest grant
+   and project membership. These
+   declarations deploy with the Application; no global server edit or restart
+   is needed. The collector receives EGRESS on `schedule.due` and the request
+   topic, and INGRESS on requests/completions. It initiates an authenticated
+   outbound WebSocket to the explicit Plowshare origin. Explicit provider scope assignments
+   validate the coordinator before Python starts; the provider publishes and
+   renews its live catalogue while serving.
 5. The package contains a paused server schedule named `network_scan`. After deployment
    and source reconciliation, inspect `schedule.files` for its actual internal name
    and set `config.schedule` to that name. Review timing and resume it through the
@@ -148,8 +315,8 @@ The Application is [network-privacy-watch](network-privacy-watch). Its root mani
 and resources run inside Plowshare; the Python collector and web UI are deployed
 separately on a host with access to the configured network.
 
-Prepare a private copy with explicit account grants, configured models, named-tool
-bindings and Relay port grants. As a server administrator, read status and deploy
+Prepare a private copy with explicit account grants, configured models and named-tool
+declarations in `server/`. As a server administrator, read status and deploy
 that copy using your configured server FileStore alias:
 
 ```sh
@@ -165,14 +332,15 @@ activation. No copy into an unrelated definitions directory is needed. The
 covers limits, authorization, identity preservation, rollback and recovery.
 
 Deployment enrolls the packaged paused schedule for server reconciliation. It
-does not configure global model/tool bindings or Relay ingress/egress grants.
+does not launch the Python service or configure global model bindings. Its
+`server/` declarations provide the scoped tool/provider and Relay port authority.
 Keep those explicit configuration steps above and verify them before resuming
 collection. Deployment does not execute Python, change a device or modify a
 firewall. DISJOINT adoption remains available for a separately managed pipeline.
 
 ## Run the Python web interface
 
-Install the native tool bindings described below and set the explicit provider
+Configure the Application-owned native tool declarations described below and set the explicit provider
 name/account variables before enabling agent calls.
 
 Provide the web listener explicitly:
@@ -244,28 +412,47 @@ path.
 
 ## Agent tools through the SDK
 
-The coordinator explicitly grants `network_scope`, `network_scan`,
+The coordinator requests `network_scope`, `network_scan`,
 `network_scan_status`, `network_scan_list`, `network_evidence`,
-`network_destinations` and `relay_tool_read`. The SDK exposes a declaration and
-async Python handler for each capability; Plowshare installs the façade into its
+`network_destinations` and `relay_tool_read`. Its `dynamic: true` flag accepts the
+`network_scanning` provider scope explicitly assigned in root `plowshare.json`.
+That scope is limited to these six network tools and the configured execution
+principal; `relay_tool_read` retains its ordinary named built-in grant.
+The SDK exposes a declaration and async Python handler for each capability; Plowshare installs the façade into its
 normal tool registry. The model never constructs a Relay envelope or selects a
 provider or topic.
 
-Export the matching server bindings **offline**, using the actual project and
-provider account from private configuration:
+For legacy server startup bindings, the SDK can still export matching declarations
+**offline**, using the actual project and provider execution identity from private configuration:
 
 ```sh
 : "${PRIVACY_TOOL_PROVIDER:?Set the tool provider name}"
-: "${PRIVACY_TOOL_ACCOUNT:?Set the credential's owning account}"
+: "${PRIVACY_TOOL_ACCOUNT:?Set the authenticated execution identity; service tokens use their principal}"
 build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" --tool-provider "$PRIVACY_TOOL_PROVIDER" --tool-account "$PRIVACY_TOOL_ACCOUNT" tool-bindings
 ```
 
-Merge that output into private server deployment configuration, alongside the
-schedule/scan [ports](examples/server-ports.json), and restart the server. A
-[placeholder export](examples/server-tool-bindings.json) shows the six declarations.
+That exporter remains available for legacy startup bindings. For this Application,
+use its root `server/tools.json`: `bindings` is empty and the provider declaration
+fixes the execution account, name prefix and catalogue lease. No tool schema needs
+to be known at deployment. Root `plowshare.json` supplies `executionAccount`,
+`toolScopes` and `toolGrants`; only `privacy_coordinator` owns the network scope.
+The setup script fills the execution principal in the manifest and server files.
+For manual setup, replace it in all three files before deploying and keep
+`provider` equal to the configured Python provider name. Global tool/port fragments
+are unnecessary. Agents can deploy before the collector publishes its catalogue;
+network tools appear when that publication arrives.
+
+The collector publishes `plowshare-tool-catalog/1` through the SDK and renews it
+while polling (100 seconds by default for the packaged 300-second lease).
+`--tool-catalog-renew-seconds` must be less than the configured lease. UUIDs and
+publication states are retained in private `tool-catalogue.jsonl`. A failed
+publication stops intake with an attention state; restart publishes fresh current
+metadata and never replays a tool effect. Inspect the recorded UUID through
+Relay logs if its publication outcome is uncertain.
 The binding derives only provider request egress and result ingress; ordinary
 collection topics retain their separate port grants. Declaring handlers does not
-register them dynamically or give agents tool grants. All SDK languages offer the
+authorize catalogue publication or give agents tool grants; deployed provider
+authority enables dynamic catalogue updates. All SDK languages offer the
 same [façade](../../docs/relay-tools.md#equivalent-examples); Python implements this collector.
 
 Start `serve`, `once` or `reconcile` with those two flags before the subcommand.
@@ -364,3 +551,29 @@ and a missing DNS export. Confirm a local model binding from actual request/mode
 logs if local inference is the deployment goal. Fixtures do not prove those live
 outcomes. Traffic capture, router-specific exporters and approved remediation
 integrations are natural additions using the existing public SDK boundary.
+
+## Interactive connections use the same registry
+
+An interactive CLI/TUI/desktop session can connect a provider with
+`tool scope connect` using the shared command interface:
+
+```text
+tool scope connect {"project":"coding-project","scope":"linear","provider":"linear","prefix":"linear_","grants":["*"],"agents":["ticketer"],"leaseSeconds":300}
+```
+
+The target agent must declare `dynamic: true`. The authenticated user owns this
+connection and its grants; no server JSON catalogue is required. The reply includes
+an isolated `provider` routing name and `account`. Bind the SDK tool provider to
+those returned values, publish its discovered catalogue and serve calls on the
+same authenticated event socket. `tool scope list` inspects current connections;
+`tool scope disconnect` removes one. New connections receive a fresh namespace.
+Socket loss stops tool availability; neither reconnection nor UNKNOWN effects are
+replayed automatically. A one-shot CLI connect closes with the command, so active
+providers use a persistent SDK or interactive client connection. These commands do
+not launch the external provider.
+
+Applications use the same operations under their declared service execution
+principal, but their requested provider, tools and agents must match the explicit
+manifest assignments. The packaged collector uses its deployed provider authority
+rather than the interactive connection command. See [provider scopes](../../docs/tool-scopes.md)
+for equivalent SDK operations and the present MCP transport/schema limits.

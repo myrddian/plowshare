@@ -21,6 +21,19 @@ internal static class ToolFacadeChecks
             catch (Exception error) when (error is ArgumentException or JsonException or InvalidOperationException or FormatException) { accepted = false; }
             if (accepted != sample.GetProperty("valid").GetBoolean()) throw new Exception("Tool boundary differs: " + sample.GetProperty("name").GetString());
         }
+        var catalogueWire = new Ports(""); var catalogueCalls = 0;
+        var catalogueProvider = new ToolProvider(catalogueWire,Binding,[new(Declaration,(call,token) => { catalogueCalls++; return Task.FromResult(new ToolResult("COMPLETED","unexpected")); })],new Journal());
+        await catalogueProvider.PublishCatalogAsync(Id);
+        using (var catalogue = JsonDocument.Parse(catalogueWire.Published!.Text)) {
+            if(catalogueWire.Published.Topic!="tool.scanner.catalog" || catalogue.RootElement.GetProperty("version").GetString()!="plowshare-tool-catalog/1" || catalogue.RootElement.GetProperty("tools").GetArrayLength()!=1)throw new Exception("Catalogue scope differs");
+        }
+        await catalogueProvider.WithdrawCatalogAsync("22222222-2222-2222-2222-222222222222");
+        using (var catalogue = JsonDocument.Parse(catalogueWire.Published!.Text)) {
+            if(catalogue.RootElement.GetProperty("tools").GetArrayLength()!=0)throw new Exception("Catalogue withdrawal differs");
+        }
+        catalogueWire.LoseReply=true;
+        await MustFailAsync(async () => { await catalogueProvider.PublishCatalogAsync("33333333-3333-3333-3333-333333333333"); return 0; });
+        if(catalogueCalls!=0 || catalogueWire.Publications!=3)throw new Exception("Catalogue executed or replayed an effect");
         var source = fixture.RootElement.GetProperty("cases")[0].GetProperty("source").GetString()!;
         var journal = new Journal(); var wire = new Ports(source) { LoseReply = true }; var executions = 0;
         RegisteredTool[] tools = [new(Declaration, (call, token) => { executions++; return Task.FromResult(new ToolResult("COMPLETED", "observed")); })];
@@ -56,6 +69,7 @@ internal static class ToolFacadeChecks
         internal bool LoseReply { get; set; }
         internal int Publications { get; private set; }
         private RelayPublishRequest? published;
+        internal RelayPublishRequest? Published => published;
         private static T Decode<T>(object value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value)) ?? throw new Exception("Fixture DTO missing");
         private object Event(bool result = false) => new {
             position = "1", eventId = result ? published!.RequestId : Id,

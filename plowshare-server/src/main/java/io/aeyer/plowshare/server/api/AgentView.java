@@ -128,7 +128,44 @@ public record AgentView(
     List<String> skills,
     List<io.aeyer.plowshare.server.agents.CommandCatalog.Entry> commands,
     String displayName,
-    String origin) {
+    String origin,
+    boolean dynamic) {
+
+  /** Compatibility for existing programmatic views without runtime-tool opt-in. */
+  public AgentView(
+      String name,
+      List<String> tools,
+      List<String> calls,
+      List<String> scopes,
+      boolean served,
+      List<String> withheld,
+      boolean bot,
+      String description,
+      boolean preferred,
+      String model,
+      List<String> orchestrations,
+      List<String> skills,
+      List<io.aeyer.plowshare.server.agents.CommandCatalog.Entry> commands,
+      String displayName,
+      String origin) {
+    this(
+        name,
+        tools,
+        calls,
+        scopes,
+        served,
+        withheld,
+        bot,
+        description,
+        preferred,
+        model,
+        orchestrations,
+        skills,
+        commands,
+        displayName,
+        origin,
+        false);
+  }
 
   public AgentView(
       String name,
@@ -208,7 +245,8 @@ public record AgentView(
         skills,
         entries,
         displayName,
-        origin);
+        origin,
+        dynamic);
   }
 
   /** Lists a logical address with the selected variant's capabilities and visible identity. */
@@ -229,7 +267,8 @@ public record AgentView(
         skills,
         commands,
         displayName,
-        origin);
+        origin,
+        dynamic);
   }
 
   public AgentView withSkillRefusals(List<String> reasons) {
@@ -250,7 +289,8 @@ public record AgentView(
         skills,
         commands,
         displayName,
-        origin);
+        origin,
+        dynamic);
   }
 
   /** The pre-skills wire shape. */
@@ -333,7 +373,8 @@ public record AgentView(
         definition.skills(),
         List.of(),
         definition.displayName(),
-        definition.origin());
+        definition.origin(),
+        definition.dynamic());
   }
 
   /**
@@ -393,6 +434,7 @@ public record AgentView(
         skills,
         commands,
         displayName,
-        origin);
+        origin,
+        dynamic);
   }
 }

@@ -92,7 +92,10 @@ public final class ConversationContextHandler implements FrameHandler {
     String priced = asked.agent() != null ? asked.agent() : rules.whoAnswered(conversation, spoken);
     return Outcome.ok(
         ContextView.of(
-            spoken, priced == null ? null : priced(conversation, priced, asking.sessionId())));
+            spoken,
+            priced == null
+                ? null
+                : priced(conversation, priced, asking.sessionId(), asking.handle())));
   }
 
   /**
@@ -101,7 +104,8 @@ public final class ConversationContextHandler implements FrameHandler {
    * the laptop's turns, and a price that looked for it anywhere else would refuse the one agent the
    * conversation is actually having.
    */
-  private ContextView.Prefix priced(String conversation, String agent, String session) {
+  private ContextView.Prefix priced(
+      String conversation, String agent, String session, String account) {
     AgentDefinition definition =
         callers.readAgent(agent, callers.callerForConversation(conversation, session));
     definition =
@@ -109,7 +113,8 @@ public final class ConversationContextHandler implements FrameHandler {
             definition, callers.homeOfConversation(conversation), session, conversation);
     return ContextView.Prefix.of(
         definition,
-        runtime.schemasOfferedTo(definition),
+        runtime.schemasOfferedTo(
+            definition, callers.homeOfConversation(conversation), session, account),
         tokenizer,
         compaction.contextLengthOf(definition));
   }

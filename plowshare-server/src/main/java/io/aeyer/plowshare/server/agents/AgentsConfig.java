@@ -648,10 +648,10 @@ public class AgentsConfig {
       io.aeyer.plowshare.server.relay.tools.RelayToolProperties properties,
       io.aeyer.plowshare.server.relay.tools.RelayToolInvocations invocations) {
     var tools = new java.util.ArrayList<>(builtins);
+    if (invocations != null) tools.add(new RelayInvocationReadTool(invocations));
     if (properties == null || properties.getBindings().isEmpty()) return tools;
     if (invocations == null)
       throw new IllegalStateException("Relay tools require their invocation service");
-    tools.add(new RelayInvocationReadTool(invocations));
     var grouped =
         properties.getBindings().stream()
             .collect(
@@ -768,7 +768,8 @@ public class AgentsConfig {
       ObjectProvider<io.aeyer.plowshare.server.outgoing.OutgoingWork> outgoing,
       ObjectProvider<io.aeyer.plowshare.server.board.BoardMessaging> messaging,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
-      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations) {
+      ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations,
+      ObjectProvider<ScopedTools> scopedTools) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -801,7 +802,15 @@ public class AgentsConfig {
                                       conversation);
                           return io.aeyer.plowshare.server.api.ContextView.Prefix.of(
                               definition,
-                              contextRuntime.getObject().schemasOfferedTo(definition),
+                              contextRuntime
+                                  .getObject()
+                                  .schemasOfferedTo(
+                                      definition,
+                                      callers.homeOfConversation(conversation),
+                                      session,
+                                      callers
+                                          .callerForConversation(conversation, session)
+                                          .handle()),
                               contextTokenizer.getObject(),
                               contextCompaction.getObject().contextLengthOf(definition));
                         }),
@@ -850,6 +859,7 @@ public class AgentsConfig {
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.
     // TodosConfig is unconditional in production; a context without a board is not a boot.
     runtime.useTodos(todos);
+    runtime.useScopedTools(scopedTools.getIfAvailable(() -> ScopedTools.NONE));
     runtime.useMessaging(
         new Messaging() {
           public SendMessageTool tool(RunExtras.Context context) {
@@ -1257,6 +1267,7 @@ public class AgentsConfig {
             sessionRoots(projects, presences),
             checks);
     resolver.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
+    resolver.useScopedTools(runtime.scopedTools());
     resolver.useProjectConfiguration(
         id ->
             configurations.getIfAvailable() == null
@@ -1385,6 +1396,7 @@ public class AgentsConfig {
             sessionRoots(projects, presences),
             definitions::forCaller,
             checks);
+    resolver.useScopedTools(runtime.scopedTools());
     resolver.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
     resolver.useApplicationResources(applicationResources);
     return resolver;
@@ -1411,7 +1423,9 @@ public class AgentsConfig {
   @Bean
   public DefinitionWriter definitionWriter(
       AgentRegistry agentRegistry, DataLayout data, JobRuntime runtime, DefinitionChecks checks) {
-    return new DefinitionWriter(agentRegistry, data, runtime.knownTools(), REQUIRED, checks);
+    var writer = new DefinitionWriter(agentRegistry, data, runtime.knownTools(), REQUIRED, checks);
+    writer.useScopedTools(runtime.scopedTools());
+    return writer;
   }
 
   /**

@@ -17,27 +17,128 @@ The same façade is available in every SDK:
 | Go | `ToolDeclaration`, `RegisteredTool` | `ToolProvider` | `ToolDeploymentConfig` | `Poll`, `Reconcile` |
 | .NET | `ToolDeclaration`, `RegisteredTool` | `ToolProvider` | `DeploymentConfig` | `PollAsync`, `ReconcileAsync` |
 
-## Install authority separately
+Provider scopes support tools unknown before connection, with `dynamic: true`
+agent opt-in, explicit application assignments and authenticated interactive
+connections. See [provider scopes](tool-scopes.md) for the shared SDK operations.
 
-1. Declare the capabilities and export their deployment configuration from the SDK.
-2. Merge `plowshare.relay.tools.bindings` into private server configuration using
-   the [deployment configuration format](message-filtering.md#configuration-format),
-   then restart the server. Each binding fixes project, provider, authenticated
-   provider account, name, description, parameters and timeout. There are at most
-   256 bindings. A project/tool name has one provider; names shared across projects
-   must have identical schemas. Built-in tool name collisions fail startup.
-3. Give the provider account project work membership and supply its own credential.
-   A Personal project requires its owner for both provider and caller.
-4. Explicitly grant the named tool in the agent definition's `tools` list. Grant
-   `relay_tool_read` when the agent needs to inspect an earlier invocation.
-5. Start the external provider with the matching declarations, binding and an
-   exclusively owned durable journal. Plowshare does not deploy or launch it.
+## Application-owned dynamic tools
 
-Declarations do not register dynamically or grant permissions. These version-one
-bindings require a server configuration reload through restart. Each binding grants
-only request egress to the `tool-provider` group and result ingress to its provider.
-It does not grant arbitrary Relay topics or make project membership a port grant.
-Existing Relay port configuration continues to apply independently.
+Built-in tools still register at startup. The live registry supplements them with
+project-owned declarations, authenticated caller access and the running agent's
+explicit `tools` grants. Two projects can use the same dynamic name with different
+schemas. Application authority never grants system-scope Relay access or membership.
+
+Put declarations in the Application root's `server/` directory, alongside
+`plowshare.json`, not inside `.plowshare/`. Deployment validates them before loading
+agents and activates them with the source revision. No global configuration edit
+or restart is needed. Only `tools.json`, `ports.json` and `README.md` are accepted;
+this directory cannot contain arbitrary Spring settings, secrets or executable code.
+Each JSON file is at most 64 KiB and must have version 1. Unknown fields, linked
+files and malformed values are refused.
+
+`server/tools.json` derives its project from the Application identity:
+
+```json
+{
+  "version": 1,
+  "bindings": [{
+    "provider": "scanner", "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+    "name": "network_scope", "description": "Read configured scope",
+    "parameters": [], "timeoutSeconds": 30
+  }],
+  "providers": [{
+    "provider": "scanner", "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
+    "prefix": "network_", "leaseSeconds": 300
+  }]
+}
+```
+
+Replace account placeholders in a private source copy. Give the authenticated
+provider project work membership and a manifest grant. A Personal project requires
+its owner for both provider and caller. Agent grants remain separate: declare
+`network_scope` in `tools`, plus `relay_tool_read` for invocation reconciliation.
+There are at most 128 bootstrap bindings and 32 catalogue providers. Provider
+prefixes end in `_`, cannot overlap each other or built-in names, and cannot
+claim another provider's bootstrap tools. The bootstrap schemas allow deployment
+before the external provider is running; calls require a live catalogue lease
+when a dynamic provider is declared.
+
+The SDK provider publishes its current declarations on the project-local
+`tool.<provider>.catalog` topic. Only the configured authenticated provider can
+publish. The server validates the entire snapshot before accepting it: version
+`plowshare-tool-catalog/1`, at most 128 distinct tools, 64 KiB total, allowed
+prefix and the existing parameter vocabulary. Newest retained broker position
+wins; client timestamps cannot extend the lease. Empty catalogues withdraw tools.
+If the latest publication has expired from broker retention, bootstrap tools are
+not revived. Granting a new dynamically discovered name still requires an agent
+permission change. Existing source grants cannot name an undiscovered tool;
+include initial bindings for names needed at first deployment.
+
+| SDK | Publish or renew | Withdraw |
+| --- | --- | --- |
+| Java | `provider.publishCatalog(requestId)` | `provider.withdrawCatalog(requestId)` |
+| TypeScript / Node | `await provider.publishCatalog(requestId)` | `await provider.withdrawCatalog(requestId)` |
+| Python | `await provider.publish_catalog(request_id)` | `await provider.withdraw_catalog(request_id)` |
+| Go | `provider.PublishCatalog(ctx, requestID)` | `provider.WithdrawCatalog(ctx, requestID)` |
+| .NET | `await provider.PublishCatalogAsync(requestId, token)` | `await provider.WithdrawCatalogAsync(requestId, token)` |
+
+Retain a fresh UUID before each metadata publication. Methods submit once and
+validate the receipt; a lost response is uncertain and is never automatically
+replayed. Inspect retained Relay records by that UUID when necessary. Lease
+renewal is caller-owned: publish fresh current metadata before `leaseSeconds`
+(1–300) elapses. These metadata methods do not execute handlers or cancel existing
+invocations. Restart with changed declarations and a correctly bound journal when
+changing the handler set; keep old receipts available for reconciliation.
+
+General application Relay ports use `server/ports.json`:
+
+```json
+{"version":1,"bindings":[
+  {"topic":"schedule.due","account":"REPLACE_WITH_PROVIDER_ACCOUNT",
+   "direction":"EGRESS","groups":["collector"]}
+]}
+```
+
+Up to 128 exact port grants are allowed. EGRESS groups are explicit; INGRESS uses
+an empty `groups` list. Reserved `tool.*` topics require tool/provider declarations.
+An agent cannot edit the Application manifest or `server/` through file tools.
+Authority updates use administrator-reviewed Application redeployments, including
+rollback to an earlier source revision. The provider's newest live catalogue still
+applies within that revision's authority; rollback does not replay external work.
+
+## Per-call access and failures
+
+Declared built-in grants and dynamic tool access are checked at each invocation,
+not only when schemas are offered. Dynamic calls also check current provider
+authority, availability and the exact offered definition. A changed schema cannot
+reinterpret arguments emitted for an earlier schema. The check is an admission
+boundary; revocation cannot undo an external effect already admitted.
+
+| Code | Meaning |
+| --- | --- |
+| `E_NO_ACCESS` | Caller, provider or agent permission is absent/revoked; try another tool. |
+| `E_NO_CONNECTION` | No live provider lease or no confirmed external response. |
+| `E_NO_EXEC` | Tool withdrawn/changed, invocation refused or execution identity unavailable. |
+| `E_GENERAL_TOOL_FAILURE` | Unexpected execution failure; safe diagnostic returned, details logged server-side. |
+
+An uncertain response includes its invocation UUID and asks for
+`relay_tool_read` reconciliation. It never authorizes repeating a potentially
+completed effect. Tools supplied as run extras keep their existing owning lifecycle
+and authorization; discovery does not create grants for them.
+
+This supports providers whose catalogues change at runtime, including future MCP
+adapters. It does not itself implement an outbound MCP client or arbitrary MCP
+JSON Schema: the current Relay facade accepts STRING, NUMBER, INTEGER and BOOLEAN
+parameters. Providers must expose capabilities within that vocabulary.
+
+## Legacy server bindings
+
+The SDK configuration exporters remain compatible with private
+`plowshare.relay.tools.bindings` startup configuration. Those bindings still need
+a restart, keep the existing global same-schema rule, and cannot be shadowed by
+an Application declaration. Prefer Application-owned declarations for independently
+deployed tools. External processes and credentials remain operator-owned;
+Plowshare does not deploy or start Python services.
 
 ## Equivalent examples
 

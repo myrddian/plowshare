@@ -238,6 +238,8 @@ public final class RelayTools {
 
   private record ToolConfiguration(List<Installed> bindings) {}
 
+  private record Catalogue(String version, List<Declaration> tools) {}
+
   private record ResultEnvelope(
       String schema,
       String invocationId,
@@ -517,6 +519,40 @@ public final class RelayTools {
         if (receipt.result().isPresent()) resultText(call, receipt.result().orElseThrow());
       }
       return receipts;
+    }
+
+    /** Publish/renew declarations using a retained caller UUID; never auto-replay. */
+    public void publishCatalog(String requestId) throws IOException {
+      catalog(requestId, tools.stream().map(RegisteredTool::declaration).toList());
+    }
+
+    /** Withdraw declarations. Existing uncertain effects still require reconciliation. */
+    public void withdrawCatalog(String requestId) throws IOException {
+      catalog(requestId, List.of());
+    }
+
+    private void catalog(String requestId, List<Declaration> declarations) throws IOException {
+      RelayPort.uuid(requestId);
+      if (declarations.size() > 128)
+        throw new IllegalArgumentException("Tool catalogue exceeds 128 declarations");
+      String text = write(new Catalogue("plowshare-tool-catalog/1", declarations));
+      text(text, 65536, false);
+      String topic = "tool." + binding.provider() + ".catalog";
+      var reply =
+          ports.publish(
+              new RelayPort.Publish(
+                  requestId,
+                  binding.project(),
+                  topic,
+                  text,
+                  Instant.now().truncatedTo(ChronoUnit.MICROS),
+                  null,
+                  null,
+                  null));
+      if (!reply.requestId().equals(requestId)
+          || !reply.project().equals(binding.project())
+          || !reply.topic().equals(topic))
+        throw new IOException("Foreign tool catalogue publication receipt");
     }
 
     private void publish(Receipt receipt) throws IOException {

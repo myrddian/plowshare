@@ -18,7 +18,7 @@ public final class ProjectRelayPorts implements RelayPorts {
   private final ProjectMembers members;
   private final ProjectWorkspaces projects;
   private final int maxDepth;
-  private final io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools;
+  private final io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools;
 
   public ProjectRelayPorts(
       Relay relay,
@@ -44,7 +44,7 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectMembers members,
       ProjectWorkspaces projects,
       int maxDepth,
-      io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools) {
+      io.aeyer.plowshare.server.relay.tools.RelayToolAuthority tools) {
     this.tools = Objects.requireNonNull(tools);
     this.relay = Objects.requireNonNull(relay);
     this.repository = Objects.requireNonNull(repository);
@@ -71,7 +71,9 @@ public final class ProjectRelayPorts implements RelayPorts {
     Long id = projects.id(project);
     if (id == null) throw new CallerFault("Relay project unavailable");
     var key = new Relay.TopicKey(id, topic);
-    if (tools.permits(account, project, topic, direction, group))
+    if (direction == RelayPortProperties.Direction.EGRESS
+        && topic.startsWith("tool.")
+        && tools.permits(account, project, topic, direction, group))
       relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     return key;
   }

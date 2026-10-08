@@ -28,6 +28,33 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 class AgentRegistryTest {
 
+  @Test
+  void dynamic_requests_can_wait_for_discovery_and_copies_keep_the_opt_in(@TempDir Path dir)
+      throws Exception {
+    write(
+        dir,
+        "dynamic_agent",
+        leaf("dynamic_agent")
+            .replace("tools: [memory_read]", "tools: [linear_future]\ndynamic: true"),
+        "Work.");
+    var definition = AgentRegistry.load(dir, TOOLS).get("dynamic_agent");
+    assertTrue(definition.dynamic());
+    assertEquals(List.of("linear_future"), definition.tools());
+    assertTrue(
+        definition
+            .withCaps(2, 2)
+            .withPrompt("Changed")
+            .withTools(List.of())
+            .withScopes(List.of())
+            .dynamic());
+    write(
+        dir,
+        "dynamic_agent",
+        leaf("dynamic_agent").replace("tools: [memory_read]", "tools: [board_read]\ndynamic: true"),
+        "Work.");
+    assertThrows(IllegalStateException.class, () -> AgentRegistry.load(dir, TOOLS));
+  }
+
   private static final Set<String> TOOLS =
       Set.of("memory_recall", "memory_read", "agent_run", "memory_write");
 
