@@ -69,13 +69,22 @@ and retains the acknowledged edit. Inspect the saved file before making a
 correction; do not replay the acknowledged mutation. Validation observes a
 snapshot, so a later external edit still requires fresh discovery validation.
 
-Plowshare's extensions are `agent`, `mode` and `agentVisible`. `agent` defaults to
-`interlocutor`; `mode` may be `INHERITED`, `SUMMARISED`, `NEW`, or `DIRECT`.
-`DIRECT` cannot select another agent. An absent mode remains unresolved until
-the delegated context default is agreed and configured. `skill_run` may supply
-the mode when the package omits it, but cannot override a declared mode or use
-DIRECT on a package that selects an agent. Unsupported context modes fail
-explicitly before any child or model work; execution never switches modes.
+Plowshare's extensions are `agent`, `mode`, `agentVisible` and `argument-hint`. An
+optional `argument-hint` is nonempty text of at most 1024 characters, describing
+useful inputs, for example `argument-hint: '[location or date, optional]'`. It is
+shown in the command catalog and client completion; it is help text, not an
+argument schema or a requirement for extra text. When omitted, discovery says
+"Optional arguments; may be omitted". Skills needing specific inputs should
+describe them in their instructions and ask for missing information when invoked.
+
+`agent` defaults to `interlocutor`; `mode` may be `INHERITED`, `SUMMARISED`,
+`NEW`, or `DIRECT`.
+`DIRECT` cannot select another agent. Explicit user commands default an absent
+mode to `DIRECT`; choose a delegated mode explicitly when the package selects
+an `agent`. Model-selected `skill_run` still requires a configured package mode.
+An invocation cannot override a declared mode or use DIRECT on a package that
+selects an agent. Unsupported context modes fail explicitly before any child or
+model work; execution never switches modes.
 
 Resources resolve within the selected package, including the exact client root
 that supplied it. The server reads them on demand. Traversal, unsafe path
@@ -226,10 +235,13 @@ Submit commands as ordinary conversation text:
 ```
 
 A package with a declared `mode` does not need the flag. A portable package with
-no mode requires `--mode=INHERITED`, `SUMMARISED`, `NEW` or `DIRECT`; no delegated
-context default has been selected. An orchestration does not take this flag.
-Commands need nonempty arguments. Only qualified commands are exposed, avoiding
-collisions with native client commands.
+no mode defaults to `DIRECT`. Use `--mode=INHERITED`, `SUMMARISED`, or `NEW` to
+select delegated context, or `--mode=DIRECT` to state the default explicitly.
+An orchestration does not take this flag. Skill arguments may be empty: both
+`/skill:weather-capture` and `/skill:weather-capture --mode=DIRECT` load the
+skill's instructions. Orchestration commands require a description of the work;
+an empty invocation reports the command and its argument hint. Only qualified
+commands are exposed, avoiding collisions with native client commands.
 
 The harness validates the selected Agent's catalog and binds the original
 arguments, definition hash, mode, owning account, conversation, caller and source
@@ -257,7 +269,9 @@ runnable skills and orchestrations with help. Typing `/` offers keyboard complet
 selecting one prepares an editable draft. The tab refreshes the server catalog for
 that project's owning session and displays refused discovery reasons. Multiple
 project roots remain connected independently, including roots loaded on demand.
-A skill without a declared mode asks for a context selection. TUI completion and
+A skill without a declared mode starts its draft with DIRECT selected by default;
+the Commands tab offers delegated context overrides. Argument hints appear in
+both the tab and slash picker. TUI completion and
 `/help` expose the same server-provided metadata, and qualified commands pass
 through to the server unchanged. TUI `/commands` refreshes the selected agent's
 catalog and completion; `/skills` shows its runnable skills, including skills

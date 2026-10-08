@@ -238,13 +238,77 @@ class BoundCommandsTest {
   }
 
   @Test
-  void invalid_or_ungranted_commands_are_not_downgraded_to_chat_or_given_a_default_mode() {
+  void invalid_or_ungranted_commands_are_not_downgraded_to_chat() {
     assertNotNull(prepare(true, "/skill:unknown request").refusal());
-    assertNotNull(prepare(true, "/skill:review").refusal());
     assertNotNull(prepare(true, "/skill:review --mode=DIRECT request").refusal());
+    assertNotNull(prepare(true, "/skill:review --mode=UNKNOWN").refusal());
+    verify(store, never()).bind(any(), any(), any(), any(), any(), any(), any());
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void portable_skills_default_to_direct_and_accept_no_arguments() {
     offer("");
-    assertNotNull(prepare(true, "/skill:review request").refusal());
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn("Instructions.");
+    var prepared = prepare(true, "/skill:review");
+    assertNull(prepared.refusal());
+    assertNull(prepared.tool());
+    assertTrue(prepared.notice().contains("Instructions."));
+    assertEquals("DIRECT", stored.get().mode());
+    assertEquals("", stored.get().arguments());
+    assertEquals("finished", stored.get().state());
+  }
+
+  @Test
+  void explicit_direct_and_declared_delegated_modes_accept_no_arguments() {
+    offer("");
+    when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn("Instructions.");
+    assertNull(prepare(true, "/skill:review --mode=DIRECT").refusal());
+    assertEquals("DIRECT", stored.get().mode());
+    assertEquals("", stored.get().arguments());
+    offer("mode: NEW\n");
+    var delegated = prepare(true, "/skill:review");
+    assertNull(delegated.refusal());
+    assertNotNull(delegated.tool());
+    assertEquals("NEW", stored.get().mode());
+    assertEquals("", stored.get().arguments());
+  }
+
+  @Test
+  void explicit_delegated_context_overrides_the_portable_default() {
+    offer("");
     assertNull(prepare(true, "/skill:review --mode=INHERITED request").refusal());
+    assertEquals("INHERITED", stored.get().mode());
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void empty_orchestration_input_reports_the_command_and_input_hint_without_binding() {
+    var definition = mock(OrchestrationDefinition.class);
+    when(definition.conductor()).thenReturn(caller);
+    when(definition.tier()).thenReturn(OrchestrationDefinition.Tier.GLOBAL);
+    when(orchestrations.forCaller(authority)).thenReturn(Map.of("review", definition));
+    var workflowCaller = mock(AgentDefinition.class);
+    when(workflowCaller.name()).thenReturn("bot");
+    when(workflowCaller.orchestrations()).thenReturn(List.of("review"));
+    var prepared =
+        commands.prepare(
+            true,
+            "/orchestration:review",
+            workflowCaller,
+            transcript,
+            Home.global(),
+            budget,
+            () -> false,
+            "session",
+            "alice",
+            end,
+            new LinkedHashMap<>());
+    assertTrue(prepared.refusal().contains("Describe the work after /orchestration:review"));
+    assertTrue(prepared.refusal().contains("Work for the orchestration to do"));
+    verify(store, never()).bind(any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(runtime);
   }
 

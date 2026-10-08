@@ -253,7 +253,9 @@ public final class BoundCommands {
   /**
    * Bind an authorized explicit command, or recover pending bindings on resume. DIRECT skills are
    * claimed and pinned here before inference, without launching model work. Other commands await
-   * model dispatch. Failed or ambiguous claims remain inspectable and are never replayed.
+   * model dispatch. Failed or ambiguous claims remain inspectable and are never replayed. Skill
+   * arguments may be empty, and an omitted package and invocation mode defaults to DIRECT.
+   * Orchestrations require work text and do not accept skill context flags.
    */
   public Prepared prepare(
       boolean incoming,
@@ -293,19 +295,27 @@ public final class BoundCommands {
                     () ->
                         new IllegalArgumentException(
                             "That command is unknown, unavailable or not granted. Nothing ran."));
-        if (parsed.arguments().isBlank())
-          throw new IllegalArgumentException("The command needs arguments. Nothing ran.");
         String mode = parsed.mode() == null ? command.mode() : parsed.mode();
         if (command.kind().equals("skill")) {
-          if (mode == null)
-            throw new IllegalArgumentException(
-                "Specify --mode=INHERITED, SUMMARISED, NEW or DIRECT for this skill. Nothing ran.");
+          // The user explicitly selected this skill. Portable packages run in the current agent
+          // unless the user chooses a delegated context; model-selected skills keep their own
+          // policy.
+          if (mode == null) mode = SkillDefinition.Mode.DIRECT.name();
           if (command.mode() != null && !command.mode().equals(mode))
             throw new IllegalArgumentException(
                 "The mode conflicts with the skill package. Nothing ran.");
-        } else if (mode != null)
-          throw new IllegalArgumentException(
-              "Orchestration commands do not accept a skill context mode. Nothing ran.");
+        } else {
+          if (mode != null)
+            throw new IllegalArgumentException(
+                "Orchestration commands do not accept a skill context mode. Nothing ran.");
+          if (parsed.arguments().isBlank())
+            throw new IllegalArgumentException(
+                "Describe the work after "
+                    + command.command()
+                    + ". "
+                    + command.argumentHint()
+                    + ". Nothing ran.");
+        }
         bindings =
             List.of(
                 invocations.bind(

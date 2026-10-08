@@ -38,9 +38,11 @@ try {
   await expect(main.locator('#draft')).toHaveValue('/orchestration:research ');
   await expect(picker).toBeHidden();
   await main.locator('#draft').fill('/skill:r');
+  await expect(picker).toContainText('Change to review');
   await main.locator('#draft').press('Tab');
-  await expect(commands.locator('select')).toBeFocused();
-  await expect(main.locator('#draft')).toHaveValue('/skill:review ');
+  await expect(main.locator('#draft')).toBeFocused();
+  await expect(main.locator('#draft')).toHaveValue('/skill:review --mode=DIRECT ');
+  await expect(picker).toBeHidden();
   await main.locator('#draft').fill('/');
   await main.locator('#draft').press('Escape');
   await expect(picker).toBeHidden();
@@ -57,8 +59,8 @@ try {
   await main.locator('#dismiss-error').click();
   await main.locator('#draft').fill('Review\nthis exact change');
   await commands.locator('[data-command-index="0"]').click();
-  await expect(commands).toContainText('Choose how the skill receives context.');
-  await expect(main.locator('#draft')).toHaveValue('Review\nthis exact change');
+  await expect(main.locator('#draft')).toHaveValue('/skill:review --mode=DIRECT Review\nthis exact change');
+  await expect(commands.locator('select')).toHaveValue('DIRECT');
   await commands.locator('select').selectOption('SUMMARISED');
   await commands.locator('[data-command-index="0"]').click();
   await expect(main.locator('#draft')).toHaveValue('/skill:review --mode=SUMMARISED Review\nthis exact change');
@@ -94,5 +96,5 @@ try {
   await expect.poll(() => fixture.frames.filter(frame => frame.type === 'agent.run').length).toBe(1);
   assert.equal(fixture.frames.find(frame => frame.type === 'agent.run').payload.task, invocation);
   assert.deepEqual(errors, []);
-  console.log('PASS: human-visible skills hidden from the model, slash completion and native help without model calls, scoped server catalog, explicit context selection, and durable workflow recovery without duplicate runs.');
+  console.log('PASS: human-visible skills hidden from the model, slash completion and native help without model calls, scoped server catalog, DIRECT default and explicit context overrides, and durable workflow recovery without duplicate runs.');
 } finally { if (app) await app.close(); await fixture.close(); await rm(profile, { recursive: true, force: true }); }

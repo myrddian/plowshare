@@ -27,7 +27,8 @@ public record SkillDefinition(
     String hash,
     String source,
     boolean agentSpecified,
-    boolean agentVisible) {
+    boolean agentVisible,
+    String argumentHint) {
   public enum Mode {
     INHERITED,
     SUMMARISED,
@@ -45,14 +46,15 @@ public record SkillDefinition(
           "allowed-tools",
           "agent",
           "mode",
-          "agentVisible");
+          "agentVisible",
+          "argument-hint");
 
   public SkillDefinition {
     allowedTools = List.copyOf(allowedTools);
     metadata = Map.copyOf(metadata);
   }
 
-  /** Mode may be absent: the deployment's delegated context default is a separate decision. */
+  /** Mode may be absent; explicit user commands default to DIRECT at the binding boundary. */
   public static SkillDefinition parse(
       DefinitionSource.Definition file, OrchestrationDefinition.Tier tier) {
     String source = file.text();
@@ -63,6 +65,7 @@ public record SkillDefinition(
     if (!problems.isEmpty()) throw bad(problems.getFirst());
     String name = text(keys, "name", true, 64);
     String description = text(keys, "description", true, 1024);
+    String argumentHint = text(keys, "argument-hint", false, 1024);
     text(keys, "license", false, Integer.MAX_VALUE);
     text(keys, "compatibility", false, 500);
     Map<String, String> metadata = metadata(keys);
@@ -85,7 +88,8 @@ public record SkillDefinition(
         hash(source),
         source,
         keys.containsKey("agent"),
-        visibility(keys));
+        visibility(keys),
+        argumentHint == null ? "Optional arguments; may be omitted" : argumentHint);
   }
 
   private record Frontmatter(Map<?, ?> keys, String body) {}
@@ -135,6 +139,7 @@ public record SkillDefinition(
           }
         });
     check(problems, () -> text(keys, "description", true, 1024));
+    check(problems, () -> text(keys, "argument-hint", false, 1024));
     check(problems, () -> text(keys, "license", false, Integer.MAX_VALUE));
     check(problems, () -> text(keys, "compatibility", false, 500));
     check(problems, () -> metadata(keys));
@@ -210,7 +215,8 @@ public record SkillDefinition(
         hash,
         source,
         agentSpecified,
-        visible);
+        visible,
+        argumentHint);
   }
 
   private static String text(Map<?, ?> keys, String key, boolean required, int max) {

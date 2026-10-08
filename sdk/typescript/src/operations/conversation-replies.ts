@@ -80,8 +80,10 @@ export type CommandEntry = {
   readonly kind: 'skill' | 'orchestration';
   readonly name: string;
   readonly description: string;
+  /** Human input guidance; skill arguments may be empty. This is not an argument schema. */
   readonly argumentHint: string;
   readonly executor: string;
+  /** Declared mode; skills with no mode default to DIRECT for user commands and allow overrides. */
   readonly mode: 'INHERITED' | 'SUMMARISED' | 'NEW' | 'DIRECT' | null;
   readonly tier: string;
   readonly hash: string;
