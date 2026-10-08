@@ -16,11 +16,11 @@ names remain stable. See the [coding standards](../docs/coding-standards.md) for
 the SDK boundary and [SDKs](../sdk/README.md) for the client libraries.
 
 A2A and Home Assistant include deployable Application templates under
-`examples/application/`. [Network Privacy Watch](network-privacy/examples/network-privacy-watch/README.md)
-uses `network-privacy/examples/network-privacy-watch/`. Each Application is identified
+`examples/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
+uses `network-privacy/network-privacy-watch/`. Each Application is identified
 by its root `plowshare.json`. Register
 these roots as Applications so authorized clients list them under **Applications**.
-The templates have empty `access.accounts` lists: add explicit deployment account
+The supplied manifests have empty `access.accounts` lists: add explicit deployment account
 grants and matching server membership before use. Adapter credentials, endpoints
 and journals stay in private deployment configuration. The adapter processes
 continue to use the public SDK; a repository directory name or an adapter binding's

@@ -14,7 +14,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** Verifies the deployable Python Application with actual parsers and sandboxes; no database. */
-class ApplicationExamplesTest {
+class NetworkPrivacyWatchTest {
   private static final Set<String> TOOLS =
       Set.of(
           "information_read",
@@ -32,10 +32,10 @@ class ApplicationExamplesTest {
           "network_evidence",
           "network_destinations",
           "relay_tool_read");
-  private final Path application = Path.of(System.getProperty("privacy.examples"));
+  private final Path application = Path.of(System.getProperty("privacy.application"));
 
   @Test
-  void complete_example_passes_the_deployment_resource_validator() throws Exception {
+  void complete_application_passes_the_deployment_resource_validator() throws Exception {
     try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
         var relay = new GraalRelayRouteProgram()) {
       new RuntimeApplicationPackageValidator(
@@ -66,7 +66,8 @@ class ApplicationExamplesTest {
     var json = new ObjectMapper();
     var source =
         json.readTree(
-                Files.readString(application.getParent().resolve("server-tool-bindings.json")))
+                Files.readString(
+                    application.getParent().resolve("examples/server-tool-bindings.json")))
             .path("plowshare")
             .path("relay")
             .path("tools")

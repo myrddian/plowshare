@@ -50,11 +50,11 @@ install its dependencies.
 
 ## Set up a deployment
 
-Follow the [integration guide](../../README.md) for the exact commands and
+Follow the [integration guide](../README.md) for the exact commands and
 configuration contracts.
 
 1. Install the Python SDK and collector. Copy the supplied
-   [configuration](../config.json) into a private operator directory and set the
+   [configuration](../examples/config.json) into a private operator directory and set the
    server origin, `network-privacy-watch` project, collector scope and private
    state directory. Supply separate Plowshare and dashboard credentials through
    the configured environment variables.
@@ -65,7 +65,7 @@ configuration contracts.
    MANAGER access to that destination, deploy the private folder using CLI
    `application deploy` or Desktop **Applications → Deploy**. Retain the request
    UUID and inspect its receipt after uncertain delivery.
-4. Install the [Relay port grants](../server-ports.json) and exported named-tool
+4. Install the [Relay port grants](../examples/server-ports.json) and exported named-tool
    bindings in private server deployment configuration. Replace the placeholder
    accounts and groups, and apply that server configuration. Application
    deployment does not install these global bindings or grants.
@@ -78,7 +78,7 @@ configuration contracts.
    packaged source changes.
 
 For a first look without a server or network probes, use the
-[synthetic browser preview](../../README.md#verify-without-a-database-or-live-household-data).
+[synthetic browser preview](../README.md#verify-without-a-database-or-live-household-data).
 It uses fixture observations and a fixture report; it does not run an LLM.
 
 ## What the evidence means
@@ -92,5 +92,5 @@ exporter and do not reveal encrypted payloads or prove malicious behavior.
 Missing and stale sources remain visible as evidence gaps. Reports are drafts
 for operator review. The collector records uncertain uploads and publications
 for read-only reconciliation instead of automatically repeating them. See the
-[recovery guide](../../README.md#receipts-disconnects-and-recovery) before
+[recovery guide](../README.md#receipts-disconnects-and-recovery) before
 restarting a collector with an unresolved outcome.

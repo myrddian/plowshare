@@ -2,7 +2,7 @@
 
 Network Privacy Watch helps an operator understand changes in their network,
 retain the observations and investigate them with an LLM, including a local model.
-Start with the [Application README](examples/network-privacy-watch/README.md) for
+Start with the [Application README](network-privacy-watch/README.md) for
 the workflow and deployment checklist; this guide covers the Python integration,
 tool configuration and recovery.
 
@@ -34,7 +34,7 @@ collection and comparison. Plowshare retains evidence and coordinates the
 investigation. An LLM interprets observations and explains uncertainty. A local
 model pool can serve the same `reasoning` binding used by these definitions.
 
-## What the first example collects
+## What the collector observes
 
 `tcp` performs bounded TCP connection probes against **explicit IP addresses and
 ports** in private deployment configuration. It sends no application payloads,
@@ -49,7 +49,7 @@ export with TCP collection. It uses the [snapshot contract](examples/observation
 version, an offset-bearing `observed_at`, `tcp` and `dns` arrays. For a DNS-only
 export, set `tcp` to `[]`. Each DNS row identifies the device, lowercase domain
 and count of observed queries in the exporter’s window. Exporter identity and
-attribution remain its responsibility; this example does not parse Pi-hole or
+attribution remain its responsibility; the collector does not parse Pi-hole or
 router-specific files. A missing or stale export is an explicit evidence gap.
 Malformed exports refuse collection before network probes. A DNS query is not
 proof of a connection, encrypted payload content or malicious behavior.
@@ -74,11 +74,11 @@ build/privacy-python-env/bin/python -m pip install ./sdk/python ./integrations/n
 ```
 
 The Python SDK has no published remote package yet; install the local SDK alongside
-the integration. This example uses only its public typed operations. For a remote
+the integration. The collector uses only its public typed operations. For a remote
 collector, build both wheels locally and transfer them using your normal deployment
 workflow. Build the integration with `python -m build integrations/network-privacy`.
 Its wheel includes the HTML, CSS and JavaScript interface. Application definitions
-and deployment examples remain in this directory and are installed separately.
+live in `network-privacy-watch/` and are deployed separately.
 
 Copy [config.json](examples/config.json) into a private operator directory. Replace
 the explicit server origin, project, collector identity, state directory, addresses
@@ -98,10 +98,10 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
 
 ## Install the Plowshare Application
 
-1. Prepare a private copy of [examples/network-privacy-watch](examples/network-privacy-watch). Its
+1. Prepare a private copy of [network-privacy-watch](network-privacy-watch). Its
    valid root `plowshare.json` identifies `network-privacy-watch`. Add explicit manifest
    account grants and matching server project membership for the operator and
-   collector. Templates have **no grants**. Use a project-scoped service credential;
+   collector. The supplied manifest has **no grants**. Use a project-scoped service credential;
    the collector needs work access for evidence uploads and reading for reports.
 2. Configure a server FileStore and grant the deploying administrator MANAGER
    access to its destination. Read `application.deployment.status`, then use
@@ -139,12 +139,12 @@ without launching another model investigation. The
 analyst and reviewer have narrower tools, and the conductor retains a draft
 report with source dependencies. Memory supplies previously established operator
 context where permitted. Document-derived evidence and conclusions stay in the
-information store; this example does not copy restricted evidence into memory.
+information store; the Application does not copy restricted evidence into memory.
 No shell, firewall or device-changing tools are granted to these agents.
 
 ## Deploy the Plowshare Application
 
-The Application is [examples/network-privacy-watch](examples/network-privacy-watch). Its root manifest
+The Application is [network-privacy-watch](network-privacy-watch). Its root manifest
 and resources run inside Plowshare; the Python collector and web UI are deployed
 separately on a host with access to the configured network.
 
@@ -196,7 +196,7 @@ comparison gaps and related project reports. **Refresh** obtains current status;
 **Request a scan** publishes a new request through the SDK and Relay. It does not
 call a scanner directly or bypass grants. A published scan is distinct from a
 completed agent investigation. Draft/final report status comes from the project
-information store. This slice shows the latest 50 scan receipts and the first
+information store. The dashboard shows the latest 50 scan receipts and the first
 100 accessible project reports that include a retained scan input.
 
 For headless operation, `once` performs one intake/collection pass. An operator
@@ -266,8 +266,7 @@ schedule/scan [ports](examples/server-ports.json), and restart the server. A
 The binding derives only provider request egress and result ingress; ordinary
 collection topics retain their separate port grants. Declaring handlers does not
 register them dynamically or give agents tool grants. All SDK languages offer the
-same [façade](../../docs/relay-tools.md#equivalent-examples); Python is this example's
-implementation language.
+same [façade](../../docs/relay-tools.md#equivalent-examples); Python implements this collector.
 
 Start `serve`, `once` or `reconcile` with those two flags before the subcommand.
 The SDK's exclusive SQLite tool journal lives under the configured private state
@@ -324,7 +323,7 @@ after inspecting the recorded outcomes.
 Journal identity includes deployment scope and collection configuration. A foreign
 journal, competing local owner, excessive queue or corrupt source refuses work.
 State is bounded at 1 MiB and 1,000 receipts/requests each, without automatic
-pruning. For this example's longer operation, archive settled state only after
+pruning. For longer operation, archive settled state only after
 confirming durable evidence and the consumer cursor; choose a new state directory
 for a deliberate scope change. Do not delete uncertain receipts to force retries.
 
