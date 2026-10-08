@@ -20,12 +20,17 @@ const skill: CommandEntry = {
   tier: 'PROJECT',
   hash: 'source-hash',
 };
-await test('a portable skill requires an explicit context selection and preserves draft arguments', () => {
-  assert.throws(
-    () => commandDraft(skill, '', 'Review\nthis exact change'),
-    /Choose/,
+await test('a portable skill defaults to DIRECT and preserves draft arguments', () => {
+  assert.equal(
+    commandDraft(skill, '', 'Review\nthis exact change'),
+    '/skill:review --mode=DIRECT Review\nthis exact change',
   );
-  assert.throws(() => commandDraft(skill, 'AUTOMATIC', 'Review'), /Choose/);
+  assert.equal(commandDraft(skill, '', ''), '/skill:review --mode=DIRECT ');
+  assert.equal(
+    commandDraft(skill, '', '/skill:review'),
+    '/skill:review --mode=DIRECT ',
+  );
+  assert.throws(() => commandDraft(skill, 'AUTOMATIC', 'Review'), /Unknown/);
   assert.equal(
     commandDraft(skill, 'INHERITED', 'Review\nthis exact change'),
     '/skill:review --mode=INHERITED Review\nthis exact change',
@@ -67,7 +72,11 @@ await test('direct workflow launch accepts editable multiline work and strips on
 await test('human completion includes runnable skills hidden from the model and only the supplied bot catalog', () => {
   const hidden = { ...skill, agentVisible: false };
   assert.deepEqual(commandOffers('/skill:r', [hidden]), [
-    { command: hidden.command, description: hidden.description },
+    {
+      command: hidden.command,
+      description: hidden.description,
+      argumentHint: hidden.argumentHint,
+    },
   ]);
   assert.deepEqual(commandOffers('/skill:r', []), []);
   assert.deepEqual(commandOffers('Explain /skill:r', [hidden]), []);

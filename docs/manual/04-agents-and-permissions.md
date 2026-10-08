@@ -124,8 +124,11 @@ it never grants capabilities the executor lacks.
 Skills are not automatically triggered by description matching. Model discovery
 requires an explicit `agentVisible` policy and the caller's grant. Hidden,
 granted skills can remain available through bound human commands such as
-`/skill:<name>`. A package without a configured context mode needs an explicit
-mode at invocation where supported.
+`/skill:<name>`. Human skill commands accept empty arguments and default to
+`DIRECT` when the package omits its mode. Use `--mode=INHERITED`, `SUMMARISED`,
+or `NEW` to select delegated context. A package selecting another agent requires
+a delegated mode. Model-selected invocation still requires a configured mode.
+Optional `argument-hint` frontmatter explains useful inputs in command discovery.
 
 | Mode | Context behavior |
 | --- | --- |

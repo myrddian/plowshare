@@ -63,19 +63,6 @@ const commandPicker = installCommandPicker(
     const command = state.agents[scope]
       ?.find((row) => row.name === agentSelect.value)
       ?.commands?.find((row) => row.command === name);
-    if (command?.kind === 'skill' && command.mode === null) {
-      draft.value = `${name} `;
-      drafts[selected] = draft.value;
-      persist();
-      render();
-      showInfoTab('commands');
-      $('#agent-commands')
-        .querySelector<HTMLSelectElement>(
-          `[aria-label="Context for ${CSS.escape(name)}"]`,
-        )
-        ?.focus();
-      return false;
-    }
     draft.value = command ? commandDraft(command, '', '') : `${name} `;
     drafts[selected] = draft.value;
     persist();
