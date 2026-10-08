@@ -63,6 +63,24 @@ Filesystem lending, process execution, binary uploads and Git transfers remain
 platform integrations. Calling an operation does not install its provider
 or assert that a remote system has an accessible filesystem.
 
+## Application source deployment
+
+All SDKs expose `application.deploy`, `application.activate`,
+`application.deployment.status` and `application.deployment.receipt` with typed
+requests/results and the same package limits. Java uses `ApplicationClient` and
+`ApplicationDeployment` records; TypeScript/Node uses typed operations, and the
+native SDKs generate DTOs from that shared operation graph. Node additionally
+exports `applicationFiles(directory)` from `plowshare-client-node/applications`
+for a bounded folder snapshot. Other callers supply the explicit `{path,text}`
+file list through their typed request.
+
+Retain a new request UUID before mutation. Read status for the expected active
+revision, use `null` for first deployment, and inspect the receipt after uncertain
+delivery. No SDK automatically repeats a submission. Only server administrators
+can deploy; FileStore grants and ordinary Application permissions remain explicit.
+See [deployment and recovery](projects.md#deploy-update-and-activate-an-application)
+for the complete lifecycle.
+
 ## Build and verify
 
 Install Java 21, Node 22.12+, the pinned pnpm, Python 3.11+, .NET SDK 8+ and Go 1.23+.

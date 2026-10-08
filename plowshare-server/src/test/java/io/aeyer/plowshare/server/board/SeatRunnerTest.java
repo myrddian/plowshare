@@ -369,7 +369,7 @@ class SeatRunnerTest {
     Board three =
         new Board(
             store,
-            project -> THREE,
+            project -> List.of(THREE),
             fixture.conversations,
             firings,
             dispatcher::drain,

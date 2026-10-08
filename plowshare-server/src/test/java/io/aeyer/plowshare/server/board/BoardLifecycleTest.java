@@ -384,7 +384,7 @@ class BoardLifecycleTest {
     Board nested =
         new Board(
             f.store,
-            project -> BoardFixture.TWO,
+            project -> List.of(BoardFixture.TWO),
             f.conversations,
             f.firings,
             target -> {

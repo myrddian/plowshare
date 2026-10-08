@@ -130,7 +130,17 @@ public class BoardPostingFrames implements FrameArea {
         throw new CallerFault("maxModelCalls must be a whole number of at least two.");
       budget = ((Number) rawBudget).intValue();
     }
-    var identity = new BoardPostRepository.Open(project, title, label, body, budget);
+    if (!java.util.Set.of(
+            "project", "title", "label", "body", "requestId", "maxModelCalls", "swarm")
+        .containsAll(payload.keySet()))
+      throw new CallerFault("board.open contains an unknown field");
+    String swarm = null;
+    if (payload.containsKey("swarm")) {
+      swarm = Payloads.required(payload, "swarm", FrameTypes.BOARD_OPEN, "the selected swarm type");
+      io.aeyer.plowshare.server.board.SwarmSelection.requireName(swarm);
+    }
+    var identity = new BoardPostRepository.Open(project, title, label, body, budget, swarm);
+    String selectedSwarm = swarm;
     Integer requestedBudget = budget;
     return work.inTransaction(
         () -> {
@@ -154,7 +164,8 @@ public class BoardPostingFrames implements FrameArea {
                       BoardTopic.BY_PERSON,
                       account,
                       null,
-                      requestedBudget));
+                      requestedBudget,
+                      selectedSwarm));
           receipts.save(account, request, identity, opened.opening().id());
           return Outcome.ok(new OpenReceipt(request.toString(), opened.topic(), opened.opening()));
         });

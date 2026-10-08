@@ -83,7 +83,8 @@
       "closedAt": null,
       "future": {
         "preserved": true
-      }
+      },
+      "swarm": null
     }
   },
   "buffer.purge": {
@@ -627,6 +628,16 @@
         "closedAt": null,
         "future": {
           "preserved": true
+        },
+        "swarm": {
+          "name": "default",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "description": "",
+          "members": [
+            "researcher",
+            "critic"
+          ],
+          "budget": 20
         }
       },
       "message": {

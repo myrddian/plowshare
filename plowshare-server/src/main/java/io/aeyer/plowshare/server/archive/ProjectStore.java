@@ -113,7 +113,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * key and not {@code AgentsProperties}', which is evidence the old sentence's premise never
  * generalised past the one path it happened to name.
  */
-public final class ProjectStore implements ServerProjects {
+public final class ProjectStore implements ServerProjects, ProjectNames {
 
   /*
    * `lent` sits between `workspace` and `exclusions` because that is the order
@@ -550,6 +550,51 @@ public final class ProjectStore implements ServerProjects {
                   name);
           if (changed != 1)
             throw new ArchiveRefusedException("Application placement changed concurrently");
+          return find(name).orElseThrow();
+        });
+  }
+
+  @Override
+  public ProjectRecord activateDeployment(
+      String name,
+      ApplicationPlacement placement,
+      ApplicationPlacement expected,
+      Path verifiedRoot,
+      String handle) {
+    new io.aeyer.plowshare.server.auth.AdminStore(jdbc).requireServerAdmin(handle);
+    ordinary(name);
+    return withCreator(
+        name,
+        expected == null ? handle : null,
+        () -> {
+          var existing = find(name);
+          if (expected == null) {
+            if (existing.isPresent() || rootedElsewhere(name).isPresent())
+              throw new ArchiveRefusedException(
+                  "First deployment needs a project without an existing source");
+          } else {
+            var row =
+                existing.orElseThrow(
+                    () -> new ArchiveRefusedException("Application source is unavailable"));
+            if (!row.type().equals("MANAGED") || !expected.equals(row.placement()))
+              throw new ArchiveRefusedException(
+                  "Application source changed outside its deployment lifecycle");
+          }
+          if (!fileStores.permits(placement.applicationRoot(), handle, ProjectRole.MANAGER))
+            throw new ArchiveRefusedException(
+                "Deployment needs current MANAGER access to its FileStore");
+          var root = fileStores.resolve(placement).root();
+          if (!root.equals(verifiedRoot))
+            throw new ArchiveRefusedException("FileStore configuration changed before activation");
+          validWorkspace(name, root);
+          int changed =
+              jdbc.update(
+                  "UPDATE projects SET workspace = ?, machine = NULL, project_type = 'MANAGED', application_storage = ?::jsonb, application_boundary = TRUE, write_paths = '{}', defined_at = now() WHERE name = ? AND personal_owner IS NULL",
+                  root.toString(),
+                  ApplicationPlacementCodec.encode(placement),
+                  name);
+          if (changed != 1)
+            throw new ArchiveRefusedException("Application identity is unavailable");
           return find(name).orElseThrow();
         });
   }

@@ -27,7 +27,52 @@ public record BoardTopic(
     Integer reserve,
     Instant quietNotifiedAt,
     Instant openedAt,
-    Instant closedAt) {
+    Instant closedAt,
+    SwarmSelection swarm) {
+
+  /** Historical topics and private transports have no selected public swarm. */
+  public BoardTopic(
+      String id,
+      String project,
+      String parent,
+      String root,
+      int depth,
+      String title,
+      String label,
+      String account,
+      String openerKind,
+      String opener,
+      String originConversation,
+      String state,
+      String resolution,
+      Integer potTotal,
+      Integer potSpent,
+      Integer reserve,
+      Instant quietNotifiedAt,
+      Instant openedAt,
+      Instant closedAt) {
+    this(
+        id,
+        project,
+        parent,
+        root,
+        depth,
+        title,
+        label,
+        account,
+        openerKind,
+        opener,
+        originConversation,
+        state,
+        resolution,
+        potTotal,
+        potSpent,
+        reserve,
+        quietNotifiedAt,
+        openedAt,
+        closedAt,
+        null);
+  }
 
   public static final String OPEN = "open";
   public static final String EXHAUSTED = "exhausted";

@@ -53,3 +53,7 @@ Adapter integrations use `IncomingClient` for durable receive/status/cancel call
 and `OutgoingClient` for outbound work, over the same authenticated WebSocket.
 The separate [A2A adapter](../../integrations/a2a/README.md) implements HTTP serving; see
 the [receiving manual](../../docs/a2a-receiving.md) for client identities and scope.
+
+Named external tools use the same declaration, handler, durable journal and
+read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
+for configuration, grants, examples and recovery semantics.

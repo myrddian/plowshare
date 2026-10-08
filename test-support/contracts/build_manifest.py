@@ -62,7 +62,7 @@ EXPLICIT_FRAMES = {
 DESKTOP_FRAMES = {
     "project.list", "conversation.list", "conversation.open", "conversation.trajectory",
     "agent.list", "agent.run", "job.status", "job.cancel", "job.stream",
-    "approval.list", "approval.answer", "board.topics", "board.messages", "swarm.status",
+    "approval.list", "approval.answer", "board.topics", "board.messages", "swarm.status", "swarm.types",
     "conversation.follow", "inbox.list", "inbox.read", "orchestration.list", "orchestration.status",
 }
 BACKGROUND_PARITY = [{'id': 'orchestration-discovery',
@@ -281,8 +281,8 @@ def inventory():
     response_families = {}
     for family, name, expected_types, expected_operations in [
         ("administrative", "AdministrativeReplies", 34, 35),
-        ("conversation", "ConversationReplies", 42, 47),
-        ("inspection", "InspectionReplies", 14, 7),
+        ("conversation", "ConversationReplies", 42, 51),
+        ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 33, 40),
         ("messaging", "MessagingReplies", 5, 9),
     ]:

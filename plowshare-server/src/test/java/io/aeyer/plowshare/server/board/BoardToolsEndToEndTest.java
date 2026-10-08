@@ -307,7 +307,7 @@ class BoardToolsEndToEndTest {
     Board board =
         new Board(
             boardStore,
-            project -> BoardFixture.TWO,
+            project -> List.of(BoardFixture.TWO),
             fixture.conversations,
             fixture.firings,
             dispatcher::drain,

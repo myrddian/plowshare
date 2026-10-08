@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -269,4 +270,24 @@ func decodePush(data []byte) (ServerPush, error) {
 	}
 	err = json.Unmarshal(wire, &result)
 	return result, err
+}
+
+// Transport boundary correlation supplements schema validation for retained deployment receipts.
+func deploymentMatches(operation string, request, reply []byte) bool {
+	if !slices.Contains([]string{"application.deploy", "application.activate", "application.deployment.status", "application.deployment.receipt"}, operation) {
+		return true
+	}
+	type coordinates struct {
+		Project   string `json:"project"`
+		RequestID string `json:"requestId"`
+		Revision  string `json:"revision"`
+		Release   struct {
+			Revision string `json:"revision"`
+		} `json:"release"`
+	}
+	var asked, answered coordinates
+	if json.Unmarshal(request, &asked) != nil || json.Unmarshal(reply, &answered) != nil || asked.Project != answered.Project {
+		return false
+	}
+	return operation == "application.deployment.status" || strings.EqualFold(asked.RequestID, answered.RequestID) && (operation != "application.activate" || strings.EqualFold(asked.Revision, answered.Release.Revision))
 }

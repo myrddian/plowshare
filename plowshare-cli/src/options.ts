@@ -36,6 +36,10 @@ A server-side project scopes work in the Plowshare agent framework: agents,
 skills, conversations, memory, information and any server workspace files.
 SDK integrations submit agentic or information tasks within that scope.
 project list groups authorized Applications and Projects; external work stays in Projects.
+Application: deploy LOCAL_FOLDER [JSON], activate [JSON], deployment status/receipt [JSON].
+     Deployment JSON requires project, requestId, expectedRevision (null for first install),
+     destination:{store,path} and writableAreas:[]. Retain requestId before submitting.
+     Packages contain root plowshare.json and bounded text source. Python services stay external.
 Application: files, read, save [JSON]. Browses deployed files without --root or sync.
      save requires the revision returned by read and permitted writePaths.
 project create provisions a MANAGED Application with plowshare.json, or registers DISJOINT files without

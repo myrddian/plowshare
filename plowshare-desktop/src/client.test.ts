@@ -82,6 +82,7 @@ function fixture() {
     payload: Record<string, unknown>,
   ) => Promise<Outcome> | Outcome = () => ({ code: 'OK' });
   let onRelay: typeof onUsage = () => ({ code: 'OK' });
+  let onDeployment: typeof onUsage = () => ({ code: 'OK' });
   const connector: Connector = async (
     _base,
     _handle,
@@ -112,6 +113,15 @@ function fixture() {
           )
             return onAdmin(type, payload);
           if (type.startsWith('usage.')) return onUsage(type, payload);
+          if (
+            [
+              'application.deploy',
+              'application.activate',
+              'application.deployment.status',
+              'application.deployment.receipt',
+            ].includes(type)
+          )
+            return onDeployment(type, payload);
           if (type.startsWith('relay.')) return onRelay(type, payload);
           if (type.startsWith('information.'))
             return onInformation(type, payload);
@@ -186,6 +196,9 @@ function fixture() {
     },
     usage: (value: typeof onUsage) => {
       onUsage = value;
+    },
+    deployment: (value: typeof onDeployment) => {
+      onDeployment = value;
     },
     relay: (value: typeof onRelay) => {
       onRelay = value;
@@ -2013,4 +2026,77 @@ await test('offline demo does not preselect a deployment or connect without an e
   );
   assert.equal(f.calls.length, 0);
   assert.equal(f.client.state.mode, 'demo');
+});
+
+await test('Application deployment requires administration, correlates receipts and preserves uncertain request identity', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  const requestId = '11111111-1111-1111-1111-111111111111',
+    revision = '22222222-2222-2222-2222-222222222222';
+  const payload = {
+    project: 'app',
+    requestId,
+    expectedRevision: null,
+    destination: { store: 'applications', path: 'app' },
+    writableAreas: [],
+    files: [{ path: 'plowshare.json', text: '{"version":1,"name":"app"}' }],
+  };
+  await connect(f.client);
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'application-deployment',
+      operation: 'application.deploy',
+      payload,
+    }),
+    /administrator/,
+  );
+  assert.equal(
+    f.calls.filter((call) => call.type === 'application.deploy').length,
+    0,
+  );
+  f.admin(true);
+  await connect(f.client);
+  const receipt = {
+    project: 'app',
+    requestId,
+    release: { revision, digest: 'a'.repeat(64), fileCount: 1 },
+  };
+  f.deployment(() => ({
+    code: 'OK',
+    payload: { ...receipt, project: 'foreign' },
+  }));
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'application-deployment',
+      operation: 'application.deploy',
+      payload,
+    }),
+    /unreadable/,
+  );
+  f.deployment(async () => {
+    throw new Error('lost reply');
+  });
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'application-deployment',
+      operation: 'application.deploy',
+      payload,
+    }),
+    /lost reply/,
+  );
+  assert.equal(
+    f.calls.filter((call) => call.type === 'application.deploy').length,
+    2,
+  );
+  f.deployment((type, p) => {
+    assert.equal(type, 'application.deployment.receipt');
+    assert.deepEqual(p, { project: 'app', requestId });
+    return { code: 'OK', payload: receipt };
+  });
+  const recovered = await f.client.dispatch({
+    action: 'application-deployment',
+    operation: 'application.deployment.receipt',
+    payload: { project: 'app', requestId },
+  });
+  assert.deepEqual(recovered.deployment, receipt);
 });

@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
+	ApplicationFiles      bool     `json:"applicationFiles"`
 	Web                   bool     `json:"web"`
 	SafePrecision         bool     `json:"safePrecision"`
 	Timestamp             bool     `json:"timestamp"`
@@ -199,6 +201,9 @@ func check(s shape, value any) error {
 			return contractError
 		}
 	case []any:
+		if s.ApplicationFiles && !applicationFiles(v) {
+			return contractError
+		}
 		maximum := 10000
 		if s.MaxItems != nil {
 			maximum = *s.MaxItems
@@ -246,4 +251,50 @@ func check(s shape, value any) error {
 		}
 	}
 	return nil
+}
+
+// Source package constraints mirror the server; raw values remain inside this codec boundary.
+func applicationFiles(files []any) bool {
+	paths := map[string]bool{}
+	total := 0
+	manifest := false
+	for _, file := range files {
+		item, ok := file.(map[string]any)
+		if !ok {
+			return false
+		}
+		path, ok := item["path"].(string)
+		if !ok {
+			return false
+		}
+		text, ok := item["text"].(string)
+		if !ok {
+			return false
+		}
+		if len(path) > 512 || len(strings.Split(path, "/")) > 17 || !pattern(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$`, path) || paths[strings.ToLower(path)] {
+			return false
+		}
+		for _, segment := range strings.Split(path, "/") {
+			if slices.Contains([]string{".", "..", "node_modules", "build", "__pycache__"}, segment) {
+				return false
+			}
+		}
+		if !utf8.ValidString(text) || strings.ContainsRune(text, 0) || len(text) > 65536 {
+			return false
+		}
+		total += len(text)
+		paths[strings.ToLower(path)] = true
+		manifest = manifest || path == "plowshare.json"
+	}
+	if total > 131072 || !manifest {
+		return false
+	}
+	for path := range paths {
+		for other := range paths {
+			if strings.HasPrefix(other, path+"/") {
+				return false
+			}
+		}
+	}
+	return true
 }

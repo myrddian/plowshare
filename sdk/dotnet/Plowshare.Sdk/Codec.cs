@@ -70,6 +70,14 @@ internal static class Codec
         var projected = Decode(catalog.RootElement.GetProperty("results").GetProperty(operation), value, false, 0);
         return JsonSerializer.SerializeToElement(projected).Deserialize<T>()!;
     }
+    // Receipt ownership supplements structural decoding before the result escapes this boundary.
+    public static void CorrelateDeployment(string operation, JsonElement request, JsonElement result)
+    {
+        if (operation is not ("application.deploy" or "application.activate" or "application.deployment.status" or "application.deployment.receipt")) return;
+        static string? TextAt(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (TextAt(request,"project") != TextAt(result,"project") || operation != "application.deployment.status" && !string.Equals(TextAt(request,"requestId"),TextAt(result,"requestId"),StringComparison.OrdinalIgnoreCase)) throw Invalid();
+        if (operation == "application.activate" && (!result.TryGetProperty("release",out var release) || !string.Equals(TextAt(request,"revision"),TextAt(release,"revision"),StringComparison.OrdinalIgnoreCase))) throw Invalid();
+    }
     public static ServerPush Push(JsonElement frame)
     {
         JsonElement raw = frame;

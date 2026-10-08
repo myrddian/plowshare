@@ -20,6 +20,7 @@ import java.util.function.Function;
  */
 public final class BoardTools {
 
+  public static final String TYPES_NAME = "board_swarm_types";
   public static final String OPEN_NAME = "board_open";
   public static final String READ_NAME = "board_read";
   public static final String POST_NAME = "board_post";
@@ -31,6 +32,7 @@ public final class BoardTools {
   public static final Set<String> NAMES =
       Set.of(
           OPEN_NAME,
+          TYPES_NAME,
           READ_NAME,
           POST_NAME,
           DOCUMENT_NAME,
@@ -41,7 +43,7 @@ public final class BoardTools {
 
   /** An opted-in agent or bot opening a topic from a person's conversation. */
   public interface Opening {
-    String open(String title, String label, String body, Integer budget);
+    String open(String title, String label, String body, Integer budget, String swarm);
   }
 
   /** One seat's verbs; pass and close answer a refusal, or empty when done. */
@@ -67,6 +69,26 @@ public final class BoardTools {
 
   public static AgentTool open(Opening opening) {
     return new Open(Objects.requireNonNull(opening, "opening"));
+  }
+
+  /** Read the current project catalog before selecting a type for a new topic. */
+  public static AgentTool types(java.util.function.Supplier<String> catalog) {
+    return new Tool() {
+      @Override
+      public ToolSchema schema() {
+        return ToolSchema.from(
+            TYPES_NAME,
+            "List this project's named swarm types, members, budgets and refusals. Choose a type with usable members for board_open.",
+            ToolArguments.object(Map.of(), List.of()));
+      }
+
+      @Override
+      String answer(String argumentsJson) {
+        JsonNode args = ToolArguments.parse(argumentsJson, TYPES_NAME, "{}");
+        if (!args.isObject() || !args.isEmpty()) return "board_swarm_types takes an empty object";
+        return catalog.get();
+      }
+    };
   }
 
   public static List<AgentTool> forMember(Seat seat, TurnEnd end) {
@@ -102,7 +124,7 @@ public final class BoardTools {
     private static final ToolSchema SCHEMA =
         ToolSchema.from(
             OPEN_NAME,
-            "Open a topic on this project's board: its swarm's members are woken to research"
+            "Open a topic on this project's board: the selected named swarm's members are woken to research"
                 + " it and answer on the board. Use it for a request that is vague or"
                 + " risky enough to need the unknowns found and answered first. You are"
                 + " woken on the topic as its opener when someone answers you, and you"
@@ -110,6 +132,9 @@ public final class BoardTools {
                 + " conversation.",
             ToolArguments.object(
                 fields(
+                    "swarm",
+                        ToolArguments.string(
+                            "Named swarm type from board_swarm_types. May be omitted only when one type exists."),
                     "title", ToolArguments.string("One line: what the topic is about."),
                     "label", ToolArguments.string("A short kind, e.g. BAD SPEC / NEED INFO."),
                     "body",
@@ -144,7 +169,10 @@ public final class BoardTools {
           ToolArguments.requireText(args, "title", OPEN_NAME, "the title"),
           ToolArguments.requireText(args, "label", OPEN_NAME, "the label"),
           ToolArguments.requireText(args, "body", OPEN_NAME, "the opening message"),
-          budget < 0 ? null : budget);
+          budget < 0 ? null : budget,
+          args.has("swarm")
+              ? ToolArguments.requireText(args, "swarm", OPEN_NAME, "the selected swarm type")
+              : null);
     }
   }
 

@@ -1,3 +1,4 @@
+import { applicationFiles } from 'plowshare-client-node/applications';
 import { FileStores } from 'plowshare-client-node/filestores';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { decodeDesktopRequest } from './request-boundary.ts';
@@ -727,6 +728,7 @@ background(
           throw new Error('Open this section from the workspace sidebar.');
         if (request.action === 'board-retry') return client.dispatch(request);
         if (
+          request.action === 'board-swarm-types' ||
           request.action === 'board-create' ||
           request.action === 'board-post' ||
           request.action === 'board-post-topics'
@@ -755,6 +757,7 @@ background(
           'board-more',
           'board-topic',
           'board-trajectory',
+          'board-swarm-types',
           'board-create',
           'board-retry',
           'board-post',
@@ -1028,6 +1031,28 @@ background(
           request.revision,
           request.chapter,
         ).then(() => ({ state: client.state }));
+      if (request.action === 'application-package') {
+        if (!main || !client.state.connected || !client.state.serverAdmin)
+          throw new Error(
+            'Choose Application source from the administrator workspace.',
+          );
+        const choice = await dialog.showOpenDialog(window!, {
+          title: 'Choose Application source',
+          buttonLabel: 'Review package',
+          properties: ['openDirectory'],
+        });
+        if (choice.canceled || !choice.filePaths[0])
+          return { state: client.state };
+        const folder = choice.filePaths[0];
+        return {
+          state: client.state,
+          applicationPackage: { folder, files: await applicationFiles(folder) },
+        };
+      }
+      if (request.action === 'application-deployment' && !main)
+        throw new Error(
+          'Deploy Applications from the administrator workspace.',
+        );
       if (request?.action === 'filestore-choose') {
         if (!main)
           throw new Error('Open local FileStores from the main window.');

@@ -23,6 +23,14 @@ public interface ServerProjects extends ProjectWorkspaces {
    */
   ProjectRecord place(String name, ApplicationPlacement placement, String handle);
 
+  /** Atomic source switch for the deployment owner; refuses unrelated or moved workspaces. */
+  ProjectRecord activateDeployment(
+      String name,
+      ApplicationPlacement placement,
+      ApplicationPlacement expected,
+      Path verifiedRoot,
+      String handle);
+
   record ServerWorkspace(Path root, boolean application, ApplicationPlacement placement) {
     public ServerWorkspace(Path root, boolean application) {
       this(root, application, null);

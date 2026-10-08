@@ -1,0 +1,279 @@
+"""Explicit deployment inputs; no implicit local server, credentials or listener."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import signal
+from contextlib import ExitStack
+from dataclasses import asdict
+from pathlib import Path
+from uuid import uuid4
+
+from aiohttp import web
+from plowshare import Client, Refusal, TransportError
+from plowshare.contracts import (
+    ScheduleDefinitionDto,
+    ScheduleDefinitionDtoActionDto,
+    ScheduleDefinitionDtoLimitsDto,
+    ScheduleDefinitionDtoTargetDto,
+    ScheduleSaveRequest,
+)
+from plowshare.tool_journal import SqliteToolJournal
+from plowshare.tools import ToolAttention, ToolProvider, deployment_config
+
+from .collection import NetworkCollector
+from .contracts import Configuration, Snapshot, load_json
+from .journal import FileReceipts
+from .native_tools import DECLARATIONS, registered
+from .peer import IntegrationPeer, SdkOutgoingPort
+from .peer_journal import FilePeerReceipts
+from .ports import SdkPrivacyPort
+from .tools import WorkerTools
+from .web import application
+from .worker import ExternalRequests, ReconciliationRequired, Worker
+
+
+def credential(name: str) -> str:
+    value = os.environ.get(name)
+    if not value or value != value.strip():
+        raise ValueError("Set the configured credential environment variable")
+    return value
+
+
+async def execute(args: argparse.Namespace) -> None:
+    config = Configuration.read(Path(args.config))
+    if args.command == "check":
+        if config.collection.observations_file:
+            Snapshot.decode(load_json(config.collection.observations_file))
+        print(
+            json.dumps(
+                {
+                    "valid": True,
+                    "project": config.project,
+                    "collector": config.collector,
+                    "mode": config.collection.mode,
+                }
+            )
+        )
+        return
+    if args.command == "tool-bindings":
+        print(
+            deployment_config(
+                config.project, args.tool_provider, args.tool_account, DECLARATIONS
+            )
+        )
+        return
+    if args.command == "scan":
+        # Local diagnostics use the same bounded collector without server credentials
+        # or durable admission. They are explicitly labelled as unretained evidence.
+        identity = str(uuid4())
+        evidence = await NetworkCollector(config.collector, config.collection).collect(
+            identity, "diagnostic:" + identity, None, None
+        )
+        print(
+            json.dumps(
+                {"retained": False, "evidence": asdict(evidence)}, allow_nan=False
+            )
+        )
+        return
+    async with await Client.connect(
+        config.origin, credential(config.token_environment), timeout=15
+    ) as client:
+        if args.command == "install-schedule":
+            saved = (
+                await client.request(
+                    ScheduleSaveRequest(
+                        project=config.project,
+                        source="server",
+                        name="network_scan",
+                        overwrite=False,
+                        definition=ScheduleDefinitionDto(
+                            version=1,
+                            cron=args.cron,
+                            zone=args.zone,
+                            paused=True,
+                            action=ScheduleDefinitionDtoActionDto(
+                                kind="orchestration",
+                                agent="privacy_coordinator",
+                                name="privacy_tick",
+                                input="A collection occurrence is available through Relay.",
+                                mode=None,
+                            ),
+                            target=ScheduleDefinitionDtoTargetDto(
+                                kind="mailbox",
+                                project=None,
+                                conversation=None,
+                                to=None,
+                                route=None,
+                            ),
+                            limits=ScheduleDefinitionDtoLimitsDto(
+                                max_model_calls=1, max_turns=8, queue_cap=1
+                            ),
+                        ),
+                    )
+                )
+            ).require_payload()
+            print(
+                json.dumps(
+                    {
+                        "internal_name": saved.internal_name,
+                        "status": saved.status,
+                        "paused": True,
+                        "next": "Set configuration.schedule to internal_name, then explicitly resume this schedule.",
+                    }
+                )
+            )
+            return
+        with FileReceipts(config) as receipts, ExitStack() as stores:
+            worker = Worker(
+                config,
+                SdkPrivacyPort(client, config),
+                receipts,
+                NetworkCollector(config.collector, config.collection),
+            )
+            peer = (
+                IntegrationPeer(
+                    config,
+                    SdkOutgoingPort(client, config),
+                    WorkerTools(worker),
+                    FilePeerReceipts(config, receipts),
+                )
+                if config.outgoing_peer is not None
+                else None
+            )
+            external: ExternalRequests | None = peer
+            native: ToolProvider | None = None
+            if args.tool_provider is not None:
+                if peer is not None:
+                    raise ValueError(
+                        "Choose either native tools or the outgoing compatibility peer"
+                    )
+                exported = deployment_config(
+                    config.project, args.tool_provider, args.tool_account, DECLARATIONS
+                )
+                journal = stores.enter_context(
+                    SqliteToolJournal(
+                        config.state_directory / "relay-tools", configuration=exported
+                    )
+                )
+                native = ToolProvider(
+                    client,
+                    project=config.project,
+                    provider=args.tool_provider,
+                    account=args.tool_account,
+                    tools=registered(WorkerTools(worker)),
+                    journal=journal,
+                )
+                external = native
+            if args.command == "once":
+                if external is not None:
+                    await external.poll()
+                await worker.poll()
+                print(json.dumps([asdict(item) for item in receipts.all()]))
+                return
+            if args.command == "reconcile":
+                await worker.reconcile()
+                if peer is not None:
+                    await peer.reconcile()
+                if native is not None:
+                    await native.reconcile()
+                print("Retained evidence reconciled; no mutation was replayed.")
+                return
+            stop = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for name in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(name, stop.set)
+                except NotImplementedError:
+                    pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
+            runner = web.AppRunner(
+                application(worker, credential(config.web_token_environment)),
+                access_log=None,
+            )
+            await runner.setup()
+            task: asyncio.Task[None] | None = None
+            try:
+                await web.TCPSite(runner, args.bind, args.port).start()
+                print(
+                    "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
+                    flush=True,
+                )
+                task = asyncio.create_task(worker.run(stop, external))
+                await stop.wait()
+            finally:
+                stop.set()
+                if task:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                await runner.cleanup()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--tool-provider", help="Enable a configured native Relay tool provider"
+    )
+    parser.add_argument(
+        "--tool-account",
+        help="Authenticated provider account named in the server binding",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "check", help="Validate offline without credentials, scans or journal writes"
+    )
+    commands.add_parser(
+        "tool-bindings",
+        help="Export native tool configuration for operator installation",
+    )
+    commands.add_parser("once", help="Perform one Relay intake and collection pass")
+    commands.add_parser(
+        "scan",
+        help="Probe the configured scope locally; print unretained diagnostic evidence",
+    )
+    commands.add_parser(
+        "reconcile", help="Read retained records to settle unknown receipts"
+    )
+    schedule = commands.add_parser(
+        "install-schedule", help="Create a paused project schedule through the SDK"
+    )
+    schedule.add_argument("--cron", required=True)
+    schedule.add_argument("--zone", required=True)
+    serve = commands.add_parser(
+        "serve", help="Run the collector and its authenticated Python web UI"
+    )
+    serve.add_argument("--bind", required=True)
+    serve.add_argument("--port", required=True, type=int)
+    args = parser.parse_args()
+    if (
+        bool(args.tool_provider) != bool(args.tool_account)
+        or args.command == "tool-bindings"
+        and not args.tool_provider
+    ):
+        parser.error("Native tools require both --tool-provider and --tool-account")
+    if args.command == "serve" and (
+        not args.bind.strip() or not 1 <= args.port <= 65535
+    ):
+        parser.error("Configure an explicit bind address and port between 1 and 65535")
+    try:
+        asyncio.run(execute(args))
+    except (
+        ValueError,
+        OSError,
+        TransportError,
+        Refusal,
+        ReconciliationRequired,
+        ToolAttention,
+    ) as error:
+        # Never print tokens, complete server refusals, configuration or private paths.
+        raise SystemExit(
+            "Privacy application stopped ("
+            + type(error).__name__
+            + "). Inspect the configured deployment and retained receipts."
+        ) from None

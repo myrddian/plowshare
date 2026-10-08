@@ -17,7 +17,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -52,7 +51,21 @@ public final class Board {
       String openerKind,
       String opener,
       String originConversation,
-      Integer budget) {}
+      Integer budget,
+      String swarm) {
+    public Open(
+        Home home,
+        String title,
+        String label,
+        String body,
+        String account,
+        String openerKind,
+        String opener,
+        String originConversation,
+        Integer budget) {
+      this(home, title, label, body, account, openerKind, opener, originConversation, budget, null);
+    }
+  }
 
   public record Opened(BoardTopic topic, BoardMessage opening, List<WakeRules.Wake> woken) {}
 
@@ -80,7 +93,7 @@ public final class Board {
   private record Seated(String conversation, Home home, String agent, boolean bot) {}
 
   private final BoardStore store;
-  private final Function<String, SwarmDefinitions.SwarmDefinition> swarmFor;
+  private final SwarmCatalog swarms;
   private final ConversationStore conversations;
   private final FiringStore firings;
   private final Consumer<String> drain;
@@ -113,7 +126,7 @@ public final class Board {
 
   public Board(
       BoardStore store,
-      Function<String, SwarmDefinitions.SwarmDefinition> swarmFor,
+      SwarmCatalog swarms,
       ConversationStore conversations,
       FiringStore firings,
       Consumer<String> drain,
@@ -121,13 +134,25 @@ public final class Board {
       IntSupplier closingReserve,
       Supplier<Instant> clock) {
     this.store = Objects.requireNonNull(store, "store");
-    this.swarmFor = Objects.requireNonNull(swarmFor, "swarmFor");
+    this.swarms = Objects.requireNonNull(swarms, "swarms");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
     this.firings = Objects.requireNonNull(firings, "firings");
     this.drain = Objects.requireNonNull(drain, "drain");
     this.work = Objects.requireNonNull(work, "work");
     this.closingReserve = Objects.requireNonNull(closingReserve, "closingReserve");
     this.clock = Objects.requireNonNull(clock, "clock");
+  }
+
+  public List<SwarmDefinitions.SwarmDefinition> swarmTypes(String project) {
+    return swarms.types(project);
+  }
+
+  /** Old topics remain inspectable, but cannot invent participants from today's configuration. */
+  private static List<String> members(BoardTopic topic) {
+    if (topic.swarm() == null)
+      throw new Refused(
+          "This topic has no retained swarm selection; open a new topic with a named swarm");
+    return topic.swarm().members();
   }
 
   /** The log stages a seat's log opening passes. {@link LogStages#NONE} until wired. */
@@ -156,7 +181,8 @@ public final class Board {
     String title = folded(request.title(), "title", BoardTopic.TITLE_MAX);
     String label = folded(request.label(), "label", BoardTopic.LABEL_MAX);
     requireText(request.body(), "body");
-    SwarmDefinitions.SwarmDefinition swarm = swarmFor.apply(request.home().project());
+    SwarmDefinitions.SwarmDefinition swarm =
+        swarms.select(request.home().project(), request.swarm());
     if (swarm.members().isEmpty()) {
       throw new Refused("this project's swarm has no members to wake — " + swarm.why());
     }
@@ -186,7 +212,8 @@ public final class Board {
                           request.opener(),
                           request.originConversation(),
                           total,
-                          reserve));
+                          reserve,
+                          swarm.selection()));
               boolean byDefinition = !BoardTopic.BY_PERSON.equals(request.openerKind());
               BoardMessage opening =
                   store.post(
@@ -207,7 +234,8 @@ public final class Board {
               }
               // Spec §6: an opening wakes every member except the opener. WakeRules leaves out the
               // opening's author seat, which for a definition is @opener — not the member name it
-              // may also sit under in swarm.md. Left in, it would be seated a second time and
+              // may also sit under in the selected swarm. Left in, it would be seated a second time
+              // and
               // woken by its own opening. A person's handle is no agent, so a person opens with
               // every member woken.
               List<String> members =
@@ -279,7 +307,7 @@ public final class Board {
         throw new Refused("this topic is at the maximum subtopic depth; ask on it instead");
       }
     }
-    List<String> members = swarmFor.apply(topic.project()).members();
+    List<String> members = members(topic);
     for (String mentioned : request.mentions()) {
       if (!members.contains(mentioned)) {
         throw new Refused(
@@ -367,7 +395,7 @@ public final class Board {
               if (!Objects.equals(account, topic.account())) {
                 throw new Refused("Choose a topic owned by this account.");
               }
-              if (!swarmFor.apply(topic.project()).members().contains(member)) {
+              if (!members(topic).contains(member)) {
                 throw new Refused("Choose a member of this project's swarm.");
               }
               BoardSeat seat =
@@ -819,10 +847,7 @@ public final class Board {
         owe(
             parent,
             reply,
-            WakeRules.after(
-                reply,
-                store.message(reply.replyTo()).orElseThrow(),
-                swarmFor.apply(parent.project()).members()),
+            WakeRules.after(reply, store.message(reply.replyTo()).orElseThrow(), members(parent)),
             seated,
             targets);
       }
@@ -910,9 +935,7 @@ public final class Board {
                             List.of()));
                 seat(child, BoardSeat.OPENER, seated);
                 List<String> members =
-                    swarmFor.apply(parent.project()).members().stream()
-                        .filter(m -> !m.equals(request.author()))
-                        .toList();
+                    members(parent).stream().filter(m -> !m.equals(request.author())).toList();
                 owe(child, opening, WakeRules.opened(opening, members), seated, targets);
               }
               store.decide(requestId, approve, reason.strip(), child == null ? null : child.id());
@@ -930,12 +953,7 @@ public final class Board {
                           (approve ? "Approved: " + child.id() : "Refused") + ". " + reason.strip(),
                           false,
                           List.of()));
-              owe(
-                  parent,
-                  reply,
-                  WakeRules.after(reply, request, swarmFor.apply(parent.project()).members()),
-                  seated,
-                  targets);
+              owe(parent, reply, WakeRules.after(reply, request, members(parent)), seated, targets);
               return store.decision(requestId).orElseThrow();
             });
     afterCommit(seated, targets);
@@ -1092,11 +1110,12 @@ public final class Board {
     Optional<BoardTopic> found = store.topic(topic).filter(t -> !t.isClosed());
     Optional<BoardSeat> seat = store.seat(topic, occupant);
     if (found.isEmpty()
+        || found.get().swarm() == null
         || seat.isEmpty()
         || (seat.get().failedEnding() != null && !seat.get().isOpener())) {
       return false;
     }
-    List<String> members = swarmFor.apply(found.get().project()).members();
+    List<String> members = members(found.get());
     List<String> openingMembers =
         BoardTopic.BY_PERSON.equals(found.get().openerKind())
             ? members

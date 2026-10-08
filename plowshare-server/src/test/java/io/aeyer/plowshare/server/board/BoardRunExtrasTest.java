@@ -101,8 +101,12 @@ class BoardRunExtrasTest {
   @Test
   void opted_in_agents_and_bots_get_board_open_only_in_a_persons_project_conversation() {
     String chat = fixture.conversations.open(Home.of("payments"), Budget.of(10)).id();
-    assertEquals(List.of("board_open"), names(extras.forRun(context(aristoxenus, chat))));
-    assertEquals(List.of("board_open"), names(extras.forRun(context(researcher, chat))));
+    assertEquals(
+        List.of("board_open", "board_swarm_types"),
+        names(extras.forRun(context(aristoxenus, chat))));
+    assertEquals(
+        List.of("board_open", "board_swarm_types"),
+        names(extras.forRun(context(researcher, chat))));
     assertSame(RunExtras.Extras.NONE, extras.forRun(context(plain, chat)));
     assertSame(RunExtras.Extras.NONE, extras.forRun(context(aristoxenus, null)));
   }

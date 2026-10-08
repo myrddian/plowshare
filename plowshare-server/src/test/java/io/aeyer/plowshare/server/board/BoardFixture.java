@@ -57,7 +57,14 @@ final class BoardFixture {
 
   Board board(SwarmDefinitions.SwarmDefinition swarm) {
     return new Board(
-        store, project -> swarm, conversations, firings, drained::add, work, () -> 10, clock);
+        store,
+        project -> List.of(swarm),
+        conversations,
+        firings,
+        drained::add,
+        work,
+        () -> 10,
+        clock);
   }
 
   /** A topic a bot opened from its person's conversation in the project "payments". */

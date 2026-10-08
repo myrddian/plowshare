@@ -61,3 +61,20 @@ func TestOmittedAndExplicitNull(t *testing.T) {
 		t.Fatal("explicit null lost")
 	}
 }
+
+func TestDeploymentReceiptCoordinates(t *testing.T) {
+	asked := []byte(`{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","revision":"22222222-2222-2222-2222-222222222222"}`)
+	valid := []byte(`{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"22222222-2222-2222-2222-222222222222"}}`)
+	if !deploymentMatches("application.activate", asked, valid) {
+		t.Fatal("matching receipt refused")
+	}
+	for _, reply := range []string{
+		`{"project":"foreign","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"22222222-2222-2222-2222-222222222222"}}`,
+		`{"project":"app","requestId":"33333333-3333-3333-3333-333333333333","release":{"revision":"22222222-2222-2222-2222-222222222222"}}`,
+		`{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"33333333-3333-3333-3333-333333333333"}}`,
+	} {
+		if deploymentMatches("application.activate", asked, []byte(reply)) {
+			t.Fatal("foreign receipt accepted")
+		}
+	}
+}

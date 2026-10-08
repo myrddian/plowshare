@@ -135,7 +135,7 @@ class BoardToolsTest {
     List<String> calls = new ArrayList<>();
     AgentTool open =
         BoardTools.open(
-            (title, label, body, budget) -> {
+            (title, label, body, budget, swarm) -> {
               calls.add(title + "|" + label + "|" + body + "|" + budget);
               return "opened";
             });
@@ -150,7 +150,7 @@ class BoardToolsTest {
     var calls = new ArrayList<String>();
     var open =
         BoardTools.open(
-            (title, label, body, budget) -> {
+            (title, label, body, budget, swarm) -> {
               calls.add(title);
               return "opened";
             });

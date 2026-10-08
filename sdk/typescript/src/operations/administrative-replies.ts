@@ -1,3 +1,4 @@
+import { swarmSelectionCheck, type SwarmSelection } from './swarm-types.ts';
 import type { ScheduleFile } from './schedule-files.ts';
 import type { Outcome } from '../binding/envelope.ts';
 import type { OrchestrationChoice } from './administration.ts';
@@ -90,6 +91,7 @@ export interface BoardTopic {
   readonly quietNotifiedAt: string | null;
   readonly openedAt: string;
   readonly closedAt: string | null;
+  readonly swarm: SwarmSelection | null;
 }
 export interface BufferPurgeReport {
   readonly fetchedPages: number;
@@ -372,6 +374,7 @@ const approval = record({
   judged: nullable(text),
 });
 export const boardTopicCheck: Check = record({
+  swarm: nullable(swarmSelectionCheck),
   id: named,
   project: named,
   parent: nullable(named),

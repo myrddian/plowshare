@@ -62,3 +62,11 @@ dialog{border:1px solid #645232;border-radius:10px;padding:27px;background:var(-
 #pricing-admin-dialog [data-edit] > button { justify-self: end; }
 #pricing-admin-dialog [data-configured] { overflow: auto; max-height: 220px; font-size: 12px; }
 @media (max-width: 640px) { #pricing-admin-dialog [data-edit], #pricing-admin-dialog [data-token] { grid-template-columns: 1fr; } }
+
+#application-deployment-dialog { width: min(660px, 90vw); max-height: 88vh; overflow: auto; }
+#application-deployment-dialog p { overflow-wrap: anywhere; }
+#application-deployment-dialog select { width: 100%; color: var(--ink); background: var(--panel); padding: 8px; }
+#application-deployment-dialog button { border: 1px solid var(--line); padding: 7px 10px; border-radius: 5px; }
+#application-deployment-dialog button:disabled { opacity: .5; }
+#application-deployment-dialog .dialog-actions { flex-wrap: wrap; }
+#application-deployment-dialog [data-error] { color: #f2c69a; }

@@ -87,6 +87,7 @@ internal static class Validation
                 break;
             case JsonValueKind.Array:
                 invalid = value.GetArrayLength() < Bound(schema, "minItems", 0) || value.GetArrayLength() > Bound(schema, "maxItems", 10000);
+                if (Flag(schema, "applicationFiles")) invalid |= !ApplicationFiles(value);
                 if (Flag(schema, "uniqueItems")) invalid |= value.EnumerateArray().Select(v => v.GetRawText()).Distinct().Count() != value.GetArrayLength();
                 if (schema.TryGetProperty("element", out var element)) foreach (var v in value.EnumerateArray()) Check(element, v);
                 break;
@@ -102,4 +103,26 @@ internal static class Validation
         if (schema.TryGetProperty("rules", out var rules)) invalid |= rules.EnumerateArray().Any(r => !Present(Rule(r, value)));
         if (invalid) throw new JsonException("Value violates the owned protocol constraints");
     }
+    // This codec-only check bounds the complete package, including case-insensitive collisions.
+    private static bool ApplicationFiles(JsonElement files)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var total = 0;
+        var manifest = false;
+        foreach (var file in files.EnumerateArray())
+        {
+            if (file.ValueKind != JsonValueKind.Object || !file.TryGetProperty("path", out var p) || !file.TryGetProperty("text", out var t) || p.ValueKind != JsonValueKind.String || t.ValueKind != JsonValueKind.String) return false;
+            var path = p.GetString()!; var text = t.GetString()!;
+            if (path.Length > 512 || path.Split('/').Length > 17 || !System.Text.RegularExpressions.Regex.IsMatch(path, @"^[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*\z") || !paths.Add(path)) return false;
+            if (path.Split('/').Any(segment => new[] {".", "..", "node_modules", "build", "__pycache__"}.Contains(segment))) return false;
+            int bytes;
+            try { bytes = new System.Text.UTF8Encoding(false, true).GetByteCount(text); }
+            catch (System.Text.EncoderFallbackException) { return false; }
+            if (text.Contains('\0') || bytes > 65536) return false;
+            total += bytes;
+            manifest |= path == "plowshare.json";
+        }
+        return total <= 131072 && manifest && !paths.Any(path => paths.Any(other => other.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase)));
+    }
+
 }

@@ -127,3 +127,18 @@ sessions, Personal checkouts, bookmarks, drafts and job receipts. Switching clos
 local access without cancelling server work or replaying an uncertain submission.
 See [shared local login](../client-login.md) for precedence, storage, migration,
 rename/remove and recovery behavior.
+
+## Deploy an Application
+
+Desktop offers **Deploy** beside Applications for connected server administrators.
+Choose a folder containing `plowshare.json`, enter the project and explicit server
+FileStore destination, and read deployment status before submitting. The CLI
+provides `application deploy ./folder '<deployment JSON>'`. Server resource loading
+continues after the client closes. Updates retain project identity and its durable
+work; activation selects a retained source revision.
+
+After an uncertain reply, inspect the retained request receipt. Desktop preserves
+its pending submission across reload and provides **Read pending receipt**. It
+never automatically repeats the deployment. Deployment does not start an external
+Python service or grant access/tool permissions. See [Application deployment](../projects.md#deploy-update-and-activate-an-application)
+for package limits, commands, FileStore authorization and rollback semantics.

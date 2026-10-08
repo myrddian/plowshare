@@ -1,3 +1,5 @@
+import { validateDeploymentReply } from './application-deployments.ts';
+import { validateSwarmReply } from './swarm-types.ts';
 import { validateRelayReply } from './relay.ts';
 import {
   validateEntryOrigins,
@@ -241,6 +243,8 @@ export function decodeReply<K extends keyof Replies>(
     type,
   ) as unknown as Replies[K];
   validateRelayReply(type, decoded);
+  validateSwarmReply(type, decoded);
+  validateDeploymentReply(type, decoded);
   validateEntryOrigins(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);

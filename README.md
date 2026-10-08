@@ -160,7 +160,7 @@ hooks and execution budgets. Scripts have no Node.js, filesystem or direct
 network APIs. See the [JavaScript orchestration guide](docs/scripted-orchestrations.md)
 and [bundled definitions](plowshare-server/src/main/resources/orchestrations).
 
-**Message-board swarms.** A project or server `swarm.md` selects member agents and
+**Message-board swarms.** Named definitions in an Application’s root `swarm/` select member agents and
 a root model-call budget. Topics retain messages, member conversations, approved
 subtopics and resolutions; a scheduler shares swarm slots across
 accounts, topics and members. Each pool defaults to half its chat slots, rounded
@@ -171,7 +171,7 @@ ordinary turn limit. In the desktop, a failed member offers **Retry member…** 
 an editable step limit; it continues the same conversation within the shared
 remaining budget. Board tools read the current topic with `board_read({})`;
 explicit topic arguments use `bdt_` IDs. The
-[bundled swarm](plowshare-server/src/main/resources/global/swarm.md) is an example.
+[bundled swarm](plowshare-server/src/main/resources/global/swarm/default.md) is an example.
 
 **Agent and bot messaging.** `send_message` addresses a persistent instance or a
 fresh task instance. The board transport durably queues recipient wakes, supplies

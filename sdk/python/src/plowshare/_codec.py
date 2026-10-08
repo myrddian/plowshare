@@ -147,7 +147,14 @@ def encode_request(request: contracts.Request[object]) -> tuple[str, object]:
         raise ValueError("Expected an operation-specific generated request")
     value = (
         _wire(request.selection)
-        if isinstance(request, contracts.ConversationFollowRequest)
+        if isinstance(
+            request,
+            (
+                contracts.ConversationFollowRequest,
+                contracts.RelayLogRequest,
+                contracts.RelayTopicsRequest,
+            ),
+        )
         else _wire(request)
     )
     schema = _schema(_object(_SCHEMAS["inputs"])[operation])
@@ -168,3 +175,34 @@ def decode_push(value: object) -> contracts.ServerPush:
             raise ValueError("Invalid notification envelope")
         row = dict(_object(row.get("payload")), type=row.get("type"))
     return cast(contracts.ServerPush, _decode(_schema(_SCHEMAS["pushes"]), row, False))
+
+
+def deployment_matches(operation: str, request: object, result: object) -> bool:
+    """A structural reply cannot certify a different project's retained receipt."""
+    if operation not in {
+        "application.deploy",
+        "application.activate",
+        "application.deployment.status",
+        "application.deployment.receipt",
+    }:
+        return True
+    request = _object(request)
+    if isinstance(result, contracts.ApplicationDeploymentStatusDto):
+        return (
+            operation == "application.deployment.status"
+            and result.project == request.get("project")
+        )
+    if not isinstance(result, contracts.ApplicationDeploymentReceiptDto):
+        return False
+    request_id = request.get("requestId")
+    revision = request.get("revision")
+    return (
+        result.project == request.get("project")
+        and isinstance(request_id, str)
+        and result.request_id.lower() == request_id.lower()
+        and (
+            operation != "application.activate"
+            or isinstance(revision, str)
+            and result.release.revision.lower() == revision.lower()
+        )
+    )

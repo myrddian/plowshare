@@ -83,16 +83,10 @@ import org.slf4j.LoggerFactory;
  * boot set and the failure is named once, under a key no real agent can have, in {@link
  * #refusalsFor}.
  *
- * <p><b>A deployment that keeps no data directory has no project tier to read.</b> {@link
- * DataLayout#agentsFor} and {@link DataLayout#botsFor} throw on a {@code null} root, on the same
- * reasoning {@code AgentsConfig.agentRegistry} already applies to its global tier: those methods
- * are for a caller that has already decided to read or write a path under the tree, and a boot with
- * no tree is not that caller. {@link #forCaller} asks {@link DataLayout#keepsAnything()} before it
- * stamps anything and answers with the boot set directly when it is false, so every project caller
- * on such a deployment gets exactly what a caller with no project gets. It is asked there rather
- * than in {@link #readProject} because the stamp below reaches {@code agentsFor}/{@code botsFor}
- * first, and nothing is cached for such a deployment at all: there is no directory whose change
- * could make the answer different.
+ * <p><b>Registered Applications read their resources from the server workspace.</b> They work
+ * without a definitions data directory or a connected client. Externals with no data directory
+ * retain the boot set. Application revisions participate in cache identity; a client session cannot
+ * replace the deployed tier. Invalid Application boundaries refuse resource reads.
  *
  * <p><b>A bot dropped into {@code projects/&lt;id&gt;/bots/} resolves on the next lookup, with no
  * restart</b> — spec §5, and the one thing this slice exists to deliver. The cache is therefore
@@ -304,6 +298,13 @@ public final class DefinitionResolver implements SessionCloseListener {
   public void useProjectConfiguration(
       java.util.function.Function<Long, ProjectConfiguration> source) {
     projectConfiguration = source;
+  }
+
+  private ApplicationResources applicationResources = ApplicationResources.NONE;
+
+  /** Composition supplies registered server sources; client sessions cannot replace them. */
+  public void useApplicationResources(ApplicationResources resources) {
+    applicationResources = Objects.requireNonNull(resources);
   }
 
   private final DataLayout data;
@@ -547,7 +548,7 @@ public final class DefinitionResolver implements SessionCloseListener {
     if (caller.projectId() == null || !projectExists.test(caller.projectId())) {
       return bootSet;
     }
-    if (!data.keepsAnything()) {
+    if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
       // No data directory means no tree to hold a project tier at all --
       // every caller for every project resolves to the boot set, exactly
       // as AgentsConfig.agentRegistry's own global-tier guard means no
@@ -625,14 +626,14 @@ public final class DefinitionResolver implements SessionCloseListener {
    */
   public Optional<DefaultBot> defaultBot(Caller caller) {
     Objects.requireNonNull(caller, "caller");
-    if (!data.keepsAnything()) {
+    if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
       return shippedDefaultIfDefined();
     }
     Long projectId = caller.projectId();
     if (projectId != null && projectExists.test(projectId)) {
       var manifestDefault = projectConfiguration.apply(projectId).defaultBot();
       if (manifestDefault.isPresent()) return manifestDefault;
-      Optional<DefaultBot> own = namedIn(data.botsFor(projectId).resolve(DEFAULT_FILE));
+      Optional<DefaultBot> own = namedIn(botsDirectory(projectId).resolve(DEFAULT_FILE));
       if (own.isPresent()) {
         return own;
       }
@@ -651,13 +652,15 @@ public final class DefinitionResolver implements SessionCloseListener {
       }
     }
     Long personal = personalIds.apply(caller);
-    if (personal != null && !personal.equals(projectId)) {
+    if (personal != null && !personal.equals(projectId) && data.keepsAnything()) {
       var manifestPersonal = projectConfiguration.apply(personal).defaultBot();
       if (manifestPersonal.isPresent()) return manifestPersonal;
-      Optional<DefaultBot> inherited = namedIn(data.botsFor(personal).resolve(DEFAULT_FILE));
+      Optional<DefaultBot> inherited = namedIn(botsDirectory(personal).resolve(DEFAULT_FILE));
       if (inherited.isPresent()) return inherited;
     }
-    return namedIn(data.botsFor(null).resolve(DEFAULT_FILE)).or(this::shippedDefaultIfDefined);
+    return data.keepsAnything()
+        ? namedIn(botsDirectory(null).resolve(DEFAULT_FILE)).or(this::shippedDefaultIfDefined)
+        : shippedDefaultIfDefined();
   }
 
   /**
@@ -744,7 +747,8 @@ public final class DefinitionResolver implements SessionCloseListener {
    */
   private CacheKey keyFor(Caller caller) {
     String sessionId = caller.sessionId();
-    if (sessionId == null
+    if (applicationResources.root(caller.projectId()).isPresent()
+        || sessionId == null
         || !sessionLive.test(sessionId)
         || !sessionRoots.test(caller.projectId(), sessionId)) {
       return new CacheKey(caller.projectId(), null, personalIds.apply(caller));
@@ -762,7 +766,8 @@ public final class DefinitionResolver implements SessionCloseListener {
    * of {@link #forCaller}.
    */
   private Stamp stamp(Long projectId) {
-    return new Stamp(fingerprint(data.agentsFor(projectId)), fingerprint(data.botsFor(projectId)));
+    return new Stamp(
+        fingerprint(agentsDirectory(projectId)), fingerprint(botsDirectory(projectId)));
   }
 
   /** Package-private so OrchestrationResolver stamps its directory the same way. */
@@ -789,7 +794,8 @@ public final class DefinitionResolver implements SessionCloseListener {
       // underneath the reader anyway.
       return "(unreadable)";
     }
-    return entries.toString();
+    // A release switch invalidates cached definitions even if size and modification times match.
+    return directory.toString() + "\0" + entries;
   }
 
   /**
@@ -823,14 +829,14 @@ public final class DefinitionResolver implements SessionCloseListener {
     List<DefinitionSource> layers =
         new ArrayList<>(
             List.of(
-                new FilesystemDefinitions(data.agentsFor(projectId)),
-                new FilesystemDefinitions(data.botsFor(projectId))));
+                new FilesystemDefinitions(agentsDirectory(projectId)),
+                new FilesystemDefinitions(botsDirectory(projectId))));
     if (key.sessionId() != null) {
       layers.add(new ChannelDefinitions(channel, key.sessionId()));
     }
     if (key.personalId() != null && !key.personalId().equals(projectId)) {
-      layers.add(new FilesystemDefinitions(data.agentsFor(key.personalId())));
-      layers.add(new FilesystemDefinitions(data.botsFor(key.personalId())));
+      layers.add(new FilesystemDefinitions(agentsDirectory(key.personalId())));
+      layers.add(new FilesystemDefinitions(botsDirectory(key.personalId())));
     }
     DefinitionSource tier = new LayeredDefinitions(List.copyOf(layers));
 
@@ -953,5 +959,13 @@ public final class DefinitionResolver implements SessionCloseListener {
     AgentRegistry registry = bootSet.replacing(merged);
     refusals.put(key, Map.copyOf(refused));
     return registry;
+  }
+
+  private java.nio.file.Path agentsDirectory(Long id) {
+    return applicationResources.directory(id, "agents").orElseGet(() -> data.agentsFor(id));
+  }
+
+  private java.nio.file.Path botsDirectory(Long id) {
+    return applicationResources.directory(id, "bots").orElseGet(() -> data.botsFor(id));
   }
 }

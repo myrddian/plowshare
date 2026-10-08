@@ -20,6 +20,28 @@ const fixtures = JSON.parse(
   ),
 ) as Record<ConversationOperation, Outcome>;
 const asked = (type: ConversationOperation): Request => {
+  const requestId = '11111111-1111-1111-1111-111111111111',
+    revision = '22222222-2222-2222-2222-222222222222';
+  if (type === 'application.deploy')
+    return request(type, {
+      project: 'app',
+      requestId,
+      expectedRevision: null,
+      destination: { store: 'applications', path: 'app' },
+      writableAreas: [],
+      files: [{ path: 'plowshare.json', text: '{}' }],
+    });
+  if (type === 'application.activate')
+    return request(type, {
+      project: 'app',
+      requestId,
+      expectedRevision: revision,
+      revision,
+    });
+  if (type === 'application.deployment.status')
+    return request(type, { project: 'app' });
+  if (type === 'application.deployment.receipt')
+    return request(type, { project: 'app', requestId });
   if (type === 'application.files') return request(type, { project: 'app' });
   if (type === 'application.file.read')
     return request(type, { project: 'app', path: 'plowshare.json' });

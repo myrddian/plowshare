@@ -206,6 +206,27 @@ push(
 // Portable host references must have identical strict semantics in every SDK.
 const root = { store: 'applications', path: 'chatbot' };
 const area = { store: 'outputs', path: 'chatbot/reports' };
+const deployment = { project: 'app', requestId: receipt, expectedRevision: null, destination: root, writableAreas: [], files: [{path:'plowshare.json',text:'{"version":1}'}] };
+input('application.deploy', deployment, true);
+input('application.deploy', {...deployment,files:[...deployment.files,{path:'agents/worker.md',text:'source'}]},true);
+input('application.deploy', {...deployment,files:[...deployment.files,{path:'.plowshare/agents/worker.md',text:'source'}]},false);
+input('application.deploy', {...deployment,requestId:receipt+'\n'},false);
+input('application.deploy', {...deployment,files:[...deployment.files,{path:'notes.md\n',text:'x'}]},false);
+input('application.deploy', {...deployment, expectedRevision: receipt}, true);
+input('application.deploy', {...deployment,destination:{store:'applications',path:''}},false);
+input('application.deploy', {...deployment, files: []}, false);
+input('application.deploy', {...deployment, files: [{path:'../escape',text:'x'}]}, false);
+input('application.deploy', {...deployment, files: [{path:'plowshare.json',text:'x'}, {path:'Plowshare.json',text:'x'}]}, false);
+input('application.deploy', {...deployment, files: [{path:'plowshare.json',text:'x'}, {path:'a',text:'😀'.repeat(16384)}, {path:'b',text:'😀'.repeat(16384)}]}, false);
+input('application.deploy', {...deployment, files: [{path:'plowshare.json',text:'x'}, {path:'a',text:'x'}, {path:'a/b',text:'x'}]}, false);
+input('application.deploy', {...deployment, files: [{path:'plowshare.json',text:'x'}, {path:'.env',text:'x'}]}, false);
+input('application.deploy', {...deployment,files:[...deployment.files,{path:'a/'.repeat(17)+'file',text:'x'}]},false);
+input('application.activate', {project:'app',requestId:receipt,expectedRevision:receipt,revision:receipt}, true);
+input('application.activate', {project:'app',requestId:receipt,expectedRevision:null,revision:receipt}, false);
+result('application.deploy', {project:'app',requestId:receipt,release:{revision:receipt,digest:'a'.repeat(64),fileCount:1}}, true);
+result('application.deployment.status', {project:'app',activeRevision:null,releases:[]}, true);
+result('application.deploy',{project:'app',requestId:receipt,release:{revision:receipt,digest:'a'.repeat(64)+'\n',fileCount:1}},false);
+result('application.deployment.status', {project:'app',activeRevision:receipt,releases:[{revision:receipt,digest:'a'.repeat(64),fileCount:0}]}, false);
 input('application.create', { name: 'chatbot', applicationRoot: root, writableAreas: [area] }, true);
 input('application.storage.set', { project: 'chatbot', applicationRoot: root, writableAreas: [] }, true);
 input('application.create', { name: 'chatbot', applicationRoot: root }, false);
@@ -230,6 +251,19 @@ for (const invalid of [
   if (!('extra' in invalid)) result('application.file.read', { ...file, location: invalid }, false);
 }
 input('application.files', { project: 'chatbot', location: { store: 'outputs', path: '' } }, true);
+
+const namedSelection = {name:'privacy', revision:'a'.repeat(64), description:'Review privacy', members:['researcher'], budget:20};
+const namedType = {name:'privacy', members:['researcher'], budget:20, refused:{}, origin:'swarm/privacy.md', selection:namedSelection};
+result('swarm.types', {project:'fixture', types:[namedType]}, true);
+result('swarm.types', {project:'fixture', types:[]}, true);
+for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget:2.5}, {description:'x'.repeat(4097)}, {members:['researcher','researcher']}, {members:[' ']}])
+  result('swarm.types', {project:'fixture', types:[{...namedType, selection:{...namedSelection,...change}}]}, false);
+result('swarm.types', {project:'fixture', types:[{...namedType, members:['critic']}]}, false);
+const namedOpening = {project:'fixture',title:'Topic',label:'Review',body:'Evidence',requestId:receipt,swarm:'privacy'};
+input('board.open', namedOpening, true);
+for (const swarm of ['../privacy', 'Privacy', '', 'p'.repeat(65), null]) input('board.open', {...namedOpening,swarm}, false);
+input('swarm.types', {project:'fixture'}, true);
+input('swarm.types', {}, false);
 for (const test of cases) {
   let accepted = true;
   try {

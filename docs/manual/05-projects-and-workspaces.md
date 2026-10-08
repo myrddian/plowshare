@@ -24,6 +24,8 @@ role changes, recovery and service-token ceilings.
 
 An Application is a folder with a valid root `plowshare.json`, using the existing
 `.plowshare/` conventions for skills, agents, bots, relay and hooks underneath it.
+Named swarm definitions live directly in root `swarm/*.md` or `swarm/*.json`;
+a project can expose several types, selected per topic. See [swarms](14-swarm-board.md).
 Older identity formats and `.plowshare/` alone remain Externals; remote file
 access and coding-agent work appear under **Projects** in the GUI, CLI and TUI.
 Managed server projects appear under **Applications**, with a valid manifest and

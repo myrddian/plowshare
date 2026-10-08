@@ -15,11 +15,90 @@ from plowshare._codec import (
     _wire,
     decode_push,
     decode_reply,
+    deployment_matches,
     encode_request,
 )
 
 
 class ContractsTest(unittest.TestCase):
+    def test_deployment_receipt_coordinates_are_checked(self) -> None:
+        asked = {
+            "project": "app",
+            "requestId": "11111111-1111-1111-1111-111111111111",
+            "revision": "22222222-2222-2222-2222-222222222222",
+        }
+        result = decode_reply(
+            "application.activate",
+            {
+                "project": "app",
+                "requestId": asked["requestId"],
+                "release": {
+                    "revision": asked["revision"],
+                    "digest": "a" * 64,
+                    "fileCount": 1,
+                },
+            },
+        )
+        self.assertTrue(deployment_matches("application.activate", asked, result))
+        self.assertFalse(
+            deployment_matches(
+                "application.activate", {**asked, "project": "other"}, result
+            )
+        )
+        self.assertFalse(
+            deployment_matches(
+                "application.activate",
+                {**asked, "requestId": "33333333-3333-3333-3333-333333333333"},
+                result,
+            )
+        )
+        self.assertFalse(
+            deployment_matches(
+                "application.activate",
+                {**asked, "revision": "33333333-3333-3333-3333-333333333333"},
+                result,
+            )
+        )
+
+    def test_selection_request_wrappers_emit_the_selected_operation_payload(
+        self,
+    ) -> None:
+        samples = (
+            (
+                contracts.ConversationFollowRequest(
+                    selection=contracts.ConversationFollowPayloadVariant1Dto(
+                        conversation="cnv_fixture"
+                    )
+                ),
+                {"conversation": "cnv_fixture"},
+            ),
+            (
+                contracts.RelayLogRequest(
+                    selection=contracts.RelayLogPayloadVariant1Dto(
+                        project="fixture",
+                        topic="tool.scanner.inspect.result",
+                        system=False,
+                    )
+                ),
+                {
+                    "project": "fixture",
+                    "topic": "tool.scanner.inspect.result",
+                    "system": False,
+                },
+            ),
+            (
+                contracts.RelayTopicsRequest(
+                    selection=contracts.RelayTopicsPayloadVariant1Dto(
+                        project="fixture", system=False
+                    )
+                ),
+                {"project": "fixture", "system": False},
+            ),
+        )
+        for request, expected in samples:
+            with self.subTest(operation=request.operation):
+                self.assertEqual((request.operation, expected), encode_request(request))
+
     def test_shared_boundary_cases(self) -> None:
         path = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"])
         cases = cast(list[dict[str, object]], json.loads(path.read_text()))

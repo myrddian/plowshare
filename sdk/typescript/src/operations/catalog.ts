@@ -1,3 +1,4 @@
+import type { ApplicationSourceFile } from './application-deployments.ts';
 import type { RelayPayloads } from './relay.ts';
 import type { MessagingPayloads } from './messaging.ts';
 import type { UsagePayloads } from './usage.ts';
@@ -59,6 +60,7 @@ export interface ExtendedPayloads
   'board.topics': Tier & Page;
   'board.messages': { readonly topic: string };
   'swarm.status': Record<string, never>;
+  'swarm.types': { readonly project: string };
   'job.list': Record<string, never>;
   'job.limits': Turns & Budget & { readonly job: string };
   'document.ask': Budget & {
@@ -154,6 +156,25 @@ export interface ExtendedPayloads
   'admin.service.token.revoke': {
     readonly handle: string;
     readonly id: string;
+  };
+  'application.deploy': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly expectedRevision: string | null;
+    readonly destination: FileStoreReference;
+    readonly writableAreas: readonly FileStoreReference[];
+    readonly files: readonly ApplicationSourceFile[];
+  };
+  'application.activate': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly expectedRevision: string;
+    readonly revision: string;
+  };
+  'application.deployment.status': { readonly project: string };
+  'application.deployment.receipt': {
+    readonly project: string;
+    readonly requestId: string;
   };
   'application.create': {
     readonly name: string;
@@ -344,6 +365,10 @@ export const CLI_OPERATIONS = {
   'application files': 'application.files',
   'application read': 'application.file.read',
   'application save': 'application.file.save',
+  'application deploy': 'application.deploy',
+  'application activate': 'application.activate',
+  'application deployment status': 'application.deployment.status',
+  'application deployment receipt': 'application.deployment.receipt',
   'application create': 'application.create',
   'application storage set': 'application.storage.set',
   'project list': 'project.list',
@@ -372,6 +397,7 @@ export const CLI_OPERATIONS = {
   'board topics': 'board.topics',
   'board messages': 'board.messages',
   'swarm status': 'swarm.status',
+  'swarm types': 'swarm.types',
   'board topup': 'board.topup',
   'board retry': 'board.retry',
   'board post': 'board.post',

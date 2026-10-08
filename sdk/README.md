@@ -18,3 +18,6 @@ All variants follow the [coding standards](../docs/coding-standards.md), with
 [TypeScript](../docs/typescript-standards.md) and
 [native SDK](../docs/native-sdk-standards.md) requirements for their languages.
 External SDK consumers belong in [integrations](../integrations/README.md).
+
+All variants expose the [named Relay tool façade](../docs/relay-tools.md), including
+configuration export, typed handlers, durable receipts and read-only reconciliation.

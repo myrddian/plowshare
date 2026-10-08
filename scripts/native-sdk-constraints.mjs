@@ -43,6 +43,7 @@ function resolve(graph, s) {
   return s.$ref ? resolve(graph, graph.$defs[s.$ref.split('/').at(-1)]) : s;
 }
 export function constrain(graph) {
+  const namedSwarm = { pattern: '^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$', minLength: 1, maxLength: 64 };
   const add = (s, c) => Object.assign(s, c);
   const rules = (s, ...values) => (s.rules = [...(s.rules ?? []), ...values]);
   const field = (s, k, c) => {
@@ -62,6 +63,7 @@ export function constrain(graph) {
     const s = resolve(graph, ref),
       extended = SHAPES[op];
     if (s.anyOf) continue;
+    if (op === 'board.open') field(s, 'swarm', namedSwarm);
     for (const [k, v] of Object.entries(s.properties ?? {})) {
       if (
         (extended || s.required?.includes(k)) &&
@@ -157,6 +159,19 @@ export function constrain(graph) {
     if (op === 'project.create') {
       const f = s.properties.writePaths;
       if (f) add(f, { element: { safeRelativePath: true, minLength: 1 } });
+    }
+    if (op === 'application.deploy') {
+      rules(s, present('destination.path'));
+      field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
+      field(s, 'files', {minItems:1, maxItems:128, applicationFiles:true});
+      const file = resolve(graph, resolve(graph, s.properties.files).items);
+      field(file, 'path', {maxLength:512});
+      field(file, 'text', {maxLength:65536, noNul:true});
+    }
+    if (['application.deploy','application.activate','application.deployment.receipt'].includes(op)) field(s, 'requestId', {minLength:36,maxLength:36});
+    if (op === 'application.deploy' || op === 'application.activate') {
+      field(s, 'expectedRevision', {pattern:uuid,minLength:36,maxLength:36});
+      if (op === 'application.activate') field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36});
     }
     if (op === 'application.create' || op === 'application.storage.set') {
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
@@ -320,6 +335,23 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'ApplicationRelease') { field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'digest', {pattern:'^[a-f0-9]{64}$',minLength:64,maxLength:64}); field(s, 'fileCount', integer(1,128)); }
+    if (title === 'ApplicationDeploymentReceipt') field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
+    if (title === 'ApplicationDeploymentStatus') { field(s, 'activeRevision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'releases', {maxItems:100}); }
+    if (title === 'BoardOpened') rules(s, not(eq('topic.swarm', null)));
+    if (title === 'BoardMessages') rules(s, {eq:[g('topic.swarm'),g('root.swarm')]});
+    if (title === 'SwarmSelection') {
+      field(s, 'name', namedSwarm);
+      field(s, 'revision', { pattern: '^[a-f0-9]{64}$' });
+      field(s, 'description', text(4096));
+      s.properties.members = { type:'array', minItems: 1, maxItems: 64, uniqueItems: true, items:{type:'string', minLength:1, nonblank:true, maxLength:128, noNul:true} };
+      field(s, 'budget', integer(2));
+    }
+    if (title === 'SwarmType') {
+      field(s, 'name', namedSwarm); field(s, 'members', {maxItems:64,uniqueItems:true}); field(s, 'budget', integer(2));
+      rules(s, implies(not(eq('selection', null)), and({eq:[g('selection.name'),g('name')]},{eq:[g('selection.budget'),g('budget')]},{eq:[g('selection.members'),g('members')]})), implies(eq('selection',null),eq('members',[])));
+    }
+    if (title === 'SwarmTypes') field(s, 'types', {maxItems:64});
     if (title === 'FileStoreReference') {
       field(s, 'store', {pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
       field(s, 'path', {maxLength:2048,canonicalRelativePath:true});

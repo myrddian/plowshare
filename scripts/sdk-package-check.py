@@ -29,13 +29,16 @@ def main():
     (node / 'entry.mjs').write_text("export * from 'plowshare-client-node'\n")
     (node / 'types.ts').write_text("import { connectPlowshare, type Reply, type Payloads } from 'plowshare-client-node'\nconst payload: Payloads['project.list'] = {}\nasync function exercise(origin: string, token: string): Promise<Reply> { const client = await connectPlowshare({ origin, token }); try { return await client.request('project.list', payload) } finally { client.close() } }\n")
     run('node', str(ROOT / 'sdk/node/node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'ES2022', '--lib', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.ts', cwd=node)
+    with (node / 'types.ts').open('a') as checks:
+        checks.write("import { ToolProvider, nodeToolHost, type ToolJournal, type ToolBinding } from 'plowshare-client-node/tools'\nimport type { ToolDeclaration } from 'plowshare-client-ts'\nconst scope: ToolDeclaration = { name: 'network_scope', description: 'Inspect scope', parameters: [], timeoutSeconds: 30 }\nasync function tools(client: Parameters<typeof ToolProvider.create>[0], binding: ToolBinding, journal: ToolJournal) { return ToolProvider.create(client, binding, [{ declaration: scope, handler: async () => ({ state: 'COMPLETED', text: 'scope' }) }], journal, nodeToolHost) }\n")
+    run('node', str(ROOT / 'sdk/node/node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'ES2022', '--lib', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.ts', cwd=node)
     env['PLOWSHARE_SDK_NODE_ENTRY'] = (node / 'entry.mjs').as_uri()
 
     python = tool('PLOWSHARE_SDK_PYTHON', 'python3', ROOT / 'build/sdk-python-env/bin/python')
     run(python, '-m', 'venv', str(base / 'python'))
     python = str(base / 'python/bin/python')
     run(python, '-m', 'pip', 'install', str(OUT / 'plowshare_sdk-0.1.0-py3-none-any.whl'))
-    run(python, '-I', '-c', 'import plowshare; from pathlib import Path; import sys; assert Path(plowshare.__file__).is_relative_to(Path(sys.prefix))')
+    run(python, '-I', '-c', 'import plowshare; from plowshare import ToolProvider, ToolDeclaration, SqliteToolJournal; from pathlib import Path; import sys; assert Path(plowshare.__file__).is_relative_to(Path(sys.prefix))')
     env['PLOWSHARE_SDK_PYTHON'] = python
     env['PLOWSHARE_SDK_PYTHONPATH'] = ''
 
@@ -43,6 +46,7 @@ def main():
     dotnet.mkdir()
     shutil.copy(ROOT / 'sdk/dotnet/Conformance/Program.cs', dotnet / 'Program.cs')
     (dotnet / 'Consumer.csproj').write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><RollForward>Major</RollForward><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup><PackageReference Include="Plowshare.Sdk" Version="0.1.0" /></ItemGroup></Project>')
+    (dotnet / 'ToolsConsumer.cs').write_text("using Plowshare.Sdk;\ninternal static class ToolsConsumer { internal static ToolProvider Create(Client client, ToolBinding binding, IToolJournal journal) => new(new SdkToolRelayPorts(client), binding, [new RegisteredTool(new ToolDeclaration(\"network_scope\", \"Inspect scope\", [], 30), (call, token) => Task.FromResult(new ToolResult(\"COMPLETED\", \"scope\")))], journal); }\n")
     dotnet_tool = tool('PLOWSHARE_SDK_DOTNET', 'dotnet', ROOT / 'build/dotnet/dotnet')
     env['NUGET_PACKAGES'] = str(base / 'nuget')
     run(dotnet_tool, 'build', str(dotnet), '--source', str(OUT), '--source', 'https://api.nuget.org/v3/index.json', '--nologo')
@@ -57,6 +61,7 @@ def main():
     (consumer / 'cmd/conformance').mkdir(parents=True)
     shutil.copy(ROOT / 'sdk/go/cmd/conformance/main.go', consumer / 'cmd/conformance/main.go')
     (consumer / 'go.mod').write_text('module sdk-consumer-fixture\n\ngo 1.23.0\nrequire io.aeyer/plowshare/sdk v0.1.0\nreplace io.aeyer/plowshare/sdk => ../plowshare-sdk-go\n')
+    (consumer / 'cmd/conformance/tools.go').write_text('package main\nimport ("context"; sdk "io.aeyer/plowshare/sdk")\nfunc tools(client *sdk.Client, binding sdk.ToolBinding, journal sdk.ToolJournal) (*sdk.ToolProvider, error) { return sdk.NewToolProvider(client,binding,[]sdk.RegisteredTool{{Declaration:sdk.ToolDeclaration{Name:"network_scope",Description:"Inspect scope",TimeoutSeconds:30},Handler:func(context.Context,sdk.ToolCall)(sdk.ToolResult,error){return sdk.ToolResult{State:"COMPLETED",Text:"scope"},nil}}},journal) }\n')
     go_tool = tool('PLOWSHARE_SDK_GO', 'go')
     run(go_tool, 'mod', 'tidy', cwd=consumer)
     env['PLOWSHARE_SDK_GO_ROOT'] = str(consumer)

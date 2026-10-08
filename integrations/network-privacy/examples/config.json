@@ -1,0 +1,19 @@
+{
+  "origin": "https://plowshare.example.invalid",
+  "project": "network-privacy-watch",
+  "collector": "home-network",
+  "tokenEnvironment": "PLOWSHARE_TOKEN",
+  "webTokenEnvironment": "PRIVACY_WEB_TOKEN",
+  "stateDirectory": "/replace-with-private-collector-state",
+  "requestTopic": "privacy.scan.requests",
+  "resultTopic": "privacy.scan.completed",
+  "group": "privacy-home-network",
+  "schedule": "REPLACE_WITH_SCHEDULE_INTERNAL_NAME",
+  "collection": {
+    "mode": "tcp",
+    "targets": ["192.0.2.10"],
+    "ports": [443, 8008],
+    "timeoutSeconds": 1,
+    "concurrency": 4
+  }
+}

@@ -1,4 +1,9 @@
 import {
+  applicationFiles,
+  ApplicationSourceError,
+} from 'plowshare-client-node/applications';
+import { decodeRequest } from 'plowshare-client-ts/operations/schema';
+import {
   FileStores,
   manageFileStores,
   localStorePath,
@@ -520,6 +525,49 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
         throw new Usage('stdin must contain a JSON object');
       command += ' ' + JSON.stringify(payload);
     }
+    // Folder deployment snapshots local source once. All other arguments remain the shared DTO;
+    // a caller retains requestId before submission and reads a receipt after uncertain delivery.
+    let deployment: ReturnType<typeof decodeRequest> | undefined;
+    if (
+      command.startsWith('application deploy ') &&
+      !command.slice(19).trimStart().startsWith('{')
+    ) {
+      const input = command.slice('application deploy '.length);
+      const jsonAt = input.indexOf('{');
+      if (jsonAt < 1)
+        throw new Usage(
+          'application deploy needs a local folder followed by deployment JSON',
+        );
+      const folder = input.slice(0, jsonAt).trim();
+      let raw: unknown;
+      try {
+        raw = JSON.parse(input.slice(jsonAt));
+      } catch {
+        throw new Usage('Deployment options must be JSON');
+      }
+      if (
+        typeof raw !== 'object' ||
+        raw === null ||
+        isList(raw) ||
+        'files' in raw
+      )
+        throw new Usage(
+          'Folder deployment options must be an object without files',
+        );
+      try {
+        deployment = decodeRequest('application.deploy', {
+          ...raw,
+          files: await applicationFiles(folder),
+        });
+      } catch (error) {
+        throw new Usage(
+          error instanceof ApplicationSourceError
+            ? error.message
+            : 'Application deployment options or source could not be read; review the deployment JSON and selected source folder',
+          { cause: error },
+        );
+      }
+    }
     const presence = command === 'client root';
     const sync = command.startsWith('sync ')
       ? syncAction(command.slice(5) === 'status' ? '' : command.slice(5))
@@ -566,8 +614,9 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       throw new Usage(
         'conversation follow takes one id and runs until interrupt or deadline; do not use --wait, --watch or --payload',
       );
-    let parsed =
-      presence || sync !== undefined
+    let parsed = deployment
+      ? { kind: 'request' as const, request: deployment }
+      : presence || sync !== undefined
         ? {
             kind: 'request' as const,
             request: request('union.status', { project: opts.project! }),

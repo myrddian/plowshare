@@ -14,7 +14,13 @@ from uuid import uuid4
 from websockets.asyncio.client import ClientConnection, connect
 
 from . import contracts
-from ._codec import _object, decode_push, decode_reply, encode_request
+from ._codec import (
+    _object,
+    decode_push,
+    decode_reply,
+    deployment_matches,
+    encode_request,
+)
 from ._protocol import CODES, PROTOCOL_VERSION
 
 T = TypeVar("T")
@@ -165,7 +171,17 @@ class Client:
                     submitted = True
                     await self._socket.send(wire)
                 outcome = await asyncio.shield(future)
-                # The reader has fully validated the schema paired with this request.
+                # The reader validates structure; the submitting caller checks receipt ownership.
+                if outcome.code in {
+                    "OK",
+                    "CREATED",
+                    "ACCEPTED",
+                    "NO_CONTENT",
+                } and not deployment_matches(operation, payload, outcome.payload):
+                    raise TransportError(
+                        Delivery.INVALID_RESPONSE,
+                        "Foreign Application deployment receipt; outcome is unknown",
+                    )
                 return Reply(outcome.code, outcome.said, cast(T, outcome.payload))
         except TransportError:
             raise

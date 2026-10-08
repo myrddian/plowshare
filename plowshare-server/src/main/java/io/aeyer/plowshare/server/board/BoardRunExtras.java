@@ -46,7 +46,8 @@ public final class BoardRunExtras implements RunExtras {
       // messaging transport never exposes its own seat or board tools.
       return new Extras(
           context.definition().board()
-              ? List.of(messaging.tool(context), BoardTools.open(opening(context)))
+              ? List.of(
+                  messaging.tool(context), BoardTools.open(opening(context)), swarmTypes(context))
               : List.of(messaging.tool(context)),
           context.end(),
           false);
@@ -71,8 +72,9 @@ public final class BoardRunExtras implements RunExtras {
         && isPersons(conversation)) {
       return new Extras(
           messaging == null
-              ? List.of(BoardTools.open(opening(context)))
-              : List.of(BoardTools.open(opening(context)), messaging.tool(context)),
+              ? List.of(BoardTools.open(opening(context)), swarmTypes(context))
+              : List.of(
+                  BoardTools.open(opening(context)), messaging.tool(context), swarmTypes(context)),
           context.end(),
           false);
     }
@@ -89,8 +91,22 @@ public final class BoardRunExtras implements RunExtras {
     return conversations.find(conversation).map(row -> row.origin() == Origin.TURN).orElse(false);
   }
 
+  private io.aeyer.plowshare.server.agents.AgentTool swarmTypes(Context context) {
+    return BoardTools.types(
+        () -> {
+          try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(board.swarmTypes(context.home().project()));
+          } catch (Board.Refused refused) {
+            return refused.getMessage();
+          } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+            throw new IllegalStateException("Swarm types could not be encoded", failed);
+          }
+        });
+  }
+
   private BoardTools.Opening opening(Context context) {
-    return (title, label, body, budget) -> {
+    return (title, label, body, budget, swarm) -> {
       String account =
           context.callerHandle() != null
               ? context.callerHandle()
@@ -111,7 +127,8 @@ public final class BoardRunExtras implements RunExtras {
                     context.definition().bot() ? BoardTopic.BY_BOT : BoardTopic.BY_AGENT,
                     context.definition().name(),
                     context.conversationId(),
-                    budget));
+                    budget,
+                    swarm));
         return "Opened "
             + opened.topic().id()
             + " — ["

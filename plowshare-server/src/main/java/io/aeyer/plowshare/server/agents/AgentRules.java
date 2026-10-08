@@ -20,6 +20,12 @@ public final class AgentRules {
     personalIds = ids;
   }
 
+  private ApplicationResources resources = ApplicationResources.NONE;
+
+  public void useApplicationResources(ApplicationResources resources) {
+    this.resources = resources;
+  }
+
   private final DataLayout data;
   private final SessionChannel channel;
   private final Predicate<String> live;
@@ -65,7 +71,8 @@ public final class AgentRules {
       addDisk(rules, data.agentsFor(personal).getParent(), "personal");
       addDisk(rules, data.agentsFor(personal).resolve(agent), "agent:" + agent);
     }
-    if (caller.projectId() != null
+    if (resources.root(caller.projectId()).isEmpty()
+        && caller.projectId() != null
         && caller.sessionId() != null
         && live.test(caller.sessionId())
         && roots.test(caller.projectId(), caller.sessionId())) {
@@ -74,10 +81,14 @@ public final class AgentRules {
       addChannel(rules, files, ".plowshare", "");
       addChannel(rules, files, ".plowshare/agents/" + agent, "agent:" + agent);
     }
-    if (data.keepsAnything() && caller.projectId() != null) {
-      Path tier = data.agentsFor(caller.projectId()).getParent();
+    if (caller.projectId() != null
+        && (data.keepsAnything() || resources.root(caller.projectId()).isPresent())) {
+      Path tier =
+          resources
+              .directory(caller.projectId(), "")
+              .orElseGet(() -> data.agentsFor(caller.projectId()).getParent());
       for (String scope : scopes) addDisk(rules, tier.resolve(scope), scope);
-      addDisk(rules, data.agentsFor(caller.projectId()).resolve(agent), "agent:" + agent);
+      addDisk(rules, tier.resolve("agents").resolve(agent), "agent:" + agent);
     }
     long bytes =
         rules.stream()

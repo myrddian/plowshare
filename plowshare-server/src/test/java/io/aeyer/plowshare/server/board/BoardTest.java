@@ -711,7 +711,7 @@ class BoardTest {
     Board service =
         new Board(
             racing,
-            project -> BoardFixture.TWO,
+            project -> List.of(BoardFixture.TWO),
             conversations,
             fixture.firings,
             drained::add,

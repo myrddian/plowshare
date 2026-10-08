@@ -71,15 +71,20 @@ public class BoardConfig {
   }
 
   /**
-   * {@code swarm.md} as the project's resolved agents see it — the same resolution a run in that
-   * project gets, without a session: a swarm is the project's, never one client's.
+   * {@code swarm/} definitions as the project's resolved agents see it — the same resolution a run
+   * in that project gets, without a session: a swarm is the project's, never one client's.
    */
   @Bean
   public SwarmDefinitions swarmDefinitions(
-      DataLayout data, DefinitionResolver resolver, LlmDispatcher llm) {
+      DataLayout data,
+      DefinitionResolver resolver,
+      LlmDispatcher llm,
+      io.aeyer.plowshare.server.archive.ProjectWorkspaces projects,
+      io.aeyer.plowshare.server.agents.ApplicationPolicy applications,
+      Callers callers) {
     return new SwarmDefinitions(
-        data,
-        projectId -> resolver.forCaller(new DefinitionResolver.Caller(projectId, null)),
+        new ServerSwarmSources(projects, applications, data),
+        project -> resolver.forCaller(callers.callerFor(project, null)),
         new DispatcherPools(llm));
   }
 
@@ -241,9 +246,8 @@ public class BoardConfig {
   }
 
   /**
-   * A topic's project is a name; {@link Callers#callerFor} turns it into the id {@code swarm.md} is
-   * looked up under, leniently — a name with no project row resolves to the global tier's swarm, as
-   * a run's own caller would.
+   * New topics select a named project definition; all later board actions use retained
+   * participants.
    *
    * <p><b>A bound closing reserve outside 0–99 is refused here</b>, for {@code SwarmConfig}'s
    * reason: the live read falls back to the bound value whenever the map holds nothing usable, so a
@@ -254,7 +258,7 @@ public class BoardConfig {
   @Bean
   public Board board(
       BoardStore store,
-      SwarmDefinitions swarms,
+      SwarmCatalog swarms,
       Callers callers,
       ConversationStore conversations,
       FiringStore firings,
@@ -275,7 +279,7 @@ public class BoardConfig {
     Board board =
         new Board(
             store,
-            project -> swarms.forProject(callers.callerFor(project, null).projectId()),
+            swarms,
             conversations,
             firings,
             dispatcher::drain,
@@ -293,9 +297,9 @@ public class BoardConfig {
   /**
    * The seat runner, and the dispatcher's wakes handed to it here — see this class's javadoc for
    * why here. A member's definition is read as its project's caller reads it, without the exported
-   * check: a seat is the swarm's, and {@code swarm.md} already refused any member that does not
-   * resolve. It is handed the dispatcher's drain as well, for the wakes it leaves queued while
-   * their root's pot is leased out: a settle drains them.
+   * check: a seat is the swarm's, and the selected swarm definition already refused any member that
+   * does not resolve. It is handed the dispatcher's drain as well, for the wakes it leaves queued
+   * while their root's pot is leased out: a settle drains them.
    *
    * <p>A bound wake cap below one is refused here, for the closing reserve's reason above; the
    * runner's own floor of one would otherwise hide it as a cap of one step.
@@ -418,10 +422,10 @@ public class BoardConfig {
    * exactly as it always did.
    *
    * <p><b>An opener seat answers empty too</b> — the final review's I-3. The opener is the person's
-   * own bot, and {@code swarm.md} checks only its members' models against the pools that declare
-   * {@code swarm:} slots; a bot's model may be served by none of them, and its scheduled run would
-   * then wait for a slot forever. The swarm slots ration members; the opener runs unscheduled, as
-   * that bot's own turns in its person's conversation do.
+   * own bot, and the selected swarm definition checks only its members' models against the pools
+   * that declare {@code swarm:} slots; a bot's model may be served by none of them, and its
+   * scheduled run would then wait for a slot forever. The swarm slots ration members; the opener
+   * runs unscheduled, as that bot's own turns in its person's conversation do.
    */
   public static Function<RunExtras.Context, Optional<SwarmScheduler.Share>> shareOf(
       BoardStore store) {

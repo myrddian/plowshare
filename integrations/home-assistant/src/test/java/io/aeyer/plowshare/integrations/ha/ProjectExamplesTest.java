@@ -26,7 +26,7 @@ class ProjectExamplesTest {
     assertTrue(boundary.accounts().isEmpty());
     assertTrue(boundary.limit("ungranted", Optional.of(ProjectRole.MANAGER)).isEmpty());
     assertFalse(Files.exists(application.resolve("plowshare")));
-    Path definitions = application.resolve(".plowshare");
+    Path definitions = application;
     Set<String> tools = Set.of("outgoing_peers", "outgoing_send", "outgoing_read");
     AgentRegistry agents = AgentRegistry.of(definitions.resolve("agents"), tools, Set.of());
     assertTrue(agents.disabled().isEmpty(), agents.disabled().toString());

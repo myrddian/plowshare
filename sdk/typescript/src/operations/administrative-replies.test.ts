@@ -344,6 +344,7 @@ describe('complete administrative WS replies', () => {
           'reserve',
           'quietNotifiedAt',
           'closedAt',
+          'swarm',
         ],
       ],
       ['BufferPurgeReport', 'server/buffers/Buffers', 'BufferPurgeReport', []],

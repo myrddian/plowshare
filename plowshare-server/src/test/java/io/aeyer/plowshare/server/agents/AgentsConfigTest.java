@@ -129,6 +129,7 @@ class AgentsConfigTest {
         // which is DataProperties' whole argument for the blank.
         .withUserConfiguration(AgentsConfig.class, DataConfig.class)
         .withBean(FileStores.class, () -> FileStores.NONE)
+        .withBean(ApplicationResources.class, () -> ApplicationResources.NONE)
         .withBean(LlmDispatcher.class, () -> dispatcher)
         // THE SHIPPED PROFILES, and read(null) is what a server with no
         // sampling directory gets -- which is the state most of these

@@ -171,6 +171,31 @@ class DefinitionResolverTest {
   }
 
   @Test
+  void deployed_application_needs_no_data_or_client_and_release_switch_invalidates_cache(
+      @TempDir Path root) throws Exception {
+    Path first = root.resolve("first"), second = root.resolve("second");
+    write(first.resolve("bots"), "worker", "first prompt");
+    write(second.resolve("bots"), "worker", "other prompt");
+    var mtime = Files.getLastModifiedTime(first.resolve("bots/worker.md"));
+    Files.setLastModifiedTime(second.resolve("bots/worker.md"), mtime);
+    AtomicReference<Path> active = new AtomicReference<>(first);
+    FakeFiles client = clientOffering("clientonly");
+    var resolver = resolverOver(new DataLayout(null), client);
+    resolver.useApplicationResources(
+        id -> id == null ? Optional.empty() : Optional.of(active.get()));
+    var caller = new DefinitionResolver.Caller(7L, "connected-client");
+    org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> resolver.defaultBot(caller));
+    AgentRegistry initial = resolver.forCaller(caller);
+    assertTrue(initial.get("worker").prompt().contains("first prompt"));
+    assertFalse(initial.names().contains("clientonly"));
+    active.set(second);
+    AgentRegistry updated = resolver.forCaller(caller);
+    assertNotSame(initial, updated);
+    assertTrue(updated.get("worker").prompt().contains("other prompt"));
+    assertSame(updated, resolver.forCaller(new DefinitionResolver.Caller(7L, null)));
+  }
+
+  @Test
   void a_project_definition_shadows_the_boot_set(@TempDir Path data) throws Exception {
     DataLayout layout = new DataLayout(data).initialise();
     write(layout.botsFor(7L), "librarian", "the project's own");

@@ -58,6 +58,50 @@ def finite(value: int | float) -> bool:
         return False
 
 
+def _application_files(value: list[object] | tuple[object, ...]) -> bool:
+    paths: set[str] = set()
+    total = 0
+    manifest = False
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        path, text = item.get("path"), item.get("text")
+        if not isinstance(path, str) or not isinstance(text, str):
+            return False
+        if (
+            len(path) > 512
+            or len(path.split("/")) > 17
+            or re.fullmatch(
+                r"[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*",
+                path,
+            )
+            is None
+        ):
+            return False
+        if (
+            any(
+                segment in (".", "..", "node_modules", "build", "__pycache__")
+                for segment in path.split("/")
+            )
+            or path.lower() in paths
+        ):
+            return False
+        try:
+            count = len(text.encode("utf-8"))
+        except UnicodeEncodeError:
+            return False
+        if "\0" in text or count > 65536:
+            return False
+        total += count
+        paths.add(path.lower())
+        manifest |= path == "plowshare.json"
+    return (
+        total <= 131072
+        and manifest
+        and not any(other.startswith(path + "/") for path in paths for other in paths)
+    )
+
+
 def check(schema: dict[str, object], value: object) -> None:
     if value is None:
         return
@@ -123,6 +167,8 @@ def check(schema: dict[str, object], value: object) -> None:
         invalid |= bool(schema.get("uniqueItems")) and len(
             {json.dumps(v, sort_keys=True) for v in value}
         ) != len(value)
+        if schema.get("applicationFiles"):
+            invalid |= not _application_files(value)
         if "element" in schema:
             for entry in value:
                 check(cast(dict[str, object], schema["element"]), entry)

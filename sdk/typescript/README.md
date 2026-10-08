@@ -159,3 +159,7 @@ The MCP information wrapper exposes only the server's reviewed model subset;
 publication and migration remain operator controls. See the
 [information guide](../../docs/information-system.md) and
 [JavaScript research guide](../../docs/scripted-research.md).
+
+Named external tools use the same declaration, handler, durable journal and
+read-only reconciliation façade in every language. See [Relay tools](../../docs/relay-tools.md)
+for configuration, grants, examples and recovery semantics.

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "cron": "0 */15 * * * *",
+  "zone": "UTC",
+  "paused": true,
+  "action": {"kind": "orchestration", "agent": "privacy_coordinator", "name": "privacy_tick", "input": "A collection occurrence is available through Relay.", "mode": null},
+  "target": {"kind": "mailbox", "project": null, "conversation": null, "to": null, "route": null},
+  "limits": {"maxModelCalls": 1, "maxTurns": 8, "queueCap": 1}
+}

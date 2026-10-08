@@ -1,3 +1,5 @@
+import { deploymentProblem } from './application-deployments.ts';
+import { swarmName } from './swarm-types.ts';
 import { isList, isObject, displayText } from '../binding/values.ts';
 import type { Operation } from './direct.ts';
 import type { ExtendedPayloads } from './catalog.ts';
@@ -419,6 +421,23 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
+  'application.deploy': [
+    [
+      'project',
+      'requestId',
+      'expectedRevision',
+      'destination',
+      'writableAreas',
+      'files',
+    ],
+    [],
+  ],
+  'application.activate': [
+    ['project', 'requestId', 'expectedRevision', 'revision'],
+    [],
+  ],
+  'application.deployment.status': [['project'], []],
+  'application.deployment.receipt': [['project', 'requestId'], []],
   'application.create': [
     ['name', 'applicationRoot', 'writableAreas'],
     ['type'],
@@ -464,12 +483,13 @@ export const SHAPES: Record<
   'board.topics': [[], ['project', 'offset', 'limit']],
   'board.messages': [['topic'], []],
   'swarm.status': [[], []],
+  'swarm.types': [['project'], []],
   'board.topup': [['topic'], ['maxModelCalls']],
   'buffer.purge': [[], []],
   'retention.sweep': [[], []],
   'board.open': [
     ['project', 'title', 'label', 'body', 'requestId'],
-    ['maxModelCalls'],
+    ['maxModelCalls', 'swarm'],
   ],
   'board.retry': [['project', 'topic', 'member', 'requestId', 'maxTurns'], []],
   'board.post': [['project', 'topic', 'body', 'requestId'], []],
@@ -600,6 +620,15 @@ export function commandProblem(
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
   if (
+    [
+      'application.deploy',
+      'application.activate',
+      'application.deployment.status',
+      'application.deployment.receipt',
+    ].includes(type)
+  )
+    return deploymentProblem(type, body);
+  if (
     type.startsWith('application.') &&
     type !== 'application.storage.set' &&
     type !== 'application.create'
@@ -659,6 +688,8 @@ export function commandProblem(
       return 'Saving needs bounded text and its reviewed file revision';
     return undefined;
   }
+  if (type === 'board.open' && 'swarm' in body && !swarmName(body['swarm']))
+    return 'Choose a valid named swarm type';
   // Relay positions are decimal strings, rather than the legacy numeric paging fields.
   if (type.startsWith('relay.')) return relayPayloadProblem(type, body);
   if (

@@ -64,7 +64,8 @@
             "closedAt": null,
             "future": {
               "preserved": true
-            }
+            },
+            "swarm": null
           },
           "messages": 3,
           "documents": 1
@@ -102,7 +103,8 @@
         "closedAt": null,
         "future": {
           "preserved": true
-        }
+        },
+        "swarm": null
       },
       "root": {
         "id": "root",
@@ -126,7 +128,8 @@
         "closedAt": null,
         "future": {
           "preserved": true
-        }
+        },
+        "swarm": null
       },
       "seats": [
         {
@@ -224,7 +227,8 @@
             "closedAt": null,
             "future": {
               "preserved": true
-            }
+            },
+            "swarm": null
           },
           "messages": 3,
           "documents": 1
@@ -291,6 +295,13 @@
       "future": {
         "preserved": true
       }
+    }
+  },
+  "swarm.types": {
+    "code": "OK",
+    "payload": {
+      "project": "fixture-project",
+      "types": []
     }
   }
 }

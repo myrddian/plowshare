@@ -37,9 +37,16 @@ public class RelayConfiguration {
       RelayPortProperties properties,
       ProjectMembers members,
       ProjectWorkspaces projects,
-      RelayProperties relayProperties) {
+      RelayProperties relayProperties,
+      io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools) {
     return new ProjectRelayPorts(
-        relay, repository, properties, members, projects, relayProperties.getMaxForwardingHops());
+        relay,
+        repository,
+        properties,
+        members,
+        projects,
+        relayProperties.getMaxForwardingHops(),
+        tools);
   }
 
   @Bean

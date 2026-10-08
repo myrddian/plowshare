@@ -18,6 +18,7 @@ public final class ProjectRelayPorts implements RelayPorts {
   private final ProjectMembers members;
   private final ProjectWorkspaces projects;
   private final int maxDepth;
+  private final io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools;
 
   public ProjectRelayPorts(
       Relay relay,
@@ -26,6 +27,25 @@ public final class ProjectRelayPorts implements RelayPorts {
       ProjectMembers members,
       ProjectWorkspaces projects,
       int maxDepth) {
+    this(
+        relay,
+        repository,
+        properties,
+        members,
+        projects,
+        maxDepth,
+        new io.aeyer.plowshare.server.relay.tools.RelayToolProperties());
+  }
+
+  public ProjectRelayPorts(
+      Relay relay,
+      RelayPortRepository repository,
+      RelayPortProperties properties,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      int maxDepth,
+      io.aeyer.plowshare.server.relay.tools.RelayToolProperties tools) {
+    this.tools = Objects.requireNonNull(tools);
     this.relay = Objects.requireNonNull(relay);
     this.repository = Objects.requireNonNull(repository);
     this.properties = Objects.requireNonNull(properties);
@@ -45,11 +65,15 @@ public final class ProjectRelayPorts implements RelayPorts {
     var owner = projects.personalOwner(project);
     if (owner.isPresent() && !owner.get().equals(account)
         || !members.mayWork(project, account)
-        || !properties.permits(account, project, topic, direction, group))
+        || !(properties.permits(account, project, topic, direction, group)
+            || tools.permits(account, project, topic, direction, group)))
       throw new CallerFault("Relay port is unavailable to this account");
     Long id = projects.id(project);
     if (id == null) throw new CallerFault("Relay project unavailable");
-    return new Relay.TopicKey(id, topic);
+    var key = new Relay.TopicKey(id, topic);
+    if (tools.permits(account, project, topic, direction, group))
+      relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    return key;
   }
 
   @Override
@@ -61,6 +85,7 @@ public final class ProjectRelayPorts implements RelayPorts {
             request.topic(),
             RelayPortProperties.Direction.INGRESS,
             null);
+    tools.validateResult(account, request);
     RelayCausation causation = new RelayCausation(request.requestId(), null, 0);
     if (request.parentTopic() != null) {
       var parentTopic =

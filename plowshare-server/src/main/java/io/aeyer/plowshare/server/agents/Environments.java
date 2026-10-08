@@ -17,9 +17,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * What {@code run} may do in a project, on each side, resolved from the server's {@code
- * projects/<id>/environment.yml} and the rooting session's {@code .plowshare/environment.yml}. Spec
- * 2026-09-14, run, §2.
+ * What {@code run} may do in a project, on each side, resolved from the Application-root {@code
+ * environment.yml}, or the legacy {@code projects/<id>/environment.yml}, and the rooting session's
+ * External {@code .plowshare/environment.yml}.
  *
  * <p><b>Read on every call, and cached nowhere.</b> A run asks once per {@code run} call, two small
  * files are cheaper than a stale answer about whether a command may start, and an edited file takes
@@ -36,6 +36,13 @@ public final class Environments {
   private final Function<String, Long> projectIds;
   private final LongFunction<Path> files;
   private final SessionChannel channel;
+  private ApplicationResources applicationResources = ApplicationResources.NONE;
+
+  /** Deployed runtime policy belongs to the Application root, including without a data tier. */
+  public void useApplicationResources(ApplicationResources resources) {
+    applicationResources = Objects.requireNonNull(resources);
+  }
+
   private Function<String, ProjectConfiguration> projectConfiguration =
       project -> ProjectConfiguration.NONE;
   private final Map<String, ProjectCaps> lastManifestCaps = new ConcurrentHashMap<>();
@@ -157,9 +164,9 @@ public final class Environments {
 
   /**
    * The server's own file for {@code project}, parsed — {@link EnvironmentFile.Parsed#EMPTY} when
-   * the project has no id, this server keeps no data directory, or nobody wrote one, which is what
-   * a project nobody configured means. Shared by {@link #resolve} and {@link #caps} so the two read
-   * one file one way.
+   * the project has no id, no admitted Application or data tier exists, or nobody wrote a file. A
+   * missing Application policy never falls back to the legacy tier. Shared by {@link #resolve} and
+   * {@link #caps} so the two read one file one way.
    *
    * @throws IOException if the file is there and could not be read
    * @throws EnvironmentFile.Unreadable if it was read and does not parse
@@ -171,12 +178,21 @@ public final class Environments {
     } catch (RuntimeException unknowable) {
       id = null;
     }
-    Path file = id == null ? null : files.apply(id);
+    Path file =
+        id == null
+            ? null
+            : applicationResources
+                .directory(id, "")
+                .map(root -> root.resolve("environment.yml"))
+                .orElse(files.apply(id));
     if (file == null) {
       return EnvironmentFile.Parsed.EMPTY;
     }
-    try {
-      return EnvironmentFile.parse(Files.readString(file, StandardCharsets.UTF_8));
+    try (var input = Files.newInputStream(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      byte[] bytes = input.readNBytes(65537);
+      if (bytes.length > 65536) throw new IOException("Environment policy exceeds 64 KiB");
+      return EnvironmentFile.parse(
+          StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString());
     } catch (NoSuchFileException absent) {
       return EnvironmentFile.Parsed.EMPTY;
     }

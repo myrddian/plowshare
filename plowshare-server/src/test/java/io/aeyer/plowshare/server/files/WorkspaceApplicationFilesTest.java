@@ -125,6 +125,39 @@ class WorkspaceApplicationFilesTest {
   }
 
   @Test
+  void root_runtime_resources_need_manager_authority_even_in_a_writable_application()
+      throws Exception {
+    row = new ProjectRecord("app", root, List.of(), List.of(), "MANAGED", List.of("."));
+    when(projects.find("app")).thenReturn(Optional.of(row));
+    when(projects.effectiveExclusions(row)).thenReturn(List.of());
+    for (String path :
+        List.of(
+            "AGENTS.md",
+            "AGENT.md",
+            "skills.yml",
+            "environment.yml",
+            "agents/worker.md",
+            "bots/worker.md",
+            "skills/review/SKILL.md",
+            "orchestrations/review.md",
+            "hooks/rule.js",
+            "schedules/daily.json",
+            "swarm/review.md",
+            "Relay/topics.json")) {
+      Path target = root.resolve(path);
+      Files.createDirectories(target.getParent());
+      Files.writeString(target, "source");
+      when(members.mayManage("app", "reader")).thenReturn(false);
+      var document = files.read(caller, path);
+      assertFalse(document.writable(), path);
+      assertThrows(
+          CallerFault.class, () -> files.save(caller, path, "changed", document.revision()), path);
+      when(members.mayManage("app", "reader")).thenReturn(true);
+      assertTrue(files.read(caller, path).writable(), path);
+    }
+  }
+
+  @Test
   void access_manifest_edits_need_manager_authority_and_remain_valid() throws Exception {
     row = new ProjectRecord("app", root, List.of(), List.of(), "MANAGED", List.of("."));
     when(projects.find("app")).thenReturn(Optional.of(row));

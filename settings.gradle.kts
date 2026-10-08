@@ -60,6 +60,8 @@ dependencyResolutionManagement {
 include("plowshare-client-node", "plowshare-mcp")
 include("plowshare-sdk", "plowshare-a2a")
 include("plowshare-integrations", "plowshare-integration-home-assistant")
+// This project only verifies the Python Application's definitions with real server loaders.
+include("plowshare-network-privacy")
 
 // Source layout is independent of published coordinates and Gradle task names.
 project(":plowshare-sdk").projectDir = file("sdk/java")
@@ -68,3 +70,4 @@ project(":plowshare-client-node").projectDir = file("sdk/node")
 project(":plowshare-integrations").projectDir = file("integrations/runtime")
 project(":plowshare-a2a").projectDir = file("integrations/a2a")
 project(":plowshare-integration-home-assistant").projectDir = file("integrations/home-assistant")
+project(":plowshare-network-privacy").projectDir = file("integrations/network-privacy")

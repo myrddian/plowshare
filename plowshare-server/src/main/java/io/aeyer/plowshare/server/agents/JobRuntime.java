@@ -3448,6 +3448,7 @@ public final class JobRuntime {
         }
         continue;
       }
+      if (tool instanceof RelayAgentTool relay) tool = relay.forRun(cancelled);
       if (tool instanceof AskTool shared) {
         // THE FOURTH KIND BUILT PER RUN, and the only one that is
         // registered as a shared tool first. The three above are absent
@@ -3536,8 +3537,9 @@ public final class JobRuntime {
     if (informationInputs != null)
       offered.replaceAll(
           (name, delegate) -> {
-            if (!BoardTools.NAMES.contains(name) || name.equals(BoardTools.READ_NAME))
-              return delegate;
+            if (!BoardTools.NAMES.contains(name)
+                || name.equals(BoardTools.READ_NAME)
+                || name.equals(BoardTools.TYPES_NAME)) return delegate;
             return new AgentTool() {
               public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
                 return delegate.schema();

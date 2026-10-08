@@ -86,6 +86,7 @@ final class OrchestrationParser {
           TodoTools.READ_NAME,
           TodoTools.WRITE_NAME,
           BoardTools.OPEN_NAME,
+          BoardTools.TYPES_NAME,
           BoardTools.READ_NAME,
           BoardTools.POST_NAME,
           BoardTools.DOCUMENT_NAME,

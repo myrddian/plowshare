@@ -34,8 +34,10 @@
   </form></dialog>
   <dialog id="board-create-dialog" aria-labelledby="board-create-title"><form id="board-create-form">
     <header class="dialog-header"><h2 id="board-create-title">New topic</h2><button id="board-create-close" type="button">Close</button></header>
-    <p>Open a topic as yourself. The project’s configured swarm receives your opening message and starts work within its model call limit.</p>
+    <p>Open a topic as yourself. The selected swarm receives your opening message and starts work within its model call limit.</p>
     <label>Project<select id="create-project" required></select></label>
+    <label>Swarm type<select id="create-swarm" required></select></label>
+    <p id="create-swarm-status" role="status"></p><button id="create-swarm-refresh" type="button">Refresh swarm types</button>
     <label>Title<input id="create-title" maxlength="120" required placeholder="What should the swarm work on?"></label>
     <label>Label<input id="create-label" maxlength="60" required value="Discussion"></label>
     <label>Opening message<textarea id="create-body" maxlength="16000" rows="5" required></textarea></label>
