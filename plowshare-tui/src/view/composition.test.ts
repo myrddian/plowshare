@@ -3948,7 +3948,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
       ]),
     );
     expect(prompt.said.join('\n')).toContain(
-      'specify --mode=INHERITED|SUMMARISED|NEW|DIRECT',
+      'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate',
     );
     expect(prompt.said.join('\n')).not.toContain('/skill:other');
     const skillListing = prompt.said

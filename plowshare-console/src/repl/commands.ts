@@ -5,7 +5,7 @@ import {
 import type { CommandEntry } from '../../../sdk/typescript/src/operations/conversation-replies.ts';
 
 /** Browser presentation over the same command grammar as Desktop. Preparation
- * never submits work; missing skill context remains an explicit user choice. */
+ * never submits work; skills default to DIRECT and allow explicit context overrides. */
 export function mountCommands(root: HTMLElement, draft: HTMLTextAreaElement) {
   let commands: readonly CommandEntry[] = [];
   let enabled = false;
@@ -84,16 +84,17 @@ export function mountCommands(root: HTMLElement, draft: HTMLTextAreaElement) {
         ' · ' +
         (command.kind === 'orchestration'
           ? 'Workflow'
-          : (command.mode ?? 'Choose context')) +
+          : (command.mode ?? 'DIRECT (default)')) +
         ' · ' +
         command.argumentHint;
       const mode = doc.createElement('select');
       mode.dataset['command'] = command.command;
       mode.setAttribute('aria-label', 'Context for ' + command.command);
-      for (const value of ['', 'INHERITED', 'SUMMARISED', 'NEW', 'DIRECT']) {
+      for (const value of ['DIRECT', 'INHERITED', 'SUMMARISED', 'NEW']) {
         const option = doc.createElement('option');
         option.value = value;
-        option.textContent = value || 'Choose context…';
+        option.textContent =
+          value === 'DIRECT' ? 'Current agent (default)' : value;
         mode.append(option);
       }
       const choose = doc.createElement('button');
@@ -134,7 +135,11 @@ export function mountCommands(root: HTMLElement, draft: HTMLTextAreaElement) {
       button.setAttribute('role', 'option');
       button.setAttribute('aria-selected', String(index === active));
       button.id = 'console-command-option-' + index;
-      button.textContent = offer.command + ' — ' + offer.description;
+      button.textContent =
+        offer.command +
+        ' — ' +
+        offer.description +
+        (offer.argumentHint ? ' · ' + offer.argumentHint : '');
       button.addEventListener('click', () => pick(index));
       popup.append(button);
       if (index === active)

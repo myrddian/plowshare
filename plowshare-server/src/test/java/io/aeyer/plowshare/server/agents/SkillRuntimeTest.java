@@ -282,6 +282,50 @@ class SkillRuntimeTest {
   }
 
   @Test
+  void bound_portable_direct_skill_accepts_empty_input_and_preserves_exact_user_data() {
+    var skill = offer("", false);
+    for (String input : List.of("", "  Inspect this\nexact change  ")) {
+      var bound =
+          new CommandInvocations.Bound(
+              "alice",
+              id,
+              "parent",
+              "run",
+              "worker",
+              "/skill:review",
+              "skill",
+              "review",
+              skill.hash(),
+              input,
+              "DIRECT",
+              "bound",
+              null);
+      String result =
+          skills.dispatch(bound, home, agent, parent, budget, () -> false, "session", "alice", end);
+      assertTrue(result.contains("Pinned specialist instructions"));
+      assertTrue(result.endsWith("Invocation arguments (user data):\n" + input));
+    }
+    verify(parent, never()).delegate(any(), any(), any());
+  }
+
+  @Test
+  void malformed_skill_inputs_refuse_before_claiming() {
+    offer("mode: DIRECT\n");
+    var tool =
+        skills.forRun(agent, parent, budget, () -> false, "session", "alice", end).getFirst();
+    for (String input : List.of("null", "42", "[]")) {
+      String result =
+          tool.run(
+              "{\"name\":\"review\",\"arguments\":" + input + ",\"invocation\":\"" + id + "\"}",
+              home);
+      assertTrue(result.contains("not a string"));
+    }
+    assertTrue(
+        tool.run("{\"name\":\"review\",\"invocation\":\"" + id + "\"}", home).contains("missing"));
+    verify(executions, never()).claim(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
   void becoming_hidden_after_discovery_refuses_a_new_model_invocation() {
     offer("mode: DIRECT\n");
     assertNotNull(skills.discovery(agent, home, "session", "parent", "alice"));

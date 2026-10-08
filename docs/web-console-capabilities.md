@@ -154,8 +154,8 @@ state or authorization.
 
 Command discovery uses the selected agent's server-provided catalogue and the
 same draft/completion model as Desktop. Completion only prepares a draft. A skill
-without a prescribed context requires an explicit context choice. The browser
-does not expose Desktop-only local commands or native file/credential adapters.
+without a prescribed context defaults to DIRECT and permits an explicit context
+override. The browser does not expose Desktop-only local commands or native file/credential adapters.
 The catalogue renders forty matches and slash completion twenty; local search
 finds other returned commands. This bounds rendering, not an unpaged server reply.
 

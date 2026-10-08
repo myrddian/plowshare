@@ -6,6 +6,14 @@ import java.util.Map;
 
 /** Server-owned discovery, shared by skills and orchestrations; contains no execution path. */
 public final class CommandCatalog {
+  /**
+   * Human discovery metadata, without loading the skill's instructions.
+   *
+   * @param argumentHint package input guidance; skill arguments are optional, not schema-validated
+   * @param executor the default executor; portable skills use the selected caller for DIRECT
+   * @param mode the declared skill mode, or null for a portable skill or orchestration; explicit
+   *     portable skill commands default to DIRECT and permit a delegated override
+   */
   public record Entry(
       String command,
       List<String> aliases,
@@ -66,8 +74,10 @@ public final class CommandCatalog {
                   "skill",
                   name,
                   skill.description(),
-                  "Arguments for the skill",
-                  skill.mode() == SkillDefinition.Mode.DIRECT ? agent.name() : skill.agent(),
+                  skill.argumentHint(),
+                  skill.mode() == null || skill.mode() == SkillDefinition.Mode.DIRECT
+                      ? agent.name()
+                      : skill.agent(),
                   skill.mode() == null ? null : skill.mode().name(),
                   skill.tier().name(),
                   skill.hash(),

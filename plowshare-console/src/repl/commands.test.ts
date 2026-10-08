@@ -27,15 +27,19 @@ function fixture() {
   return { root, draft, controls, submit };
 }
 describe('browser command preparation', () => {
-  it('completes a prefix without submitting and requires explicit portable context', () => {
+  it('completes a prefix with the DIRECT default without submitting and allows context overrides', () => {
     const { root, draft, submit } = fixture();
     draft.value = '/skill:r';
     draft.dispatchEvent(new Event('input'));
     expect(root.querySelectorAll('[role=option]')).toHaveLength(1);
+    expect(root.querySelector('[role=option]')?.textContent).toContain(
+      'Describe work',
+    );
     draft.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     expect(submit).not.toHaveBeenCalled();
-    expect(draft.value).toBe('/skill:r');
-    expect(root.querySelector('details')?.open).toBe(true);
+    expect(draft.value).toBe('/skill:review --mode=DIRECT ');
+    expect(root.querySelector('select')?.value).toBe('DIRECT');
+    expect(root.textContent).toContain('DIRECT (default)');
     const mode = root.querySelector('select')!;
     mode.value = 'NEW';
     root.querySelector<HTMLButtonElement>('.command-card button')!.click();

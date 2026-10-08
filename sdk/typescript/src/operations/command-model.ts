@@ -23,10 +23,12 @@ export function commandOffers(
     ...native.map(([command, description]) => ({
       command,
       description,
+      argumentHint: '',
     })),
     ...commands.map((command) => ({
       command: command.command,
       description: command.description,
+      argumentHint: command.argumentHint,
     })),
   ].filter((command) => command.command.toLowerCase().startsWith(query));
 }
@@ -36,22 +38,26 @@ export function commandDraft(
   mode: string,
   argumentsText: string,
 ): string {
+  const selectedMode = mode || 'DIRECT';
   if (
     command.kind === 'skill' &&
     command.mode === null &&
-    !['INHERITED', 'SUMMARISED', 'NEW', 'DIRECT'].includes(mode)
+    !['INHERITED', 'SUMMARISED', 'NEW', 'DIRECT'].includes(selectedMode)
   ) {
-    throw new Error('Choose how the skill receives context.');
+    throw new Error('Unknown skill context mode.');
   }
-  let existing = argumentsText.startsWith(command.command + ' ')
-    ? argumentsText.slice(command.command.length + 1)
-    : argumentsText;
+  let existing =
+    argumentsText === command.command
+      ? ''
+      : argumentsText.startsWith(command.command + ' ')
+        ? argumentsText.slice(command.command.length + 1)
+        : argumentsText;
   if (command.kind === 'skill' && command.mode === null)
     existing = existing.replace(
       /^--mode=(INHERITED|SUMMARISED|NEW|DIRECT)(?:\s|$)/,
       '',
     );
-  return `${command.command}${command.kind === 'skill' && command.mode === null ? ` --mode=${mode}` : ''} ${existing}`;
+  return `${command.command}${command.kind === 'skill' && command.mode === null ? ` --mode=${selectedMode}` : ''} ${existing}`;
 }
 
 export function workflowArguments(command: CommandEntry, text: string): string {
