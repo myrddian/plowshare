@@ -1,3 +1,4 @@
+import { deploymentProblem } from './application-deployments.ts';
 import { swarmName } from './swarm-types.ts';
 import { isList, isObject, displayText } from '../binding/values.ts';
 import type { Operation } from './direct.ts';
@@ -420,6 +421,23 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
+  'application.deploy': [
+    [
+      'project',
+      'requestId',
+      'expectedRevision',
+      'destination',
+      'writableAreas',
+      'files',
+    ],
+    [],
+  ],
+  'application.activate': [
+    ['project', 'requestId', 'expectedRevision', 'revision'],
+    [],
+  ],
+  'application.deployment.status': [['project'], []],
+  'application.deployment.receipt': [['project', 'requestId'], []],
   'application.create': [
     ['name', 'applicationRoot', 'writableAreas'],
     ['type'],
@@ -601,6 +619,15 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (
+    [
+      'application.deploy',
+      'application.activate',
+      'application.deployment.status',
+      'application.deployment.receipt',
+    ].includes(type)
+  )
+    return deploymentProblem(type, body);
   if (
     type.startsWith('application.') &&
     type !== 'application.storage.set' &&

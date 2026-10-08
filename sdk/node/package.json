@@ -83,6 +83,10 @@
     "./tools": {
       "types": "./build/tools.d.ts",
       "import": "./build/tools.js"
+    },
+    "./applications": {
+      "types": "./build/applications.d.ts",
+      "import": "./build/applications.js"
     }
   },
   "description": "Plowshare WebSocket SDK and optional Node platform adapters"

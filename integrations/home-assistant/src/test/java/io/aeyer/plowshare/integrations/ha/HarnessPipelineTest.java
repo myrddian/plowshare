@@ -55,7 +55,6 @@ class HarnessPipelineTest {
   @Autowired JdbcTemplate jdbc;
   @Autowired ProjectStore projects;
   @Autowired TokenStore tokens;
-  @Autowired DataLayout layout;
   @Autowired Model model;
   private Journal journal;
 
@@ -94,6 +93,13 @@ class HarnessPipelineTest {
         account);
     Path workspace = Files.createDirectory(directory.resolve("workspace"));
     Path examples = Path.of(System.getProperty("integration.examples")).resolve("application");
+    try (var paths = Files.walk(examples)) {
+      for (Path source : paths.toList()) {
+        Path target = workspace.resolve(examples.relativize(source));
+        if (Files.isDirectory(source)) Files.createDirectories(target);
+        else Files.copy(source, target);
+      }
+    }
     var manifest =
         (com.fasterxml.jackson.databind.node.ObjectNode)
             Json.parse(Files.readString(examples.resolve("plowshare.json")));
@@ -106,15 +112,6 @@ class HarnessPipelineTest {
         .put("role", "MANAGER");
     Files.writeString(workspace.resolve("plowshare.json"), manifest.toString());
     projects.define(name, workspace, List.of(), account);
-    Long id = jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, name);
-    Path definitions = examples.resolve(".plowshare");
-    try (var paths = Files.walk(definitions)) {
-      for (Path source : paths.toList()) {
-        Path target = layout.agentsFor(id).getParent().resolve(definitions.relativize(source));
-        if (Files.isDirectory(source)) Files.createDirectories(target);
-        else Files.copy(source, target);
-      }
-    }
     model.reset();
     return name;
   }

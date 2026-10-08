@@ -16,10 +16,19 @@ import java.time.Duration;
 import java.util.*;
 
 /**
- * Uses the data-layout definitions tier or the project's authenticated file channel. No fallback.
+ * Uses registered Application schedules, the External data tier or its authenticated file channel.
+ * No fallback.
  */
 public final class RegisteredScheduleFiles implements ScheduleFiles {
   private static final int MAX_FILES = 256, MAX_BYTES = 65536, TOTAL_BYTES = 1048576;
+  private io.aeyer.plowshare.server.agents.ApplicationResources resources =
+      io.aeyer.plowshare.server.agents.ApplicationResources.NONE;
+
+  public void useApplicationResources(
+      io.aeyer.plowshare.server.agents.ApplicationResources resources) {
+    this.resources = resources;
+  }
+
   private final DataLayout data;
   private final SessionChannel channel;
   private final PresenceRegistry presences;
@@ -41,7 +50,7 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     Path folder = folder(source);
     List<Entry> entries = new ArrayList<>();
     try {
-      safe(folder);
+      safe(folder, source);
       if (!Files.exists(folder, LinkOption.NOFOLLOW_LINKS)) return List.of();
       try (var paths = Files.list(folder)) {
         var matching =
@@ -54,7 +63,7 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
           throw new WorkspaceUnavailableException("Too many schedule files");
         for (Path file : matching) {
           String name = name(file);
-          safe(file);
+          safe(file, source);
           if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.size(file) > MAX_BYTES)
             throw new WorkspaceUnavailableException(
                 "Schedule file is not a bounded regular JSON file");
@@ -70,6 +79,9 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
 
   public void write(
       ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
+    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+      throw new IllegalArgumentException(
+          "Update Application schedules through a new deployment revision");
     ScheduledWork.identity(name, "file name");
     if (text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES)
       throw new IllegalArgumentException("Schedule file exceeds 64 KiB");
@@ -84,9 +96,9 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     }
     Path folder = folder(source), file = folder.resolve(name + ".json");
     try {
-      safe(file);
+      safe(file, source);
       Files.createDirectories(folder);
-      safe(file);
+      safe(file, source);
       if (!overwrite) {
         Files.writeString(file, text, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         return;
@@ -105,6 +117,9 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
   }
 
   public void delete(ScheduleDefinitionStore.Source source, String name) {
+    if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())
+      throw new IllegalArgumentException(
+          "Update Application schedules through a new deployment revision");
     ScheduledWork.identity(name, "file name");
     if (source.source().equals("workspace")) {
       ask(session(source), FileRequest.delete(id(), remotePath(name)).forSchedules());
@@ -112,7 +127,7 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     }
     Path file = folder(source).resolve(name + ".json");
     try {
-      safe(file);
+      safe(file, source);
       Files.delete(file);
     } catch (IOException failed) {
       throw new WorkspaceUnavailableException("Schedule file could not be deleted", failed);
@@ -181,13 +196,22 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
   }
 
   private Path folder(ScheduleDefinitionStore.Source source) {
+    var application = resources.directory(source.projectId(), "schedules");
+    if (application.isPresent()) return application.get();
     if (!data.keepsAnything())
       throw new WorkspaceUnavailableException("This server has no definitions directory");
     return data.schedulesFor(source.projectId());
   }
 
-  private void safe(Path path) {
-    Path root = data.root().toAbsolutePath().normalize(), at = root;
+  private void safe(Path path, ScheduleDefinitionStore.Source source) {
+    Path
+        root =
+            resources
+                .root(source.projectId())
+                .orElseGet(() -> data.root())
+                .toAbsolutePath()
+                .normalize(),
+        at = root;
     if (!path.toAbsolutePath().normalize().startsWith(root))
       throw new WorkspaceUnavailableException("Schedule path escaped the definitions tier");
     for (Path segment : root.relativize(path.toAbsolutePath().normalize())) {

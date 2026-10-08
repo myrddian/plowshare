@@ -1,3 +1,4 @@
+import { installApplicationDeployment } from './application-deployment.ts';
 import { parseFileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import { installFileStores } from './filestores.ts';
 import { isObject } from 'plowshare-client-ts/binding/values';
@@ -408,6 +409,7 @@ function openConnect() {
   if (!dialog.open) dialog.showModal();
 }
 
+const deploymentControls = installApplicationDeployment(() => state, request);
 const serverAdministration = installServerAdmin(request);
 const projectAccess = installProjectAccess(request);
 
@@ -422,6 +424,7 @@ function render() {
   recoveryWarning.hidden = state.mode !== 'live' || !state.personal?.warning;
   renderFiles();
   $('#server-project-add').hidden = !state.connected || !state.serverAdmin;
+  deploymentControls.update();
   questionPopup.update(state, scope, selected);
   const filter = $<HTMLInputElement>(
     '#conversation-filter',

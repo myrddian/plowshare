@@ -24,6 +24,16 @@ var absent = Codec.Input("conversation.open", new ConversationOpenRequest());
 if (absent.TryGetProperty("project", out _)) throw new Exception("Absent field encoded");
 var explicitNull = Codec.Input("conversation.open", new ConversationOpenRequest { Project = TierDtoProject.FromVariant1(default) });
 if (explicitNull.GetProperty("project").ValueKind != JsonValueKind.Null) throw new Exception("Explicit null lost");
+using var deploymentRequest = JsonDocument.Parse("""{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","revision":"22222222-2222-2222-2222-222222222222"}""");
+using var deploymentReceipt = JsonDocument.Parse("""{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"22222222-2222-2222-2222-222222222222"}}""");
+Codec.CorrelateDeployment("application.activate",deploymentRequest.RootElement,deploymentReceipt.RootElement);
+foreach (var changed in new[] { """{"project":"other","requestId":"11111111-1111-1111-1111-111111111111","revision":"22222222-2222-2222-2222-222222222222"}""", """{"project":"app","requestId":"33333333-3333-3333-3333-333333333333","revision":"22222222-2222-2222-2222-222222222222"}""", """{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","revision":"33333333-3333-3333-3333-333333333333"}""" })
+{
+    using var foreign = JsonDocument.Parse(changed);
+    bool refused = false;
+    try { Codec.CorrelateDeployment("application.activate",foreign.RootElement,deploymentReceipt.RootElement); } catch (JsonException) { refused = true; }
+    if (!refused) throw new Exception("Foreign deployment receipt accepted");
+}
 Console.WriteLine(".NET DTO contract checks passed");
 
 await ToolFacadeChecks.RunAsync();

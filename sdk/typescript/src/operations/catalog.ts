@@ -1,3 +1,4 @@
+import type { ApplicationSourceFile } from './application-deployments.ts';
 import type { RelayPayloads } from './relay.ts';
 import type { MessagingPayloads } from './messaging.ts';
 import type { UsagePayloads } from './usage.ts';
@@ -155,6 +156,25 @@ export interface ExtendedPayloads
   'admin.service.token.revoke': {
     readonly handle: string;
     readonly id: string;
+  };
+  'application.deploy': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly expectedRevision: string | null;
+    readonly destination: FileStoreReference;
+    readonly writableAreas: readonly FileStoreReference[];
+    readonly files: readonly ApplicationSourceFile[];
+  };
+  'application.activate': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly expectedRevision: string;
+    readonly revision: string;
+  };
+  'application.deployment.status': { readonly project: string };
+  'application.deployment.receipt': {
+    readonly project: string;
+    readonly requestId: string;
   };
   'application.create': {
     readonly name: string;
@@ -345,6 +365,10 @@ export const CLI_OPERATIONS = {
   'application files': 'application.files',
   'application read': 'application.file.read',
   'application save': 'application.file.save',
+  'application deploy': 'application.deploy',
+  'application activate': 'application.activate',
+  'application deployment status': 'application.deployment.status',
+  'application deployment receipt': 'application.deployment.receipt',
   'application create': 'application.create',
   'application storage set': 'application.storage.set',
   'project list': 'project.list',

@@ -191,9 +191,19 @@ public final class WorkspaceApplicationFiles implements ApplicationFiles {
     // Editing runtime definitions or the access/routing manifest needs definition-management
     // authority.
     boolean configuration =
-        relative.equals("plowshare.json")
-            || relative.startsWith(".plowshare/")
-            || relative.startsWith("Relay/");
+        java.util.Set.of("plowshare.json", "AGENTS.md", "AGENT.md", "skills.yml", "environment.yml")
+                .contains(relative)
+            || java.util.Set.of(
+                    "agents",
+                    "bots",
+                    "skills",
+                    "orchestrations",
+                    "hooks",
+                    "schedules",
+                    "swarm",
+                    "Relay")
+                .stream()
+                .anyMatch(directory -> relative.startsWith(directory + "/"));
     if (configuration && !members.mayManage(caller.project(), caller.account())) return false;
     return FileAccess.of(
             source.project().writeRoots(), projects.effectiveExclusions(source.project()))

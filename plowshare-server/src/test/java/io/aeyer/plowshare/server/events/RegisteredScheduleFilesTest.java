@@ -15,6 +15,27 @@ class RegisteredScheduleFilesTest {
   @TempDir Path root;
 
   @Test
+  void deployed_schedule_reads_are_sessionless_and_edits_require_a_new_release() throws Exception {
+    var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "server");
+    var channel = mock(SessionChannel.class);
+    var files =
+        new RegisteredScheduleFiles(
+            new DataLayout(null),
+            channel,
+            mock(PresenceRegistry.class),
+            mock(SessionRegistry.class));
+    files.useApplicationResources(id -> java.util.Optional.of(root));
+    Path folder = Files.createDirectories(root.resolve("schedules"));
+    Files.writeString(folder.resolve("daily.json"), "{}");
+    assertEquals(java.util.List.of(new ScheduleFiles.Entry("daily", "{}")), files.read(source));
+    assertNull(files.executionSession(source));
+    assertThrows(
+        IllegalArgumentException.class, () -> files.write(source, "daily", "changed", true));
+    assertThrows(IllegalArgumentException.class, () -> files.delete(source, "daily"));
+    verifyNoInteractions(channel);
+  }
+
+  @Test
   void createsReadsReplacesAndDeletesARealDefinitionsFile() throws Exception {
     var source = new ScheduleDefinitionStore.Source(1, "owner", 7L, "project", "server");
     var data = new DataLayout(root);

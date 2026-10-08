@@ -4,7 +4,15 @@ import { record, json, list, field, text } from './json.test-support.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import {
+  readFile,
+  mkdtemp,
+  readdir,
+  rm,
+  mkdir,
+  writeFile,
+  symlink,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -2708,3 +2716,103 @@ await test('FileStore setup and bootstrap are shared offline operations and pres
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+await test(
+  'Application folder deployment snapshots source, excludes local state and never replays a lost reply',
+  { timeout: 10000 },
+  async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'plowshare-deployment-'));
+    const requestId = '11111111-1111-1111-1111-111111111111';
+    const revision = '22222222-2222-2222-2222-222222222222';
+    const metadata = {
+      project: 'app',
+      requestId,
+      expectedRevision: null,
+      destination: { store: 'applications', path: 'app' },
+      writableAreas: [],
+    };
+    await writeFile(
+      join(folder, 'plowshare.json'),
+      '{"version":1,"name":"app"}',
+    );
+    await mkdir(join(folder, 'bots'), { recursive: true });
+    await writeFile(join(folder, 'bots', 'worker.md'), 'source');
+    await mkdir(join(folder, '.git'));
+    await writeFile(join(folder, '.git', 'config'), 'local-state');
+    let loseReply = false;
+    const fake = await fixture((frame) => {
+      if (frame.type !== 'application.deploy') return { code: 'OK' };
+      return loseReply
+        ? 'drop'
+        : {
+            code: 'OK',
+            payload: {
+              project: 'app',
+              requestId,
+              release: { revision, digest: 'a'.repeat(64), fileCount: 2 },
+            },
+          };
+    });
+    try {
+      const args = [
+        '--json',
+        'application',
+        'deploy',
+        folder,
+        JSON.stringify(metadata),
+      ];
+      const complete = await cli(fake.base, args).done;
+      assert.equal(complete.code, 0, complete.stderr);
+      const uploaded = fake.frames.filter(
+        (frame) => frame.type === 'application.deploy',
+      );
+      assert.equal(uploaded.length, 1);
+      assert.deepEqual(uploaded[0]!.payload, {
+        ...metadata,
+        files: [
+          { path: 'bots/worker.md', text: 'source' },
+          { path: 'plowshare.json', text: '{"version":1,"name":"app"}' },
+        ],
+      });
+      loseReply = true;
+      const uncertain = await cli(fake.base, args).done;
+      assert.notEqual(uncertain.code, 0);
+      assert.equal(
+        fake.frames.filter((frame) => frame.type === 'application.deploy')
+          .length,
+        2,
+      );
+      await mkdir(join(folder, '.plowshare', 'agents'), { recursive: true });
+      await writeFile(
+        join(folder, '.plowshare', 'agents', 'hidden.md'),
+        'hidden source',
+      );
+      const hidden = await cli(fake.base, args).done;
+      assert.notEqual(hidden.code, 0);
+      assert.match(
+        hidden.stdout + hidden.stderr,
+        /resources belong directly in the root/,
+      );
+      assert.equal(
+        fake.frames.filter((frame) => frame.type === 'application.deploy')
+          .length,
+        2,
+      );
+      await rm(join(folder, '.plowshare'), { recursive: true });
+      await symlink(
+        join(folder, 'plowshare.json'),
+        join(folder, 'linked.json'),
+      );
+      const invalid = await cli(fake.base, args).done;
+      assert.notEqual(invalid.code, 0);
+      assert.equal(
+        fake.frames.filter((frame) => frame.type === 'application.deploy')
+          .length,
+        2,
+      );
+    } finally {
+      await fake.close();
+      await rm(folder, { recursive: true, force: true });
+    }
+  },
+);

@@ -56,6 +56,13 @@ public final class OrchestrationResolver implements SessionCloseListener {
   }
 
   private final OrchestrationRegistry.Loaded bootSet;
+  private ApplicationResources applicationResources = ApplicationResources.NONE;
+
+  /** Composition supplies registered server sources; client sessions cannot replace them. */
+  public void useApplicationResources(ApplicationResources resources) {
+    applicationResources = Objects.requireNonNull(resources);
+  }
+
   private final DataLayout data;
   private final LongPredicate projectExists;
   private final Set<String> knownTools;
@@ -124,16 +131,18 @@ public final class OrchestrationResolver implements SessionCloseListener {
       projectId = personalIds.apply(caller);
       caller = new Caller(projectId, caller.sessionId(), caller.handle());
     }
-    if (projectId == null || !projectExists.test(projectId) || !data.keepsAnything()) {
+    if (projectId == null
+        || !projectExists.test(projectId)
+        || (!data.keepsAnything() && applicationResources.root(projectId).isEmpty())) {
       return Optional.empty();
     }
     Key key = keyFor(caller);
     AgentRegistry agents = agentsFor.apply(caller);
     String stamp =
-        DefinitionResolver.fingerprint(data.orchestrationsFor(projectId))
+        DefinitionResolver.fingerprint(orchestrationsDirectory(projectId))
             + (key.personalId() == null
                 ? ""
-                : DefinitionResolver.fingerprint(data.orchestrationsFor(key.personalId())));
+                : DefinitionResolver.fingerprint(orchestrationsDirectory(key.personalId())));
     Cached cached = byProject.get(key);
     if (cached != null && cached.stamp().equals(stamp) && cached.agents() == agents) {
       return Optional.of(cached);
@@ -142,7 +151,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
     layers.add(
         new OrchestrationRegistry.Layer(
             OrchestrationDefinition.Tier.PROJECT,
-            new FilesystemDefinitions(data.orchestrationsFor(projectId), true)));
+            new FilesystemDefinitions(orchestrationsDirectory(projectId), true)));
     if (key.sessionId() != null) {
       layers.add(
           new OrchestrationRegistry.Layer(
@@ -153,7 +162,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
       layers.add(
           new OrchestrationRegistry.Layer(
               OrchestrationDefinition.Tier.PERSONAL,
-              new FilesystemDefinitions(data.orchestrationsFor(key.personalId()), true)));
+              new FilesystemDefinitions(orchestrationsDirectory(key.personalId()), true)));
     }
     String tierDescribe =
         layers.stream().map(l -> l.source().describe()).collect(Collectors.joining(", then "));
@@ -280,7 +289,8 @@ public final class OrchestrationResolver implements SessionCloseListener {
 
   private Key keyFor(Caller caller) {
     String sessionId = caller.sessionId();
-    if (sessionId == null
+    if (applicationResources.root(caller.projectId()).isPresent()
+        || sessionId == null
         || !sessionLive.test(sessionId)
         || !sessionRoots.test(caller.projectId(), sessionId)) {
       return new Key(caller.projectId(), null, personalIds.apply(caller));
@@ -330,13 +340,15 @@ public final class OrchestrationResolver implements SessionCloseListener {
       projectId = personalIds.apply(caller);
       caller = new Caller(projectId, caller.sessionId(), caller.handle());
     }
-    if (projectId == null || !projectExists.test(projectId) || !data.keepsAnything()) {
+    if (projectId == null
+        || !projectExists.test(projectId)
+        || (!data.keepsAnything() && applicationResources.root(projectId).isEmpty())) {
       throw new IllegalArgumentException(
           "This run is in no project, so there is no project" + " tier to install into.");
     }
     Key key = keyFor(caller);
     AgentRegistry agents = agentsFor.apply(caller);
-    DefinitionSource project = new FilesystemDefinitions(data.orchestrationsFor(projectId), true);
+    DefinitionSource project = new FilesystemDefinitions(orchestrationsDirectory(projectId), true);
     DefinitionSource session =
         key.sessionId() == null
             ? null
@@ -344,7 +356,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
     DefinitionSource personal =
         key.personalId() == null || key.personalId().equals(projectId)
             ? null
-            : new FilesystemDefinitions(data.orchestrationsFor(key.personalId()), true);
+            : new FilesystemDefinitions(orchestrationsDirectory(key.personalId()), true);
     Cached before =
         build(
             "trial",
@@ -418,5 +430,11 @@ public final class OrchestrationResolver implements SessionCloseListener {
         return List.copyOf(listed);
       }
     };
+  }
+
+  private java.nio.file.Path orchestrationsDirectory(Long id) {
+    return applicationResources
+        .directory(id, "orchestrations")
+        .orElseGet(() -> data.orchestrationsFor(id));
   }
 }

@@ -12,7 +12,11 @@ clients use the existing conversation and filesystem transports.
 
 ## Packages and authority
 
-A connected project uses `.plowshare/skills/<name>/SKILL.md`. The server's data
+A deployed Application uses root `skills/<name>/SKILL.md`, root `skills.yml` and
+manifest skill settings. It loads on the server without a connected client and
+has no `.plowshare/` directory or session skill override.
+
+A connected External project uses `.plowshare/skills/<name>/SKILL.md`. The server's data
 tree uses `projects/<project-id>/skills/<name>/SKILL.md` and
 `global/skills/<name>/SKILL.md`. Shipped packages use `skills/<name>/SKILL.md` in
 the resource bundle. Each account can also put reusable packages in
@@ -290,8 +294,9 @@ and reloads so explicit retries recover the same run. There is no HTTP fallback.
 Identical aliases load once. Conflicting aliases refuse execution before any
 model call.
 
-Server rules live beside a tier's `agents/` directory or in
-`agents/<agent-name>/AGENTS.md`. A rooted client supplies project-root rules,
+Application rules live in root `AGENTS.md` or `agents/<agent-name>/AGENTS.md`.
+Legacy server rules live beside a tier's `agents/` directory or in
+`agents/<agent-name>/AGENTS.md`. A rooted External client supplies project-root rules,
 `.plowshare/AGENTS.md`, and `.plowshare/agents/<agent-name>/AGENTS.md`. Rules are
 applied from global to account Personal to session to server-project authority, with the agent's
 specific rules after that tier's project rules. Rules modify the selected

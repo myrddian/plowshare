@@ -168,6 +168,9 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	}
 	select {
 	case answer := <-waiting.answer:
+		if answer.err == nil && slices.Contains([]string{"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}, answer.reply.Code) && !deploymentMatches(operation, body, answer.reply.Payload) {
+			return outcome{}, &TransportError{Delivery: InvalidResponse, Cause: contractError}
+		}
 		return answer.reply, answer.err
 	case <-deadline.Done():
 		return outcome{}, &TransportError{Delivery: Unknown, Cause: deadline.Err()}

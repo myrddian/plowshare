@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 210,
+    "registeredRequestFrames": 214,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 201,
-    "headlessCliOneShotFrames": 191,
+    "headlessCliRequestFrames": 205,
+    "headlessCliOneShotFrames": 195,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 210,
+    "typedRequestFrames": 214,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -2512,6 +2512,28 @@
       ]
     },
     {
+      "frame": "application.activate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApplicationDeploymentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/application-deployment.ts",
+        "plowshare-desktop/src/request-schemas.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "application.create",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ServerProjectFrames.java",
       "typescriptBuilders": [
@@ -2524,6 +2546,70 @@
       "desktopConsumer": true,
       "desktopSourceReferences": [
         "plowshare-desktop/src/client.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "application.deploy",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApplicationDeploymentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts",
+        "plowshare-desktop/src/renderer/application-deployment.ts",
+        "plowshare-desktop/src/request-schemas.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "application.deployment.receipt",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApplicationDeploymentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/application-deployment.ts",
+        "plowshare-desktop/src/request-schemas.ts",
+        "plowshare-desktop/src/shared.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "application.deployment.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ApplicationDeploymentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/application-deployment.ts",
+        "plowshare-desktop/src/request-schemas.ts",
+        "plowshare-desktop/src/shared.ts"
       ],
       "headlessCliConsumer": true,
       "typedPayload": true,
@@ -6907,6 +6993,10 @@
             "application.files",
             "application.file.read",
             "application.file.save",
+            "application.deploy",
+            "application.activate",
+            "application.deployment.receipt",
+            "application.deployment.status",
             "application.create",
             "application.storage.set",
             "project.list",
@@ -7083,7 +7173,11 @@
           "agent.define",
           "agent.list",
           "agent.run",
+          "application.activate",
           "application.create",
+          "application.deploy",
+          "application.deployment.receipt",
+          "application.deployment.status",
           "application.file.read",
           "application.file.save",
           "application.files",
@@ -7254,7 +7348,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 191,
+        "count": 195,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -7266,9 +7360,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 210 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 214 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "201 WS operations: 191 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "205 WS operations: 195 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "incoming.catalog": "persistent inbound adapter",
         "incoming.receive": "persistent inbound adapter",

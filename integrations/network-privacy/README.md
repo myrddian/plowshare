@@ -92,20 +92,19 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
 
 ## Install the Plowshare Application
 
-1. Copy [examples/application](examples/application) into a configured server
-   FileStore and register its root as an Application using the existing creation
-   workflow. The valid root `plowshare.json` identifies `network-privacy`.
-2. Add explicit manifest account grants and matching server project membership for
-   the operator and collector account. Templates have **no grants**. Use a project-
-   scoped Plowshare service credential. The collector needs project work access for
-   its own evidence uploads, and reading for project reports. The schedule's
-   authenticated installer needs project MANAGER authority.
-3. Install the packaged agents, orchestrations and Relay resources into the
-   server's project definitions tier using the existing source-management workflow.
-   `.plowshare/agents` and `.plowshare/orchestrations` are drafts for that workflow;
-   Relay files belong under the project definitions tier's `Relay/`. A headless
-   Python SDK connection does **not** lend these local files to the server. Check
-   the effective rosters after applying the server configuration in the next step.
+1. Prepare a private copy of [examples/application](examples/application). Its
+   valid root `plowshare.json` identifies `network-privacy`. Add explicit manifest
+   account grants and matching server project membership for the operator and
+   collector. Templates have **no grants**. Use a project-scoped service credential;
+   the collector needs work access for evidence uploads and reading for reports.
+2. Configure a server FileStore and grant the deploying administrator MANAGER
+   access to its destination. Read `application.deployment.status`, then use
+   `application deploy ./private-application '<deployment JSON>'` or Desktop
+   **Applications → Deploy**. See the [deployment walkthrough](#deploy-the-plowshare-application).
+3. Deployed agents, orchestrations and schedules load from root `agents/`,
+   `orchestrations/` and `schedules/`; named swarms
+   load from `swarm/` and Relay from root `Relay/`. They need no desktop file
+   session. Verify effective rosters after configuring the server tools below.
 4. Merge [server-ports.json](examples/server-ports.json) into private **server
    deployment configuration**, replace its account/project/groups, and load it
    using the documented [JSON/YAML deployment configuration](../../docs/message-filtering.md#configuration-format).
@@ -114,19 +113,13 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
    SDK ingress/egress. The collector receives EGRESS on `schedule.due` and the
    request topic, and INGRESS on requests and completions. It initiates an
    authenticated outbound WebSocket to the explicit Plowshare origin.
-5. Create a paused project schedule using the Python SDK:
-
-   ```sh
-   build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" install-schedule --cron '0 */15 * * * *' --zone UTC
-   ```
-
-   Set `config.schedule` to the returned `internal_name` before starting the
-   collector. The SDK command supplies explicit timing; the packaged JSON is an
-   equivalent paused template. It uses `source: server`, so the schedule can run
-   without a desktop file session. Resume the actual returned internal name
-   through the existing Schedule UI or `schedule.pause` operation. Inspect
-   `schedule.files` to verify it is active. A lost save reply requires retained
-   schedule inspection, not blindly running installation again.
+5. The package contains a paused server schedule named `network_scan`. After deployment
+   and source reconciliation, inspect `schedule.files` for its actual internal name
+   and set `config.schedule` to that name. Review timing and resume it through the
+   Schedule UI or `schedule.pause`. Change packaged timing through a new Application
+   deployment. The separate `install-schedule` SDK command remains useful for a
+   manually managed source tier; deployment-managed source refuses direct edits.
+   Server schedules retain the authenticated installer's project permissions.
 
 The native schedule action is `privacy_tick`, a deterministic JavaScript
 orchestration that records occurrence availability without calling a model.
@@ -143,36 +136,33 @@ context where permitted. Document-derived evidence and conclusions stay in the
 information store; this example does not copy restricted evidence into memory.
 No shell, firewall or device-changing tools are granted to these agents.
 
-## How the Plowshare Application gets deployed today
+## Deploy the Plowshare Application
 
-The Application is [examples/application](examples/application), not the Python
-service. Its version-1 root `plowshare.json` supplies identity and grants; its
-definitions describe the work Plowshare runs. Starting the external collector
-does not install those files or create the Application.
+The Application is [examples/application](examples/application). Its root manifest
+and resources run inside Plowshare; the Python collector and web UI are deployed
+separately on a host with access to the configured network.
 
-The current [Application creation contract](../../docs/projects.md#create-or-adopt-an-alias-based-application)
-can provision a MANAGED root and manifest, or register a pre-existing DISJOINT
-root. [Application file operations](../../docs/projects.md#deployed-application-files)
-can inspect and replace existing bounded text files with revision checks. They
-do not upload/install a whole Application directory, create its missing files,
-or activate a versioned release. Attaching a client checkout also does not sync
-these server roots. Creating an Application and deploying its full contents are
-distinct steps.
+Prepare a private copy with explicit account grants, configured models, named-tool
+bindings and Relay port grants. As a server administrator, read status and deploy
+that copy using your configured server FileStore alias:
 
-For this example, an operator-controlled transfer, Git checkout or CI/CD workflow
-must place the root on the server in the selected FileStore. DISJOINT records that
-the external workflow owns source lifecycle; it does not require a particular CI
-system. After reviewing the root and explicit grants, an administrator can register
-it with `application.create`, `type: "DISJOINT"`, the matching project name and
-exact `applicationRoot` selector. Install the runtime definitions into their
-documented resolver tiers and verify the effective roster before resuming schedules.
-The project tier and session `.plowshare/` tier are separate; copying a client draft
-folder is not proof that a background job resolves those definitions.
+```sh
+bin/plowshare-cli application deployment status '{"project":"network-privacy"}'
+bin/plowshare-cli application deploy ./private-application '{"project":"network-privacy","requestId":"11111111-1111-1111-1111-111111111111","expectedRevision":null,"destination":{"store":"applications","path":"network-privacy"},"writableAreas":[]}'
+```
 
-A first-class install/update operation for a prepared Application folder is a
-platform capability gap. This integration does not add one to core or conceal it
-behind a copy script. The Python package is deployed separately on the collector
-host through the operator's normal Python service workflow.
+Use a fresh retained request UUID; the value above is illustrative. For updates,
+use the active revision from status. Read the retained receipt after uncertain
+delivery. Desktop exposes the same folder deployment and retained revision
+activation. No copy into an unrelated definitions directory is needed. The
+[Application deployment manual](../../docs/projects.md#deploy-update-and-activate-an-application)
+covers limits, authorization, identity preservation, rollback and recovery.
+
+Deployment enrolls the packaged paused schedule for server reconciliation. It
+does not configure global model/tool bindings or Relay ingress/egress grants.
+Keep those explicit configuration steps above and verify them before resuming
+collection. Deployment does not execute Python, change a device or modify a
+firewall. DISJOINT adoption remains available for a separately managed pipeline.
 
 ## Run the Python web interface
 

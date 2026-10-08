@@ -81,7 +81,7 @@ public sealed class Client : IAsyncDisposable
         var outcome = await RequestWireAsync(operation, body, cancellationToken);
         if (outcome.Code is not ("OK" or "CREATED" or "ACCEPTED" or "NO_CONTENT"))
             return new Reply<TResponse>(outcome.Code, outcome.Said, default!);
-        try { return new Reply<TResponse>(outcome.Code, outcome.Said, Codec.Result<TResponse>(operation, outcome.Payload)); }
+        try { var result = Codec.Result<TResponse>(operation, outcome.Payload); Codec.CorrelateDeployment(operation, body, outcome.Payload); return new Reply<TResponse>(outcome.Code, outcome.Said, result); }
         catch (JsonException) { throw new TransportException(Delivery.InvalidResponse, "Unreadable response; outcome is unknown"); }
     }
 

@@ -104,31 +104,25 @@ repeat a physical effect. No HA remote task is invented to bypass claim fencing.
 
 The example declarative route starts investigate_office_heat through the configured
 house_coordinator agent and sends its completed result through send_report. Adapt
-the [Application example](examples/application) to your existing resource tiers:
+the [Application example](examples/application):
 
-- Agent and orchestration definitions under .plowshare/agents and
-  .plowshare/orchestrations for a connected project, or the corresponding server
-  project's agents/orchestrations directories.
-- The skill package under .plowshare/skills/house-evidence, or the server project's
-  skills directory. Skill execution remains an explicit user action.
+- Root `agents/` and `orchestrations/` contain the runtime definitions.
+- Root `skills/house-evidence` contains the skill package. Skill execution remains
+  an explicit user action.
 
-Use the existing project orchestration validation/install workflow when installing
-definitions. These examples request selected reads and grant pipeline starts.
-Actions available through the outbox are constrained by
-the operator's selected binding policy. The orchestration returns its report and
-the runtime delivers the notification.
-
-For unattended event starts, install the resources in the server's project tier
-or an account Personal tier visible to the SDK caller. This headless SDK session
-does not serve a client filesystem: definitions available only through another
-client's .plowshare directory are not automatically visible to it. Use those files
-as drafts for the existing validation/install workflow.
+The deployed Application root supplies these resources without a connected client.
+Validate and deploy the complete source through CLI or Desktop Application deployment,
+or register externally deployed source with DISJOINT placement. These examples
+request selected reads and grant pipeline starts. Actions available through the
+outbox are constrained by the operator's selected binding policy. The orchestration
+returns its report and the external runtime delivers the notification.
 
 ## First installation and live acceptance
 
 1. Copy [the Application example](examples/application) to a directory in a server
    FileStore. Its root `plowshare.json` identifies `home-assistant`; its
-   `.plowshare/` directories hold the agent, orchestration and skill source.
+   root `agents/`, `orchestrations/` and `skills/` directories hold the source;
+   there is no `.plowshare/` directory.
    Preserve the existing name when converting an already registered project.
 2. Edit the deployed root [plowshare.json](examples/application/plowshare.json)
    through the operator source-management workflow. Add explicit `access.accounts`
@@ -144,9 +138,10 @@ as drafts for the existing validation/install workflow.
    valid root manifest at its current source and optionally adopt alias placement
    with `application.storage.set`; keep its name and durable work. Follow
    [creation and adoption](../../docs/projects.md#create-or-adopt-an-alias-based-application).
-   Install the `.plowshare/` resources through the existing project resource
-   workflow before starting the runtime. A headless SDK session does not serve
-   these files merely because they are present in the checkout.
+   Alternatively, deploy the complete folder through CLI or Desktop to create a
+   retained MANAGED release; see [Application deployment](../../docs/projects.md#deploy-update-and-activate-an-application).
+   Registered Application resources load on the server without a filesystem-serving
+   SDK session.
 4. Copy the connection config into a private operator directory. Match the project
    name, select real entity aliases and configure the notification action. Supply
    its token environment variables, then run `--check`. The checked-in example

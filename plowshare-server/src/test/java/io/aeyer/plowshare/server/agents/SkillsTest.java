@@ -53,6 +53,43 @@ class SkillsTest {
   }
 
   @Test
+  void deployed_skills_and_visibility_are_served_without_data_or_client_overrides()
+      throws Exception {
+    Path root = temporary.resolve("application");
+    Path packageRoot = Files.createDirectories(root.resolve("skills/review"));
+    Files.writeString(packageRoot.resolve("SKILL.md"), skill("review", "agentVisible: false\n"));
+    Files.writeString(root.resolve("skills.yml"), "skills:\n  review: {agentVisible: true}\n");
+    FakeFiles channel =
+        new FakeFiles()
+            .withFile(".plowshare/skills.yml", "skills:\n  review: {agentVisible: false}\n");
+    var resolver =
+        new SkillResolver(
+            new DataLayout(null), channel, id -> true, session -> true, (id, session) -> true);
+    resolver.useApplicationResources(
+        id -> id == null ? java.util.Optional.empty() : java.util.Optional.of(root));
+    var loaded = resolver.forCaller(new DefinitionResolver.Caller(7L, "client"));
+    assertTrue(loaded.refused().isEmpty(), loaded.refused().toString());
+    assertTrue(loaded.skills().get("review").definition().agentVisible());
+  }
+
+  @Test
+  void application_instructions_load_at_the_root_without_a_data_or_client_tier() throws Exception {
+    Path root = temporary.resolve("application");
+    Path agent = Files.createDirectories(root.resolve("agents/worker"));
+    Files.writeString(root.resolve("AGENTS.md"), "Project instructions");
+    Files.writeString(agent.resolve("AGENTS.md"), "Worker instructions");
+    var channel = new FakeFiles().withFile(".plowshare/AGENTS.md", "Client override");
+    var rules =
+        new AgentRules(new DataLayout(null), channel, session -> true, (id, session) -> true);
+    rules.useApplicationResources(id -> java.util.Optional.of(root));
+    assertEquals(
+        List.of("Project instructions", "Worker instructions"),
+        rules.forPath(new DefinitionResolver.Caller(7L, "client"), "worker", null).stream()
+            .map(AgentRules.Rule::text)
+            .toList());
+  }
+
+  @Test
   void portable_metadata_does_not_enable_a_trigger_or_choose_a_context_default() {
     SkillDefinition skill =
         parse("review", "metadata:\n  author: someone\nallowed-tools: file_read file_grep\n");

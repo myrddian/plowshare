@@ -61,11 +61,23 @@ public class HooksConfig {
 
   @Bean("projectHooks")
   public Hooks projectHooks(
-      ProjectStore projects, DataLayout data, HookEngine engine, HooksProperties properties) {
-    if (!properties.isEnabled() || !data.keepsAnything()) {
+      ProjectStore projects,
+      DataLayout data,
+      HookEngine engine,
+      HooksProperties properties,
+      io.aeyer.plowshare.server.agents.ApplicationResources resources) {
+    if (!properties.isEnabled()) {
       return Hooks.NONE;
     }
-    return new ScriptHooks(projects::id, data::hooksFor, engine, properties, Instant::now);
+    return new ScriptHooks(
+        projects::id,
+        id ->
+            resources
+                .directory(id, "hooks")
+                .orElseGet(() -> data.keepsAnything() ? data.hooksFor(id) : null),
+        engine,
+        properties,
+        Instant::now);
   }
 
   /**

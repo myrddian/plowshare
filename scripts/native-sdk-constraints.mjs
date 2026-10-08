@@ -160,6 +160,19 @@ export function constrain(graph) {
       const f = s.properties.writePaths;
       if (f) add(f, { element: { safeRelativePath: true, minLength: 1 } });
     }
+    if (op === 'application.deploy') {
+      rules(s, present('destination.path'));
+      field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
+      field(s, 'files', {minItems:1, maxItems:128, applicationFiles:true});
+      const file = resolve(graph, resolve(graph, s.properties.files).items);
+      field(file, 'path', {maxLength:512});
+      field(file, 'text', {maxLength:65536, noNul:true});
+    }
+    if (['application.deploy','application.activate','application.deployment.receipt'].includes(op)) field(s, 'requestId', {minLength:36,maxLength:36});
+    if (op === 'application.deploy' || op === 'application.activate') {
+      field(s, 'expectedRevision', {pattern:uuid,minLength:36,maxLength:36});
+      if (op === 'application.activate') field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36});
+    }
     if (op === 'application.create' || op === 'application.storage.set') {
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
       field(s, 'type', {pattern:'^(MANAGED|DISJOINT)$'});
@@ -322,6 +335,9 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'ApplicationRelease') { field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'digest', {pattern:'^[a-f0-9]{64}$',minLength:64,maxLength:64}); field(s, 'fileCount', integer(1,128)); }
+    if (title === 'ApplicationDeploymentReceipt') field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
+    if (title === 'ApplicationDeploymentStatus') { field(s, 'activeRevision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'releases', {maxItems:100}); }
     if (title === 'BoardOpened') rules(s, not(eq('topic.swarm', null)));
     if (title === 'BoardMessages') rules(s, {eq:[g('topic.swarm'),g('root.swarm')]});
     if (title === 'SwarmSelection') {

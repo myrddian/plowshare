@@ -614,6 +614,23 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   )
     return { kind: 'invalid-response', outcome };
   if (
+    (asked.type === 'application.deploy' ||
+      asked.type === 'application.activate' ||
+      asked.type === 'application.deployment.receipt') &&
+    (body?.['project'] !== asked.payload.project ||
+      String(body?.['requestId']).toLowerCase() !==
+        asked.payload.requestId.toLowerCase() ||
+      (asked.type === 'application.activate' &&
+        String(fields(body?.['release'])?.['revision']).toLowerCase() !==
+          asked.payload.revision.toLowerCase()))
+  )
+    return { kind: 'invalid-response', outcome };
+  if (
+    asked.type === 'application.deployment.status' &&
+    body?.['project'] !== asked.payload.project
+  )
+    return { kind: 'invalid-response', outcome };
+  if (
     (asked.type === 'application.files' ||
       asked.type === 'application.file.read' ||
       asked.type === 'application.file.save') &&

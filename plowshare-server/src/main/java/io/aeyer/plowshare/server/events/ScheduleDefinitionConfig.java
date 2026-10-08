@@ -28,8 +28,11 @@ public class ScheduleDefinitionConfig {
       DataLayout data,
       SessionChannel channel,
       PresenceRegistry presences,
-      SessionRegistry sessions) {
-    return new RegisteredScheduleFiles(data, channel, presences, sessions);
+      SessionRegistry sessions,
+      ApplicationResources resources) {
+    var files = new RegisteredScheduleFiles(data, channel, presences, sessions);
+    files.useApplicationResources(resources);
+    return files;
   }
 
   @Bean

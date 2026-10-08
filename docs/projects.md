@@ -9,20 +9,28 @@ spaces remain account-owned.
 
 An Application has a valid version 1 `plowshare.json` at its root. The manifest
 sets its identity, runtime settings, messaging boundary and account access.
-Existing definition directories stay underneath that root:
+Resource directories and settings live directly in that root; Applications have no `.plowshare/` directory:
 
 ```text
 mychatbot/
   plowshare.json
+  Relay/
+    active.json
+    topics.json
+    privacy/routes.js
   swarm/
     privacy-review.md
     incident-response.json
-  .plowshare/
-    agents/
-    bots/
-    skills/
-    hooks/
-    relay/
+  agents/
+  bots/
+  skills/
+    example/SKILL.md
+  hooks/
+  orchestrations/
+  schedules/
+  AGENTS.md
+  skills.yml
+  environment.yml
 ```
 
 Named swarm types load directly from Application-root `swarm/`; see the
@@ -66,6 +74,70 @@ close access. Adoption is recorded durably, so deleting the manifest or restarti
 the server cannot turn the Application back into a legacy External. Repair the
 manifest through its authorized source-management workflow. Agents cannot create,
 edit, delete or move the root `plowshare.json` through workspace file tools.
+
+## Deploy, update and activate an Application
+
+A server administrator can upload a complete source folder using the CLI or
+Desktop **Applications → Deploy**. Configure a server FileStore first and grant
+the administrator MANAGER access to its destination. Deployment retains MANAGED
+source under a dedicated `destination/revisions/<UUID>` directory; it does not
+start external processes. First deployment requires a project without an existing
+client or server source. Existing project identity and durable work are preserved.
+Use the creation/adoption workflow below for sources managed by an external pipeline.
+
+Read the active revision before each new submission:
+
+```sh
+bin/plowshare-cli application deployment status '{"project":"mychatbot"}'
+bin/plowshare-cli application deploy ./mychatbot '{"project":"mychatbot","requestId":"11111111-1111-1111-1111-111111111111","expectedRevision":null,"destination":{"store":"applications","path":"mychatbot"},"writableAreas":[{"store":"outputs","path":"mychatbot/reports"}]}'
+```
+
+Generate and retain a fresh request UUID for each new submission; the UUID above
+is illustrative. `expectedRevision: null` means first deployment. Updates use the
+active revision returned by status and preserve the destination and writable areas.
+A concurrent change refuses the submission: read status and review before creating
+a new request. Package files are regular UTF-8 text, at most 128 files, 64 KiB per
+file, at most 16 directory levels and 128 KiB in total. Local hidden state and build directories are skipped;
+links, unsafe paths and collisions are refused. Binary assets and larger source
+packages require an external source deployment workflow.
+
+The server validates the root manifest and runtime resources before activation.
+Application agents, bots, skills, orchestrations, instructions, hooks and schedules
+load directly from that registered root: `agents/`, `bots/`, `skills/`,
+`orchestrations/`, `hooks/`, `schedules/` and `AGENTS.md`. Runtime settings use
+root `skills.yml`, `environment.yml` and `plowshare.json`; named swarms use
+`swarm/` and Relay uses `Relay/`. Deployment refuses `.plowshare/` source. These resources work without a connected client.
+Clients cannot replace the deployed Application tier. Server schedules are enrolled
+for reconciliation on first deployment; they retain ordinary owner permission and
+pause rules. Update packaged schedule definitions with a new source deployment.
+
+A lost or unreadable reply is uncertain. Read its retained receipt, using the
+original server, account, project and request UUID; do not automatically resubmit:
+
+```sh
+bin/plowshare-cli application deployment receipt '{"project":"mychatbot","requestId":"11111111-1111-1111-1111-111111111111"}'
+```
+
+Desktop saves the pending submission locally and exposes **Read pending receipt**
+after reload. A missing receipt alone does not prove that a pending request cannot
+commit. An explicitly repeated identical request returns an existing receipt;
+changing its content or scope under the same UUID is refused.
+
+Status includes up to 100 retained releases and always includes the active one.
+Activate a retained revision to roll back or roll forward source:
+
+```sh
+bin/plowshare-cli application activate '{"project":"mychatbot","requestId":"33333333-3333-3333-3333-333333333333","expectedRevision":"<active revision>","revision":"<retained revision>"}'
+```
+
+Activation checks retained content and current runtime validation. It changes
+future source resolution; running work and completed effects keep their existing
+lifecycle. Runtime writable areas cannot overlap retained source. First deployment follows the existing first-creator membership rule; updates
+do not add members. Ordinary Application use still requires manifest grants and
+project membership. Deployment grants no tool permissions or Relay ports.
+Retained files and database records need a coordinated backup. Rejected or crashed
+staging directories can remain on disk; automatic cleanup is not implemented.
+See the [deployment decision](decisions/0005-application-deployment.md).
 
 ## FileStores, Application roots and writable areas
 
@@ -391,12 +463,17 @@ See the route file schema and
 
 ## Project definitions and skills
 
-Client checkouts can carry definitions under `.plowshare/agents/`,
+External client checkouts can carry definitions under `.plowshare/agents/`,
 `.plowshare/bots/`, `.plowshare/skills/<name>/SKILL.md`,
 `.plowshare/orchestrations/`, and `.plowshare/environment.yml`. Attaching the
 checkout makes its permitted sources available to the server resolver.
 
-Server project definitions live under the private server data tree at
+Application definitions load directly from the registered root, without a connected
+client: `agents/`, `bots/`, `skills/`, `orchestrations/`, `hooks/` and `schedules/`.
+Instructions and policy files also live in that root. There is no `.plowshare/`
+tier or client override for these deployed resources.
+
+Legacy External server project definitions live under the private server data tree at
 `projects/<project-id>/`, including `skills/<name>/SKILL.md`. They are separate
 from the workspace and keep their existing resolution authority. See
 [Skills and agent rules](skills-and-agent-rules.md) for package format, precedence,
@@ -525,7 +602,7 @@ CLI and TUI use the same WebSocket operations:
 
 ```text
 application files {"project":"mychatbot"}
-application files {"project":"mychatbot","path":".plowshare/agents"}
+application files {"project":"mychatbot","path":"agents"}
 application read {"project":"mychatbot","path":"notes.md"}
 application save {"project":"mychatbot","path":"notes.md","text":"Updated notes","revision":"<revision returned by read>"}
 ```
@@ -542,9 +619,9 @@ regular UTF-8 text files no larger than 256 KiB. Linked paths, Git metadata and
 excluded paths cannot be accessed. Each request rechecks effective Application
 membership, the root manifest and the filesystem fence. Write access also requires
 CONTRIBUTOR or MANAGER and a matching admitted writable area (legacy registrations
-use `writePaths`). Editing `plowshare.json`,
-`.plowshare/` definitions or `Relay/` definitions requires MANAGER; an edited root
-manifest must remain valid.
+use `writePaths`). Editing root runtime settings, instructions or definitions in `agents/`, `bots/`,
+`skills/`, `orchestrations/`, `hooks/`, `schedules/`, `swarm/` or `Relay/` requires
+MANAGER; an edited root manifest must remain valid.
 
 A save carries the SHA-256 content revision returned by its read. The server
 checks it before replacing the file atomically and preserves POSIX file modes

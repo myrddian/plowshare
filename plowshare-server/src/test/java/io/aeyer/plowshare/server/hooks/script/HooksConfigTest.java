@@ -65,10 +65,22 @@ class HooksConfigTest {
   }
 
   private ApplicationContextRunner runner() {
+    return runner(io.aeyer.plowshare.server.agents.ApplicationResources.NONE);
+  }
+
+  private ApplicationContextRunner runner(
+      io.aeyer.plowshare.server.agents.ApplicationResources resources) {
     return new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(HooksConfig.class, DataConfig.class)
-        .withBean(ProjectStore.class, () -> mock(ProjectStore.class));
+        .withBean(io.aeyer.plowshare.server.agents.ApplicationResources.class, () -> resources)
+        .withBean(
+            ProjectStore.class,
+            () -> {
+              var projects = mock(ProjectStore.class);
+              when(projects.id("ledger")).thenReturn(7L);
+              return projects;
+            });
   }
 
   private List<ILoggingEvent> warnings() {
@@ -110,8 +122,36 @@ class HooksConfigTest {
   }
 
   @Test
-  void a_server_that_keeps_nothing_has_no_project_hooks() {
-    runner().run(context -> assertSame(Hooks.NONE, context.getBean("projectHooks")));
+  void a_server_without_data_has_an_empty_project_hook_tier() {
+    runner()
+        .run(
+            context ->
+                assertEquals(
+                    io.aeyer.plowshare.server.hooks.PromptPre.NOTHING,
+                    context.getBean("projectHooks", Hooks.class).promptPre(in("log"), "hi")));
+  }
+
+  @Test
+  void deployed_hooks_load_without_data_and_revision_changes_invalidate_the_cached_set(
+      @TempDir Path root) throws Exception {
+    Path first = java.nio.file.Files.createDirectories(root.resolve("first/hooks"));
+    Path second = java.nio.file.Files.createDirectories(root.resolve("second/hooks"));
+    String script =
+        "export default {name:'rule',stages:{'prompt.pre':{handle(){return {add:'first',mode:'durable'};}}}}";
+    java.nio.file.Files.writeString(first.resolve("rule.js"), script);
+    java.nio.file.Files.writeString(second.resolve("rule.js"), script.replace("first", "other"));
+    java.nio.file.Files.setLastModifiedTime(
+        second.resolve("rule.js"),
+        java.nio.file.Files.getLastModifiedTime(first.resolve("rule.js")));
+    var active = new java.util.concurrent.atomic.AtomicReference<>(root.resolve("first"));
+    runner(id -> Optional.of(active.get()))
+        .run(
+            context -> {
+              var hooks = context.getBean("projectHooks", Hooks.class);
+              assertEquals("first", hooks.promptPre(in("log"), "hi").additions().getFirst().text());
+              active.set(root.resolve("second"));
+              assertEquals("other", hooks.promptPre(in("log"), "hi").additions().getFirst().text());
+            });
   }
 
   @Test

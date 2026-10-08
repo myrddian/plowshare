@@ -1,3 +1,9 @@
+import type { Payloads } from 'plowshare-client-ts/operations/direct';
+import type {
+  ApplicationSourceFile,
+  ApplicationDeploymentReceipt,
+  ApplicationDeploymentStatus,
+} from 'plowshare-client-ts/operations/application-deployments';
 import type { FileStoreReference } from 'plowshare-client-ts/binding/filestores';
 import type { FileStoreState } from 'plowshare-client-node/filestores';
 import type {
@@ -322,7 +328,26 @@ export interface ContextReading extends Load {
   detail?: string;
   sample?: boolean;
 }
+export type ApplicationDeploymentCall = {
+  [
+    K in
+      | 'application.deploy'
+      | 'application.activate'
+      | 'application.deployment.status'
+      | 'application.deployment.receipt'
+  ]: {
+    action: 'application-deployment';
+    operation: K;
+    payload: Payloads[K];
+  };
+}[
+  | 'application.deploy'
+  | 'application.activate'
+  | 'application.deployment.status'
+  | 'application.deployment.receipt'];
 export type Request =
+  | ApplicationDeploymentCall
+  | { action: 'application-package' }
   | { action: 'filestore-load' }
   | { action: 'filestore-choose' }
   | { action: 'filestore-setup'; alias: string; root: string }
@@ -626,6 +651,12 @@ export type Request =
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' };
 export interface Reply {
+  applicationPackage?: {
+    folder: string;
+    files: readonly ApplicationSourceFile[];
+  };
+  deployment?: ApplicationDeploymentReceipt | ApplicationDeploymentStatus;
+
   fileStoreRoot?: string;
   relay?: RelayReplies['relay.topics' | 'relay.log'];
   relayControl?: RelayReplies['relay.operate'];

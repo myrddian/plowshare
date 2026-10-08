@@ -1113,6 +1113,26 @@ export class DesktopClient {
           administration: decodeReply(request.operation, result.payload),
         };
       }
+      case 'application-package':
+        throw new Error('Choose source through the desktop folder dialog.');
+      case 'application-deployment': {
+        if (!this.state.connected || !this.state.serverAdmin)
+          throw new Error(
+            'Connect as a server administrator to deploy an Application.',
+          );
+        const result = ok(
+          await this.send(decodeRequest(request.operation, request.payload)),
+        );
+        const deployment = decodeReply(request.operation, result.payload);
+        if (
+          request.operation === 'application.deploy' ||
+          request.operation === 'application.activate'
+        ) {
+          await this.readProjects();
+          this.emit();
+        }
+        return { state: structuredClone(this.state), deployment };
+      }
       case 'server-project-create': {
         if (!this.state.connected || !this.state.serverAdmin)
           throw new Error(

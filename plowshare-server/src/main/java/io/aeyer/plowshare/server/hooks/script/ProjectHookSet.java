@@ -78,7 +78,7 @@ final class ProjectHookSet implements AutoCloseable {
   }
 
   static String fingerprint(Path directory) {
-    if (!Files.isDirectory(directory)) {
+    if (directory == null || !Files.isDirectory(directory)) {
       return "(absent)";
     }
     Map<String, String> entries = new TreeMap<>();
@@ -94,7 +94,7 @@ final class ProjectHookSet implements AutoCloseable {
       // while being iterated, as an UncheckedIOException, not at Files.list.
       return "(unreadable)";
     }
-    return entries.toString();
+    return directory.toString() + "\0" + entries;
   }
 
   static ProjectHookSet load(
@@ -104,7 +104,7 @@ final class ProjectHookSet implements AutoCloseable {
       Supplier<Instant> clock,
       ScheduledExecutorService timer) {
     String fingerprint = fingerprint(directory);
-    if (!Files.isDirectory(directory)) {
+    if (directory == null || !Files.isDirectory(directory)) {
       return new ProjectHookSet(fingerprint, List.of(), List.of());
     }
     List<Path> files;

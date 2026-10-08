@@ -35,6 +35,33 @@ class ApplicationExamplesTest {
   private final Path application = Path.of(System.getProperty("privacy.examples"));
 
   @Test
+  void complete_example_passes_the_deployment_resource_validator() throws Exception {
+    try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
+        var relay = new GraalRelayRouteProgram()) {
+      new RuntimeApplicationPackageValidator(
+              new AgentRegistry(java.util.Map.of()),
+              TOOLS,
+              DefinitionChecks.NONE,
+              new io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools() {
+                public java.util.List<String> serving(String specifier) {
+                  return java.util.List.of();
+                }
+
+                public int slots(String pool) {
+                  return 0;
+                }
+
+                public java.util.List<String> all() {
+                  return java.util.List.of();
+                }
+              },
+              hooks,
+              relay)
+          .validate("network-privacy", application);
+    }
+  }
+
+  @Test
   void exported_native_declarations_load_and_match_the_application_grants() throws Exception {
     var json = new ObjectMapper();
     var source =
@@ -54,7 +81,7 @@ class ApplicationExamplesTest {
     var properties = new io.aeyer.plowshare.server.relay.tools.RelayToolProperties();
     properties.setBindings(bindings);
     assertEquals(6, properties.getBindings().size());
-    var agents = AgentRegistry.of(application.resolve(".plowshare/agents"), TOOLS, Set.of());
+    var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
     for (var binding : bindings) {
       assertEquals("network-privacy", binding.project());
@@ -78,7 +105,7 @@ class ApplicationExamplesTest {
             Files.readString(application.resolve("plowshare.json")), "network-privacy");
     assertEquals(ApplicationPolicy.Kind.APPLICATION, policy.kind());
     assertTrue(policy.accounts().isEmpty());
-    Path definitions = application.resolve(".plowshare");
+    Path definitions = application;
     var agents = AgentRegistry.of(definitions.resolve("agents"), TOOLS, Set.of());
     assertTrue(agents.disabled().isEmpty(), agents.disabled().toString());
     assertEquals(
@@ -106,8 +133,7 @@ class ApplicationExamplesTest {
 
   @Test
   void scheduled_native_action_uses_no_model_or_external_tool() throws Exception {
-    String source =
-        Files.readString(application.resolve(".plowshare/orchestrations/privacy_tick.js"));
+    String source = Files.readString(application.resolve("orchestrations/privacy_tick.js"));
     var json = new ObjectMapper();
     for (String status : Set.of("pending", "in_progress", "done")) {
       var input = json.createObjectNode();
@@ -130,8 +156,7 @@ class ApplicationExamplesTest {
   void completed_python_publication_starts_the_granted_investigation() throws Exception {
     var pin =
         RelayDeliveries.SourcePin.of(
-            "privacy/routes.js",
-            Files.readString(application.resolve(".plowshare/Relay/privacy/routes.js")));
+            "privacy/routes.js", Files.readString(application.resolve("Relay/privacy/routes.js")));
     try (var program = new GraalRelayRouteProgram()) {
       var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
       var subscription = relay.manifest().subscriptions().getFirst();

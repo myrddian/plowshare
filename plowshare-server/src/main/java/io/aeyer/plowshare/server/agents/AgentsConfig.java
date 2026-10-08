@@ -300,10 +300,9 @@ public class AgentsConfig {
   }
 
   /**
-   * What {@code run} may do in each project, read from the data directory and the rooting session's
-   * {@code .plowshare} — wired onto {@link JobRuntime} by a setter, on {@link #projectWhereabouts}'
-   * pattern. A server with no data directory has no project files, so every side is the defaults,
-   * which run nothing.
+   * What {@code run} may do in each project, read from the Application root or the legacy data tier
+   * and the rooting session's External resources. Deployed Application policy works without a data
+   * directory; absent policy runs nothing. Wired onto {@link JobRuntime} by a setter.
    */
   @Bean
   public Environments environments(
@@ -311,11 +310,12 @@ public class AgentsConfig {
       io.aeyer.plowshare.server.data.DataLayout data,
       SessionChannel channel,
       JobRuntime runtime,
+      ApplicationResources applicationResources,
       ObjectProvider<ProjectConfigurations> configurations) {
     Environments environments =
-        data.keepsAnything()
-            ? new Environments(projects::id, data::environmentFor, channel)
-            : new Environments(name -> null, id -> null, channel);
+        new Environments(
+            projects::id, id -> data.keepsAnything() ? data.environmentFor(id) : null, channel);
+    environments.useApplicationResources(applicationResources);
     environments.useProjectConfiguration(
         project ->
             configurations.getIfAvailable() == null
@@ -1243,7 +1243,8 @@ public class AgentsConfig {
       DefinitionChecks checks,
       PresenceRegistry presences,
       ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
-      ObjectProvider<ProjectConfigurations> configurations) {
+      ObjectProvider<ProjectConfigurations> configurations,
+      ApplicationResources applicationResources) {
     DefinitionResolver resolver =
         new DefinitionResolver(
             agentRegistry,
@@ -1261,6 +1262,7 @@ public class AgentsConfig {
             configurations.getIfAvailable() == null
                 ? ProjectConfiguration.NONE
                 : configurations.getIfAvailable().read(id));
+    resolver.useApplicationResources(applicationResources);
     return resolver;
   }
 
@@ -1272,7 +1274,8 @@ public class AgentsConfig {
       SessionRegistry sessions,
       PresenceRegistry presences,
       ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
-      ObjectProvider<ProjectConfigurations> configurations) {
+      ObjectProvider<ProjectConfigurations> configurations,
+      ApplicationResources applicationResources) {
     SkillResolver resolver =
         new SkillResolver(
             data,
@@ -1286,6 +1289,7 @@ public class AgentsConfig {
             configurations.getIfAvailable() == null
                 ? ProjectConfiguration.NONE
                 : configurations.getIfAvailable().read(id));
+    resolver.useApplicationResources(applicationResources);
     return resolver;
   }
 
@@ -1297,9 +1301,11 @@ public class AgentsConfig {
       SessionRegistry sessions,
       PresenceRegistry presences,
       JobRuntime runtime,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal) {
+      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ApplicationResources applicationResources) {
     AgentRules rules =
         new AgentRules(data, channel, sessionLive(sessions), sessionRoots(projects, presences));
+    rules.useApplicationResources(applicationResources);
     rules.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
     runtime.useAgentRules(
         (definition, home, session, account) ->
@@ -1353,7 +1359,8 @@ public class AgentsConfig {
       SessionRegistry sessions,
       DefinitionChecks checks,
       PresenceRegistry presences,
-      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal) {
+      ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
+      ApplicationResources applicationResources) {
     DefinitionSource shipped =
         new ClasspathDefinitions(ClasspathDefinitions.SHIPPED_ORCHESTRATIONS);
     List<OrchestrationRegistry.Layer> boot =
@@ -1379,6 +1386,7 @@ public class AgentsConfig {
             definitions::forCaller,
             checks);
     resolver.usePersonalResources(personalIds(personal.getIfAvailable(), sessions));
+    resolver.useApplicationResources(applicationResources);
     return resolver;
   }
 

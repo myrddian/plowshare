@@ -1,3 +1,9 @@
+import {
+  deploymentReceiptCheck,
+  deploymentStatusCheck,
+  type ApplicationDeploymentReceipt,
+  type ApplicationDeploymentStatus,
+} from './application-deployments.ts';
 import { utf8Length } from '../binding/files.ts';
 import {
   fileStoreReference,
@@ -373,6 +379,10 @@ export interface ConversationReplies {
   'application.files': ApplicationFileListing;
   'application.file.read': ApplicationFileDocument;
   'application.file.save': ApplicationFileDocument;
+  'application.deploy': ApplicationDeploymentReceipt;
+  'application.activate': ApplicationDeploymentReceipt;
+  'application.deployment.receipt': ApplicationDeploymentReceipt;
+  'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
   'application.storage.set': ProjectView;
   'project.list': readonly ProjectView[];
@@ -812,6 +822,10 @@ const readers = {
       );
     },
   ),
+  'application.deploy': deploymentReceiptCheck,
+  'application.activate': deploymentReceiptCheck,
+  'application.deployment.receipt': deploymentReceiptCheck,
+  'application.deployment.status': deploymentStatusCheck,
   'application.create': project,
   'application.storage.set': project,
   'application.file.read': applicationDocument,

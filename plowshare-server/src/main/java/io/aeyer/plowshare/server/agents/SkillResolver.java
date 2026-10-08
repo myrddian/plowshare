@@ -55,6 +55,13 @@ public final class SkillResolver {
     this.personalIds = personalIds;
   }
 
+  private ApplicationResources applicationResources = ApplicationResources.NONE;
+
+  /** Composition supplies registered server sources; client sessions cannot replace them. */
+  public void useApplicationResources(ApplicationResources resources) {
+    applicationResources = java.util.Objects.requireNonNull(resources);
+  }
+
   private final DataLayout data;
   private final SessionChannel channel;
   private final LongPredicate projectExists;
@@ -80,9 +87,10 @@ public final class SkillResolver {
     if (caller.projectId() != null) {
       if (!projectExists.test(caller.projectId()))
         throw new IllegalArgumentException("project does not exist");
-      if (data.keepsAnything())
-        layers.add(new Layer(Tier.PROJECT, SkillSource.disk(data.skillsFor(caller.projectId()))));
-      if (caller.sessionId() != null
+      if (data.keepsAnything() || applicationResources.root(caller.projectId()).isPresent())
+        layers.add(new Layer(Tier.PROJECT, SkillSource.disk(skillsDirectory(caller.projectId()))));
+      if (applicationResources.root(caller.projectId()).isEmpty()
+          && caller.sessionId() != null
           && live.test(caller.sessionId())
           && roots.test(caller.projectId(), caller.sessionId())) {
         layers.add(new Layer(Tier.SESSION, SkillSource.channel(channel, caller.sessionId())));
@@ -90,10 +98,10 @@ public final class SkillResolver {
     }
     Long personal = personalIds.apply(caller);
     if (personal != null && !personal.equals(caller.projectId()) && data.keepsAnything()) {
-      layers.add(new Layer(Tier.PERSONAL, SkillSource.disk(data.skillsFor(personal))));
+      layers.add(new Layer(Tier.PERSONAL, SkillSource.disk(skillsDirectory(personal))));
     }
     if (data.keepsAnything())
-      layers.add(new Layer(Tier.GLOBAL, SkillSource.disk(data.skillsFor(null))));
+      layers.add(new Layer(Tier.GLOBAL, SkillSource.disk(skillsDirectory(null))));
     layers.add(new Layer(Tier.SHIPPED, SkillSource.shipped()));
     Catalog catalog = load(layers);
     try {
@@ -104,6 +112,7 @@ public final class SkillResolver {
         visibility.putAll(visibilityAt(personal));
       }
       if (caller.projectId() != null
+          && applicationResources.root(caller.projectId()).isEmpty()
           && caller.sessionId() != null
           && live.test(caller.sessionId())
           && roots.test(caller.projectId(), caller.sessionId())) {
@@ -116,7 +125,8 @@ public final class SkillResolver {
             ProjectConfiguration.local(new ChannelDefinitions(channel, caller.sessionId()), null)
                 .skills());
       }
-      if (caller.projectId() != null && data.keepsAnything()) {
+      if (caller.projectId() != null
+          && (data.keepsAnything() || applicationResources.root(caller.projectId()).isPresent())) {
         visibility.putAll(visibilityAt(caller.projectId()));
       }
       Map<String, Resolved> resolved = new LinkedHashMap<>();
@@ -141,13 +151,25 @@ public final class SkillResolver {
   }
 
   private Map<String, Boolean> visibilityAt(Long projectId) {
-    Path directory = data.skillsFor(projectId).getParent();
+    Path directory =
+        applicationResources
+            .directory(projectId, "")
+            .orElseGet(() -> skillsDirectory(projectId).getParent());
     Map<String, Boolean> result = new LinkedHashMap<>();
     if (Files.exists(directory.resolve("skills.yml"), LinkOption.NOFOLLOW_LINKS)) {
-      String source =
-          SkillSource.disk(directory.getParent())
-              .readResource(directory.getFileName().toString(), "skills.yml");
-      result.putAll(SkillVisibility.parse(source));
+      try (var input =
+          Files.newInputStream(directory.resolve("skills.yml"), LinkOption.NOFOLLOW_LINKS)) {
+        byte[] bytes = input.readNBytes(65537);
+        if (bytes.length > 65536) throw new java.io.IOException("Skill visibility exceeds 64 KiB");
+        String source =
+            java.nio.charset.StandardCharsets.UTF_8
+                .newDecoder()
+                .decode(java.nio.ByteBuffer.wrap(bytes))
+                .toString();
+        result.putAll(SkillVisibility.parse(source));
+      } catch (java.io.IOException invalid) {
+        throw new IllegalArgumentException("Skill visibility is unreadable", invalid);
+      }
     }
     result.putAll(projectConfiguration.apply(projectId).skills());
     return Map.copyOf(result);
@@ -186,5 +208,9 @@ public final class SkillResolver {
       }
     }
     return new Catalog(served, refused);
+  }
+
+  private java.nio.file.Path skillsDirectory(Long id) {
+    return applicationResources.directory(id, "skills").orElseGet(() -> data.skillsFor(id));
   }
 }

@@ -242,6 +242,9 @@ export async function protocolFixture(options = {}) {
       const payload = frame.payload;
       let result = { code: 'OK' };
       switch (frame.type) {
+        case 'application.deploy': case 'application.activate': case 'application.deployment.status': case 'application.deployment.receipt':
+          result = options.applicationDeployment ? options.applicationDeployment(frame.type, payload) : {code:'BAD_REQUEST',said:'Deployment fixture is not configured'};
+          break;
         case 'relay.topics': case 'relay.log': case 'relay.operate':
           result = options.relay ? options.relay(frame.type, payload) : {code:'BAD_REQUEST',said:'Relay fixture is not configured'};
           break;
