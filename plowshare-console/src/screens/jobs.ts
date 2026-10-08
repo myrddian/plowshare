@@ -1,5 +1,6 @@
 import { ApiError } from '../api';
 import { recordLinks } from './record-link';
+import { reconciliation } from './reconciliation';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import {
@@ -191,17 +192,15 @@ export function createJobs(options: JobsOptions): Screen {
   let fresh = false;
   let epoch = 0;
   let selected: string | null = null;
-  let selectionEpoch = 0;
+  let selectedJob: JobView | null = null;
+  let selectedConversation: string | null = null;
+  let selectionProblem: string | null = null;
+  let focusSelection = false;
   const blocked = new Map<string, string>();
   const raiseAmounts = new Map<string, string>();
   const continuationAmounts = new Map<string, string>();
   let stream: EventStream | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
-  /** A read is in flight. */
-  let reading = false;
-  /** Something asked for a read while one was in flight. */
-  let asked = false;
 
   const shell = el('section', 'screen jobs');
   const head = el('header', 'screen-head');
@@ -209,7 +208,15 @@ export function createJobs(options: JobsOptions): Screen {
   const widen = button('widen', 'Next jobs page');
   const previous = button('previous', 'Previous jobs page');
   previous.hidden = true;
-  const detail = el('div', 'job-selection');
+  const status = el(
+    'p',
+    'job-status',
+    'Connecting to read current process jobs…',
+  );
+  status.setAttribute('role', 'status');
+  const detail = el('section', 'job-selection');
+  detail.setAttribute('aria-label', 'Selected job');
+  detail.tabIndex = -1;
   const body = el('div', 'screen-body');
   body.dataset['jobs'] = '';
   widen.hidden = true;
@@ -220,12 +227,14 @@ export function createJobs(options: JobsOptions): Screen {
   // showing. A copy here was a second [data-stream] element saying the same
   // thing about the same socket beside the first.
   head.append(el('h2', 'screen-title', 'jobs'), reload, previous, widen);
-  body.append(detail);
+  body.append(status, detail);
   shell.append(head, body);
   options.root.replaceChildren(shell);
 
+  const refresh = reconciliation({ available: canRead, pollMs, read });
+
   reload.addEventListener('click', () => {
-    background(refresh());
+    background(refresh.refresh());
   });
   widen.addEventListener('click', () => {
     page += 1;
@@ -274,7 +283,7 @@ export function createJobs(options: JobsOptions): Screen {
     if (asJobEvent(frame) === null) {
       return;
     }
-    background(refresh());
+    background(refresh.refresh());
   }
 
   // --- drawing -------------------------------------------------------------
@@ -408,7 +417,7 @@ export function createJobs(options: JobsOptions): Screen {
     const key = `continue:${id}`;
     resume.disabled = !canAct() || blocked.has(key);
     resume.addEventListener('click', () => {
-      if (!canAct() || blocked.has(key)) return;
+      if (!canAct() || !shell.contains(card) || blocked.has(key)) return;
       if (grantField !== null) {
         const value = parsePositiveWholeNumber(amount.value);
         if (value === null) {
@@ -433,7 +442,7 @@ export function createJobs(options: JobsOptions): Screen {
             // The continued run is a new job under the same conversation;
             // the listing is re-read rather than the answer trusted, same
             // rule as `cancel` and the raise control above it.
-            () => refresh(),
+            () => refresh.refresh(),
             (problem: unknown) => {
               failure(
                 key,
@@ -577,7 +586,7 @@ export function createJobs(options: JobsOptions): Screen {
     const key = `limits:${id}`;
     raise.disabled = !canAct() || blocked.has(key);
     raise.addEventListener('click', () => {
-      if (!canAct() || blocked.has(key)) return;
+      if (!canAct() || !shell.contains(card) || blocked.has(key)) return;
       const by = parsePositiveWholeNumber(amount.value);
       if (by === null) {
         // Refused here and not sent for the server to refuse: neither
@@ -632,7 +641,7 @@ export function createJobs(options: JobsOptions): Screen {
           // asked.
           () => {
             blocked.delete(key);
-            return refresh();
+            return refresh.refresh();
           },
           (problem: unknown) => {
             failure(
@@ -688,7 +697,14 @@ export function createJobs(options: JobsOptions): Screen {
       job.cancelRequested === true ||
       job.state !== 'RUNNING';
     stop.addEventListener('click', () => {
-      if (!canAct() || blocked.has(key)) return;
+      if (
+        !canAct() ||
+        !shell.contains(card) ||
+        blocked.has(key) ||
+        job.state !== 'RUNNING' ||
+        job.cancelRequested
+      )
+        return;
       blocked.set(key, 'Cancellation requested; waiting for server state.');
       stop.disabled = true;
       void transport
@@ -697,7 +713,7 @@ export function createJobs(options: JobsOptions): Screen {
         // cancel changes what the run will do, not what it has done,
         // and this screen's rule is that what a run has done comes from
         // the listing.
-        .then(() => refresh())
+        .then(() => refresh.refresh())
         .catch((problem: unknown) => {
           failure(
             key,
@@ -758,10 +774,79 @@ export function createJobs(options: JobsOptions): Screen {
   }
 
   function draw(): void {
+    // A poll may replace nodes while the operator is editing a limit. Keep the
+    // explicit draft and caret, but never let the detached controls submit it.
+    const focused = options.root.ownerDocument.activeElement;
+    const headingFocused = focused === detail.querySelector('h3');
+    const editing =
+      focused instanceof HTMLInputElement && body.contains(focused);
+    const focusedId = editing
+      ? focused.closest<HTMLElement>('[data-job]')?.dataset['job']
+      : undefined;
+    const label = editing ? (focused.dataset['input'] ?? null) : null;
+    const start = editing ? focused.selectionStart : null;
+    const end = editing ? focused.selectionEnd : null;
+    const direction = editing ? focused.selectionDirection : null;
+    const scrollTop = body.scrollTop;
+    drawRows();
+    drawSelection();
+    if (focusSelection && fresh) {
+      (detail.querySelector<HTMLElement>('h3') ?? detail).focus();
+      focusSelection = false;
+    } else if (headingFocused) {
+      detail.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true });
+    } else if (focusedId !== undefined && label !== null) {
+      const replacement = [
+        ...body.querySelectorAll<HTMLInputElement>('[data-job] input'),
+      ].find(
+        (candidate) =>
+          candidate.closest<HTMLElement>('[data-job]')?.dataset['job'] ===
+            focusedId && candidate.dataset['input'] === label,
+      );
+      replacement?.focus({ preventScroll: true });
+      if (replacement && start !== null && end !== null)
+        replacement.setSelectionRange(start, end, direction ?? undefined);
+      body.scrollTop = scrollTop;
+    }
+  }
+
+  function drawSelection(): void {
+    detail.hidden = selected === null;
+    if (selected === null) {
+      detail.replaceChildren();
+      return;
+    }
+    const title = el('h3', '', `Selected job ${selected}`);
+    title.tabIndex = -1;
+    if (selectedJob !== null)
+      detail.replaceChildren(title, drawJob(selectedJob));
+    else {
+      const inbox = document.createElement('a');
+      inbox.href = '#inbox';
+      inbox.textContent = 'Open inbox and saved results';
+      detail.replaceChildren(
+        title,
+        trouble(
+          selectionProblem ??
+            'This job has not been verified against current server state.',
+        ),
+        el(
+          'p',
+          'note',
+          'Current-process job lookup does not provide historic jobs after a restart. Inspect the retained conversation or inbox delivery for saved results. A missing job does not establish its outcome.',
+        ),
+        recordLinks(selectedConversation),
+        inbox,
+      );
+    }
+  }
+
+  function drawRows(): void {
     if (held.length === 0) {
       widen.hidden = true;
       previous.hidden = true;
       body.replaceChildren(
+        status,
         detail,
         nothing(
           'This process is holding no jobs. That is an answer and not a failure — and on' +
@@ -799,118 +884,101 @@ export function createJobs(options: JobsOptions): Screen {
           ' again after a restart. It is what this process is holding and not a history.',
       ),
     );
-    body.replaceChildren(detail, ...nodes, ...shown.map(drawJob));
+    body.replaceChildren(
+      status,
+      detail,
+      ...nodes,
+      ...shown.filter((job) => job.id !== selectedJob?.id).map(drawJob),
+    );
   }
 
   // --- the server ----------------------------------------------------------
 
   async function read(): Promise<void> {
     const stamp = epoch;
+    const id = selected;
     fresh = false;
     disableActions();
-    let listed: readonly JobView[];
+    shell.setAttribute('aria-busy', 'true');
+    status.textContent =
+      'Refreshing jobs. The displayed snapshot may be stale.';
     try {
-      listed = (await transport.get('/v1/jobs')) ?? [];
-    } catch (problem) {
-      // The listing is left as it was rather than emptied. An unreadable
-      // answer is not a server with no jobs on it, and drawing one would
-      // be this screen concluding from a failure the same way it refuses
-      // to conclude from silence.
+      const listed = (await transport.get('/v1/jobs')) ?? [];
       if (!canRead() || stamp !== epoch) return;
+      let inspected: JobView | null = null;
+      let problem: string | null = null;
+      if (id !== null) {
+        try {
+          // Selection belongs to this read generation. Use its authorized list
+          // when possible; at most one status read handles an absent list row.
+          inspected =
+            listed.find((job) => job.id === id) ??
+            (await transport.get(`/v1/jobs/${encodeURIComponent(id)}`));
+          if (!inspected)
+            throw new Error('The server did not return this job.');
+          if (inspected.id !== id)
+            throw new Error('The server returned a different job.');
+        } catch (failure) {
+          inspected = null;
+          problem = problemText(failure, 'This job is unavailable.');
+        }
+      }
+      if (!canRead() || stamp !== epoch || id !== selected) return;
+      held = listed;
+      selectedJob = inspected;
+      // Retain only the previously verified owning-record link on a miss, never
+      // its job state or effect controls. Navigation rechecks access at the owner.
+      if (inspected !== null)
+        selectedConversation = inspected.conversation ?? null;
+      selectionProblem = problem;
+      fresh = true;
+      draw();
+      status.textContent = `${held.length} current-process jobs reconciled from server state.`;
+    } catch (problem) {
+      if (!canRead() || stamp !== epoch) return;
+      // Keep the context, with effects disabled. An unreadable list is never an
+      // empty list, and cached selected-job state cannot authorize an action.
       body.querySelector('[data-list-error]')?.remove();
       const error = trouble(
         problemText(problem, 'The jobs could not be listed.'),
       );
       error.dataset['listError'] = '';
       body.prepend(error);
-      return;
-    }
-    if (!canRead() || stamp !== epoch) return;
-    held = listed;
-    fresh = true;
-    draw();
-    if (selected !== null) await showRecord(selected);
-  }
-
-  /**
-   * One read at a time, and one more if anything asked while it was going.
-   *
-   * A burst of frames is exactly the case this screen exists to survive, and
-   * a read per frame would answer a dropped-event problem with a thundering
-   * one. There is no timer in this: the coalescing is a latch, so a suite
-   * driving it does not have to wait for a clock.
-   */
-  async function refresh(): Promise<void> {
-    if (!canRead()) return;
-    if (reading) {
-      asked = true;
-      return;
-    }
-    reading = true;
-    try {
-      await read();
+      status.textContent =
+        'Current job authority could not be read. Refresh to retry; displayed jobs may be stale.';
     } finally {
-      reading = false;
+      if (!stopped) shell.setAttribute('aria-busy', 'false');
     }
-    if (asked && canRead()) {
-      asked = false;
-      await refresh();
-    }
-  }
-
-  function schedulePoll(): void {
-    if (pollMs === null || !canRead() || timer !== null) {
-      return;
-    }
-    timer = setTimeout(() => {
-      timer = null;
-      background(refresh().finally(schedulePoll));
-    }, pollMs);
   }
 
   async function load(): Promise<void> {
     if (stream === null && !stopped) {
-      // Reconnect reconciles the listing; the socket's state is reported once
-      // at the rail's foot.
       stream = openSocket({
         session: options.session,
         onEvent,
         onStatus: (status) => {
           if (stopped) return;
+          pause();
           if (status.state === 'open' && !status.signedOut)
-            background(refresh().finally(schedulePoll));
-          else pause();
+            background(refresh.refresh());
         },
       });
     }
-    await refresh();
-    schedulePoll();
+    await refresh.refresh();
   }
 
   async function showRecord(id: string): Promise<void> {
-    selected = id;
-    if (!canRead()) return;
-    const epoch = ++selectionEpoch;
-    try {
-      const job =
-        held.find((row) => row.id === id) ??
-        (await transport.get(`/v1/jobs/${encodeURIComponent(id)}`));
-      if (!canRead() || epoch !== selectionEpoch) return;
-      if (!job) throw new Error('The server did not return this job.');
-      if (job.id !== id)
-        throw new Error('The server returned a different job.');
-      detail.replaceChildren(el('h3', '', 'Selected job'), drawJob(job));
-    } catch (problem) {
-      if (!canRead() || epoch !== selectionEpoch) return;
-      detail.replaceChildren(
-        trouble(problemText(problem, 'This job is unavailable.')),
-        el(
-          'p',
-          'note',
-          'Historic job lookup is unavailable after the server process loses the job. Read its retained conversation or inbox delivery instead.',
-        ),
-      );
+    if (stopped) return;
+    if (selected !== id) {
+      selectedJob = null;
+      selectedConversation = null;
+      selectionProblem = null;
     }
+    selected = id;
+    focusSelection = true;
+    pause();
+    drawSelection();
+    await refresh.refresh();
   }
 
   function canRead(): boolean {
@@ -938,17 +1006,17 @@ export function createJobs(options: JobsOptions): Screen {
    * socket loss fences late reads and requires a fresh read before effects. */
   function pause(): void {
     ++epoch;
-    ++selectionEpoch;
     fresh = false;
-    asked = false;
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
+    status.textContent =
+      'The displayed jobs may be stale. Reconnect or refresh before acting.';
     disableActions();
   }
 
   function visibilityChanged(): void {
-    if (!canRead()) pause();
-    else background(refresh().finally(schedulePoll));
+    pause();
+    refresh.setActive(
+      active && options.root.ownerDocument.visibilityState !== 'hidden',
+    );
   }
   options.root.ownerDocument.addEventListener(
     'visibilitychange',
@@ -962,21 +1030,19 @@ export function createJobs(options: JobsOptions): Screen {
       if (stopped || active === next) return;
       active = next;
       pause();
-      if (active && !stopped) background(refresh().finally(schedulePoll));
+      refresh.setActive(
+        active && options.root.ownerDocument.visibilityState !== 'hidden',
+      );
     },
     load,
     destroy(): void {
       stopped = true;
       ++epoch;
-      ++selectionEpoch;
       options.root.ownerDocument.removeEventListener(
         'visibilitychange',
         visibilityChanged,
       );
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      refresh.stop();
       stream?.close();
       stream = null;
     },

@@ -118,6 +118,16 @@ and read-receipt controls require a fresh successful read on the active
 connection. A refused or unreadable read does not re-enable these controls.
 Server authorization still decides every effect; reconnect never resubmits one.
 
+Job selection and list refresh share one reconciliation owner. Each pass reads
+one current-process list and, only when needed, one selected-job status. Obsolete
+reads cannot replace a later selection. A selected job appears once, with its
+full outcome and owning conversation; an unavailable lookup provides inbox
+navigation and its previously verified conversation link without inventing an
+ending. Polling preserves explicit budget
+and continuation drafts, keyboard focus and the caret. Detached controls from an
+older snapshot cannot submit cancellation, budget changes or continuation after
+fresh authority returns.
+
 Inbox offers All and Unread deliveries through the existing server-side filter,
 applied before paging. Each page renders up to fifty short previews and one full
 selected result, with its delivery metadata and owning conversation link.

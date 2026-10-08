@@ -773,6 +773,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .mover, .editor { margin: .4rem 0 0 8.6rem; display: flex; gap: .6rem; flex-wrap: wrap; }
 .mover input, .editor input { min-width: 22rem; }
 
+.job-selection { border: 1px solid var(--accent); padding: .75rem; margin-bottom: 1rem; background: var(--surface); }
+.job-selection h3 { overflow-wrap: anywhere; }
+.job-selection:focus, .job-selection h3:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
 .job-head { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
 .job[data-state="RUNNING"] .state { color: var(--agent); }
 .job .cancel-requested { color: var(--refused); }

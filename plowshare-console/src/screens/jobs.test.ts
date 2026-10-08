@@ -1059,6 +1059,204 @@ describe('authoritative actions across reconciliation', () => {
   });
 });
 
+describe('selected jobs and coordinated refresh', () => {
+  it('awaits the current selection through a coalesced list refresh and draws it once', async () => {
+    await screen.load();
+    let resolve: (jobs: readonly JobView[]) => void = () => {};
+    get.mockReturnValueOnce(
+      new Promise<readonly JobView[]>((accept) => {
+        resolve = accept;
+      }),
+    );
+    const reading = screen.load();
+    if (!screen.showRecord) throw new Error('Expected job selection');
+    const selecting = screen.showRecord('job_current');
+    server.jobs = [done({ id: 'job_current' })];
+    resolve([job({ id: 'job_obsolete' })]);
+    await Promise.all([reading, selecting]);
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(row('job_obsolete')).toBeNull();
+    expect(rows()).toHaveLength(1);
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'what it came to',
+    );
+    expect(document.activeElement?.textContent).toBe(
+      'Selected job job_current',
+    );
+    await screen.load();
+    expect(document.activeElement?.textContent).toBe(
+      'Selected job job_current',
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('fences a delayed status lookup when a different record is selected', async () => {
+    await screen.load();
+    let resolve: (job: JobView) => void = () => {};
+    get.mockResolvedValueOnce([]).mockReturnValueOnce(
+      new Promise<JobView>((accept) => {
+        resolve = accept;
+      }),
+    );
+    if (!screen.showRecord) throw new Error('Expected job selection');
+    const oldSelection = screen.showRecord('job_old');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    server.jobs = [job({ id: 'job_current' })];
+    const currentSelection = screen.showRecord('job_current');
+    resolve(job({ id: 'job_old' }));
+    await Promise.all([oldSelection, currentSelection]);
+    expect(get).toHaveBeenCalledTimes(4);
+    expect(row('job_old')).toBeNull();
+    expect(rows()).toHaveLength(1);
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'job_current',
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('clears an unavailable selected job without inventing a terminal outcome', async () => {
+    server.jobs = [job({ conversation: 'cnv_retained' })];
+    await screen.load();
+    if (!screen.showRecord) throw new Error('Expected job selection');
+    await screen.showRecord('job_000001');
+    server.jobs = [];
+    await screen.load();
+    expect(rows()).toHaveLength(0);
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'answered 404',
+    );
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'A missing job does not establish its outcome',
+    );
+    expect(root.querySelector('[data-outcome]')).toBeNull();
+    expect(
+      root.querySelector('.job-selection a[href="#chat?record=cnv_retained"]'),
+    ).not.toBeNull();
+    expect(
+      root.querySelector('.job-selection a[href="#inbox"]'),
+    ).not.toBeNull();
+    await screen.showRecord('job_unrelated');
+    expect(
+      root.querySelector('.job-selection a[href="#chat?record=cnv_retained"]'),
+    ).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['raise', false],
+    ['raise', true],
+    ['continue', false],
+    ['continue', true],
+  ] as const)(
+    'preserves the %s draft, caret and focus across polling with selection=%s',
+    async (action, select) => {
+      if (action === 'continue')
+        server.jobs = [
+          done({
+            conversation: 'cnv_1',
+            outcome: {
+              ending: 'TURN_CAP',
+              answered: false,
+              resumable: true,
+              text: 'Stopped at cap',
+              steps: 2,
+              modelCalls: 2,
+              detail: '',
+            },
+          }),
+        ];
+      await screen.load();
+      if (select) {
+        if (!screen.showRecord) throw new Error('Expected job selection');
+        await screen.showRecord('job_000001');
+      }
+      const selector =
+        action === 'raise' ? '.raise-control input' : '.continue-control input';
+      const amount = root.querySelector<HTMLInputElement>(selector);
+      if (!amount) throw new Error('Expected budget input');
+      amount.value = '123';
+      amount.dispatchEvent(new Event('input'));
+      amount.focus();
+      amount.setSelectionRange(1, 2, 'backward');
+      await screen.load();
+      const replacement = root.querySelector<HTMLInputElement>(selector);
+      expect(replacement).not.toBe(amount);
+      expect(replacement?.value).toBe('123');
+      expect(document.activeElement).toBe(replacement);
+      expect(replacement?.selectionStart).toBe(1);
+      expect(replacement?.selectionEnd).toBe(2);
+      expect(replacement?.selectionDirection).toBe('backward');
+      expect(rows()).toHaveLength(1);
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['cancel', 'raise', 'continue'])(
+    'refuses a detached %s control even after fresh authority has returned',
+    async (action) => {
+      if (action === 'continue')
+        server.jobs = [
+          done({
+            conversation: 'cnv_1',
+            outcome: {
+              ending: 'TURN_CAP',
+              answered: false,
+              resumable: true,
+              text: 'Stopped at cap',
+              steps: 2,
+              modelCalls: 2,
+              detail: '',
+            },
+          }),
+        ];
+      await screen.load();
+      const oldControl = root.querySelector<HTMLButtonElement>(
+        `[data-${action}]`,
+      );
+      if (!oldControl) throw new Error('Expected job action');
+      server.jobs = server.jobs.map((held) => ({
+        ...held,
+        limits: {
+          maxTurns: 100,
+          noTurnCap: false,
+          maxModelCalls: 200,
+          noBudget: false,
+          modelCallsSpent: 5,
+        },
+      }));
+      await screen.load();
+      oldControl.dispatchEvent(new Event('click'));
+      expect(post).not.toHaveBeenCalled();
+      const currentControl = root.querySelector<HTMLButtonElement>(
+        `[data-${action}]`,
+      );
+      expect(currentControl?.disabled).toBe(false);
+      currentControl?.click();
+      await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+      if (action === 'raise')
+        expect(post).toHaveBeenCalledWith('/v1/jobs/job_000001/limits', {
+          maxTurns: 120,
+          maxModelCalls: 220,
+        });
+      if (action === 'continue')
+        expect(post).toHaveBeenCalledWith('/v1/conversations/cnv_1/resume', {
+          session: 'session-under-test',
+          maxTurns: 100,
+        });
+    },
+  );
+
+  it('does not submit a cancellation from a terminal job control', async () => {
+    server.jobs = [done()];
+    await screen.load();
+    const control = root.querySelector<HTMLButtonElement>('[data-cancel]');
+    if (!control) throw new Error('Expected disabled cancel control');
+    expect(control.disabled).toBe(true);
+    control.dispatchEvent(new Event('click'));
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
 describe('the stream’s state', () => {
   it("says nothing about the socket, which is the rail's to report", async () => {
     await screen.load();
