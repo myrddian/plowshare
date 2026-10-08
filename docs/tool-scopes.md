@@ -72,8 +72,11 @@ catalogue and serve requests on the same authenticated event socket. The `prefix
 reserves model tool names and prevents built-in or same-owner provider collisions.
 Other accounts in a shared project have independent connections and routing names.
 
-Connections are bounded in-memory attachments, not another durable execution
-system. Socket loss or restart removes availability; reconnect explicitly and use
+Connections are bounded in-memory attachments. A one-shot CLI connect ends when
+its event socket closes; use a persistent SDK connection or the TUI/desktop's
+persistent command session for an active provider scope. CLI list remains useful
+for inspecting connections owned by this account. Scope connection does not start
+an external provider process. Socket loss or restart removes availability; reconnect explicitly and use
 the new routing name. Repeating an identical connect request on the same live
 socket returns that existing connection. Changing it requires disconnecting first.
 Do not automatically replay a timed-out connection mutation; inspect the scope list.

@@ -559,7 +559,9 @@ those returned values, publish its discovered catalogue and serve calls on the
 same authenticated event socket. `tool scope list` inspects current connections;
 `tool scope disconnect` removes one. New connections receive a fresh namespace.
 Socket loss stops tool availability; neither reconnection nor UNKNOWN effects are
-replayed automatically.
+replayed automatically. A one-shot CLI connect closes with the command, so active
+providers use a persistent SDK or interactive client connection. These commands do
+not launch the external provider.
 
 Applications use the same operations under their declared service execution
 principal, but their requested provider, tools and agents must match the explicit

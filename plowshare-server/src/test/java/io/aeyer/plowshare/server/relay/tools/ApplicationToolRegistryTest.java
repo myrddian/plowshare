@@ -403,6 +403,19 @@ class ApplicationToolRegistryTest {
   }
 
   @Test
+  void source_validation_reserves_harness_names_even_when_they_are_not_boot_tools()
+      throws Exception {
+    Files.writeString(
+        root.resolve("server/tools.json"),
+        """
+        {"version":1,"bindings":[{"provider":"scanner","account":"provider","name":"board_read","description":"Board","parameters":[],"timeoutSeconds":30}],
+         "providers":[{"provider":"scanner","account":"provider","prefix":"board_","leaseSeconds":30}]}
+        """);
+    assertThrows(
+        CallerFault.class, () -> registry.stagedNames("fixture", root, Set.of("memory_read")));
+  }
+
+  @Test
   void built_in_collisions_are_refused_before_deployment() {
     assertThrows(
         CallerFault.class, () -> registry.stagedNames("fixture", root, Set.of("network_scope")));

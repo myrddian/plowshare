@@ -247,7 +247,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
   @Override
   public Set<String> stagedNames(String project, Path root, Set<String> builtins) {
-    return checked(project, root, builtins).tools().stream()
+    return checked(project, root, ScopedTools.reservedNames(builtins)).tools().stream()
         .map(RelayToolDefinition::name)
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
