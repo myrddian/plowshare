@@ -1,6 +1,6 @@
 # Automation and integrations
 
-The [Python Network Privacy Application](../../integrations/network-privacy/README.md)
+The [Network Privacy Watch Application](../../integrations/network-privacy/README.md)
 shows a complete SDK consumer with its own web interface. A project schedule
 publishes collection occurrences through Relay; Python retains bounded network
 observations in the project information store and publishes completion. Relay

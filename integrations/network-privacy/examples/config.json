@@ -1,6 +1,6 @@
 {
   "origin": "https://plowshare.example.invalid",
-  "project": "network-privacy",
+  "project": "network-privacy-watch",
   "collector": "home-network",
   "tokenEnvironment": "PLOWSHARE_TOKEN",
   "webTokenEnvironment": "PRIVACY_WEB_TOKEN",

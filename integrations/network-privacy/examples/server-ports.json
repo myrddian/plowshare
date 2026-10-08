@@ -3,10 +3,10 @@
     "relay": {
       "ports": {
         "bindings": [
-          {"project": "network-privacy", "topic": "schedule.due", "account": "privacy-collector-account", "direction": "EGRESS", "groups": ["privacy-home-network"]},
-          {"project": "network-privacy", "topic": "privacy.scan.requests", "account": "privacy-collector-account", "direction": "EGRESS", "groups": ["privacy-home-network"]},
-          {"project": "network-privacy", "topic": "privacy.scan.requests", "account": "privacy-collector-account", "direction": "INGRESS"},
-          {"project": "network-privacy", "topic": "privacy.scan.completed", "account": "privacy-collector-account", "direction": "INGRESS"}
+          {"project": "network-privacy-watch", "topic": "schedule.due", "account": "privacy-collector-account", "direction": "EGRESS", "groups": ["privacy-home-network"]},
+          {"project": "network-privacy-watch", "topic": "privacy.scan.requests", "account": "privacy-collector-account", "direction": "EGRESS", "groups": ["privacy-home-network"]},
+          {"project": "network-privacy-watch", "topic": "privacy.scan.requests", "account": "privacy-collector-account", "direction": "INGRESS"},
+          {"project": "network-privacy-watch", "topic": "privacy.scan.completed", "account": "privacy-collector-account", "direction": "INGRESS"}
         ]
       }
     }

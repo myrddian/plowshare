@@ -7,8 +7,8 @@ dependencies {
     testImplementation(files(rootProject.project(":plowshare-server").configurations.named("runtimeClasspath")))
 }
 tasks.test {
-    inputs.dir("examples/application").withPathSensitivity(PathSensitivity.RELATIVE)
-    systemProperty("privacy.examples", file("examples/application").absolutePath)
+    inputs.dir("examples/network-privacy-watch").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("privacy.examples", file("examples/network-privacy-watch").absolutePath)
 }
 
 tasks.register<Exec>("pythonCheck") {

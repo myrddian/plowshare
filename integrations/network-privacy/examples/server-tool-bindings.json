@@ -4,7 +4,7 @@
       "tools": {
         "bindings": [
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_scope",
@@ -13,7 +13,7 @@
             "timeoutSeconds": 30
           },
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_scan",
@@ -22,7 +22,7 @@
             "timeoutSeconds": 30
           },
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_scan_status",
@@ -38,7 +38,7 @@
             "timeoutSeconds": 30
           },
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_scan_list",
@@ -47,7 +47,7 @@
             "timeoutSeconds": 30
           },
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_evidence",
@@ -63,7 +63,7 @@
             "timeoutSeconds": 30
           },
           {
-            "project": "network-privacy",
+            "project": "network-privacy-watch",
             "provider": "privacy-scanner",
             "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
             "name": "network_destinations",

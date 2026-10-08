@@ -57,7 +57,7 @@ class ApplicationExamplesTest {
               },
               hooks,
               relay)
-          .validate("network-privacy", application);
+          .validate("network-privacy-watch", application);
     }
   }
 
@@ -84,7 +84,7 @@ class ApplicationExamplesTest {
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
     for (var binding : bindings) {
-      assertEquals("network-privacy", binding.project());
+      assertEquals("network-privacy-watch", binding.project());
       assertTrue(coordinator.tools().contains(binding.name()));
       assertEquals(binding.name(), binding.schema().name());
     }
@@ -102,7 +102,7 @@ class ApplicationExamplesTest {
   void manifest_agents_orchestrations_and_paused_schedule_are_valid() throws Exception {
     var policy =
         WorkspaceApplicationPolicy.parse(
-            Files.readString(application.resolve("plowshare.json")), "network-privacy");
+            Files.readString(application.resolve("plowshare.json")), "network-privacy-watch");
     assertEquals(ApplicationPolicy.Kind.APPLICATION, policy.kind());
     assertTrue(policy.accounts().isEmpty());
     Path definitions = application;

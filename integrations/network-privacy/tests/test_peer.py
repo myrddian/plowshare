@@ -48,7 +48,7 @@ def work(data: ExternalMessageDtoPartsItemVariant4DtoData) -> OutgoingWorkDto:
     return OutgoingWorkDto(
         id=str(uuid4()),
         request_id=str(uuid4()),
-        project="network-privacy",
+        project="network-privacy-watch",
         peer="privacy-scanner",
         conversation=None,
         created_at=STAMP,

@@ -1,0 +1,96 @@
+# Network Privacy Watch
+
+Network Privacy Watch is a defensive network privacy Application. It combines a
+Python collector and web dashboard with Plowshare's scheduler, Relay, project
+information store and agents. It helps answer: **What changed on my network, what
+evidence supports that, and what should I investigate?**
+
+The Python service runs separately on a host with access to the configured
+network. Plowshare can run locally or on a cloud provider. The connection uses
+the public SDK; it needs no shared filesystem or Java code in the collector.
+Agents can use a configured local model or another served model through the
+Application's `reasoning` binding.
+
+## How it works
+
+1. A Plowshare schedule or a dashboard request makes a scan request available
+   through project-scoped Relay.
+2. Python probes explicitly configured IP addresses and TCP ports. It can also
+   read a normalized DNS observation export from an external monitoring system.
+3. The collector compares observations, uploads evidence to the project's
+   information store and publishes a completion event with retained identities.
+4. Relay starts an investigation for a baseline, changed observations or a
+   coverage gap. A coordinator works with an analyst and reviewer to retain a
+   draft report linked to its source evidence.
+5. The dashboard displays collection receipts, observations, gaps and related
+   reports. Agents also get granted named tools for requesting a scan and reading
+   its scope, status, evidence and DNS destinations.
+
+Python handles collection and comparison. Plowshare owns scheduling, retained
+evidence and investigation work. The LLM contributes interpretation and review.
+A scan publication, completed collection and completed investigation are separate
+outcomes.
+
+## Application contents
+
+This folder is the deployable Application root. It contains no `.plowshare/`
+directory.
+
+| Path | Purpose |
+| --- | --- |
+| `plowshare.json` | Application identity `network-privacy-watch`, account grants and limits |
+| `agents/` | Coordinator, analyst and reviewer definitions with explicit tool grants |
+| `orchestrations/` | Deterministic schedule action and agent investigation workflow |
+| `schedules/network_scan.json` | Packaged scan schedule, initially paused |
+| `Relay/` | Project topics and the scan-completion route |
+
+The Python service, private configuration, credentials and collector journal
+stay outside this folder. Deploying the Application does not start Python or
+install its dependencies.
+
+## Set up a deployment
+
+Follow the [integration guide](../../README.md) for the exact commands and
+configuration contracts.
+
+1. Install the Python SDK and collector. Copy the supplied
+   [configuration](../config.json) into a private operator directory and set the
+   server origin, `network-privacy-watch` project, collector scope and private
+   state directory. Supply separate Plowshare and dashboard credentials through
+   the configured environment variables.
+2. Make a private copy of this Application folder. Add explicit manifest account
+   grants and matching server membership; the supplied manifest grants no
+   accounts. Configure the agents' model binding and review their tool grants.
+3. Configure a server FileStore destination. As a server administrator with
+   MANAGER access to that destination, deploy the private folder using CLI
+   `application deploy` or Desktop **Applications → Deploy**. Retain the request
+   UUID and inspect its receipt after uncertain delivery.
+4. Install the [Relay port grants](../server-ports.json) and exported named-tool
+   bindings in private server deployment configuration. Replace the placeholder
+   accounts and groups, and apply that server configuration. Application
+   deployment does not install these global bindings or grants.
+5. Read `schedule.files` for the deployed schedule's actual internal name and set
+   it in the collector configuration. Start the Python web service with explicit
+   provider, account, bind address and port values. Connect the dashboard using
+   its separate web bearer.
+6. Request a scan and inspect its retained evidence and related report. Then
+   review and resume the paused schedule. Use a new Application revision for
+   packaged source changes.
+
+For a first look without a server or network probes, use the
+[synthetic browser preview](../../README.md#verify-without-a-database-or-live-household-data).
+It uses fixture observations and a fixture report; it does not run an LLM.
+
+## What the evidence means
+
+Collection is bounded to operator-configured targets and ports. Agents cannot
+choose arbitrary targets, execute a shell, change devices or modify a firewall.
+TCP probes observe selected service responses; they do not provide complete
+device discovery or vulnerability detection. DNS observations need an external
+exporter and do not reveal encrypted payloads or prove malicious behavior.
+
+Missing and stale sources remain visible as evidence gaps. Reports are drafts
+for operator review. The collector records uncertain uploads and publications
+for read-only reconciliation instead of automatically repeating them. See the
+[recovery guide](../../README.md#receipts-disconnects-and-recovery) before
+restarting a collector with an unresolved outcome.

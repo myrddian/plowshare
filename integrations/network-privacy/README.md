@@ -1,4 +1,10 @@
-# Network privacy: a Plowshare Application with a Python integration
+# Network Privacy Watch
+
+Network Privacy Watch helps an operator understand changes in their network,
+retain the observations and investigate them with an LLM, including a local model.
+Start with the [Application README](examples/network-privacy-watch/README.md) for
+the workflow and deployment checklist; this guide covers the Python integration,
+tool configuration and recovery.
 
 The Plowshare Application contains the manifest, agents, orchestrations and Relay
 definitions that Plowshare runs. The collector and its web interface are an
@@ -92,8 +98,8 @@ build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
 
 ## Install the Plowshare Application
 
-1. Prepare a private copy of [examples/application](examples/application). Its
-   valid root `plowshare.json` identifies `network-privacy`. Add explicit manifest
+1. Prepare a private copy of [examples/network-privacy-watch](examples/network-privacy-watch). Its
+   valid root `plowshare.json` identifies `network-privacy-watch`. Add explicit manifest
    account grants and matching server project membership for the operator and
    collector. Templates have **no grants**. Use a project-scoped service credential;
    the collector needs work access for evidence uploads and reading for reports.
@@ -138,7 +144,7 @@ No shell, firewall or device-changing tools are granted to these agents.
 
 ## Deploy the Plowshare Application
 
-The Application is [examples/application](examples/application). Its root manifest
+The Application is [examples/network-privacy-watch](examples/network-privacy-watch). Its root manifest
 and resources run inside Plowshare; the Python collector and web UI are deployed
 separately on a host with access to the configured network.
 
@@ -147,8 +153,8 @@ bindings and Relay port grants. As a server administrator, read status and deplo
 that copy using your configured server FileStore alias:
 
 ```sh
-bin/plowshare-cli application deployment status '{"project":"network-privacy"}'
-bin/plowshare-cli application deploy ./private-application '{"project":"network-privacy","requestId":"11111111-1111-1111-1111-111111111111","expectedRevision":null,"destination":{"store":"applications","path":"network-privacy"},"writableAreas":[]}'
+bin/plowshare-cli application deployment status '{"project":"network-privacy-watch"}'
+bin/plowshare-cli application deploy ./private-application '{"project":"network-privacy-watch","requestId":"11111111-1111-1111-1111-111111111111","expectedRevision":null,"destination":{"store":"applications","path":"network-privacy-watch"},"writableAreas":[]}'
 ```
 
 Use a fresh retained request UUID; the value above is illustrative. For updates,

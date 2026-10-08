@@ -220,7 +220,7 @@ result. It never submits another operation. A COMPLETED result confirms the
 handler's stated outcome; a scan-submission handler may confirm publication while
 collection and investigation remain separate retained work.
 
-The [network privacy example](../integrations/network-privacy/README.md) combines
+The [Network Privacy Watch](../integrations/network-privacy/README.md) combines
 this façade with Python collection, a web interface, schedules, project evidence
 and multiple agents. The [design decision](decisions/0002-relay-tool-facade.md)
 records platform scope and compatibility. This is not an MCP implementation;

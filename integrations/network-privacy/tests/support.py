@@ -32,7 +32,7 @@ def configuration(directory: Path) -> Configuration:
     snapshot.write_bytes((EXAMPLES / "observations-before.json").read_bytes())
     return Configuration(
         "https://plowshare.example.invalid",
-        "network-privacy",
+        "network-privacy-watch",
         "home-network",
         "PLOWSHARE_TOKEN",
         "PRIVACY_WEB_TOKEN",
