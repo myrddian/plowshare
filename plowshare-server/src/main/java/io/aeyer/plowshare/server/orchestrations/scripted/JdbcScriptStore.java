@@ -2,12 +2,14 @@ package io.aeyer.plowshare.server.orchestrations.scripted;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** A journal, not a mutable JavaScript stack. Raw paid results survive post-hook failure. */
 public final class JdbcScriptStore implements ScriptStore {
-  private static final ObjectMapper JSON = new ObjectMapper();
+  // Script input includes TodoItem.updatedAt; retain Java-time support at this JSON boundary.
+  private static final ObjectMapper JSON = new ObjectMapper().registerModule(new JavaTimeModule());
   private final JdbcTemplate jdbc;
 
   public JdbcScriptStore(JdbcTemplate jdbc) {
