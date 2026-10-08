@@ -1,3 +1,4 @@
+import { fileStoreCatalogCheck } from './server-filestores.ts';
 import { validateDeploymentReply } from './application-deployments.ts';
 import { validateSwarmReply } from './swarm-types.ts';
 import { validateRelayReply } from './relay.ts';
@@ -242,6 +243,8 @@ export function decodeReply<K extends keyof Replies>(
     false,
     type,
   ) as unknown as Replies[K];
+  if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
+    throw new Error('Invalid FileStore catalogue');
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);
   validateDeploymentReply(type, decoded);

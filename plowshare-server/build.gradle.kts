@@ -301,6 +301,8 @@ tasks.named<Test>("test") {
     inputs.dir("src/test/node").withPathSensitivity(PathSensitivity.RELATIVE)
     // ScriptDocumentationTest executes the copyable example outside the source set.
     inputs.file(rootProject.file("docs/examples/scripted-orchestrations/catalogue_inventory.js"))
+    inputs.file(rootProject.file("deploy/docker/server-filestores.sh"))
+    systemProperty("plowshare.docker.filestores", rootProject.file("deploy/docker/server-filestores.sh").absolutePath)
     useJUnitPlatform { excludeTags("node-source") }
 }
 

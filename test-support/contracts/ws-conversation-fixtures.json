@@ -952,5 +952,16 @@
         }
       ]
     }
+  },
+  "filestore.list": {
+    "code": "OK",
+    "payload": {
+      "stores": [
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        }
+      ]
+    }
   }
 }

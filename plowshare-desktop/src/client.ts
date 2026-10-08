@@ -1113,6 +1113,15 @@ export class DesktopClient {
           administration: decodeReply(request.operation, result.payload),
         };
       }
+      case 'server-filestore-list': {
+        if (!this.state.connected)
+          throw new Error('Connect to a server before selecting FileStores.');
+        const result = ok(await this.send(decodeRequest('filestore.list', {})));
+        return {
+          state: structuredClone(this.state),
+          serverFileStores: decodeReply('filestore.list', result.payload),
+        };
+      }
       case 'application-package':
         throw new Error('Choose source through the desktop folder dialog.');
       case 'application-deployment': {

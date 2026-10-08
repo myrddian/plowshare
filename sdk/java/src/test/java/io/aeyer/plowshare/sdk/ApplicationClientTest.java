@@ -76,6 +76,29 @@ class ApplicationClientTest {
   }
 
   @Test
+  void catalogue_decode_refuses_malformed_aliases_roles_and_missing_fields() throws Exception {
+    var json = SdkJson.mapper();
+    var type = io.aeyer.plowshare.protocol.FileStoreCatalog.class;
+    assertEquals(
+        "applications",
+        SdkJson.decode(
+                json,
+                json.readTree(
+                    "{\"stores\":[{\"alias\":\"applications\",\"role\":\"MANAGER\",\"future\":true}]}"),
+                type)
+            .stores()
+            .getFirst()
+            .alias());
+    for (String invalid :
+        List.of(
+            "{}",
+            "{\"stores\":[{\"alias\":\"../secret\",\"role\":\"MANAGER\"}]}",
+            "{\"stores\":[{\"alias\":\"applications\",\"role\":\"OWNER\"}]}")) {
+      assertThrows(IOException.class, () -> SdkJson.decode(json, json.readTree(invalid), type));
+    }
+  }
+
+  @Test
   void malformed_release_and_missing_status_fields_are_refused() throws Exception {
     var json = SdkJson.mapper();
     assertThrows(

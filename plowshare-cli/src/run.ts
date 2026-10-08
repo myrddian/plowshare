@@ -321,7 +321,11 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       return 0;
     }
     const fileStores = new FileStores(userConfigDirectory(io.env));
-    if (opts.commandParts?.[0] === 'filestore') {
+    // list discovers server grants; the remaining FileStore commands manage this host's registry.
+    if (
+      opts.commandParts?.[0] === 'filestore' &&
+      opts.commandParts[1] !== 'list'
+    ) {
       if (opts.validate)
         throw new Usage(
           '--validate is for server payloads. FileStore setup is an explicit local configuration action.',

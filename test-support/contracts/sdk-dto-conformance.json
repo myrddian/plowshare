@@ -3818,5 +3818,487 @@
     "operation": "swarm.types",
     "value": {},
     "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "filestore.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "filestore.list",
+    "value": {
+      "account": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "filestore.list",
+    "value": {
+      "stores": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "filestore.list",
+    "value": {
+      "stores": [
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "reports",
+          "role": "CONTRIBUTOR"
+        },
+        {
+          "alias": "archive",
+          "role": "VIEWER"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "filestore.list",
+    "value": {
+      "stores": [
+        {
+          "alias": "../private",
+          "role": "MANAGER"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "filestore.list",
+    "value": {
+      "stores": [
+        {
+          "alias": "applications",
+          "role": "OWNER"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "filestore.list",
+    "value": {
+      "stores": [
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        },
+        {
+          "alias": "applications",
+          "role": "MANAGER"
+        }
+      ]
+    },
+    "valid": false
   }
 ]

@@ -68,6 +68,13 @@ val personalStarterInstallTest by tasks.registering(Exec::class) {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     commandLine("node", "--test", "scripts/install-personal-starter.test.mjs")
 }
+val deploymentConfigTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Checks persistent image FileStore initialization without Docker or a database."
+    inputs.files("deploy/docker/server-filestores.sh", "deploy/docker/server-entrypoint.sh", "deploy/docker/server.Dockerfile", "deploy/docker/server.Dockerfile.dockerignore", "deploy/docker/tests/test_filestores.py")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    commandLine("python3", "-B", "-m", "unittest", "discover", "-s", "deploy/docker/tests")
+}
 val clientManifestCheck by tasks.registering(Exec::class) {
     group = "verification"
     description = "Refuses stale WS, MCP and client capability inventory."
@@ -101,7 +108,7 @@ val databaseTestBoundaryCheck by tasks.registering(Exec::class) {
     inputs.files(fileTree(rootDir) { include("*/src/test/java/**/*.java", "sdk/*/src/test/java/**/*.java", "integrations/*/src/test/java/**/*.java") })
     commandLine("python3", "scripts/check-database-tests.py")
 }
-tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, manualCheck, clientManifestCheck, legacyCliAuditCheck, databaseTestBoundaryCheck) }
+tasks.named("check") { dependsOn(serverLaunchTest, personalStarterInstallTest, deploymentConfigTest, manualCheck, clientManifestCheck, legacyCliAuditCheck, databaseTestBoundaryCheck) }
 
 subprojects {
     apply(plugin = "java")

@@ -1,4 +1,8 @@
 import {
+  fileStoreCatalogCheck,
+  type FileStoreCatalog,
+} from './server-filestores.ts';
+import {
   deploymentReceiptCheck,
   deploymentStatusCheck,
   type ApplicationDeploymentReceipt,
@@ -382,6 +386,7 @@ export interface ConversationReplies {
   'application.deploy': ApplicationDeploymentReceipt;
   'application.activate': ApplicationDeploymentReceipt;
   'application.deployment.receipt': ApplicationDeploymentReceipt;
+  'filestore.list': FileStoreCatalog;
   'application.deployment.status': ApplicationDeploymentStatus;
   'application.create': ProjectView;
   'application.storage.set': ProjectView;
@@ -825,6 +830,7 @@ const readers = {
   'application.deploy': deploymentReceiptCheck,
   'application.activate': deploymentReceiptCheck,
   'application.deployment.receipt': deploymentReceiptCheck,
+  'filestore.list': fileStoreCatalogCheck,
   'application.deployment.status': deploymentStatusCheck,
   'application.create': project,
   'application.storage.set': project,

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.sdk;
 
 import io.aeyer.plowshare.protocol.ApplicationDeployment.*;
+import io.aeyer.plowshare.protocol.FileStoreCatalog;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
@@ -12,6 +13,13 @@ public final class ApplicationClient {
 
   public ApplicationClient(Plowshare connection) {
     this.connection = Objects.requireNonNull(connection);
+  }
+
+  /** Lists this account's server aliases/grants; storage host paths are private. */
+  public FileStoreCatalog stores() throws IOException {
+    var result = connection.request("filestore.list", Map.of(), FileStoreCatalog.class);
+    if (result == null) throw new IOException("Unreadable FileStore catalogue");
+    return result;
   }
 
   public Receipt deploy(Deploy request) throws IOException {

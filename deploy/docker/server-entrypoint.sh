@@ -16,6 +16,7 @@ test -d "$PLOWSHARE_DATA_DIR" && test -w "$PLOWSHARE_DATA_DIR" || {
     echo "PLOWSHARE_DATA_DIR must be an existing directory writable by container UID 1000." >&2
     exit 1
 }
+. "$(dirname "$0")/server-filestores.sh"
 # Numeric container users have no passwd home. GraalJS needs a writable home
 # for its native runtime cache; keep that disposable cache on the exec tmpfs.
 mkdir -p /tmp/plowshare-runtime

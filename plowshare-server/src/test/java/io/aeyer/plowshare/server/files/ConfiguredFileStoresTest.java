@@ -11,11 +11,89 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 
 class ConfiguredFileStoresTest {
   @TempDir Path temporary;
+
+  @Test
+  void image_default_is_readable_by_the_real_registry_with_only_the_configured_manager_grant()
+      throws Exception {
+    Path data = Files.createDirectory(temporary.resolve("data"));
+    Path workspace = Files.createDirectory(temporary.resolve("workspace \"quoted\""));
+    String manager = "operator";
+    var builder =
+        new ProcessBuilder("sh", System.getProperty("plowshare.docker.filestores"))
+            .redirectErrorStream(true);
+    builder.environment().keySet().removeIf(key -> key.startsWith("PLOWSHARE_"));
+    builder.environment().put("PLOWSHARE_DATA_DIR", data.toString());
+    builder.environment().put("PLOWSHARE_PROJECTS_WORKSPACE_DIRECTORY", workspace.toString());
+    builder.environment().put("PLOWSHARE_ADMIN_HANDLE", manager);
+    var process = builder.start();
+    try {
+      assertTrue(process.waitFor(10, TimeUnit.SECONDS));
+      assertEquals(0, process.exitValue());
+    } finally {
+      process.destroyForcibly();
+    }
+    try (var stores = new ConfiguredFileStores(data.resolve("filestore.js").toString())) {
+      var reference = new FileStoreReference("applications", "network-privacy-watch");
+      assertEquals(
+          workspace.resolve("applications").toRealPath(),
+          stores
+              .resolve(
+                  new ApplicationPlacement(new FileStoreReference("applications", ""), List.of()))
+              .root());
+      assertTrue(stores.permits(reference, manager, ProjectRole.MANAGER));
+      assertFalse(stores.permits(reference, "other", ProjectRole.VIEWER));
+    }
+  }
+
+  @Test
+  void packaged_setting_uses_image_default_but_keeps_explicit_and_private_overlay_precedence()
+      throws Exception {
+    var environment = new StandardEnvironment();
+    environment
+        .getPropertySources()
+        .remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
+    environment
+        .getPropertySources()
+        .remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
+    for (var source :
+        new YamlPropertySourceLoader().load("packaged", new ClassPathResource("application.yml"))) {
+      environment.getPropertySources().addLast(source);
+    }
+    assertEquals("", environment.getProperty("plowshare.filestores.config-file"));
+    Path image = temporary.resolve("image.js");
+    Path explicit = temporary.resolve("explicit.js");
+    Path privateOverlay = temporary.resolve("private.js");
+    environment
+        .getPropertySources()
+        .addFirst(
+            new MapPropertySource(
+                "image", Map.of("PLOWSHARE_DEFAULT_FILESTORES_CONFIG_FILE", image.toString())));
+    assertEquals(image.toString(), environment.getProperty("plowshare.filestores.config-file"));
+    environment
+        .getPropertySources()
+        .addFirst(
+            new MapPropertySource(
+                "explicit", Map.of("PLOWSHARE_FILESTORES_CONFIG_FILE", explicit.toString())));
+    assertEquals(explicit.toString(), environment.getProperty("plowshare.filestores.config-file"));
+    environment
+        .getPropertySources()
+        .addFirst(
+            new MapPropertySource(
+                "private-overlay",
+                Map.of("plowshare.filestores.config-file", privateOverlay.toString())));
+    assertEquals(
+        privateOverlay.toString(), environment.getProperty("plowshare.filestores.config-file"));
+  }
 
   Path write(Map<String, Object> stores) throws Exception {
     Path file = temporary.resolve("filestore.js");
@@ -123,6 +201,66 @@ class ConfiguredFileStoresTest {
               stores.resolve(
                   new ApplicationPlacement(new FileStoreReference("applications", ""), List.of())));
     }
+  }
+
+  @Test
+  void catalogue_filters_accounts_projects_no_host_paths_and_reloads_revoked_grants()
+      throws Exception {
+    Path root = Files.createDirectory(temporary.resolve("applications"));
+    Path config =
+        write(
+            Map.of(
+                "applications",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "operator", "role", "MANAGER")))),
+                "reports",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts",
+                            List.of(Map.of("handle", "operator", "role", "CONTRIBUTOR")))),
+                "archive",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "operator", "role", "VIEWER")))),
+                "private",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "other", "role", "MANAGER"))))));
+    try (var stores = new ConfiguredFileStores(config.toString())) {
+      var catalogue = stores.catalog("operator");
+      assertEquals(
+          List.of("applications", "archive", "reports"),
+          catalogue.stores().stream()
+              .map(io.aeyer.plowshare.protocol.FileStoreCatalog.Store::alias)
+              .toList());
+      assertEquals(
+          List.of("MANAGER", "VIEWER", "CONTRIBUTOR"),
+          catalogue.stores().stream().map(store -> store.role().name()).toList());
+      String wire = new ObjectMapper().writeValueAsString(catalogue);
+      assertFalse(wire.contains(root.toString()));
+      assertFalse(wire.contains("other"));
+      assertFalse(wire.contains("private"));
+      assertTrue(stores.catalog("ungranted").stores().isEmpty());
+      assertThrows(IllegalArgumentException.class, () -> stores.catalog(" "));
+      write(Map.of("applications", Map.of("root", root.toString())));
+      assertTrue(stores.catalog("operator").stores().isEmpty());
+      Files.writeString(config, "export default {version:1};");
+      assertThrows(WorkspaceRefusedException.class, () -> stores.catalog("operator"));
+    }
+    assertThrows(WorkspaceRefusedException.class, () -> FileStores.NONE.catalog("operator"));
   }
 
   @Test

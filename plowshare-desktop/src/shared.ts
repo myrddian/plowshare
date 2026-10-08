@@ -1,3 +1,4 @@
+import type { FileStoreCatalog } from 'plowshare-client-ts/operations/server-filestores';
 import type { Payloads } from 'plowshare-client-ts/operations/direct';
 import type {
   ApplicationSourceFile,
@@ -348,6 +349,7 @@ export type ApplicationDeploymentCall = {
 export type Request =
   | ApplicationDeploymentCall
   | { action: 'application-package' }
+  | { action: 'server-filestore-list' }
   | { action: 'filestore-load' }
   | { action: 'filestore-choose' }
   | { action: 'filestore-setup'; alias: string; root: string }
@@ -651,6 +653,7 @@ export type Request =
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' };
 export interface Reply {
+  serverFileStores?: FileStoreCatalog;
   applicationPackage?: {
     folder: string;
     files: readonly ApplicationSourceFile[];

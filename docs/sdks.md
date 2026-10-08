@@ -63,6 +63,22 @@ Filesystem lending, process execution, binary uploads and Git transfers remain
 platform integrations. Calling an operation does not install its provider
 or assert that a remote system has an accessible filesystem.
 
+## Server FileStores
+
+`filestore.list` accepts an empty request and returns `stores`, each with an
+`alias` and the authenticated account's `role` (`VIEWER`, `CONTRIBUTOR` or
+`MANAGER`). It omits stores without an account grant, host paths and other
+accounts. An unconfigured registry refuses the request; a configured registry
+with no grants returns an empty list. Discovery reads the current configuration;
+file operations still recheck grants, paths and physical roots before use.
+
+Desktop Application creation and deployment select aliases from this catalogue.
+Source placement requires MANAGER access; writable-area references use granted
+stores. Relative paths are entered separately. All SDK languages expose this
+operation; Java also provides `ApplicationClient.stores()`. The CLI exposes
+`filestore list` for server discovery; `filestore status`, `setup`, `default` and
+`resolve` manage the local registry.
+
 ## Application source deployment
 
 All SDKs expose `application.deploy`, `application.activate`,

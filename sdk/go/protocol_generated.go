@@ -69,6 +69,7 @@ var operationNames = []string{
 	"document.search",
 	"document.stance",
 	"event.fire",
+	"filestore.list",
 	"firing.list",
 	"inbox.list",
 	"inbox.read",
