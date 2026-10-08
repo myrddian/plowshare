@@ -64,6 +64,15 @@ destinations. It compares equal configured scopes and does not infer device
 disappearance from missing data or compare counts across different export windows.
 These are observations and hypotheses for an investigator, not vendor allegations.
 
+## Guided setup
+
+Use the [step-by-step setup walkthrough](SETUP.md) and installed
+`plowshare-privacy-bootstrap` helper to configure a private collector, select a
+server FileStore, deploy the paused Application, provision a separate service
+account and redeploy with its execution principal. The guide explains each identity,
+provider scope, Relay processing, Python startup and interrupted-install recovery.
+The lower-level preparation and provisioning commands below remain available.
+
 ## Install the Python application
 
 From the repository root, with Python 3.11+:
@@ -274,7 +283,7 @@ intent and reconcile it first. The script never reconnects or replays mutations.
    declarations deploy with the Application; no global server edit or restart
    is needed. The collector receives EGRESS on `schedule.due` and the request
    topic, and INGRESS on requests/completions. It initiates an authenticated
-   outbound WebSocket to the explicit Plowshare origin. Bootstrap tool schemas
+   outbound WebSocket to the explicit Plowshare origin. Explicit provider scope assignments
    validate the coordinator before Python starts; the provider publishes and
    renews its live catalogue while serving.
 5. The package contains a paused server schedule named `network_scan`. After deployment

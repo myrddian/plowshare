@@ -51,8 +51,10 @@ install its dependencies.
 
 ## Set up a deployment
 
-Follow the [integration guide](../README.md) for the exact commands and
-configuration contracts.
+Start with the [guided Python setup walkthrough](../SETUP.md). It prepares private
+configuration, selects a server FileStore, deploys the Application and provisions
+its separate execution account. The [integration guide](../README.md) documents
+the lower-level commands and configuration contracts.
 
 Start with [service account and human manager setup](../README.md#separate-the-human-manager-from-the-service-account).
 The Python setup script reads configuration, prompts for blanks, prepares private
@@ -60,8 +62,9 @@ source and provisions a project-scoped service credential after the first paused
 deployment. The human user gets Application `MANAGER` access; the service handle
 gets `CONTRIBUTOR`. The management group is the manifest's `MANAGER` accounts with
 matching server membership. It does not require giving the user server admin.
-Relay provider/port declarations use the service token's `@service/<UUID>` principal,
-while the manifest uses its owning account handle. The guide also explains how to
+Relay provider/port declarations use the service token's `@service/<UUID>` principal.
+The manifest uses that principal for `executionAccount` and its owning account
+handle for membership grants. The guide also explains how to
 run investigations as that principal and the current administrator-owned schedule
 limit; setup does not transfer ownership of a deployed schedule.
 
@@ -111,8 +114,8 @@ restarting a collector with an unresolved outcome.
 
 Before deploying your private copy, configure [`server/`](server/README.md)
 with the external collector's authenticated execution identity (the service token
-principal when using a service account). Its tool bootstrap
-schemas and catalogue authority are validated with the agent definitions; its
+principal when using a service account). Its provider scope assignments and
+catalogue authority are validated with the agent definitions; its
 Relay port grants activate with this Application revision. No global server
 configuration edit or restart is required. The Python process remains separately
 operated and renews its live tool catalogue lease. See the
