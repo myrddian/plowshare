@@ -242,6 +242,9 @@ export async function protocolFixture(options = {}) {
       const payload = frame.payload;
       let result = { code: 'OK' };
       switch (frame.type) {
+        case 'filestore.list':
+          result = options.fileStores ? options.fileStores() : {code:'OK',payload:{stores:[{alias:'applications',role:'MANAGER'},{alias:'reports',role:'CONTRIBUTOR'},{alias:'archive',role:'VIEWER'}]}};
+          break;
         case 'application.deploy': case 'application.activate': case 'application.deployment.status': case 'application.deployment.receipt':
           result = options.applicationDeployment ? options.applicationDeployment(frame.type, payload) : {code:'BAD_REQUEST',said:'Deployment fixture is not configured'};
           break;

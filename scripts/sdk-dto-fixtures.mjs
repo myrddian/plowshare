@@ -264,6 +264,13 @@ input('board.open', namedOpening, true);
 for (const swarm of ['../privacy', 'Privacy', '', 'p'.repeat(65), null]) input('board.open', {...namedOpening,swarm}, false);
 input('swarm.types', {project:'fixture'}, true);
 input('swarm.types', {}, false);
+input('filestore.list', {}, true);
+input('filestore.list', {account:'other'}, false);
+result('filestore.list', {stores:[]}, true);
+result('filestore.list', {stores:[{alias:'applications',role:'MANAGER'},{alias:'reports',role:'CONTRIBUTOR'},{alias:'archive',role:'VIEWER'}]}, true);
+result('filestore.list', {stores:[{alias:'../private',role:'MANAGER'}]}, false);
+result('filestore.list', {stores:[{alias:'applications',role:'OWNER'}]}, false);
+result('filestore.list', {stores:Array(101).fill({alias:'applications',role:'MANAGER'})}, false);
 for (const test of cases) {
   let accepted = true;
   try {

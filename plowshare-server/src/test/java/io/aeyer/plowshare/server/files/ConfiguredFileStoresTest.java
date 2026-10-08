@@ -204,6 +204,66 @@ class ConfiguredFileStoresTest {
   }
 
   @Test
+  void catalogue_filters_accounts_projects_no_host_paths_and_reloads_revoked_grants()
+      throws Exception {
+    Path root = Files.createDirectory(temporary.resolve("applications"));
+    Path config =
+        write(
+            Map.of(
+                "applications",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "operator", "role", "MANAGER")))),
+                "reports",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts",
+                            List.of(Map.of("handle", "operator", "role", "CONTRIBUTOR")))),
+                "archive",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "operator", "role", "VIEWER")))),
+                "private",
+                    Map.of(
+                        "root",
+                        root.toString(),
+                        "access",
+                        Map.of(
+                            "accounts", List.of(Map.of("handle", "other", "role", "MANAGER"))))));
+    try (var stores = new ConfiguredFileStores(config.toString())) {
+      var catalogue = stores.catalog("operator");
+      assertEquals(
+          List.of("applications", "archive", "reports"),
+          catalogue.stores().stream()
+              .map(io.aeyer.plowshare.protocol.FileStoreCatalog.Store::alias)
+              .toList());
+      assertEquals(
+          List.of("MANAGER", "VIEWER", "CONTRIBUTOR"),
+          catalogue.stores().stream().map(store -> store.role().name()).toList());
+      String wire = new ObjectMapper().writeValueAsString(catalogue);
+      assertFalse(wire.contains(root.toString()));
+      assertFalse(wire.contains("other"));
+      assertFalse(wire.contains("private"));
+      assertTrue(stores.catalog("ungranted").stores().isEmpty());
+      assertThrows(IllegalArgumentException.class, () -> stores.catalog(" "));
+      write(Map.of("applications", Map.of("root", root.toString())));
+      assertTrue(stores.catalog("operator").stores().isEmpty());
+      Files.writeString(config, "export default {version:1};");
+      assertThrows(WorkspaceRefusedException.class, () -> stores.catalog("operator"));
+    }
+    assertThrows(WorkspaceRefusedException.class, () -> FileStores.NONE.catalog("operator"));
+  }
+
+  @Test
   void refuses_host_access_imports_and_blocking_javascript() throws Exception {
     Path file = temporary.resolve("filestore.js");
     try (var stores = new ConfiguredFileStores(file.toString())) {

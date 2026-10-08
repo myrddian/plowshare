@@ -171,6 +171,7 @@ export interface ExtendedPayloads
     readonly expectedRevision: string;
     readonly revision: string;
   };
+  'filestore.list': Record<string, never>;
   'application.deployment.status': { readonly project: string };
   'application.deployment.receipt': {
     readonly project: string;
@@ -367,6 +368,7 @@ export const CLI_OPERATIONS = {
   'application save': 'application.file.save',
   'application deploy': 'application.deploy',
   'application activate': 'application.activate',
+  'filestore list': 'filestore.list',
   'application deployment status': 'application.deployment.status',
   'application deployment receipt': 'application.deployment.receipt',
   'application create': 'application.create',

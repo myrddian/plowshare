@@ -1,5 +1,5 @@
 import { installApplicationDeployment } from './application-deployment.ts';
-import { parseFileStoreReference } from 'plowshare-client-ts/binding/filestores';
+import { fileStorePlacement } from './server-filestores.ts';
 import { installFileStores } from './filestores.ts';
 import { isObject } from 'plowshare-client-ts/binding/values';
 import { readPreferences, type Preferences } from './preferences.ts';
@@ -2683,8 +2683,42 @@ $('#server-setup').addEventListener(
     }
   }),
 );
+const serverPlacement = fileStorePlacement(
+  $('#server-project-placement'),
+  async () => {
+    const base = state.base,
+      handle = state.handle;
+    const reply = await request({ action: 'server-filestore-list' });
+    if (state.base !== base || state.handle !== handle)
+      throw new Error('The server connection changed.');
+    if (!reply.serverFileStores)
+      throw new Error('Server FileStore catalogue was unreadable.');
+    return reply.serverFileStores;
+  },
+  false,
+);
+const loadServerPlacement = async () => {
+  $('#server-project-error').hidden = true;
+  try {
+    await serverPlacement.load();
+  } catch (reason) {
+    // Catalogue failures stay visible in the dialog and submission remains blocked.
+    $('#server-project-error').textContent = errorMessage(reason);
+    $('#server-project-error').hidden = false;
+  }
+};
+serverPlacement.reload.addEventListener(
+  'click',
+  ownedEvent(loadServerPlacement),
+);
+let serverProjectConnection = '';
 $('#server-project-add').addEventListener('click', () => {
+  serverProjectConnection = JSON.stringify([state.base, state.handle]);
   $<HTMLFormElement>('#server-project-form').reset();
+  serverPlacement.reset();
+  $('#server-project-placement').hidden = true;
+  $<HTMLFieldSetElement>('#server-project-placement').disabled = true;
+  $('#server-project-legacy').hidden = false;
   $('#server-project-error').hidden = true;
   $<HTMLSelectElement>('#server-project-type').value = 'MANAGED';
   $<HTMLInputElement>('#server-project-writes').value = '.';
@@ -2693,16 +2727,22 @@ $('#server-project-add').addEventListener('click', () => {
     'Leave the path blank to provision a server workspace.';
   $<HTMLDialogElement>('#server-project-dialog').showModal();
 });
-$('#server-project-filestore').addEventListener('change', () => {
-  const aliases = $<HTMLInputElement>('#server-project-filestore').checked;
-  $<HTMLInputElement>('#server-project-workspace').required =
-    aliases ||
-    $<HTMLSelectElement>('#server-project-type').value === 'DISJOINT';
-  $<HTMLInputElement>('#server-project-writes').value = aliases ? '' : '.';
-  $('#server-project-path-note').textContent = aliases
-    ? 'Use a server FileStore alias and relative path, such as applications/mychatbot. Writable areas also use alias/path. Blank means read only. Server aliases are independent of local FileStores.'
-    : 'Use the existing absolute server source-directory format.';
-});
+$('#server-project-filestore').addEventListener(
+  'change',
+  ownedEvent(async () => {
+    const aliases = $<HTMLInputElement>('#server-project-filestore').checked;
+    $('#server-project-placement').hidden = !aliases;
+    $<HTMLFieldSetElement>('#server-project-placement').disabled = !aliases;
+    $('#server-project-legacy').hidden = aliases;
+    $<HTMLInputElement>('#server-project-workspace').required =
+      !aliases &&
+      $<HTMLSelectElement>('#server-project-type').value === 'DISJOINT';
+    $('#server-project-path-note').textContent = aliases
+      ? 'Choose a server FileStore and enter relative paths. Leave writable areas empty for read-only runtime files.'
+      : 'Use the existing absolute server source-directory format.';
+    if (aliases) await loadServerPlacement();
+  }),
+);
 $('#server-project-type').addEventListener('change', () => {
   if ($<HTMLInputElement>('#server-project-filestore').checked) return;
   const disjoint =
@@ -2725,6 +2765,13 @@ $('#server-project-form').addEventListener(
       button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
     button.disabled = true;
     try {
+      if (
+        !state.connected ||
+        serverProjectConnection !== JSON.stringify([state.base, state.handle])
+      )
+        throw new Error(
+          'The server connection changed. Close and reopen this dialog.',
+        );
       const root = $<HTMLInputElement>('#server-project-workspace').value;
       const writes = $<HTMLInputElement>('#server-project-writes')
         .value.split(',')
@@ -2733,15 +2780,16 @@ $('#server-project-form').addEventListener(
       const placement = $<HTMLInputElement>(
         '#server-project-filestore',
       ).checked;
+      const selected = placement ? serverPlacement.read() : undefined;
       await request({
         action: 'server-project-create',
         name: $<HTMLInputElement>('#server-project-name').value,
         type: $<HTMLSelectElement>('#server-project-type').value as
           'MANAGED' | 'DISJOINT',
-        ...(placement
+        ...(selected
           ? {
-              applicationRoot: parseFileStoreReference(root),
-              writableAreas: writes.map(parseFileStoreReference),
+              applicationRoot: selected.destination,
+              writableAreas: selected.writableAreas,
             }
           : { workspace: root, writePaths: writes }),
       });

@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.files;
 
+import io.aeyer.plowshare.protocol.FileStoreCatalog;
 import io.aeyer.plowshare.protocol.FileStoreReference;
 import io.aeyer.plowshare.server.archive.ApplicationPlacement;
 import io.aeyer.plowshare.server.archive.ProjectRole;
@@ -21,6 +22,11 @@ public interface FileStores {
   /** Direct filesystem access is independent of an Application's runtime write admission. */
   boolean permits(FileStoreReference reference, String account, ProjectRole role);
 
+  /**
+   * List only this account's configured aliases/grants, without host paths; recheck grants on use.
+   */
+  FileStoreCatalog catalog(String account);
+
   /** The registry is private server configuration and must be fenced from file operations. */
   Optional<Path> configurationFile();
 
@@ -33,6 +39,11 @@ public interface FileStores {
 
         public boolean permits(FileStoreReference reference, String account, ProjectRole role) {
           return false;
+        }
+
+        public FileStoreCatalog catalog(String account) {
+          throw new WorkspaceRefusedException(
+              "Configure this server's filestore.js before listing FileStores");
         }
 
         public Optional<Path> configurationFile() {

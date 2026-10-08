@@ -1,6 +1,6 @@
 import type { Payloads } from 'plowshare-client-ts/operations/direct';
 import { decodePayload } from 'plowshare-client-ts/operations/schema';
-import { parseFileStoreReference } from 'plowshare-client-ts/binding/filestores';
+import { fileStorePlacement } from './server-filestores.ts';
 import type {
   ApplicationSourceFile,
   ApplicationDeploymentStatus,
@@ -18,8 +18,7 @@ export function installApplicationDeployment(
   dialog.setAttribute('aria-label', 'Deploy an Application');
   dialog.innerHTML = `<form><h2>Deploy an Application</h2><p>Choose a folder with plowshare.json. Deploy its source to this server and retain the project’s work across updates.</p>
     <button type="button" data-choose>Choose source folder</button><p data-package>No source selected.</p>
-    <label>Application project<input data-project required></label><label>Server destination<input data-destination required placeholder="applications/my-app"></label>
-    <label>Writable areas<input data-areas placeholder="artifacts/my-app, reports/my-app"></label><p>Leave writable areas blank for read-only runtime files.</p>
+    <label>Application project<input data-project required></label><div data-placement></div><p>Leave writable areas blank for read-only runtime files.</p>
     <button type="button" data-status>Read deployment status</button><p data-active role="status">Read status before updating an existing deployment.</p>
     <label>Retained revision<select data-revision><option value="">No revisions loaded</option></select></label><button type="button" data-activate>Activate selected revision</button>
     <p data-request></p><p data-result role="status"></p><p data-error role="alert" hidden></p>
@@ -49,6 +48,12 @@ export function installApplicationDeployment(
       );
     return reply;
   };
+  const placement = fileStorePlacement(get('[data-placement]'), async () => {
+    const reply = await call({ action: 'server-filestore-list' });
+    if (!reply.serverFileStores)
+      throw new Error('Server FileStore catalogue was unreadable.');
+    return reply.serverFileStores;
+  });
   const show = (selector: string, text: string) => {
     get(selector).textContent = text;
   };
@@ -111,8 +116,9 @@ export function installApplicationDeployment(
   };
   document.querySelector('#application-deploy-open')!.addEventListener(
     'click',
-    run(() => {
+    run(async () => {
       draftKey = key();
+      placement.reset();
       files = [];
       folder = '';
       status = undefined;
@@ -144,7 +150,14 @@ export function installApplicationDeployment(
           `Pending request: ${pending.requestId}. Read its receipt before another submission.`,
         );
       }
+      await placement.load();
+      if (pending && 'destination' in pending)
+        placement.set(pending.destination, pending.writableAreas);
     }),
+  );
+  placement.reload.addEventListener(
+    'click',
+    run(() => placement.load()),
   );
   get('[data-close]').addEventListener('click', () => dialog.close());
   get('[data-choose]').addEventListener(
@@ -210,14 +223,7 @@ export function installApplicationDeployment(
         project: project(),
         requestId: crypto.randomUUID(),
         expectedRevision: status.activeRevision,
-        destination: parseFileStoreReference(
-          get<HTMLInputElement>('[data-destination]').value,
-        ),
-        writableAreas: get<HTMLInputElement>('[data-areas]')
-          .value.split(',')
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .map(parseFileStoreReference),
+        ...placement.read(),
         files,
       });
       pending = payload;
@@ -281,6 +287,7 @@ export function installApplicationDeployment(
     update: () => {
       if (draftKey && draftKey !== key()) {
         dialog.close();
+        placement.reset();
         files = [];
         pending = undefined;
         status = undefined;

@@ -436,6 +436,7 @@ export const SHAPES: Record<
     ['project', 'requestId', 'expectedRevision', 'revision'],
     [],
   ],
+  'filestore.list': [[], []],
   'application.deployment.status': [['project'], []],
   'application.deployment.receipt': [['project', 'requestId'], []],
   'application.create': [

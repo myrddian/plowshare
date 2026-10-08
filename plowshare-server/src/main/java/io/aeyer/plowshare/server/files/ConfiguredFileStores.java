@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.files;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.FileStoreCatalog;
 import io.aeyer.plowshare.protocol.FileStoreReference;
 import io.aeyer.plowshare.server.archive.ApplicationPlacement;
 import io.aeyer.plowshare.server.archive.ProjectRole;
@@ -59,6 +60,24 @@ public final class ConfiguredFileStores implements FileStores, AutoCloseable {
       throw new IllegalArgumentException(
           "plowshare.filestores.config-file must be an absolute path");
     file = path.normalize();
+  }
+
+  @Override
+  public FileStoreCatalog catalog(String account) {
+    if (account == null || account.isBlank())
+      throw new IllegalArgumentException("An authenticated account is required");
+    var visible =
+        registry().entrySet().stream()
+            .filter(entry -> entry.getValue().accounts().containsKey(account))
+            .sorted(Map.Entry.comparingByKey())
+            .map(
+                entry ->
+                    new FileStoreCatalog.Store(
+                        entry.getKey(),
+                        FileStoreCatalog.Role.valueOf(
+                            entry.getValue().accounts().get(account).name())))
+            .toList();
+    return new FileStoreCatalog(visible);
   }
 
   @Override

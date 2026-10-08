@@ -352,6 +352,8 @@ export function constrain(graph) {
       rules(s, implies(not(eq('selection', null)), and({eq:[g('selection.name'),g('name')]},{eq:[g('selection.budget'),g('budget')]},{eq:[g('selection.members'),g('members')]})), implies(eq('selection',null),eq('members',[])));
     }
     if (title === 'SwarmTypes') field(s, 'types', {maxItems:64});
+    if (title === 'FileStoreCatalog') field(s, 'stores', {maxItems:100});
+    if (title === 'FileStoreOption') field(s, 'alias', {pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
     if (title === 'FileStoreReference') {
       field(s, 'store', {pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
       field(s, 'path', {maxLength:2048,canonicalRelativePath:true});

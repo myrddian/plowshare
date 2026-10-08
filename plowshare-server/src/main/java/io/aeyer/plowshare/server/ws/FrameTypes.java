@@ -36,6 +36,7 @@ public final class FrameTypes {
   public static final String APPLICATION_DEPLOY = "application.deploy";
   public static final String APPLICATION_ACTIVATE = "application.activate";
   public static final String APPLICATION_DEPLOYMENT_STATUS = "application.deployment.status";
+  public static final String FILESTORE_LIST = "filestore.list";
   public static final String APPLICATION_DEPLOYMENT_RECEIPT = "application.deployment.receipt";
   public static final String APPLICATION_CREATE = "application.create";
   public static final String APPLICATION_STORAGE_SET = "application.storage.set";

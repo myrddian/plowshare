@@ -2816,3 +2816,24 @@ await test(
     }
   },
 );
+
+await test('FileStore list discovers server grants rather than using the local registry', async () => {
+  const fake = await fixture(() => ({
+    code: 'OK',
+    payload: { stores: [{ alias: 'applications', role: 'MANAGER' }] },
+  }));
+  try {
+    const result = await cli(fake.base, ['--json', 'filestore', 'list']).done;
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /applications/);
+    assert.deepEqual(
+      fake.frames.map((frame) => ({
+        type: frame.type,
+        payload: frame.payload,
+      })),
+      [{ type: 'filestore.list', payload: {} }],
+    );
+  } finally {
+    await fake.close();
+  }
+});
