@@ -3537,8 +3537,9 @@ public final class JobRuntime {
     if (informationInputs != null)
       offered.replaceAll(
           (name, delegate) -> {
-            if (!BoardTools.NAMES.contains(name) || name.equals(BoardTools.READ_NAME))
-              return delegate;
+            if (!BoardTools.NAMES.contains(name)
+                || name.equals(BoardTools.READ_NAME)
+                || name.equals(BoardTools.TYPES_NAME)) return delegate;
             return new AgentTool() {
               public io.aeyer.plowshare.server.llm.dispatch.ToolSchema schema() {
                 return delegate.schema();

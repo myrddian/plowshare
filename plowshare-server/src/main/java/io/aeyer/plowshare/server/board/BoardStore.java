@@ -34,7 +34,7 @@ public class BoardStore {
   private static final String TOPIC_COLUMNS =
       "id, project, parent, root, depth, title, label,"
           + " account, opener_kind, opener, origin_conversation, state, resolution, pot_total,"
-          + " pot_spent, reserve, quiet_notified_at, opened_at, closed_at";
+          + " pot_spent, reserve, quiet_notified_at, opened_at, closed_at, swarm_selection";
   private static final String MESSAGE_COLUMNS =
       "id, topic, reply_to, author_kind, author,"
           + " conversation, entry, kind, title, body, alert, mentions, posted_at";
@@ -51,7 +51,31 @@ public class BoardStore {
       String opener,
       String originConversation,
       int potTotal,
-      int reserve) {}
+      int reserve,
+      SwarmSelection swarm) {
+    public NewTopic(
+        String project,
+        String title,
+        String label,
+        String account,
+        String openerKind,
+        String opener,
+        String originConversation,
+        int potTotal,
+        int reserve) {
+      this(
+          project,
+          title,
+          label,
+          account,
+          openerKind,
+          opener,
+          originConversation,
+          potTotal,
+          reserve,
+          null);
+    }
+  }
 
   public record NewMessage(
       String topic,
@@ -87,8 +111,8 @@ public class BoardStore {
     jdbc.update(
         "INSERT INTO board_topics (id, project, parent, root, depth, title, label,"
             + " account, opener_kind, opener, origin_conversation, state, pot_total,"
-            + " pot_spent, reserve, opened_at) VALUES (?, ?, NULL, ?, 0, ?, ?, ?, ?, ?, ?,"
-            + " 'open', ?, 0, ?, ?)",
+            + " pot_spent, reserve, opened_at, swarm_selection) VALUES (?, ?, NULL, ?, 0, ?, ?, ?, ?, ?, ?,"
+            + " 'open', ?, 0, ?, ?, ?::jsonb)",
         id,
         topic.project(),
         id,
@@ -100,7 +124,8 @@ public class BoardStore {
         topic.originConversation(),
         topic.potTotal(),
         topic.reserve(),
-        utc(at));
+        utc(at),
+        encodeSwarm(topic.swarm()));
     return topic(id).orElseThrow();
   }
 
@@ -314,8 +339,8 @@ public class BoardStore {
     String account = topic(parent.root()).orElseThrow().account();
     jdbc.update(
         "INSERT INTO board_topics (id, project, parent, root, depth, title, label,"
-            + " account, opener_kind, opener, state, opened_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'member', ?, 'open', ?)",
+            + " account, opener_kind, opener, state, opened_at, swarm_selection)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'member', ?, 'open', ?, ?::jsonb)",
         id,
         parent.project(),
         parent.id(),
@@ -325,7 +350,8 @@ public class BoardStore {
         label,
         account,
         opener,
-        utc(at));
+        utc(at),
+        encodeSwarm(parent.swarm()));
     return topic(id).orElseThrow();
   }
 
@@ -770,6 +796,29 @@ public class BoardStore {
     return rs.wasNull() ? null : value;
   }
 
+  private static final com.fasterxml.jackson.databind.ObjectMapper SWARM_JSON =
+      new com.fasterxml.jackson.databind.ObjectMapper()
+          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+
+  private static String encodeSwarm(SwarmSelection selection) {
+    if (selection == null) return null;
+    try {
+      return SWARM_JSON.writeValueAsString(selection);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+      throw new IllegalStateException("The swarm selection could not be encoded", failed);
+    }
+  }
+
+  private static SwarmSelection decodeSwarm(String value) {
+    if (value == null) return null;
+    try {
+      return SWARM_JSON.readValue(value, SwarmSelection.class);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
+      throw new IllegalStateException("The retained swarm selection is invalid", failed);
+    }
+  }
+
   private static BoardTopic topicRow(ResultSet rs, int n) throws SQLException {
     return new BoardTopic(
         rs.getString("id"),
@@ -790,7 +839,8 @@ public class BoardStore {
         integer(rs, "reserve"),
         instant(rs, "quiet_notified_at"),
         instant(rs, "opened_at"),
-        instant(rs, "closed_at"));
+        instant(rs, "closed_at"),
+        decodeSwarm(rs.getString("swarm_selection")));
   }
 
   private static BoardMessage messageRow(ResultSet rs, int n) throws SQLException {

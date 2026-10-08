@@ -186,6 +186,7 @@ var operationNames = []string{
 	"schedule.save",
 	"schedule.sync",
 	"swarm.status",
+	"swarm.types",
 	"todos.read",
 	"trigger.define",
 	"trigger.forget",

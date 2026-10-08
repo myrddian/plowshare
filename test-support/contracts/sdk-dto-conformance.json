@@ -3059,5 +3059,359 @@
       }
     },
     "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "../privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "bad",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 1
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 2.5
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher",
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "researcher"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              " "
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture",
+      "types": [
+        {
+          "name": "privacy",
+          "members": [
+            "critic"
+          ],
+          "budget": 20,
+          "refused": {},
+          "origin": "swarm/privacy.md",
+          "selection": {
+            "name": "privacy",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "description": "Review privacy",
+            "members": [
+              "researcher"
+            ],
+            "budget": 20
+          }
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": "privacy"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": "../privacy"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": "Privacy"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "board.open",
+    "value": {
+      "project": "fixture",
+      "title": "Topic",
+      "label": "Review",
+      "body": "Evidence",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "swarm": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "swarm.types",
+    "value": {
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "swarm.types",
+    "value": {},
+    "valid": false
   }
 ]

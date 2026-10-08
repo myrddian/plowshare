@@ -457,10 +457,12 @@ export type Request =
   | { action: 'history'; conversation: string; before?: number }
   | { action: 'select'; conversation?: string }
   | { action: 'trajectory'; conversation: string }
+  | { action: 'board-swarm-types'; project: string }
   | { action: 'board-post-topics'; project: string; more?: boolean }
   | {
       action: 'board-create';
       project: string;
+      swarm?: string;
       title: string;
       label: string;
       body: string;

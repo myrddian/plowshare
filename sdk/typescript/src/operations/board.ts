@@ -1,9 +1,15 @@
+import {
+  swarmSelectionCheck,
+  type SwarmSelection,
+  type SwarmTypes,
+} from './swarm-types.ts';
 import { isList } from '../binding/values.ts';
 import type { SwarmActivity } from './swarm.ts';
 import type { Ask } from './client-views.ts';
 
 export type BoardView = 'board' | 'swarm';
 export interface Topic {
+  swarm?: SwarmSelection | null;
   id: string;
   project: string;
   parent: string | null;
@@ -123,6 +129,7 @@ export interface BoardInspection {
     notice?: string;
     error?: string;
   };
+  types?: Record<string, Reading<SwarmTypes>>;
   details: Record<string, Reading<TopicDetail>>;
   swarm: Reading<SwarmStatus>;
 }
@@ -167,7 +174,10 @@ const topic = (v: unknown): v is Topic =>
   ) &&
   fields(v, ['potTotal', 'potSpent', 'reserve'], nullable(num)) &&
   obj(v) &&
-  num(v['depth']);
+  num(v['depth']) &&
+  (v['swarm'] === undefined ||
+    v['swarm'] === null ||
+    swarmSelectionCheck(v['swarm']));
 const summary = (v: unknown): v is TopicSummary =>
   obj(v) && topic(v['topic']) && num(v['messages']) && num(v['documents']);
 const seat = (v: unknown): v is SeatView =>

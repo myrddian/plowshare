@@ -418,18 +418,14 @@ public final class DataLayout {
     return tierDirectory(projectId, "environment.yml");
   }
 
-  /**
-   * Where one tier's swarm lives: {@code projects/<id>/swarm.md}, or {@code global/swarm.md} for
-   * {@code null} — spec 2026-09-29 §3. One file, not a directory: the member list of a project's
-   * board. An absent file is no swarm at that tier.
-   */
+  /** The default named swarm in a server-data tier. Applications resolve root/swarm instead. */
   public Path swarmFor(Long projectId) {
     if (root == null) {
       throw new IllegalStateException(
           "this server keeps no data directory, so there is nowhere to look for a swarm"
               + " definition. Set PLOWSHARE_DATA_DIR.");
     }
-    return tierDirectory(projectId, "swarm.md");
+    return tierDirectory(projectId, "swarm").resolve("default.md");
   }
 
   private java.util.function.LongPredicate personalProjects = id -> false;
@@ -449,7 +445,7 @@ public final class DataLayout {
                 "orchestrations",
                 "hooks",
                 "environment.yml",
-                "swarm.md")
+                "swarm")
             .contains(leaf)) {
       return unionFor(projectId)
           .resolve("tree")

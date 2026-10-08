@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 209,
+    "registeredRequestFrames": 210,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 200,
-    "headlessCliOneShotFrames": 190,
+    "headlessCliRequestFrames": 201,
+    "headlessCliOneShotFrames": 191,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 209,
+    "typedRequestFrames": 210,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -5959,6 +5959,25 @@
       "legacyMcpTools": []
     },
     {
+      "frame": "swarm.types",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/SwarmTypeFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/board.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "todos.read",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/TodoFrames.java",
       "typescriptBuilders": [
@@ -6930,6 +6949,7 @@
             "board.topics",
             "board.messages",
             "swarm.status",
+            "swarm.types",
             "union.status",
             "union.conflict.list"
           ],
@@ -7215,6 +7235,7 @@
           "schedule.save",
           "schedule.sync",
           "swarm.status",
+          "swarm.types",
           "todos.read",
           "trigger.define",
           "trigger.forget",
@@ -7233,7 +7254,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 190,
+        "count": 191,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -7245,9 +7266,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 209 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 210 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "200 WS operations: 190 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "201 WS operations: 191 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "incoming.catalog": "persistent inbound adapter",
         "incoming.receive": "persistent inbound adapter",

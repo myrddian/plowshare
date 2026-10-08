@@ -343,7 +343,7 @@ function renderDetail() {
     ancestors.unshift({ id: parent, title: p?.title ?? parent });
     parent = p?.parent ?? null;
   }
-  content.innerHTML = `<nav class="board-breadcrumb" aria-label="Topic ancestors">${ancestors.map((p) => `<button data-topic="${esc(p.id)}">${esc(p.title)}</button> / `).join('')}<span>${esc(d.topic.title)}</span></nav><header><div class="eyebrow">${esc(d.topic.project)} · ${esc(d.topic.label)} · ${esc(d.topic.state)}</div><h2>${esc(d.topic.title)}</h2><p class="board-subtitle">Opened by ${esc(d.topic.opener)} · ${esc(date(d.topic.openedAt))} · ${esc(d.topic.id)}${d.topic.closedAt ? ` · closed ${esc(date(d.topic.closedAt))}` : ''}</p></header>${reading?.error ? `<p class="error-banner">${esc(reading.error)}</p>` : ''}
+  content.innerHTML = `<nav class="board-breadcrumb" aria-label="Topic ancestors">${ancestors.map((p) => `<button data-topic="${esc(p.id)}">${esc(p.title)}</button> / `).join('')}<span>${esc(d.topic.title)}</span></nav><header><div class="eyebrow">${esc(d.topic.project)}${d.topic.swarm ? ` · ${esc(d.topic.swarm.name)}` : ''} · ${esc(d.topic.label)} · ${esc(d.topic.state)}</div><h2>${esc(d.topic.title)}</h2><p class="board-subtitle">Opened by ${esc(d.topic.opener)} · ${esc(date(d.topic.openedAt))} · ${esc(d.topic.id)}${d.topic.closedAt ? ` · closed ${esc(date(d.topic.closedAt))}` : ''}</p></header>${reading?.error ? `<p class="error-banner">${esc(reading.error)}</p>` : ''}
     <div class="board-budget"><meter min="0" max="${Math.max(1, budget)}" value="${spent}"></meter><strong>${spent} / ${budget} model calls spent</strong><small>${root.reserve ?? 0} closing reserve${d.topic.parent ? ' · shared root budget' : ''}</small></div>
     <h3>${icon('activity')}Seats</h3>${d.seats.length ? seatsHtml(d.seats, d.topic.project) : '<p class="board-subtitle">No agent seats on this topic.</p>'}
     ${d.topic.resolution ? `<section class="board-resolution"><div class="eyebrow">Resolution</div>${prose(d.topic.resolution)}</section>` : ''}
@@ -645,13 +645,15 @@ $('#board-post-form').addEventListener(
 
 const createDialog = $<HTMLDialogElement>('#board-create-dialog');
 const createProject = $<HTMLSelectElement>('#create-project'),
+  createSwarm = $<HTMLSelectElement>('#create-swarm'),
   createTitle = $<HTMLInputElement>('#create-title'),
   createLabel = $<HTMLInputElement>('#create-label'),
   createBody = $<HTMLTextAreaElement>('#create-body'),
   createBudget = $<HTMLInputElement>('#create-budget');
 let createIdentity = '',
   restoredCreateKey = '',
-  createError = '';
+  createError = '',
+  selectedCreateSwarm = '';
 const createStorageKey = () =>
   `plowshare.desktop.board-create.v1:${JSON.stringify([state.base, state.handle])}`;
 function persistCreate() {
@@ -661,6 +663,7 @@ function persistCreate() {
       JSON.stringify({
         requestId: createIdentity,
         project: createProject.value,
+        swarm: selectedCreateSwarm,
         title: createTitle.value,
         label: createLabel.value,
         body: createBody.value,
@@ -686,9 +689,40 @@ function renderOpening() {
     createProject.innerHTML = options;
     createProject.value = project;
   }
+  const reading = state.board.types?.[createProject.value];
+  const choices = reading?.value?.types ?? [];
+  createSwarm.innerHTML =
+    '<option value="">Choose swarm type</option>' +
+    choices
+      .map(
+        (type) =>
+          `<option value="${esc(type.name)}" ${type.selection ? '' : 'disabled'}>${esc(type.name)} · ${type.members.length} members · ${type.budget} calls</option>`,
+      )
+      .join('');
+  // Keep a retained draft's selector even when the definition disappears; receipt recovery
+  // must send the same identity rather than silently selecting another type.
+  if (
+    selectedCreateSwarm &&
+    !choices.some((type) => type.name === selectedCreateSwarm)
+  )
+    createSwarm.innerHTML += `<option value="${esc(selectedCreateSwarm)}">${esc(selectedCreateSwarm)} (retained draft)</option>`;
+  createSwarm.value = selectedCreateSwarm;
+  $('#create-swarm-status').textContent = reading?.loading
+    ? 'Loading swarm types…'
+    : (reading?.error ??
+      (!choices.length
+        ? 'No swarm types are available for this project.'
+        : (choices.find((type) => type.name === selectedCreateSwarm)?.selection
+            ?.description ?? 'Choose a swarm type for this topic.')));
+  $<HTMLButtonElement>('#create-swarm-refresh').disabled =
+    !!opening?.busy ||
+    !state.connected ||
+    !createProject.value ||
+    !!reading?.loading;
   const busy = !!opening?.busy;
   for (const field of [
     createProject,
+    createSwarm,
     createTitle,
     createLabel,
     createBody,
@@ -700,6 +734,7 @@ function renderOpening() {
     busy ||
     !state.connected ||
     !createProject.value ||
+    !selectedCreateSwarm ||
     !createTitle.value.trim() ||
     !createLabel.value.trim() ||
     !createBody.value.trim() ||
@@ -714,6 +749,7 @@ $('#board-create-open').addEventListener('click', () => {
   if (restoredCreateKey !== createStorageKey()) {
     restoredCreateKey = createStorageKey();
     createIdentity = '';
+    selectedCreateSwarm = '';
     createProject.value = state.board.project ?? state.projects[0]?.name ?? '';
     createTitle.value = '';
     createBody.value = '';
@@ -729,6 +765,8 @@ $('#board-create-open').addEventListener('click', () => {
         state.projects.some((row) => row.name === saved.project)
       ) {
         createProject.value = saved.project;
+        selectedCreateSwarm =
+          typeof saved.swarm === 'string' ? saved.swarm : '';
         for (const [field, name] of [
           [createTitle, 'title'],
           [createLabel, 'label'],
@@ -743,11 +781,13 @@ $('#board-create-open').addEventListener('click', () => {
       /* Begin a new draft. */
     }
   }
+  background(loadCreateSwarms());
   renderOpening();
   createTitle.focus();
 });
 for (const field of [
   createProject,
+  createSwarm,
   createTitle,
   createLabel,
   createBody,
@@ -756,9 +796,29 @@ for (const field of [
   field.addEventListener('input', () => {
     createIdentity = '';
     createError = '';
+    if (field === createSwarm) selectedCreateSwarm = createSwarm.value;
+    if (field === createProject) {
+      selectedCreateSwarm = '';
+      background(loadCreateSwarms());
+    }
     persistCreate();
     renderOpening();
   });
+async function loadCreateSwarms() {
+  if (!createProject.value || !state.connected) return;
+  try {
+    await window.plowshare.request({
+      action: 'board-swarm-types',
+      project: createProject.value,
+    });
+  } catch (error) {
+    createError = errorMessage(error);
+  }
+  renderOpening();
+}
+$('#create-swarm-refresh').addEventListener('click', () => {
+  background(loadCreateSwarms());
+});
 $('#board-create-close').addEventListener('click', () => createDialog.close());
 createDialog.addEventListener('cancel', (event) => {
   if (state.board.opening?.busy) event.preventDefault();
@@ -776,6 +836,7 @@ $('#board-create-form').addEventListener(
       const reply = await window.plowshare.request({
         action: 'board-create',
         project: createProject.value,
+        swarm: selectedCreateSwarm,
         title: createTitle.value,
         label: createLabel.value,
         body: createBody.value,

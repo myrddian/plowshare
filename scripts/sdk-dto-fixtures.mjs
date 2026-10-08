@@ -230,6 +230,19 @@ for (const invalid of [
   if (!('extra' in invalid)) result('application.file.read', { ...file, location: invalid }, false);
 }
 input('application.files', { project: 'chatbot', location: { store: 'outputs', path: '' } }, true);
+
+const namedSelection = {name:'privacy', revision:'a'.repeat(64), description:'Review privacy', members:['researcher'], budget:20};
+const namedType = {name:'privacy', members:['researcher'], budget:20, refused:{}, origin:'swarm/privacy.md', selection:namedSelection};
+result('swarm.types', {project:'fixture', types:[namedType]}, true);
+result('swarm.types', {project:'fixture', types:[]}, true);
+for (const change of [{name:'../privacy'}, {revision:'bad'}, {budget:1}, {budget:2.5}, {description:'x'.repeat(4097)}, {members:['researcher','researcher']}, {members:[' ']}])
+  result('swarm.types', {project:'fixture', types:[{...namedType, selection:{...namedSelection,...change}}]}, false);
+result('swarm.types', {project:'fixture', types:[{...namedType, members:['critic']}]}, false);
+const namedOpening = {project:'fixture',title:'Topic',label:'Review',body:'Evidence',requestId:receipt,swarm:'privacy'};
+input('board.open', namedOpening, true);
+for (const swarm of ['../privacy', 'Privacy', '', 'p'.repeat(65), null]) input('board.open', {...namedOpening,swarm}, false);
+input('swarm.types', {project:'fixture'}, true);
+input('swarm.types', {}, false);
 for (const test of cases) {
   let accepted = true;
   try {

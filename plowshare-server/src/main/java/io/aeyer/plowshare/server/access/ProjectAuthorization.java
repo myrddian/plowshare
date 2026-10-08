@@ -70,6 +70,7 @@ public class ProjectAuthorization {
           "board.topics",
           "board.messages",
           "swarm.status",
+          "swarm.types",
           "provider.list",
           "schedule.list",
           "schedule.read",
@@ -154,6 +155,7 @@ public class ProjectAuthorization {
         || operation.startsWith("agent.")
         || operation.startsWith("job.")
         || operation.startsWith("board.")
+        || operation.equals("swarm.types")
         || operation.startsWith("orchestration.")
         || operation.startsWith("message.")
         || operation.startsWith("union.")

@@ -1400,10 +1400,10 @@
     "tools" : [ ],
     "commands" : [ ],
     "screens" : [ ],
-    "note" : "board.topics pages the account's topics; board.messages reads whole messages, seats and decisions without advancing model read watermarks; swarm.status reads account queue entries and shared pool occupancy. The desktop Board and Swarm inspector refreshes these reads while open. Operator POST /v1/board/topics/{id}/topup and board.topup grant an absolute root ceiling. board.open creates a person-owned topic and opening message with one durable receipt. board.post writes an account-attributed person message to an owned project topic using a durable request receipt. board.retry retries an eligible failed member with a durable request receipt.",
+    "note" : "board.topics pages the account's topics; board.messages reads whole messages, seats and decisions without advancing model read watermarks; swarm.status reads account queue entries and shared pool occupancy. The desktop Board and Swarm inspector refreshes these reads while open. Operator POST /v1/board/topics/{id}/topup and board.topup grant an absolute root ceiling. board.open creates a person-owned topic and opening message with one durable receipt. board.post writes an account-attributed person message to an owned project topic using a durable request receipt. board.retry retries an eligible failed member with a durable request receipt. swarm.types discovers named project definitions; board.open retains the selected definition for posts, retries and subtopics.",
     "consoleNote" : "Board and Swarm inspection is available in the desktop application.",
     "agentNote" : "A budget grant is an operator's decision; agents cannot grant their own research allowance.",
-    "frames" : [ "board.topics", "board.messages", "swarm.status", "board.topup", "board.post", "board.open", "board.retry" ],
+    "frames" : [ "board.topics", "board.messages", "swarm.status", "swarm.types", "board.topup", "board.post", "board.open", "board.retry" ],
     "frameNote" : null
   }, {
     "what" : "send, observe and cancel opaque external work through an account's configured adapters",

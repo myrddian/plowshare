@@ -25,6 +25,7 @@ export async function protocolFixture(options = {}) {
   const board = demoBoard();
   // Display demos omit this nullable server field; the WS fixture carries the full DTO.
   for (const topic of new Set([...board.topics.value.map(row => row.topic), ...board.swarm.value.topics.map(row => row.topic), ...Object.values(board.details).flatMap(detail => [detail.value.topic, detail.value.root])])) {topic.quietNotifiedAt = null; if(options.boardProject)topic.project=options.boardProject;}
+  let swarmTypesOverride;
   let loseRetryAck = false;
   let refuseBoard = false, refuseProjects = false, refusePost = false; const postReceipts = new Map();
   let eventSession;
@@ -325,13 +326,19 @@ export async function protocolFixture(options = {}) {
           const rows = board.topics.value.filter(row => !payload.project || row.topic.project === payload.project);
           result = refuseBoard ? { code: 'BAD_REQUEST', said: 'Board inspection temporarily unavailable.' } : { code: 'OK', payload: { topics: rows.slice(payload.offset ?? 0, (payload.offset ?? 0) + (payload.limit ?? 200)), more: false, offset: payload.offset ?? 0 } }; break;
         }
+        case 'swarm.types': {
+          const selection = board.details['demo-board'].value.topic.swarm;
+          result = refuseBoard ? {code:'BAD_REQUEST',said:'Swarm types temporarily unavailable.'} : {code:'OK',payload:{project:payload.project,types:swarmTypesOverride ?? [{name:selection.name,members:selection.members,budget:selection.budget,refused:{},origin:'swarm/default.md',selection},{name:'incident',members:['critic'],budget:24,refused:{},origin:'swarm/incident.json',selection:{...selection,name:'incident',members:['critic'],budget:24}}]}};
+          break;
+        }
         case 'board.open': {
           if(refusePost){result={code:'BAD_REQUEST',said:'Topic acknowledgment unavailable.'};break;}
           let receipt=postReceipts.get(payload.requestId);
           if(receipt && receipt.identity!==JSON.stringify(payload)){result={code:'BAD_REQUEST',said:'Request identity changed.'};break;}
           if(!receipt){
             const id='topic-'+payload.requestId, template=board.details['demo-board'].value;
-            const topic={...template.topic,id,root:id,parent:null,depth:0,project:payload.project,title:payload.title,label:payload.label,account:'fixture',openerKind:'person',opener:'fixture',originConversation:null,state:'open',resolution:null,closedAt:null,potTotal:payload.maxModelCalls ?? 120,potSpent:0,reserve:1,openedAt:new Date().toISOString()};
+            const selectedSwarm=payload.swarm === 'incident' ? {...template.topic.swarm,name:'incident',members:['critic'],budget:24} : template.topic.swarm;
+            const topic={...template.topic,swarm:selectedSwarm,id,root:id,parent:null,depth:0,project:payload.project,title:payload.title,label:payload.label,account:'fixture',openerKind:'person',opener:'fixture',originConversation:null,state:'open',resolution:null,closedAt:null,potTotal:payload.maxModelCalls ?? 120,potSpent:0,reserve:1,openedAt:new Date().toISOString()};
             const message={...template.messages[0],id:'opening-'+payload.requestId,topic:id,authorKind:'person',author:'fixture',conversation:null,entry:null,kind:'post',title:null,body:payload.body,replyTo:null,alert:false,mentions:[]};
             receipt={identity:JSON.stringify(payload),topic,message};postReceipts.set(payload.requestId,receipt);
             board.topics.value.unshift({topic,messages:1,documents:0});board.details[id]={value:{topic,root:topic,messages:[message],seats:[],decisions:[]}};
@@ -680,6 +687,7 @@ export async function protocolFixture(options = {}) {
       for (const s of [...board.details['demo-board'].value.seats, ...board.swarm.value.seats]) if(s.seat.occupant===member && s.seat.topic==='demo-board') {s.state='failed';s.seat.failedEnding='TURN_CAP';s.job=null;}
     },
     loseRetryAcknowledgment() {loseRetryAck=true;},
+    setSwarmTypes: value => {swarmTypesOverride = value;},
     setRefuseBoard: value => { refuseBoard = value; },
     setWorkflowAckMissing(value) { workflowAckMissing=value; },
     workflowRunCount() { return workflowReceipts.size; },

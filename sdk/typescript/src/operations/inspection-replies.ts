@@ -1,3 +1,4 @@
+import { swarmTypesCheck, type SwarmTypes } from './swarm-types.ts';
 import type { Outcome } from '../binding/envelope.ts';
 import { jobView, type ObservedJob } from '../binding/job-view.ts';
 import { boardTopicCheck, type BoardTopic } from './administrative-replies.ts';
@@ -124,6 +125,7 @@ export interface InspectionReplies {
   'board.topics': BoardTopics;
   'board.messages': BoardMessages;
   'swarm.status': Swarm;
+  'swarm.types': SwarmTypes;
   'union.status': IneligibleUnion | EligibleUnion;
   'union.conflict.list': UnionConflicts;
 }
@@ -221,6 +223,7 @@ const readers = {
   'job.limits': (value) => jobView(value) !== undefined,
   'board.topics': record({ topics: list(summary), more: bool, offset: count }),
   'board.messages': detail,
+  'swarm.types': swarmTypesCheck,
   'swarm.status': record({
     pools: list(record({ pool: named, slots: count, used: count })),
     ready: list(

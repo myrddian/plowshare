@@ -7,8 +7,13 @@ import java.util.UUID;
 public interface BoardPostRepository {
   sealed interface Action permits Open, Post, Retry {}
 
-  record Open(String project, String title, String label, String body, Integer maxModelCalls)
-      implements Action {}
+  record Open(
+      String project, String title, String label, String body, Integer maxModelCalls, String swarm)
+      implements Action {
+    public Open(String project, String title, String label, String body, Integer maxModelCalls) {
+      this(project, title, label, body, maxModelCalls, null);
+    }
+  }
 
   record Post(String project, String topic, String body) implements Action {}
 

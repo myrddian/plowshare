@@ -98,7 +98,7 @@ class SwarmDefinitionsTest {
     setUp();
     Path destination = new DataLayout(root).swarmFor(7L);
     Files.createDirectories(destination.getParent());
-    Files.copy(Path.of("../docs/examples/swarm/swarm.md"), destination);
+    Files.copy(Path.of("../docs/examples/swarm/default.md"), destination);
     SwarmDefinitions.SwarmDefinition swarm = definitions().forProject(7L);
     assertEquals(List.of("researcher", "spec_writer", "critic"), swarm.members());
     assertEquals(36, swarm.budget());
@@ -132,7 +132,7 @@ class SwarmDefinitionsTest {
     SwarmDefinitions.SwarmDefinition swarm = definitions().forProject(7L);
     assertEquals(List.of("researcher", "spec_writer", "critic"), swarm.members());
     assertTrue(swarm.refused().isEmpty(), swarm.why());
-    assertEquals("classpath:global/swarm.md", swarm.origin());
+    assertEquals("classpath:global/swarm/default.md", swarm.origin());
   }
 
   @Test
@@ -141,7 +141,7 @@ class SwarmDefinitionsTest {
     swarm(new DataLayout(root).swarmFor(null), "---\nmembers: []\n---\n");
     var resolved = definitions().forProject(7L);
     assertTrue(resolved.members().isEmpty());
-    assertTrue(resolved.origin().endsWith("global/swarm.md"));
+    assertTrue(resolved.origin().endsWith("global/swarm/default.md"));
     assertTrue(resolved.why().contains("non-empty"), resolved.why());
   }
 
@@ -240,5 +240,46 @@ class SwarmDefinitionsTest {
     }
     long warnings = heard.list.stream().filter(event -> event.getLevel() == Level.WARN).count();
     assertEquals(2, warnings, heard.list.toString());
+  }
+
+  @Test
+  void markdown_and_json_have_named_snapshots_and_edits_change_only_future_selections()
+      throws Exception {
+    setUp();
+    Path directory = new DataLayout(root).swarmFor(7L).getParent();
+    swarm(
+        directory.resolve("privacy.md"),
+        "---\nmembers: [researcher]\nbudget: 24\n---\nReview privacy.");
+    swarm(
+        directory.resolve("incident.json"),
+        "{\"members\":[\"critic\"],\"budget\":24,\"description\":\"Review incidents.\"}");
+    var definitions = definitions();
+    assertEquals(
+        List.of("incident", "privacy"),
+        definitions.types("7").stream().map(SwarmDefinitions.SwarmDefinition::name).toList());
+    var retained = definitions.select("7", "privacy").selection();
+    assertEquals("Review privacy.", retained.description());
+    swarm(directory.resolve("privacy.md"), "---\nmembers: [critic]\nbudget: 24\n---\nChanged.");
+    var current = definitions.select("7", "privacy").selection();
+    assertEquals(List.of("researcher"), retained.members());
+    assertEquals(List.of("critic"), current.members());
+    org.junit.jupiter.api.Assertions.assertNotEquals(retained.revision(), current.revision());
+  }
+
+  @Test
+  void json_rejects_duplicate_unknown_and_mistyped_fields_and_duplicate_members() throws Exception {
+    setUp();
+    Path file = new DataLayout(root).swarmFor(7L).getParent().resolve("privacy.json");
+    for (String invalid :
+        List.of(
+            "{\"members\":[\"critic\"],\"members\":[\"researcher\"]}",
+            "{\"members\":[\"critic\"],\"tools\":[\"run\"]}",
+            "{\"members\":[\"critic\"],\"budget\":2.5}",
+            "{\"members\":[\"critic\",\"critic\"]}",
+            "{\"members\":[\"critic\"],\"description\":null}",
+            "{\"members\":[\"critic\"]} {}")) {
+      swarm(file, invalid);
+      assertTrue(definitions().select("7", "privacy").members().isEmpty(), invalid);
+    }
   }
 }

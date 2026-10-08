@@ -1,0 +1,5 @@
+{
+  "members": ["researcher", "critic"],
+  "budget": 24,
+  "description": "Review incident evidence, identify uncertainty and propose bounded defensive steps."
+}

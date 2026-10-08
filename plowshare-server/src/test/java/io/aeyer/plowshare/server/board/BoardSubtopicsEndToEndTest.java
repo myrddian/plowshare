@@ -334,8 +334,9 @@ class BoardSubtopicsEndToEndTest {
         new Board(
             boardStore,
             project ->
-                new SwarmDefinitions.SwarmDefinition(
-                    List.of("researcher", "critic"), 60, Map.of(), "test"),
+                List.of(
+                    new SwarmDefinitions.SwarmDefinition(
+                        List.of("researcher", "critic"), 60, Map.of(), "test")),
             fixture.conversations,
             fixture.firings,
             dispatcher::drain,

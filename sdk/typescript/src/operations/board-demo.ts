@@ -8,6 +8,13 @@ import type {
 } from './board.ts';
 export function demoBoard(): BoardInspection {
   const root: Topic = {
+    swarm: {
+      name: 'default',
+      revision: 'a'.repeat(64),
+      description: 'Research and discussion.',
+      members: ['researcher', 'spec_writer', 'critic'],
+      budget: 120,
+    },
     id: 'demo-board',
     project: 'Plowshare',
     parent: null,

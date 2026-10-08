@@ -32,6 +32,7 @@ export type {
   IntegrationRequest,
   IntegrationResult,
 } from './external.ts';
+export type { SwarmSelection, SwarmType, SwarmTypes } from './swarm-types.ts';
 export type { OutgoingWork } from './outgoing.ts';
 export type {
   RelayPublishRequest,

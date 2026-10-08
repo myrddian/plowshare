@@ -555,3 +555,159 @@ function boardClient(
     emit,
   );
 }
+
+await test('named swarm discovery retains errors and rejects a catalog from another project', async () => {
+  const s = sample();
+  const project = s.projects[0]!.name;
+  const selection = {
+    name: 'privacy',
+    revision: 'a'.repeat(64),
+    description: 'Review privacy',
+    members: ['researcher'],
+    budget: 20,
+  };
+  const catalog = {
+    project,
+    types: [
+      {
+        name: 'privacy',
+        members: ['researcher'],
+        budget: 20,
+        refused: {},
+        origin: 'swarm/privacy.md',
+        selection,
+      },
+    ],
+  };
+  let response: Outcome = ok(catalog);
+  const client = boardClient(
+    () => s,
+    async () => response,
+    () => {},
+  );
+  await client.swarmTypes(project);
+  assert.deepEqual(s.board.types![project]!.value, catalog);
+  response = ok({ ...catalog, project: 'another-project' });
+  await assert.rejects(client.swarmTypes(project), /different project/);
+  assert.deepEqual(s.board.types![project]!.value, catalog);
+  assert.match(s.board.types![project]!.error!, /different project/);
+  client.reset();
+});
+
+await test('a named opening sends the selector and rejects an acknowledgment for another swarm', async () => {
+  const s = sample();
+  s.handle = 'demo';
+  const project = s.projects[0]!.name;
+  const detail = present(s.board.details['demo-board']).value!;
+  const selection = {
+    name: 'privacy',
+    revision: 'a'.repeat(64),
+    description: 'Review privacy',
+    members: ['researcher'],
+    budget: 20,
+  };
+  const requestId = '11111111-1111-1111-1111-111111111111';
+  let received: unknown;
+  let returnedName = 'incident';
+  const client = boardClient(
+    () => s,
+    async (type, payload) => {
+      assert.equal(type, 'board.open');
+      received = payload;
+      const topic = {
+        ...detail.topic,
+        title: 'Topic',
+        label: 'Review',
+        potTotal: 20,
+        project,
+        account: s.handle,
+        openerKind: 'person',
+        opener: s.handle,
+        swarm: { ...selection, name: returnedName },
+      };
+      const message = {
+        ...detail.messages[0],
+        topic: topic.id,
+        body: 'Evidence',
+        authorKind: 'person',
+        author: s.handle,
+      };
+      return ok({ requestId, topic, message });
+    },
+    () => {},
+  );
+  await assert.rejects(
+    client.create(
+      project,
+      'Topic',
+      'Review',
+      'Evidence',
+      requestId,
+      20,
+      'privacy',
+    ),
+    /did not confirm/,
+  );
+  assert.deepEqual(received, {
+    project,
+    title: 'Topic',
+    label: 'Review',
+    body: 'Evidence',
+    requestId,
+    maxModelCalls: 20,
+    swarm: 'privacy',
+  });
+  assert.match(
+    s.board.opening!.error!,
+    /draft and request identity are retained/,
+  );
+  returnedName = 'privacy';
+  // Creation succeeds; refreshing is an independent read and uses a separate transport below.
+  const successful = boardClient(
+    () => s,
+    async (type) => {
+      if (type === 'board.open') {
+        const topic = {
+          ...detail.topic,
+          project,
+          account: s.handle,
+          openerKind: 'person',
+          opener: s.handle,
+          swarm: selection,
+        };
+        return ok({
+          requestId,
+          topic,
+          message: {
+            ...detail.messages[0],
+            topic: topic.id,
+            body: 'Evidence',
+            authorKind: 'person',
+            author: s.handle,
+          },
+        });
+      }
+      if (type === 'board.topics')
+        return ok({ topics: [], more: false, offset: 0 });
+      return ok({
+        ...detail,
+        topic: { ...detail.topic, project },
+        root: { ...detail.root, project },
+      });
+    },
+    () => {},
+  );
+  await successful.create(
+    project,
+    'Topic',
+    'Review',
+    'Evidence',
+    requestId,
+    20,
+    'privacy',
+  );
+  assert.equal(s.board.opening!.notice, 'Topic created.');
+  assert.equal(s.board.opening!.busy, false);
+  successful.reset();
+  client.reset();
+});

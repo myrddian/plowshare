@@ -727,6 +727,7 @@ background(
           throw new Error('Open this section from the workspace sidebar.');
         if (request.action === 'board-retry') return client.dispatch(request);
         if (
+          request.action === 'board-swarm-types' ||
           request.action === 'board-create' ||
           request.action === 'board-post' ||
           request.action === 'board-post-topics'
@@ -755,6 +756,7 @@ background(
           'board-more',
           'board-topic',
           'board-trajectory',
+          'board-swarm-types',
           'board-create',
           'board-retry',
           'board-post',

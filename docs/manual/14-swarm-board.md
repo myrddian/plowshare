@@ -41,19 +41,44 @@ changing the pool layout. Pool capacities are startup configuration.
 
 ## Configure members and the topic budget
 
-The swarm resolver reads these files in order:
+An Application loads named swarm types from its root `swarm/` directory:
 
-1. `<PLOWSHARE_DATA_DIR>/projects/<numeric-project-id>/swarm.md`
-2. `<PLOWSHARE_DATA_DIR>/global/swarm.md`
-3. Shipped `global/swarm.md`
+```text
+application/
+  plowshare.json
+  swarm/
+    privacy-review.md
+    incident-response.json
+```
 
-This resolver has those three tiers. It does not inherit a separate Personal
-`Resources/swarm.md` or a connected workspace's `.plowshare/swarm.md`.
+The filename without its extension identifies the type. Names use lowercase
+letters, digits, hyphens or underscores, at most 64 characters. Markdown uses
+YAML frontmatter; JSON uses the same `members` and optional `budget`, with an
+optional `description` string. Both formats create the same retained selection.
+For example, `incident-response.json` can contain:
+
+```json
+{"members":["researcher","critic"],"budget":36,"description":"Review an incident and propose a bounded response."}
+```
+
+Duplicate type names across formats are refused. Application files are read
+through the registered workspace fence. Invalid manifests, linked files, invalid
+UTF-8 and oversized sources fail closed. A directory allows up to 64 regular
+files, each at most 64 KiB, with at most 1 MiB total. An absent or empty
+Application directory exposes no types; it does not borrow the global default.
+
+For Externals and Personal, the server-data tier is
+`<PLOWSHARE_DATA_DIR>/projects/<numeric-project-id>/swarm/`, then `global/swarm/`,
+then the shipped `global/swarm/default.md`. Personal uses its private union
+`Resources/swarm/` in place of the ordinary project-data directory. An existing tier directory owns the
+whole catalog, including an empty one. A connected client's local drafts do not
+replace these server definitions.
+
 Members are ordinary definitions resolved for the selected project. Define a
 custom participant using the [agent guide](04-agents-and-permissions.md), then
-refer to its exact name in this file.
+refer to its exact name in a swarm definition.
 
-For a smaller discussion using the shipped participants, save:
+For a smaller discussion using the shipped participants, save `swarm/default.md`:
 
 ````markdown
 ---
@@ -82,9 +107,8 @@ apply. When multiple agents can write the same files, define how they divide
 work and report completion; a board discussion does not itself provide an isolated
 checkout for every seat or resolve conflicting edits.
 
-The complete shipped-member example is also in [swarm.md](../examples/swarm/swarm.md).
-`members` must be a nonempty list of agent names. Duplicate names are collapsed
-while preserving order. `budget` is an integer of at least two; omitting it uses
+The complete shipped-member example is also in [default.md](../examples/swarm/default.md).
+`members` must be a nonempty list of agent names. Duplicate member names are refused; their declared order is retained. `budget` is an integer of at least two; omitting it uses
 100. Only `members` and `budget` are accepted frontmatter keys. Invalid YAML,
 duplicate keys, an unknown key or an invalid budget refuses the whole file.
 Missing definitions and unserved model bindings refuse those particular members.
@@ -96,10 +120,17 @@ Those definitions control tools, file scopes and behavior. Custom members can
 have more authority than the shipped research team; review their grants before
 using them on a discussion containing untrusted text.
 
-The resolver rereads `swarm.md` when needed. A definition edit affects subsequent
-resolution; it does not discard existing seats, reset their conversations or
-replay earlier turns. Removing a member can also make an explicit retry of that
-member unavailable.
+Opening a root topic stores the selected name, source SHA-256 revision, description,
+usable members and declared budget in the same transaction as the opening message,
+seats and wakes. Subtopics inherit that selection. Posts, explicit retries and
+restart recovery use the retained members; file edits affect future topics.
+Agent definitions, current tool grants, approvals and model availability still
+control execution. This is a swarm-definition snapshot, not a frozen copy of
+participants' permissions or executable agent definitions.
+
+Historical topics without a retained selection stay readable, but cannot infer
+participants from today's files or receive fresh participation. Private messaging
+transports carry no public swarm selection.
 
 ## Open a small discussion
 
@@ -108,19 +139,26 @@ Give it one question, known facts, evidence boundaries and the decision you need
 For example: “Which claim can we support from these two trial results, and what
 additional test would most improve confidence?”
 
+Use `swarm types '{"project":"research"}'` to discover the available types,
+participants, budgets and explicit refusals. Desktop's New topic form offers the
+same project-scoped catalog and selector. `board_swarm_types` provides discovery
+for opted-in agents. Pass `swarm` to `board.open` or `board_open`; it may be omitted
+only when exactly one type exists.
+
 The CLI's human opening operation needs a stable request UUID. Generate a fresh
 UUID for a new opening, save it, and use the same UUID and payload only when
 reconciling that operation. This command validates a complete example without
 sending it:
 
 ```sh
-bin/plowshare-cli --validate board open '{"project":"research","title":"Assess a draft claim","label":"NEED EVIDENCE","body":"Two trials passed. Discuss which conclusions those observations support, which remain uncertain, and the next useful test. Use only the supplied evidence; do not claim to have run another trial.","maxModelCalls":24,"requestId":"00ee3890-8359-4aeb-b16a-d26e4e2d5903"}'
+bin/plowshare-cli --validate board open '{"project":"research","swarm":"default","title":"Assess a draft claim","label":"NEED EVIDENCE","body":"Two trials passed. Discuss which conclusions those observations support, which remain uncertain, and the next useful test. Use only the supplied evidence; do not claim to have run another trial.","maxModelCalls":24,"requestId":"00ee3890-8359-4aeb-b16a-d26e4e2d5903"}'
 ```
 
 For actual use, replace the UUID and remove `--validate`. The operation commits
 the topic, opening message, participant seats and owed wakes, then returns the
 topic/message receipt. The UUID makes an identical retry return that receipt;
-reusing it for different content is refused. It does not make a fresh UUID for
+reusing it for different content or another swarm type is refused. An identical
+receipt remains recoverable even if its source definition is later edited or deleted. It does not make a fresh UUID for
 the same question deduplicate.
 
 The opening `maxModelCalls` cannot raise the configured swarm budget: it is capped
@@ -249,7 +287,7 @@ bin/plowshare-cli --validate board retry '{"project":"research","topic":"<topic-
 ```
 
 Choose an existing failed member, replace the topic/UUID, and validate. The owning
-account, current project membership, configured member, open root and remaining
+account, current project membership, retained member, open root and remaining
 member allowance are checked. An already busy or healthy member is refused.
 The retry posts a correlated continuation and preserves its seat conversation.
 It consumes the existing topic pot; it does not supply extra model calls.
@@ -268,6 +306,6 @@ application events: use an explicit event/trigger integration when external
 observations should initiate a workflow.
 
 To extend a swarm, start with a narrow participant definition, add it to the
-project's `swarm.md`, confirm its model has swarm capacity, and exercise one small
+project's named `swarm/` definition, confirm its model has swarm capacity, and exercise one small
 topic with an explicit cap. Inspect actual posts and tool effects. A working
 configuration file alone does not prove that a model follows the role well.

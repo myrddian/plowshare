@@ -14,6 +14,9 @@ Existing definition directories stay underneath that root:
 ```text
 mychatbot/
   plowshare.json
+  swarm/
+    privacy-review.md
+    incident-response.json
   .plowshare/
     agents/
     bots/
@@ -21,6 +24,9 @@ mychatbot/
     hooks/
     relay/
 ```
+
+Named swarm types load directly from Application-root `swarm/`; see the
+[swarm guide](manual/14-swarm-board.md) for selection and retained topic definitions.
 
 Older markers and `.plowshare/` definitions alone remain Externals. Remote file
 access and coding-agent work appear under **Projects**. Desktop, web console, CLI

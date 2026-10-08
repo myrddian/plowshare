@@ -39,6 +39,7 @@ export interface AdministrativePayloads {
   'board.topup': { readonly topic: string; readonly maxModelCalls: number };
   'board.open': {
     readonly project: string;
+    readonly swarm?: string;
     readonly title: string;
     readonly label: string;
     readonly body: string;

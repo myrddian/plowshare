@@ -417,6 +417,7 @@ public final class FrameTypes {
   public static final String BOARD_TOPICS = "board.topics";
   public static final String BOARD_MESSAGES = "board.messages";
   public static final String SWARM_STATUS = "swarm.status";
+  public static final String SWARM_TYPES = "swarm.types";
   public static final String BOARD_TOPUP = "board.topup";
   public static final String BOARD_POST = "board.post";
   public static final String BOARD_OPEN = "board.open";

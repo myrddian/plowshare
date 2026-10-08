@@ -1,3 +1,5 @@
+import { decodeReply } from 'plowshare-client-ts/operations/schema';
+import { swarmName } from 'plowshare-client-ts/operations/swarm-types';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import {
   SWARM_PAGE,
@@ -289,6 +291,38 @@ export class BoardClient {
       }
     }
   }
+  async swarmTypes(project: string) {
+    const state = this.state();
+    if (!state.connected || !state.projects.some((row) => row.name === project))
+      throw new Error(
+        'Choose an available project and connect before reading swarm types.',
+      );
+    const readings = (state.board.types ??= {});
+    if (readings[project]?.loading) return;
+    const reading = (readings[project] ??= {});
+    const epoch = this.epoch;
+    reading.loading = true;
+    delete reading.error;
+    this.emit();
+    try {
+      const answer = await this.ask('swarm.types', { project });
+      if (answer.code !== 'OK')
+        throw new Error(answer.said ?? 'Swarm types could not be read.');
+      const types = decodeReply('swarm.types', answer.payload);
+      if (types.project !== project)
+        throw new Error('Swarm types name a different project.');
+      if (epoch === this.epoch) reading.value = types;
+    } catch (error) {
+      if (epoch === this.epoch) reading.error = errorMessage(error);
+      throw error;
+    } finally {
+      if (epoch === this.epoch) {
+        reading.loading = false;
+        this.emit();
+      }
+    }
+  }
+
   async create(
     project: string,
     title: string,
@@ -296,6 +330,7 @@ export class BoardClient {
     body: string,
     requestId: string,
     maxModelCalls?: number,
+    swarm?: string,
   ) {
     const state = this.state(),
       board = state.board;
@@ -329,6 +364,8 @@ export class BoardClient {
       throw new Error(
         'The model call limit must be a whole number of at least two.',
       );
+    if (swarm !== undefined && !swarmName(swarm))
+      throw new Error('Choose a valid swarm type.');
     const epoch = this.epoch,
       opening = (board.opening = { busy: true } as NonNullable<
         BoardInspection['opening']
@@ -337,6 +374,7 @@ export class BoardClient {
     try {
       const answer = await this.ask('board.open', {
         project,
+        ...(swarm === undefined ? {} : { swarm }),
         title,
         label,
         body,
@@ -345,15 +383,13 @@ export class BoardClient {
       });
       if (answer.code !== 'OK')
         throw new Error(answer.said ?? 'Topic creation was not confirmed.');
-      const receipt = answer.payload as {
-        requestId?: string;
-        topic?: unknown;
-        message?: unknown;
-      };
+      const receipt = decodeReply('board.open', answer.payload);
       if (
         receipt?.requestId !== requestId ||
         !isBoardTopic(receipt.topic) ||
         receipt.topic.project !== project ||
+        receipt.topic.swarm === null ||
+        (swarm !== undefined && receipt.topic.swarm.name !== swarm) ||
         receipt.topic.account !== state.handle ||
         receipt.topic.openerKind !== 'person' ||
         receipt.topic.opener !== state.handle ||
@@ -400,6 +436,7 @@ export class BoardClient {
       b.posting.loading = false;
       b.posting.busy = false;
     }
+    for (const reading of Object.values(b.types ?? {})) reading.loading = false;
     for (const detail of Object.values(b.details)) detail.loading = false;
     for (const reading of Object.values(b.activity ?? {}))
       reading.loading = false;

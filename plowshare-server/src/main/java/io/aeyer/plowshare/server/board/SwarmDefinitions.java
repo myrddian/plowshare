@@ -5,7 +5,6 @@ import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.swarm.SwarmScheduler;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,19 +24,12 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.error.YAMLException;
 
-/**
- * A project's swarm — spec 2026-09-29 §3: {@code projects/<id>/swarm.md}, else {@code
- * global/swarm.md}, then the shipped {@code global/swarm.md}. Its members are ordinary agent
- * definitions resolved from that project, and each one that could not be a member in this slice is
- * refused by name with a reason, never silently. Read when asked — the file is small and asked for
- * only when a topic opens or a message is posted — so an edit takes effect at once.
- */
-public final class SwarmDefinitions {
+/** Named project definitions. Current files govern new topics; existing topics own a snapshot. */
+public final class SwarmDefinitions implements SwarmCatalog {
 
   private static final Logger log = LoggerFactory.getLogger(SwarmDefinitions.class);
 
-  public static final String FILE = "swarm.md";
-  private static final String SHIPPED = "global/" + FILE;
+  public static final String FILE = "swarm definition";
 
   /** Model calls per root topic when the file names none. */
   public static final int DEFAULT_BUDGET = 100;
@@ -52,11 +44,47 @@ public final class SwarmDefinitions {
    * @param origin where it was read from, for a person reading a refusal
    */
   public record SwarmDefinition(
-      List<String> members, int budget, Map<String, String> refused, String origin) {
+      String name,
+      List<String> members,
+      int budget,
+      Map<String, String> refused,
+      String origin,
+      SwarmSelection selection) {
 
     public SwarmDefinition {
       members = List.copyOf(members);
       refused = Map.copyOf(refused);
+      SwarmSelection.requireName(name);
+      Objects.requireNonNull(origin, "origin");
+      if (budget < 2
+          || members.size() > 64
+          || (selection == null && !members.isEmpty())
+          || (selection != null
+              && (!name.equals(selection.name())
+                  || budget != selection.budget()
+                  || !members.equals(selection.members()))))
+        throw new IllegalArgumentException("Swarm catalog and retained selection must agree");
+    }
+
+    /**
+     * Programmatically supplied default definitions retain their canonical participant identity.
+     */
+    public SwarmDefinition(
+        List<String> members, int budget, Map<String, String> refused, String origin) {
+      this(
+          "default",
+          members,
+          budget,
+          refused,
+          origin,
+          members.isEmpty()
+              ? null
+              : new SwarmSelection(
+                  "default",
+                  SwarmSelection.digest(String.join("\0", members) + "\0" + budget),
+                  "",
+                  members,
+                  budget));
     }
 
     /** Why this swarm has no members, or what was refused from it. */
@@ -71,45 +99,79 @@ public final class SwarmDefinitions {
     }
   }
 
-  private final DataLayout data;
-  private final Function<Long, AgentRegistry> agentsFor;
+  private final SwarmSources sources;
+  private final Function<String, AgentRegistry> agentsFor;
   private final SwarmScheduler.Pools pools;
-
-  /**
-   * The refusals last logged for each {@code swarm.md} this instance has read, so a persistently
-   * misconfigured member is not a fresh WARN on every topic open and every message post. Keyed by
-   * origin (path or classpath resource) rather than by project id, on {@link #firstExisting}'s own
-   * reasoning: the project tier and the global tier are two different files and each earns its own
-   * memory of what was last said about it. A path absent from this map has either never been read
-   * or was last read with no refusals; {@link #logRefusals} removes an entry the moment a file's
-   * refusals clear, so a later regression is logged again rather than staying silent because of
-   * what an earlier, unrelated fault once said.
-   */
   private final Map<String, Map<String, String>> lastLogged = new ConcurrentHashMap<>();
 
   public SwarmDefinitions(
+      SwarmSources sources, Function<String, AgentRegistry> agentsFor, SwarmScheduler.Pools pools) {
+    this.sources = Objects.requireNonNull(sources);
+    this.agentsFor = Objects.requireNonNull(agentsFor);
+    this.pools = Objects.requireNonNull(pools);
+  }
+
+  /** Server-data tier constructor for isolated fixtures and embedded configurations. */
+  public SwarmDefinitions(
       DataLayout data, Function<Long, AgentRegistry> agentsFor, SwarmScheduler.Pools pools) {
-    this.data = Objects.requireNonNull(data, "data");
-    this.agentsFor = Objects.requireNonNull(agentsFor, "agentsFor");
-    this.pools = Objects.requireNonNull(pools, "pools");
+    this(
+        project -> {
+          Long id = project == null ? null : Long.valueOf(project);
+          if (data.keepsAnything()) {
+            Path own = data.swarmFor(id).getParent();
+            if (Files.exists(own, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+              return ServerSwarmSources.directory(data.root(), own, null, own + "/");
+            Path global = data.swarmFor(null).getParent();
+            if (Files.exists(global, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+              return ServerSwarmSources.directory(data.root(), global, null, global + "/");
+          }
+          return ServerSwarmSources.shipped();
+        },
+        project -> agentsFor.apply(project == null ? null : Long.valueOf(project)),
+        pools);
   }
 
   public SwarmDefinition forProject(Long projectId) {
-    Path file = firstExisting(projectId);
-    String origin = file == null ? "classpath:" + SHIPPED : file.toString();
-    Map<String, Object> front;
+    return select(projectId == null ? null : projectId.toString(), null);
+  }
+
+  @Override
+  public List<SwarmDefinition> types(String project) {
+    return sources.read(project).stream().map(source -> resolve(project, source)).toList();
+  }
+
+  private SwarmDefinition resolve(String project, SwarmSources.Source source) {
+    String origin = source.origin();
     List<String> names;
     int budget;
+    String description;
     try {
-      front = frontmatter(file == null ? shipped() : Files.readString(file));
+      Map<String, Object> front;
+      if (source.format().equals("md")) {
+        front = frontmatter(source.text());
+        String normalised = source.text().replace("\r\n", "\n");
+        int end = normalised.indexOf("\n---", 4) + 4;
+        description = normalised.substring(end).strip();
+      } else {
+        front = json(source.text());
+        Object prose = front.remove("description");
+        if (prose != null && !(prose instanceof String))
+          throw new IllegalStateException("Swarm description must be text");
+        description = prose == null ? "" : (String) prose;
+      }
       names = names(front.get("members"));
+      if (front.containsKey("budget") && front.get("budget") == null)
+        throw new IllegalStateException("Swarm budget must be a whole number");
       budget = budget(front.get("budget"));
+      if (description.length() > 4096 || description.indexOf('\0') >= 0)
+        throw new IllegalStateException("Swarm description must fit within 4096 characters");
     } catch (IOException | IllegalStateException refused) {
       Map<String, String> whole = Map.of(FILE, String.valueOf(refused.getMessage()));
       logRefusals(origin, whole);
-      return new SwarmDefinition(List.of(), DEFAULT_BUDGET, whole, origin);
+      return new SwarmDefinition(source.name(), List.of(), DEFAULT_BUDGET, whole, origin, null);
     }
-    AgentRegistry registry = agentsFor.apply(projectId);
+    AgentRegistry registry = agentsFor.apply(project);
+
     List<String> members = new ArrayList<>();
     Map<String, String> refused = new LinkedHashMap<>();
     for (String name : names) {
@@ -147,7 +209,16 @@ public final class SwarmDefinitions {
       members.add(name);
     }
     logRefusals(origin, refused);
-    return new SwarmDefinition(members, budget, refused, origin);
+    return new SwarmDefinition(
+        source.name(),
+        members,
+        budget,
+        refused,
+        origin,
+        members.isEmpty()
+            ? null
+            : new SwarmSelection(
+                source.name(), SwarmSelection.digest(source.text()), description, members, budget));
   }
 
   /**
@@ -175,24 +246,47 @@ public final class SwarmDefinitions {
     lastLogged.put(file, refused);
   }
 
-  private Path firstExisting(Long projectId) {
-    if (!data.keepsAnything()) {
-      return null;
-    }
-    if (projectId != null && Files.isRegularFile(data.swarmFor(projectId))) {
-      return data.swarmFor(projectId);
-    }
-    Path global = data.swarmFor(null);
-    return Files.isRegularFile(global) ? global : null;
-  }
-
-  private static String shipped() throws IOException {
-    try (var input = SwarmDefinitions.class.getResourceAsStream("/" + SHIPPED)) {
-      if (input == null) {
-        throw new IllegalStateException("the shipped " + SHIPPED + " is missing");
+  /** Strict JSON is converted inside the configuration boundary before domain values are built. */
+  private static Map<String, Object> json(String text) throws IOException {
+    var mapper =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    var body = mapper.readTree(text);
+    if (body == null || !body.isObject())
+      throw new IllegalStateException("A JSON swarm must be an object");
+    var result = new LinkedHashMap<String, Object>();
+    var fields = body.fields();
+    while (fields.hasNext()) {
+      var entry = fields.next();
+      if (!Set.of("members", "budget", "description").contains(entry.getKey()))
+        throw new IllegalStateException("Unknown swarm key '" + entry.getKey() + "'");
+      var value = entry.getValue();
+      switch (entry.getKey()) {
+        case "members" -> {
+          if (!value.isArray())
+            throw new IllegalStateException("Swarm members must be a non-empty list");
+          var members = new ArrayList<String>();
+          for (var member : value) {
+            if (!member.isTextual())
+              throw new IllegalStateException("Swarm members must be agent names");
+            members.add(member.textValue());
+          }
+          result.put("members", members);
+        }
+        case "budget" -> {
+          if (!value.isIntegralNumber() || !value.canConvertToInt())
+            throw new IllegalStateException("Swarm budget must be a whole number");
+          result.put("budget", value.intValue());
+        }
+        case "description" -> {
+          if (!value.isTextual()) throw new IllegalStateException("Swarm description must be text");
+          result.put("description", value.textValue());
+        }
+        default -> throw new IllegalStateException("Unknown swarm key");
       }
-      return new String(input.readAllBytes(), StandardCharsets.UTF_8);
     }
+    return result;
   }
 
   private static Map<String, Object> frontmatter(String text) {
@@ -202,6 +296,8 @@ public final class SwarmDefinitions {
           FILE + " opens with a '---' frontmatter fence and" + " this one does not");
     }
     int close = normalised.indexOf("\n---", 4);
+    if (close >= 0 && close + 4 < normalised.length() && normalised.charAt(close + 4) != '\n')
+      throw new IllegalStateException("Swarm frontmatter closing fence must be a complete line");
     if (close < 0) {
       throw new IllegalStateException(FILE + "'s frontmatter is never closed with '---'");
     }
@@ -245,17 +341,21 @@ public final class SwarmDefinitions {
   }
 
   private static List<String> names(Object members) {
-    if (!(members instanceof List<?> list) || list.isEmpty()) {
+    if (!(members instanceof List<?> list) || list.isEmpty() || list.size() > 64) {
       throw new IllegalStateException(
           FILE + " names its members as a non-empty list:" + " members: [researcher, critic]");
     }
     Set<String> names = new LinkedHashSet<>();
     for (Object each : list) {
-      if (!(each instanceof String name) || name.isBlank()) {
+      if (!(each instanceof String name)
+          || name.isBlank()
+          || name.length() > 128
+          || name.indexOf('\0') >= 0) {
         throw new IllegalStateException(
             FILE + "'s members are agent names; '" + each + "' is not one");
       }
-      names.add(name.strip());
+      if (!names.add(name.strip()))
+        throw new IllegalStateException("Swarm member names must be unique");
     }
     return List.copyOf(names);
   }

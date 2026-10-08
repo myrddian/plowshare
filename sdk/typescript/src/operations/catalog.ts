@@ -59,6 +59,7 @@ export interface ExtendedPayloads
   'board.topics': Tier & Page;
   'board.messages': { readonly topic: string };
   'swarm.status': Record<string, never>;
+  'swarm.types': { readonly project: string };
   'job.list': Record<string, never>;
   'job.limits': Turns & Budget & { readonly job: string };
   'document.ask': Budget & {
@@ -372,6 +373,7 @@ export const CLI_OPERATIONS = {
   'board topics': 'board.topics',
   'board messages': 'board.messages',
   'swarm status': 'swarm.status',
+  'swarm types': 'swarm.types',
   'board topup': 'board.topup',
   'board retry': 'board.retry',
   'board post': 'board.post',

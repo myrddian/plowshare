@@ -1307,6 +1307,9 @@ export class DesktopClient {
       case 'board-post-topics':
         await this.board.postingTopics(request.project, request.more);
         break;
+      case 'board-swarm-types':
+        await this.board.swarmTypes(request.project);
+        break;
       case 'board-create':
         await this.board.create(
           request.project,
@@ -1315,6 +1318,7 @@ export class DesktopClient {
           request.body,
           request.requestId,
           request.maxModelCalls,
+          request.swarm,
         );
         break;
       case 'board-retry':
