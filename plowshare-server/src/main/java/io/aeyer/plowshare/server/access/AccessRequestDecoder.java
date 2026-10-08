@@ -41,7 +41,9 @@ public final class AccessRequestDecoder {
     add(resources, JOB, payload.get("job"));
     add(resources, MEMORY, payload.get("memory"));
     add(resources, PROPOSAL, payload.get("proposal"));
-    add(resources, TOPIC, payload.get("topic"));
+    // Relay topics are names inside the explicit project, not board topic UUIDs.
+    // Their owning port/log services enforce topic and subscriber authority.
+    if (!operation.startsWith("relay.")) add(resources, TOPIC, payload.get("topic"));
     add(resources, INSTANCE, payload.get("instance"));
     if (operation.startsWith("orchestration.")) {
       add(resources, ORCHESTRATION, payload.get("id"));

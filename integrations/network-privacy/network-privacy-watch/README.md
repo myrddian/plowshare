@@ -54,6 +54,17 @@ install its dependencies.
 Follow the [integration guide](../README.md) for the exact commands and
 configuration contracts.
 
+Start with [service account and human manager setup](../README.md#separate-the-human-manager-from-the-service-account).
+The Python setup script reads configuration, prompts for blanks, prepares private
+source and provisions a project-scoped service credential after the first paused
+deployment. The human user gets Application `MANAGER` access; the service handle
+gets `CONTRIBUTOR`. The management group is the manifest's `MANAGER` accounts with
+matching server membership. It does not require giving the user server admin.
+Relay provider/port declarations use the service token's `@service/<UUID>` principal,
+while the manifest uses its owning account handle. The guide also explains how to
+run investigations as that principal and the current administrator-owned schedule
+limit; setup does not transfer ownership of a deployed schedule.
+
 1. Install the Python SDK and collector. Copy the supplied
    [configuration](../examples/config.json) into a private operator directory and set the
    server origin, `network-privacy-watch` project, collector scope and private
@@ -61,7 +72,7 @@ configuration contracts.
    the configured environment variables.
 2. Make a private copy of this Application folder. Add explicit manifest account
    grants and matching server membership; the supplied manifest grants no
-   accounts. Replace provider account placeholders in `server/tools.json` and
+   accounts. Replace provider account placeholders with the service token principal in `server/tools.json` and
    `server/ports.json`; configure the agents' model binding and review their tool grants.
 3. Configure a server FileStore destination. As a server administrator with
    MANAGER access to that destination, deploy the private folder using CLI
@@ -99,7 +110,8 @@ restarting a collector with an unresolved outcome.
 ## Application-owned tools and ports
 
 Before deploying your private copy, configure [`server/`](server/README.md)
-with the external collector's authenticated provider account. Its tool bootstrap
+with the external collector's authenticated execution identity (the service token
+principal when using a service account). Its tool bootstrap
 schemas and catalogue authority are validated with the agent definitions; its
 Relay port grants activate with this Application revision. No global server
 configuration edit or restart is required. The Python process remains separately

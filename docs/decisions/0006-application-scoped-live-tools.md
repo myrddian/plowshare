@@ -42,6 +42,15 @@ extras retain their own lifecycle authority. Failures carry stable `E_NO_ACCESS`
 UNKNOWN external effects retain invocation identity and require read-only
 reconciliation; no error code authorizes automatic mutation replay.
 
+Service-token providers use the token execution principal in Relay declarations,
+while manifest and project grants name its owning service account handle. Central
+admission explicitly permits existing project Relay operations for service tokens,
+requiring current token scope and the operation's Viewer/Contributor/Manager role
+before the owning Relay service checks port, topic, lease and provenance authority.
+System scope and unknown operations remain refused. Relay topic names are not board
+topic resource IDs. This closes a permission-gate gap in the authorized provider
+plumbing; it introduces no new transport, operation or token scope format.
+
 Authority follows activation/rollback of Application source, while catalogue
 metadata is still the provider's newest durable publication within that authority.
 Catalogues refresh definition caches without rebooting. Lease renewals publish fresh

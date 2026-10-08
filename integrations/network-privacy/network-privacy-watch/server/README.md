@@ -1,9 +1,12 @@
 # Application server declarations
 
 Replace `REPLACE_WITH_PROVIDER_ACCOUNT` in both JSON files with the authenticated
-Python provider account in your private Application copy. Grant that account
-project work access in `plowshare.json` (one account entry per handle) and the
-project membership policy. Declarations grant no membership by themselves.
+Python provider execution identity in your private Application copy. For a service
+token this is its returned `@service/<token UUID>` principal, not the account handle.
+Grant the owning service account handle project work access in `plowshare.json`
+(one account entry per handle) and the project membership policy. Declarations
+grant no membership by themselves. The [setup guide](../../README.md#separate-the-human-manager-from-the-service-account)
+provides a Python configuration/provisioning script and separate human `MANAGER` grants.
 
 Deployment validates these files before activation. `tools.json` provides initial
 schemas and authorizes `privacy-scanner` to publish the `network_` catalogue.
