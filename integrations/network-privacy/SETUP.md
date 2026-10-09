@@ -286,13 +286,16 @@ credential in `deployment/service-token`. The helper does not edit a whole serve
 configuration to install a worker. Without a worker or explicit processing pass,
 scan evidence can be retained while its investigation has not started.
 
-Current server limitation: a processing pass requires MANAGER access whenever
-its active source declares topic policies, even if those policies are unchanged.
-This Application declares policies in `Relay/topics.json`, so its CONTRIBUTOR
-service credential can collect and retain evidence but cannot yet process those
-investigations. Processing with a human manager changes investigation ownership.
-Separating policy management from routine service processing requires a platform
-permission change; setup does not broaden the service account's role.
+Contributor processing uses the broker's stored topic policy, or the standard
+four-day default when registering a new topic. Declared values in `Relay/topics.json`
+are applied only by a manager processing pass. The service account can process
+investigations without acquiring policy-write authority; setup keeps its CONTRIBUTOR
+role. Inspect `relay.log` for the effective stored policy.
+
+Older servers refused contributor processing whenever source declared topic policies.
+If you receive `Changing Relay topic policies requires project manager access`, update
+the server with the Relay processing permission fix. Using a human manager instead
+changes investigation ownership and does not verify service-account processing.
 
 The packaged schedule is still owned by the deploying administrator. Its
 `privacy_tick` action invokes no model. Setup does not transfer that schedule's
