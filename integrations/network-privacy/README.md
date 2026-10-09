@@ -234,9 +234,13 @@ this project and the token **principal**, or supervise explicit processing passe
 under that service credential. Do not also bind an automatic worker for this
 Application to the human account: processing identity determines investigation
 ownership. Without a worker or explicit pass, completed scans remain retained but
-do not launch an investigation. The service token cannot manage or assume the
-administrator-owned packaged schedule. Separating schedule ownership needs a
-platform lifecycle feature; this setup does not claim to provide it.
+do not launch an investigation. Contributor processing preserves the broker's current
+topic policies, using the standard default for a new topic. Declared retention in
+`Relay/topics.json` is applied only by a manager processing pass; it does not grant
+policy-write access or prevent this service account from processing investigations.
+The service token cannot manage or assume the administrator-owned packaged schedule.
+Separating schedule ownership needs a platform lifecycle feature; this setup does not
+claim to provide it.
 
 ### Rotation and interrupted setup
 

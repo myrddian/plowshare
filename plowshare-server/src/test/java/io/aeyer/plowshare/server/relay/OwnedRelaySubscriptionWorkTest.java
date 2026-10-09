@@ -7,6 +7,7 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,15 +31,7 @@ class OwnedRelaySubscriptionWorkTest {
   @BeforeEach
   void setup() {
     when(members.mayWork("project", "operator")).thenReturn(true);
-    var declared =
-        new RelayRouting.Subscription(
-            "release", "release.observed", RelayPayload.Kind.TEXT, Relay.Start.OLDEST_RETAINED);
-    var bundle =
-        new RelayRouting.Package(
-            "notices",
-            delivery(RelayDeliveries.State.DISPATCHING, false).routing(),
-            new RelayRouting.Manifest(List.of(declared)));
-    when(routing.load(ACCESS)).thenReturn(new RelayRouting.Project(List.of(bundle), Map.of()));
+    configuration(Map.of());
     when(consumers.acquire(eq(SUB), eq("worker"), eq("operator"), any()))
         .thenReturn(Optional.of(lease));
     when(dispatch.next(eq(ACCESS), eq(SUB), eq("worker"), any(), any()))
@@ -127,12 +120,92 @@ class OwnedRelaySubscriptionWorkTest {
     assertThrows(CallerFault.class, () -> work.subscriptions(ACCESS));
   }
 
+  private void configuration(Map<String, Relay.Policy> policies) {
+    var declared =
+        new RelayRouting.Subscription(
+            "release", "release.observed", RelayPayload.Kind.TEXT, Relay.Start.OLDEST_RETAINED);
+    var bundle =
+        new RelayRouting.Package(
+            "notices",
+            delivery(RelayDeliveries.State.DISPATCHING, false).routing(),
+            new RelayRouting.Manifest(List.of(declared)));
+    when(routing.load(ACCESS)).thenReturn(new RelayRouting.Project(List.of(bundle), policies));
+  }
+
   @Test
-  void policy_changes_require_manager_before_broker_mutation() {
+  void contributor_can_discover_and_process_with_declared_policies_without_applying_them() {
+    var declared = new Relay.Policy(Duration.ofDays(1), 1L);
+    configuration(Map.of(SUB.topic().name(), declared));
+    var input = delivery(RelayDeliveries.State.DISPATCHING, false).publication();
+    when(relay.read(SUB, 1))
+        .thenReturn(
+            new Relay.Read(
+                new Relay.Subscription(SUB, 0, Instant.EPOCH), Optional.empty(), List.of(input)));
+    when(consumers.claim(eq(lease), any()))
+        .thenReturn(Optional.of(delivery(RelayDeliveries.State.ACCEPTED, false)));
+    assertEquals(List.of(SUB), work.subscriptions(ACCESS));
+    verifyNoInteractions(relay, consumers, dispatch);
+    var result = work.process(ACCESS, SUB, "worker", 1, 1);
+    assertEquals(1, result.admitted());
+    assertEquals(1, result.dispatched());
+    verify(relay).registerTopic(SUB.topic(), RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    verify(relay, never()).configureTopic(any(), any(), any());
+    verify(routing).admit(eq(ACCESS), eq(SUB), eq(input), any());
+    verify(consumers).release(lease);
+  }
+
+  @Test
+  void manager_can_apply_declared_policy_before_consuming() {
+    var declared = new Relay.Policy(Duration.ofDays(1), 1L);
+    configuration(Map.of(SUB.topic().name(), declared));
+    when(members.mayManage("project", "operator")).thenReturn(true);
+    work.process(ACCESS, SUB, "worker", 1, 0);
+    var order = inOrder(relay, consumers);
+    order.verify(relay).configureTopic(SUB.topic(), RelayPayload.Kind.TEXT, declared);
+    order.verify(relay).subscribe(SUB, Relay.Start.OLDEST_RETAINED);
+    order.verify(consumers).acquire(eq(SUB), eq("worker"), eq("operator"), any());
+    verify(relay, never()).registerTopic(any(), any(), any());
+  }
+
+  @Test
+  void removing_manager_authority_after_discovery_preserves_processing_without_policy_writes() {
+    configuration(Map.of(SUB.topic().name(), new Relay.Policy(Duration.ofDays(1), 1L)));
+    when(members.mayManage("project", "operator")).thenReturn(true);
+    assertEquals(List.of(SUB), work.subscriptions(ACCESS));
+    when(members.mayManage("project", "operator")).thenReturn(false);
+    work.process(ACCESS, SUB, "worker", 1, 0);
+    verify(relay, never()).configureTopic(any(), any(), any());
+    verify(relay).registerTopic(SUB.topic(), RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+  }
+
+  @Test
+  void contributor_cannot_apply_a_new_policy_on_a_later_processing_pass() {
+    configuration(Map.of(SUB.topic().name(), new Relay.Policy(Duration.ofDays(1), 1L)));
+    work.process(ACCESS, SUB, "worker", 1, 0);
+    configuration(Map.of(SUB.topic().name(), new Relay.Policy(Duration.ofDays(30), 1000L)));
+    work.process(ACCESS, SUB, "worker", 1, 0);
+    verify(relay, never()).configureTopic(any(), any(), any());
+    verify(relay, times(2))
+        .registerTopic(SUB.topic(), RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+  }
+
+  @Test
+  void inactive_packages_do_not_apply_policies_even_for_managers() {
+    when(members.mayManage("project", "operator")).thenReturn(true);
     when(routing.load(ACCESS))
         .thenReturn(
             new RelayRouting.Project(
-                List.of(), Map.of("release.observed", Relay.Policy.systemDefault())));
+                List.of(), Map.of(SUB.topic().name(), new Relay.Policy(Duration.ofDays(1), 1L))));
+    assertEquals(List.of(), work.subscriptions(ACCESS));
+    assertFalse(work.process(ACCESS, SUB, "worker", 1, 1).progressed());
+    verifyNoInteractions(relay, consumers, dispatch);
+  }
+
+  @Test
+  void losing_work_authority_after_discovery_prevents_broker_work() {
+    configuration(Map.of(SUB.topic().name(), Relay.Policy.systemDefault()));
+    assertEquals(List.of(SUB), work.subscriptions(ACCESS));
+    when(members.mayWork("project", "operator")).thenReturn(false);
     assertThrows(CallerFault.class, () -> work.process(ACCESS, SUB, "worker", 1, 1));
     verifyNoInteractions(relay, consumers, dispatch);
   }

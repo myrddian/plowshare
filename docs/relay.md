@@ -226,9 +226,14 @@ configuration order. It admits at most one publication per subscription and at
 most 32 inputs and 32 branch dispatches overall, or the requested lower limit.
 Each subscription uses the same distributed ownership lease as automatic workers;
 a subscription with another live owner is skipped for that pass.
-It requires contributor access; applying explicit topic policies requires manager
-access. Repeated passes drain queued input. Gaps stop new admission for that
-subscription while previously admitted branches can still dispatch. The result
+It requires contributor access. A contributor pass preserves the stored topic policy,
+or uses the standard four-day registration default for a new topic; declared policies
+in `Relay/topics.json` do not block processing and cannot change retention under that
+identity. A manager pass applies explicit policies for its active subscription topics
+before consumption. Editing or deploying the policy file alone does not apply those
+values; inspect `relay.log` for the effective persisted policy. Repeated passes drain
+queued input. Gaps stop new admission for that subscription while previously admitted
+branches can still dispatch. The result
 reports the gap; managers can acknowledge an inspected gap explicitly through
 `relay.operate`. Reading or running a pass never acknowledges it.
 
