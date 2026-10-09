@@ -6,7 +6,11 @@ import io.aeyer.plowshare.protocol.RelayPort;
 public interface RelayPorts {
   RelayPort.Published publish(String account, RelayPort.Publish request);
 
-  RelayPort.Batch consume(String account, RelayPort.Consume request);
+  default RelayPort.Batch consume(String account, RelayPort.Consume request) {
+    return consume(account, request, RelayReadBudget.SEGMENTED);
+  }
+
+  RelayPort.Batch consume(String account, RelayPort.Consume request, RelayReadBudget budget);
 
   RelayPort.Acknowledged acknowledge(String account, RelayPort.Ack request);
 }

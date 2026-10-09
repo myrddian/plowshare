@@ -82,7 +82,7 @@ function decode(
     case 'null':
       return value === null ? null : fail();
     case 'string':
-      return typeof value === 'string' && value.length <= 8 * 1024 * 1024
+      return typeof value === 'string' && value.length <= 50 * 1024 * 1024
         ? value
         : fail();
     case 'number':

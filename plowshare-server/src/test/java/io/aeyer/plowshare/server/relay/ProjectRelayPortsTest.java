@@ -147,7 +147,7 @@ class ProjectRelayPortsTest {
             RelayPort.Start.OLDEST_RETAINED,
             1,
             0);
-    when(repository.consume(any(), anyString(), any()))
+    when(repository.consume(any(), anyString(), any(), any()))
         .thenReturn(
             new RelayPort.Batch(
                 "project",

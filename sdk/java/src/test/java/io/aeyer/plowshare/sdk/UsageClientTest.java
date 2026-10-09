@@ -43,7 +43,7 @@ class UsageClientTest {
                     }
                   }));
       try (var connection =
-          Plowshare.connect(
+          LegacyFixture.connect(
               server.url("/").toString(), "fixture", Duration.ofSeconds(2), push -> {})) {
         assertThrows(
             IOException.class, () -> new UsageClient(connection).calls(project("selected")));

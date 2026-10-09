@@ -319,7 +319,7 @@ export function constrain(graph) {
       for(const k of ['occurredAt','publishedAt','expiresAt']) field(shape,k,instant);
     }
     if(op==='relay.publish') {
-      field(request,'text',{...text(65536,1),nonblank:true});
+      field(request,'text',{...text(50 * 1024 * 1024,1),maxUtf8Bytes:50 * 1024 * 1024,nonblank:true});
       for(const k of ['parentEventId','correlationId']) field(request,k,{...identity,maxLength:256});
       rules(request,{eq:[present('parentTopic'),present('parentEventId')]});
     }
@@ -399,6 +399,8 @@ export function constrain(graph) {
     }
     if (p.text && (p.url || p.raw || p.data || p.kind))
       field(s, 'text', text(262144));
+    if (p.text && p.kind && p.schedule && p.emits && p.fireAt)
+      field(s, 'text', {...text(50 * 1024 * 1024, 1), maxUtf8Bytes:50 * 1024 * 1024, nonblank:true});
     if (p.raw)
       field(s, 'raw', {
         maxLength: 262144,

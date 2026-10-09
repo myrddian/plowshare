@@ -112,7 +112,9 @@ class SelectedResourceRepliesTest {
                         }
                       }
                     }));
-        try (var client = new WsServerClient(server.url("/").toString(), "fixture")) {
+        try (var client =
+            new WsServerClient(
+                server.url("/").toString(), "fixture", Plowshare.TransportMode.LEGACY)) {
           if (foreign) {
             var error =
                 assertThrows(Plowshare.TransportException.class, () -> call(client, operation));

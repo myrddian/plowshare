@@ -18,6 +18,12 @@ import okhttp3.*;
  * complete JSON, including future fields. No mutation replay.
  */
 public final class Plowshare implements AutoCloseable {
+  /** Legacy is an explicit compatibility choice; no possibly submitted request changes encoding. */
+  public enum TransportMode {
+    SEGMENTED,
+    LEGACY
+  }
+
   public enum Delivery {
     NOT_SUBMITTED,
     UNKNOWN,
@@ -64,6 +70,18 @@ public final class Plowshare implements AutoCloseable {
       Executors.newSingleThreadExecutor(
           Thread.ofPlatform().daemon().name("plowshare-sdk-push").factory());
   private volatile WebSocket socket;
+  private final Object packetWrite = new Object();
+  private io.aeyer.plowshare.protocol.transport.SegmentedMessages packets;
+  private final ObjectMapper packetJson =
+      JSON.copy()
+          .enable(
+              com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
+              com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS,
+              com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
+              com.fasterxml.jackson.databind.DeserializationFeature
+                  .FAIL_ON_MISSING_CREATOR_PROPERTIES,
+              com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
+          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
   private volatile boolean closed;
   private volatile boolean lost;
   private final java.util.concurrent.atomic.AtomicLong dropped =
@@ -73,6 +91,25 @@ public final class Plowshare implements AutoCloseable {
     this.http = http;
     this.timeout = timeout;
     this.session = session;
+    packetJson
+        .coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Integer)
+        .setCoercion(
+            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float,
+            com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
+        .setCoercion(
+            com.fasterxml.jackson.databind.cfg.CoercionInputShape.String,
+            com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
+    packetJson
+        .coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Textual)
+        .setCoercion(
+            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float,
+            com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
+        .setCoercion(
+            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer,
+            com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
+        .setCoercion(
+            com.fasterxml.jackson.databind.cfg.CoercionInputShape.Boolean,
+            com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
   }
 
   /**
@@ -88,6 +125,18 @@ public final class Plowshare implements AutoCloseable {
   public static Plowshare connect(
       String origin, String bearer, String session, Duration timeout, Consumer<ServerPush> onPush)
       throws IOException {
+    return connect(origin, bearer, session, timeout, onPush, TransportMode.SEGMENTED);
+  }
+
+  public static Plowshare connect(
+      String origin,
+      String bearer,
+      String session,
+      Duration timeout,
+      Consumer<ServerPush> onPush,
+      TransportMode mode)
+      throws IOException {
+    Objects.requireNonNull(mode, "mode");
     HttpUrl base = HttpUrl.parse(origin);
     if (base == null
         || !base.encodedPath().equals("/")
@@ -117,6 +166,10 @@ public final class Plowshare implements AutoCloseable {
                     .addQueryParameter("session", session)
                     .build());
     if (bearer != null && !bearer.isBlank()) request.header("Authorization", "Bearer " + bearer);
+    if (mode == TransportMode.SEGMENTED)
+      request.header(
+          "Sec-WebSocket-Protocol",
+          io.aeyer.plowshare.protocol.transport.SegmentedMessages.SUBPROTOCOL);
     var ready = new CompletableFuture<Void>();
     client.socket =
         client.http.newWebSocket(
@@ -124,12 +177,50 @@ public final class Plowshare implements AutoCloseable {
             new WebSocketListener() {
               @Override
               public void onOpen(WebSocket ws, Response response) {
+                if (mode == TransportMode.SEGMENTED) {
+                  if (!io.aeyer.plowshare.protocol.transport.SegmentedMessages.SUBPROTOCOL.equals(
+                      response.header("Sec-WebSocket-Protocol"))) {
+                    ready.completeExceptionally(
+                        new TransportException(
+                            Delivery.NOT_SUBMITTED,
+                            "server does not support segmented transport; explicitly select legacy mode for compatibility"));
+                    ws.cancel();
+                    return;
+                  }
+                  client.socket = ws;
+                  client.packets =
+                      new io.aeyer.plowshare.protocol.transport.SegmentedMessages(
+                          new io.aeyer.plowshare.protocol.transport.PacketWire() {
+                            public void segment(
+                                io.aeyer.plowshare.protocol.transport.MessageSegment packet)
+                                throws IOException {
+                              client.packet(packet);
+                            }
+
+                            public void credit(
+                                io.aeyer.plowshare.protocol.transport.SegmentCredit packet)
+                                throws IOException {
+                              client.packet(packet);
+                            }
+                          },
+                          io.aeyer.plowshare.protocol.transport.SegmentedMessages.PROCESS_BUDGET,
+                          client::close);
+                }
                 ready.complete(null);
               }
 
               @Override
               public void onMessage(WebSocket ws, String text) {
-                client.arrived(text);
+                if (client.packets == null) {
+                  client.arrived(text);
+                  return;
+                }
+                try {
+                  client.packetArrived(text);
+                } catch (IOException | RuntimeException invalid) {
+                  client.strand();
+                  ws.cancel();
+                }
               }
 
               @Override
@@ -194,6 +285,17 @@ public final class Plowshare implements AutoCloseable {
       throw new IllegalArgumentException("a dotted frame type is required");
     String id = UUID.randomUUID().toString();
     CompletableFuture<Reply> answer = new CompletableFuture<>();
+    String frame =
+        JSON.writeValueAsString(
+            new Envelope(
+                id, type, Envelope.CURRENT_VERSION, new java.util.LinkedHashMap<>(payload)));
+    int bytes = frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    if (bytes
+        > (packets == null
+            ? 1024 * 1024
+            : io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES))
+      throw new TransportException(
+          Delivery.NOT_SUBMITTED, "encoded request exceeds negotiated transport allowance");
     synchronized (this) {
       if (!connected())
         throw new TransportException(
@@ -201,11 +303,21 @@ public final class Plowshare implements AutoCloseable {
       if (pending.size() >= 64)
         throw new TransportException(
             Delivery.NOT_SUBMITTED, "too many outstanding Plowshare requests");
-      String frame =
-          JSON.writeValueAsString(
-              new Envelope(
-                  id, type, Envelope.CURRENT_VERSION, new java.util.LinkedHashMap<>(payload)));
       pending.put(id, new Pending(type, answer));
+    }
+    if (packets != null) {
+      try {
+        packets.send(frame);
+      } catch (IllegalArgumentException refused) {
+        pending.remove(id);
+        throw new TransportException(
+            Delivery.NOT_SUBMITTED, "transport capacity exceeded before submission");
+      } catch (IOException failed) {
+        pending.remove(id);
+        throw new TransportException(
+            Delivery.UNKNOWN, "packet send failed; outcome is unknown; request was not replayed");
+      }
+    } else {
       if (!socket.send(frame)) {
         pending.remove(id);
         throw new TransportException(
@@ -232,6 +344,35 @@ public final class Plowshare implements AutoCloseable {
     Map<String, Object> fields =
         JSON.convertValue(request, new com.fasterxml.jackson.core.type.TypeReference<>() {});
     return SdkJson.decode(JSON, request(type, fields).requirePayload(), response);
+  }
+
+  private void packet(Object value) throws IOException {
+    synchronized (packetWrite) {
+      if (!socket.send(packetJson.writeValueAsString(value)))
+        throw new IOException("socket refused packet");
+    }
+  }
+
+  private void packetArrived(String text) throws IOException {
+    if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+        > io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_PACKET_BYTES)
+      throw new IOException("oversized packet");
+    var tree = packetJson.readTree(text);
+    if (tree == null || !tree.isObject() || !tree.path("kind").isTextual())
+      throw new IOException("invalid packet");
+    switch (tree.get("kind").textValue()) {
+      case "transport.segment" ->
+          packets
+              .receive(
+                  packetJson.treeToValue(
+                      tree, io.aeyer.plowshare.protocol.transport.MessageSegment.class))
+              .ifPresent(this::arrived);
+      case "transport.credit" ->
+          packets.credit(
+              packetJson.treeToValue(
+                  tree, io.aeyer.plowshare.protocol.transport.SegmentCredit.class));
+      default -> throw new IOException("unsupported packet kind");
+    }
   }
 
   private void arrived(String text) {
@@ -285,6 +426,7 @@ public final class Plowshare implements AutoCloseable {
 
   private synchronized void strand() {
     lost = true;
+    if (packets != null) packets.close();
     pending
         .values()
         .forEach(

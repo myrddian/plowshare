@@ -1,3 +1,4 @@
+import { validRelayText } from '../binding/relay-text.ts';
 import {
   isRelayPort,
   relayPortProblem,
@@ -659,14 +660,7 @@ export function validateRelayEvent(value: unknown, kind: unknown): bigint {
         : body[part] !== null
     )
       fail();
-  if (
-    body['kind'] === 'TEXT' &&
-    (typeof body['text'] !== 'string' ||
-      !body['text'].trim() ||
-      body['text'].length > 65536 ||
-      body['text'].includes('\0'))
-  )
-    fail();
+  if (body['kind'] === 'TEXT' && !validRelayText(body['text'])) fail();
   for (const part of ['lifecycle', 'wake']) {
     const data = body[part];
     const expected =

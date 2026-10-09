@@ -52,7 +52,7 @@ def main():
         run(python, '-m', 'build', 'sdk/python', '--no-isolation', '--outdir', str(OUT))
         run(dotnet, 'pack', 'sdk/dotnet/Plowshare.Sdk', '--configuration', 'Release', '--output', str(OUT), '--nologo')
         with tarfile.open(OUT / 'plowshare-sdk-go-0.1.0.tar.gz', 'w:gz') as archive:
-            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'tools.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'schemas.json']:
+            for name in ['README.md', 'go.mod', 'go.sum', 'client.go', 'packets.go', 'tools.go', 'protocol_generated.go', 'contracts_generated.go', 'codec.go', 'validation.go', 'schemas.json']:
                 path = ROOT / 'sdk/go' / name
                 info = archive.gettarinfo(str(path), 'plowshare-sdk-go/' + name)
                 info.uid = info.gid = info.mtime = 0

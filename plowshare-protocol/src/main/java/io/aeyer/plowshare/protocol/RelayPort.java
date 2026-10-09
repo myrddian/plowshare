@@ -7,6 +7,15 @@ import java.util.UUID;
 
 /** Public project-topic ingress and leased egress. An acknowledgement is not a filter verdict. */
 public final class RelayPort {
+  /** Default server admission policy; deployments may lower it or raise it to MAX_TEXT_BYTES. */
+  public static final int DEFAULT_TEXT_BYTES = 5 * 1024 * 1024;
+
+  /** Portable storage/SDK ceiling, independently of deployment policy and JSON escaping. */
+  public static final int MAX_TEXT_BYTES = 50 * 1024 * 1024;
+
+  /** JSON can expand a byte of control text to six bytes; reserve room for the payload object. */
+  public static final int MAX_ENCODED_PAYLOAD_BYTES = 6 * MAX_TEXT_BYTES + 1024;
+
   private RelayPort() {}
 
   /** An authenticated account gets a bounded, separate publisher namespace. */
@@ -197,8 +206,28 @@ public final class RelayPort {
   }
 
   public static String text(String value) {
-    if (value == null || value.isBlank() || value.length() > 65536 || value.indexOf('\0') >= 0)
-      throw invalid();
+    return text(value, MAX_TEXT_BYTES);
+  }
+
+  /** Validate raw UTF-8 against a server-selected allowance without truncation or replacement. */
+  public static String text(String value, int maxBytes) {
+    if (maxBytes < 1 || maxBytes > MAX_TEXT_BYTES)
+      throw new IllegalArgumentException("Relay text allowance must be 1 through 52428800 bytes");
+    if (value == null || value.isBlank() || value.length() > maxBytes) throw invalid();
+    int bytes = 0;
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c == 0) throw invalid();
+      if (Character.isHighSurrogate(c)) {
+        if (++i >= value.length() || !Character.isLowSurrogate(value.charAt(i))) throw invalid();
+        bytes += 4;
+      } else if (Character.isLowSurrogate(c)) {
+        throw invalid();
+      } else {
+        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+      }
+      if (bytes > maxBytes) throw invalid();
+    }
     return value;
   }
 

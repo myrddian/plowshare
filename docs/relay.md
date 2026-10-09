@@ -427,9 +427,29 @@ also supports YAML configuration files; project Relay configuration remains JSON
 
 | Operation | Contract |
 | --- | --- |
-| `relay.publish` | UUID `requestId`, project/topic, nonblank text up to 65,536 UTF-16 units, stable ISO `occurredAt`, optional correlation and parent topic/event. |
+| `relay.publish` | UUID `requestId`, project/topic, nonblank text within the configured raw UTF-8 allowance (5 MiB default, 50 MiB ceiling), stable ISO `occurredAt`, optional correlation and parent topic/event. |
 | `relay.consume` | Project/topic, group, UUID consumer instance, `start` OLDEST_RETAINED or LATEST, limit 1–100 (default 100), waitMs 0–30,000 (default 0). |
 | `relay.ack` | Exact project/topic/group/consumer, batch UUID, decimal fence and, for a gap, its exact `expiredThrough`. |
+
+The [segmented SDK transport](decisions/0009-segmented-sdk-message-transport.md)
+reassembles a logical request, response or push from bounded 64 KiB byte ranges.
+The TEXT allowance counts raw UTF-8 bytes and excludes the envelope. Configure
+`plowshare.relay.max-text-bytes` with a positive byte count; it defaults to
+`5242880` (5 MiB) and cannot exceed `52428800` (50 MiB). Invalid configuration
+fails startup. For example, this opts into the current maximum:
+
+```yaml
+plowshare:
+  relay:
+    max-text-bytes: 52428800 # 50 MiB; omit to retain the 5 MiB default
+```
+
+The repository applies this policy only to new TEXT publications. SDK DTOs,
+stored payloads and retained reads use the 50 MiB ceiling, so lowering the setting
+does not block an identical publication UUID replay, reading or admitting retained
+work. Other payload families and tool-specific limits retain their own contracts.
+Encoded payload JSON allows worst-case escaping; the complete SDK message is
+independently bounded at 320 MiB. The setting takes effect at server startup.
 
 Use a stable UUID per running consumer instance. Same-group instances compete;
 different groups have independent cursors. Start applies only when registering a
@@ -440,7 +460,9 @@ the same token and complete boundary again; asking for a smaller limit that hide
 part of an outstanding batch fails. A competing owner gets BUSY.
 
 A batch may contain fewer than the requested limit to keep its encoded events
-within 768 KiB, leaving room for the envelope below native SDKs' 1 MiB frame cap.
+within 319 MiB on a segmented connection or 768 KiB on a legacy connection,
+leaving room for the envelope. A legacy read refuses an undeliverable first event
+without issuing a lease or advancing the cursor.
 JSON escaping and UTF-8 bytes count toward this budget. Acknowledgement covers
 only the returned prefix; the next batch delivers the remaining records.
 

@@ -1,3 +1,4 @@
+import { nodePacketSocket } from 'plowshare-client-node';
 import { record, field, json } from './json.test-support.js';
 import { httpHandler, wireText } from './http.test-support.js';
 import { displayText } from 'plowshare-client-ts/binding/values';
@@ -136,11 +137,15 @@ async function fixture(
       return;
     }
     assert.equal(url.pathname, '/v1/events');
+    const messages = nodePacketSocket(socket);
     eventSession = url.searchParams.get('session')!;
     assert.ok(eventSession);
     assert.equal(url.searchParams.has('root'), false);
-    socket.on('message', (bytes) => {
-      const frame = JSON.parse(wireText(bytes)) as Frame;
+    messages.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string')
+        throw new Error('Non-text logical fixture message');
+      const bytes = event.data;
+      const frame = JSON.parse(bytes) as Frame;
       assert.equal(frame.protocol_version, 'plowshare-v1');
       frames.push(frame);
       const outcome = script(frame);
@@ -149,8 +154,8 @@ async function fixture(
         return;
       }
       if (outcome === 'hang') return;
-      socket.send(JSON.stringify({ job: 'foreign-job', kind: 'ended' }));
-      socket.send(
+      messages.send(JSON.stringify({ job: 'foreign-job', kind: 'ended' }));
+      messages.send(
         JSON.stringify({
           id: frame.id,
           type: frame.type,

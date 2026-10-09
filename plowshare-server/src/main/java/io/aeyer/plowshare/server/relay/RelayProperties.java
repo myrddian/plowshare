@@ -4,9 +4,24 @@ import java.time.Duration;
 import java.util.Objects;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Server cleanup bounds; topic retention itself is durable per-topic policy. */
+/** Server admission and cleanup bounds; topic retention itself is durable per-topic policy. */
 @ConfigurationProperties("plowshare.relay")
 public final class RelayProperties {
+  private int maxTextBytes = io.aeyer.plowshare.protocol.RelayPort.DEFAULT_TEXT_BYTES;
+
+  /** Raw UTF-8 bytes allowed on new TEXT publications, independently of encoded packet size. */
+  public int getMaxTextBytes() {
+    return maxTextBytes;
+  }
+
+  public void setMaxTextBytes(int value) {
+    maxTextBytes = new RelayTextLimit(value).bytes();
+  }
+
+  public RelayTextLimit textLimit() {
+    return new RelayTextLimit(maxTextBytes);
+  }
+
   private java.util.List<SystemTopic> systemTopics = java.util.List.of();
 
   /** Explicit deployment policy for a server-private topic; no project authority is inferred. */

@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 from plowshare import OPERATIONS, CancelledRequest, Client, Refusal, TransportError
-from plowshare.contracts import JobStatusRequest, ProjectListRequest
+from plowshare.contracts import (
+    JobStatusRequest,
+    ProjectListRequest,
+    RelayConsumeRequest,
+    RelayPublishRequest,
+)
 
 
 async def main() -> None:
@@ -27,6 +32,13 @@ async def main() -> None:
         raise AssertionError("redirect followed")
     except TransportError as error:
         assert error.delivery == "NOT_SUBMITTED"
+    try:
+        await Client.connect(
+            origin, "sdk-legacy-fixture", session="python-legacy-refusal"
+        )
+        raise AssertionError("unsupported transport accepted")
+    except TransportError as error:
+        assert error.delivery == "NOT_SUBMITTED"
     async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/multiplex"
     ) as client:
@@ -39,6 +51,7 @@ async def main() -> None:
     tests += [
         ("malformed-nested", "INVALID_RESPONSE"),
         ("missing-payload", "INVALID_RESPONSE"),
+        ("bad-packet", "UNKNOWN"),
     ]
     for name, delivery in tests:
         async with await Client.connect(
@@ -95,6 +108,35 @@ async def main() -> None:
             raise AssertionError("cancelled request succeeded")
         except CancelledRequest as error:
             assert error.delivery == "UNKNOWN"
+    large_text = "\u0001" * (5 * 1024 * 1024)
+    async with await Client.connect(
+        origin, "sdk-fixture-token", session="packet-large-python", timeout=30
+    ) as client:
+        identity = "11111111-1111-1111-1111-111111111111"
+        publication = (
+            await client.request(
+                RelayPublishRequest(
+                    request_id=identity,
+                    project="fixture",
+                    topic="large.events",
+                    text=large_text,
+                    occurred_at="2026-10-09T00:00:00Z",
+                )
+            )
+        ).require_payload()
+        assert publication.position == "1"
+        batch = (
+            await client.request(
+                RelayConsumeRequest(
+                    project="fixture",
+                    topic="large.events",
+                    group="fixture",
+                    consumer_id=identity,
+                    start="OLDEST_RETAINED",
+                )
+            )
+        ).require_payload()
+        assert batch.events[0].payload.text == large_text
     print("Python typed SDK conformance passed")
 
 

@@ -129,7 +129,9 @@ public final class ProjectRelayPorts implements RelayPorts {
   }
 
   @Override
-  public RelayPort.Batch consume(String account, RelayPort.Consume request) {
+  public RelayPort.Batch consume(
+      String account, RelayPort.Consume request, RelayReadBudget budget) {
+    java.util.Objects.requireNonNull(budget);
     long deadline =
         System.nanoTime()
             + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
@@ -142,7 +144,7 @@ public final class ProjectRelayPorts implements RelayPorts {
               request.topic(),
               RelayPortProperties.Direction.EGRESS,
               request.group());
-      var batch = repository.consume(topic, account, request);
+      var batch = repository.consume(topic, account, request, budget);
       if (batch.status() != RelayPort.Status.EMPTY || System.nanoTime() >= deadline) return batch;
       try {
         Thread.sleep(100);

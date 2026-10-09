@@ -9,6 +9,7 @@ using var catalog = JsonDocument.Parse(File.ReadAllText(Environment.GetEnvironme
 Check(Protocol.Operations.SequenceEqual(catalog.RootElement.GetProperty("operations").EnumerateArray().Select(v => v.GetString()!)), "catalog differs");
 try { await using var invalid = await Client.ConnectAsync(origin + "/wrong", "sdk-fixture-token"); throw new Exception("invalid origin accepted"); } catch (ArgumentException) { }
 try { await using var redirect = await Client.ConnectAsync(origin, "sdk-redirect-fixture", "dotnet-redirect", TimeSpan.FromMilliseconds(300)); throw new Exception("redirect followed"); } catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "wrong redirect state"); }
+try { await using var unsupported = await Client.ConnectAsync(origin, "sdk-legacy-fixture", "dotnet-legacy-refusal"); throw new Exception("unsupported transport accepted"); } catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "unsupported negotiation submitted work"); }
 async Task<Client> Open(string name) => await Client.ConnectAsync(origin, "sdk-fixture-token", "typed-dotnet/" + name, TimeSpan.FromMilliseconds(300));
 await using (var client = await Open("multiplex"))
 {
@@ -18,7 +19,7 @@ await using (var client = await Open("multiplex"))
     Check(results[0].RequirePayload()[0].Name == "first" && results[1].RequirePayload()[0].Name == "second", "correlation failed");
 }
 var tests = fixture.RootElement.GetProperty("cases").EnumerateArray().Select(t => (Name: t.GetProperty("name").GetString()!, Delivery: t.TryGetProperty("delivery", out var d) ? d.GetString() : null)).ToList();
-tests.Add(("malformed-nested", "INVALID_RESPONSE")); tests.Add(("missing-payload", "INVALID_RESPONSE"));
+tests.Add(("malformed-nested", "INVALID_RESPONSE")); tests.Add(("missing-payload", "INVALID_RESPONSE")); tests.Add(("bad-packet", "UNKNOWN"));
 foreach (var test in tests)
 {
     await using var client = await Open(test.Name);
@@ -62,5 +63,14 @@ await using (var client = await Open("cancel"))
     cancel.Cancel();
     try { await task; throw new Exception("cancelled request succeeded"); }
     catch (RequestCancelledException e) { Check(e.Delivery == Delivery.Unknown && e.CancellationToken == cancel.Token, "cancellation lost delivery"); }
+}
+await using (var client = await Client.ConnectAsync(origin, "sdk-fixture-token", "packet-large-dotnet",TimeSpan.FromSeconds(30)))
+{
+    var text=new string('\u0001',5*1024*1024);
+    const string id="11111111-1111-1111-1111-111111111111";
+    var published=(await client.RelayPublishAsync(new RelayPublishRequest{RequestId=id,Project="fixture",Topic="large.events",Text=text,OccurredAt="2026-10-09T00:00:00Z"})).RequirePayload();
+    Check(published.Position=="1","large publication failed");
+    var batch=(await client.RelayConsumeAsync(new RelayConsumeRequest{Project="fixture",Topic="large.events",Group="fixture",ConsumerId=id,Start="OLDEST_RETAINED"})).RequirePayload();
+    Check(batch.Events.Count==1&&batch.Events[0].Payload.Text.Variant2.Value==text,"large typed reply lost bytes");
 }
 Console.WriteLine(".NET typed SDK conformance passed");

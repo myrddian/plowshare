@@ -82,14 +82,21 @@ public final class JdbcRelayLogRepository implements RelayLogRepository {
             throw new IllegalArgumentException("Relay position is beyond the topic log");
           var events =
               jdbc.query(
-                  "SELECT * FROM relay_publications WHERE scope_key=? AND topic=? AND position>? ORDER BY position LIMIT ?",
+                  // Apply the byte prefix in SQL, before JDBC materializes/decodes large rows.
+                  "SELECT * FROM (SELECT candidates.*, SUM(octet_length(payload::text) + 4096)"
+                      + " OVER (ORDER BY position) AS page_bytes FROM (SELECT *"
+                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>?"
+                      + " ORDER BY position LIMIT ?) candidates) bounded"
+                      + " WHERE page_bytes <= ? ORDER BY position",
                   (row, index) -> publication(row, topic),
                   scope,
                   key.name(),
                   after,
-                  // Payloads may occupy 256 KiB each. A partial forward page keeps the entire
-                  // response, including bounded subscriber/branch metadata, below frame limits.
-                  Math.min(limit, 16));
+                  // Row-count and byte budgets are independent. The public projection selects
+                  // a frame-sized prefix and advances next only through that returned prefix.
+                  Math.min(limit, 16),
+                  io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES
+                      - 1024 * 1024);
           var subscribers =
               jdbc.query(
                   "SELECT * FROM relay_subscriptions WHERE scope_key=? AND topic=? ORDER BY subscriber LIMIT 1000",

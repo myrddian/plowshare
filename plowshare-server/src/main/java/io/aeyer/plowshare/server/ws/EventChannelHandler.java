@@ -168,7 +168,11 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  * sequence number that would invite either.
  */
 public final class EventChannelHandler extends TextWebSocketHandler
-    implements JobEvents, AccountPushes, SpeakerHandles, SessionPushes {
+    implements JobEvents,
+        AccountPushes,
+        SpeakerHandles,
+        SessionPushes,
+        org.springframework.web.socket.SubProtocolCapable {
 
   private static final Logger log = LoggerFactory.getLogger(EventChannelHandler.class);
 
@@ -230,6 +234,18 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * and a new one here would be that mistake arriving through the other role.
    */
   private static final String DELIVERY = "events.delivery";
+
+  private io.aeyer.plowshare.protocol.transport.PacketBudget packetBudget =
+      io.aeyer.plowshare.protocol.transport.SegmentedMessages.PROCESS_BUDGET;
+
+  void usePacketBudget(io.aeyer.plowshare.protocol.transport.PacketBudget budget) {
+    packetBudget = java.util.Objects.requireNonNull(budget);
+  }
+
+  @Override
+  public java.util.List<String> getSubProtocols() {
+    return java.util.List.of(io.aeyer.plowshare.protocol.transport.SegmentedMessages.SUBPROTOCOL);
+  }
 
   /** The socket attribute ws.HandleInterceptor copies AuthFilter's handle into. */
   public static final String HANDLE = "handle";
@@ -442,7 +458,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     // publish need not defend itself: a job that finds this socket in the
     // role finds a socket that already has somewhere to put an event, so
     // there is no window in which a listener is attached and unreachable.
-    Delivery delivery = new Delivery(socket, id, json);
+    Delivery delivery = new Delivery(socket, id, json, packetBudget);
     UsageSubscriptions usage = usageSubscriptions;
     if (usage != null) {
       usage.connect(socket.getId(), claimant, delivery::snapshot);
@@ -477,9 +493,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * was defined for a listener to send. Something is now: a frame reaching here goes to {@link
    * FrameRouter}, and the {@link Outcome} it hands back is offered to this connection's queue as a
    * response. The old method's other half survives unchanged and matters more than ever — <b>no
-   * exception a client's frame provokes costs it the socket</b>, because this connection's whole
-   * job is still to be there when a job starts producing. A frame this server cannot read is
-   * answered with a refusal, not closed over.
+   * domain-frame validation exception costs it the socket</b>, because this connection's whole job
+   * is still to be there when a job starts producing. A frame this server cannot read is answered
+   * with a refusal. Malformed transport packets close the connection and discard partial assemblies
+   * before any domain operation runs.
    *
    * <p><b>Stated as "exception" and not "anything", because the catch below is {@link
    * RuntimeException} and not {@link Throwable}.</b> An {@link Error} — an {@code
@@ -521,7 +538,20 @@ public final class EventChannelHandler extends TextWebSocketHandler
       return;
     }
     String session = named(socket);
-    String frame = message.getPayload();
+    String frame;
+    try {
+      var assembled = delivery.transport.receive(message.getPayload());
+      if (assembled.isEmpty()) return;
+      frame = assembled.get();
+    } catch (IOException | RuntimeException invalidPacket) {
+      delivery.stop();
+      try {
+        socket.close(CloseStatus.BAD_DATA.withReason("invalid packet transport"));
+      } catch (IOException closing) {
+        log.debug("Packet socket could not close");
+      }
+      return;
+    }
     Map<String, Object> correlation = correlationOf(frame);
     Outcome outcome;
     try {
@@ -529,7 +559,13 @@ public final class EventChannelHandler extends TextWebSocketHandler
           router()
               .route(
                   frame,
-                  new Asking(session, (String) socket.getAttributes().get(HANDLE), socket.getId()));
+                  new Asking(
+                      session,
+                      (String) socket.getAttributes().get(HANDLE),
+                      socket.getId(),
+                      delivery.transport instanceof PacketEventTransport
+                          ? io.aeyer.plowshare.server.relay.RelayReadBudget.SEGMENTED
+                          : io.aeyer.plowshare.server.relay.RelayReadBudget.LEGACY));
     } catch (RuntimeException unexpected) {
       // A SAFETY NET, NOT A SECOND MAPPING. FrameRouter already turns
       // everything a handler throws into an Outcome, so nothing is
@@ -881,6 +917,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     private final WebSocketSession socket;
     private final String session;
     private final ObjectMapper json;
+    private final EventTransport transport;
     private final BlockingQueue<Pending> pending = new ArrayBlockingQueue<>(PENDING);
 
     /**
@@ -949,10 +986,38 @@ public final class EventChannelHandler extends TextWebSocketHandler
       return new Pushed(snapshots.remove(id));
     }
 
-    Delivery(WebSocketSession socket, String session, ObjectMapper json) {
+    Delivery(
+        WebSocketSession socket,
+        String session,
+        ObjectMapper json,
+        io.aeyer.plowshare.protocol.transport.PacketBudget budget) {
       this.socket = socket;
       this.session = session;
       this.json = json;
+      if (io.aeyer.plowshare.protocol.transport.SegmentedMessages.SUBPROTOCOL.equals(
+          socket.getAcceptedProtocol())) {
+        socket.setTextMessageSizeLimit(
+            io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_PACKET_BYTES);
+        transport = new PacketEventTransport(socket, json, budget);
+      } else {
+        transport =
+            new EventTransport() {
+              public java.util.Optional<String> receive(String frame) throws IOException {
+                // Container text limits count characters; legacy policy counts encoded UTF-8 bytes.
+                if (frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1024 * 1024)
+                  throw new IOException("legacy message exceeds wire allowance");
+                return java.util.Optional.of(frame);
+              }
+
+              public void send(String frame) throws IOException {
+                if (frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1024 * 1024)
+                  throw new IOException("legacy message exceeds wire allowance");
+                socket.sendMessage(new TextMessage(frame));
+              }
+
+              public void close() {}
+            };
+      }
     }
 
     /**
@@ -969,6 +1034,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
      */
     void stop() {
       running = false;
+      transport.close();
       whenStopped.run();
       synchronized (this) {
         snapshots.clear();
@@ -1113,8 +1179,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
           continue;
         }
         try {
-          socket.sendMessage(new TextMessage(frame));
-        } catch (IOException | IllegalStateException unusable) {
+          transport.send(frame);
+        } catch (IOException | RuntimeException unusable) {
           // The two shapes FileChannelHandler measured for a socket
           // that cannot be written to: an IOException is the write
           // failing, and an IllegalStateException is a send after
@@ -1127,6 +1193,12 @@ public final class EventChannelHandler extends TextWebSocketHandler
                   + " it will send nothing more.",
               session,
               unusable.getClass().getSimpleName());
+          stop();
+          try {
+            socket.close(CloseStatus.SERVER_ERROR.withReason("event transport failed"));
+          } catch (IOException closing) {
+            log.debug("Failed event socket could not close");
+          }
           return;
         }
       }

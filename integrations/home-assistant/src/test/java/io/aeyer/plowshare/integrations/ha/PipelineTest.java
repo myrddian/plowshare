@@ -204,7 +204,12 @@ export default {
       try (Journal journal = new Journal(directory);
           var sdk =
               Plowshare.connect(
-                  config.plowshare(), "fixture-plowshare-token", Duration.ofSeconds(3), null);
+                  config.plowshare(),
+                  "fixture-plowshare-token",
+                  "legacy-ha-fixture",
+                  Duration.ofSeconds(3),
+                  null,
+                  Plowshare.TransportMode.LEGACY);
           var runtime =
               new IntegrationRuntime(
                   config,

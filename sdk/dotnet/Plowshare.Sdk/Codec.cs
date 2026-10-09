@@ -121,7 +121,7 @@ internal static class Codec
         switch (type)
         {
             case "string":
-                if (value.ValueKind != JsonValueKind.String || value.GetString()!.Length > 8 * 1024 * 1024) throw Invalid();
+                if (value.ValueKind != JsonValueKind.String || value.GetString()!.Length > 50 * 1024 * 1024) throw Invalid();
                 return JsonValue.Create(value.GetString());
             case "number":
                 if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) || !double.IsFinite(number)) throw Invalid();
