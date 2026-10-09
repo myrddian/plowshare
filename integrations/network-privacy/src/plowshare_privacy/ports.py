@@ -21,12 +21,15 @@ from plowshare.contracts import (
     RelayLogRequest,
     RelayPublishRequest,
     RelayPublishResultDto,
+    RelayTopicsPayloadVariant1Dto,
+    RelayTopicsRequest,
 )
 
 from .contracts import Configuration, Evidence
 
 
 class PrivacyPort(Protocol):
+    async def available_topics(self) -> frozenset[str]: ...
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto: ...
     async def acknowledge(self, batch: RelayBatchDto) -> None: ...
     async def upload(
@@ -47,9 +50,35 @@ class SdkPrivacyPort:
     def __init__(self, client: Client, config: Configuration):
         self.client = client
         self.config = config
+        # Service credentials cannot include shared information; an omitted field
+        # defaults to inclusion at the public information boundary.
         self.scope = InformationAcquirePayloadDtoScopeVariant2Dto(
-            kind="project", project=config.project
+            kind="project", project=config.project, include_shared=False
         )
+
+    async def available_topics(self) -> frozenset[str]:
+        """Inspect registration before intake; a paused source may have no topic yet.
+
+        Topic absence does not mean delivery completion or permission to acknowledge
+        a gap. Consume still enforces account/group permissions on every call. A
+        full page refuses inference about absence rather than silently truncating it.
+        """
+        result = (
+            await self.client.request(
+                RelayTopicsRequest(
+                    selection=RelayTopicsPayloadVariant1Dto(
+                        project=self.config.project, limit=100
+                    )
+                )
+            )
+        ).require_payload()
+        if result.scope.project != self.config.project or result.scope.system:
+            raise ValueError("Foreign Relay topic scope")
+        if len(result.topics) >= 100:
+            raise ValueError(
+                "Relay topic listing is full; cannot establish topic availability"
+            )
+        return frozenset(topic.name for topic in result.topics)
 
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto:
         batch = (

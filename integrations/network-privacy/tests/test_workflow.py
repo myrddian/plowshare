@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from dataclasses import replace
@@ -9,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from plowshare import Delivery, TransportError
+from plowshare import Delivery, Refusal, TransportError
 from plowshare.contracts import (
     InformationAdmissionDto,
     RelayBatchDto,
@@ -72,6 +73,96 @@ class WorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.evidence.previous_revision, first.revision)
         self.assertEqual(len(second.evidence.changes), 2)
         self.assertIn("new-destination.example", second.evidence.changes[1])
+
+    async def test_missing_schedule_topic_does_not_block_manual_collection(
+        self,
+    ) -> None:
+        self.port.registered_topics.remove("schedule.due")
+        identity = str(uuid4())
+        await self.worker.request_scan(identity)
+        with patch.object(self.port, "consume", wraps=self.port.consume) as consume:
+            await self.worker.poll()
+        self.assertEqual(
+            [call.args[0] for call in consume.call_args_list],
+            [self.config.request_topic],
+        )
+        self.assertEqual(self.receipts.all()[0].phase, "done")
+        self.assertEqual(self.receipts.all()[0].source_event, identity)
+        self.assertEqual(self.collector.count, 1)
+        self.assertEqual(self.worker.state, "ready")
+        self.assertIn("Scheduled intake is waiting", self.worker.detail)
+        self.assertEqual(len(self.port.acknowledgements), 1)
+
+    async def test_no_topics_waits_without_consume_acknowledgement_or_evidence(
+        self,
+    ) -> None:
+        self.port.registered_topics.clear()
+        with patch.object(self.port, "consume", wraps=self.port.consume) as consume:
+            await self.worker.poll()
+            consume.assert_not_called()
+        self.assertEqual(self.receipts.all(), ())
+        self.assertEqual(self.port.acknowledgements, [])
+        self.assertEqual(self.collector.count, 0)
+        self.assertEqual(self.worker.state, "ready")
+        # A later source publication becomes visible on the next normal poll.
+        self.port.registered_topics.add("schedule.due")
+        self.port.events["schedule.due"] = [event()]
+        await self.worker.poll()
+        self.assertEqual(self.collector.count, 1)
+        self.assertEqual(self.receipts.all()[0].phase, "done")
+
+    async def test_registered_topic_refusal_stops_with_operation_and_redacted_reason(
+        self,
+    ) -> None:
+        identity = str(uuid4())
+        await self.worker.request_scan(identity)
+        reached = asyncio.Event()
+
+        async def refused(topic: str, consumer: str) -> RelayBatchDto:
+            reached.set()
+            raise Refusal(
+                "REFUSED",
+                "Relay port is unavailable to this account; Bearer private-secret pss_private-secret",
+            )
+
+        stop = asyncio.Event()
+        with patch.object(self.port, "consume", side_effect=refused):
+            task = asyncio.create_task(self.worker.run(stop))
+            try:
+                await asyncio.wait_for(reached.wait(), 1)
+                self.assertEqual(self.worker.state, "attention_required")
+                self.assertIn("relay.consume (schedule.due)", self.worker.detail)
+                self.assertIn("REFUSED", self.worker.detail)
+                self.assertIn("Relay port is unavailable", self.worker.detail)
+                self.assertNotIn("private-secret", self.worker.detail)
+                self.assertEqual(self.collector.count, 0)
+                self.assertEqual(self.receipts.all(), ())
+                self.assertEqual(self.receipts.publications()[0].request_id, identity)
+                self.assertEqual(len(self.port.published), 1)
+            finally:
+                stop.set()
+                await task
+
+    async def test_topic_inspection_refusal_is_not_reinterpreted_as_absence(
+        self,
+    ) -> None:
+        stop = asyncio.Event()
+        reached = asyncio.Event()
+
+        async def denied() -> frozenset[str]:
+            reached.set()
+            raise Refusal("REFUSED", "Project access was revoked")
+
+        with patch.object(self.port, "available_topics", side_effect=denied):
+            task = asyncio.create_task(self.worker.run(stop))
+            try:
+                await asyncio.wait_for(reached.wait(), 1)
+                self.assertEqual(self.worker.state, "attention_required")
+                self.assertIn("relay.topics", self.worker.detail)
+                self.assertIn("Project access was revoked", self.worker.detail)
+            finally:
+                stop.set()
+                await task
 
     async def test_redelivery_does_not_scan_or_upload_again(self) -> None:
         self.port.events["schedule.due"] = [event()]

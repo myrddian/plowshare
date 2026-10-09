@@ -121,6 +121,10 @@ class FixturePort:
         self.published: list[RelayPublishRequest] = []
         self.acknowledgements: list[RelayBatchDto] = []
         self.uploads = 0
+        self.registered_topics = set(self.events)
+
+    async def available_topics(self) -> frozenset[str]:
+        return frozenset(self.registered_topics)
 
     async def consume(self, topic: str, consumer: str) -> RelayBatchDto:
         events = tuple(self.events[topic])

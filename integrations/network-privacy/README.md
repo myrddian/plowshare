@@ -248,8 +248,13 @@ this project and the token **principal**, or supervise explicit processing passe
 under that service credential. Do not also bind an automatic worker for this
 Application to the human account: processing identity determines investigation
 ownership. Without a worker or explicit pass, completed scans remain retained but
-do not launch an investigation. The service token cannot manage or assume the
-administrator-owned packaged schedule. Separating schedule ownership needs a
+do not launch an investigation. The current server requires MANAGER access for
+processing whenever the active source declares topic policies, including this
+Application's `Relay/topics.json`; a CONTRIBUTOR service token therefore cannot
+process its investigations yet. Collection and project-scoped evidence retention
+remain available. Separating topic-policy management from routine processing is
+a platform permission gap, not an automatically granted service-account role.
+The service token cannot manage or assume the administrator-owned packaged schedule. Separating schedule ownership needs a
 platform lifecycle feature; this setup does not claim to provide it.
 
 ### Rotation and interrupted setup

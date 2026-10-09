@@ -79,6 +79,9 @@ def batch_wire(value: RelayBatchDto) -> dict[str, object]:
 
 
 class SdkTest(unittest.IsolatedAsyncioTestCase):
+    # These fixtures own legacy JSON envelopes. Select that transport explicitly;
+    # SDK packet tests separately own segmented negotiation and reassembly.
+
     async def test_outgoing_peer_advertises_claims_and_reports_over_public_sdk(
         self,
     ) -> None:
@@ -169,7 +172,7 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                 port = server.sockets[0].getsockname()[1]
                 config = replace(config, origin=f"http://127.0.0.1:{port}")
                 async with await Client.connect(
-                    config.origin, "fixture-token", timeout=2
+                    config.origin, "fixture-token", timeout=2, legacy_transport=True
                 ) as client:
                     outgoing = SdkOutgoingPort(client, config)
                     await outgoing.advertise()
@@ -200,6 +203,23 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
             batches: dict[str, RelayBatchDto] = {}
 
             async def answer(operation: str, row: dict[str, object]) -> object:
+                if operation == "relay.topics":
+                    self.assertEqual(row["project"], config.project)
+                    return {
+                        "scope": {"project": config.project, "system": False},
+                        "topics": [
+                            {
+                                "name": topic,
+                                "kind": "TEXT",
+                                "generation": str(uuid4()),
+                                "through": "0",
+                                "expiredThrough": "0",
+                                "retentionSeconds": "345600",
+                                "maxRecords": None,
+                            }
+                            for topic in sorted(fixture.registered_topics)
+                        ],
+                    }
                 if operation == "relay.consume":
                     self.assertEqual(row["project"], config.project)
                     self.assertEqual(row["group"], config.group)
@@ -223,7 +243,12 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                     }
                 if operation == "information.upload":
                     self.assertEqual(
-                        row["scope"], {"kind": "project", "project": config.project}
+                        row["scope"],
+                        {
+                            "kind": "project",
+                            "project": config.project,
+                            "includeShared": False,
+                        },
                     )
                     content = row["text"]
                     if not isinstance(content, str) or len(content) > 65536:
@@ -256,6 +281,14 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                         "publishedAt": publication.published_at,
                     }
                 if operation == "information.read":
+                    self.assertEqual(
+                        row["scope"],
+                        {
+                            "kind": "project",
+                            "project": config.project,
+                            "includeShared": False,
+                        },
+                    )
                     # The second character occupies two UTF-16 units. Follow
                     # server end offsets, rather than Python string lengths.
                     offset = row["offset"]
@@ -314,7 +347,10 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                 port = server.sockets[0].getsockname()[1]
                 connected_config = replace(config, origin=f"http://127.0.0.1:{port}")
                 async with await Client.connect(
-                    connected_config.origin, "fixture-plowshare-token", timeout=2
+                    connected_config.origin,
+                    "fixture-plowshare-token",
+                    timeout=2,
+                    legacy_transport=True,
                 ) as client:
                     receipts = MemoryReceipts()
                     worker = Worker(
@@ -328,6 +364,7 @@ class SdkTest(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(
                         requests,
                         [
+                            "relay.topics",
                             "relay.consume",
                             "relay.ack",
                             "relay.consume",

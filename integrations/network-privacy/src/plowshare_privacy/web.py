@@ -13,6 +13,7 @@ from aiohttp import web
 from plowshare import Refusal, TransportError
 
 from .contracts import integer, items, object_fields, parse_json, text, uuid
+from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
 from .journal import Publication
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
@@ -82,7 +83,12 @@ def application(
             response = web.json_response(
                 {"error": "Invalid request or unavailable evidence"}, status=400
             )
-        except (TransportError, Refusal):
+        except Refusal as error:
+            response = web.json_response(
+                {"error": refusal_detail(error, "dashboard " + request.path)},
+                status=503,
+            )
+        except TransportError:
             response = web.json_response(
                 {
                     "error": "Plowshare request did not settle; inspect its retained identity before trying again"

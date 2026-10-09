@@ -64,6 +64,12 @@ and uncertain effects block changes until they finish or are reconciled. Every
 collection retains its scope, and a changed scope begins a new comparison baseline.
 No discovery or scope expansion is exposed as an agent tool.
 
+A paused schedule may not have published its first event, so `schedule.due` may
+not exist yet. The collector checks topic registration before intake, waits for
+unregistered channels and continues processing dashboard scan requests. A registered
+channel that refuses access still stops collection and shows the operation, refusal
+code and available server reason in the private dashboard.
+
 The packaged server schedule remains paused until you enable it as its administrator.
 Agent investigations also need service-owned Relay processing as described below.
 The dashboard can collect and retain evidence before either is enabled.
@@ -269,7 +275,8 @@ server work. It is safe to use again after reconciliation.
 ## 4. Enable investigation processing
 
 The service account owns collector tools, evidence uploads and completion-triggered
-agent work. The **account that processes the Relay subscriptions** owns those
+agent work. Collector information requests explicitly exclude shared information;
+the service credential reads and writes only its granted project scope. The **account that processes the Relay subscriptions** owns those
 investigations, so use the service credential for that processing.
 
 Follow [Run investigations as the service identity](README.md#run-investigations-as-the-service-identity)
@@ -278,6 +285,14 @@ to configure the existing automatic Relay worker using the principal in
 credential in `deployment/service-token`. The helper does not edit a whole server
 configuration to install a worker. Without a worker or explicit processing pass,
 scan evidence can be retained while its investigation has not started.
+
+Current server limitation: a processing pass requires MANAGER access whenever
+its active source declares topic policies, even if those policies are unchanged.
+This Application declares policies in `Relay/topics.json`, so its CONTRIBUTOR
+service credential can collect and retain evidence but cannot yet process those
+investigations. Processing with a human manager changes investigation ownership.
+Separating policy management from routine service processing requires a platform
+permission change; setup does not broaden the service account's role.
 
 The packaged schedule is still owned by the deploying administrator. Its
 `privacy_tick` action invokes no model. Setup does not transfer that schedule's
