@@ -392,8 +392,9 @@ class JobRuntimeTest {
    * the case a too-broad set produces, and it is asserted on rather than waved through.
    */
   @Test
-  void a_declared_builtin_grant_is_rechecked_between_calls() throws Exception {
-    Probe probe = Probe.returning("probe_read", "first permitted");
+  void a_declared_builtin_uses_its_admitted_grant_without_external_policy_lookup()
+      throws Exception {
+    Probe probe = Probe.returning("probe_read", "internal result");
     Scripted transport =
         new Scripted()
             .then(() -> asking("first", call("first", "probe_read", "{}")))
@@ -401,28 +402,24 @@ class JobRuntimeTest {
             .then(() -> answer("done"));
     var runtime = runtimeOver(transport, probe);
     var scoped = org.mockito.Mockito.mock(ScopedTools.class);
-    var checks = new AtomicInteger();
-    org.mockito.Mockito.when(
-            scoped.checkAccess(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq("probe_read"),
-                org.mockito.ArgumentMatchers.any()))
-        .thenAnswer(
-            call ->
-                checks.incrementAndGet() == 1
-                    ? Optional.empty()
-                    : Optional.of(
-                        new ToolFailure(
-                            ToolFailure.Code.E_NO_ACCESS, "Grant revoked. Try another tool.")));
     runtime.useScopedTools(scoped);
-    runtime.run(agent("reader"), "Read twice", Home.of("fixture"), generous(), null);
-    assertEquals(2, checks.get());
-    assertEquals(1, probe.seen().size());
-    assertTrue(
+    var outcome = runtime.run(agent("reader"), "Read twice", Home.of("fixture"), generous(), null);
+    assertEquals(Outcome.Ending.ANSWERED, outcome.ending());
+    assertEquals(2, probe.seen().size());
+    assertEquals(
+        List.of("internal result", "internal result"),
         withRole(transport.conversation(2), ChatMessage.Role.TOOL).stream()
-            .anyMatch(message -> message.content().startsWith("E_NO_ACCESS")));
+            .map(ChatMessage::content)
+            .toList());
+    // Discovery may supplement the offered set; it has no second grant for an internal tool.
+    org.mockito.Mockito.verify(scoped)
+        .tools(
+            org.mockito.ArgumentMatchers.eq(Home.of("fixture")),
+            org.mockito.ArgumentMatchers.eq("reader"),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+    org.mockito.Mockito.verifyNoMoreInteractions(scoped);
   }
 
   private static final Set<String> FIXTURE_TOOLS =

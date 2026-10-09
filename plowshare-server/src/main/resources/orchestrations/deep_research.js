@@ -111,6 +111,12 @@ function measureContext(s,data) {
 // One repair per analytical response, three per run, within the shared model budget.
 // Reference and semantic failures are never repaired into acceptance.
 function acceptOrRepair(s,input) {
+  // These are host refusals, not model output. Stop before local extraction can
+  // mistake embedded JSON for an answer or a later assessment can become a gap.
+  if(s.pending && typeof input.result==='string'
+    && /^E_(NO_ACCESS|NO_CONNECTION|NO_EXEC|GENERAL_TOOL_FAILURE):/.test(input.result.trimStart()))
+    fail('Tool '+s.pending.tool+(s.pending.operation?' ('+s.pending.operation+')':'')
+      +' failed: '+input.result.slice(0,4096)+'; the complete tool result is retained in the command journal.');
   const analysis=s.analysis, snapshot=analysis?JSON.parse(JSON.stringify(s)):null;
   let diagnostic=null;
   try {

@@ -31,15 +31,6 @@ public interface ScopedTools {
 
   String revision(Long project);
 
-  default java.util.Optional<ToolFailure> checkAccess(
-      Home home,
-      String agent,
-      String session,
-      String tool,
-      io.aeyer.plowshare.server.llm.accounting.UsageAttribution owner) {
-    return java.util.Optional.empty();
-  }
-
   List<AgentTool> tools(Home home, String agent, String session, BooleanSupplier cancelled);
 
   /** Owner-aware projection; implementations must filter runtime scope assignments here. */

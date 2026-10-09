@@ -112,6 +112,8 @@ class ScriptedDelegationFailureTest {
           }
         };
     var runtime = new JobRuntime(mock(LlmDispatcher.class), List.of(probe, child));
+    var scoped = mock(ScopedTools.class);
+    runtime.useScopedTools(scoped);
     runtime.useScripts(store);
     String source =
         ScriptProgram.MARKER
@@ -148,5 +150,8 @@ class ScriptedDelegationFailureTest {
     verify(store).started("cnv_script_fixture", 1, "{}");
     verify(store, never()).executed(eq("cnv_script_fixture"), eq(1), anyString());
     verify(store, never()).completed(eq("cnv_script_fixture"), eq(1), anyString());
+    // The script's admitted internal grants do not consult external provider authority.
+    verify(scoped).tools(any(), eq("fixture"), any(), any(), any());
+    verifyNoMoreInteractions(scoped);
   }
 }

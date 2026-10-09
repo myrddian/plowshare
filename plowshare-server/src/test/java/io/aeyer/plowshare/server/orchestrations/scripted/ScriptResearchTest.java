@@ -76,6 +76,7 @@ class ScriptResearchTest {
     String preflightFailure;
     String localJsonKind;
     String malformedAssessmentKind;
+    String toolFailureKind, toolFailure;
     boolean partialReviews;
     final java.util.Deque<String> objectiveAnswers = new java.util.ArrayDeque<>();
     final List<JsonNode> askedQuestions = new ArrayList<>();
@@ -177,6 +178,7 @@ class ScriptResearchTest {
           result = "{broken JSON";
         if (tool.equals("agent_run") && kind.equals(malformedAssessmentKind))
           result = "{broken JSON";
+        if (kind.equals(toolFailureKind)) result = toolFailure;
       }
       fail("script did not terminate");
     }
@@ -1472,6 +1474,36 @@ class ScriptResearchTest {
         normal.reportArguments.path("findings"), recovered.reportArguments.path("findings"));
     assertEquals(
         normal.reportArguments.path("citations"), recovered.reportArguments.path("citations"));
+  }
+
+  @Test
+  void host_failures_stop_before_json_recovery_or_assessment_fallback() {
+    for (String kind : List.of("objectives", "query_review", "preflight_rank")) {
+      for (String code :
+          List.of("E_NO_ACCESS", "E_NO_CONNECTION", "E_NO_EXEC", "E_GENERAL_TOOL_FAILURE")) {
+        var fixture = new Fixture();
+        fixture.toolFailureKind = kind;
+        // A JSON-shaped detail must never be extracted as successful analytical output.
+        fixture.toolFailure = code + ": Access refused. Detail: {\"queries\":[]} ";
+        var refused = assertThrows(IllegalStateException.class, fixture::run);
+        assertTrue(
+            refused
+                .getMessage()
+                .contains(
+                    "Tool "
+                        + (kind.equals("preflight_rank") ? "information_read (rank)" : "agent_run")
+                        + " failed: "
+                        + code));
+        assertFalse(refused.getMessage().contains("Expected JSON"));
+        assertTrue(fixture.state.path("jsonRecovery").isMissingNode());
+        assertTrue(fixture.state.path("repairs").isMissingNode());
+        assertTrue(
+            fixture.semanticTasks.stream().noneMatch(task -> task.startsWith("REPAIR ONLY")));
+        assertEquals(fixture.toolFailure, fixture.result);
+        assertEquals(0, fixture.initialSearches);
+        assertNull(fixture.reportArguments);
+      }
+    }
   }
 
   @Test
