@@ -25,42 +25,25 @@ class NetworkPrivacyWatchTest {
           "outgoing_peers",
           "outgoing_send",
           "outgoing_read",
-          "network_scope",
-          "network_scan",
-          "network_scan_status",
-          "network_scan_list",
-          "network_evidence",
-          "network_destinations",
           "relay_tool_read");
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
   @Test
-  void application_owned_declarations_cover_coordinator_grants_without_global_bindings()
-      throws Exception {
+  void application_scope_loads_without_external_names_or_provider_schemas() throws Exception {
     var settings =
         io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
             "network-privacy-watch", application);
     assertEquals(0, settings.tools().size());
     assertEquals(4, settings.ports().size());
     assertEquals(1, settings.providers().size());
-    Set<String> builtins =
-        TOOLS.stream()
-            .filter(name -> !name.startsWith("network_"))
-            .collect(java.util.stream.Collectors.toSet());
-    var names = new java.util.HashSet<>(builtins);
-    settings
-        .tools()
-        .forEach(
-            tool -> {
-              assertEquals("network-privacy-watch", tool.project());
-              names.add(tool.name());
-            });
     var loaded =
         AgentRegistry.read(
-            new FilesystemDefinitions(application.resolve("agents")), names, Set.of());
+            new FilesystemDefinitions(application.resolve("agents")), TOOLS, Set.of());
     assertEquals(java.util.Map.of(), loaded.withheldTools());
     assertEquals(java.util.Map.of(), loaded.disabled());
-    assertTrue(loaded.enabled().get("privacy_coordinator").dynamic());
+    var coordinator = loaded.enabled().get("privacy_coordinator");
+    assertTrue(coordinator.dynamic());
+    assertFalse(coordinator.tools().stream().anyMatch(name -> name.startsWith("network_")));
     var policy = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
     assertEquals(6, policy.toolScopes().getFirst().grants().size());
     assertTrue(
@@ -121,9 +104,13 @@ class NetworkPrivacyWatchTest {
     assertEquals(6, properties.getBindings().size());
     var agents = AgentRegistry.of(application.resolve("agents"), TOOLS, Set.of());
     var coordinator = agents.get("privacy_coordinator");
+    var scopes = io.aeyer.plowshare.server.applications.ApplicationToolScopes.read(application);
     for (var binding : bindings) {
       assertEquals("network-privacy-watch", binding.project());
-      assertTrue(coordinator.tools().contains(binding.name()));
+      assertFalse(coordinator.tools().contains(binding.name()));
+      assertTrue(
+          scopes.permits(
+              scopes.executionAccount(), coordinator.name(), binding.provider(), binding.name()));
       assertEquals(binding.name(), binding.schema().name());
     }
     assertTrue(coordinator.tools().contains("relay_tool_read"));

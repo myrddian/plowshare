@@ -39,11 +39,17 @@ directory.
 | Path | Purpose |
 | --- | --- |
 | `plowshare.json` | Application identity `network-privacy-watch`, account grants and limits |
-| `agents/` | Coordinator, analyst and reviewer definitions with explicit tool grants |
+| `agents/` | Built-in grants and dynamic opt-in; external access comes from manifest provider scopes |
 | `orchestrations/` | Deterministic schedule action and agent investigation workflow |
 | `schedules/network_scan.json` | Packaged scan schedule, initially paused |
 | `Relay/` | Project topics and the scan-completion route |
 | `server/` | Project tool/provider catalogue and Relay port declarations |
+
+The coordinator sets `dynamic: true`; its `tools` field lists built-in grants.
+The six external network tools are granted through the `network_scanning` provider
+scope in `plowshare.json`, without listing them again in the agent definition.
+Those permissions control visibility and execution. Python publishes the schemas
+at runtime, and each call checks current registration, permission and availability.
 
 The Python service, private configuration, credentials and collector journal
 stay outside this folder. Deploying the Application does not start Python or

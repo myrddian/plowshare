@@ -2,10 +2,17 @@
 
 Built-in tools are registered at startup. External provider tools join the registry
 at runtime, using the authenticated account, project and named agent as their
-permission boundary. An agent's `tools` list requests specific capabilities.
-`dynamic: true` additionally accepts capabilities assigned by its owner; the flag
-itself authorizes nothing. Tool schemas come from provider discovery, independently
-of these grants.
+permission boundary. Built-in grants remain in an agent's `tools` list.
+With `dynamic: true`, external tools such as SDK providers and MCP adapters come
+from the runtime registry and the owner's provider scopes; they do not need to be
+listed individually in `tools`. The flag itself authorizes nothing. Provider
+permissions grant both visibility and execution. Tool schemas come from provider
+discovery, independently of these grants.
+
+Loading an agent or deploying an Application validates configuration and permission
+policy, not the existence or availability of external tools. Runtime discovery
+supplies the permitted tool list. Each external invocation checks the current
+registry entry, permissions and availability before execution.
 
 An internal tool's grant is declared in the admitted agent or conductor definition.
 External provider policy does not reauthorize that grant. Internal tools retain
@@ -64,11 +71,17 @@ tool scope disconnect {"project":"coding-project","scope":"linear"}
 
 A client or integration can issue `tool.scope.connect` when the user connects its
 provider. The server derives the account and socket identity from authentication.
-Interactive policy automatically assigns that requested scope to the selected
-eligible agents in this account/project/session. The client supplies the agent
-selection and cannot substitute another account. Personal projects additionally
-require their owning account. Work membership and the agent's dynamic opt-in remain
-mandatory. Connecting a provider alone does not select every agent.
+Interactive policy gives an authenticated user default authority to connect an
+external provider within their own account/project/session. Connecting automatically
+assigns the requested provider scope to the selected eligible agents; no Application
+manifest or per-tool agent list is needed. A provider wildcard (`grants: ["*"]`)
+covers its discovered tools, including later catalogue additions. The client supplies
+the requested grants and agent selection and cannot substitute another account.
+Personal projects additionally require their owning account. Work membership and
+the agent's dynamic opt-in remain mandatory. Connecting a provider alone does not
+select every agent. Applications do not inherit this interactive default: their
+execution identity, provider permissions and agent assignments must be explicit in
+`plowshare.json`.
 
 The reply's `sourceProvider` is the logical provider; `provider` is a fresh isolated
 Relay routing name. Pass the returned `project`, `provider` and `account` into the

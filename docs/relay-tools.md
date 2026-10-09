@@ -24,9 +24,12 @@ connections. See [provider scopes](tool-scopes.md) for the shared SDK operations
 ## Application-owned dynamic tools
 
 Built-in tools still register at startup. The live registry supplements them with
-project-owned declarations, authenticated caller access and the running agent's
-explicit `tools` grants. Two projects can use the same dynamic name with different
-schemas. Application authority never grants system-scope Relay access or membership.
+project-owned provider catalogues, authenticated caller access and permission scopes
+assigned to a running agent with `dynamic: true`. External tool names need not appear
+in the agent's `tools` field; that field still grants built-in capabilities.
+Permissions determine both which external tools the model sees and which it may
+execute. Two projects can use the same dynamic name with different schemas.
+Application authority never grants system-scope Relay access or membership.
 
 Put declarations in the Application root's `server/` directory, alongside
 `plowshare.json`, not inside `.plowshare/`. Deployment validates them before loading
@@ -41,11 +44,7 @@ files and malformed values are refused.
 ```json
 {
   "version": 1,
-  "bindings": [{
-    "provider": "scanner", "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
-    "name": "network_scope", "description": "Read configured scope",
-    "parameters": [], "timeoutSeconds": 30
-  }],
+  "bindings": [],
   "providers": [{
     "provider": "scanner", "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
     "prefix": "network_", "leaseSeconds": 300
@@ -54,14 +53,35 @@ files and malformed values are refused.
 ```
 
 Replace account placeholders in a private source copy. Give the authenticated
-provider project work membership and a manifest grant. A Personal project requires
-its owner for both provider and caller. Agent grants remain separate: declare
-`network_scope` in `tools`, plus `relay_tool_read` for invocation reconciliation.
-There are at most 128 bootstrap bindings and 32 catalogue providers. Provider
-prefixes end in `_`, cannot overlap each other or built-in names, and cannot
-claim another provider's bootstrap tools. The bootstrap schemas allow deployment
-before the external provider is running; calls require a live catalogue lease
-when a dynamic provider is declared.
+provider project work membership. In root `plowshare.json`, declare the execution
+principal, provider permissions and scope-to-agent assignments:
+
+```json
+{
+  "executionAccount": "REPLACE_WITH_PROVIDER_ACCOUNT",
+  "toolScopes": [
+    {"scope": "network_scanning", "provider": "scanner", "grants": ["*"]}
+  ],
+  "toolGrants": [
+    {"toolScope": "network_scanning", "agent": "coordinator"}
+  ]
+}
+```
+
+This is a manifest fragment; retain the Application's other required fields.
+The assigned agent sets `dynamic: true`. It need not list `network_scope` or any
+other discovered external name in `tools`; retain `relay_tool_read` there if it
+needs that built-in capability for invocation reconciliation. Exact scope grants
+can restrict known tool names; a provider wildcard covers its changing catalogue.
+A Personal project requires its owner for both provider and caller. Interactive
+user connections use their own default scope authority instead of an Application
+manifest; see [interactive policy](tool-scopes.md#interactive-policy).
+
+There are at most 128 optional bootstrap bindings and 32 catalogue providers.
+Provider prefixes end in `_`, cannot overlap each other or built-in names, and
+cannot claim another provider's bootstrap tools. Deployment does not require a
+known catalogue or a running provider. Calls require a current registry entry,
+permission and a live catalogue lease when a catalogue provider is declared.
 
 The SDK provider publishes its current declarations on the project-local
 `tool.<provider>.catalog` topic. Only the configured authenticated provider can
@@ -70,9 +90,12 @@ publish. The server validates the entire snapshot before accepting it: version
 prefix and the existing parameter vocabulary. Newest retained broker position
 wins; client timestamps cannot extend the lease. Empty catalogues withdraw tools.
 If the latest publication has expired from broker retention, bootstrap tools are
-not revived. Granting a new dynamically discovered name still requires an agent
-permission change. Existing source grants cannot name an undiscovered tool;
-include initial bindings for names needed at first deployment.
+not revived. Discovery does not grant permissions: a new name is available only
+within the assigned provider scope. A wildcard already covers new tools from that
+provider; exact scope grants require an explicit policy update for a new name.
+Neither case requires adding external names to the agent's `tools` field or
+bootstrap schemas before deployment. Loading does not guarantee that a tool exists
+or can execute; the registry, permissions and availability are checked at runtime.
 
 | SDK | Publish or renew | Withdraw |
 | --- | --- | --- |
@@ -108,10 +131,11 @@ applies within that revision's authority; rollback does not replay external work
 
 ## Per-call access and failures
 
-Declared built-in grants and dynamic tool access are checked at each invocation,
-not only when schemas are offered. Dynamic calls also check current provider
-authority, availability and the exact offered definition. A changed schema cannot
-reinterpret arguments emitted for an earlier schema. The check is an admission
+Built-in calls use the admitted definition's declared grants and the tool's own
+resource and lifecycle checks. External calls use the runtime registry and provider
+scope permissions. Only permitted schemas are offered to the model; every external
+call rechecks current authority, availability and the exact offered definition.
+A changed schema cannot reinterpret arguments emitted for an earlier schema. The check is an admission
 boundary; revocation cannot undo an external effect already admitted.
 
 | Code | Meaning |
