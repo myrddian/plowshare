@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.images.ImageRefusedException;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.images.ImageVanishedException;
@@ -68,7 +69,7 @@ import java.util.function.BooleanSupplier;
  *
  * <h2>The declared list is enforced here as well as at load</h2>
  *
- * <p>{@code AgentRegistry} refuses a cyclic graph at boot and takes an unknown callee out of the
+ * <p>{@code AgentRegistry} refuses a cyclic resolved graph and takes an unknown callee out of the
  * list that names it, and that load-time work is the real guard — it is why there is no depth
  * counter anywhere in this runtime. It is not the whole guard: <b>a model can name any string it
  * likes</b>, and the name it sends has to be checked against this caller's list every time. The
@@ -118,24 +119,17 @@ import java.util.function.BooleanSupplier;
  *
  * <h2>A child's grants are its own, and it may not hold one its caller lacks</h2>
  *
- * <p><b>The rule this class deferred is now enforced, and not here.</b> An earlier version of this
- * paragraph said the intersection of caller and callee grants would have to be computed before
- * {@code runtime.run} below, the moment a tool could touch a filesystem. It is not, and this is
- * better: {@code calls:} makes the graph static, so {@code AgentRegistry} checks every edge of it
- * once, at load, and a set that would allow the escalation fails the boot instead of refusing a
- * delegation halfway through a job somebody is waiting on. A runtime intersection would also be a
- * second reading of the same file, reachable only down a path somebody has to remember to test.
+ * <p>The resolved registry checks declared edges when definitions load. Delegation also compares
+ * the current callee's workspace grants with the admitted caller's grants before opening a child
+ * conversation. A changed Application revision or an alias cannot use a running parent's old schema
+ * to acquire broader filesystem authority.
  *
- * <p><b>What is still true is that a child may hold {@code tools} its caller lacks</b>, and that is
- * deliberate rather than the same hole in another hat. A file tool reaches nothing on its own: what
- * it may touch is resolved from the grants its provider was built with, and {@code LocalProvider}
- * is built with a list of grants and nothing else that could widen them — so a callee holding
- * {@code file_read} and no grant reads no file. That closes the filesystem half without a rule
- * about {@code tools}, <em>on the condition that a job's provider is built from that job's own
- * definition</em>, which is the wiring this slice leaves to its last task and the reason the
- * condition is written down rather than assumed. {@code boss.md} declaring {@code tools:
- * [agent_run]} and reaching {@code probe_read}'s effects through {@code helper} stays legal
- * meanwhile, and stays bounded by the tier it was always bounded by.
+ * <p>A child may hold different tools from its parent, but its file providers are built from its
+ * own grants in the inherited home. The shared budget, cancellation, session and admitted account
+ * travel down the tree; the parent's tools and filesystem grants do not. Explicit {@code calls:}
+ * grants still decide which names the parent may request, including unexported delegable agents.
+ * Current account/project work authority is checked at every call, independently of descriptions
+ * captured when the tool schema was built.
  *
  * <h2>The tier is not an argument</h2>
  *
@@ -213,24 +207,10 @@ public final class AgentRunTool implements AgentTool {
       "{\"agent\": \"promotion_judge\", \"task\": \"is mem_000042 worth promoting?\"}";
 
   /**
-   * The set a delegation resolves against, and it is <b>the boot set</b>.
-   *
-   * <p>{@code JobRuntime.offeredTo} builds this tool from the registry the runtime was wired with,
-   * which is the one {@code AgentsConfig} validated at boot — seed plus {@code global/} — and never
-   * a caller's resolved set. That is not a subtlety to leave implicit, because it has a consequence
-   * a definition cannot see from where it is written: <b>a project-tier agent whose {@code calls:}
-   * names another project-tier agent passes validation and then finds no callee here.</b> {@code
-   * DefinitionResolver} validates that edge against the merged graph and is right to; the tool
-   * holding the boot set is what it fails against at run time.
-   *
-   * <p>Closing it needs a project id at {@code offeredTo}, which has none — a run carries a {@code
-   * Home}, and a {@code Home} carries a project <em>name</em> while {@code
-   * DefinitionResolver.Caller} takes a surrogate <em>id</em>, so the wiring would have to reach the
-   * database from inside the turn loop. That is a change to what a run knows about itself and not a
-   * change to this tool. Until it is made, the refusal in {@link #answer} must say so rather than
-   * assert a reason that is false for this path.
+   * Current caller-scoped definitions, rechecked before starting each child. The schema uses a
+   * description snapshot, but execution never treats that snapshot as continuing authority.
    */
-  private final AgentRegistry agents;
+  private final AgentDelegates agents;
 
   private final JobRuntime runtime;
   private final AgentDefinition caller;
@@ -392,6 +372,35 @@ public final class AgentRunTool implements AgentTool {
       ImageStore store,
       TurnEnd end,
       String callerHandle) {
+    this(
+        agents,
+        runtime,
+        caller,
+        budget,
+        cancelled,
+        sessionId,
+        transcript,
+        images,
+        store,
+        end,
+        callerHandle,
+        AgentDelegates.fixed(() -> agents));
+  }
+
+  AgentRunTool(
+      AgentRegistry descriptions,
+      JobRuntime runtime,
+      AgentDefinition caller,
+      Budget budget,
+      BooleanSupplier cancelled,
+      String sessionId,
+      Transcript transcript,
+      List<Content.Image> images,
+      ImageStore store,
+      TurnEnd end,
+      String callerHandle,
+      AgentDelegates agents) {
+    Objects.requireNonNull(descriptions, "agents");
     this.transcript = Objects.requireNonNull(transcript, "transcript");
     this.agents = Objects.requireNonNull(agents, "agents");
     this.runtime = Objects.requireNonNull(runtime, "runtime");
@@ -422,7 +431,7 @@ public final class AgentRunTool implements AgentTool {
     this.store = Objects.requireNonNull(store, "store");
     this.end = end;
     this.callerHandle = callerHandle;
-    this.schema = ToolSchema.from(NAME, describe(agents, this.callable), parameters());
+    this.schema = ToolSchema.from(NAME, describe(descriptions, this.callable), parameters());
   }
 
   @Override
@@ -530,33 +539,25 @@ public final class AgentRunTool implements AgentTool {
     // nothing is wrong with agent_run, and nothing the model sends can fix
     // it, so the sentence has to say the agent is not there and let the
     // model do the work another way.
-    AgentDefinition callee = agents.find(wanted).orElse(null);
+    AgentDefinition callee;
+    try {
+      callee = agents.find(home, sessionId, callerHandle, wanted).orElse(null);
+    } catch (CallerFault refused) {
+      return "E_NO_ACCESS: " + refused.getMessage();
+    }
     if (callee != null && (callee.bot() || !callee.delegable())) {
       return "'"
           + wanted
           + "' cannot be a delegation target. Bots may receive messages; only delegable agents may receive delegated tasks.";
     }
     if (callee == null) {
-      // THREE WAYS TO GET HERE AND THE SENTENCE NAMES ALL THREE, because
-      // it used to name two and was therefore false on the third. The
-      // third is not exotic: a project-tier agent calling another
-      // project-tier agent takes it every time, since this tool holds the
-      // boot set and neither definition is in it -- see the javadoc on
-      // `agents`. A message asserting "read and refused, or no such
-      // agent" sends that operator to look for a fault in a file that is
-      // fine.
       return "the agent '"
           + wanted
           + "' is one '"
           + caller.name()
-          + "' may call, but it is"
-          + " not in the set this run can delegate into: its definition was read and"
-          + " refused, or it is defined only in a project's own agents/ or bots/"
-          + " directory or in a client's .plowshare/ -- delegation resolves against the"
-          + " set this server"
-          + " booted with, which is the shipped definitions and global/ -- or this"
-          + " process defines no such agent anywhere. Nothing you send can start it. Do"
-          + " the work yourself, or use one of "
+          + "' may call, but it is not in the set this run can delegate into: its definition"
+          + " is unavailable or refused in the current account and project. Do the work"
+          + " yourself, or use one of "
           + callable;
     }
 

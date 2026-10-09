@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Bubblewrap;
 import io.aeyer.plowshare.protocol.CommandIsolation;
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.curator.Curator;
 import io.aeyer.plowshare.server.agents.learner.Learner;
 import io.aeyer.plowshare.server.agents.learner.Reminder;
@@ -853,7 +854,23 @@ public class AgentsConfig {
             // store. A runtime given NONE resolves every id against what the
             // run was shown and finds nothing else, which is exactly this
             // tool's behaviour before the decision.
-            images.getIfAvailable(() -> ImageStore.NONE));
+            images.getIfAvailable(() -> ImageStore.NONE),
+            RefusalDetector.PHRASES,
+            System::nanoTime,
+            new AgentDelegates() {
+              @Override
+              public AgentRegistry visible(Home home, String session, String account) {
+                // Unscoped/global metadata inspection needs no run owner or caller bean.
+                if (home == null || home.isGlobal() && account == null) return agents.getObject();
+                return contextCallers.getObject().visible(home, session, account);
+              }
+
+              @Override
+              public java.util.Optional<AgentDefinition> find(
+                  Home home, String session, String account, String name) {
+                return contextCallers.getObject().find(home, session, account, name);
+              }
+            });
     // Before the registry reads knownTools(): see JobRuntime.useTodos. REQUIRED, not optional:
     // a todo list is how any agent keeps a task of several steps across turns and compactions,
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.

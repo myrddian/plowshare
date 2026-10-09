@@ -85,6 +85,21 @@ a less specific definition. Editing a definition affects future resolution; an
 ongoing workflow or skill invocation keeps its pinned source and identity where
 the lifecycle contract requires it.
 
+`agent_run` resolves delegates in the current run's account, project and eligible
+session, using the same definition loader as the agent listing. A registered
+Application's `agents/` directory participates without a connected client or a
+server restart; its deployed tier cannot be replaced by client definitions.
+Names are resolved only within that home, never by searching other projects.
+
+The caller must declare the delegate in `calls:` and hold current CONTRIBUTOR
+access to run work in the project. Delegation may reach an unexported agent when
+it is delegable; `exported` controls outside submissions. Missing, disabled or
+non-delegable targets are refused before a child starts. Losing work access returns
+`E_NO_ACCESS`, even if a previous tool schema described the delegate. Current child
+workspace grants cannot exceed the admitted caller's grants. Children keep their
+own tools, inherit the account/home/session and share the tree's budget and
+cancellation while recording into separate conversations.
+
 ## The layers of authority
 
 | Layer | What it controls |
