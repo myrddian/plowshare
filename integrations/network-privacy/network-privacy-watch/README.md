@@ -51,10 +51,13 @@ install its dependencies.
 
 ## Set up a deployment
 
-Start with the [guided Python setup walkthrough](../SETUP.md). It prepares private
-configuration, selects a server FileStore, deploys the Application and provisions
-its separate execution account. The [integration guide](../README.md) documents
-the lower-level commands and configuration contracts.
+Use the [guided startup and dashboard](../SETUP.md#start-and-use-the-dashboard).
+The `start` command installs new setup once, waits for readiness and opens an
+authenticated dashboard. Select devices and save monitoring there. Later starts
+use the generated launcher in the private setup folder; no dashboard-token copying
+is required. The [integration guide](../README.md) covers configuration and recovery.
+
+### Manual deployment (advanced)
 
 Start with [service account and human manager setup](../README.md#separate-the-human-manager-from-the-service-account).
 The Python setup script reads configuration, prompts for blanks, prepares private
