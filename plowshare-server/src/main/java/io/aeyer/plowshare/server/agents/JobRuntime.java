@@ -202,6 +202,7 @@ public final class JobRuntime {
   private final LlmDispatcher dispatcher;
   private final Map<String, AgentTool> byName;
   private final Supplier<AgentRegistry> agents;
+  private final AgentDelegates delegates;
   private final RunProviders files;
   private volatile io.aeyer.plowshare.server.files.CodeWorkspaceMonitor codeMonitor;
 
@@ -879,11 +880,37 @@ public final class JobRuntime {
       ImageStore images,
       RefusalDetector refusals,
       LongSupplier ticker) {
+    this(
+        dispatcher,
+        tools,
+        agents,
+        files,
+        clock,
+        reminding,
+        images,
+        refusals,
+        ticker,
+        AgentDelegates.fixed(() -> requireWired(agents)));
+  }
+
+  /** Runtime with a caller-scoped delegate resolver, supplied lazily at composition time. */
+  public JobRuntime(
+      LlmDispatcher dispatcher,
+      List<AgentTool> tools,
+      Supplier<AgentRegistry> agents,
+      RunProviders files,
+      Supplier<Instant> clock,
+      Reminding reminding,
+      ImageStore images,
+      RefusalDetector refusals,
+      LongSupplier ticker,
+      AgentDelegates delegates) {
+    this.agents = agents;
+    this.delegates = Objects.requireNonNull(delegates, "delegates");
     this.ticker = Objects.requireNonNull(ticker, "ticker");
     this.refusals = Objects.requireNonNull(refusals, "refusals");
     this.images = Objects.requireNonNull(images, "images");
     this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
-    this.agents = agents;
     this.files = files;
     this.clock = Objects.requireNonNull(clock, "clock");
     this.reminding = Objects.requireNonNull(reminding, "reminding");
@@ -3398,7 +3425,7 @@ public final class JobRuntime {
         offered.put(
             name,
             new AgentRunTool(
-                requireWired(),
+                delegates.visible(toolHome, sessionId, callerHandle),
                 this,
                 definition,
                 budget,
@@ -3426,7 +3453,8 @@ public final class JobRuntime {
                 // A child's approval question ends this run waiting too. Each parent gets
                 // its own TurnEnd, so AWAITING walks the whole delegation chain to the root.
                 extras.end(),
-                callerHandle));
+                callerHandle,
+                delegates));
         continue;
       }
       if (router != null && FileTools.NAMES.contains(name)) {
@@ -3629,8 +3657,8 @@ public final class JobRuntime {
    * {@code NullPointerException} several frames down inside a tool. It is raised before the first
    * model call, so the {@code 0, 0} counts {@code JobStore} reports for it are the honest ones.
    */
-  private AgentRegistry requireWired() {
-    AgentRegistry registry = agents.get();
+  private static AgentRegistry requireWired(Supplier<AgentRegistry> agents) {
+    AgentRegistry registry = agents == null ? null : agents.get();
     if (registry == null) {
       throw new IllegalStateException(
           "this runtime serves '"
