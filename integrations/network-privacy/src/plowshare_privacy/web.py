@@ -2,26 +2,37 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from dataclasses import asdict
 from importlib.resources import files
+from ipaddress import IPv4Network
 from typing import Awaitable, Callable
 
 from aiohttp import web
 from plowshare import Refusal, TransportError
 
-from .contracts import object_fields, parse_json, uuid
+from .contracts import integer, items, object_fields, parse_json, text, uuid
+from .discovery import DeviceDiscovery, DiscoveryPlan
 from .journal import Publication
+from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .tools import DEFINITIONS, PrivacyTools, WorkerTools, decode_call
 from .worker import Worker
 
 
 def application(
-    worker: Worker, token: str, tools: PrivacyTools | None = None
+    worker: Worker,
+    token: str,
+    tools: PrivacyTools | None = None,
+    settings: MonitorSettings | None = None,
+    discovery: DeviceDiscovery | None = None,
+    instance: str | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
-    Browser credentials stay in memory. Mutations require JSON plus a bearer;
+    Browser sessions use an HttpOnly, SameSite=Strict cookie. Bearers remain
+    supported for remote/operator API clients. Cookie mutations require the exact
+    same origin; mutations require JSON plus an authenticated session or bearer;
     cross-origin access is unavailable. Static assets contain no household data.
     Use TLS at the deployment proxy when serving beyond the collector machine.
     """
@@ -30,6 +41,10 @@ def application(
             "Web bearer must contain at least 24 non-whitespace characters"
         )
 
+    if instance is not None:
+        uuid(instance)
+    cookie = "privacy_" + hashlib.sha256(token.encode()).hexdigest()[:16]
+
     @web.middleware
     async def boundary(
         request: web.Request,
@@ -37,14 +52,32 @@ def application(
     ) -> web.StreamResponse:
         if request.path.startswith("/api/"):
             expected = "Bearer " + token
-            if not hmac.compare_digest(
+            bearer_authorized = hmac.compare_digest(
                 request.headers.get("Authorization", "").encode(), expected.encode()
-            ):
+            )
+            session_authorized = hmac.compare_digest(
+                request.cookies.get(cookie, "").encode(), token.encode()
+            )
+            if not bearer_authorized and not session_authorized:
                 raise web.HTTPUnauthorized(text="Dashboard authentication required")
+            if (
+                session_authorized
+                and not bearer_authorized
+                and request.method == "POST"
+            ):
+                if (
+                    request.headers.get("Origin")
+                    != request.scheme + "://" + request.host
+                ):
+                    raise web.HTTPForbidden(
+                        text="A same-origin dashboard request is required"
+                    )
             if request.method == "POST" and request.content_type != "application/json":
                 raise web.HTTPUnsupportedMediaType(text="JSON is required")
         try:
             response = await handler(request)
+        except SettingsBusy as error:
+            response = web.json_response({"error": str(error)}, status=409)
         except ValueError:
             response = web.json_response(
                 {"error": "Invalid request or unavailable evidence"}, status=400
@@ -68,6 +101,57 @@ def application(
 
     app = web.Application(middlewares=[boundary], client_max_size=4096)
     provider: PrivacyTools = tools if tools is not None else WorkerTools(worker)
+
+    async def session_status(request: web.Request) -> web.Response:
+        return web.json_response({"instance": instance})
+
+    async def connect_session(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        response = web.json_response({"connected": True})
+        response.set_cookie(
+            cookie,
+            token,
+            httponly=True,
+            samesite="Strict",
+            secure=request.secure,
+            path="/api",
+        )
+        return response
+
+    async def disconnect_session(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        response = web.json_response({"connected": False})
+        response.del_cookie(cookie, path="/api")
+        return response
+
+    async def monitoring(request: web.Request) -> web.Response:
+        if settings is None:
+            raise web.HTTPNotFound(text="Dashboard settings are not enabled")
+        return web.json_response(asdict(settings.view()))
+
+    async def save_monitoring(request: web.Request) -> web.Response:
+        choice = MonitorChoice.decode(parse_json(await request.read()))
+        if settings is None:
+            raise web.HTTPNotFound(text="Dashboard settings are not enabled")
+        return web.json_response(asdict(await settings.save(choice)))
+
+    async def previous_devices(request: web.Request) -> web.Response:
+        result = discovery.latest() if discovery is not None else None
+        return web.json_response(asdict(result) if result is not None else None)
+
+    async def find_devices(request: web.Request) -> web.Response:
+        if discovery is None:
+            raise web.HTTPNotFound(text="Dashboard discovery is not enabled")
+        row = object_fields(parse_json(await request.read()), {"network", "ports"})
+        plan = DiscoveryPlan(
+            IPv4Network(text(row["network"], 64), strict=True),
+            tuple(integer(port, 1, 65535) for port in items(row["ports"], 8)),
+            0.5,
+            32,
+        )
+        # Discovery is an operator request, never an agent tool. The HTTP bearer
+        # must be accepted before any network probe; there is no silent subnet scan.
+        return web.json_response(asdict(await discovery.scan(plan)))
 
     async def tool_catalog(request: web.Request) -> web.Response:
         # Schemas describe this HTTP boundary; raw dictionaries do not enter the provider.
@@ -122,6 +206,7 @@ def application(
                 "collector": worker.config.collector,
                 "mode": worker.config.collection.mode,
                 "collection_enabled": worker.config.collection.enabled,
+                "settings_available": settings is not None,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -205,6 +290,13 @@ def application(
 
     for path in ("/", "/app.js", "/style.css"):
         app.router.add_get(path, asset)
+    app.router.add_get("/api/session/status", session_status)
+    app.router.add_post("/api/session", connect_session)
+    app.router.add_post("/api/session/logout", disconnect_session)
+    app.router.add_get("/api/monitoring", monitoring)
+    app.router.add_post("/api/monitoring", save_monitoring)
+    app.router.add_get("/api/discovery", previous_devices)
+    app.router.add_post("/api/discovery", find_devices)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/tools", tool_catalog)
     app.router.add_post("/api/tools/{name}", call_tool)

@@ -52,15 +52,15 @@ class Worker:
         self.detail = (
             "Waiting for scheduled or requested collection."
             if config.collection.enabled
-            else "Collection is disabled. Configure targets and ports, then enable collection and restart."
+            else "Choose devices in the dashboard to begin monitoring."
         )
 
     async def poll(self) -> None:
         """Copy intake durably and acknowledge promptly; scans run outside the batch lease."""
-        if not self.config.collection.enabled:
-            # Do not consume/acknowledge availability before an operator configures collection.
-            return
         async with self.lock:
+            if not self.config.collection.enabled:
+                # Scope changes hold the same lock; disabled intake cannot race an edit.
+                return
             await self._drain()
             for topic in ("schedule.due", self.config.request_topic):
                 batch = await self.port.consume(topic, self.consumer)
@@ -230,13 +230,13 @@ class Worker:
         self, request_id: str, origin: ScanOrigin | None = None
     ) -> Publication:
         request_id = uuid(request_id)
-        if not self.config.collection.enabled:
-            raise ValueError(
-                "Collection is disabled; configure targets and ports before requesting a scan"
-            )
         # SDK submissions may overlap a scan; journal writes themselves are synchronous.
         # Holding the collection lock here would make the UI wait for every TCP timeout.
         async with self.request_lock:
+            if not self.config.collection.enabled:
+                raise ValueError(
+                    "Collection is disabled; choose devices in the dashboard first"
+                )
             existing = next(
                 (
                     item

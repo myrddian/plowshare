@@ -206,8 +206,13 @@ class Configuration:
 
     @classmethod
     def read(cls, path: Path) -> Configuration:
+        return cls.decode(load_json(path), path)
+
+    @classmethod
+    def decode(cls, value: object, path: Path) -> Configuration:
+        """Validate a complete configuration before installing or saving it."""
         row = object_fields(
-            load_json(path),
+            value,
             {
                 "origin",
                 "project",

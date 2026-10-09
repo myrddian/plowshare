@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import errno
-from dataclasses import dataclass
-from ipaddress import IPv4Network
+import json
+from dataclasses import asdict, dataclass
+from ipaddress import IPv4Address, IPv4Network
+from pathlib import Path
+from typing import Protocol
+
+from .contracts import integer, items, load_json, object_fields, text
+from .monitor import replace_private
 
 
 @dataclass(frozen=True)
@@ -142,3 +148,72 @@ async def discover(plan: DiscoveryPlan) -> DiscoveryReport:
         devices,
         sum(status == "unanswered" for _, _, status in observations),
     )
+
+
+class DeviceDiscovery(Protocol):
+    """Operator-only discovery; retained local results never grant an agent new scope."""
+
+    def latest(self) -> DiscoveryReport | None: ...
+    async def scan(self, plan: DiscoveryPlan) -> DiscoveryReport: ...
+
+
+class LocalDeviceDiscovery:
+    def __init__(self, directory: Path):
+        self.path = directory / "discovery.json"
+        self.lock = asyncio.Lock()
+
+    def latest(self) -> DiscoveryReport | None:
+        if not self.path.exists():
+            return None
+        row = object_fields(
+            load_json(self.path),
+            {
+                "network",
+                "ports",
+                "addresses_checked",
+                "devices",
+                "unanswered_probes",
+                "coverage",
+            },
+        )
+        plan = DiscoveryPlan(
+            IPv4Network(text(row["network"], 64), strict=True),
+            tuple(integer(port, 1, 65535) for port in items(row["ports"], 8)),
+            0.5,
+            32,
+        )
+        devices = []
+        for value in items(row["devices"], 256):
+            device = object_fields(value, {"address", "open_ports", "refused_ports"})
+            address = IPv4Address(text(device["address"], 64))
+            opened = tuple(
+                integer(port, 1, 65535) for port in items(device["open_ports"], 8)
+            )
+            refused = tuple(
+                integer(port, 1, 65535) for port in items(device["refused_ports"], 8)
+            )
+            if (
+                address not in plan.network
+                or len(set(opened + refused)) != len(opened + refused)
+                or not set(opened + refused) <= set(plan.ports)
+            ):
+                raise ValueError("Discovery result is outside its scope")
+            devices.append(DiscoveredDevice(str(address), opened, refused))
+        if len({device.address for device in devices}) != len(devices):
+            raise ValueError("Discovery result contains duplicate devices")
+        return DiscoveryReport(
+            str(plan.network),
+            plan.ports,
+            integer(row["addresses_checked"], 1, 256),
+            tuple(devices),
+            integer(row["unanswered_probes"], 0, 2048),
+            text(row["coverage"], 4096),
+        )
+
+    async def scan(self, plan: DiscoveryPlan) -> DiscoveryReport:
+        if self.lock.locked():
+            raise ValueError("Discovery is already running")
+        async with self.lock:
+            report = await discover(plan)
+            replace_private(self.path, json.dumps(asdict(report), indent=2) + "\n")
+            return report

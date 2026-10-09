@@ -1,9 +1,72 @@
 # Set up Network Privacy Watch
 
-The guided Python helper prepares a private configuration, deploys the Plowshare
-Application and creates its separate execution account. It also starts the external
-Python collector when you ask it to. Each stage has a separate command so you can
-review the configuration before changing the server.
+Run the guided `start` command on the machine that can reach your devices. It
+prepares configuration if needed, installs the Application with its separate service
+account, waits for readiness and opens an authenticated dashboard. Confirmed setup
+is reused on later starts. You choose devices in the dashboard.
+
+## Start and use the dashboard
+
+After installing the Python package below, use this single command for a new setup:
+
+```sh
+build/privacy-python-env/bin/plowshare-privacy-bootstrap \
+  --directory "$PRIVACY_PRIVATE" start --source "$PRIVACY_APP_SOURCE" \
+  --bind "$PRIVACY_BIND"
+```
+
+Set `PRIVACY_PRIVATE` to an absolute private directory outside Git,
+`PRIVACY_APP_SOURCE` to the Application folder, and `PRIVACY_BIND` to an explicit
+loopback IP on the collector machine. For a **local-only dashboard**, an operator
+can choose `127.0.0.1`. The operating system chooses an available port unless you
+supply `--port`. The helper remembers the bind address and port in private
+`dashboard.json`; subsequent starts need only `--directory ... start`.
+
+For an already installed Application, omit `--source`. No deployment, account or
+credential creation is repeated. If schedule registration is still pending, the
+helper waits using read-only requests. An interrupted installation remains fenced
+until its retained receipts are reconciled; see recovery below.
+
+For new setup, the prompts ask for the server, collector name, separate service
+account, human manager, deployment administrator and model binding. Device scope
+is chosen in the dashboard; the guided flow uses bounded probe settings and a
+30-day service credential. The staged `configure` command below exposes advanced
+settings before installation.
+
+The helper also creates **Start Network Privacy Watch.command** on macOS, or
+**start-network-privacy-watch.sh** on other systems, in your private setup directory.
+Open that launcher next time. It contains the interpreter and configuration path,
+with no credentials. Double-clicking it while the updated collector is running
+reopens that dashboard. Keep its Python environment installed. Closing the running
+terminal stops the collector; the launcher is not a background-service installer.
+
+In the dashboard:
+
+1. Enter your private network subnet and the TCP ports you want to check, then
+   choose **Find devices**. Previous local discovery results are displayed when available.
+2. Select devices, check **Enable collection**, and choose **Save monitoring**.
+   You can also enter explicit private IPv4 addresses. The scope is limited to
+   32 devices and eight ports; discovery checks at most 256 addresses.
+3. Choose **Request a scan**. Results refresh automatically as evidence is retained.
+
+There is no dashboard-token copying. `start` generates a new dashboard credential
+for this process and opens the browser with a fragment handoff, removed immediately
+from history and exchanged for an HttpOnly, SameSite=Strict session cookie. Browser
+reloads remain authenticated. The Plowshare service credential stays in Python. A private `dashboard-runtime.json`
+contains only the local dashboard handoff while the process is running; normal
+shutdown removes it, and restart verifies its process nonce before reopening it.
+Automatic browser login is restricted to the explicitly configured loopback listener.
+Use advanced `serve` mode below for a remotely hosted dashboard.
+
+Monitoring changes apply immediately without restarting. Settled evidence and request
+identities are preserved. In-progress scans, published requests awaiting collection,
+and uncertain effects block changes until they finish or are reconciled. Every
+collection retains its scope, and a changed scope begins a new comparison baseline.
+No discovery or scope expansion is exposed as an agent tool.
+
+The packaged server schedule remains paused until you enable it as its administrator.
+Agent investigations also need service-owned Relay processing as described below.
+The dashboard can collect and retain evidence before either is enabled.
 
 ## Understand the two parts
 
@@ -189,7 +252,7 @@ intents and receipts with `0600`. On Windows, restrict the directory's ACLs.
 It never prints the administrator password, service token or dashboard bearer.
 It does not scan or configure an automatic Relay worker during installation.
 
-If schedule discovery is still pending, run:
+The `start` flow waits for schedule registration automatically. For a separate read-only diagnostic, run:
 
 ```sh
 build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
@@ -279,7 +342,7 @@ retry. Follow [interrupted provisioning](README.md#rotation-and-interrupted-setu
 There is no automatic rollback or retry of an uncertain install. Finish a reconciled
 partial install using the lower-level setup and deployment commands, retain all
 intents, and verify the final principal and active source before starting Python.
-The guided `serve` command requires its completion marker; manually recovered
+The guided `start` and `serve` commands require its completion marker; manually recovered
 installations can use the documented lower-level collector command instead.
 
 For updates, edit the private Application copy and use the normal deployment

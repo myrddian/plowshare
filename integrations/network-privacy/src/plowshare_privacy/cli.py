@@ -9,6 +9,7 @@ import os
 import signal
 from contextlib import ExitStack
 from dataclasses import asdict
+from ipaddress import ip_address
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,7 +27,10 @@ from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .collection import NetworkCollector
 from .contracts import Configuration, Snapshot, load_json
+from .dashboard import RunningDashboard
+from .discovery import LocalDeviceDiscovery
 from .journal import FileReceipts
+from .monitor import FileMonitorSettings
 from .native_tools import DECLARATIONS, CataloguedProvider, registered
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
@@ -191,18 +195,57 @@ async def execute(args: argparse.Namespace) -> None:
                     loop.add_signal_handler(name, stop.set)
                 except NotImplementedError:
                     pass  # Windows retains asyncio.run's normal Ctrl-C cancellation.
+            instance = str(uuid4())
+            handoff = Path(args.config).parent / "dashboard-runtime.json"
+            owns_handoff = False
             runner = web.AppRunner(
-                application(worker, credential(config.web_token_environment)),
+                application(
+                    worker,
+                    credential(config.web_token_environment),
+                    instance=instance,
+                    settings=FileMonitorSettings(Path(args.config), worker, receipts)
+                    if getattr(args, "dashboard_settings", False)
+                    else None,
+                    discovery=LocalDeviceDiscovery(Path(args.config).parent)
+                    if getattr(args, "dashboard_settings", False)
+                    else None,
+                ),
                 access_log=None,
             )
             await runner.setup()
             task: asyncio.Task[None] | None = None
             try:
-                await web.TCPSite(runner, args.bind, args.port).start()
-                print(
-                    "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
-                    flush=True,
-                )
+                site = web.TCPSite(runner, args.bind, args.port)
+                await site.start()
+                if getattr(args, "open_browser", False):
+                    address = ip_address(args.bind)
+                    if not address.is_loopback:
+                        raise ValueError(
+                            "Automatic dashboard login requires an explicit loopback bind"
+                        )
+                    port = runner.addresses[0][1]
+                    host = (
+                        "[" + str(address) + "]"
+                        if address.version == 6
+                        else str(address)
+                    )
+                    dashboard = RunningDashboard(
+                        instance,
+                        f"http://{host}:{port}",
+                        credential(config.web_token_environment),
+                    )
+                    dashboard.write(handoff)
+                    owns_handoff = True
+                    await dashboard.open()
+                    print(
+                        "Network Privacy Watch is open in your browser. Close this terminal to stop it.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
+                        flush=True,
+                    )
                 task = asyncio.create_task(worker.run(stop, external))
                 await stop.wait()
             finally:
@@ -214,6 +257,8 @@ async def execute(args: argparse.Namespace) -> None:
                     except asyncio.CancelledError:
                         pass
                 await runner.cleanup()
+                if owns_handoff:
+                    handoff.unlink(missing_ok=True)
 
 
 def main() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, replace
 from types import TracebackType
@@ -13,6 +14,7 @@ from uuid import uuid4
 
 from .collection import scope_fingerprint
 from .contracts import (
+    CollectionPlan,
     Configuration,
     Evidence,
     identifier,
@@ -165,7 +167,19 @@ class FileReceipts:
                 import fcntl
 
                 fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.identity = hashlib.sha256(
+            deployment = [
+                config.origin,
+                config.project,
+                config.collector,
+                config.group,
+                config.request_topic,
+                config.result_topic,
+                config.schedule,
+            ]
+            self.collection_scope = scope_fingerprint(config.collection)
+            self.next_collection_scope: str | None = None
+            self.identity = hashlib.sha256(json.dumps(deployment).encode()).hexdigest()
+            legacy_identity = hashlib.sha256(
                 json.dumps(
                     [
                         config.origin,
@@ -187,8 +201,29 @@ class FileReceipts:
                 row = object_fields(
                     load_json(self.path),
                     {"version", "identity", "receipts", "publications"},
+                    {"collectionScope", "nextCollectionScope"},
                 )
-                if row["version"] != 1 or row["identity"] != self.identity:
+                if row["version"] == 2:
+                    scope = text(row.get("collectionScope"), 64)
+                    staged = row.get("nextCollectionScope")
+                    if (
+                        not re.fullmatch(r"[0-9a-f]{64}", scope)
+                        or "nextCollectionScope" not in row
+                        or staged is not None
+                        and not re.fullmatch(r"[0-9a-f]{64}", text(staged, 64))
+                    ):
+                        raise ValueError("Invalid journal scope transition")
+                if not (
+                    type(row["version"]) is int
+                    and (
+                        row["version"] == 1
+                        and row["identity"] == legacy_identity
+                        or row["version"] == 2
+                        and row["identity"] == self.identity
+                        and self.collection_scope
+                        in (row.get("collectionScope"), row.get("nextCollectionScope"))
+                    )
+                ):
                     raise ValueError(
                         "Foreign journal; use a new private state directory"
                     )
@@ -205,6 +240,15 @@ class FileReceipts:
                     self._publications
                 ) != len(publications):
                     raise ValueError("Duplicate journal identity")
+                if row.get("nextCollectionScope") is not None:
+                    completed = {
+                        item.source_event for item in receipts if item.phase == "done"
+                    }
+                    if any(item.phase != "done" for item in receipts) or any(
+                        item.state != "published" or item.request_id not in completed
+                        for item in publications
+                    ):
+                        raise ValueError("Scope transition contains unsettled work")
         except BaseException:
             os.close(self._fd)
             raise
@@ -264,13 +308,41 @@ class FileReceipts:
         self._write(self._receipts, updated)
         self._publications = updated
 
+    def prepare_scope_change(self, plan: CollectionPlan) -> None:
+        """Migrate verified v1 state before replacing configuration.
+
+        Version 2 fences the deployment identity and explicitly staged scope;
+        each evidence record retains its own scope. The operator must settle all
+        work before changing that scope.
+        Migrating first means a crash between the two writes remains recoverable.
+        """
+        completed = {
+            item.source_event
+            for item in self._receipts.values()
+            if item.phase == "done"
+        }
+        if any(item.phase != "done" for item in self._receipts.values()) or any(
+            item.state != "published" or item.request_id not in completed
+            for item in self._publications.values()
+        ):
+            raise ValueError("Settle retained work before changing collection scope")
+        self.next_collection_scope = scope_fingerprint(plan)
+        self._write(self._receipts, self._publications)
+
+    def complete_scope_change(self, plan: CollectionPlan) -> None:
+        self.collection_scope = scope_fingerprint(plan)
+        self.next_collection_scope = None
+        self._write(self._receipts, self._publications)
+
     def _write(
         self, receipts: dict[str, Receipt], publications: dict[str, Publication]
     ) -> None:
         encoded = json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "identity": self.identity,
+                "collectionScope": self.collection_scope,
+                "nextCollectionScope": self.next_collection_scope,
                 "receipts": [asdict(item) for item in receipts.values()],
                 "publications": [asdict(item) for item in publications.values()],
             },

@@ -2,7 +2,8 @@
 
 Configure is offline. Install performs two retained source deployments around
 service-account provisioning; it never retries mutations after a lost reply.
-Status is read-only on the server. Serve runs the separately operated collector.
+Status is read-only on the server. Start reuses installation and opens a local
+dashboard; serve supports an explicitly configured remote collector listener.
 """
 
 from __future__ import annotations
@@ -12,9 +13,12 @@ import asyncio
 import json
 import os
 import re
+import secrets
+import shlex
+import sys
 from dataclasses import asdict
 from getpass import getpass
-from ipaddress import IPv4Network
+from ipaddress import IPv4Network, ip_address
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,7 +39,9 @@ from plowshare.tools import ToolAttention
 
 from .cli import execute
 from .contracts import Configuration, integer, load_json, object_fields, text
+from .dashboard import reopen
 from .discovery import DiscoveryPlan, discover
+from .monitor import replace_private
 from .setup import (
     Setup,
     SetupClient,
@@ -66,7 +72,7 @@ def private_root(path: Path) -> Path:
     return path
 
 
-def configure(directory: Path, source: Path) -> None:
+def configure(directory: Path, source: Path, *, guided: bool = False) -> None:
     """Collect deployment inputs and prepare a private Application without network I/O."""
     root = private_root(directory)
     if root.exists():
@@ -83,17 +89,21 @@ def configure(directory: Path, source: Path) -> None:
     )
     origin = ask("Plowshare HTTP(S) origin (include your port if needed)")
     collector = ask("Collector identifier", "home-network")
-    target_input = input(
-        "Device IPs (comma-separated; Enter to configure collection later): "
-    ).strip()
+    target_input = (
+        ""
+        if guided
+        else input(
+            "Device IPs (comma-separated; Enter to configure collection later): "
+        ).strip()
+    )
     targets = [part.strip() for part in target_input.split(",")] if target_input else []
     ports = (
         [int(part.strip()) for part in ask("TCP ports (comma-separated)").split(",")]
         if targets
         else []
     )
-    timeout = float(ask("Probe timeout in seconds", "1"))
-    concurrency = int(ask("Concurrent probes", "4"))
+    timeout = 1.0 if guided else float(ask("Probe timeout in seconds", "1"))
+    concurrency = 4 if guided else int(ask("Concurrent probes", "4"))
     service = ask("Separate service account handle")
     manager = ask("Existing human application manager handle")
     deployer = ask("Existing server administrator handle", manager)
@@ -102,9 +112,18 @@ def configure(directory: Path, source: Path) -> None:
         raise SetupProblem(
             "Choose a model binding identifier without spaces or newlines."
         )
-    expiry = integer(int(ask("Service credential lifetime in days", "30")), 1, 365)
-    destination = ask(
-        "Application path within the selected server FileStore", "network-privacy-watch"
+    expiry = (
+        30
+        if guided
+        else integer(int(ask("Service credential lifetime in days", "30")), 1, 365)
+    )
+    destination = (
+        source.name
+        if guided
+        else ask(
+            "Application path within the selected server FileStore",
+            "network-privacy-watch",
+        )
     )
     if not re.fullmatch(
         r"[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*", destination
@@ -324,7 +343,9 @@ async def deploy(
     return receipt.release.revision
 
 
-async def install(setup: Setup, client: SetupClient, destination_path: str) -> None:
+async def install(
+    setup: Setup, client: SetupClient, destination_path: str, *, guided: bool = False
+) -> None:
     """Install a fresh paused application, issue its identity, then activate that identity.
 
     Any prior deployment/provisioning intent blocks re-entry before contacting the
@@ -365,10 +386,14 @@ async def install(setup: Setup, client: SetupClient, destination_path: str) -> N
         raise SetupProblem(
             "No FileStore with MANAGER access. Configure a server FileStore and grant the administrator access first."
         )
-    print("Choose the server FileStore destination:")
-    for index, alias in enumerate(choices, 1):
-        print(f"  {index}. {alias}")
-    selected = integer(int(ask("FileStore number")), 1, len(choices))
+    if guided and len(choices) == 1:
+        selected = 1
+        print("Installing in FileStore:", choices[0])
+    else:
+        print("Choose the server FileStore destination:")
+        for index, alias in enumerate(choices, 1):
+            print(f"  {index}. {alias}")
+        selected = integer(int(ask("FileStore number")), 1, len(choices))
     destination = FileStoreReferenceDto(
         store=choices[selected - 1], path=destination_path
     )
@@ -389,10 +414,12 @@ async def install(setup: Setup, client: SetupClient, destination_path: str) -> N
         setup.output / "installation-completed",
         "Two deployments and service provisioning confirmed.\n",
     )
-    await inspect(setup, client)
-    print(
-        "Application installed. Start the external collector after completing the worker checklist."
-    )
+    if guided:
+        await wait_for_schedule(setup, client)
+        print("Application and service account are ready.")
+    else:
+        await inspect(setup, client)
+        print("Application installed. Run start to open the collector dashboard.")
 
 
 async def inspect(setup: Setup, client: SetupClient) -> None:
@@ -424,6 +451,18 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
             )
         ).require_payload()
         print(phase + " retained revision:", receipt.release.revision)
+    if await resolve_schedule(setup, client):
+        print(
+            "Collector configuration now uses the deployed schedule identity:",
+            Configuration.read(setup.collector).schedule,
+        )
+    else:
+        print("Schedule is still registering. Run start to wait for readiness.")
+
+
+async def resolve_schedule(setup: Setup, client: SetupClient) -> bool:
+    """Resolve one active source schedule using read-only server requests."""
+    config = Configuration.read(setup.collector)
     schedules = (await client.request(ScheduleFilesRequest())).require_payload()
     matches = [
         s
@@ -434,10 +473,7 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
         and s.status == "active"
     ]
     if len(matches) != 1:
-        print(
-            "Schedule is not uniquely available yet. Run status again after server source reconciliation."
-        )
-        return
+        return False
     row = object_fields(
         load_json(setup.collector),
         {
@@ -456,17 +492,24 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
         {"outgoingPeer"},
     )
     row["schedule"] = matches[0].internal_name
-    setup.collector.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
-    print(
-        "Collector configuration now uses the deployed schedule identity:",
-        matches[0].internal_name,
-    )
-    print(
-        "Review the paused schedule and configure service-owned Relay processing before resuming it."
+    replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+    return True
+
+
+async def wait_for_schedule(setup: Setup, client: SetupClient) -> None:
+    """Wait briefly for source reconciliation, without repeating any mutation."""
+    print("Waiting for the Application to become ready…", flush=True)
+    for attempt in range(30):
+        if await resolve_schedule(setup, client):
+            return
+        if attempt < 29:
+            await asyncio.sleep(1)
+    raise SetupProblem(
+        "The Application is installed but its schedule is still registering. Run start again later; installation will not be repeated."
     )
 
 
-async def serve(setup: Setup, bind: str, port: int) -> None:
+async def serve(setup: Setup, bind: str, port: int, *, automatic: bool = False) -> None:
     """Load the private service credential into this collector process, never the browser."""
     if not (setup.output / "installation-completed").is_file():
         raise SetupProblem(
@@ -481,7 +524,7 @@ async def serve(setup: Setup, bind: str, port: int) -> None:
         raise SetupProblem(
             "Configure an explicit dashboard bind address without edge whitespace."
         )
-    integer(port, 1, 65535)
+    integer(port, 0 if automatic else 1, 65535)
     if config.schedule == "REPLACE_WITH_SCHEDULE_INTERNAL_NAME":
         raise SetupProblem(
             "Run status to resolve the deployed schedule before starting Python."
@@ -500,7 +543,11 @@ async def serve(setup: Setup, bind: str, port: int) -> None:
     )
     if not credential.startswith("pss_") or credential != credential.strip():
         raise SetupProblem("Invalid private service credential.")
-    web_token = os.environ.get(config.web_token_environment)
+    web_token = (
+        secrets.token_urlsafe(32)
+        if automatic
+        else os.environ.get(config.web_token_environment)
+    )
     if web_token is None:
         web_token = getpass(
             "Dashboard bearer (at least 24 non-whitespace characters): "
@@ -525,6 +572,8 @@ async def serve(setup: Setup, bind: str, port: int) -> None:
                 tool_catalog_renew_seconds=100,
                 bind=bind,
                 port=port,
+                open_browser=automatic,
+                dashboard_settings=True,
             )
         )
     finally:
@@ -533,6 +582,67 @@ async def serve(setup: Setup, bind: str, port: int) -> None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def launcher(root: Path, bind: str, port: int) -> Path:
+    """Remember explicit listener configuration and make a credential-free launcher."""
+    if not ip_address(bind).is_loopback:
+        raise SetupProblem(
+            "Automatic dashboard login requires a loopback bind IP. Use serve for remote hosting."
+        )
+    integer(port, 0, 65535)
+    replace_private(
+        root / "dashboard.json", json.dumps({"bind": bind, "port": port}) + "\n"
+    )
+    name = (
+        "Start Network Privacy Watch.command"
+        if sys.platform == "darwin"
+        else "start-network-privacy-watch.sh"
+    )
+    path = root / name
+    arguments = [
+        sys.executable,
+        "-m",
+        "plowshare_privacy.bootstrap",
+        "--directory",
+        str(root),
+        "start",
+    ]
+    replace_private(
+        path,
+        "#!/bin/sh\nexec " + " ".join(shlex.quote(value) for value in arguments) + "\n",
+    )
+    path.chmod(0o700)
+    return path
+
+
+async def start(setup: Setup, bind: str, port: int) -> None:
+    """Reuse confirmed installation; new/unfinished installs retain existing fences."""
+    if not ip_address(bind).is_loopback:
+        raise SetupProblem("Choose a loopback bind IP for automatic dashboard login.")
+    integer(port, 0, 65535)
+    if await reopen(setup.collector.parent / "dashboard-runtime.json"):
+        print("Opened the running Network Privacy Watch dashboard.")
+        return
+    installed = (setup.output / "installation-completed").is_file()
+    config = Configuration.read(setup.collector)
+    if not installed or config.schedule == "REPLACE_WITH_SCHEDULE_INTERNAL_NAME":
+        async with administrator_login(
+            config.origin, setup.deployer, getpass("Plowshare administrator password: ")
+        ) as bearer:
+            async with await Client.connect(
+                config.origin, bearer, timeout=15
+            ) as client:
+                if installed:
+                    await wait_for_schedule(setup, client)
+                else:
+                    row = object_fields(
+                        load_json(setup.collector.parent / "destination.json"), {"path"}
+                    )
+                    await install(setup, client, text(row["path"], 512), guided=True)
+    path = launcher(setup.collector.parent, bind, port)
+    print("Next time, open", path.name, "in your private setup folder.", flush=True)
+    await serve(setup, bind, port, automatic=True)
 
 
 def main() -> None:
@@ -571,6 +681,22 @@ def main() -> None:
         "status",
         help="Read retained server status and fill the local schedule identity",
     )
+    launch = commands.add_parser(
+        "start", help="Install if needed, then open the authenticated local dashboard"
+    )
+    launch.add_argument(
+        "--source",
+        type=Path,
+        help="Application source; required only for a new private directory",
+    )
+    launch.add_argument(
+        "--bind", help="Explicit loopback IP; remembered for subsequent starts"
+    )
+    launch.add_argument(
+        "--port",
+        type=int,
+        help="Listener port; 0 lets the operating system choose a free port",
+    )
     run = commands.add_parser(
         "serve", help="Start the separate Python collector with private credentials"
     )
@@ -589,18 +715,44 @@ def main() -> None:
             return
         if args.directory is None:
             raise SetupProblem(
-                "Set --directory for configure, install, status or serve."
+                "Set --directory for configure, install, status, start or serve."
             )
         root = private_root(args.directory)
         if args.command == "configure":
             configure(root, args.source)
             return
+        if args.command == "start" and not root.exists():
+            if args.source is None:
+                raise SetupProblem(
+                    "For a new setup, supply --source with the Application folder."
+                )
+            configure(root, args.source, guided=True)
         setup = Setup.read(root / "deployment/setup.json")
         if (
             setup.output != root / "deployment"
             or setup.collector != root / "collector.json"
         ):
             raise SetupProblem("Setup paths do not match this private directory.")
+        if args.command == "start":
+            saved = (
+                object_fields(load_json(root / "dashboard.json"), {"bind", "port"})
+                if (root / "dashboard.json").exists()
+                else None
+            )
+            bind = args.bind or (
+                text(saved["bind"])
+                if saved
+                else ask("Local dashboard bind IP (for example 127.0.0.1)")
+            )
+            port = (
+                args.port
+                if args.port is not None
+                else integer(saved["port"], 0, 65535)
+                if saved
+                else 0
+            )
+            asyncio.run(start(setup, bind, port))
+            return
         if args.command == "serve":
             text(args.bind)
             integer(args.port, 1, 65535)
@@ -625,6 +777,10 @@ def main() -> None:
                         await inspect(setup, client)
 
         asyncio.run(connected())
+    except BlockingIOError:
+        raise SystemExit(
+            "Network Privacy Watch is already running. Close its earlier collector terminal, then open the launcher again."
+        ) from None
     except SetupProblem as error:
         raise SystemExit(str(error)) from None
     except (

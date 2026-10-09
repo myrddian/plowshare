@@ -33,6 +33,8 @@ from plowshare_privacy.bootstrap import (
     install,
     private_root,
     serve,
+    start,
+    wait_for_schedule,
 )
 from plowshare_privacy.contracts import Configuration
 from plowshare_privacy.setup import Setup, bind_provider, prepare, private_write
@@ -398,6 +400,79 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 await serve(self.setup, "fixture-bind", 43210)
             self.assertEqual(os.environ["PLOWSHARE_TOKEN"], "existing-human-token")
             self.assertNotIn("PRIVACY_WEB_TOKEN", os.environ)
+
+    async def test_start_reuses_completed_install_without_admin_login_or_bearer_prompt(
+        self,
+    ) -> None:
+        prepare(self.setup)
+        await self.provisioned(self.setup, object())
+        private_write(self.setup.output / "installation-completed", "confirmed\n")
+        row = json.loads(self.config.read_text())
+        row["schedule"] = "actual-schedule"
+        self.config.write_text(json.dumps(row))
+        with (
+            patch("plowshare_privacy.bootstrap.administrator_login") as login,
+            patch("plowshare_privacy.bootstrap.getpass") as password,
+            patch(
+                "plowshare_privacy.bootstrap.execute", new_callable=AsyncMock
+            ) as collector,
+        ):
+            await start(self.setup, "127.0.0.1", 0)
+            login.assert_not_called()
+            password.assert_not_called()
+            arguments = collector.call_args.args[0]
+            self.assertTrue(arguments.open_browser)
+            self.assertTrue(arguments.dashboard_settings)
+            self.assertEqual(arguments.port, 0)
+        self.assertTrue((self.root / "dashboard.json").exists())
+        self.assertTrue(
+            any(self.root.glob("*Network Privacy Watch.command"))
+            or (self.root / "start-network-privacy-watch.sh").exists()
+        )
+
+    async def test_readiness_wait_only_repeats_schedule_reads(self) -> None:
+        prepare(self.setup)
+        client = self.client()
+        original = client.request.side_effect
+        count = 0
+
+        async def request(command: object) -> Reply[object]:
+            nonlocal count
+            count += 1
+            if count == 1:
+                return Reply("OK", None, ())
+            assert callable(original)
+            result = await original(command)
+            self.assertIsInstance(result, Reply)
+            assert isinstance(result, Reply)
+            return result
+
+        client.request.side_effect = request
+        with patch("plowshare_privacy.bootstrap.asyncio.sleep", new_callable=AsyncMock):
+            await wait_for_schedule(self.setup, client)
+        self.assertEqual(
+            [call.args[0].operation for call in client.request.call_args_list],
+            ["schedule.files", "schedule.files"],
+        )
+
+    def test_guided_configuration_defers_devices_and_advanced_settings(self) -> None:
+        root = self.root / "guided"
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "https://fixture.invalid",
+                "collector-one",
+                "worker",
+                "manager",
+                "installer",
+                "local-model",
+            ],
+        ):
+            configure(root, self.setup.source, guided=True)
+        config = Configuration.read(root / "collector.json")
+        self.assertFalse(config.collection.enabled)
+        self.assertEqual(config.collection.targets, ())
+        self.assertEqual(config.collection.ports, ())
 
     def test_configure_prepares_offline_source_and_all_model_declarations(self) -> None:
         root = self.root / "wizard"
