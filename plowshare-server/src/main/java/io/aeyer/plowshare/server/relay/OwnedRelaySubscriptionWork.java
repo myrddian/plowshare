@@ -59,10 +59,16 @@ public final class OwnedRelaySubscriptionWork implements RelaySubscriptionWork {
     for (var bundle : configuration.relays())
       for (var declared : bundle.manifest().subscriptions())
         if (bundle.key(access.projectId(), declared).equals(key)) {
-          relay.registerTopic(key.topic(), declared.kind(), configuration.policy(declared.topic()));
-          if (configuration.policies().containsKey(declared.topic()))
-            relay.configureTopic(
-                key.topic(), declared.kind(), configuration.policy(declared.topic()));
+          var policy = configuration.policies().get(declared.topic());
+          if (policy != null && members.mayManage(access.project(), access.account())) {
+            // A declaration requests policy; it does not grant a processing identity authority
+            // to apply it. Only a current manager pass can create/update this explicit policy.
+            relay.configureTopic(key.topic(), declared.kind(), policy);
+          } else {
+            // Registration preserves the stored policy. Contributors may introduce an active
+            // topic using the standard default, but cannot apply source-controlled retention.
+            relay.registerTopic(key.topic(), declared.kind(), Relay.Policy.systemDefault());
+          }
           relay.subscribe(key, declared.start());
           active = true;
         }
@@ -122,10 +128,6 @@ public final class OwnedRelaySubscriptionWork implements RelaySubscriptionWork {
     if (!members.mayWork(access.project(), access.account()))
       throw new CallerFault("Relay processing requires project contributor access");
     files.requireAccess(access);
-    var configuration = routing.load(access);
-    if (!configuration.policies().isEmpty()
-        && !members.mayManage(access.project(), access.account()))
-      throw new CallerFault("Changing Relay topic policies requires project manager access");
-    return configuration;
+    return routing.load(access);
   }
 }

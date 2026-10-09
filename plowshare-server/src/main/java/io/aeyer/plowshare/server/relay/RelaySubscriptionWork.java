@@ -4,13 +4,15 @@ import java.util.List;
 
 /** Independent bounded consumption shared by background workers and explicit processing. */
 public interface RelaySubscriptionWork {
-  /** Lists current active keys after source and policy authority checks; no broker effects. */
+  /** Lists current active keys after source and contributor authority checks; no broker effects. */
   List<Relay.SubscriptionKey> subscriptions(RelayProjectFiles.Access access);
 
   /**
    * Processes one subscription with a distributed lease. Routing and effects run outside database
    * transactions. A competing owner returns an idle result; a gap never advances the cursor.
-   * Inactive subscriptions do no work; previously pinned branches remain retained.
+   * Inactive subscriptions do no work; previously pinned branches remain retained. Contributors
+   * register only standard defaults, preserving existing topic policy. Applying declared policies
+   * requires current manager authority; policy declarations alone never block contributor work.
    */
   Result process(
       RelayProjectFiles.Access access,
