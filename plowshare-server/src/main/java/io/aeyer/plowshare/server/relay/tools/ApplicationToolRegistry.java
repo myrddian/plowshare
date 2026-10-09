@@ -160,6 +160,9 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   private boolean assigned(Entry entry, String account, String agent, String session) {
     try {
       Long id = projects.id(entry.binding().project());
+      if (id == null
+          || !projectAccess(entry.binding().project(), account, entry.binding().account()))
+        return false;
       if (entry.scope().isPresent())
         return grants.acceptsDynamic(id, account, agent, session)
             && connections.permits(
@@ -168,7 +171,9 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
           resources
               .root(id)
               .map(io.aeyer.plowshare.server.applications.ApplicationToolScopes::read);
-      if (policy.isPresent() && !policy.get().toolScopes().isEmpty())
+      // An Application never inherits interactive or named-tool fallback authority.
+      // Missing scopes (including a missing manifest) are an empty grant.
+      if (policy.isPresent())
         return account.equals(entry.binding().account())
             && grants.acceptsDynamic(id, account, agent, session)
             && policy
@@ -271,51 +276,32 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
             snapshot(project).revision() + connections.connections(project, null).toString());
   }
 
+  /** Without an authenticated owner there is no authority to reveal provider schemas. */
   @Override
   public List<AgentTool> tools(Home home, String agent, String session, BooleanSupplier cancelled) {
-    if (home == null || home.isGlobal()) return List.of();
-    return snapshot(home.project()).entries().values().stream()
-        .map(e -> (AgentTool) new LiveTool(e, agent, session, cancelled))
-        .toList();
+    return List.of();
   }
 
   @Override
   public List<AgentTool> tools(
       Home home, String agent, String session, BooleanSupplier cancelled, String account) {
-    if (account == null) return tools(home, agent, session, cancelled);
-    if (home == null || home.isGlobal()) return List.of();
+    if (home == null
+        || home.isGlobal()
+        || account == null
+        || !projectAccess(home.project(), account, account)) return List.of();
     return snapshot(home.project(), account).entries().values().stream()
         .filter(e -> assigned(e, account, agent, session))
         .map(e -> (AgentTool) new LiveTool(e, agent, session, cancelled))
         .toList();
   }
 
-  /** External proxy admission; internal tools use the admitted definition's own grants. */
-  private Optional<ToolFailure> checkAccess(
-      Home home, String agent, String session, String tool, UsageAttribution owner) {
-    if (home == null || home.isGlobal()) return Optional.empty();
-    if (owner == null || owner.accountHandle() == null || !home.project().equals(owner.projectId()))
-      return Optional.of(
-          new ToolFailure(E_NO_ACCESS, "This run cannot access the tool. Try another tool."));
-    try {
-      var personal = projects.personalOwner(home.project());
-      if (personal.isPresent() && !personal.get().equals(owner.accountHandle())
-          || !members.mayWork(home.project(), owner.accountHandle())
-          || !(grants.permits(
-                  projects.id(home.project()), owner.accountHandle(), agent, session, tool)
-              || Optional.ofNullable(
-                      snapshot(home.project(), owner.accountHandle()).entries().get(tool))
-                  .map(e -> assigned(e, owner.accountHandle(), agent, session))
-                  .orElse(false)))
-        return Optional.of(
-            new ToolFailure(
-                E_NO_ACCESS,
-                "The account or agent no longer has this tool grant. Try another tool."));
-      return Optional.empty();
-    } catch (CallerFault refused) {
-      return Optional.of(
-          new ToolFailure(E_NO_ACCESS, "The agent's tool grant is unavailable. Try another tool."));
-    }
+  /** Visibility and execution share the caller/provider membership and Personal owner fence. */
+  private boolean projectAccess(String project, String account, String provider) {
+    if (projects.id(project) == null || account == null || provider == null) return false;
+    var personal = projects.personalOwner(project);
+    return (personal.isEmpty() || personal.get().equals(account) && personal.get().equals(provider))
+        && members.mayWork(project, account)
+        && members.mayWork(project, provider);
   }
 
   @Override
@@ -410,17 +396,18 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
 
     @Override
     public String run(String arguments, Home home, UsageAttribution owner) {
-      if (owner == null
-          || owner.accountHandle() == null
-          || !offered.project().equals(home.project())
-          || !offered.project().equals(owner.projectId()))
+      if (home == null
+          || home.isGlobal()
+          || owner == null
+          || owner.scope() != UsageAttribution.Scope.PROJECT
+          || owner.status() != UsageAttribution.Status.ATTRIBUTED
+          || !offered.project().equals(home.project()))
         return failure(E_NO_ACCESS, "This run cannot access the tool. Try another tool.");
       try {
-        var personal = projects.personalOwner(home.project());
-        if (personal.isPresent() && !personal.get().equals(owner.accountHandle())
-            || !members.mayWork(home.project(), owner.accountHandle())
-            || !members.mayWork(home.project(), offered.account()))
-          return failure(E_NO_ACCESS, "Project or provider access was revoked. Try another tool.");
+        // Home and provider bindings name the project; accounting carries its durable numeric ID.
+        Long projectId = projects.id(home.project());
+        if (projectId == null || !Long.toString(projectId).equals(owner.projectId()))
+          return failure(E_NO_ACCESS, "This run cannot access the tool. Try another tool.");
         if (!assigned(entry, owner.accountHandle(), agent, session))
           return failure(
               E_NO_ACCESS, "The provider scope or agent grant was revoked. Try another tool.");
@@ -430,8 +417,9 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
           return failure(E_NO_CONNECTION, "The provider scope is disconnected. Try another tool.");
         var current = snapshot(home.project(), owner.accountHandle()).entries().get(offered.name());
         if (current == null) return failure(E_NO_EXEC, "The tool was withdrawn. Try another tool.");
-        var denied = checkAccess(home, agent, session, offered.name(), owner);
-        if (denied.isPresent()) return denied.get().render();
+        if (!assigned(current, owner.accountHandle(), agent, session))
+          return failure(
+              E_NO_ACCESS, "The provider scope or agent grant was revoked. Try another tool.");
         if (!current.binding().equals(offered))
           return failure(
               E_NO_EXEC, "The tool definition changed. Refresh the tool list before calling it.");

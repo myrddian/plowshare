@@ -20,7 +20,10 @@ Python on the server.
 The Application assigns six network tools to `privacy_coordinator` through the
 `network_scanning` provider scope. The analyst and reviewer retain narrower grants.
 The coordinator opts into dynamic tools; Python publishes their schemas when it
-starts. The model cannot select new scan targets or execute shell commands.
+starts. External names belong in the manifest's provider scope permissions, not
+in the agent's `tools` list. Permissions grant visibility and execution; loading
+validates policy and each runtime call checks registration, permission and
+availability. The model cannot select new scan targets or execute shell commands.
 TCP results show service responses, not vulnerabilities or proof of data leaving
 a device. DNS observations require an additional normalized export; TCP probes
 alone do not reveal which remote destinations a TV contacts.

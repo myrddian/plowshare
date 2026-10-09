@@ -412,12 +412,14 @@ path.
 
 ## Agent tools through the SDK
 
-The coordinator requests `network_scope`, `network_scan`,
-`network_scan_status`, `network_scan_list`, `network_evidence`,
-`network_destinations` and `relay_tool_read`. Its `dynamic: true` flag accepts the
-`network_scanning` provider scope explicitly assigned in root `plowshare.json`.
-That scope is limited to these six network tools and the configured execution
-principal; `relay_tool_read` retains its ordinary named built-in grant.
+The coordinator sets `dynamic: true` and receives `network_scope`, `network_scan`,
+`network_scan_status`, `network_scan_list`, `network_evidence` and
+`network_destinations` through the `network_scanning` provider scope explicitly
+assigned in root `plowshare.json`. These external names are absent from its `tools`
+field. That scope grants both visibility and execution, limited to these six tools
+and the configured execution principal. `relay_tool_read` retains its ordinary
+named built-in grant in `tools`. Loading validates the policy; discovery and
+per-call permission/availability checks happen at runtime.
 The SDK exposes a declaration and async Python handler for each capability; Plowshare installs the façade into its
 normal tool registry. The model never constructs a Relay envelope or selects a
 provider or topic.

@@ -34,7 +34,7 @@ class ApplicationToolRegistryTest {
   final AtomicReference<RelayLogRepository.Head> head =
       new AtomicReference<>(new RelayLogRepository.Head(0, Optional.empty()));
   final UsageAttribution owner =
-      UsageAttribution.project("caller", "fixture", UsageAttribution.Operation.AGENT_CHAT);
+      UsageAttribution.project("provider", "1", UsageAttribution.Operation.AGENT_CHAT);
   ApplicationToolRegistry registry;
   static final String DECLARATION =
       """
@@ -55,6 +55,12 @@ class ApplicationToolRegistryTest {
         """
         {"version":1,"bindings":[{"topic":"schedule.due","account":"provider","direction":"EGRESS","groups":["collector"]}]}
         """);
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        """
+        {"executionAccount":"provider","toolScopes":[{"scope":"scans","provider":"scanner","grants":["*"]}],
+         "toolGrants":[{"toolScope":"scans","agent":"coordinator"}]}
+        """);
     when(projects.id("fixture")).thenReturn(1L);
     when(projects.id("other")).thenReturn(2L);
     when(names.nameForId(1L)).thenReturn(Optional.of("fixture"));
@@ -71,7 +77,15 @@ class ApplicationToolRegistryTest {
             logs,
             new RelayToolProperties(),
             invocations,
-            (p, a, n, s, t) -> grant.get(),
+            new ToolGrants() {
+              public boolean permits(Long p, String a, String n, String s, String t) {
+                return true; // A named grant must never substitute for Application scope policy.
+              }
+
+              public boolean acceptsDynamic(Long p, String a, String n, String s) {
+                return grant.get();
+              }
+            },
             () -> Set.of("memory_read"),
             clock::get);
   }
@@ -97,7 +111,8 @@ class ApplicationToolRegistryTest {
   }
 
   AgentTool tool() {
-    var tool = registry.tools(Home.of("fixture"), "coordinator", null, () -> false).getFirst();
+    var tool =
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").getFirst();
     tool.calledAs("call");
     return tool;
   }
@@ -114,10 +129,81 @@ class ApplicationToolRegistryTest {
     Path agents = Files.createDirectory(root.resolve("agents"));
     Files.writeString(
         agents.resolve("coordinator.md"),
-        "---\nname: coordinator\ndescription: d\nmodel: m\nmax-turns: 2\nmax-model-calls: 4\ntools: [network_scope]\n---\nRead.");
+        "---\nname: coordinator\ndescription: d\nmodel: m\nmax-turns: 2\nmax-model-calls: 4\ndynamic: true\ntools: []\n---\nRead.");
     var definition = AgentRegistry.load(agents, runtime.knownTools(1L)).get("coordinator");
-    assertEquals(1, runtime.schemasOfferedTo(definition, Home.of("fixture")).size());
-    assertEquals(0, runtime.schemasOfferedTo(definition, Home.of("other")).size());
+    assertEquals(
+        1, runtime.schemasOfferedTo(definition, Home.of("fixture"), null, "provider").size());
+    assertEquals(
+        0, runtime.schemasOfferedTo(definition, Home.of("other"), null, "provider").size());
+  }
+
+  @Test
+  void ownerless_discovery_never_exposes_external_schemas() {
+    catalogue(DECLARATION);
+    assertTrue(registry.tools(Home.of("fixture"), "coordinator", null, () -> false).isEmpty());
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, null).isEmpty());
+  }
+
+  @Test
+  void schema_visibility_rechecks_membership_and_personal_owner() {
+    catalogue(DECLARATION);
+    var previouslyOffered = tool();
+    assertEquals(
+        1, registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").size());
+    when(members.mayWork("fixture", "provider")).thenReturn(false);
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").isEmpty());
+    assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    when(members.mayWork("fixture", "provider")).thenReturn(true);
+    when(projects.personalOwner("fixture")).thenReturn(Optional.of("another-owner"));
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").isEmpty());
+    assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    when(projects.personalOwner("fixture")).thenReturn(Optional.of("provider"));
+    assertEquals(
+        1, registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").size());
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void an_application_without_explicit_scopes_cannot_fall_back_to_named_tool_grants()
+      throws Exception {
+    catalogue(DECLARATION);
+    var previouslyOffered = tool();
+    for (String manifest : List.of("{}", "{\"executionAccount\":\"provider\"}", "invalid")) {
+      Files.writeString(root.resolve("plowshare.json"), manifest);
+      assertTrue(
+          registry
+              .tools(Home.of("fixture"), "coordinator", null, () -> false, "provider")
+              .isEmpty());
+      assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    }
+    Files.delete(root.resolve("plowshare.json"));
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").isEmpty());
+    assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
+  void accounting_identity_must_match_the_durable_project_id() {
+    catalogue(DECLARATION);
+    var offered = tool();
+    for (var rejected :
+        List.of(
+            UsageAttribution.project("provider", "fixture", UsageAttribution.Operation.AGENT_CHAT),
+            UsageAttribution.project("provider", "2", UsageAttribution.Operation.AGENT_CHAT),
+            UsageAttribution.global("provider", UsageAttribution.Operation.AGENT_CHAT),
+            UsageAttribution.system("1", UsageAttribution.Operation.AGENT_CHAT),
+            UsageAttribution.LEGACY)) {
+      assertTrue(offered.run("{}", Home.of("fixture"), rejected).startsWith("E_NO_ACCESS"));
+    }
+    assertTrue(offered.run("{}", Home.of("fixture"), null).startsWith("E_NO_ACCESS"));
+    assertTrue(offered.run("{}", null, owner).startsWith("E_NO_ACCESS"));
+    when(projects.id("fixture")).thenReturn(null);
+    assertTrue(offered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    verifyNoInteractions(invocations);
   }
 
   @Test
@@ -293,6 +379,40 @@ class ApplicationToolRegistryTest {
             () -> Set.of("memory_read"),
             clock::get);
     assertEquals(Set.of(), registry.stagedNames("fixture", root, Set.of("memory_read")));
+    Path agents = Files.createDirectory(root.resolve("agents"));
+    Files.writeString(
+        agents.resolve("coordinator.md"),
+        """
+        ---
+        name: coordinator
+        description: d
+        model: m
+        dynamic: true
+        tools: []
+        max-turns: 2
+        max-model-calls: 4
+        ---
+        Inspect permitted provider tools.
+        """);
+    // No external names or schemas are known when the agent loads. The provider scope,
+    // not its static tools list, grants visibility and execution after discovery.
+    var definition = AgentRegistry.load(agents, Set.of()).get("coordinator");
+    assertTrue(definition.tools().isEmpty());
+    var runtime = new JobRuntime(mock(LlmDispatcher.class), List.of());
+    runtime.useScopedTools(registry);
+    assertTrue(runtime.schemasOfferedTo(definition, Home.of("fixture"), "s", "provider").isEmpty());
+    catalogue(DECLARATION);
+    assertEquals(
+        List.of("network_scope"),
+        runtime.schemasOfferedTo(definition, Home.of("fixture"), "s", "provider").stream()
+            .map(io.aeyer.plowshare.server.llm.dispatch.ToolSchema::name)
+            .toList());
+    catalogue(DECLARATION + "," + DECLARATION.replace("network_scope", "network_future"));
+    assertEquals(
+        Set.of("network_scope", "network_future"),
+        runtime.schemasOfferedTo(definition, Home.of("fixture"), "s", "provider").stream()
+            .map(io.aeyer.plowshare.server.llm.dispatch.ToolSchema::name)
+            .collect(java.util.stream.Collectors.toSet()));
     catalogue(DECLARATION);
     assertEquals(
         1, registry.tools(Home.of("fixture"), "coordinator", "s", () -> false, "provider").size());
@@ -304,8 +424,9 @@ class ApplicationToolRegistryTest {
         registry.tools(Home.of("fixture"), "coordinator", "s", () -> false, "provider").getFirst();
     offered.calledAs("call");
     var execution =
-        UsageAttribution.project("provider", "fixture", UsageAttribution.Operation.AGENT_CHAT);
+        UsageAttribution.project("provider", "1", UsageAttribution.Operation.AGENT_CHAT);
     dynamic.set(false);
+    assertTrue(runtime.schemasOfferedTo(definition, Home.of("fixture"), "s", "provider").isEmpty());
     assertTrue(offered.run("{}", Home.of("fixture"), execution).startsWith("E_NO_ACCESS"));
     dynamic.set(true);
     Files.writeString(
@@ -398,7 +519,13 @@ class ApplicationToolRegistryTest {
             .getFirst();
     offered.calledAs("call");
     connected.set(false);
-    assertTrue(offered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_CONNECTION"));
+    assertTrue(
+        offered
+            .run(
+                "{}",
+                Home.of("fixture"),
+                UsageAttribution.project("caller", "1", UsageAttribution.Operation.AGENT_CHAT))
+            .startsWith("E_NO_CONNECTION"));
     verifyNoInteractions(invocations);
   }
 
