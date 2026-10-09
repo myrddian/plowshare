@@ -90,14 +90,14 @@ async function refresh() {
   try {
     const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
-    byId('mode').textContent = status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
+    byId('mode').textContent = status.collection_enabled === false ? 'Collection not configured' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
     byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.state.replaceAll('_', ' ');
     byId('detail').textContent = status.detail;
     byId('change-count').textContent = scans.length ? scans[0].changes.filter(change => !change.startsWith('Baseline')).length : '—';
     byId('report-count').textContent = reportResult.error ? 'Unavailable' : reportResult.value.length;
-    byId('scan').disabled = status.state === 'attention_required';
+    byId('scan').disabled = status.state === 'attention_required' || status.collection_enabled === false;
     renderCollections(scans);
     if (reportResult.error) byId('reports').replaceChildren(element('p', 'Retained agent reports are temporarily unavailable. Local evidence remains readable.', 'empty'));
     else if (Array.isArray(reportResult.value)) renderReports(reportResult.value);
@@ -107,7 +107,7 @@ async function refresh() {
     const unknown = status.requests.find(request => request.state === 'pending');
     if (unknown) notice(`Request ${unknown.request_id} needs reconciliation. It has not been resent.`, true);
     else if (reportResult.error) notice(reportResult.error.message, true);
-    else notice(status.state === 'attention_required' ? status.detail : 'Evidence is retained before an investigation is requested.', status.state === 'attention_required');
+    else notice(status.state === 'attention_required' || status.collection_enabled === false ? status.detail : 'Evidence is retained before an investigation is requested.', status.state === 'attention_required');
   } finally {refreshPending = false; byId('refresh').disabled = false;}
 }
 byId('connect').addEventListener('submit', event => {

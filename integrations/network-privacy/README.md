@@ -36,6 +36,12 @@ model pool can serve the same `reasoning` binding used by these definitions.
 
 ## What the collector observes
 
+`collection.enabled` defaults to `true` for existing TCP configurations. Set it
+explicitly to `false` to deploy and start the dashboard before selecting devices;
+targets and ports may then be empty. Disabled collection makes no probes, consumes
+no scan batches and refuses new scan requests. The independent setup `discover`
+command can help you choose devices before enabling the monitored scope.
+
 `tcp` performs bounded TCP connection probes against **explicit IP addresses and
 ports** in private deployment configuration. It sends no application payloads,
 requires no raw sockets or elevated scan privileges, and records open, refused,
@@ -67,11 +73,14 @@ These are observations and hypotheses for an investigator, not vendor allegation
 ## Guided setup
 
 Use the [step-by-step setup walkthrough](SETUP.md) and installed
-`plowshare-privacy-bootstrap` helper to configure a private collector, select a
+`plowshare-privacy-bootstrap` helper to discover LAN devices, configure a private collector, select a
 server FileStore, deploy the paused Application, provision a separate service
 account and redeploy with its execution principal. The guide explains each identity,
 provider scope, Relay processing, Python startup and interrupted-install recovery.
-The lower-level preparation and provisioning commands below remain available.
+Device selection can be deferred: the Application deploys with collection disabled,
+and you enable an explicit monitored scope later. Discovery runs only against an
+operator-selected private subnet. The lower-level preparation and provisioning
+commands below remain available.
 
 ## Install the Python application
 

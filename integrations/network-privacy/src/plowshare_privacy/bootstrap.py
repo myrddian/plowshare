@@ -14,6 +14,7 @@ import os
 import re
 from dataclasses import asdict
 from getpass import getpass
+from ipaddress import IPv4Network
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,6 +35,7 @@ from plowshare.tools import ToolAttention
 
 from .cli import execute
 from .contracts import Configuration, integer, load_json, object_fields, text
+from .discovery import DiscoveryPlan, discover
 from .setup import (
     Setup,
     SetupClient,
@@ -81,13 +83,15 @@ def configure(directory: Path, source: Path) -> None:
     )
     origin = ask("Plowshare HTTP(S) origin (include your port if needed)")
     collector = ask("Collector identifier", "home-network")
-    targets = [
-        part.strip()
-        for part in ask("IP addresses to probe (comma-separated)").split(",")
-    ]
-    ports = [
-        int(part.strip()) for part in ask("TCP ports (comma-separated)").split(",")
-    ]
+    target_input = input(
+        "Device IPs (comma-separated; Enter to configure collection later): "
+    ).strip()
+    targets = [part.strip() for part in target_input.split(",")] if target_input else []
+    ports = (
+        [int(part.strip()) for part in ask("TCP ports (comma-separated)").split(",")]
+        if targets
+        else []
+    )
     timeout = float(ask("Probe timeout in seconds", "1"))
     concurrency = int(ask("Concurrent probes", "4"))
     service = ask("Separate service account handle")
@@ -128,6 +132,7 @@ def configure(directory: Path, source: Path) -> None:
                 "schedule": "REPLACE_WITH_SCHEDULE_INTERNAL_NAME",
                 "collection": {
                     "mode": "tcp",
+                    "enabled": bool(targets),
                     "targets": targets,
                     "ports": ports,
                     "timeoutSeconds": timeout,
@@ -189,6 +194,10 @@ def configure(directory: Path, source: Path) -> None:
     print(
         "Prepared collector.json and deployment/application. Review both before install."
     )
+    if not targets:
+        print(
+            "Collection is disabled. Discover devices and configure targets/ports when ready."
+        )
     print("No login, network probes or server changes were performed.")
 
 
@@ -531,10 +540,20 @@ def main() -> None:
     parser.add_argument(
         "--directory",
         type=Path,
-        required=True,
-        help="Absolute private directory outside Git",
+        help="Absolute private directory outside Git; not required for discover",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    scan = commands.add_parser(
+        "discover", help="Discover responding devices on an explicit private LAN subnet"
+    )
+    scan.add_argument(
+        "--network", required=True, help="Private IPv4 CIDR, at most 256 addresses"
+    )
+    scan.add_argument(
+        "--ports", required=True, help="Comma-separated TCP ports, at most eight"
+    )
+    scan.add_argument("--timeout", type=float, default=0.5)
+    scan.add_argument("--concurrency", type=int, default=32)
     create = commands.add_parser(
         "configure", help="Prompt for private configuration and prepare source offline"
     )
@@ -559,6 +578,19 @@ def main() -> None:
     run.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "discover":
+            plan = DiscoveryPlan(
+                IPv4Network(args.network, strict=True),
+                tuple(int(port.strip()) for port in args.ports.split(",")),
+                args.timeout,
+                args.concurrency,
+            )
+            print(json.dumps(asdict(asyncio.run(discover(plan))), indent=2))
+            return
+        if args.directory is None:
+            raise SetupProblem(
+                "Set --directory for configure, install, status or serve."
+            )
         root = private_root(args.directory)
         if args.command == "configure":
             configure(root, args.source)

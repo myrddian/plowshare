@@ -121,6 +121,7 @@ def application(
                 "project": worker.config.project,
                 "collector": worker.config.collector,
                 "mode": worker.config.collection.mode,
+                "collection_enabled": worker.config.collection.enabled,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [

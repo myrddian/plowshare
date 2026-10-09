@@ -65,7 +65,30 @@ folder: it will contain the service credential and operational state.
 : "${PRIVACY_APP_SOURCE:?Set the absolute path to integrations/network-privacy/network-privacy-watch}"
 ```
 
-## 2. Configure and review offline
+## 2. Discover devices, or configure them later
+
+You do not need a device inventory to deploy the Application. Run a discovery pass
+on the collector machine when convenient:
+
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap discover \
+  --network "$PRIVACY_NETWORK" --ports "$PRIVACY_DISCOVERY_PORTS"
+```
+
+Set `PRIVACY_NETWORK` to an explicit private IPv4 CIDR reachable from that machine
+(for example, an operator-selected `/24`), and `PRIVACY_DISCOVERY_PORTS` to a
+comma-separated list of TCP ports. Discovery requires no Plowshare login, private
+setup directory, administrator privileges or external scanner installation. It
+checks at most 256 addresses and eight ports, with at most 32 concurrent connections.
+It sends no application payloads. Output lists responding IPs with open or refused
+ports; filtered/silent devices may be missed. Ports do not establish vendor or
+device identity. Retain discovery output outside source if you want to keep it.
+
+Discovery does not automatically change the monitored scope or give an agent
+permission to scan a subnet. Choose monitored devices from the results when ready.
+You can also defer that choice and prepare the Application now.
+
+### Configure and review offline
 
 ```sh
 build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
@@ -78,7 +101,7 @@ The prompts ask for:
 | --- | --- |
 | Server origin | Your actual HTTP(S) origin, including a port if needed; no API path |
 | Collector identifier | A stable name for this collector and its Relay consumer group |
-| IP addresses and TCP ports | Comma-separated explicit device addresses and port numbers; no CIDR sweep or hostnames |
+| IP addresses and TCP ports | Enter device addresses and ports, or press Enter at the device prompt to configure collection later |
 | Timeout and concurrency | Probe timeout 0.1–5 seconds and 1–32 concurrent probes |
 | Service handle | A separate service account, distinct from both human accounts |
 | Human manager | An existing enabled account that should manage this Application |
@@ -110,6 +133,17 @@ private-directory/
       Relay/
       server/                    # Application-owned tools/provider and port authority
 ```
+
+If you defer device selection, `collector.json` contains `collection.enabled: false`
+and empty target/port lists. Installation still works. The dashboard explains that
+collection needs configuration, rejects scan requests and leaves Relay scan intake
+untouched. Keep the schedule paused.
+
+To enable collection later, stop the Python process, edit `collector.json`, set
+`collection.targets` and `collection.ports`, and change `collection.enabled` to
+`true`. Restart the collector. Its scope tool reports whether collection is enabled.
+If you are changing a scope that already has retained work, preserve its journals
+and follow the scope-change/recovery instructions instead of deleting state.
 
 Review `collector.json` and `deployment/application` before continuing. There is
 no `.plowshare/` directory. The first manifest's `executionAccount` temporarily

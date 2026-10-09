@@ -48,11 +48,18 @@ class Worker:
         self.consumer = str(uuid4())
         self.lock = asyncio.Lock()
         self.request_lock = asyncio.Lock()
-        self.state = "ready"
-        self.detail = "Waiting for scheduled or requested collection."
+        self.state = "ready" if config.collection.enabled else "configuration_required"
+        self.detail = (
+            "Waiting for scheduled or requested collection."
+            if config.collection.enabled
+            else "Collection is disabled. Configure targets and ports, then enable collection and restart."
+        )
 
     async def poll(self) -> None:
         """Copy intake durably and acknowledge promptly; scans run outside the batch lease."""
+        if not self.config.collection.enabled:
+            # Do not consume/acknowledge availability before an operator configures collection.
+            return
         async with self.lock:
             await self._drain()
             for topic in ("schedule.due", self.config.request_topic):
@@ -223,6 +230,10 @@ class Worker:
         self, request_id: str, origin: ScanOrigin | None = None
     ) -> Publication:
         request_id = uuid(request_id)
+        if not self.config.collection.enabled:
+            raise ValueError(
+                "Collection is disabled; configure targets and ports before requesting a scan"
+            )
         # SDK submissions may overlap a scan; journal writes themselves are synchronous.
         # Holding the collection lock here would make the UI wait for every TCP timeout.
         async with self.request_lock:

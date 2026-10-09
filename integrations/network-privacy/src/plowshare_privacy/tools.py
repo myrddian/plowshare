@@ -122,6 +122,7 @@ class ScopeResult:
     concurrency: int
     timeout_seconds: float
     dns_export_configured: bool
+    enabled: bool
 
 
 @dataclass(frozen=True)
@@ -215,6 +216,7 @@ class WorkerTools:
                 plan.concurrency,
                 plan.timeout,
                 plan.observations_file is not None,
+                plan.enabled,
             )
         if isinstance(call, ScanCall):
             return await self.worker.request_scan(call.request_id, call.origin)
