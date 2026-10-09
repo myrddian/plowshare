@@ -1,3 +1,4 @@
+import {fixtureSocket} from './sdk-packet-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -204,7 +205,8 @@ test('real Node SDK publishes all chapters over WS and resumes a dropped admissi
     else res.writeHead(404).end();
   });
   const sockets = new WebSocketServer({ server: http });
-  sockets.on('connection', (socket, req) => {
+  sockets.on('connection', (physical, req) => {
+    const socket = fixtureSocket(physical);
     assert.equal(new URL(req.url, 'http://fixture').pathname, '/v1/events');
     socket.on('message', async bytes => {
       const frame = JSON.parse(bytes); frames.push(frame); assert.equal(frame.protocol_version, 'plowshare-v1');

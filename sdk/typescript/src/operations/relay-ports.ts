@@ -1,3 +1,4 @@
+import { validRelayText } from '../binding/relay-text.ts';
 import { validateRelayEvent } from './relay.ts';
 import type { RelayEvent } from './relay.ts';
 
@@ -125,10 +126,7 @@ export function relayPortProblem(
     if (
       !uuid(p['requestId']) ||
       !instant(p['occurredAt']) ||
-      typeof p['text'] !== 'string' ||
-      !p['text'].trim() ||
-      p['text'].length > 65536 ||
-      p['text'].includes('\0')
+      !validRelayText(p['text'])
     )
       return 'Invalid Relay publication';
     if (p['correlationId'] != null && !identity(p['correlationId']))

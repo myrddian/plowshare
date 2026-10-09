@@ -72,7 +72,8 @@ class RelayClientTest {
                     }
                   }));
       try (var connection =
-          Plowshare.connect(server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
         assertThrows(
             IOException.class,
             () -> new RelayClient(connection).process(new RelayLog.Process("project", 1)));
@@ -123,7 +124,8 @@ class RelayClientTest {
                     }
                   }));
       try (var connection =
-          Plowshare.connect(server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
         assertThrows(IOException.class, () -> new RelayClient(connection).operate(request));
         assertEquals(1, received.get());
       }

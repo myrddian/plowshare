@@ -52,7 +52,9 @@ class SdkContractsTest {
                       }
                     }
                   }));
-      try (var client = new WsServerClient(server.url("/").toString(), "fixture")) {
+      try (var client =
+          new WsServerClient(
+              server.url("/").toString(), "fixture", Plowshare.TransportMode.LEGACY)) {
         var failure = assertThrows(Plowshare.TransportException.class, () -> client.job("job_1"));
         assertEquals(Plowshare.Delivery.INVALID_RESPONSE, failure.delivery());
         assertEquals(1, server.getRequestCount());

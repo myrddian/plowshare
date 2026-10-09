@@ -296,6 +296,11 @@ tasks.named("check") { dependsOn(invariants) }
 // And not run twice. Without this the class executes in both tasks, and every
 // XML tally of the suite counts its five assertions and its class twice.
 tasks.named<Test>("test") {
+    // Opt-in Relay SQL paging tests materialize a full 319 MiB prefix and its typed copies.
+    // Ordinary mocked checks retain the default heap and never start the database fixtures.
+    if (providers.gradleProperty("fullDb").map { it.isEmpty() || it == "true" }.getOrElse(false)) {
+        maxHeapSize = "2g"
+    }
     filter { excludeTestsMatching("io.aeyer.plowshare.server.InvariantsTest") }
     dependsOn(":plowshare-client-node:nodeBuild", ":plowshare-mcp:mcpBuild")
     inputs.dir("src/test/node").withPathSensitivity(PathSensitivity.RELATIVE)

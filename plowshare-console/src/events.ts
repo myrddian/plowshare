@@ -1,3 +1,9 @@
+import {
+  packetSocket,
+  PACKET_PROTOCOL,
+} from '../../sdk/typescript/src/binding/packets.ts';
+import { sha256 } from '../../sdk/typescript/src/binding/sha256.ts';
+import type { Socket } from '../../sdk/typescript/src/binding/connection.ts';
 import { errorMessage } from '../../sdk/typescript/src/binding/values.ts';
 import { isObject } from '../../sdk/typescript/src/binding/values.ts';
 import { outcomeIn } from '../../sdk/typescript/src/binding/envelope.ts';
@@ -138,7 +144,8 @@ export function eventUrl(session: string, scope: Window = window): string {
  */
 export function openEventStream(options: EventStreamOptions): EventStream {
   const scope = options.scope ?? window;
-  const openSocket = options.open ?? ((url: string) => new WebSocket(url));
+  const openSocket =
+    options.open ?? ((url: string) => new WebSocket(url, [PACKET_PROTOCOL]));
   const baseDelayMs = options.baseDelayMs ?? 500;
   const maxDelayMs = options.maxDelayMs ?? 15_000;
   const askTimeoutMs = options.askTimeoutMs ?? ASK_TIMEOUT_MS;
@@ -148,6 +155,7 @@ export function openEventStream(options: EventStreamOptions): EventStream {
   let attempt = 0;
   let retryInMs: number | null = null;
   let socket: WebSocket | null = null;
+  let messages: Socket | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   let issued = 0;
@@ -214,6 +222,8 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         return;
       }
       settled = true;
+      messages?.close();
+      messages = null;
       socket = null;
       failWaiting('the socket closed before it answered');
       scheduleRetry();
@@ -221,13 +231,57 @@ export function openEventStream(options: EventStreamOptions): EventStream {
 
     socket = openSocket(url);
     socket.onopen = (): void => {
+      if (socket === null) return;
+      if (socket.protocol === PACKET_PROTOCOL) {
+        messages = packetSocket({
+          socket,
+          codec: {
+            encode: (text) => new TextEncoder().encode(text),
+            decode: (bytes) =>
+              new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+            base64: (bytes) =>
+              btoa(
+                Array.from(bytes, (value) => String.fromCharCode(value)).join(
+                  '',
+                ),
+              ),
+            unbase64: (text) =>
+              Uint8Array.from(atob(text), (value) => value.charCodeAt(0)),
+            hash: (bytes) => Promise.resolve(sha256(bytes)),
+            identity: () => {
+              const bytes = crypto.getRandomValues(new Uint8Array(16));
+              const value = Array.from(bytes, (n) =>
+                n.toString(16).padStart(2, '0'),
+              ).join('');
+              return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+            },
+          },
+          schedule: (expired, ms) => {
+            const timer = setTimeout(expired, ms);
+            return () => clearTimeout(timer);
+          },
+        });
+        messages.addEventListener('message', (message) =>
+          received(message.data),
+        );
+      } else {
+        if (options.open === undefined) {
+          socket.close(1002, 'Segmented transport was not negotiated');
+          failed();
+          return;
+        }
+        // Explicitly injected legacy fixtures/clients retain their current mode and small-message bound.
+        messages = socket;
+        socket.onmessage = (message) => received(message.data);
+      }
       attempt = 0;
       retryInMs = null;
       state = 'open';
       announce();
     };
-    socket.onmessage = (message: MessageEvent): void => {
-      const frame = String(message.data);
+    const received = (data: unknown): void => {
+      if (typeof data !== 'string') return;
+      const frame = data;
       let decoded: unknown;
       try {
         decoded = JSON.parse(frame);
@@ -295,6 +349,8 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         socket.onmessage = null;
         socket.onerror = null;
         socket.onclose = null;
+        if (messages !== socket) messages?.close();
+        messages = null;
         socket.close();
         socket = null;
       }
@@ -309,7 +365,7 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       }
       issued += 1;
       const id = `console-${issued}`;
-      const live = socket;
+      const live = messages ?? socket;
       return new Promise<FrameOutcome>((answered, failed) => {
         const deadline = setTimeout(() => {
           if (waiting.delete(id)) {
@@ -333,14 +389,18 @@ export function openEventStream(options: EventStreamOptions): EventStream {
           },
         });
         try {
-          live.send(
-            JSON.stringify({
-              id,
-              type,
-              protocol_version: PROTOCOL_VERSION,
-              payload: payload ?? {},
-            }),
-          );
+          const frame = JSON.stringify({
+            id,
+            type,
+            protocol_version: PROTOCOL_VERSION,
+            payload: payload ?? {},
+          });
+          if (
+            live === socket &&
+            new TextEncoder().encode(frame).length > 1024 * 1024
+          )
+            throw new Error('encoded request exceeds legacy allowance');
+          live.send(frame);
         } catch (trouble) {
           // Nothing left the tab, so nothing will answer this id.
           waiting.delete(id);

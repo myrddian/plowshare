@@ -22,6 +22,7 @@ type constraints struct {
 	Timestamp             bool     `json:"timestamp"`
 	MinLength             int      `json:"minLength"`
 	MaxLength             *int     `json:"maxLength"`
+	MaxUtf8Bytes          *int     `json:"maxUtf8Bytes"`
 	Nonblank              bool     `json:"nonblank"`
 	Trimmed               bool     `json:"trimmed"`
 	NoNul                 bool     `json:"noNul"`
@@ -184,8 +185,11 @@ func check(s shape, value any) error {
 				return contractError
 			}
 		}
+		if s.MaxUtf8Bytes != nil && (!utf8.ValidString(v) || len(v) > *s.MaxUtf8Bytes) {
+			return contractError
+		}
 		n := len(utf16.Encode([]rune(v)))
-		maximum := 8 * 1024 * 1024
+		maximum := 50 * 1024 * 1024
 		if s.MaxLength != nil {
 			maximum = *s.MaxLength
 		}

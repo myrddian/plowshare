@@ -111,8 +111,15 @@ def check(schema: dict[str, object], value: object) -> None:
     if isinstance(value, str):
         length = len(value.encode("utf-16-le", errors="surrogatepass")) // 2
         invalid = length < cast(int, schema.get("minLength", 0)) or length > cast(
-            int, schema.get("maxLength", 8 * 1024 * 1024)
+            int, schema.get("maxLength", 50 * 1024 * 1024)
         )
+        if "maxUtf8Bytes" in schema:
+            try:
+                invalid |= len(value.encode("utf-8")) > cast(
+                    int, schema["maxUtf8Bytes"]
+                )
+            except UnicodeEncodeError:
+                invalid = True
         invalid |= bool(schema.get("nonblank")) and not value.strip()
         invalid |= bool(schema.get("trimmed")) and value != value.strip()
         invalid |= bool(schema.get("noNul")) and "\0" in value

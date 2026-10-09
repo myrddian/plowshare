@@ -11,7 +11,121 @@ import okhttp3.mockwebserver.*;
 import org.junit.jupiter.api.Test;
 
 class PlowshareTest {
+  @org.junit.jupiter.api.Test
+  void sdk_json_boundary_accepts_fifty_mib_text_without_jackson_default_string_refusal()
+      throws Exception {
+    var json = SdkJson.mapper();
+    var request =
+        new io.aeyer.plowshare.protocol.RelayPort.Publish(
+            "11111111-1111-1111-1111-111111111111",
+            "fixture",
+            "large.events",
+            "x".repeat(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES),
+            java.time.Instant.parse("2026-10-10T00:00:00Z"),
+            null,
+            null,
+            null);
+    var read =
+        SdkJson.decode(
+            json,
+            json.readTree(json.writeValueAsString(request)),
+            io.aeyer.plowshare.protocol.RelayPort.Publish.class);
+    assertEquals(request, read);
+  }
+
   private static final ObjectMapper JSON = new ObjectMapper();
+
+  @Test
+  void segmented_reply_with_trailing_json_strands_the_request_without_replay() throws Exception {
+    try (var server = new MockWebServer()) {
+      var requests = new java.util.concurrent.atomic.AtomicInteger();
+      server.enqueue(
+          new MockResponse()
+              .setHeader("Sec-WebSocket-Protocol", "plowshare-segments-v1")
+              .withWebSocketUpgrade(
+                  new WebSocketListener() {
+                    @Override
+                    public void onMessage(WebSocket ws, String text) {
+                      try {
+                        var packet = JSON.readTree(text);
+                        if (!packet.path("kind").asText().equals("transport.segment")) return;
+                        requests.incrementAndGet();
+                        var request =
+                            JSON.readTree(
+                                java.util.Base64.getDecoder().decode(packet.path("data").asText()));
+                        ws.send(
+                            JSON.writeValueAsString(
+                                new io.aeyer.plowshare.protocol.transport.SegmentCredit(
+                                    "transport.credit", 1, packet.path("transferId").asText(), 1)));
+                        byte[] reply =
+                            JSON.writeValueAsBytes(
+                                Map.of(
+                                    "id",
+                                    request.path("id").asText(),
+                                    "type",
+                                    "project.list",
+                                    "protocol_version",
+                                    "plowshare-v1",
+                                    "payload",
+                                    Map.of("code", "OK", "payload", java.util.List.of())));
+                        var segment =
+                            new io.aeyer.plowshare.protocol.transport.MessageSegment(
+                                "transport.segment",
+                                1,
+                                java.util.UUID.randomUUID().toString(),
+                                1,
+                                1,
+                                0,
+                                reply.length,
+                                java.util.HexFormat.of()
+                                    .formatHex(
+                                        java.security.MessageDigest.getInstance("SHA-256")
+                                            .digest(reply)),
+                                java.util.Base64.getEncoder().encodeToString(reply));
+                        ws.send(JSON.writeValueAsString(segment) + " {}");
+                      } catch (Exception failure) {
+                        throw new AssertionError(failure);
+                      }
+                    }
+                  }));
+      try (var client =
+          Plowshare.connect(
+              server.url("/").toString(), "fixture-token", Duration.ofSeconds(3), null)) {
+        var failure =
+            assertThrows(
+                Plowshare.TransportException.class, () -> client.request("project.list", Map.of()));
+        assertEquals(Plowshare.Delivery.UNKNOWN, failure.delivery());
+        assertEquals(1, requests.get());
+      }
+    }
+  }
+
+  @Test
+  void default_transport_refuses_a_legacy_server_before_any_operation() throws Exception {
+    try (var server = new MockWebServer()) {
+      var messages = new java.util.concurrent.atomic.AtomicInteger();
+      server.enqueue(
+          new MockResponse()
+              .withWebSocketUpgrade(
+                  new WebSocketListener() {
+                    @Override
+                    public void onMessage(WebSocket ws, String text) {
+                      messages.incrementAndGet();
+                    }
+                  }));
+      var refusal =
+          assertThrows(
+              Plowshare.TransportException.class,
+              () ->
+                  Plowshare.connect(
+                      server.url("/").toString(), "fixture-token", Duration.ofSeconds(3), null));
+      assertEquals(Plowshare.Delivery.NOT_SUBMITTED, refusal.delivery());
+      assertEquals(0, messages.get());
+      assertEquals(
+          "plowshare-segments-v1",
+          server.takeRequest(3, TimeUnit.SECONDS).getHeader("Sec-WebSocket-Protocol"));
+    }
+  }
 
   @Test
   void multiplexes_replies_and_delivers_pushes_with_bearer_upgrade() throws Exception {
@@ -42,7 +156,7 @@ class PlowshareTest {
                     }
                   }));
       try (var sdk =
-              Plowshare.connect(
+              LegacyFixture.connect(
                   server.url("/").toString(),
                   "test-bearer",
                   Duration.ofSeconds(3),
@@ -81,7 +195,8 @@ class PlowshareTest {
                       count.incrementAndGet();
                     }
                   }));
-      var sdk = Plowshare.connect(server.url("/").toString(), null, Duration.ofMillis(150), null);
+      var sdk =
+          LegacyFixture.connect(server.url("/").toString(), null, Duration.ofMillis(150), null);
       try {
         var failure =
             assertThrows(
@@ -121,7 +236,7 @@ class PlowshareTest {
                     }
                   }));
       try (var sdk =
-          Plowshare.connect(server.url("/").toString(), null, Duration.ofSeconds(3), null)) {
+          LegacyFixture.connect(server.url("/").toString(), null, Duration.ofSeconds(3), null)) {
         assertEquals(
             Plowshare.Delivery.INVALID_RESPONSE,
             assertThrows(
@@ -225,7 +340,8 @@ class PlowshareTest {
                       }
                     }
                   }));
-      try (var sdk = new WsServerClient(server.url("/").toString(), null)) {
+      try (var sdk =
+          new WsServerClient(server.url("/").toString(), null, Plowshare.TransportMode.LEGACY)) {
         assertEquals(0, server.getRequestCount());
         var conversation = sdk.openConversation(null, null);
         assertNull(conversation.maxModelCalls());

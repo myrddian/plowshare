@@ -1,4 +1,6 @@
 import WebSocket from 'ws';
+import { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
+import { legacySocket } from 'plowshare-client-ts/binding/packets';
 import { randomUUID } from 'node:crypto';
 import {
   Plowshare,
@@ -43,6 +45,7 @@ export interface ClientOptions {
   readonly token: string;
   readonly session?: string;
   readonly timeoutMs?: number;
+  readonly transport?: 'segmented' | 'legacy';
   readonly onPushFault?: (fault: ConnectionFault) => void;
   readonly onPush?: (push: ServerPush) => void;
 }
@@ -74,7 +77,8 @@ export async function connectPlowshare(
   origin.protocol = origin.protocol === 'https:' ? 'wss:' : 'ws:';
   origin.pathname = '/v1/events';
   origin.searchParams.set('session', session);
-  const socket = new WebSocket(origin, {
+  const segmented = options.transport !== 'legacy';
+  const socket = new WebSocket(origin, segmented ? [PACKET_PROTOCOL] : [], {
     headers: { Authorization: `Bearer ${options.token}` },
     followRedirects: false,
     handshakeTimeout: timeout,
@@ -93,6 +97,10 @@ export async function connectPlowshare(
     socket.once('error', failed);
     socket.once('close', failed);
     socket.once('open', () => {
+      if (segmented && socket.protocol !== PACKET_PROTOCOL) {
+        failed();
+        return;
+      }
       socket.off('error', failed);
       socket.off('close', failed);
       resolve();
@@ -101,7 +109,7 @@ export async function connectPlowshare(
   // Keep late transport errors from becoming unhandled EventEmitter exceptions; close strands asks.
   socket.on('error', () => {});
   return new Plowshare({
-    socket,
+    socket: segmented ? nodePacketSocket(socket) : legacySocket(socket),
     session,
     deadline: {
       milliseconds: timeout,
@@ -139,3 +147,5 @@ export type {
   ToolState,
   RegisteredTool,
 } from './tools.ts';
+
+export { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';

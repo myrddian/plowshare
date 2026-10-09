@@ -116,7 +116,7 @@ func decode(s shape, value any, input bool, depth int) (any, error) {
 	switch s.Type {
 	case "string":
 		v, ok := value.(string)
-		if !ok || len(v) > 8*1024*1024 {
+		if !ok || len(v) > 50*1024*1024 {
 			return nil, contractError
 		}
 		return v, nil

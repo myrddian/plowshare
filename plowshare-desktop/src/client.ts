@@ -1,3 +1,4 @@
+import { nodePacketSocket, PACKET_PROTOCOL } from 'plowshare-client-node';
 import { connectionAccount } from 'plowshare-client-node/connections';
 import { jobNotification } from 'plowshare-client-ts/operations/push';
 import {
@@ -247,7 +248,8 @@ export const serverConnector: Connector = async (
     );
   const open: Parameters<typeof openSocket>[0]['open'] = (url) =>
     new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
+      const events = new URL(url).pathname === '/v1/events';
+      const socket = new WebSocket(url, events ? [PACKET_PROTOCOL] : []);
       const timer = setTimeout(() => {
         socket.close();
         reject(
@@ -258,7 +260,12 @@ export const serverConnector: Connector = async (
         'open',
         () => {
           clearTimeout(timer);
-          resolve(socket);
+          if (events && socket.protocol !== PACKET_PROTOCOL) {
+            socket.close();
+            reject(new Error('The server does not support packet transport.'));
+            return;
+          }
+          resolve(events ? nodePacketSocket(socket) : socket);
         },
         { once: true },
       );

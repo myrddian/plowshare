@@ -239,12 +239,23 @@ treat exit 3 as a failed send to retry with another UUID.
 | `requestId` | Your retained UUID for recovering this exact submission |
 | `id` | Plowshare receipt UUID used by status and cancellation |
 | `messageId` on the remote wire | Supplied by the adapter from the Plowshare receipt `id` |
-| `remoteTask` / `remoteContext` | Peer-issued A2A identities, retained after an observation |
+| `remoteTask` / `remoteContext` | Peer-issued task and conversational session identities, retained after an observation |
 | Optional `conversation` in the request | Attribution to an existing Plowshare conversation in the same project |
 
 The adapter supplies `messageId` and `role: "ROLE_USER"`; leave them out of your
 payload. Plowshare's `conversation` is separate from A2A's `contextId` and does not
 automatically create or select a remote context.
+
+For [incoming A2A work](a2a-receiving.md#context-conversation-and-task-mapping),
+Plowshare maps a received context to a persistent receiving instance and its
+conversation. Outgoing work crosses a different ownership boundary: the optional
+local `conversation` attributes the submission, while the peer owns its remote
+context and conversation policy. Keep the local conversation ID, outgoing receipt
+ID, remote task ID and remote context ID distinct.
+
+The [Relay external-work design](decisions/0008-relay-external-work-and-a2a-mapping.md)
+describes the planned common delivery mechanism and retained correlation mapping.
+The current adapter still uses outgoing claims and reports until that migration ships.
 
 If the submission reply is lost, explicitly resubmit the **identical saved payload
 with the same `requestId`**. Plowshare returns the existing receipt if it already

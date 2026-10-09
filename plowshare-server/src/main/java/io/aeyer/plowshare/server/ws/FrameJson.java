@@ -45,6 +45,20 @@ public final class FrameJson {
   private FrameJson() {}
 
   /**
+   * Reads a complete event message after transport assembly. The portable Relay ceiling can exceed
+   * Jackson's default string bound; domain DTOs still apply their own narrower limits.
+   */
+  public static ObjectMapper reading() {
+    return new ObjectMapper(
+        com.fasterxml.jackson.core.JsonFactory.builder()
+            .streamReadConstraints(
+                com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                    .maxStringLength(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES)
+                    .build())
+            .build());
+  }
+
+  /**
    * A mapper that writes an outcome the way the HTTP surface writes the same object.
    *
    * <p>A new instance per call rather than one shared constant: {@code ObjectMapper} is thread-safe

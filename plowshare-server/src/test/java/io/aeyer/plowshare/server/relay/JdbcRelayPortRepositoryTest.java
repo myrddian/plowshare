@@ -115,6 +115,41 @@ class JdbcRelayPortRepositoryTest {
   }
 
   @Test
+  void large_pages_preserve_the_issued_cursor_and_leave_the_tail_unacknowledged() {
+    relay =
+        new DurableRelay(
+            new JdbcRelayRepository(
+                jdbc, transactions, new RelayTextLimit(RelayPort.MAX_TEXT_BYTES)),
+            Instant::now);
+    ports = new JdbcRelayPortRepository(jdbc, transactions, relay);
+    String text = "x".repeat(RelayPort.MAX_TEXT_BYTES);
+    for (int i = 1; i <= 7; i++)
+      relay.publish(
+          topic,
+          new Relay.Draft(
+              "large-" + i, "fixture", Instant.now(), null, null, new RelayPayload.Text(text)));
+    String consumer = UUID.randomUUID().toString();
+    var request = consume("large-readers", consumer, 100);
+    var batch = ports.consume(topic, "reviewer", request);
+    assertEquals(6, batch.events().size());
+    assertEquals("6", batch.through());
+    assertEquals(batch, ports.consume(topic, "reviewer", request));
+    assertThrows(
+        CallerFault.class, () -> ports.consume(topic, "reviewer", request, RelayReadBudget.LEGACY));
+    assertEquals(batch, ports.consume(topic, "reviewer", request));
+    var inspection = new JdbcRelayLogRepository(jdbc, transactions);
+    var page = inspection.read(topic, 0, 100, "reviewer");
+    assertEquals(6, page.events().size());
+    assertEquals(6, page.events().getLast().position());
+    assertEquals(7, inspection.read(topic, 6, 100, "reviewer").events().getFirst().position());
+    ports.acknowledge(topic, "reviewer", ack(batch));
+    var tail = ports.consume(topic, "reviewer", request);
+    assertEquals(1, tail.events().size());
+    assertEquals("7", tail.through());
+    assertEquals(text, tail.events().getFirst().payload().text());
+  }
+
+  @Test
   void reading_does_not_acknowledge_and_repetition_preserves_the_whole_batch() {
     publish("first");
     publish("second");

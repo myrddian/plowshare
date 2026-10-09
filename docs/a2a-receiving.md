@@ -20,6 +20,61 @@ The adapter owns its HTTP listener, public URL and external caller credentials.
 A receiving context has an isolated persistent agent instance and a passive return
 address. Replies remain readable without waking an external sender as a model.
 
+## Context, conversation and task mapping
+
+A2A's `contextId` identifies a conversational session shared by related tasks and
+messages. The [A2A 1.0 specification, section 3.4.1](https://a2a-protocol.org/v1.0.0/specification/#341-context-identifier-semantics)
+recommends treating those interactions as one session, while leaving retained
+history, model context and expiration policy to the receiving implementation.
+Plowshare implements that continuity with a persistent receiving agent instance
+and its server-owned conversation.
+
+```mermaid
+flowchart LR
+    C["A2A contextId"] --> X["Scoped external context record"]
+    X --> I["Persistent receiving agent instance"]
+    I --> V["Plowshare conversation and retained transcript"]
+    X --> S["Passive sender / return address"]
+    C -->|groups| T1
+    C -->|groups| T2
+    T1["Task 1 / incoming message 1"] --> I
+    T2["Task 2 / incoming message 2"] --> I
+```
+
+| Identity | Mapping in the current receiver |
+| --- | --- |
+| `contextId` | Server-issued UUID naming the retained external context; resolves to the receiving instance and its conversation |
+| Plowshare conversation ID | Separate internal identity for that instance's conversation; it is not the wire `contextId` |
+| A2A task `id` / message `taskId` reference | Durable incoming task receipt tied to one accepted Plowshare message and its delivery outcome; it is not a job or conversation ID |
+| Incoming `messageId` | External message identity from which the adapter derives the SDK request UUID for duplicate-submission recovery |
+| JSON-RPC `id` | Correlates a single request and response; it does not identify retained work or a conversation |
+
+The context lookup is scoped by the authenticated Plowshare execution principal,
+configured project, selected receiving agent and authenticated external client
+alias. The caller cannot select another scope by supplying a context UUID or a
+prefixed path such as `/application/account/taskid`. An unknown or inaccessible
+context is refused. With a service token, the execution principal is
+`@service/<token UUID>`; rotating the same token preserves that identity, while
+issuing another token creates a different owner. See [service token ownership](server-administration.md).
+
+For each new message, omit `contextId` to create a new isolated conversation, or
+reuse the returned `contextId` with a new `messageId` to create another task in
+the same conversation. Completing or cancelling a task does not itself end that
+conversation. Concurrent messages in one context use normal serial message
+scheduling. Repeating the same `messageId` with the unchanged payload recovers
+the existing task instead of creating another one.
+
+The current receiver supports conversation continuity across tasks, but refuses
+messages carrying `taskId`, including follow-ups to a task awaiting approval.
+Approval remains a Plowshare operator action; see [task state and cancellation](#4-read-or-cancel-a-task).
+Relay event identities and correlation IDs serve transport and causal tracking;
+they do not replace the retained context-to-conversation or task-to-message
+mapping. The adapter uses public `IncomingClient` operations for these records.
+
+The [Relay external-work design](decisions/0008-relay-external-work-and-a2a-mapping.md)
+records the planned correlation contract, common outbound delivery and final-artifact
+mapping. Those implementation slices are separate from the current receiver behavior.
+
 ### Upgrade from the earlier receiver branch
 
 The merged migrations are V107 (Agent Cards) and V108 (message ingress). Earlier

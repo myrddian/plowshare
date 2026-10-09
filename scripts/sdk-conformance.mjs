@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import {fixtureSocket} from './sdk-packet-fixture.mjs'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
@@ -10,12 +11,15 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const fixture = JSON.parse(await readFile(root + 'test-support/contracts/sdk-conformance.json', 'utf8'))
 const cases = new Map(fixture.cases.map(value => [value.name, value]))
 const counts = new Map()
+const packetCounts = new Map()
+const packetMax = new Map()
+const largeText = '\u0001'.repeat(5 * 1024 * 1024)
 const upgrades = new Map()
 const failures = []
 const server = createServer((_, response) => response.writeHead(404).end())
 const connections = new Set()
 server.on('connection', socket => { connections.add(socket); socket.on('close', () => connections.delete(socket)) })
-const sockets = new WebSocketServer({ noServer: true })
+const sockets = new WebSocketServer({ noServer: true, handleProtocols: (protocols, request) => request.headers.authorization === 'Bearer sdk-legacy-fixture' ? false : protocols.values().next().value })
 let origin
 server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url, origin)
@@ -30,13 +34,38 @@ server.on('upgrade', (request, socket, head) => {
             socket.end(`HTTP/1.1 302 Found\r\nLocation: ${origin.replace('http:', 'ws:')}${request.url}\r\nContent-Length: 0\r\n\r\n`)
             return
         }
-        assert.equal(auth, 'Bearer sdk-fixture-token')
-        sockets.handleUpgrade(request, socket, head, ws => {
+        assert.ok(['Bearer sdk-fixture-token','Bearer sdk-legacy-fixture'].includes(auth))
+        sockets.handleUpgrade(request, socket, head, physical => {
+            physical.on('message', wire => {
+                if (physical.protocol === 'plowshare-segments-v1') {
+                    packetMax.set(session, Math.max(packetMax.get(session) ?? 0, wire.length))
+                    if(JSON.parse(wire.toString()).kind === 'transport.segment') packetCounts.set(session, (packetCounts.get(session) ?? 0) + 1)
+                }
+            })
+            const ws = fixtureSocket(physical)
             let first, second
             ws.on('message', wire => {
                 try {
                     const sent = JSON.parse(wire.toString())
                     assert.equal(sent.protocol_version, fixture.protocolVersion)
+                    if (session.startsWith('packet-large-')) {
+                        assert.equal(physical.protocol, 'plowshare-segments-v1')
+                        assert.ok(['relay.publish','relay.consume'].includes(sent.type))
+                        const key = session + '/' + sent.type
+                        counts.set(key, (counts.get(key) ?? 0) + 1)
+                        const at = '2026-10-09T00:00:00Z'
+                        let payload
+                        if(sent.type === 'relay.publish') {
+                            assert.ok(sent.payload.text === largeText,'large logical publication lost bytes')
+                            payload = {requestId:sent.payload.requestId, project:sent.payload.project, topic:sent.payload.topic, position:'1',publishedAt:at}
+                        } else {
+                            payload = {...sent.payload,status:'DATA',batchId:'22222222-2222-2222-2222-222222222222',fence:'1',through:'1',expiresAt:'2026-10-09T00:00:30Z',expiredThrough:null,
+                                events:[{position:'1',eventId:'large-event',publisher:'fixture',occurredAt:at,publishedAt:at,correlationId:null,causationId:null,causation:null,payload:{kind:'TEXT',text:largeText,schedule:null,emits:null,fireAt:null,lifecycle:null,wake:null}}]}
+                            delete payload.start
+                        }
+                        ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:{code:'OK',payload}}))
+                        return
+                    }
                     assert.equal(sent.type, 'project.list')
                     assert.equal(typeof sent.id, 'string')
                     if (session.startsWith('typed-')) {
@@ -52,6 +81,7 @@ server.on('upgrade', (request, socket, head) => {
                             ws.send(JSON.stringify({id:first.id,type:first.type,protocol_version:fixture.protocolVersion,payload:{code:'OK',payload:[project('first')]}}))
                             return
                         }
+                        if(name==='bad-packet'){physical.send('{"kind":"transport.credit","version":"1","transferId":"11111111-1111-1111-1111-111111111111","segmentNumber":1}');return}
                         if(name==='cancel'){ws.send(JSON.stringify({kind:'inbox.changed',unread:1}));return}
                         if(name==='invalid-input')throw new Error('invalid DTO reached the transport')
                         if(name==='malformed-nested'){answer({code:'OK',payload:[{...project('bad'),members:[42]}]});return}
@@ -127,6 +157,10 @@ try {
             child.on('error', reject)
             child.on('exit', code => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error(language + ' conformance failed: ' + code)) })
         })
+        assert.equal(counts.get('packet-large-'+language+'/relay.publish'),1,'large publication repeated')
+        assert.equal(counts.get('packet-large-'+language+'/relay.consume'),1,'large consume repeated')
+        assert.ok(packetCounts.get('packet-large-'+language)>480,'large message was not segmented')
+        assert.ok(packetMax.get('packet-large-'+language)<=128*1024,'packet exceeds wire allowance')
         if(language==='node') assert.equal(counts.get('node-typed/undefined'),3,'public SDK replayed work or sent invalid input')
         assert.equal(upgrades.get(language + '-redirect'), 1, language + ' followed an authenticated upgrade redirect')
         for(const name of ['timeout','disconnect','cancel'])assert.equal(counts.get(language==='node'? language+(name==='cancel'?'-cancel':'')+'/'+name:'typed-'+language+'/'+name+'/'+name),1,language+' replayed '+name+' work')

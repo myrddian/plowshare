@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { decodeReply } from './schema.ts';
+import { MAX_RELAY_TEXT_BYTES } from '../binding/relay-text.ts';
+import { decodePayload, decodeReply } from './schema.ts';
 import { request, resultOf } from './direct.ts';
 const id = '11111111-1111-1111-1111-111111111111';
 const input = {
@@ -23,6 +24,31 @@ const empty = {
   events: [],
 };
 describe('Relay topic port reply boundaries', () => {
+  it('bounds raw UTF-8 bytes rather than UTF-16 units or escaped JSON', () => {
+    const publish = {
+      project: input.project,
+      topic: input.topic,
+      requestId: id,
+      occurredAt: '2026-10-09T00:00:00Z',
+    };
+    for (const text of [
+      'x'.repeat(MAX_RELAY_TEXT_BYTES),
+      'é'.repeat(MAX_RELAY_TEXT_BYTES / 2),
+      '😀'.repeat(MAX_RELAY_TEXT_BYTES / 4),
+      '\u0001'.repeat(MAX_RELAY_TEXT_BYTES),
+    ]) {
+      expect(decodePayload('relay.publish', { ...publish, text }).text).toBe(
+        text,
+      );
+      expect(() =>
+        decodePayload('relay.publish', { ...publish, text: text + 'x' }),
+      ).toThrow();
+    }
+    for (const text of ['\ud800', 'x\udfff', 'x\0'])
+      expect(() =>
+        decodePayload('relay.publish', { ...publish, text }),
+      ).toThrow();
+  });
   it('binds consumption and acknowledgement to the requested scope and identity', () => {
     const asked = request('relay.consume', input);
     expect(resultOf(asked, { code: 'OK', payload: empty }).kind).toBe(
@@ -72,7 +98,7 @@ describe('Relay topic port reply boundaries', () => {
       causation: { rootId: id, parentId: null, depth: 0 },
       payload: {
         kind: 'TEXT',
-        text: 'message',
+        text: 'é'.repeat(MAX_RELAY_TEXT_BYTES / 2),
         schedule: null,
         emits: null,
         fireAt: null,

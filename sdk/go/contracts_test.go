@@ -3,6 +3,7 @@ package plowshare
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +76,28 @@ func TestDeploymentReceiptCoordinates(t *testing.T) {
 	} {
 		if deploymentMatches("application.activate", asked, []byte(reply)) {
 			t.Fatal("foreign receipt accepted")
+		}
+	}
+}
+
+func TestRelayPublishRawUtf8Limit(t *testing.T) {
+	const maximum = 50 * 1024 * 1024
+	for _, text := range []string{strings.Repeat("x", maximum), strings.Repeat("é", maximum/2)} {
+		asked := RelayPublishRequest{Project: "fixture", Topic: "large.events", RequestId: "11111111-1111-1111-1111-111111111111", OccurredAt: "2026-10-09T00:00:00Z", Text: text}
+		data, err := json.Marshal(asked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := project(catalog.Inputs["relay.publish"], data, true); err != nil {
+			t.Fatal(err)
+		}
+		asked.Text += "x"
+		data, err = json.Marshal(asked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := project(catalog.Inputs["relay.publish"], data, true); err == nil {
+			t.Fatal("Oversized UTF-8 text accepted")
 		}
 	}
 }

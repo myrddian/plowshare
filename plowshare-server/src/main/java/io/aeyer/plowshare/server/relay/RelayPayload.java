@@ -24,8 +24,7 @@ public sealed interface RelayPayload {
   /** Custom prose, never interpreted by the broker as instructions or encoded structured data. */
   record Text(String text) implements RelayPayload {
     public Text {
-      if (text == null || text.isBlank() || text.length() > 65536 || text.indexOf('\0') >= 0)
-        throw new IllegalArgumentException("text must be bounded nonblank content");
+      io.aeyer.plowshare.protocol.RelayPort.text(text);
     }
 
     @Override

@@ -9,6 +9,7 @@ import (
 	plowshare "io.aeyer/plowshare/sdk"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,8 @@ func main() {
 	_, err = plowshare.Connect(ctx, origin, "sdk-redirect-fixture", plowshare.Options{Session: "go-redirect", Timeout: 300 * time.Millisecond})
 	var delivery *plowshare.TransportError
 	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.NotSubmitted, "redirect followed")
+	_, err = plowshare.Connect(ctx, origin, "sdk-legacy-fixture", plowshare.Options{Session: "go-legacy-refusal"})
+	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.NotSubmitted, "unsupported transport accepted")
 	open := func(name string) *plowshare.Client {
 		client, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "typed-go/" + name, Timeout: 300 * time.Millisecond})
 		check(err == nil, "connect failed")
@@ -104,6 +107,10 @@ func main() {
 		}
 		client.Close()
 	}
+	client = open("bad-packet")
+	_, err = client.ProjectList(ctx, plowshare.ProjectListRequest{})
+	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.Unknown, "bad packet lost uncertain delivery")
+	client.Close()
 	client = open("invalid-input")
 	_, err = client.JobStatus(ctx, plowshare.JobStatusRequest{Job: "\x00bad"})
 	check(err != nil, "invalid identifier submitted")
@@ -118,5 +125,18 @@ func main() {
 	err = <-abandoned
 	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.Unknown && errors.Is(err, context.Canceled), "cancellation lost delivery")
 	client.Close()
+	large, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "packet-large-go", Timeout: 30 * time.Second})
+	check(err == nil, "large packet upgrade failed")
+	text := strings.Repeat("\u0001", 5*1024*1024)
+	id := "11111111-1111-1111-1111-111111111111"
+	publication, err := large.RelayPublish(ctx, plowshare.RelayPublishRequest{RequestId: id, Project: "fixture", Topic: "large.events", Text: text, OccurredAt: "2026-10-09T00:00:00Z"})
+	check(err == nil, "large publication failed")
+	published, err := publication.RequirePayload()
+	check(err == nil && published.Position == "1", "large publication result invalid")
+	consumed, err := large.RelayConsume(ctx, plowshare.RelayConsumeRequest{Project: "fixture", Topic: "large.events", Group: "fixture", ConsumerId: id, Start: "OLDEST_RETAINED"})
+	check(err == nil, "large response failed")
+	batch, err := consumed.RequirePayload()
+	check(err == nil && len(batch.Events) == 1 && batch.Events[0].Payload.Text.Variant2 != nil && *batch.Events[0].Payload.Text.Variant2 == text, "large typed reply lost bytes")
+	large.Close()
 	fmt.Println("Go typed SDK conformance passed")
 }

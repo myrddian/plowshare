@@ -27,10 +27,16 @@ public final class JdbcRelayRepository implements RelayRepository {
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
+  private final RelayTextLimit textLimit;
 
   public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
+    this(jdbc, transactions, RelayTextLimit.DEFAULT);
+  }
+
+  public JdbcRelayRepository(JdbcTemplate jdbc, UnitOfWork transactions, RelayTextLimit textLimit) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
+    this.textLimit = Objects.requireNonNull(textLimit, "textLimit");
   }
 
   @Override
@@ -90,7 +96,6 @@ public final class JdbcRelayRepository implements RelayRepository {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(draft, "draft");
     Instant admittedAt = RelayValues.time(publishedAt);
-    String payload = RelayPayloadCodec.write(draft.payload());
     return transactions.inTransaction(
         () -> {
           Relay.Topic topic = topic(key, true);
@@ -111,6 +116,10 @@ public final class JdbcRelayRepository implements RelayRepository {
               throw new IllegalArgumentException("Relay event ID conflicts with retained content");
             return original;
           }
+          // Check only a new append under the topic lock: a lowered deployment allowance must
+          // still recover an identical retained UUID and must never advance a refused position.
+          textLimit.validateNew(draft.payload());
+          String payload = RelayPayloadCodec.write(draft.payload());
           long position = Math.addExact(topic.lastPosition(), 1);
           changed(
               jdbc.update(
@@ -201,14 +210,21 @@ public final class JdbcRelayRepository implements RelayRepository {
           Relay.Subscription subscription = subscription(key);
           var publications =
               jdbc.query(
-                  "SELECT "
+                  // Bound database materialization before decoding large payloads. Adding per-row
+                  // metadata headroom preserves a contiguous prefix; a short page never skips work.
+                  "SELECT * FROM (SELECT candidates.*, SUM(octet_length(payload::text) + 4096)"
+                      + " OVER (ORDER BY position) AS page_bytes FROM (SELECT "
                       + PUBLICATION_COLUMNS
-                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>? ORDER BY position LIMIT ?",
+                      + " FROM relay_publications WHERE scope_key=? AND topic=? AND position>?"
+                      + " ORDER BY position LIMIT ?) candidates) bounded"
+                      + " WHERE page_bytes <= ? ORDER BY position",
                   (row, index) -> publication(row, topic),
                   RelayScopeCodec.write(key.topic()),
                   key.topic().name(),
                   subscription.seenThrough(),
-                  limit);
+                  limit,
+                  io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES
+                      - 1024 * 1024);
           return new Relay.Read(subscription, gap(topic, subscription), publications);
         });
   }

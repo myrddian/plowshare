@@ -51,42 +51,7 @@ public final class ScopedRelayInspection implements RelayInspection {
             query.after() == null ? 0 : Long.parseLong(query.after()),
             query.limit() == null ? 100 : query.limit(),
             account);
-    var events =
-        read.events().stream()
-            .map(
-                publication -> {
-                  var draft = publication.event();
-                  var payload = draft.payload();
-                  var encoded =
-                      new RelayLog.Payload(
-                          payload.kind().name(),
-                          payload instanceof RelayPayload.Text text ? text.text() : null,
-                          payload instanceof RelayPayload.ScheduleDue due ? due.schedule() : null,
-                          payload instanceof RelayPayload.ScheduleDue due ? due.emits() : null,
-                          payload instanceof RelayPayload.ScheduleDue due ? due.fireAt() : null,
-                          payload instanceof RelayPayload.Lifecycle change
-                              ? new RelayLog.Lifecycle(
-                                  change.source(),
-                                  change.subject(),
-                                  change.state(),
-                                  change.context(),
-                                  change.related())
-                              : null,
-                          payload instanceof RelayPayload.WakeRequested wake
-                              ? new RelayLog.Wake(wake.firing(), wake.target(), wake.type().name())
-                              : null);
-                  return new RelayLog.Event(
-                      Long.toString(publication.position()),
-                      draft.eventId(),
-                      draft.publisher(),
-                      draft.occurredAt(),
-                      publication.publishedAt(),
-                      draft.correlationId(),
-                      draft.causationId(),
-                      encoded,
-                      draft.causation());
-                })
-            .toList();
+    var events = RelayPortEvents.bounded(read.events());
     var subscribers =
         read.subscribers().stream()
             .map(
@@ -122,9 +87,9 @@ public final class ScopedRelayInspection implements RelayInspection {
                         branch.handlerHash()))
             .toList();
     long next =
-        read.events().isEmpty()
+        events.isEmpty()
             ? Math.max(read.after(), read.topic().expiredThrough())
-            : read.events().getLast().position();
+            : Long.parseLong(events.getLast().position());
     return new RelayLog.Page(
         new RelayLog.Scope(query.project(), query.system()),
         topic(read.topic()),

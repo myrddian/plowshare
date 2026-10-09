@@ -14,7 +14,13 @@ final class SdkJson {
 
   static ObjectMapper mapper() {
     ObjectMapper json =
-        JsonMapper.builder()
+        JsonMapper.builder(
+                com.fasterxml.jackson.core.JsonFactory.builder()
+                    .streamReadConstraints(
+                        com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                            .maxStringLength(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES)
+                            .build())
+                    .build())
             .findAndAddModules()
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)

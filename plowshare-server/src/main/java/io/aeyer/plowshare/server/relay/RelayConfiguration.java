@@ -51,8 +51,9 @@ public class RelayConfiguration {
 
   @Bean
   @DependsOnDatabaseInitialization
-  public RelayRepository relayRepository(JdbcTemplate jdbc, UnitOfWork transactions) {
-    return new JdbcRelayRepository(jdbc, transactions);
+  public RelayRepository relayRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, RelayProperties properties) {
+    return new JdbcRelayRepository(jdbc, transactions, properties.textLimit());
   }
 
   @Bean

@@ -6,9 +6,8 @@ import java.util.List;
 
 /** Converts retained broker values at the public transport boundary, preserving typed families. */
 final class RelayPortEvents {
-  // Native SDKs accept 1 MiB frames. Reserve a quarter for the batch/envelope and serializer
-  // differences; count encoded UTF-8 bytes, since character counts miss JSON control escaping.
-  private static final int EVENTS_BYTES = 768 * 1024;
+  // A maximum 5 MiB TEXT can encode to 30 MiB. Reserve 1 MiB of the 32 MiB logical message for
+  // envelope/inspection metadata; count encoded UTF-8 bytes, including control escaping.
   private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
       com.fasterxml.jackson.databind.json.JsonMapper.builder()
           .addModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
@@ -19,19 +18,28 @@ final class RelayPortEvents {
 
   /** The issued cursor must cover only the returned prefix, never records omitted for size. */
   static List<RelayLog.Event> bounded(List<Relay.Publication> publications) {
+    return bounded(publications, RelayReadBudget.SEGMENTED);
+  }
+
+  static List<RelayLog.Event> bounded(
+      List<Relay.Publication> publications, RelayReadBudget budget) {
+    return boundedEvents(publications.stream().map(RelayPortEvents::event).toList(), budget);
+  }
+
+  static List<RelayLog.Event> boundedEvents(List<RelayLog.Event> offered, RelayReadBudget budget) {
     var events = new ArrayList<RelayLog.Event>();
     int bytes = 2;
-    for (var publication : publications) {
-      var event = event(publication);
+    for (var event : offered) {
       final int encoded;
       try {
         encoded = JSON.writeValueAsBytes(event).length + 1;
       } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
         throw new IllegalStateException("Retained Relay event cannot be encoded", invalid);
       }
-      if (bytes + encoded > EVENTS_BYTES) {
+      if (bytes + encoded > budget.bytes()) {
         if (events.isEmpty())
-          throw new IllegalStateException("Retained Relay event exceeds the SDK frame budget");
+          throw new io.aeyer.plowshare.server.faults.CallerFault(
+              "Retained Relay event exceeds the transport allowance; use segmented transport");
         break;
       }
       bytes += encoded;

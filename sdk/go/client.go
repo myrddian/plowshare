@@ -75,8 +75,9 @@ type outcome struct {
 }
 
 type Options struct {
-	Session string
-	Timeout time.Duration
+	LegacyTransport bool
+	Session         string
+	Timeout         time.Duration
 }
 type response struct {
 	reply outcome
@@ -89,6 +90,7 @@ type pending struct {
 type Client struct {
 	Session   string
 	socket    *websocket.Conn
+	packets   *packets
 	timeout   time.Duration
 	mu        sync.Mutex
 	pending   map[string]pending
@@ -131,16 +133,28 @@ func Connect(ctx context.Context, origin, token string, options Options) (*Clien
 	u.RawQuery = url.Values{"session": {options.Session}}.Encode()
 	opening, stopOpening := context.WithTimeout(ctx, options.Timeout)
 	defer stopOpening()
+	var protocols []string
+	if !options.LegacyTransport {
+		protocols = []string{packetProtocol}
+	}
 	socket, _, err := websocket.Dial(opening, u.String(), &websocket.DialOptions{
-		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
-		HTTPClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		Subprotocols: protocols,
+		HTTPHeader:   http.Header{"Authorization": {"Bearer " + token}},
+		HTTPClient:   &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	})
 	if err != nil {
 		return nil, &TransportError{Delivery: NotSubmitted, Cause: err}
 	}
+	if !options.LegacyTransport && socket.Subprotocol() != packetProtocol {
+		_ = socket.CloseNow()
+		return nil, &TransportError{Delivery: NotSubmitted, Cause: errors.New("server does not support segmented transport; explicitly select legacy mode")}
+	}
 	socket.SetReadLimit(1048576)
 	lifetime, cancel := context.WithCancel(context.Background())
 	c := &Client{Session: options.Session, socket: socket, timeout: options.Timeout, pending: map[string]pending{}, pushes: make(chan ServerPush, 256), cancel: cancel, done: make(chan struct{})}
+	if !options.LegacyTransport {
+		c.packets = newPackets(socket)
+	}
 	go c.read(lifetime)
 	return c, nil
 }
@@ -151,6 +165,9 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	wire, err := json.Marshal(map[string]any{"id": id, "type": operation, "protocol_version": ProtocolVersion, "payload": json.RawMessage(body)})
 	if err != nil {
 		return outcome{}, err
+	}
+	if len(wire) > 1048576 && c.packets == nil || len(wire) > packetMessage {
+		return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: packetCapacity}
 	}
 	deadline, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -163,7 +180,15 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 	c.pending[id] = waiting
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, id); c.mu.Unlock() }()
-	if err = c.socket.Write(deadline, websocket.MessageText, wire); err != nil {
+	if c.packets != nil {
+		err = c.packets.send(deadline, wire)
+	} else {
+		err = c.socket.Write(deadline, websocket.MessageText, wire)
+	}
+	if err != nil {
+		if errors.Is(err, packetCapacity) {
+			return outcome{}, &TransportError{Delivery: NotSubmitted, Cause: err}
+		}
 		return outcome{}, &TransportError{Delivery: Unknown, Cause: err}
 	}
 	select {
@@ -179,6 +204,10 @@ func (c *Client) request(ctx context.Context, operation string, body []byte) (ou
 
 func (c *Client) read(ctx context.Context) {
 	defer func() {
+		if c.packets != nil {
+			c.packets.close()
+			_ = c.socket.CloseNow()
+		}
 		c.mu.Lock()
 		c.closed = true
 		for _, waiting := range c.pending {
@@ -196,6 +225,15 @@ func (c *Client) read(ctx context.Context) {
 		}
 		if kind != websocket.MessageText {
 			continue
+		}
+		if c.packets != nil {
+			wire, err = c.packets.receive(ctx, wire)
+			if err != nil {
+				return
+			}
+			if wire == nil {
+				continue
+			}
 		}
 		var frame map[string]json.RawMessage
 		if json.Unmarshal(wire, &frame) != nil || frame == nil {

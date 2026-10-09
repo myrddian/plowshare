@@ -134,9 +134,8 @@ public final class RelayLog {
 
     public Payload {
       RelayLog.kind(kind);
-      if (kind.equals("TEXT")
-          ? text == null || text.isBlank() || text.length() > 65536 || text.indexOf('\0') >= 0
-          : text != null) throw new IllegalArgumentException("Invalid Relay text payload");
+      if (kind.equals("TEXT")) RelayPort.text(text);
+      else if (text != null) throw new IllegalArgumentException("Invalid Relay text payload");
       if (kind.equals("LIFECYCLE") != (lifecycle != null)
           || kind.equals("WAKE_REQUESTED") != (wake != null))
         throw new IllegalArgumentException("Invalid Relay structured payload");

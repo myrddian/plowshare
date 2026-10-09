@@ -42,6 +42,7 @@ public sealed class Client : IAsyncDisposable
     private readonly Channel<ServerPush> pushes = Channel.CreateBounded<ServerPush>(new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true });
     private readonly TimeSpan timeout;
     private readonly Task reader;
+    private readonly Packets? packets;
     private bool closed;
     private bool disposed;
     private long droppedPushes;
@@ -52,10 +53,11 @@ public sealed class Client : IAsyncDisposable
     private Client(ClientWebSocket socket, HttpMessageInvoker http, string session, TimeSpan timeout)
     {
         this.socket = socket; this.http = http; Session = session; this.timeout = timeout;
+        packets = socket.SubProtocol == Packets.Protocol ? new Packets(socket) : null;
         reader = ReadAsync();
     }
 
-    public static async Task<Client> ConnectAsync(string origin, string token, string? session = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    public static async Task<Client> ConnectAsync(string origin, string token, string? session = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default, bool legacyTransport = false)
     {
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https") || url.UserInfo != "" || url.AbsolutePath != "/" || url.Query != "" || url.Fragment != "")
             throw new ArgumentException("An HTTP(S) origin without credentials, path, query or fragment is required", nameof(origin));
@@ -67,10 +69,12 @@ public sealed class Client : IAsyncDisposable
         var ws = new ClientWebSocket();
         var http = new HttpMessageInvoker(new SocketsHttpHandler { AllowAutoRedirect = false });
         ws.Options.SetRequestHeader("Authorization", "Bearer " + token);
+        if (!legacyTransport) ws.Options.AddSubProtocol(Packets.Protocol);
         using var opening = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         opening.CancelAfter(deadline);
         try { await ws.ConnectAsync(address, http, opening.Token); }
         catch { ws.Dispose(); http.Dispose(); throw new TransportException(Delivery.NotSubmitted, "Plowshare WebSocket upgrade failed; no application request was submitted"); }
+        if (!legacyTransport && ws.SubProtocol != Packets.Protocol) { ws.Abort(); ws.Dispose(); http.Dispose(); throw new TransportException(Delivery.NotSubmitted, "Server does not support segmented transport; explicitly select legacy mode"); }
         return new Client(ws, http, session, deadline);
     }
 
@@ -89,6 +93,8 @@ public sealed class Client : IAsyncDisposable
     {
         var id = Guid.NewGuid().ToString();
         var wire = JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body });
+        if (wire.Length == 0 || wire.Length > (packets is null ? 1048576 : Packets.MaxMessage)) throw new TransportException(Delivery.NotSubmitted, "Encoded request exceeds negotiated allowance");
+        using var reservation = packets?.ReserveOutgoing(wire.Length);
         var answer = new TaskCompletionSource<WireOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
         var submitted = false;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -104,7 +110,8 @@ public sealed class Client : IAsyncDisposable
                     pending.Add(id, new Pending(operation, answer));
                 }
                 submitted = true;
-                await socket.SendAsync(wire.AsMemory(), WebSocketMessageType.Text, true, deadline.Token);
+                if (packets is not null) await packets.SendAsync(wire, deadline.Token);
+                else await socket.SendAsync(wire.AsMemory(), WebSocketMessageType.Text, true, deadline.Token);
             }
             finally { writer.Release(); }
             return await answer.Task.WaitAsync(deadline.Token);
@@ -134,8 +141,10 @@ public sealed class Client : IAsyncDisposable
                     message.Write(buffer, 0, received.Count);
                 } while (!received.EndOfMessage);
                 if (received.MessageType != WebSocketMessageType.Text) continue;
+                var wire = message.ToArray();
+                if (packets is not null) { var assembled = await packets.AcceptAsync(wire, lifetime.Token); if (assembled is null) continue; wire = assembled; }
                 JsonDocument json;
-                try { json = JsonDocument.Parse(message.ToArray()); } catch (JsonException) { continue; }
+                try { json = JsonDocument.Parse(wire); } catch (JsonException) { continue; }
                 using (json)
                 {
                     var frame = json.RootElement;
@@ -162,6 +171,8 @@ public sealed class Client : IAsyncDisposable
         catch { /* Uncorrelated transport failure cannot establish a mutation outcome. */ }
         finally
         {
+            packets?.Dispose();
+            if (packets is not null) socket.Abort();
             lock (gate)
             {
                 closed = true;
@@ -175,7 +186,7 @@ public sealed class Client : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         lock (gate) { if (disposed) return; disposed = true; closed = true; }
-        lifetime.Cancel(); socket.Abort();
+        packets?.Dispose(); lifetime.Cancel(); socket.Abort();
         await reader;
         socket.Dispose(); http.Dispose(); lifetime.Dispose();
     }
