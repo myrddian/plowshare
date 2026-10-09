@@ -523,6 +523,13 @@ formatting heuristics; the original response is kept and every recovered object 
 passes the ordinary stage, evidence-ID and citation validators. No missing fields or
 closing brackets are invented, and service responses and request envelopes remain strict.
 
+Stable host failures (`E_NO_ACCESS`, `E_NO_CONNECTION`, `E_NO_EXEC` and
+`E_GENERAL_TOOL_FAILURE`) stop the script before JSON recovery, model repair or
+assessment fallback. The failure names the command and retains the original reason;
+the complete refusal remains in the command journal. Resolve the owning access or
+service problem and inspect the retained receipt before choosing a recovery action.
+A completed refusal does not become a successful result merely by resuming the run.
+
 Local recovery costs no model call. A compact review records the selected pass and
 parser errors. `jsonRecovery` holds the latest full diagnostic: command sequence, task,
 attempted text and each parser error with line/column/offset. Inputs exceeding the recovery

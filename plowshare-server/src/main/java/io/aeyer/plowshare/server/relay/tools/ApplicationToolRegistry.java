@@ -290,8 +290,8 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
         .toList();
   }
 
-  @Override
-  public Optional<ToolFailure> checkAccess(
+  /** External proxy admission; internal tools use the admitted definition's own grants. */
+  private Optional<ToolFailure> checkAccess(
       Home home, String agent, String session, String tool, UsageAttribution owner) {
     if (home == null || home.isGlobal()) return Optional.empty();
     if (owner == null || owner.accountHandle() == null || !home.project().equals(owner.projectId()))

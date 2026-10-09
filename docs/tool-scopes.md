@@ -7,6 +7,11 @@ permission boundary. An agent's `tools` list requests specific capabilities.
 itself authorizes nothing. Tool schemas come from provider discovery, independently
 of these grants.
 
+An internal tool's grant is declared in the admitted agent or conductor definition.
+External provider policy does not reauthorize that grant. Internal tools retain
+their own authenticated resource, callee, workspace and lifecycle checks; provider
+membership, assignments, schema and lease checks apply to external provider calls.
+
 ## Explicit applications
 
 An Application's root `plowshare.json` can declare:

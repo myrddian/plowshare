@@ -33,9 +33,12 @@ expire availability; withdrawal and expired broker history never revive bootstra
 schemas. Discovery alone cannot grant an agent or widen membership. Two projects
 can have different schemas for the same dynamic name.
 
-Every declared tool call rechecks account membership and current agent grants.
-Dynamic tools also recheck provider identity, schema and lease. The offered schema
-is pinned so changed declarations cannot reinterpret old arguments. Revocation
+Internal tools use the admitted definition's declared grants and retain their own
+authenticated resource, delegation, workspace and lifecycle checks. They do not
+consult the external provider registry for a second grant. External provider calls
+recheck account membership, current agent grants, provider identity, schema and
+lease. The offered schema is pinned so changed declarations cannot reinterpret old
+arguments. Revocation
 prevents the next admitted call, not an effect already admitted. Existing run
 extras retain their own lifecycle authority. Failures carry stable `E_NO_ACCESS`,
 `E_NO_CONNECTION`, `E_NO_EXEC` or `E_GENERAL_TOOL_FAILURE` codes and safe diagnostics.

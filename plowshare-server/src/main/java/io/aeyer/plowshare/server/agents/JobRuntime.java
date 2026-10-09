@@ -939,25 +939,6 @@ public final class JobRuntime {
     this.byName = Collections.unmodifiableMap(map);
   }
 
-  private String runGranted(
-      AgentTool tool,
-      String arguments,
-      Home home,
-      AgentDefinition definition,
-      String session,
-      UsageAttribution owner) {
-    // Built-ins created per run (files, results, delegation) share the same live grant check.
-    // Dynamic proxies check their pinned definition and access themselves; run extras keep their
-    // owning lifecycle authority.
-    if (knownTools().contains(tool.schema().name())
-        && definition.tools().contains(tool.schema().name())) {
-      var refused =
-          scopedTools.checkAccess(home, definition.name(), session, tool.schema().name(), owner);
-      if (refused.isPresent()) return refused.get().render();
-    }
-    return owner == null ? tool.run(arguments, home) : tool.run(arguments, home, owner);
-  }
-
   private ScopedTools scopedTools = ScopedTools.NONE;
 
   public void useScopedTools(ScopedTools tools) {
@@ -1783,18 +1764,14 @@ public final class JobRuntime {
                 "Script command " + pending.sequence(),
                 List.of(new ToolCall(id, name, pre.arguments()))));
         tool.calledAs(id);
+        // The offered set enforces the admitted definition's internal grants. Each tool owns
+        // resource/lifecycle checks; external proxies also recheck their provider authority.
         try {
           raw =
               usable(
                   transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                      ? runGranted(tool, pre.arguments(), home, definition, session, null)
-                      : runGranted(
-                          tool,
-                          pre.arguments(),
-                          home,
-                          definition,
-                          session,
-                          usageFor(transcript, definition, taken)),
+                      ? tool.run(pre.arguments(), home)
+                      : tool.run(pre.arguments(), home, usageFor(transcript, definition, taken)),
                   name);
         } catch (AgentRunTool.SubAgentFailed child) {
           // A dependency failure is an ordinary terminal child outcome, not a runtime bug.
@@ -2995,17 +2972,14 @@ public final class JobRuntime {
               // run -- judges whatever actually runs, so a rewrite is
               // checked exactly once, on what is executed.
               tool.calledAs(wanted.id());
+              // Internal grants come from the admitted definition. External provider proxies
+              // recheck their additional authority inside run, alongside tool-owned access checks.
               result =
                   usable(
                       transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                          ? runGranted(tool, preTool.arguments(), home, definition, sessionId, null)
-                          : runGranted(
-                              tool,
-                              preTool.arguments(),
-                              home,
-                              definition,
-                              sessionId,
-                              usageFor(transcript, definition, steps)),
+                          ? tool.run(preTool.arguments(), home)
+                          : tool.run(
+                              preTool.arguments(), home, usageFor(transcript, definition, steps)),
                       wanted.name());
               ToolPost postTool =
                   toolPost(
