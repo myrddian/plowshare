@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from websockets.asyncio.client import ClientConnection, connect
+from websockets.typing import Subprotocol
 
 from . import contracts
 from ._codec import (
@@ -21,6 +22,8 @@ from ._codec import (
     deployment_matches,
     encode_request,
 )
+from ._packets import PROTOCOL as PACKET_PROTOCOL
+from ._packets import Packets
 from ._protocol import CODES, PROTOCOL_VERSION
 
 T = TypeVar("T")
@@ -90,11 +93,23 @@ class Client:
         self._pushes: asyncio.Queue[contracts.ServerPush] = asyncio.Queue(256)
         self.dropped_pushes = 0
         self._reader_closed = asyncio.Event()
+        self._abort_task: asyncio.Task[None] | None = None
+        self._packets = (
+            Packets(self._abort_packets)
+            if socket.subprotocol == PACKET_PROTOCOL
+            else None
+        )
         self._reader = asyncio.create_task(self._read())
 
     @classmethod
     async def connect(
-        cls, origin: str, token: str, *, session: str | None = None, timeout: float = 30
+        cls,
+        origin: str,
+        token: str,
+        *,
+        session: str | None = None,
+        timeout: float = 30,
+        legacy_transport: bool = False,
     ) -> Client:
         import math
 
@@ -136,12 +151,21 @@ class Client:
                 open_timeout=timeout,
                 max_size=1048576,
                 max_queue=16,
+                subprotocols=None
+                if legacy_transport
+                else [Subprotocol(PACKET_PROTOCOL)],
             )
         except Exception:
             raise TransportError(
                 Delivery.NOT_SUBMITTED,
                 "Plowshare WebSocket upgrade failed; no application request was submitted",
             ) from None
+        if not legacy_transport and socket.subprotocol != PACKET_PROTOCOL:
+            await socket.close()
+            raise TransportError(
+                Delivery.NOT_SUBMITTED,
+                "server does not support segmented transport; explicitly select legacy mode",
+            )
         return cls(socket, session, timeout)
 
     async def request(self, request: contracts.Request[T]) -> Reply[T]:
@@ -157,6 +181,27 @@ class Client:
             },
             allow_nan=False,
         )
+        try:
+            encoded = (
+                self._packets.prepare(wire)
+                if self._packets is not None
+                else wire.encode("utf-8")
+            )
+        except ValueError:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "encoded request exceeds transport allowance"
+            ) from None
+        if self._packets is None and len(encoded) > 1048576:
+            raise TransportError(
+                Delivery.NOT_SUBMITTED, "encoded request exceeds legacy allowance"
+            )
+        if self._packets is not None:
+            try:
+                self._packets.reserve_outgoing(len(encoded))
+            except ValueError:
+                raise TransportError(
+                    Delivery.NOT_SUBMITTED, "packet capacity exceeded before submission"
+                ) from None
         future: asyncio.Future[_Outcome] = asyncio.get_running_loop().create_future()
         submitted = False
         try:
@@ -169,7 +214,10 @@ class Client:
                         )
                     self._pending[identity] = (operation, future)
                     submitted = True
-                    await self._socket.send(wire)
+                    if self._packets is not None:
+                        await self._packets.send(encoded, self._write_packet)
+                    else:
+                        await self._socket.send(wire)
                 outcome = await asyncio.shield(future)
                 # The reader validates structure; the submitting caller checks receipt ownership.
                 if outcome.code in {
@@ -198,16 +246,34 @@ class Client:
             ) from None
         finally:
             self._pending.pop(identity, None)
+            if self._packets is not None:
+                self._packets.release_outgoing(len(encoded))
             if not future.done():
                 future.cancel()
             elif not future.cancelled():
                 future.exception()  # Retrieve a late failure when send/timeout won the race.
+
+    async def _write_packet(self, packet: str) -> None:
+        await self._socket.send(packet)
+
+    def _abort_packets(self) -> None:
+        if self._abort_task is None:
+            self._abort_task = asyncio.create_task(
+                self._socket.close(code=1002, reason="packet transfer failed")
+            )
 
     async def _read(self) -> None:
         try:
             async for wire in self._socket:
                 if not isinstance(wire, str):
                     continue
+                if self._packets is not None:
+                    message, credit = self._packets.accept(wire)
+                    if credit is not None:
+                        await self._socket.send(credit)
+                    if message is None:
+                        continue
+                    wire = message
                 try:
                     frame = json.loads(wire)
                 except (ValueError, TypeError):
@@ -273,6 +339,9 @@ class Client:
             pass
         finally:
             self._closed = True
+            if self._packets is not None:
+                self._packets.close()
+                self._abort_packets()
             self._reader_closed.set()
             for _, answer in self._pending.values():
                 if not answer.done():
@@ -310,6 +379,8 @@ class Client:
         self._closed = True
         await self._socket.close()
         await self._reader
+        if self._abort_task is not None:
+            await self._abort_task
 
     async def __aenter__(self) -> Client:
         return self

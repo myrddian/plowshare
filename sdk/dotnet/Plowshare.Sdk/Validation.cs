@@ -65,7 +65,7 @@ internal static class Validation
                 var text = value.GetString()!;
                 invalid = Flag(schema, "web") && (!Uri.TryCreate(text, UriKind.Absolute, out var address) || address.Port < 1 || address.Port > 65535)
                     || Flag(schema, "timestamp") && !DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _)
-                    || text.Length < Bound(schema, "minLength", 0) || text.Length > Bound(schema, "maxLength", 8 * 1024 * 1024)
+                    || text.Length < Bound(schema, "minLength", 0) || text.Length > Bound(schema, "maxLength", 50 * 1024 * 1024)
                     || Flag(schema, "nonblank") && string.IsNullOrWhiteSpace(text)
                     || Flag(schema, "trimmed") && text != text.Trim()
                     || Flag(schema, "noNul") && text.Contains('\0')
@@ -73,6 +73,11 @@ internal static class Validation
                     || schema.TryGetProperty("disallow", out var disallowed) && disallowed.EnumerateArray().Any(v => v.GetString() == text)
                     || Flag(schema, "canonicalRelativePath") && !CanonicalRelativePath(text)
                     || Flag(schema, "safeRelativePath") && (text.StartsWith('/') || text.Contains('\\') || text.Split('/').Contains(".."));
+                if (schema.TryGetProperty("maxUtf8Bytes", out var byteLimit))
+                {
+                    try { invalid |= new System.Text.UTF8Encoding(false, true).GetByteCount(text) > byteLimit.GetInt32(); }
+                    catch (System.Text.EncoderFallbackException) { invalid = true; }
+                }
                 break;
             case JsonValueKind.Number:
                 if (!value.TryGetDouble(out var number)) throw new JsonException("Invalid protocol number");

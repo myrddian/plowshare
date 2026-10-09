@@ -25,6 +25,29 @@ remain private to their owning transports and codecs. Follow the
 [native SDK standard](native-sdk-standards.md) for Python, Go and .NET changes.
 Filesystem/process providers remain separate platform integrations.
 
+[Segmented SDK transport](decisions/0009-segmented-sdk-message-transport.md) is the
+default on new event connections: the upgrade must select `plowshare-segments-v1`.
+Requests, replies and pushes are assembled from 64 KiB ranges before normal typed
+decoding. Relay TEXT DTOs accept the portable 50 MiB UTF-8 ceiling; server admission
+uses `plowshare.relay.max-text-bytes` (5 MiB by default). See [Relay configuration](relay.md).
+The encoded inner message is bounded at 320 MiB; domain limits still
+apply. Unsupported negotiation fails before an application request is submitted.
+
+Explicit legacy compatibility is available through these connection options:
+
+| SDK | Legacy option |
+| --- | --- |
+| Java | `Plowshare.TransportMode.LEGACY` on the six-argument `connect` overload; `WsServerClient` accepts the mode in its third constructor argument |
+| Node | `connectPlowshare({ ..., transport: 'legacy' })` |
+| Python | `Client.connect(..., legacy_transport=True)` |
+| Go | `Options{LegacyTransport: true}` |
+| .NET | `Client.ConnectAsync(..., legacyTransport: true)` |
+
+Legacy messages retain the 1 MiB allowance. No SDK silently falls back or resends
+a mutation after negotiation or delivery failure. Neutral TypeScript consumers
+wrap their explicitly negotiated platform socket with `packetSocket`; the Node
+SDK and console/desktop compositions supply platform codecs and timers.
+
 ## Shared contract
 
 - Credentials travel in the WebSocket upgrade's bearer header; authenticated

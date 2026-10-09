@@ -106,6 +106,87 @@ class JdbcRelayDeliveryRepositoryTest {
   }
 
   @Test
+  void five_mib_raw_text_survives_publication_and_admission_and_database_refuses_overflow() {
+    String text = "é".repeat(io.aeyer.plowshare.protocol.RelayPort.DEFAULT_TEXT_BYTES / 2);
+    var large =
+        log.append(
+            topic,
+            new Relay.Draft("large", "publisher", T0, null, null, new RelayPayload.Text(text)),
+            T0);
+    deliveries.admit(first, ONE, T0);
+    var key = new RelayDeliveries.AdmissionKey(subscription, large.position());
+    deliveries.admit(key, ONE, T0);
+    assertEquals(
+        text,
+        ((RelayPayload.Text)
+                deliveries.admission(key).orElseThrow().publication().event().payload())
+            .text());
+    // Bypass Java validation to prove both new SQL constraints enforce raw UTF-8 bytes.
+    for (String table : List.of("relay_publications", "relay_admissions")) {
+      // Generate the exact portable ceiling inside PostgreSQL, avoiding a large JDBC/test buffer.
+      jdbc.update(
+          "UPDATE "
+              + table
+              + " SET payload=jsonb_build_object('text',repeat('x',52428800)) WHERE event_id='large'");
+      assertEquals(
+          52428800,
+          jdbc.queryForObject(
+              "SELECT octet_length(payload->>'text') FROM " + table + " WHERE event_id='large'",
+              Integer.class));
+      assertThrows(
+          DataIntegrityViolationException.class,
+          () ->
+              jdbc.update(
+                  "UPDATE "
+                      + table
+                      + " SET payload=jsonb_build_object('text',repeat('x',52428801)) WHERE event_id='large'"));
+      jdbc.update(
+          "UPDATE "
+              + table
+              + " SET payload=jsonb_build_object('text',?::text) WHERE event_id='large'",
+          text);
+      assertEquals(
+          text,
+          jdbc.queryForObject(
+              "SELECT payload->>'text' FROM " + table + " WHERE event_id='large'", String.class));
+    }
+  }
+
+  @Test
+  void configured_text_allowance_controls_new_appends_without_blocking_retained_recovery() {
+    var configured =
+        new JdbcRelayRepository(
+            jdbc,
+            transactions,
+            new RelayTextLimit(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES));
+    var draft =
+        new Relay.Draft(
+            "above-default",
+            "publisher",
+            T0,
+            null,
+            null,
+            new RelayPayload.Text("é".repeat(3 * 1024 * 1024)));
+    assertThrows(IllegalArgumentException.class, () -> log.append(topic, draft, T0));
+    assertEquals(1, log.topic(topic).lastPosition(), "refusal must not allocate a position");
+    var large = configured.append(topic, draft, T0);
+    assertEquals(2, large.position());
+    assertEquals(
+        large,
+        log.append(topic, draft, T0.plusSeconds(1)),
+        "lowering the allowance preserves identical UUID recovery");
+    assertEquals(large, log.retained(topic, draft.eventId()).orElseThrow());
+    var key = new RelayDeliveries.AdmissionKey(subscription, large.position());
+    deliveries.admit(first, ONE, T0);
+    deliveries.admit(key, ONE, T0);
+    assertEquals(
+        large,
+        deliveries.admission(key).orElseThrow().publication(),
+        "a retained large publication remains admissible after the policy is lowered");
+    assertEquals(3, append("after-refusal").position());
+  }
+
+  @Test
   void fan_out_pins_optional_handler_input_and_stable_branch_identities_per_subscriber() {
     var handler =
         RelayDeliveries.SourcePin.of(

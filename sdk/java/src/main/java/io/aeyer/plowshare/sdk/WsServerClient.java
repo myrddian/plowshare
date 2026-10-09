@@ -17,6 +17,7 @@ public class WsServerClient implements ServerClient, AutoCloseable {
   private static final ObjectMapper JSON = SdkJson.mapper();
   private final String origin;
   private final String bearer;
+  private final Plowshare.TransportMode transportMode;
   private final OkHttpClient uploads =
       new OkHttpClient.Builder()
           .retryOnConnectionFailure(false)
@@ -35,6 +36,11 @@ public class WsServerClient implements ServerClient, AutoCloseable {
   private boolean closed;
 
   public WsServerClient(String origin, String bearer) {
+    this(origin, bearer, Plowshare.TransportMode.SEGMENTED);
+  }
+
+  public WsServerClient(String origin, String bearer, Plowshare.TransportMode transportMode) {
+    this.transportMode = Objects.requireNonNull(transportMode);
     HttpUrl url = HttpUrl.parse(origin);
     if (url == null
         || !url.encodedPath().equals("/")
@@ -59,7 +65,14 @@ public class WsServerClient implements ServerClient, AutoCloseable {
       connection = null;
     }
     if (connection == null)
-      connection = Plowshare.connect(origin, bearer, Duration.ofMinutes(30), null);
+      connection =
+          Plowshare.connect(
+              origin,
+              bearer,
+              UUID.randomUUID().toString(),
+              Duration.ofMinutes(30),
+              null,
+              transportMode);
     return connection;
   }
 

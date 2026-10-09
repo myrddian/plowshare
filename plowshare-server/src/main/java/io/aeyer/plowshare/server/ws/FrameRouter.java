@@ -87,7 +87,7 @@ public final class FrameRouter {
    * setting, one mapper here is enough.
    */
   private static final ObjectMapper JSON =
-      new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+      FrameJson.reading().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
   private final Map<String, FrameHandler> handlers;
 

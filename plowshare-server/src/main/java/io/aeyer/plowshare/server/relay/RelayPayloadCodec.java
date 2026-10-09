@@ -15,9 +15,16 @@ import java.util.Set;
 
 /** Raw JSON is confined to this persistence boundary and never returned to broker consumers. */
 final class RelayPayloadCodec {
-  private static final int MAX_BYTES = 262144;
+  private static final int MAX_BYTES =
+      io.aeyer.plowshare.protocol.RelayPort.MAX_ENCODED_PAYLOAD_BYTES;
   private static final ObjectMapper JSON =
-      JsonMapper.builder()
+      JsonMapper.builder(
+              com.fasterxml.jackson.core.JsonFactory.builder()
+                  .streamReadConstraints(
+                      com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                          .maxStringLength(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES)
+                          .build())
+                  .build())
           .addModule(new JavaTimeModule())
           .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)

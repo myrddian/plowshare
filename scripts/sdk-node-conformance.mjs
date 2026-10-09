@@ -65,4 +65,14 @@ try {
     assert.throws(() => requirePayload(refusal), Refusal)
     await assert.rejects(typed.request('project.list', {}), error => error.code === 'INVALID_ENVELOPE')
 } finally { typed.close() }
+await assert.rejects(connectPlowshare({origin,token:'sdk-legacy-fixture',session:'node-legacy-refusal'}), error=>error.code==='NOT_SUBMITTED')
+const largeText = '\u0001'.repeat(5 * 1024 * 1024)
+const large = await connectPlowshare({origin,token:'sdk-fixture-token',session:'packet-large-node'})
+try {
+    const id='11111111-1111-1111-1111-111111111111'
+    const publication=requirePayload(await large.request('relay.publish',{requestId:id,project:'fixture',topic:'large.events',text:largeText,occurredAt:'2026-10-09T00:00:00Z'}))
+    assert.equal(publication.position,'1')
+    const batch=requirePayload(await large.request('relay.consume',{project:'fixture',topic:'large.events',group:'fixture',consumerId:id,start:'OLDEST_RETAINED'}))
+    assert.ok(batch.events[0].payload.text===largeText,'large typed reply lost bytes')
+} finally { large.close() }
 console.log('Node SDK conformance passed')

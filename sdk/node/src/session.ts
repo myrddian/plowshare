@@ -6,6 +6,7 @@ import {
   savedOrLogin,
 } from './credentials.ts';
 import { randomUUID } from 'node:crypto';
+import { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
 import { hostname } from 'node:os';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
@@ -66,7 +67,8 @@ export async function canonicalRoot(path: string): Promise<string> {
 export function socketAt(url: string, signal: AbortSignal): Promise<Socket> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const events = new URL(url).pathname === '/v1/events';
+    const socket = new WebSocket(url, events ? [PACKET_PROTOCOL] : []);
     const cleanup = (): void => {
       signal.removeEventListener('abort', aborted);
       socket.removeEventListener('open', opened);
@@ -84,8 +86,12 @@ export function socketAt(url: string, signal: AbortSignal): Promise<Socket> {
       reject(new Error('could not open socket'));
     };
     const opened = (): void => {
+      if (events && socket.protocol !== PACKET_PROTOCOL) {
+        failed();
+        return;
+      }
       cleanup();
-      resolve(socket);
+      resolve(events ? nodePacketSocket(socket) : socket);
     };
     signal.addEventListener('abort', aborted, { once: true });
     socket.addEventListener('open', opened, { once: true });

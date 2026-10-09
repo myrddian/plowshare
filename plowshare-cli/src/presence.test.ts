@@ -1,3 +1,4 @@
+import { nodePacketSocket } from 'plowshare-client-node';
 import { field, json } from './json.test-support.js';
 import { httpHandler, wireText } from './http.test-support.js';
 import assert from 'node:assert/strict';
@@ -174,14 +175,17 @@ async function fixture(
       else setTimeout(() => socket.close(1003, 'refused'), 20);
     } else {
       assert.equal(url.pathname, '/v1/events');
+      const messages = nodePacketSocket(socket);
       eventSession = url.searchParams.get('session')!;
-      socket.on('message', (bytes) => {
+      messages.addEventListener('message', (event) => {
+        assert.equal(typeof event.data, 'string');
+        const bytes = event.data as string;
         void (async () => {
-          const frame = JSON.parse(wireText(bytes)) as Frame;
+          const frame = JSON.parse(bytes) as Frame;
           frames.push(frame);
           const outcome = await script(frame);
           if (socket.readyState === WebSocket.OPEN)
-            socket.send(
+            messages.send(
               JSON.stringify({
                 id: frame.id,
                 type: frame.type,

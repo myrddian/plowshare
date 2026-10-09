@@ -33,7 +33,9 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
       boolean acknowledged) {}
 
   @Override
-  public RelayPort.Batch consume(Relay.TopicKey topic, String account, RelayPort.Consume request) {
+  public RelayPort.Batch consume(
+      Relay.TopicKey topic, String account, RelayPort.Consume request, RelayReadBudget budget) {
+    Objects.requireNonNull(budget);
     Objects.requireNonNull(request);
     RelayPort.identity(account);
     return transactions.inTransaction(
@@ -71,6 +73,9 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
                       .toList();
               if (events.size() > (request.limit() == null ? 100 : request.limit()))
                 throw new CallerFault("Relay limit is smaller than the outstanding batch");
+              if (RelayPortEvents.boundedEvents(events, budget).size() != events.size())
+                throw new CallerFault(
+                    "Transport allowance is smaller than the outstanding Relay batch; use segmented transport");
               if (!events.isEmpty())
                 return batch(
                     request,
@@ -98,7 +103,7 @@ public final class JdbcRelayPortRepository implements RelayPortRepository {
           Long gap = read.gap().map(Relay.Gap::throughInclusive).orElse(null);
           var events =
               gap == null
-                  ? RelayPortEvents.bounded(read.publications())
+                  ? RelayPortEvents.bounded(read.publications(), budget)
                   : List.<io.aeyer.plowshare.protocol.RelayLog.Event>of();
           if (gap == null && events.isEmpty())
             return batch(request, RelayPort.Status.EMPTY, null, 0, through, null, null, events);

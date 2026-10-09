@@ -34,6 +34,15 @@ foreach (var changed in new[] { """{"project":"other","requestId":"11111111-1111
     try { Codec.CorrelateDeployment("application.activate",foreign.RootElement,deploymentReceipt.RootElement); } catch (JsonException) { refused = true; }
     if (!refused) throw new Exception("Foreign deployment receipt accepted");
 }
+const int maximumRelayBytes = 50 * 1024 * 1024;
+foreach (var text in new[] { new string('x', maximumRelayBytes), new string('é', maximumRelayBytes / 2) })
+{
+    var asked = new RelayPublishRequest { Project="fixture", Topic="large.events", RequestId="11111111-1111-1111-1111-111111111111", OccurredAt="2026-10-09T00:00:00Z", Text=text };
+    Codec.Input("relay.publish", asked);
+    bool refused = false;
+    try { Codec.Input("relay.publish", asked with { Text=text + "x" }); } catch (JsonException) { refused=true; }
+    if (!refused) throw new Exception("Oversized UTF-8 Relay text accepted");
+}
 Console.WriteLine(".NET DTO contract checks passed");
 
 await ToolFacadeChecks.RunAsync();

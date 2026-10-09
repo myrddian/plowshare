@@ -1,5 +1,6 @@
+import { nodePacketSocket } from 'plowshare-client-node';
 import { run } from './run.js';
-import { httpHandler, wireText } from './http.test-support.js';
+import { httpHandler } from './http.test-support.js';
 import { record, json, list, field, text } from './json.test-support.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -19,6 +20,7 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 
 interface Frame {
@@ -120,15 +122,22 @@ async function fixture(
     }),
   );
   const sockets = new WebSocketServer({ server });
+  const eventPeers = new Map<WebSocket, ReturnType<typeof nodePacketSocket>>();
   sockets.on('connection', (socket, req) => {
     const url = new URL(req.url!, 'http://localhost');
     assert.equal(url.pathname, '/v1/events');
+    const messages = nodePacketSocket(socket);
+    eventPeers.set(socket, messages);
+    socket.on('close', () => eventPeers.delete(socket));
     assert.equal(url.searchParams.get('ticket'), 'ticket-secret');
     assert.ok(url.searchParams.get('session'));
     sessions.push(url.searchParams.get('session')!);
     assert.equal(url.searchParams.has('root'), false);
-    socket.on('message', (bytes) => {
-      const frame = JSON.parse(wireText(bytes)) as Frame;
+    messages.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string')
+        throw new Error('Non-text logical fixture message');
+      const bytes = event.data;
+      const frame = JSON.parse(bytes) as Frame;
       assert.equal(frame.protocol_version, 'plowshare-v1');
       frames.push(frame);
       seen?.(frame);
@@ -139,8 +148,8 @@ async function fixture(
       }
       if (outcome === 'hang') return;
       // Bare ended pushes never prove completion, including another job's event.
-      socket.send(JSON.stringify({ job: 'foreign-job', kind: 'ended' }));
-      socket.send(
+      messages.send(JSON.stringify({ job: 'foreign-job', kind: 'ended' }));
+      messages.send(
         JSON.stringify({
           id: frame.id,
           type: frame.type,
@@ -160,7 +169,7 @@ async function fixture(
       seen = callback;
     },
     push(value: unknown) {
-      for (const socket of sockets.clients) socket.send(JSON.stringify(value));
+      for (const peer of eventPeers.values()) peer.send(JSON.stringify(value));
     },
     disconnect() {
       for (const socket of sockets.clients) socket.close();

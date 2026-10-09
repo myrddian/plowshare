@@ -198,9 +198,22 @@ class RelayContractTest {
 
   @Test
   void byte_limits_and_errors_do_not_disclose_payload_content() {
+    // Raw bytes, not escaped JSON bytes, own the limit. The encoded form exceeds 30 MiB.
+    var largest =
+        new RelayPayload.Text(
+            "\u0001".repeat(io.aeyer.plowshare.protocol.RelayPort.DEFAULT_TEXT_BYTES));
+    String encoded = RelayPayloadCodec.write(largest);
+    assertTrue(encoded.length() > 30 * 1024 * 1024);
+    assertEquals(largest, RelayPayloadCodec.read(RelayPayload.Kind.TEXT, 1, encoded));
     assertThrows(
         IllegalArgumentException.class,
-        () -> RelayPayloadCodec.write(new RelayPayload.Text("\u0001".repeat(65536))));
+        () ->
+            RelayPayloadCodec.read(
+                RelayPayload.Kind.TEXT,
+                1,
+                "{\"text\":\""
+                    + "x".repeat(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES + 1)
+                    + "\"}"));
     String source = "{\"text\":\"private-marker\" BROKEN}";
     var failure =
         assertThrows(

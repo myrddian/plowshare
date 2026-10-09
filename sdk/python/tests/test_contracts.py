@@ -21,6 +21,28 @@ from plowshare._codec import (
 
 
 class ContractsTest(unittest.TestCase):
+    def test_relay_publish_raw_utf8_limit(self) -> None:
+        maximum = 50 * 1024 * 1024
+        for text in ("x" * maximum, "é" * (maximum // 2)):
+            asked = contracts.RelayPublishRequest(
+                project="fixture",
+                topic="large.events",
+                request_id="11111111-1111-1111-1111-111111111111",
+                occurred_at="2026-10-09T00:00:00Z",
+                text=text,
+            )
+            encode_request(asked)
+            with self.assertRaises(ValueError):
+                encode_request(
+                    contracts.RelayPublishRequest(
+                        project=asked.project,
+                        topic=asked.topic,
+                        request_id=asked.request_id,
+                        occurred_at=asked.occurred_at,
+                        text=text + "x",
+                    )
+                )
+
     def test_deployment_receipt_coordinates_are_checked(self) -> None:
         asked = {
             "project": "app",

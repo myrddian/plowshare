@@ -57,7 +57,9 @@ public final class RelayPortFrames implements FrameArea {
 
   Outcome consume(Map<String, Object> payload, Asking asking) {
     var request = decode(payload, RelayPort.Consume.class);
-    return Outcome.ok(ports.consume(asking.requireHandle(FrameTypes.RELAY_CONSUME), request));
+    return Outcome.ok(
+        ports.consume(
+            asking.requireHandle(FrameTypes.RELAY_CONSUME), request, asking.relayBudget()));
   }
 
   Outcome ack(Map<String, Object> payload, Asking asking) {

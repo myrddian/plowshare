@@ -231,7 +231,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                 async with serve(fixture.handle, "127.0.0.1", 0) as server:
                     port = server.sockets[0].getsockname()[1]
                     async with await Client.connect(
-                        f"http://127.0.0.1:{port}", "fixture-token", timeout=1
+                        f"http://127.0.0.1:{port}",
+                        "fixture-token",
+                        timeout=1,
+                        legacy_transport=True,
                     ) as client:
                         provider = ToolProvider(
                             client,
@@ -266,7 +269,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                     if lost:
                         fixture.drop = False
                         async with await Client.connect(
-                            f"http://127.0.0.1:{port}", "fixture-token", timeout=1
+                            f"http://127.0.0.1:{port}",
+                            "fixture-token",
+                            timeout=1,
+                            legacy_transport=True,
                         ) as client:
                             provider = ToolProvider(
                                 client,
@@ -309,7 +315,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                     Path(directory), configuration=CONFIG
                 ) as journal:
                     async with await Client.connect(
-                        f"http://127.0.0.1:{port}", "fixture-token", timeout=1
+                        f"http://127.0.0.1:{port}",
+                        "fixture-token",
+                        timeout=1,
+                        legacy_transport=True,
                     ) as client:
                         provider = ToolProvider(
                             client,
@@ -368,7 +377,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                     async with serve(fixture.handle, "127.0.0.1", 0) as server:
                         port = server.sockets[0].getsockname()[1]
                         async with await Client.connect(
-                            f"http://127.0.0.1:{port}", "fixture-token", timeout=1
+                            f"http://127.0.0.1:{port}",
+                            "fixture-token",
+                            timeout=1,
+                            legacy_transport=True,
                         ) as client:
                             provider = ToolProvider(
                                 client,

@@ -58,7 +58,8 @@ class ApplicationClientTest {
                     }
                   }));
       try (var connection =
-          Plowshare.connect(server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
         var client = new ApplicationClient(connection);
         var request =
             new Deploy(

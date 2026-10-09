@@ -62,7 +62,7 @@ def _decode(
             raise ValueError("Expected null")
         return None
     if kind == "string":
-        if not isinstance(value, str) or len(value) > 8 * 1024 * 1024:
+        if not isinstance(value, str) or len(value) > 50 * 1024 * 1024:
             raise ValueError("Invalid bounded protocol text")
         return value
     if kind == "number":

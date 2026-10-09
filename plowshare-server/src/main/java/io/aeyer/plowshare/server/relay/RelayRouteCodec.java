@@ -139,7 +139,11 @@ final class RelayRouteCodec {
     root.put("correlationId", input.event().correlationId());
     root.put("causationId", input.event().causationId());
     root.set("causation", JSON.valueToTree(input.event().causation()));
-    root.set("payload", parse(RelayPayloadCodec.write(input.event().payload()), 262144));
+    root.set(
+        "payload",
+        parse(
+            RelayPayloadCodec.write(input.event().payload()),
+            io.aeyer.plowshare.protocol.RelayPort.MAX_ENCODED_PAYLOAD_BYTES));
     return root.toString();
   }
 

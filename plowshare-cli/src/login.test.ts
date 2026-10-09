@@ -1,5 +1,6 @@
+import { nodePacketSocket } from 'plowshare-client-node';
 import { connectionDirectory } from 'plowshare-client-node/connections';
-import { httpHandler, wireText } from './http.test-support.js';
+import { httpHandler } from './http.test-support.js';
 import { record, text, field, json } from './json.test-support.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -122,10 +123,14 @@ async function fixture(flagged = false) {
     }),
   );
   const sockets = new WebSocketServer({ server });
-  sockets.on('connection', (socket) =>
-    socket.on('message', (bytes) => {
-      const frame = json(wireText(bytes));
-      socket.send(
+  sockets.on('connection', (socket) => {
+    const messages = nodePacketSocket(socket);
+    messages.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string')
+        throw new Error('Non-text logical fixture message');
+      const bytes = event.data;
+      const frame = json(bytes);
+      messages.send(
         JSON.stringify({
           id: field(frame, ['id']),
           type: field(frame, ['type']),
@@ -133,8 +138,8 @@ async function fixture(flagged = false) {
           payload: { code: 'OK', payload: replies[text(frame, ['type'])] },
         }),
       );
-    }),
-  );
+    });
+  });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {

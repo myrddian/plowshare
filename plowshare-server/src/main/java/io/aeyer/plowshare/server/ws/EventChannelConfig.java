@@ -139,6 +139,27 @@ public class EventChannelConfig implements WebSocketConfigurer {
    */
   private final Watchers watchers;
 
+  @org.springframework.beans.factory.annotation.Value(
+      "${plowshare.transport.packet-memory-bytes:2147483648}")
+  private long packetMemoryBytes = 2147483648L;
+
+  /**
+   * The fixed wire ceiling must remain readable after a deployment lowers its admission policy.
+   * Reserve capacity is not eagerly allocated. Explicit budgets must fit one complete portable
+   * message, its conversion copies and completed-ID bookkeeping before startup succeeds.
+   */
+  long resolvedPacketMemoryBytes() {
+    long minimum =
+        io.aeyer.plowshare.protocol.transport.SegmentedMessages.MAX_MESSAGE_BYTES * 3L
+            + 1024 * 1024;
+    if (packetMemoryBytes < minimum)
+      throw new IllegalArgumentException(
+          "packet-memory-bytes must accommodate the portable message ceiling and its copies");
+    return packetMemoryBytes;
+  }
+
+  private io.aeyer.plowshare.protocol.transport.PacketBudget packetBudget;
+
   private ObjectProvider<UsageSubscriptions> usageSubscriptions;
 
   @org.springframework.beans.factory.annotation.Autowired
@@ -197,6 +218,10 @@ public class EventChannelConfig implements WebSocketConfigurer {
     EventChannelHandler channel =
         new EventChannelHandler(
             sessions, () -> routers.getIfAvailable(EventChannelConfig::routesNothing), watchers);
+    if (packetBudget == null)
+      packetBudget =
+          new io.aeyer.plowshare.protocol.transport.PacketBudget(resolvedPacketMemoryBytes());
+    channel.usePacketBudget(packetBudget);
     if (usageSubscriptions != null) usageSubscriptions.ifAvailable(channel::useUsageSubscriptions);
     return channel;
   }

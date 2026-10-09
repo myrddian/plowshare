@@ -59,7 +59,7 @@ class OutgoingReceiptsTest {
                     }
                   }
                 }));
-    return Plowshare.connect(
+    return LegacyFixture.connect(
         server.url("/").toString(), "fixture", Duration.ofSeconds(2), push -> {});
   }
 

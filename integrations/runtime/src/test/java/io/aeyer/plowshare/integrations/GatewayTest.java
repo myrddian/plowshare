@@ -60,7 +60,12 @@ class GatewayTest {
       try (Gateway gateway =
           new Gateway.Sdk(
               Plowshare.connect(
-                  server.url("/").toString(), "fixture-token", Duration.ofSeconds(3), null))) {
+                  server.url("/").toString(),
+                  "fixture-token",
+                  "legacy-gateway-fixture",
+                  Duration.ofSeconds(3),
+                  null,
+                  Plowshare.TransportMode.LEGACY))) {
         gateway.advertise("home", List.of("ha-house"));
         assertTrue(gateway.receipt(UUID.randomUUID()).isEmpty());
         assertEquals(

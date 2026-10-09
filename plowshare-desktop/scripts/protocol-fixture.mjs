@@ -1,3 +1,4 @@
+import {fixtureSocket} from '../../scripts/sdk-packet-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -201,7 +202,8 @@ export async function protocolFixture(options = {}) {
     const timer = setTimeout(() => { timers.delete(timer); finish(job); }, 15000); timers.add(timer);
     return job;
   }
-  wss.on('connection', (connection, req) => {
+  wss.on('connection', (physical, req) => {
+    const connection = fixtureSocket(physical);
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/v1/files' && url.searchParams.get('ticket') === 'fixture-ticket') {
       const claim = Object.fromEntries(['session', 'project', 'machine', 'root'].map(key => [key, url.searchParams.get(key)]));

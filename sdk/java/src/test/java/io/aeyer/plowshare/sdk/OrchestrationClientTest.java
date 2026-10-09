@@ -58,7 +58,8 @@ class OrchestrationClientTest {
                     }
                   }));
       try (var connection =
-          Plowshare.connect(server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
         var sdk = new OrchestrationClient(connection);
         IOException failure =
             assertThrows(
