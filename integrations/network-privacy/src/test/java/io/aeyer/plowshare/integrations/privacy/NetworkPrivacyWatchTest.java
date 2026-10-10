@@ -209,4 +209,43 @@ class NetworkPrivacyWatchTest {
       assertEquals("investigate_network", routes.getFirst().work().definition());
     }
   }
+
+  @Test
+  void operator_withheld_investigation_routes_no_work_and_malformed_decision_is_refused()
+      throws Exception {
+    var pin =
+        RelayDeliveries.SourcePin.of(
+            "privacy/routes.js", Files.readString(application.resolve("Relay/privacy/routes.js")));
+    try (var program = new GraalRelayRouteProgram()) {
+      var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
+      var subscription = relay.manifest().subscriptions().getFirst();
+      for (String requested : java.util.List.of("false", "\"false\"")) {
+        String completion =
+            """
+          {"version":1,"scan_id":"00000000-0000-0000-0000-000000000001",
+          "revision":"00000000-0000-0000-0000-000000000002","collector":"home-network",
+          "mode":"fixture","changes":["Baseline collection"],"issues":[],
+          "investigation":{"requested":%s,"reason":"operator policy","decided_at":"2026-01-01T00:00:00Z"}}
+          """
+                .formatted(requested);
+        var input =
+            new Relay.Publication(
+                new Relay.TopicKey(1, subscription.topic()),
+                1,
+                Instant.EPOCH,
+                new Relay.Draft(
+                    "fixture",
+                    "sdk:collector",
+                    Instant.EPOCH,
+                    null,
+                    null,
+                    new RelayPayload.Text(completion)));
+        if (requested.equals("false")) {
+          assertTrue(program.route(relay, subscription, input).isEmpty());
+        } else {
+          assertThrows(RuntimeException.class, () -> program.route(relay, subscription, input));
+        }
+      }
+    }
+  }
 }

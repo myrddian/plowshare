@@ -23,6 +23,7 @@ from .contracts import (
 )
 from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
+from .operator_state import OperatorStore
 from .ports import PrivacyPort, evidence_name
 
 
@@ -34,6 +35,20 @@ class ExternalRequests(Protocol):
     async def poll(self) -> int | None: ...
 
 
+class ActiveRequests:
+    """Composition-owned dispatch target, replaced only while the worker is stopped.
+
+    A fresh connection uses the same durable provider journal. Replacing the
+    transport does not retry an invocation or create another execution owner.
+    """
+
+    def __init__(self, target: ExternalRequests):
+        self.target = target
+
+    async def poll(self) -> int | None:
+        return await self.target.poll()
+
+
 class Worker:
     def __init__(
         self,
@@ -41,7 +56,12 @@ class Worker:
         port: PrivacyPort,
         receipts: Receipts,
         collector: Collector,
+        operator: OperatorStore | None = None,
     ):
+        self.operator = operator
+        self.recovery_requested = asyncio.Event()
+        self.last_contact: str | None = None
+        self.failure_kind: str | None = None
         self.config = config
         self.port = port
         self.receipts = receipts
@@ -186,6 +206,16 @@ class Worker:
                 receipt = replace(receipt, phase="uploaded", revision=retained.revision)
                 self.receipts.save(receipt)
             if receipt.phase == "uploaded":
+                if self.operator is not None and receipt.investigation is None:
+                    if receipt.evidence is None:
+                        raise ValueError("Missing retained evidence")
+                    receipt = replace(
+                        receipt,
+                        investigation=self.operator.decide(
+                            receipt.evidence, self.receipts.all()
+                        ),
+                    )
+                    self.receipts.save(receipt)
                 self.state = "publishing"
                 self.receipts.save(replace(receipt, phase="publishing"))
                 self.operation = "relay.publish (" + self.config.result_topic + ")"
@@ -219,8 +249,20 @@ class Worker:
                     "scan_id": receipt.scan_id,
                     "revision": receipt.revision,
                     "mode": receipt.evidence.mode,
-                    "changes": receipt.evidence.changes,
+                    "changes": receipt.evidence.changes
+                    if receipt.investigation is None or receipt.investigation.requested
+                    else (),
+                    **(
+                        {"observed_changes": receipt.evidence.changes}
+                        if receipt.investigation
+                        else {}
+                    ),
                     "issues": receipt.evidence.issues,
+                    **(
+                        {"investigation": asdict(receipt.investigation)}
+                        if receipt.investigation
+                        else {}
+                    ),
                 },
                 allow_nan=False,
             ),
@@ -252,6 +294,10 @@ class Worker:
         # SDK submissions may overlap a scan; journal writes themselves are synchronous.
         # Holding the collection lock here would make the UI wait for every TCP timeout.
         async with self.request_lock:
+            if self.state == "attention_required":
+                raise ValueError(
+                    "Check retained work and resolve the stopped collector before requesting another scan"
+                )
             if not self.config.collection.enabled:
                 raise ValueError(
                     "Collection is disabled; choose devices in the dashboard first"
@@ -342,6 +388,8 @@ class Worker:
                     self.operation = "external tool provider"
                     await external.poll()
                 await self.poll()
+                self.last_contact = utc_now()
+                self.failure_kind = None
             except (
                 ReconciliationRequired,
                 ToolAttention,
@@ -351,6 +399,7 @@ class Worker:
                 OSError,
             ) as error:
                 # Keep the dashboard available; reconnection and mutation replay are explicit.
+                self.failure_kind = type(error).__name__
                 self.state = "attention_required"
                 self.detail = (
                     refusal_detail(error, self.operation)
@@ -361,8 +410,25 @@ class Worker:
                         + ")."
                     )
                 )
-                await stop.wait()
-                return
+                stopped = asyncio.create_task(stop.wait())
+                resumed = asyncio.create_task(self.recovery_requested.wait())
+                try:
+                    await asyncio.wait(
+                        (stopped, resumed), return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    for pending in (stopped, resumed):
+                        pending.cancel()
+                    await asyncio.gather(stopped, resumed, return_exceptions=True)
+                self.recovery_requested.clear()
+                if stop.is_set():
+                    return
+                self.state = (
+                    "ready"
+                    if self.config.collection.enabled
+                    else "configuration_required"
+                )
+                continue
             try:
                 await asyncio.wait_for(stop.wait(), 2)
             except TimeoutError:

@@ -6,6 +6,8 @@ Use the [guided start and dashboard](SETUP.md#start-and-use-the-dashboard) to in
 open the dashboard and select devices. Later starts use the generated launcher
 in your private setup folder. The [Application README](network-privacy-watch/README.md)
 explains the platform workflow; this guide covers integration configuration and recovery.
+The [operator guide](OPERATIONS.md) covers health, device history, expected findings,
+investigation limits, browser alerts, background services and reviewed schedule updates.
 
 The Plowshare Application contains the manifest, agents, orchestrations and Relay
 definitions that Plowshare runs. The collector and its web interface are an

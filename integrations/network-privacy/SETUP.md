@@ -38,7 +38,9 @@ The helper also creates **Start Network Privacy Watch.command** on macOS, or
 Open that launcher next time. It contains the interpreter and configuration path,
 with no credentials. Double-clicking it while the updated collector is running
 reopens that dashboard. Keep its Python environment installed. Closing the running
-terminal stops the collector; the launcher is not a background-service installer.
+terminal stops a foreground collector. To keep collecting after closing the terminal,
+enroll the optional [background service](OPERATIONS.md#keep-the-collector-running-in-the-background).
+Once enrolled, the launcher opens the running service dashboard.
 
 In the dashboard:
 
@@ -48,6 +50,8 @@ In the dashboard:
    You can also enter explicit private IPv4 addresses. The scope is limited to
    32 devices and eight ports; discovery checks at most 256 addresses.
 3. Choose **Request a scan**. Results refresh automatically as evidence is retained.
+4. Use the health checklist, optional Pi-hole connection, investigation preferences
+   and reviewed schedule controls to [finish setup in the dashboard](OPERATIONS.md#finish-setup-in-the-dashboard).
 
 There is no dashboard-token copying. `start` generates a new dashboard credential
 for this process and opens the browser with a fragment handoff, removed immediately
@@ -71,10 +75,15 @@ channel that refuses access still stops collection and shows the operation, refu
 code and available server reason in the private dashboard.
 
 The packaged server schedule remains paused until you enable it as its administrator.
+The dashboard provides a reviewed Application revision for frequency and pause changes;
+see [schedule controls](OPERATIONS.md#finish-setup-in-the-dashboard).
 Agent investigations also need service-owned Relay processing as described below.
 The dashboard can collect and retain evidence before either is enabled.
 
 ## Connect Pi-hole v6
+
+The dashboard can [test and save Pi-hole while the collector is idle](OPERATIONS.md#finish-setup-in-the-dashboard).
+The following offline alternative remains available.
 
 After the first guided setup, add Pi-hole to the collector on the machine that
 can reach its API. You can also use device names without Pi-hole: enter one

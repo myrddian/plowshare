@@ -7,6 +7,12 @@ let selected = null;
 let refreshPending = false;
 let settingsLoaded = false;
 let settingsPending = false;
+let overview = null;
+let preferencesLoaded = false;
+let scheduleDraft = null;
+let notified = null;
+let deviceSignature = null;
+let findingSignature = null;
 const byId = (name) => document.getElementById(name);
 const phases = {queued:'Queued',collected:'Collected',uploading:'Upload outcome pending',uploaded:'Evidence retained',publishing:'Publication outcome pending',done:'Evidence published'};
 
@@ -70,6 +76,34 @@ async function showEvidence(scanId) {
   panel.append(element('p', result.revision || 'Not yet retained in Plowshare.'));
   panel.append(element('h3', 'Observations'));
   panel.append(element('pre', JSON.stringify(evidence.snapshot, null, 2)));
+  if (overview) {
+    const scan = (await api('/api/scans')).find(value => value.scan_id === scanId);
+    if (scan?.investigation) panel.append(element('p', `Investigation: ${scan.investigation.reason}`));
+    const manual = overview.investigations.find(value => value.scan_id === scanId && value.phase !== 'refused');
+    if (manual) panel.append(element('p', `Explicit investigation: ${manual.phase}${manual.run_id ? ` · ${manual.run_id}` : ' · inspect its retained receipt'}`));
+    else if (scan?.phase === 'done' && scan.investigation?.requested === false) {
+      const investigate = element('button', 'Investigate this evidence');
+      investigate.addEventListener('click', async () => {
+        if (investigate.dataset.reviewed !== 'yes') {
+          investigate.dataset.reviewed = 'yes'; investigate.textContent = 'Confirm one explicit investigation';
+          panel.append(element('p', 'This starts one investigation of the retained evidence and may incur model costs beyond the automatic limit. Confirm above to submit it.'));
+          return;
+        }
+        investigate.disabled = true;
+        try {await api('/api/investigations', {method:'POST', body:JSON.stringify({scan_id:scanId, request_id:crypto.randomUUID()})}); await refresh(); await showEvidence(scanId);} catch (error) {notice(error.message, true);}
+      });
+      panel.append(investigate);
+    }
+  }
+  const reports = await api('/api/reports');
+  const associated = reports.filter(value => (value.inputs || []).includes(result.revision));
+  panel.append(element('h3', 'Reports citing this evidence'));
+  if (!associated.length) panel.append(element('p', 'No retained report cites this revision yet.'));
+  for (const report of associated) {
+    const button = element('button', report.title, 'entry');
+    button.addEventListener('click', () => showReport(report.revision).catch(error => notice(error.message, true)));
+    panel.append(button);
+  }
 }
 async function showReport(revision) {
   const result = await api(`/api/reports/${encodeURIComponent(revision)}`);
@@ -131,6 +165,7 @@ async function refresh() {
       byId('save-monitoring').disabled = !settings.editable;
       byId('settings-detail').textContent = settings.detail;
     }
+    try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message));}
     byId('dashboard').hidden = false;
     byId('connect').hidden = true;
     const unknown = status.requests.find(request => request.state === 'pending');
@@ -149,7 +184,10 @@ byId('connect').addEventListener('submit', event => {
 byId('refresh').addEventListener('click', () => {refresh().catch(error => notice(error.message, true));});
 byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
-  bearer = ''; authenticated = false; selected = null; settingsLoaded = false;
+  bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
+  for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
+  for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
+  byId('schedule-draft').hidden = true;
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
   byId('dashboard').hidden = true; byId('connect').hidden = false;
@@ -262,5 +300,119 @@ connectLocal().catch(error => {
   if (handoff) notice(error.message, true);
 });
 setInterval(() => {
-  if ((bearer || authenticated) && !document.hidden && !settingsPending) refresh().catch(error => notice(error.message, true));
+  if ((bearer || authenticated) && (!document.hidden || overview?.preferences.browser_notifications) && !settingsPending) refresh().catch(error => notice(error.message, true));
 }, 5000);
+
+function renderOverview(value) {
+  const health = value.health;
+  byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
+  const grid = byId('health'); grid.replaceChildren();
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Next scheduled scan', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not registered'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}` : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
+  for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
+  grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
+  byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
+  byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
+  const runs = health.runs.map(run => `${run.state} · ${run.id}`);
+  if (runs.length) listItems(byId('recovery'), 'Recent project investigations', runs);
+  const nextDeviceSignature = JSON.stringify(value.devices);
+  if (nextDeviceSignature !== deviceSignature) {
+  deviceSignature = nextDeviceSignature;
+  const cards = byId('device-cards'); cards.replaceChildren();
+  if (!value.devices.length) cards.append(element('p', 'Choose your devices below to begin.'));
+  for (const device of value.devices) {
+    const card = element('article', undefined, 'device-card');
+    card.append(element('h3', device.name), element('p', device.address));
+    card.append(element('p', device.identity ? `${device.identity.mac || device.identity.device_id}${device.identity.vendor ? ' · ' + device.identity.vendor : ''}` : 'Address only; physical identity not observed', 'hint'));
+    card.append(element('p', device.last_seen ? `Last evidence ${new Date(device.last_seen).toLocaleString()}` : 'Awaiting first evidence', 'hint'));
+    card.append(element('p', device.services.map(item => `${item.port}: ${item.status}`).join(' · '), 'hint'));
+    const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
+    const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
+    for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
+    card.append(history); cards.append(card);
+  }
+  }
+  const nextFindingSignature = JSON.stringify(value.findings);
+  if (nextFindingSignature !== findingSignature) {
+  findingSignature = nextFindingSignature;
+  const findings = byId('findings'); findings.replaceChildren();
+  if (!value.findings.length) findings.append(element('p', 'No comparison findings yet. A baseline establishes the first observations.', 'empty'));
+  for (const finding of value.findings) {
+    const card = element('article', undefined, 'finding'); card.append(element('h3', finding.title), element('p', finding.explanation, 'hint'));
+    const open = element('button', 'Read evidence', 'secondary'); open.addEventListener('click', () => showEvidence(finding.scan_id).catch(error => notice(error.message, true)));
+    const acknowledge = element('button', finding.expected ? 'Expected · undo' : 'Mark expected', 'secondary');
+    acknowledge.addEventListener('click', async () => {acknowledge.disabled = true; try {await api('/api/expected', {method:'POST', body:JSON.stringify({id:finding.id,expected:!finding.expected})}); await refresh();} catch (error) {notice(error.message,true); acknowledge.disabled = false;}});
+    const actions = element('div', undefined, 'actions'); actions.append(open, acknowledge); card.append(actions); findings.append(card);
+  }
+  }
+  if (!preferencesLoaded) {
+    byId('automatic').checked = value.preferences.automatic_investigations;
+    byId('daily-limit').value = value.preferences.daily_limit;
+    byId('cooldown').value = value.preferences.cooldown_minutes;
+    byId('notifications').checked = value.preferences.browser_notifications;
+    if (health.schedule) {byId('zone').value = health.schedule.zone; byId('schedule-paused').checked = health.schedule.paused;}
+    preferencesLoaded = true;
+  }
+  const latest = value.findings.find(item => !item.expected);
+  if (latest && notified !== null && notified !== latest.scan_id && value.preferences.browser_notifications && globalThis.Notification?.permission === 'granted') new Notification('Network Privacy Watch', {body:'New observations are ready for review in your private dashboard.'});
+  if (latest) notified = latest.scan_id;
+}
+byId('preferences-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    let notificationHint = '';
+    if (byId('notifications').checked && globalThis.Notification && Notification.permission !== 'granted') await Notification.requestPermission();
+    if (byId('notifications').checked && (!globalThis.Notification || Notification.permission !== 'granted')) {byId('notifications').checked = false; notificationHint = ' Browser notifications are unavailable or were declined; findings remain in the dashboard.';}
+    await api('/api/preferences', {method:'POST', body:JSON.stringify({automatic_investigations:byId('automatic').checked,daily_limit:Number(byId('daily-limit').value),cooldown_minutes:Number(byId('cooldown').value),browser_notifications:byId('notifications').checked})});
+    await refresh(); notice('Preferences saved. Existing evidence and publication decisions are unchanged.' + notificationHint);
+  } catch (error) {notice(error.message,true);}
+});
+async function piholeConnection(save) {
+  const password = byId('pihole-password').value; byId('pihole-password').value = '';
+  try {
+    const result = await api('/api/pihole', {method:'POST', body:JSON.stringify({origin:byId('pihole-origin').value.trim(),password,save})});
+    byId('pihole-detail').textContent = `${result.connected ? (result.saved ? 'Connection saved.' : 'Connection read succeeded. Enter the password again to save.') : 'Connection check failed.'} ${result.issues.join(' ')}`;
+    if (result.saved) {settingsLoaded = false; await refresh();}
+  } catch (error) {byId('pihole-detail').textContent = error.message;}
+}
+byId('pihole-test').addEventListener('click', () => piholeConnection(false));
+byId('pihole-form').addEventListener('submit', event => {event.preventDefault(); piholeConnection(true);});
+byId('recover').addEventListener('click', async () => {
+  byId('recover').disabled = true;
+  try {await api('/api/recovery', {method:'POST', body:'{}'}); await refresh(); notice('Retained receipts checked. Collection can resume; no uncertain effect was resent.');} catch (error) {notice(error.message,true);} finally {byId('recover').disabled = false;}
+});
+byId('check-moves').addEventListener('click', async () => {
+  byId('check-moves').disabled = true;
+  try {
+    const moves = await api('/api/device-moves', {method:'POST', body:'{}'}); byId('moves').replaceChildren();
+    if (!moves.length) byId('moves').append(element('p', 'No fresh reassociation found in the latest discovery. Run Find devices before checking again.', 'hint'));
+    for (const move of moves) {
+      const button = element('button', `Confirm ${move.device_id}: ${move.old} → ${move.new}`, 'entry');
+      button.addEventListener('click', async () => {button.disabled = true; try {await api('/api/device-moves/accept', {method:'POST', body:JSON.stringify(move)}); settingsLoaded = false; await refresh(); byId('moves').replaceChildren();} catch (error) {notice(error.message,true); button.disabled = false;}}); byId('moves').append(button);
+    }
+  } catch (error) {notice(error.message,true);} finally {byId('check-moves').disabled = false;}
+});
+byId('schedule-form').addEventListener('submit', async event => {
+  event.preventDefault(); scheduleDraft = null; byId('schedule-draft').hidden = true;
+  const password = byId('administrator-password').value; byId('administrator-password').value = '';
+  try {
+    scheduleDraft = await api('/api/schedule/review', {method:'POST', body:JSON.stringify({preset:byId('frequency').value,zone:byId('zone').value.trim(),paused:byId('schedule-paused').checked,password})});
+    byId('schedule-review').textContent = `${scheduleDraft.paused ? 'Paused' : 'Enabled'} · ${scheduleDraft.cron} · ${scheduleDraft.zone}. Based on revision ${scheduleDraft.expected_revision}. Source digest ${scheduleDraft.source_digest}. Enter the administrator password again to deploy.`;
+    byId('schedule-store').replaceChildren(...scheduleDraft.stores.map(store => {const option = element('option', store); option.value = store; return option;}));
+    const sources = element('details'); sources.append(element('summary', 'Review full Application source'));
+    for (const file of scheduleDraft.sources) {sources.append(element('h3', file.path), element('pre', file.text));}
+    byId('schedule-review').append(sources);
+    byId('schedule-draft').hidden = false;
+  } catch (error) {notice(error.message,true);}
+});
+byId('deploy-schedule').addEventListener('click', async () => {
+  if (!scheduleDraft || !byId('administrator-password').value) {notice('Review a revision and enter the administrator password to deploy.',true); return;}
+  const password = byId('administrator-password').value; byId('administrator-password').value = ''; byId('deploy-schedule').disabled = true;
+  try {const result = await api('/api/schedule/deploy', {method:'POST',body:JSON.stringify({review_id:scheduleDraft.id,store:byId('schedule-store').value,password})}); scheduleDraft = null; byId('schedule-draft').hidden = true; await refresh(); notice(`Application revision ${result.revision} retained. Schedule activation may take a moment.`);} catch (error) {notice(error.message,true);} finally {byId('deploy-schedule').disabled = false;}
+});
+
+byId('check-deployment').addEventListener('click', async () => {
+  const password = byId('administrator-password').value; byId('administrator-password').value = '';
+  if (!password) {notice('Enter the configured deployment administrator password to inspect its retained receipt.', true); return;}
+  byId('check-deployment').disabled = true;
+  try {const result = await api('/api/schedule/reconcile', {method:'POST', body:JSON.stringify({password})}); await refresh(); notice(result.revision ? `Confirmed active revision ${result.revision}. No deployment was resent.` : 'No unsettled schedule deployment.');} catch (error) {notice(error.message, true);} finally {byId('check-deployment').disabled = false;}
+});
