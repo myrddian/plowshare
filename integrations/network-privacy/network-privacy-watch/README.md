@@ -20,10 +20,12 @@ Application's `reasoning` binding.
    observation export from an external monitoring system.
 3. The collector compares observations, uploads evidence to the project's
    information store and publishes a completion event with retained identities.
-4. Relay starts an investigation for a baseline, changed observations or a
-   coverage gap. A coordinator works with an analyst and reviewer to retain a
+4. Relay starts an investigation for a baseline or changed observations when the
+   collector's operator admission policy permits it. Coverage changes remain findings;
+   unchanged gaps remain visible evidence. A coordinator works with an analyst and reviewer to retain a
    draft report linked to its source evidence.
-5. The dashboard displays collection receipts, observations, gaps and related
+5. The dashboard displays health, device history, expected findings, collection
+   receipts, observations, gaps and related
    reports. Agents also get granted named tools for requesting a scan and reading
    its scope, status, evidence and DNS destinations. Operator labels and observed
    device identities accompany evidence, with explicit gaps for unavailable data.
@@ -138,3 +140,21 @@ text to the reviewer and assembles the draft from the actual review. Agents supp
 judgments within the shared allowance. Missing assessments, unavailable evidence
 and invalid tool results stop work explicitly. The collector remains an external
 Python integration.
+
+Operator admission preferences and acknowledgements live in the external collector,
+separately from evidence. New completion decisions are immutable once retained;
+withheld changes never remove original observations. See the
+[operator guide](../OPERATIONS.md) for background operation, reviewed Application
+schedule updates, explicit investigation receipts and recovery.
+
+Operator device profiles are project Information sources named
+`network-privacy-device/<UUID>.md`. Existing Information grants let agents read
+relevant current revisions as context; agents do not edit those profiles. The
+external dashboard creates/revises them through the public scoped SDK. See the
+[operator guide](../OPERATIONS.md#device-knowledge-base) and [capability gaps](../GAPS.md).
+
+Shared privacy issues use `network-privacy-issue/<UUID>.md` Markdown resources in
+project Information. Profiles pin reviewed issue revisions and retain per-device
+applicability, mitigation progress and supporting evidence. Existing read grants
+let agents use that context without adding model stages or enforcement privileges.
+Plans remain advisory. See [the mitigation guide](../OPERATIONS.md#privacy-issues-and-network-mitigations).

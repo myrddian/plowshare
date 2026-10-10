@@ -526,7 +526,14 @@ async def wait_for_schedule(setup: Setup, client: SetupClient) -> None:
     )
 
 
-async def serve(setup: Setup, bind: str, port: int, *, automatic: bool = False) -> None:
+async def serve(
+    setup: Setup,
+    bind: str,
+    port: int,
+    *,
+    automatic: bool = False,
+    open_browser: bool = True,
+) -> None:
     """Load the private service credential into this collector process, never the browser."""
     if not (setup.output / "installation-completed").is_file():
         raise SetupProblem(
@@ -589,7 +596,10 @@ async def serve(setup: Setup, bind: str, port: int, *, automatic: bool = False) 
                 tool_catalog_renew_seconds=100,
                 bind=bind,
                 port=port,
-                open_browser=automatic,
+                open_browser=automatic and open_browser,
+                dashboard_handoff=automatic,
+                deployment_controls=True,
+                credential_expires_at=text(identity["expiresAt"], 128),
                 dashboard_settings=True,
             )
         )
@@ -641,6 +651,18 @@ async def start(setup: Setup, bind: str, port: int) -> None:
     if await reopen(setup.collector.parent / "dashboard-runtime.json"):
         print("Opened the running Network Privacy Watch dashboard.")
         return
+    if (setup.collector.parent / "collector-service.json").exists():
+        from .service import CollectorService, SystemProcesses
+
+        CollectorService(setup.collector.parent, SystemProcesses()).manage("start")
+        for _ in range(40):
+            if await reopen(setup.collector.parent / "dashboard-runtime.json"):
+                print("Opened the background collector dashboard.")
+                return
+            await asyncio.sleep(0.25)
+        raise SetupProblem(
+            "The service was started but its dashboard is not ready. Run service status and inspect the private logs."
+        )
     installed = (setup.output / "installation-completed").is_file()
     config = Configuration.read(setup.collector)
     if not installed or config.schedule == "REPLACE_WITH_SCHEDULE_INTERNAL_NAME":
@@ -794,6 +816,18 @@ def main() -> None:
         type=int,
         help="Listener port; 0 lets the operating system choose a free port",
     )
+    commands.add_parser(
+        "background",
+        help="Run the installed collector without prompts or opening a browser",
+    )
+    service = commands.add_parser(
+        "service", help="Manage an opt-in per-user background collector"
+    )
+    service.add_argument(
+        "action", choices=("install", "status", "start", "stop", "uninstall")
+    )
+    service.add_argument("--service-directory", type=Path)
+    service.add_argument("--python", type=Path)
     run = commands.add_parser(
         "serve", help="Start the separate Python collector with private credentials"
     )
@@ -830,6 +864,48 @@ def main() -> None:
             or setup.collector != root / "collector.json"
         ):
             raise SetupProblem("Setup paths do not match this private directory.")
+        if args.command == "service":
+            from .service import CollectorService, SystemProcesses
+
+            manager = CollectorService(root, SystemProcesses())
+            if args.action == "install":
+                if args.service_directory is None:
+                    raise SetupProblem(
+                        "Supply --service-directory: your macOS LaunchAgents directory or Linux user systemd directory."
+                    )
+                manager.install(
+                    args.service_directory, args.python or Path(sys.executable)
+                )
+                print(
+                    "Background service enrolled. Use service status to check the manager and your launcher to open the dashboard."
+                )
+            else:
+                result = manager.manage(args.action)
+                print(result.output.strip() or "Service manager confirmed the command.")
+                if result.code:
+                    raise SetupProblem(
+                        "The service manager does not report an active collector."
+                    )
+            return
+        if args.command == "background":
+            background_settings = object_fields(
+                load_json(root / "dashboard.json"), {"bind", "port"}
+            )
+            bind = text(background_settings["bind"], 128)
+            if not ip_address(bind).is_loopback:
+                raise SetupProblem(
+                    "Background dashboard handoff needs an explicitly configured loopback IP."
+                )
+            asyncio.run(
+                serve(
+                    setup,
+                    bind,
+                    integer(background_settings["port"], 0, 65535),
+                    automatic=True,
+                    open_browser=False,
+                )
+            )
+            return
         if args.command == "connect-pihole":
             connect_pihole(
                 setup, args.origin, getpass("Pi-hole application password: ")

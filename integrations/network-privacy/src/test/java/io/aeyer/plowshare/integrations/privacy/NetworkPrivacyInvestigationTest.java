@@ -33,6 +33,8 @@ class NetworkPrivacyInvestigationTest {
       throws Exception {
     var host = new Host();
     host.advanceTo("privacy_reviewer");
+    assertTrue(
+        host.command.path("arguments").path("task").asText().contains("device profile revisions"));
     var payload =
         JSON.readTree(
             host.command.path("arguments").path("task").asText().split("\\nDATA:\\n", 2)[1]);
@@ -294,6 +296,7 @@ class NetworkPrivacyInvestigationTest {
         case "agent_run" -> {
           delegations++;
           assertEquals("privacy_analyst", args.path("agent").asText());
+          assertTrue(args.path("task").asText().contains("network-privacy-device/<UUID>.md"));
           accept(ANALYSIS);
         }
         case "information_write" -> {
