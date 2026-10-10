@@ -7,10 +7,11 @@ import asyncio
 import json
 import os
 import signal
-from contextlib import ExitStack
+from contextlib import AsyncExitStack, ExitStack
 from dataclasses import asdict
 from ipaddress import ip_address
 from pathlib import Path
+from typing import Awaitable, Callable
 from uuid import uuid4
 
 from aiohttp import web
@@ -26,18 +27,26 @@ from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
 from .collector_factory import configured_collector
+from .console import FileManualInvestigations, OperatorConsole
+from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
+from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
+from .issue_port import SdkIssuePort
+from .issue_records import FileIssueIntents, PrivacyIssues
 from .journal import FileReceipts
 from .monitor import FileMonitorSettings
 from .native_tools import DECLARATIONS, CataloguedProvider, registered
+from .operator_state import FileOperatorStore
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
+from .profile_port import SdkProfilePort
+from .schedule_editor import ScheduleEditor
 from .tools import WorkerTools
 from .web import application
-from .worker import ExternalRequests, ReconciliationRequired, Worker
+from .worker import ActiveRequests, ExternalRequests, ReconciliationRequired, Worker
 
 
 def credential(name: str) -> str:
@@ -83,9 +92,12 @@ async def execute(args: argparse.Namespace) -> None:
             )
         )
         return
-    async with await Client.connect(
-        config.origin, credential(config.token_environment), timeout=15
-    ) as client:
+    async with AsyncExitStack() as connections:
+        client = await connections.enter_async_context(
+            await Client.connect(
+                config.origin, credential(config.token_environment), timeout=15
+            )
+        )
         if args.command == "install-schedule":
             saved = (
                 await client.request(
@@ -132,11 +144,17 @@ async def execute(args: argparse.Namespace) -> None:
             )
             return
         with FileReceipts(config) as receipts, ExitStack() as stores:
+            operator_store = (
+                FileOperatorStore(Path(args.config).parent)
+                if getattr(args, "dashboard_settings", False)
+                else None
+            )
             worker = Worker(
                 config,
                 SdkPrivacyPort(client, config),
                 receipts,
                 configured_collector(config.collector, config.collection),
+                operator_store,
             )
             peer = (
                 IntegrationPeer(
@@ -150,6 +168,7 @@ async def execute(args: argparse.Namespace) -> None:
             )
             external: ExternalRequests | None = peer
             native: ToolProvider | None = None
+            native_journal: SqliteToolJournal | None = None
             if args.tool_provider is not None:
                 if peer is not None:
                     raise ValueError(
@@ -158,7 +177,7 @@ async def execute(args: argparse.Namespace) -> None:
                 exported = deployment_config(
                     config.project, args.tool_provider, args.tool_account, DECLARATIONS
                 )
-                journal = stores.enter_context(
+                native_journal = stores.enter_context(
                     SqliteToolJournal(
                         config.state_directory / "relay-tools", configuration=exported
                     )
@@ -169,7 +188,7 @@ async def execute(args: argparse.Namespace) -> None:
                     provider=args.tool_provider,
                     account=args.tool_account,
                     tools=registered(WorkerTools(worker)),
-                    journal=journal,
+                    journal=native_journal,
                 )
                 external = CataloguedProvider(
                     native, config.state_directory, args.tool_catalog_renew_seconds
@@ -188,6 +207,7 @@ async def execute(args: argparse.Namespace) -> None:
                     await native.reconcile()
                 print("Retained evidence reconciled; no mutation was replayed.")
                 return
+            active_requests = ActiveRequests(external) if external is not None else None
             stop = asyncio.Event()
             loop = asyncio.get_running_loop()
             for name in (signal.SIGINT, signal.SIGTERM):
@@ -198,16 +218,155 @@ async def execute(args: argparse.Namespace) -> None:
             instance = str(uuid4())
             handoff = Path(args.config).parent / "dashboard-runtime.json"
             owns_handoff = False
+            settings = (
+                FileMonitorSettings(Path(args.config), worker, receipts)
+                if operator_store
+                else None
+            )
+            discovery = (
+                LocalDeviceDiscovery(Path(args.config).parent)
+                if operator_store
+                else None
+            )
+
+            issues = (
+                PrivacyIssues(
+                    SdkIssuePort(client, config, worker.port),
+                    FileIssueIntents(
+                        Path(args.config).parent, config.project, config.collector
+                    ),
+                )
+                if operator_store
+                else None
+            )
+            profiles = (
+                DeviceProfiles(
+                    SdkProfilePort(client, config, worker.port),
+                    FileProfileIntents(
+                        Path(args.config).parent, config.project, config.collector
+                    ),
+                    receipts,
+                    lambda: worker.config.collection.targets,
+                    issues,
+                )
+                if operator_store
+                else None
+            )
+
+            async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
+                nonlocal client, native
+                async with worker.request_lock:
+                    if worker.state == "attention_required":
+                        # Explicit operator recovery creates one fresh SDK session.
+                        # No request is retried; journals remain their owning stores.
+                        replacement = await connections.enter_async_context(
+                            await Client.connect(
+                                worker.config.origin,
+                                credential(worker.config.token_environment),
+                                timeout=15,
+                            )
+                        )
+                        candidate_port = SdkPrivacyPort(replacement, worker.config)
+                        try:
+                            available = await candidate_port.available_topics()
+                            if (
+                                not {
+                                    worker.config.request_topic,
+                                    worker.config.result_topic,
+                                }
+                                <= available
+                            ):
+                                raise ReconciliationRequired(
+                                    "Required Relay topics remain unavailable"
+                                )
+                        except (
+                            Refusal,
+                            TransportError,
+                            ValueError,
+                            ReconciliationRequired,
+                        ):
+                            await replacement.close()
+                            raise
+                        old = client
+                        client = replacement
+                        worker.port = candidate_port
+                        if issues is not None:
+                            issues.port = SdkIssuePort(
+                                replacement, worker.config, worker.port
+                            )
+                        if profiles is not None:
+                            profiles.port = SdkProfilePort(
+                                replacement, worker.config, worker.port
+                            )
+                        if console is not None:
+                            console.port = SdkConsolePort(replacement, worker.config)
+                        if peer is not None:
+                            peer.port = SdkOutgoingPort(replacement, worker.config)
+                        if native_journal is not None:
+                            native = ToolProvider(
+                                replacement,
+                                project=worker.config.project,
+                                provider=args.tool_provider,
+                                account=args.tool_account,
+                                tools=registered(WorkerTools(worker)),
+                                journal=native_journal,
+                            )
+                            if active_requests is None:
+                                raise ValueError("Missing configured provider dispatch")
+                            active_requests.target = CataloguedProvider(
+                                native,
+                                worker.config.state_directory,
+                                args.tool_catalog_renew_seconds,
+                            )
+                        await old.close()
+                    await worker.reconcile()
+                    if peer is not None:
+                        await peer.reconcile()
+                    if native is not None:
+                        await native.reconcile()
+                    topics = await worker.port.available_topics()
+                    if (
+                        not {worker.config.request_topic, worker.config.result_topic}
+                        <= topics
+                    ):
+                        raise ReconciliationRequired(
+                            "Required Relay topics remain unavailable"
+                        )
+                    if issues is not None:
+                        await issues.reconcile()
+                    if profiles is not None:
+                        await profiles.reconcile()
+                    await reconcile_manual()
+                    if worker.state == "attention_required":
+                        worker.recovery_requested.set()
+
+            console = (
+                OperatorConsole(
+                    Path(args.config).parent,
+                    worker,
+                    SdkConsolePort(client, config),
+                    settings,
+                    discovery,
+                    operator_store,
+                    recover,
+                    FileManualInvestigations(Path(args.config).parent),
+                    getattr(args, "credential_expires_at", None),
+                )
+                if operator_store and settings and discovery
+                else None
+            )
             runner = web.AppRunner(
                 application(
                     worker,
                     credential(config.web_token_environment),
                     instance=instance,
-                    settings=FileMonitorSettings(Path(args.config), worker, receipts)
-                    if getattr(args, "dashboard_settings", False)
-                    else None,
-                    discovery=LocalDeviceDiscovery(Path(args.config).parent)
-                    if getattr(args, "dashboard_settings", False)
+                    settings=settings,
+                    discovery=discovery,
+                    console=console,
+                    profiles=profiles,
+                    issues=issues,
+                    schedule_editor=ScheduleEditor(Path(args.config).parent)
+                    if getattr(args, "deployment_controls", False)
                     else None,
                 ),
                 access_log=None,
@@ -217,7 +376,9 @@ async def execute(args: argparse.Namespace) -> None:
             try:
                 site = web.TCPSite(runner, args.bind, args.port)
                 await site.start()
-                if getattr(args, "open_browser", False):
+                if getattr(
+                    args, "dashboard_handoff", getattr(args, "open_browser", False)
+                ):
                     address = ip_address(args.bind)
                     if not address.is_loopback:
                         raise ValueError(
@@ -236,9 +397,10 @@ async def execute(args: argparse.Namespace) -> None:
                     )
                     dashboard.write(handoff)
                     owns_handoff = True
-                    await dashboard.open()
+                    if getattr(args, "open_browser", False):
+                        await dashboard.open()
                     print(
-                        "Network Privacy Watch is open in your browser. Close this terminal to stop it.",
+                        "Network Privacy Watch is ready. Use your private launcher to open the dashboard.",
                         flush=True,
                     )
                 else:
@@ -246,7 +408,7 @@ async def execute(args: argparse.Namespace) -> None:
                         "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
                         flush=True,
                     )
-                task = asyncio.create_task(worker.run(stop, external))
+                task = asyncio.create_task(worker.run(stop, active_requests))
                 await stop.wait()
             finally:
                 stop.set()
@@ -300,6 +462,11 @@ def main() -> None:
     schedule.add_argument("--zone", required=True)
     serve = commands.add_parser(
         "serve", help="Run the collector and its authenticated Python web UI"
+    )
+    serve.add_argument(
+        "--dashboard-settings",
+        action="store_true",
+        help="Enable private operator settings, health and recovery controls",
     )
     serve.add_argument("--bind", required=True)
     serve.add_argument("--port", required=True, type=int)

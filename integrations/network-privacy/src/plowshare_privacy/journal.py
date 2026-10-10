@@ -25,6 +25,7 @@ from .contracts import (
     timestamp,
     uuid,
 )
+from .operator_state import InvestigationDecision
 
 Phase = Literal["queued", "collected", "uploading", "uploaded", "publishing", "done"]
 
@@ -38,6 +39,7 @@ class Receipt:
     phase: Phase = "queued"
     evidence: Evidence | None = None
     revision: str | None = None
+    investigation: InvestigationDecision | None = None
 
     @classmethod
     def decode(cls, value: object) -> Receipt:
@@ -52,6 +54,7 @@ class Receipt:
                 "evidence",
                 "revision",
             },
+            {"investigation"},
         )
         phases: tuple[Phase, ...] = (
             "queued",
@@ -89,6 +92,9 @@ class Receipt:
             phase,
             evidence,
             revision,
+            InvestigationDecision.decode(row["investigation"])
+            if row.get("investigation") is not None
+            else None,
         )
 
 
@@ -274,11 +280,21 @@ class FileReceipts:
         previous = self._receipts.get(receipt.scan_id)
         if (
             previous
+            and (
+                previous.investigation is not None
+                or previous.phase in {"publishing", "done"}
+            )
+            and previous.investigation != receipt.investigation
+        ):
+            raise ValueError("An investigation admission decision is immutable")
+        if (
+            previous
             and replace(
                 previous,
                 phase=receipt.phase,
                 evidence=receipt.evidence,
                 revision=receipt.revision,
+                investigation=receipt.investigation,
             )
             != receipt
         ):

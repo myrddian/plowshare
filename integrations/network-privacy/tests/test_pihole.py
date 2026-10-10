@@ -75,6 +75,19 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    async def test_identity_check_reads_no_dns_and_uses_ephemeral_password(
+        self,
+    ) -> None:
+        with patch.dict(os.environ, {"PIHOLE_TEST_PASSWORD": "unused"}):
+            result = await PiHoleV6(self.plan, application_password=SECRET).identify(
+                (ADDRESS,), utc_now()
+            )
+        self.assertEqual(result.devices[0].mac, MAC)
+        self.assertEqual(result.dns, ())
+        self.assertIsNone(result.window)
+        self.assertEqual(self.query_clients, [])
+        self.assertEqual(self.calls[-1], ("DELETE", "/api/auth"))
+
     async def stolen_request(self, request: web.Request) -> web.Response:
         self.stolen = True
         return web.json_response({})

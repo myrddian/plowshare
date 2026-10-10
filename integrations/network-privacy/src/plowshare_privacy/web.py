@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import time
 from dataclasses import asdict
 from importlib.resources import files
 from ipaddress import IPv4Network
@@ -11,14 +13,22 @@ from typing import Awaitable, Callable
 
 from aiohttp import web
 from plowshare import Refusal, TransportError
+from plowshare.contracts import InformationRevisionDto
+from plowshare.tools import ToolAttention
 
+from .console import OperatorConsole
 from .contracts import integer, items, object_fields, parse_json, text, uuid
+from .device_profiles import ProfileFields, ProfileManagement
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
+from .issue_records import IssueManagement
 from .journal import Publication
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
+from .operator_state import Preferences
+from .privacy_issues import IssueFields, IssueValidation
+from .schedule_editor import ScheduleManagement
 from .tools import DEFINITIONS, PrivacyTools, WorkerTools, decode_call
-from .worker import Worker
+from .worker import ReconciliationRequired, Worker
 
 
 def application(
@@ -28,6 +38,10 @@ def application(
     settings: MonitorSettings | None = None,
     discovery: DeviceDiscovery | None = None,
     instance: str | None = None,
+    console: OperatorConsole | None = None,
+    schedule_editor: ScheduleManagement | None = None,
+    profiles: ProfileManagement | None = None,
+    issues: IssueManagement | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -77,8 +91,17 @@ def application(
                 raise web.HTTPUnsupportedMediaType(text="JSON is required")
         try:
             response = await handler(request)
-        except SettingsBusy as error:
+        except (SettingsBusy, ReconciliationRequired) as error:
             response = web.json_response({"error": str(error)}, status=409)
+        except ToolAttention:
+            response = web.json_response(
+                {
+                    "error": "A tool invocation has an unsettled receipt. Inspect the provider journal; it has not been resent."
+                },
+                status=409,
+            )
+        except IssueValidation as error:
+            response = web.json_response({"error": str(error)}, status=400)
         except ValueError:
             response = web.json_response(
                 {"error": "Invalid request or unavailable evidence"}, status=400
@@ -105,8 +128,123 @@ def application(
         )
         return response
 
-    app = web.Application(middlewares=[boundary], client_max_size=4096)
+    app = web.Application(middlewares=[boundary], client_max_size=16384)
     provider: PrivacyTools = tools if tools is not None else WorkerTools(worker)
+
+    def operator() -> OperatorConsole:
+        if console is None:
+            raise web.HTTPNotFound(text="Operator console is not configured")
+        return console
+
+    async def overview(request: web.Request) -> web.Response:
+        value = operator()
+        return web.json_response(
+            {
+                "health": asdict(await value.health()),
+                "devices": [asdict(item) for item in value.devices()],
+                "findings": [asdict(item) for item in value.findings()],
+                "preferences": asdict(value.store.preferences),
+                "investigations": [asdict(item) for item in value.manual],
+                "pending_deployment": schedule_editor.pending_request()
+                if schedule_editor
+                else None,
+            }
+        )
+
+    async def preferences(request: web.Request) -> web.Response:
+        operator().store.set_preferences(
+            Preferences.decode(parse_json(await request.read()))
+        )
+        return web.json_response(asdict(operator().store.preferences))
+
+    async def expected(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"id", "expected"})
+        if type(row["expected"]) is not bool:
+            raise ValueError("Expected requires a boolean")
+        operator().acknowledge(text(row["id"], 64), row["expected"])
+        return web.json_response({"saved": True})
+
+    async def investigate(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"scan_id", "request_id"})
+        return web.json_response(
+            asdict(
+                await operator().investigate(
+                    uuid(row["scan_id"]), uuid(row["request_id"])
+                )
+            ),
+            status=202,
+        )
+
+    async def recovery(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        await operator().check_and_resume()
+        return web.json_response({"checked": True})
+
+    async def pihole(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()), {"origin", "password", "save"}
+        )
+        if type(row["save"]) is not bool:
+            raise ValueError("Save requires a boolean")
+        return web.json_response(
+            asdict(
+                await operator().connect_pihole(
+                    text(row["origin"], 2048), text(row["password"], 4096), row["save"]
+                )
+            )
+        )
+
+    async def moves(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        return web.json_response(
+            [asdict(item) for item in await operator().moved_devices()]
+        )
+
+    async def accept_move(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()), {"old", "new", "device_id"}
+        )
+        await operator().accept_move(
+            text(row["old"], 64), text(row["new"], 64), text(row["device_id"], 128)
+        )
+        return web.json_response({"saved": True})
+
+    async def schedule_review(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()), {"preset", "zone", "paused", "password"}
+        )
+        if schedule_editor is None or type(row["paused"]) is not bool:
+            raise ValueError("Schedule editor is unavailable")
+        return web.json_response(
+            asdict(
+                await schedule_editor.review(
+                    text(row["preset"], 32),
+                    text(row["zone"], 128),
+                    row["paused"],
+                    text(row["password"], 4096),
+                )
+            )
+        )
+
+    async def schedule_reconcile(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"password"})
+        if schedule_editor is None:
+            raise ValueError("Schedule editor is unavailable")
+        revision = await schedule_editor.reconcile(text(row["password"], 4096))
+        operator().cache_until = 0
+        return web.json_response({"revision": revision})
+
+    async def schedule_deploy(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()), {"review_id", "store", "password"}
+        )
+        if schedule_editor is None:
+            raise ValueError("Schedule editor is unavailable")
+        revision = await schedule_editor.deploy(
+            uuid(row["review_id"]), text(row["store"], 128), text(row["password"], 4096)
+        )
+        operator().cache_until = 0
+        return web.json_response({"revision": revision})
 
     async def session_status(request: web.Request) -> web.Response:
         return web.json_response({"instance": instance})
@@ -129,6 +267,104 @@ def application(
         response = web.json_response({"connected": False})
         response.del_cookie(cookie, path="/api")
         return response
+
+    def profile_service() -> ProfileManagement:
+        if profiles is None:
+            raise web.HTTPNotFound(text="Device profiles are not enabled")
+        return profiles
+
+    async def profile_list(request: web.Request) -> web.Response:
+        service = profile_service()
+        return web.json_response(
+            {
+                "profiles": [asdict(v) for v in await service.list()],
+                "intents": [asdict(v) for v in service.writes()],
+            }
+        )
+
+    async def profile_intents(request: web.Request) -> web.Response:
+        return web.json_response([asdict(v) for v in profile_service().writes()])
+
+    async def profile_source(request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "text": await profile_service().read(
+                    uuid(request.match_info["identity"]),
+                    uuid(request.match_info["revision"]),
+                )
+            }
+        )
+
+    async def profile_save(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()),
+            {"profile_id", "request_id", "expected_revision", "fields"},
+        )
+        result = await profile_service().save(
+            uuid(row["profile_id"]),
+            uuid(row["request_id"]),
+            uuid(row["expected_revision"])
+            if row["expected_revision"] is not None
+            else None,
+            ProfileFields.decode(row["fields"]),
+        )
+        return web.json_response(
+            asdict(result), status=202 if result.phase == "pending" else 200
+        )
+
+    async def profile_reconcile(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        await profile_service().reconcile()
+        return web.json_response({"checked": True})
+
+    def issue_service() -> IssueManagement:
+        if issues is None:
+            raise web.HTTPNotFound(text="Privacy issues are not enabled")
+        return issues
+
+    async def issue_list(request: web.Request) -> web.Response:
+        service = issue_service()
+        return web.json_response(
+            {
+                "issues": [asdict(v) for v in await service.list()],
+                "intents": [asdict(v) for v in service.writes()],
+            }
+        )
+
+    async def issue_intents(request: web.Request) -> web.Response:
+        return web.json_response([asdict(v) for v in issue_service().writes()])
+
+    async def issue_source(request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "text": await issue_service().read(
+                    uuid(request.match_info["identity"]),
+                    uuid(request.match_info["revision"]),
+                )
+            }
+        )
+
+    async def issue_save(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()),
+            {"issue_id", "request_id", "expected_revision", "fields"},
+        )
+        result = await issue_service().save(
+            uuid(row["issue_id"]),
+            uuid(row["request_id"]),
+            uuid(row["expected_revision"])
+            if row["expected_revision"] is not None
+            else None,
+            IssueFields.decode(row["fields"]),
+        )
+        return web.json_response(
+            asdict(result), status=202 if result.phase == "pending" else 200
+        )
+
+    async def issue_reconcile(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        await issue_service().reconcile()
+        return web.json_response({"checked": True})
 
     async def monitoring(request: web.Request) -> web.Response:
         if settings is None:
@@ -213,6 +449,8 @@ def application(
                 "mode": worker.config.collection.mode,
                 "collection_enabled": worker.config.collection.enabled,
                 "settings_available": settings is not None,
+                "profiles_available": profiles is not None,
+                "issues_available": issues is not None,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -234,6 +472,9 @@ def application(
                     else worker.config.collection.mode,
                     "changes": item.evidence.changes if item.evidence else (),
                     "issues": item.evidence.issues if item.evidence else (),
+                    "investigation": asdict(item.investigation)
+                    if item.investigation
+                    else None,
                 }
                 for item in reversed(worker.receipts.all())
             ][:50]
@@ -257,11 +498,23 @@ def application(
             asdict(publication), status=202 if publication.state == "published" else 409
         )
 
+    report_cache: tuple[InformationRevisionDto, ...] = ()
+    report_cache_until = 0.0
+    report_lock = asyncio.Lock()
+
+    async def report_candidates() -> tuple[InformationRevisionDto, ...]:
+        nonlocal report_cache, report_cache_until
+        async with report_lock:
+            if time.monotonic() >= report_cache_until:
+                report_cache = await worker.port.reports()
+                report_cache_until = time.monotonic() + 20
+            return report_cache
+
     async def reports(request: web.Request) -> web.Response:
         revisions = {item.revision for item in worker.receipts.all() if item.revision}
         result = [
             item
-            for item in await worker.port.reports()
+            for item in await report_candidates()
             if isinstance(item.inputs, tuple) and revisions.intersection(item.inputs)
         ]
         return web.json_response(
@@ -271,6 +524,7 @@ def application(
                     "title": item.title
                     if isinstance(item.title, str)
                     else "Network privacy investigation",
+                    "inputs": item.inputs,
                     "status": item.report_status
                     if isinstance(item.report_status, str)
                     else "unknown",
@@ -282,7 +536,7 @@ def application(
     async def report(request: web.Request) -> web.Response:
         revision = uuid(request.match_info["revision"])
         known = {item.revision for item in worker.receipts.all() if item.revision}
-        candidates = await worker.port.reports()
+        candidates = await report_candidates()
         if not any(
             item.id == revision
             and isinstance(item.inputs, tuple)
@@ -294,6 +548,20 @@ def application(
             {"revision": revision, "text": await worker.port.read_source(revision)}
         )
 
+    app.router.add_get("/api/overview", overview)
+    for path, handler in (
+        ("preferences", preferences),
+        ("expected", expected),
+        ("investigations", investigate),
+        ("recovery", recovery),
+        ("pihole", pihole),
+        ("device-moves", moves),
+        ("device-moves/accept", accept_move),
+        ("schedule/review", schedule_review),
+        ("schedule/deploy", schedule_deploy),
+        ("schedule/reconcile", schedule_reconcile),
+    ):
+        app.router.add_post("/api/" + path, handler)
     for path in ("/", "/app.js", "/style.css"):
         app.router.add_get(path, asset)
     app.router.add_get("/api/session/status", session_status)
@@ -309,6 +577,16 @@ def application(
     app.router.add_get("/api/scans", scans)
     app.router.add_get("/api/scans/{scan_id}", evidence)
     app.router.add_post("/api/scans", collect)
+    app.router.add_get("/api/issue-intents", issue_intents)
+    app.router.add_get("/api/issues", issue_list)
+    app.router.add_get("/api/issues/{identity}/{revision}", issue_source)
+    app.router.add_post("/api/issues", issue_save)
+    app.router.add_post("/api/issues/reconcile", issue_reconcile)
+    app.router.add_get("/api/profile-intents", profile_intents)
+    app.router.add_get("/api/profiles", profile_list)
+    app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)
+    app.router.add_post("/api/profiles", profile_save)
+    app.router.add_post("/api/profiles/reconcile", profile_reconcile)
     app.router.add_get("/api/reports", reports)
     app.router.add_get("/api/reports/{revision}", report)
     return app

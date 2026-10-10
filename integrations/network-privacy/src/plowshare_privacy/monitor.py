@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from uuid import uuid4
 
 from .collector_factory import configured_collector
 from .contracts import (
     Configuration,
     DeviceLabel,
+    PiHolePlan,
     device_labels,
     integer,
     items,
@@ -22,6 +21,7 @@ from .contracts import (
     text,
 )
 from .journal import FileReceipts
+from .private_files import replace_private as replace_private
 from .worker import Worker
 
 
@@ -84,28 +84,7 @@ class MonitorSettings(Protocol):
 
     def view(self) -> MonitorView: ...
     async def save(self, choice: MonitorChoice) -> MonitorView: ...
-
-
-def replace_private(path: Path, content: str) -> None:
-    """Atomically replace private configuration, including a durable directory flush."""
-    if path.is_symlink() or path.resolve() != path:
-        raise ValueError("Private configuration cannot be linked")
-    temporary = path.parent / (str(uuid4()) + ".tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, path)
-        if os.name == "posix":
-            directory = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-    finally:
-        temporary.unlink(missing_ok=True)
+    async def save_pihole(self, plan: PiHolePlan) -> MonitorView: ...
 
 
 class FileMonitorSettings:
@@ -152,6 +131,20 @@ class FileMonitorSettings:
         )
 
     async def save(self, choice: MonitorChoice) -> MonitorView:
+        return await self._save(choice, None)
+
+    async def save_pihole(self, plan: PiHolePlan) -> MonitorView:
+        current = self.view()
+        return await self._save(
+            MonitorChoice(
+                current.enabled, current.targets, current.ports, current.labels
+            ),
+            plan,
+        )
+
+    async def _save(
+        self, choice: MonitorChoice, pihole: PiHolePlan | None
+    ) -> MonitorView:
         if not self.view().editable:
             raise SettingsBusy(self.view().detail)
         async with self.worker.request_lock, self.worker.lock:
@@ -221,6 +214,15 @@ class FileMonitorSettings:
             )
             if labels or "deviceLabels" in plan:
                 plan["deviceLabels"] = {label.address: label.label for label in labels}
+            if pihole is not None:
+                plan["pihole"] = {
+                    "origin": pihole.origin,
+                    "passwordFile": str(pihole.password_file),
+                    "queryLimit": pihole.query_limit,
+                    "lookbackSeconds": pihole.lookback_seconds,
+                    "maxIdentityAgeSeconds": pihole.max_identity_age,
+                    "timeoutSeconds": pihole.timeout,
+                }
             row["collection"] = plan
             config = Configuration.decode(row, self.path)
             collector = configured_collector(config.collector, config.collection)

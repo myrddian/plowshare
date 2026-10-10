@@ -104,10 +104,18 @@ class QuerySample:
 
 
 class PiHoleV6:
-    def __init__(self, plan: PiHolePlan):
+    def __init__(self, plan: PiHolePlan, *, application_password: str | None = None):
         self.plan = plan
         # Configuration errors fail at startup, rather than silently dropping a source.
-        self._password = password(plan)
+        self._password = (
+            password(plan)
+            if application_password is None
+            else text(application_password, 4096)
+        )
+        if self._password != self._password.strip():
+            raise ValueError(
+                "Pi-hole application password cannot contain edge whitespace"
+            )
 
     async def _request(
         self,
@@ -296,6 +304,15 @@ class PiHoleV6:
         )
 
     async def read(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
+        return await self._read(targets, observed_at, queries=True)
+
+    async def identify(self, targets: tuple[str, ...], observed_at: str) -> DeviceData:
+        """Operator-only identity checks; no DNS history is fetched or retained."""
+        return await self._read(targets, observed_at, queries=False)
+
+    async def _read(
+        self, targets: tuple[str, ...], observed_at: str, *, queries: bool
+    ) -> DeviceData:
         if len(targets) > 32 or len(set(targets)) != len(targets):
             raise ValueError("Pi-hole requires at most 32 unique selected addresses")
         targets = tuple(str(ipaddress.ip_address(address)) for address in targets)
@@ -347,63 +364,64 @@ class PiHoleV6:
                     issues.add(
                         "identity_unavailable: Pi-hole device records could not be read or validated"
                     )
-                semaphore = asyncio.Semaphore(4)
+                if queries:
+                    semaphore = asyncio.Semaphore(4)
 
-                async def sample(address: str) -> QuerySample:
-                    async with semaphore:
-                        try:
-                            raw = await self._request(
-                                session,
-                                "GET",
-                                "queries",
-                                sid=sid,
-                                parameters={
-                                    "client_ip": address,
-                                    "from": str(start),
-                                    "until": str(end),
-                                    "length": str(self.plan.query_limit),
-                                    "disk": "false",
-                                },
-                            )
-                            return self._queries(raw, address, start, end)
-                        except (
-                            PiHoleUnavailable,
-                            ValueError,
-                            aiohttp.ClientError,
-                            TimeoutError,
-                        ):
-                            return QuerySample(
-                                (),
-                                0,
-                                0,
-                                (
-                                    "dns_unavailable: Pi-hole queries could not be read or validated for a selected device",
-                                ),
-                            )
+                    async def sample(address: str) -> QuerySample:
+                        async with semaphore:
+                            try:
+                                raw = await self._request(
+                                    session,
+                                    "GET",
+                                    "queries",
+                                    sid=sid,
+                                    parameters={
+                                        "client_ip": address,
+                                        "from": str(start),
+                                        "until": str(end),
+                                        "length": str(self.plan.query_limit),
+                                        "disk": "false",
+                                    },
+                                )
+                                return self._queries(raw, address, start, end)
+                            except (
+                                PiHoleUnavailable,
+                                ValueError,
+                                aiohttp.ClientError,
+                                TimeoutError,
+                            ):
+                                return QuerySample(
+                                    (),
+                                    0,
+                                    0,
+                                    (
+                                        "dns_unavailable: Pi-hole queries could not be read or validated for a selected device",
+                                    ),
+                                )
 
-                samples = await asyncio.gather(
-                    *(sample(address) for address in targets)
-                )
-                for sample_result in samples:
-                    issues.update(sample_result.issues)
-                dns = tuple(
-                    observation
-                    for sample_result in samples
-                    for observation in sample_result.dns
-                )
-                if len(dns) > 256:
-                    dns = dns[:256]
-                    issues.add(
-                        "dns_truncated: normalized Pi-hole destination limit reached"
+                    samples = await asyncio.gather(
+                        *(sample(address) for address in targets)
                     )
-                window = DnsWindow(
-                    "pihole-v6",
-                    instant(start),
-                    instant(end),
-                    sum(sample.read for sample in samples),
-                    sum(sample.available for sample in samples),
-                    not any(issue.startswith("dns_") for issue in issues),
-                )
+                    for sample_result in samples:
+                        issues.update(sample_result.issues)
+                    dns = tuple(
+                        observation
+                        for sample_result in samples
+                        for observation in sample_result.dns
+                    )
+                    if len(dns) > 256:
+                        dns = dns[:256]
+                        issues.add(
+                            "dns_truncated: normalized Pi-hole destination limit reached"
+                        )
+                    window = DnsWindow(
+                        "pihole-v6",
+                        instant(start),
+                        instant(end),
+                        sum(sample.read for sample in samples),
+                        sum(sample.available for sample in samples),
+                        not any(issue.startswith("dns_") for issue in issues),
+                    )
             except (PiHoleUnavailable, ValueError, aiohttp.ClientError, TimeoutError):
                 issues.update(
                     {
