@@ -117,6 +117,100 @@ class InformationMetadataTest {
   }
 
   @Test
+  void fenced_model_answers_recover_tags_groups_and_only_source_supported_attribution() {
+    String response =
+        """
+        ```json
+        {"autoTag":["network scanning","tcp probes","port observation","home network"],
+         "tagGroups":{"security":["network scanning","tcp probes","port observation"]},
+         "documentAuthor":null,"documentOrganisation":null}
+        ```
+        """;
+    var result = InformationMetadataCodec.read(response, retained);
+    assertEquals(
+        List.of("home network", "network scanning", "port observation", "tcp probes"),
+        result.tags());
+    assertEquals(
+        Map.of("security", List.of("network scanning", "port observation", "tcp probes")),
+        result.groups());
+    assertNull(result.author());
+    var supported =
+        InformationMetadataCodec.read(
+            """
+        Here is the metadata:
+        ```json
+        {"autoTag":["postgresql"],"documentAuthor":{"name":"Ada Lovelace",
+        "evidence":"Written by Ada Lovelace.","certain":true}}
+        ```
+        """,
+            retained);
+    assertEquals("Ada Lovelace", supported.author());
+    assertNull(
+        InformationMetadataCodec.read(
+                """
+        ```json
+        {"autoTag":["postgresql"],"documentAuthor":{"name":"Ada Lovelace",
+        "evidence":"Written by Ada Lovelace.","certain":true}}
+        ```
+        """,
+                "A mention of Ada Lovelace without a byline")
+            .author());
+  }
+
+  @Test
+  void bounded_syntax_recovery_applies_to_grouping_and_historical_paid_tag_lists() {
+    for (String response :
+        List.of("```json\n[\"PostgreSQL\"]\n```", "{'autoTag':['PostgreSQL',],}"))
+      assertEquals(List.of("postgresql"), InformationMetadataCodec.read(response, retained).tags());
+    assertEquals(
+        Map.of("databases", List.of("postgresql")),
+        InformationMetadataCodec.groups(
+            "```json\n{'databases':['postgresql',],}\n```", List.of("postgresql")));
+  }
+
+  @Test
+  void repaired_syntax_cannot_bypass_field_reference_or_host_refusal_validation() {
+    for (String response :
+        List.of(
+            "```json\n{\"autoTag\":[7]}\n```",
+            "```json\n{\"autoTag\":[],\"documentAuthor\":{\"name\":\"Ada\",\"evidence\":\"Written by Ada\",\"certain\":\"true\"}}\n```",
+            "```json\n{\"autoTag\":[],\"unexpected\":true}\n```",
+            "```json\n{\"autoTag\":[],\"autoTag\":[\"sql\"]}\n```",
+            "```json\n{\"autoTag\":[]} {}\n```"))
+      assertThrows(
+          IllegalStateException.class,
+          () -> InformationMetadataCodec.read(response, retained),
+          response);
+    for (String code : List.of("NO_ACCESS", "NO_CONNECTION", "NO_EXEC", "GENERAL_TOOL_FAILURE")) {
+      String response = " E_" + code + ": detail {\"autoTag\":[\"sql\"]}";
+      assertThrows(
+          IllegalStateException.class, () -> InformationMetadataCodec.read(response, retained));
+      assertThrows(
+          IllegalStateException.class,
+          () -> InformationMetadataCodec.groups(response, List.of("sql")));
+    }
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            InformationMetadataCodec.groups(
+                "```json\n{\"databases\":[\"invented\"]}\n```", List.of("sql")));
+  }
+
+  @Test
+  void model_metadata_keeps_byte_and_recovery_depth_limits() {
+    assertThrows(IllegalStateException.class, () -> InformationMetadataCodec.read(null, retained));
+    assertThrows(
+        IllegalStateException.class,
+        () -> InformationMetadataCodec.read(" ".repeat(65537), retained));
+    assertThrows(
+        IllegalStateException.class,
+        () -> InformationMetadataCodec.read("é".repeat(32769), retained));
+    assertThrows(
+        IllegalStateException.class,
+        () -> InformationMetadataCodec.groups("[".repeat(130) + "0" + "]".repeat(130), List.of()));
+  }
+
+  @Test
   void direct_metadata_values_are_immutable_and_cannot_bypass_attribution_checks() {
     assertThrows(
         IllegalArgumentException.class,

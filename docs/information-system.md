@@ -64,7 +64,12 @@ The tool-free `information_tagger` model worker fills revision-specific `autoTag
 from a bounded excerpt of the retained extraction. Generated tags are navigation
 suggestions, not evidence. The `autoTag` processing step uses the existing
 captured allowance, owned logs, hooks, paid-response checkpoints and generation
-fences. It can run after extraction/derivation even if embeddings or summaries
+fences. Metadata answers use bounded local model-JSON recovery, including code
+fences and common formatting mistakes, before strict field validation. Recovery
+makes no model call and does not widen attribution or tag-group membership.
+Unrecoverable answers and host refusals remain failed; an explicit
+`information.retry` can reuse the retained paid response after a parser fix.
+It can run after extraction/derivation even if embeddings or summaries
 fail; it never edits user tags. Inspect its state with `information.status`,
 retry failures with `information.retry`, or explicitly regenerate with
 `information.rebuild` and `stage: "autoTag"`. Rebuilding tags preserves summaries
