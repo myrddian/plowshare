@@ -136,7 +136,7 @@ class NetworkPrivacyWatchTest {
     assertEquals(
         Set.of("privacy_coordinator", "privacy_analyst", "privacy_reviewer"), agents.names());
     for (String name : Set.of("investigate_network", "privacy_tick")) {
-      String suffix = name.equals("privacy_tick") ? ".js" : ".md";
+      String suffix = ".js";
       Path source = definitions.resolve("orchestrations/" + name + suffix);
       var loaded =
           OrchestrationRegistry.parsePinned(

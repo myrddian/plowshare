@@ -312,9 +312,17 @@ not used: SDK ports do not expose system scope.
 The result route starts `investigate_network` under `privacy_coordinator` for the
 baseline or a changed observation/coverage gap. Unchanged collections are retained
 without launching another model investigation. The
-analyst and reviewer have narrower tools, and the conductor retains a draft
-report with source dependencies. Memory supplies previously established operator
-context where permitted. Document-derived evidence and conclusions stay in the
+analyst and reviewer have narrower tools. The scripted `investigate_network.js`
+waits for extraction, reads complete bounded evidence windows, retains the actual
+analyst response and passes it verbatim with the sources to the reviewer. Each
+handoff is stored in the existing scoped command journal; a reviewer does not
+inherit the analyst's conversation. Missing input stops review immediately.
+Code validates the review and retains a draft report with source dependencies.
+An explicit `not_checked` review remains labelled unverified in the draft.
+Readiness, host refusals, invalid output and uncertain writes stop the workflow;
+the script never starts a replacement scan or invents another report request ID.
+Admission confirms retention, not completed extraction of the new report. Memory
+supplies previously established operator context where permitted. Document-derived evidence and conclusions stay in the
 information store; the Application does not copy restricted evidence into memory.
 No shell, firewall or device-changing tools are granted to these agents.
 

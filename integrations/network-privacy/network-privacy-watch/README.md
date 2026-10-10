@@ -126,3 +126,10 @@ Relay port grants activate with this Application revision. No global server
 configuration edit or restart is required. The Python process remains separately
 operated and renews its live tool catalogue lease. See the
 [integration guide](../README.md#agent-tools-through-the-sdk) for startup.
+
+Investigation uses `orchestrations/investigate_network.js`. Plowshare journals its
+commands and state; code passes the complete analyst response and retained source
+text to the reviewer and assembles the draft from the actual review. Agents supply
+judgments within the shared allowance. Missing assessments, unavailable evidence
+and invalid tool results stop work explicitly. The collector remains an external
+Python integration.
