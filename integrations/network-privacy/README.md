@@ -321,6 +321,8 @@ Code validates the review and retains a draft report with source dependencies.
 An explicit `not_checked` review remains labelled unverified in the draft.
 Readiness, host refusals, invalid output and uncertain writes stop the workflow;
 the script never starts a replacement scan or invents another report request ID.
+The dashboard resolves report dependencies through scoped status reads when list
+summaries omit them, so a retained draft remains visible for its scan evidence.
 Admission confirms retention, not completed extraction of the new report. Memory
 supplies previously established operator context where permitted. Document-derived evidence and conclusions stay in the
 information store; the Application does not copy restricted evidence into memory.

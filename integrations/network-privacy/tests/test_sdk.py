@@ -79,6 +79,66 @@ def batch_wire(value: RelayBatchDto) -> dict[str, object]:
 
 
 class SdkTest(unittest.IsolatedAsyncioTestCase):
+    async def test_report_list_hydrates_omitted_dependencies_through_scoped_status(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = configuration(Path(folder))
+            report, source = str(uuid4()), str(uuid4())
+            operations: list[str] = []
+            foreign = False
+
+            async def handle(socket: ServerConnection) -> None:
+                async for source_frame in socket:
+                    frame = json.loads(source_frame)
+                    operation = frame["type"]
+                    operations.append(operation)
+                    payload = frame["payload"]
+                    self.assertEqual(payload["scope"]["project"], config.project)
+                    self.assertEqual(payload["scope"]["kind"], "project")
+                    summary = {"id": report, "kind": "report", "report_status": "draft"}
+                    if operation == "information.list":
+                        self.assertEqual(payload["kind"], "report")
+                        result: object = [summary]
+                    elif operation == "information.status":
+                        self.assertEqual(payload["revision"], report)
+                        result = {
+                            **summary,
+                            "id": str(uuid4()) if foreign else report,
+                            "inputs": [source],
+                        }
+                    else:
+                        raise AssertionError("Unexpected operation " + operation)
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "id": frame["id"],
+                                "type": operation,
+                                "protocol_version": PROTOCOL_VERSION,
+                                "payload": {
+                                    "code": "OK",
+                                    "said": None,
+                                    "payload": result,
+                                },
+                            }
+                        )
+                    )
+
+            async with serve(handle, "127.0.0.1", 0) as server:
+                origin = "http://127.0.0.1:" + str(server.sockets[0].getsockname()[1])
+                async with await Client.connect(
+                    origin, "fixture-token", timeout=2, legacy_transport=True
+                ) as client:
+                    reports = await SdkPrivacyPort(client, config).reports()
+                    self.assertEqual(len(reports), 1)
+                    self.assertEqual(reports[0].id, report)
+                    self.assertEqual(reports[0].inputs, (source,))
+                    self.assertEqual(reports[0].report_status, "draft")
+                    foreign = True
+                    with self.assertRaisesRegex(ValueError, "foreign"):
+                        await SdkPrivacyPort(client, config).reports()
+            self.assertEqual(operations, ["information.list", "information.status"] * 2)
+
     async def test_outgoing_peer_advertises_claims_and_reports_over_public_sdk(
         self,
     ) -> None:
