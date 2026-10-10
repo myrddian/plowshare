@@ -24,6 +24,7 @@ from .contracts import (
     DnsObservation,
     PiHolePlan,
     TcpObservation,
+    identifier,
     items,
     load_json,
     object_fields,
@@ -113,7 +114,7 @@ class ManualInvestigation:
             uuid(row["scan_id"]),
             timestamp(row["requested_at"]),
             phase,
-            uuid(row["run_id"]) if row["run_id"] is not None else None,
+            identifier(row["run_id"]) if row["run_id"] is not None else None,
             text(row["state"], 128) if row["state"] is not None else None,
         )
 

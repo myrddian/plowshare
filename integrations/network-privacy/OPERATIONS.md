@@ -73,7 +73,12 @@ through the public SDK. This may incur model costs beyond the automatic limit.
 An intent is retained before submission; the same identity cannot resubmit an
 unknown outcome, and a second intent for the same scan is blocked until the first
 is positively refused. Automatically admitted and legacy completions cannot be
-manually duplicated through this control.
+manually duplicated through this control. Run IDs are opaque server identifiers
+(`orc_…`), separate from UUID request identities. If a start reply cannot be
+retained, keep the manual intent pending and use **Check and resume** to read its
+exact receipt. If the service-token receipt read is refused, follow the
+[project-scoped receipt gap](GAPS.md#project-scoped-orchestration-start-receipts);
+do not retry the investigation or confirm it from a similarly timed run.
 
 Browser notifications are optional and request permission only after your explicit
 preference action. They carry a generic notice, with no addresses or DNS names.

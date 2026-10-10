@@ -49,3 +49,25 @@ unavailable read as a missing schedule or poll using human credentials.
 An administrator can inspect schedules through the CLI, and the dashboard's
 explicit schedule editor uses a temporary administrator login. A project-scoped
 runtime inspection contract is a separate platform follow-up.
+
+## Project-scoped orchestration start receipts
+
+`orchestration.start` admits project work with an account-owned UUID request
+identity. Its response contains a separate opaque `orc_…` run ID. The public
+`orchestration.receipt` request exposes only `requestId`; it has no project
+selection. The current server cannot resolve a service token's project ceiling
+from that receipt identity, so it refuses the read before reaching the retained
+account-owned receipt.
+
+The dashboard can retain a successful start response, but after an unknown or
+unusable reply its manual intent must remain pending. Listing a similar run or
+matching creation time does not prove which request was admitted. The collector
+never resubmits the start, replaces its request UUID, borrows a human credential
+or marks an intent confirmed from those hints. Check and resume remains fenced
+if it cannot obtain the exact account-owned receipt.
+
+A separate platform task should authorize this receipt read against the retained
+request's project and caller, preserving foreign-account and foreign-project
+refusal. A bounded public SDK receipt read must recover the existing admission
+without launching another run. No server, shared contract or SDK changes are
+included in this integration fix.
