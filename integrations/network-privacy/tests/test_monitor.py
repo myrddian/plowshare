@@ -14,7 +14,8 @@ from aiohttp.test_utils import TestClient, TestServer
 from support import EXAMPLES, CountingCollector, FixturePort, configuration
 
 from plowshare_privacy.collection import NetworkCollector
-from plowshare_privacy.contracts import Configuration, utc_now
+from plowshare_privacy.collector_factory import configured_collector
+from plowshare_privacy.contracts import Configuration, DeviceLabel, utc_now
 from plowshare_privacy.discovery import LocalDeviceDiscovery
 from plowshare_privacy.journal import FileReceipts, Publication, Receipt
 from plowshare_privacy.monitor import FileMonitorSettings, MonitorChoice, SettingsBusy
@@ -237,3 +238,63 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(ValueError):
                 MonitorChoice.decode(value)
+
+    async def test_device_labels_are_saved_without_exposing_or_removing_pihole_secret(
+        self,
+    ) -> None:
+        row = json.loads(self.path.read_text())
+        secret = self.root / "pihole-secret"
+        secret.write_text("fixture-app-password")
+        secret.chmod(0o600)
+        row["collection"]["pihole"] = {
+            "origin": "https://pihole.example",
+            "passwordFile": str(secret),
+        }
+        configured = Configuration.decode(row, self.path)
+        self.receipts.prepare_scope_change(configured.collection)
+        self.path.write_text(json.dumps(row))
+        self.receipts.complete_scope_change(configured.collection)
+        self.worker.config = configured
+        self.worker.collector = configured_collector(
+            configured.collector, configured.collection
+        )
+        labeled = MonitorChoice.decode(
+            {
+                "enabled": True,
+                "targets": ["192.168.0.12"],
+                "ports": [443],
+                "labels": {"192.168.0.12": "Living room TV"},
+            }
+        )
+        await self.settings.save(labeled)
+        view = self.settings.view()
+        self.assertTrue(view.pihole_configured)
+        self.assertEqual(view.labels, (DeviceLabel("192.168.0.12", "Living room TV"),))
+        self.assertNotIn("fixture-app-password", str(view))
+        self.assertNotIn(str(secret), str(view))
+        await self.settings.save(
+            CHOICE
+        )  # An older UI omits labels; existing labels are retained.
+        self.assertEqual(self.settings.view().labels, view.labels)
+        await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
+        self.assertEqual(self.settings.view().labels, ())
+        self.assertEqual(
+            Configuration.read(self.path).collection.pihole,
+            self.worker.config.collection.pihole,
+        )
+
+    def test_device_labels_require_selected_addresses_and_bounded_text(self) -> None:
+        for labels in (
+            {"192.168.0.13": "foreign"},
+            {"192.168.0.12": "x" * 129},
+            {"192.168.0.12": ""},
+        ):
+            with self.assertRaises(ValueError):
+                MonitorChoice.decode(
+                    {
+                        "enabled": True,
+                        "targets": ["192.168.0.12"],
+                        "ports": [443],
+                        "labels": labels,
+                    }
+                )

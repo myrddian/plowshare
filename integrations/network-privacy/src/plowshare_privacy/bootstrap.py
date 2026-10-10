@@ -41,6 +41,7 @@ from .cli import execute
 from .contracts import Configuration, integer, load_json, object_fields, text
 from .dashboard import reopen
 from .discovery import DiscoveryPlan, discover
+from .journal import FileReceipts
 from .monitor import replace_private
 from .setup import (
     Setup,
@@ -661,6 +662,79 @@ async def start(setup: Setup, bind: str, port: int) -> None:
     await serve(setup, bind, port, automatic=True)
 
 
+def connect_pihole(setup: Setup, origin: str, application_password: str) -> None:
+    """Configure a stopped collector offline, preserving settled receipts and scope fences.
+
+    This stores an app password in a fresh private file; it never logs into Pi-hole
+    or changes the Plowshare Application. Local transition recovery is identical to
+    dashboard scope changes, so neither old nor new work is abandoned on a crash.
+    """
+    config = Configuration.read(setup.collector)
+    if (
+        config.collection.mode != "tcp"
+        or config.collection.observations_file is not None
+    ):
+        raise SetupProblem(
+            "Pi-hole needs TCP collection without an observation-file source."
+        )
+    if config.collection.pihole is not None:
+        raise SetupProblem(
+            "Pi-hole is already configured. Update its existing private password file or environment secret."
+        )
+    secret = text(application_password, 4096)
+    if secret != secret.strip():
+        raise SetupProblem(
+            "Pi-hole application password cannot contain edge whitespace."
+        )
+    row = object_fields(
+        load_json(setup.collector),
+        {
+            "origin",
+            "project",
+            "collector",
+            "tokenEnvironment",
+            "webTokenEnvironment",
+            "stateDirectory",
+            "requestTopic",
+            "resultTopic",
+            "group",
+            "schedule",
+            "collection",
+        },
+        {"outgoingPeer"},
+    )
+    plan = object_fields(
+        row["collection"],
+        {"mode", "targets", "ports", "timeoutSeconds", "concurrency"},
+        {"enabled", "deviceLabels"},
+    )
+    path = setup.collector.parent / ("pihole-password-" + str(uuid4()))
+    plan["pihole"] = {
+        "origin": origin,
+        "passwordFile": str(path),
+        "lookbackSeconds": 3600,
+        "queryLimit": 64,
+        "maxIdentityAgeSeconds": 86400,
+        "timeoutSeconds": 5,
+    }
+    row["collection"] = plan
+    configured = Configuration.decode(row, setup.collector)
+    with FileReceipts(config) as receipts:
+        if Configuration.read(setup.collector) != config:
+            raise SetupProblem(
+                "Collector configuration changed; review it before connecting Pi-hole."
+            )
+        # prepare_scope_change requires settled collection and publication receipts.
+        # Preserve the secret if a later filesystem effect becomes uncertain.
+        receipts.prepare_scope_change(configured.collection)
+        private_write(path, secret + "\n")
+        replace_private(setup.collector, json.dumps(row, indent=2) + "\n")
+        receipts.complete_scope_change(configured.collection)
+    print(
+        "Pi-hole v6 configured. Run start, then request a scan to check device and DNS evidence."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -688,6 +762,13 @@ def main() -> None:
         type=Path,
         required=True,
         help="Absolute network-privacy-watch Application folder",
+    )
+    pihole = commands.add_parser(
+        "connect-pihole",
+        help="Configure a stopped collector's Pi-hole v6 source offline",
+    )
+    pihole.add_argument(
+        "--origin", required=True, help="Explicit Pi-hole HTTP(S) origin"
     )
     commands.add_parser(
         "install",
@@ -731,7 +812,7 @@ def main() -> None:
             return
         if args.directory is None:
             raise SetupProblem(
-                "Set --directory for configure, install, status, start or serve."
+                "Set --directory for configure, install, status, start, connect-pihole or serve."
             )
         root = private_root(args.directory)
         if args.command == "configure":
@@ -749,6 +830,11 @@ def main() -> None:
             or setup.collector != root / "collector.json"
         ):
             raise SetupProblem("Setup paths do not match this private directory.")
+        if args.command == "connect-pihole":
+            connect_pihole(
+                setup, args.origin, getpass("Pi-hole application password: ")
+            )
+            return
         if args.command == "start":
             saved = (
                 object_fields(load_json(root / "dashboard.json"), {"bind", "port"})

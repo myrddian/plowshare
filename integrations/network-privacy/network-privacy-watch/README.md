@@ -16,7 +16,8 @@ Application's `reasoning` binding.
 1. A Plowshare schedule or a dashboard request makes a scan request available
    through project-scoped Relay.
 2. Python probes explicitly configured IP addresses and TCP ports. It can also
-   read a normalized DNS observation export from an external monitoring system.
+   read Pi-hole v6 device associations and recent DNS queries, or a normalized DNS
+   observation export from an external monitoring system.
 3. The collector compares observations, uploads evidence to the project's
    information store and publishes a completion event with retained identities.
 4. Relay starts an investigation for a baseline, changed observations or a
@@ -24,7 +25,8 @@ Application's `reasoning` binding.
    draft report linked to its source evidence.
 5. The dashboard displays collection receipts, observations, gaps and related
    reports. Agents also get granted named tools for requesting a scan and reading
-   its scope, status, evidence and DNS destinations.
+   its scope, status, evidence and DNS destinations. Operator labels and observed
+   device identities accompany evidence, with explicit gaps for unavailable data.
 
 Python handles collection and comparison. Plowshare owns scheduling, retained
 evidence and investigation work. The LLM contributes interpretation and review.

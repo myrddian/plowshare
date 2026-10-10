@@ -10,7 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from .contracts import DnsObservation, Evidence, object_fields, uuid
+from .contracts import (
+    DeviceIdentity,
+    DeviceLabel,
+    DnsObservation,
+    DnsWindow,
+    Evidence,
+    object_fields,
+    uuid,
+)
 from .journal import Publication, Receipt, ScanOrigin
 from .worker import Worker
 
@@ -123,6 +131,8 @@ class ScopeResult:
     timeout_seconds: float
     dns_export_configured: bool
     enabled: bool
+    device_labels: tuple[DeviceLabel, ...] = ()
+    pihole_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,6 +172,8 @@ class DestinationsResult:
     observed_at: str
     destinations: tuple[DnsObservation, ...]
     issues: tuple[str, ...]
+    devices: tuple[DeviceIdentity, ...] = ()
+    dns_window: DnsWindow | None = None
 
 
 ToolResult = (
@@ -217,6 +229,8 @@ class WorkerTools:
                 plan.timeout,
                 plan.observations_file is not None,
                 plan.enabled,
+                plan.labels,
+                plan.pihole is not None,
             )
         if isinstance(call, ScanCall):
             return await self.worker.request_scan(call.request_id, call.origin)
@@ -262,4 +276,6 @@ class WorkerTools:
             evidence.snapshot.observed_at,
             evidence.snapshot.dns,
             evidence.issues,
+            evidence.snapshot.devices,
+            evidence.snapshot.dns_window,
         )

@@ -74,6 +74,69 @@ The packaged server schedule remains paused until you enable it as its administr
 Agent investigations also need service-owned Relay processing as described below.
 The dashboard can collect and retain evidence before either is enabled.
 
+## Connect Pi-hole v6
+
+After the first guided setup, add Pi-hole to the collector on the machine that
+can reach its API. You can also use device names without Pi-hole: enter one
+selected `address=name` per line in the dashboard's **Device names** field.
+
+1. In Pi-hole's web interface, create an **application password** for the API.
+   Follow the [official authentication guide](https://docs.pi-hole.net/api/auth/).
+   This is separate from both your Plowshare service credential and dashboard login.
+2. Stop the Python collector by closing its running terminal or pressing Ctrl-C.
+   Wait for scans to finish first. The helper refuses an active collector or
+   unsettled receipts; it does not abandon pending work.
+3. Set `PIHOLE_ORIGIN` to Pi-hole's actual HTTP(S) origin, including its port if
+   needed, with no `/admin` or `/api` path. Prefer an HTTPS endpoint with a certificate
+   trusted by the collector. Run:
+
+   ```sh
+   build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+     --directory "$PRIVACY_PRIVATE" connect-pihole --origin "$PIHOLE_ORIGIN"
+   ```
+
+   Enter the application password at the hidden prompt. The helper stores it in
+   a fresh `pihole-password-<UUID>` file with private permissions and writes its
+   absolute path to `collector.json`. Configuration is offline: no login, probe,
+   Plowshare deployment or Pi-hole change is performed.
+4. Run the existing launcher or `--directory "$PRIVACY_PRIVATE" start`, then choose
+   **Request a scan**. Inspect **Observed devices**, the DNS window and **Coverage &
+   gaps** in its evidence. No Plowshare server restart is required. The source
+   change begins a new baseline; previous scans remain readable.
+
+The connector reads only the selected addresses' query samples and returns fresh,
+unambiguous device associations. If Pi-hole is unreachable, refuses authentication,
+or has insufficient retained history, the scan retains TCP results with explicit
+DNS/identity gaps. DNS observations do not establish payload contents or malicious
+behavior. Router-proxied clients and DNS that bypasses Pi-hole may not be attributable.
+
+For deployments using a secret manager, supply an environment variable instead of
+running the helper. Add this object to `collection` in private `collector.json`:
+
+```json
+"pihole": {
+  "origin": "https://pihole.example.invalid",
+  "passwordEnvironment": "PIHOLE_APP_PASSWORD",
+  "lookbackSeconds": 3600,
+  "queryLimit": 64,
+  "maxIdentityAgeSeconds": 86400,
+  "timeoutSeconds": 5
+}
+```
+
+Use exactly one of `passwordEnvironment` or `passwordFile`; never put a password
+in JSON or a command argument. Supply the variable to every collector process.
+Manual source edits are suitable before the first run. Once a receipt journal
+exists, use `connect-pihole` for initial enrollment so scope transitions are fenced.
+Existing source changes need deliberate journal reconciliation; do not delete
+history to bypass a refusal. To rotate the same file-backed password, stop the
+collector, replace the existing secret file contents preserving `0600` permissions,
+and restart. This changes no collection scope or service identity.
+
+Pi-hole exposes documentation for its installed version at `/api/docs`. The
+[connector details](README.md#pi-hole-v6-and-device-names) explain sample limits,
+freshness, optional evidence fields and attribution limits.
+
 ## Understand the two parts
 
 | Part | Where it runs | What it does |
@@ -94,8 +157,8 @@ in the agent's `tools` list. Permissions grant visibility and execution; loading
 validates policy and each runtime call checks registration, permission and
 availability. The model cannot select new scan targets or execute shell commands.
 TCP results show service responses, not vulnerabilities or proof of data leaving
-a device. DNS observations require an additional normalized export; TCP probes
-alone do not reveal which remote destinations a TV contacts.
+a device. DNS observations require the optional Pi-hole v6 connector or a normalized export;
+TCP probes alone do not reveal which remote destinations a TV contacts.
 
 ## 1. Prepare the prerequisites
 

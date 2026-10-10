@@ -157,16 +157,122 @@ class DnsObservation:
 
 
 @dataclass(frozen=True)
+class DeviceIdentity:
+    """A time-specific address association, not proof of a physical device's identity."""
+
+    address: str
+    device_id: str
+    label: str | None
+    hostname: str | None
+    mac: str | None
+    vendor: str | None
+    source: Literal["configured", "pihole-v6"]
+    observed_at: str
+    last_seen: str | None
+
+    @classmethod
+    def decode(cls, value: object) -> DeviceIdentity:
+        row = object_fields(
+            value,
+            {
+                "address",
+                "device_id",
+                "label",
+                "hostname",
+                "mac",
+                "vendor",
+                "source",
+                "observed_at",
+                "last_seen",
+            },
+        )
+        address = str(ipaddress.ip_address(text(row["address"])))
+        mac = text(row["mac"], 17).lower() if row["mac"] is not None else None
+        if mac is not None and (
+            not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac)
+            or mac in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}
+        ):
+            raise ValueError("Invalid device MAC address")
+        expected = "mac:" + mac if mac else "ip:" + address
+        if row["device_id"] != expected or row["source"] not in {
+            "configured",
+            "pihole-v6",
+        }:
+            raise ValueError("Invalid device identity provenance")
+        if row["source"] == "configured" and (
+            mac is not None
+            or row["hostname"] is not None
+            or row["vendor"] is not None
+            or row["last_seen"] is not None
+        ):
+            raise ValueError("Configured labels cannot assert discovered identity")
+        return cls(
+            address,
+            expected,
+            text(row["label"], 128) if row["label"] is not None else None,
+            text(row["hostname"], 128) if row["hostname"] is not None else None,
+            mac,
+            text(row["vendor"], 96) if row["vendor"] is not None else None,
+            "pihole-v6" if row["source"] == "pihole-v6" else "configured",
+            timestamp(row["observed_at"]),
+            timestamp(row["last_seen"]) if row["last_seen"] is not None else None,
+        )
+
+
+@dataclass(frozen=True)
+class DnsWindow:
+    """Counts describe a bounded query-log sample; completeness is never inferred from silence."""
+
+    source: Literal["pihole-v6"]
+    from_at: str
+    until_at: str
+    queries_read: int
+    queries_available: int
+    complete: bool
+
+    @classmethod
+    def decode(cls, value: object) -> DnsWindow:
+        row = object_fields(
+            value,
+            {
+                "source",
+                "from_at",
+                "until_at",
+                "queries_read",
+                "queries_available",
+                "complete",
+            },
+        )
+        start, end = timestamp(row["from_at"]), timestamp(row["until_at"])
+        if (
+            row["source"] != "pihole-v6"
+            or type(row["complete"]) is not bool
+            or datetime.fromisoformat(start.replace("Z", "+00:00"))
+            > datetime.fromisoformat(end.replace("Z", "+00:00"))
+        ):
+            raise ValueError("Invalid DNS window")
+        read = integer(row["queries_read"], 0, 8192)
+        available = integer(row["queries_available"], read, 2**53 - 1)
+        if row["complete"] and read != available:
+            raise ValueError("Incomplete query counts cannot claim complete coverage")
+        return cls("pihole-v6", start, end, read, available, row["complete"])
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """A bounded export/fixture. DNS queries are observations, not proof of payload exfiltration."""
 
     observed_at: str
     tcp: tuple[TcpObservation, ...]
     dns: tuple[DnsObservation, ...]
+    devices: tuple[DeviceIdentity, ...] = ()
+    dns_window: DnsWindow | None = None
 
     @classmethod
     def decode(cls, value: object) -> Snapshot:
-        row = object_fields(value, {"version", "observed_at", "tcp", "dns"})
+        row = object_fields(
+            value, {"version", "observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+        )
         integer(row["version"], 1, 1)
         tcp = tuple(TcpObservation.decode(item) for item in items(row["tcp"], 256))
         dns = tuple(DnsObservation.decode(item) for item in items(row["dns"], 256))
@@ -174,7 +280,122 @@ class Snapshot:
             {(item.device, item.domain) for item in dns}
         ) != len(dns):
             raise ValueError("Duplicate observation")
-        return cls(timestamp(row["observed_at"]), tcp, dns)
+        devices = tuple(
+            DeviceIdentity.decode(item) for item in items(row.get("devices", []), 32)
+        )
+        if len({device.address for device in devices}) != len(devices):
+            raise ValueError("Duplicate device address association")
+        window = (
+            DnsWindow.decode(row["dns_window"])
+            if row.get("dns_window") is not None
+            else None
+        )
+        return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
+
+
+@dataclass(frozen=True)
+class DeviceLabel:
+    address: str
+    label: str
+
+
+def device_labels(value: object, targets: tuple[str, ...]) -> tuple[DeviceLabel, ...]:
+    if not isinstance(value, dict) or len(value) > 32:
+        raise ValueError("Device labels must map selected addresses to names")
+    labels = tuple(
+        DeviceLabel(str(ipaddress.ip_address(text(address))), text(label, 128))
+        for address, label in value.items()
+    )
+    if len({label.address for label in labels}) != len(labels) or not {
+        label.address for label in labels
+    } <= set(targets):
+        raise ValueError("Labels must refer to selected device addresses")
+    # These names also appear in network_scope replies, before a scan exists.
+    # Bound their escaped JSON separately so that metadata fits native tool limits.
+    if (
+        len(json.dumps([asdict(label) for label in labels], separators=(",", ":")))
+        > 8192
+    ):
+        raise ValueError("Device names exceed the tool reply budget; use shorter names")
+    return tuple(sorted(labels, key=lambda label: label.address))
+
+
+@dataclass(frozen=True)
+class PiHolePlan:
+    origin: str
+    password_environment: str | None
+    password_file: Path | None
+    lookback_seconds: int
+    query_limit: int
+    max_identity_age: int
+    timeout: float
+
+    @classmethod
+    def decode(cls, value: object) -> PiHolePlan:
+        row = object_fields(
+            value,
+            {"origin"},
+            {
+                "passwordEnvironment",
+                "passwordFile",
+                "lookbackSeconds",
+                "queryLimit",
+                "maxIdentityAgeSeconds",
+                "timeoutSeconds",
+            },
+        )
+        origin = text(row["origin"], 2048).rstrip("/")
+        url = urlsplit(origin)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username
+            or url.password
+            or url.path
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError(
+                "Configure a Pi-hole HTTP(S) origin without credentials or a path"
+            )
+        url.port
+        if ("passwordEnvironment" in row) == ("passwordFile" in row):
+            raise ValueError(
+                "Pi-hole requires exactly one passwordEnvironment or passwordFile"
+            )
+        environment = (
+            text(row["passwordEnvironment"], 128)
+            if "passwordEnvironment" in row
+            else None
+        )
+        if environment is not None and not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*", environment
+        ):
+            raise ValueError("Invalid Pi-hole password environment name")
+        file = Path(text(row["passwordFile"], 4096)) if "passwordFile" in row else None
+        if file is not None and (
+            not file.is_absolute() or file.resolve() != file or file.is_symlink()
+        ):
+            raise ValueError(
+                "Pi-hole password file must be an absolute unlinked private path"
+            )
+        timeout = row.get("timeoutSeconds", 5)
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or not 0.1 <= timeout <= 10
+        ):
+            raise ValueError("Pi-hole timeout must be between 0.1 and 10 seconds")
+        return cls(
+            origin,
+            environment,
+            file,
+            integer(row.get("lookbackSeconds", 3600), 60, 86400),
+            integer(row.get("queryLimit", 64), 1, 256),
+            integer(row.get("maxIdentityAgeSeconds", 86400), 60, 604800),
+            float(timeout),
+        )
 
 
 @dataclass(frozen=True)
@@ -187,6 +408,8 @@ class CollectionPlan:
     observations_file: Path | None
     max_observation_age: int
     enabled: bool = True
+    labels: tuple[DeviceLabel, ...] = ()
+    pihole: PiHolePlan | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +482,8 @@ class Configuration:
                 "observationsFile",
                 "maxObservationAgeSeconds",
                 "enabled",
+                "deviceLabels",
+                "pihole",
             },
         )
         mode = plan["mode"]
@@ -315,6 +540,9 @@ class Configuration:
                 if observations
                 else 0
             )
+            pihole = PiHolePlan.decode(plan["pihole"]) if "pihole" in plan else None
+            if pihole is not None and observations is not None:
+                raise ValueError("Choose either Pi-hole or a DNS observation file")
             collection = CollectionPlan(
                 "tcp",
                 targets,
@@ -324,6 +552,8 @@ class Configuration:
                 observations,
                 age,
                 enabled,
+                device_labels(plan.get("deviceLabels", {}), targets),
+                pihole,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),
@@ -385,7 +615,21 @@ class Evidence:
     previous_revision: str | None
 
     def encode(self) -> str:
-        return json.dumps(asdict(self), indent=2, allow_nan=False)
+        # Historical receipts are reconciled against exact retained text. Preserve
+        # their original pretty encoding and omit absent v1 extensions. Enriched
+        # evidence uses compact JSON to fit the bundled investigation's 32-KiB fence.
+        row = asdict(self)
+        enriched = bool(self.snapshot.devices) or self.snapshot.dns_window is not None
+        if not self.snapshot.devices:
+            row["snapshot"].pop("devices")
+        if self.snapshot.dns_window is None:
+            row["snapshot"].pop("dns_window")
+        return json.dumps(
+            row,
+            indent=None if enriched else 2,
+            separators=(",", ":") if enriched else None,
+            allow_nan=False,
+        )
 
     @classmethod
     def decode(cls, value: object) -> Evidence:
@@ -408,7 +652,9 @@ class Evidence:
         mode = row["mode"]
         if mode not in ("tcp", "fixture"):
             raise ValueError("Invalid evidence mode")
-        snapshot = object_fields(row["snapshot"], {"observed_at", "tcp", "dns"})
+        snapshot = object_fields(
+            row["snapshot"], {"observed_at", "tcp", "dns"}, {"devices", "dns_window"}
+        )
         snapshot["version"] = 1
         return cls(
             uuid(row["scan_id"]),

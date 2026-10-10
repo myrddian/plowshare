@@ -10,8 +10,17 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from .collection import NetworkCollector
-from .contracts import Configuration, integer, items, load_json, object_fields, text
+from .collector_factory import configured_collector
+from .contracts import (
+    Configuration,
+    DeviceLabel,
+    device_labels,
+    integer,
+    items,
+    load_json,
+    object_fields,
+    text,
+)
 from .journal import FileReceipts
 from .worker import Worker
 
@@ -25,10 +34,11 @@ class MonitorChoice:
     enabled: bool
     targets: tuple[str, ...]
     ports: tuple[int, ...]
+    labels: tuple[DeviceLabel, ...] | None = None
 
     @classmethod
     def decode(cls, value: object) -> MonitorChoice:
-        row = object_fields(value, {"enabled", "targets", "ports"})
+        row = object_fields(value, {"enabled", "targets", "ports"}, {"labels"})
         if type(row["enabled"]) is not bool:
             raise ValueError("Monitoring enabled must be a boolean")
         targets = tuple(
@@ -50,7 +60,12 @@ class MonitorChoice:
             and (not targets or not ports)
         ):
             raise ValueError("Choose unique private device addresses and TCP ports")
-        return cls(row["enabled"], targets, ports)
+        return cls(
+            row["enabled"],
+            targets,
+            ports,
+            device_labels(row["labels"], targets) if "labels" in row else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -60,6 +75,8 @@ class MonitorView:
     ports: tuple[int, ...]
     editable: bool
     detail: str
+    labels: tuple[DeviceLabel, ...] = ()
+    pihole_configured: bool = False
 
 
 class MonitorSettings(Protocol):
@@ -130,6 +147,8 @@ class FileMonitorSettings:
             "Choose the devices and ports to monitor."
             if editable
             else "Finish or reconcile the current work before changing monitoring settings.",
+            plan.labels,
+            plan.pihole is not None,
         )
 
     async def save(self, choice: MonitorChoice) -> MonitorView:
@@ -178,21 +197,37 @@ class FileMonitorSettings:
             plan = object_fields(
                 row["collection"],
                 {"mode", "targets", "ports", "timeoutSeconds", "concurrency"},
-                {"enabled", "observationsFile", "maxObservationAgeSeconds"},
+                {
+                    "enabled",
+                    "observationsFile",
+                    "maxObservationAgeSeconds",
+                    "deviceLabels",
+                    "pihole",
+                },
             )
             plan.update(
                 enabled=choice.enabled,
                 targets=list(choice.targets),
                 ports=list(choice.ports),
             )
+            labels = (
+                choice.labels
+                if choice.labels is not None
+                else tuple(
+                    label
+                    for label in self.worker.config.collection.labels
+                    if label.address in choice.targets
+                )
+            )
+            if labels or "deviceLabels" in plan:
+                plan["deviceLabels"] = {label.address: label.label for label in labels}
             row["collection"] = plan
             config = Configuration.decode(row, self.path)
+            collector = configured_collector(config.collector, config.collection)
             self.receipts.prepare_scope_change(config.collection)
             replace_private(self.path, json.dumps(row, indent=2) + "\n")
             self.worker.config = config
-            self.worker.collector = NetworkCollector(
-                config.collector, config.collection
-            )
+            self.worker.collector = collector
             self.receipts.complete_scope_change(config.collection)
             self.worker.state = "ready" if choice.enabled else "configuration_required"
             self.worker.detail = (

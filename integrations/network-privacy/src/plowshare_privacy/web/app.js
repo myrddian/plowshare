@@ -46,6 +46,24 @@ async function showEvidence(scanId) {
   panel.replaceChildren();
   byId('selection').textContent = evidence.mode === 'fixture' ? 'Synthetic fixture' : 'Collected observations';
   panel.append(element('p', `Observed ${new Date(evidence.snapshot.observed_at).toLocaleString()}`));
+  const devices = evidence.snapshot.devices || [];
+  if (devices.length) {
+    panel.append(element('h3', 'Observed devices'));
+    const table = element('table', undefined, 'identity-table');
+    const header = element('tr');
+    ['Device', 'Address', 'MAC / identity', 'Observed association'].forEach(title => header.append(element('th', title)));
+    table.append(header);
+    devices.forEach(device => {
+      const row = element('tr');
+      [device.label || device.hostname || 'Unnamed device', device.address, device.mac || device.device_id, device.last_seen ? `${device.source} · ${new Date(device.last_seen).toLocaleString()}` : 'Configured address; MAC not observed'].forEach(value => row.append(element('td', value)));
+      table.append(row);
+    });
+    panel.append(table);
+  }
+  if (evidence.snapshot.dns_window) {
+    const window = evidence.snapshot.dns_window;
+    panel.append(element('p', `Pi-hole DNS window: ${new Date(window.from_at).toLocaleString()} – ${new Date(window.until_at).toLocaleString()}. Read ${window.queries_read} of ${window.queries_available} matching recorded queries${window.complete ? '.' : '; coverage is incomplete. See gaps below.'}`));
+  }
   listItems(panel, 'Changes against the previous collection', evidence.changes);
   listItems(panel, 'Coverage & gaps', evidence.issues);
   panel.append(element('h3', 'Evidence revision'));
@@ -133,7 +151,7 @@ byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false;
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
-  byId('network').value = ''; byId('targets').value = ''; byId('ports').value = '';
+  byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
   byId('dashboard').hidden = true; byId('connect').hidden = false;
   byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren();
   byId('mode').textContent = 'Not connected'; notice('Disconnected. Private evidence has been cleared from view.');
@@ -185,6 +203,8 @@ async function loadSettings() {
   byId('enabled').checked = settings.enabled;
   byId('targets').value = settings.targets.join(', ');
   byId('ports').value = settings.ports.join(',');
+  byId('device-labels').value = (settings.labels || []).map(label => `${label.address}=${label.label}`).join('\n');
+  byId('identity-source').textContent = settings.pihole_configured ? 'Pi-hole v6 is configured. A scan records fresh device associations and DNS activity; names below remain your own labels.' : 'Add your own device names, or connect Pi-hole v6 using the setup guide for observed hostnames, MAC addresses and DNS activity.';
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
@@ -206,7 +226,15 @@ byId('monitor-form').addEventListener('submit', async event => {
   byId('save-monitoring').disabled = true;
   try {
     const targets = byId('targets').value.split(',').map(value => value.trim()).filter(Boolean);
-    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection()})});
+    const labels = {};
+    for (const line of byId('device-labels').value.split('\n').map(value => value.trim()).filter(Boolean)) {
+      const separator = line.indexOf('=');
+      const address = line.slice(0, separator).trim();
+      const name = line.slice(separator + 1).trim();
+      if (separator < 1 || !name || !targets.includes(address) || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
+      labels[address] = name;
+    }
+    const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
     await refresh();
     notice(result.enabled ? 'Monitoring saved. Choose Request a scan to collect your first evidence.' : 'Collection is disabled. Your evidence is preserved.');
   } catch (error) {notice(error.message, true);}
