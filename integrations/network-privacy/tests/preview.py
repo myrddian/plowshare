@@ -24,10 +24,17 @@ from support import (
     configuration,
     event,
 )
+from test_device_profiles import Documents
 from test_operator_console import ConsoleFixture, Settings
 
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
+from plowshare_privacy.device_profiles import (
+    DeviceProfiles,
+    FileProfileIntents,
+    ProfileFields,
+)
 from plowshare_privacy.discovery import LocalDeviceDiscovery
+from plowshare_privacy.monitor import MonitorView
 from plowshare_privacy.operator_state import FileOperatorStore, Preferences
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
@@ -82,8 +89,47 @@ async def preview(bind: str, port: int) -> None:
             recover,
             FileManualInvestigations(Path(folder).resolve()),
         )
+
+        class PreviewSettings(Settings):
+            def view(self) -> MonitorView:
+                return MonitorView(
+                    True,
+                    config.collection.targets,
+                    (443,),
+                    True,
+                    "Synthetic fixture settings",
+                )
+
+        profiles = DeviceProfiles(
+            Documents(),
+            FileProfileIntents(
+                Path(folder).resolve(), config.project, config.collector
+            ),
+            receipts,
+            lambda: config.collection.targets,
+        )
+        await profiles.save(
+            str(uuid4()),
+            str(uuid4()),
+            None,
+            ProfileFields(
+                "Living room TV",
+                "Household",
+                "Operator supplied model",
+                "Streaming and home media",
+                "HTTPS for media and firmware updates; investigate unexplained services",
+                "Synthetic preview profile; physical identity is not verified",
+                config.collection.targets,
+            ),
+        )
         runner = web.AppRunner(
-            application(worker, "fixture-web-token-1234567890", console=console),
+            application(
+                worker,
+                "fixture-web-token-1234567890",
+                console=console,
+                profiles=profiles,
+                settings=PreviewSettings(),
+            ),
             access_log=None,
         )
         await runner.setup()

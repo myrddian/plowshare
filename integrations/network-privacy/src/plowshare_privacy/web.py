@@ -18,6 +18,7 @@ from plowshare.tools import ToolAttention
 
 from .console import OperatorConsole
 from .contracts import integer, items, object_fields, parse_json, text, uuid
+from .device_profiles import DeviceProfiles, ProfileFields
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
 from .journal import Publication
@@ -37,6 +38,7 @@ def application(
     instance: str | None = None,
     console: OperatorConsole | None = None,
     schedule_editor: ScheduleManagement | None = None,
+    profiles: DeviceProfiles | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -261,6 +263,55 @@ def application(
         response.del_cookie(cookie, path="/api")
         return response
 
+    def profile_service() -> DeviceProfiles:
+        if profiles is None:
+            raise web.HTTPNotFound(text="Device profiles are not enabled")
+        return profiles
+
+    async def profile_list(request: web.Request) -> web.Response:
+        service = profile_service()
+        return web.json_response(
+            {
+                "profiles": [asdict(v) for v in await service.list()],
+                "intents": [asdict(v) for v in service.intents.all()],
+            }
+        )
+
+    async def profile_intents(request: web.Request) -> web.Response:
+        return web.json_response([asdict(v) for v in profile_service().intents.all()])
+
+    async def profile_source(request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "text": await profile_service().read(
+                    uuid(request.match_info["identity"]),
+                    uuid(request.match_info["revision"]),
+                )
+            }
+        )
+
+    async def profile_save(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()),
+            {"profile_id", "request_id", "expected_revision", "fields"},
+        )
+        result = await profile_service().save(
+            uuid(row["profile_id"]),
+            uuid(row["request_id"]),
+            uuid(row["expected_revision"])
+            if row["expected_revision"] is not None
+            else None,
+            ProfileFields.decode(row["fields"]),
+        )
+        return web.json_response(
+            asdict(result), status=202 if result.phase == "pending" else 200
+        )
+
+    async def profile_reconcile(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        await profile_service().reconcile()
+        return web.json_response({"checked": True})
+
     async def monitoring(request: web.Request) -> web.Response:
         if settings is None:
             raise web.HTTPNotFound(text="Dashboard settings are not enabled")
@@ -344,6 +395,7 @@ def application(
                 "mode": worker.config.collection.mode,
                 "collection_enabled": worker.config.collection.enabled,
                 "settings_available": settings is not None,
+                "profiles_available": profiles is not None,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -470,6 +522,11 @@ def application(
     app.router.add_get("/api/scans", scans)
     app.router.add_get("/api/scans/{scan_id}", evidence)
     app.router.add_post("/api/scans", collect)
+    app.router.add_get("/api/profile-intents", profile_intents)
+    app.router.add_get("/api/profiles", profile_list)
+    app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)
+    app.router.add_post("/api/profiles", profile_save)
+    app.router.add_post("/api/profiles/reconcile", profile_reconcile)
     app.router.add_get("/api/reports", reports)
     app.router.add_get("/api/reports/{revision}", report)
     return app

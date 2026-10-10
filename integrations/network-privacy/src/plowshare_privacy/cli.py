@@ -31,6 +31,7 @@ from .console import FileManualInvestigations, OperatorConsole
 from .console_port import SdkConsolePort
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
+from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
 from .journal import FileReceipts
 from .monitor import FileMonitorSettings
@@ -39,6 +40,7 @@ from .operator_state import FileOperatorStore
 from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
+from .profile_port import SdkProfilePort
 from .schedule_editor import ScheduleEditor
 from .tools import WorkerTools
 from .web import application
@@ -225,6 +227,19 @@ async def execute(args: argparse.Namespace) -> None:
                 else None
             )
 
+            profiles = (
+                DeviceProfiles(
+                    SdkProfilePort(client, config, worker.port),
+                    FileProfileIntents(
+                        Path(args.config).parent, config.project, config.collector
+                    ),
+                    receipts,
+                    lambda: worker.config.collection.targets,
+                )
+                if operator_store
+                else None
+            )
+
             async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
                 nonlocal client, native
                 async with worker.request_lock:
@@ -262,6 +277,10 @@ async def execute(args: argparse.Namespace) -> None:
                         old = client
                         client = replacement
                         worker.port = candidate_port
+                        if profiles is not None:
+                            profiles.port = SdkProfilePort(
+                                replacement, worker.config, worker.port
+                            )
                         if console is not None:
                             console.port = SdkConsolePort(replacement, worker.config)
                         if peer is not None:
@@ -296,6 +315,8 @@ async def execute(args: argparse.Namespace) -> None:
                         raise ReconciliationRequired(
                             "Required Relay topics remain unavailable"
                         )
+                    if profiles is not None:
+                        await profiles.reconcile()
                     await reconcile_manual()
                     if worker.state == "attention_required":
                         worker.recovery_requested.set()
@@ -323,6 +344,7 @@ async def execute(args: argparse.Namespace) -> None:
                     settings=settings,
                     discovery=discovery,
                     console=console,
+                    profiles=profiles,
                     schedule_editor=ScheduleEditor(Path(args.config).parent)
                     if getattr(args, "deployment_controls", False)
                     else None,

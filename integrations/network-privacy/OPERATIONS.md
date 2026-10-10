@@ -195,3 +195,55 @@ while the evidence and optional `observed_changes` retain every observation. Thi
 also works with the previous Application completion route, which already skips
 empty changes. Deploy the updated Application package through its normal reviewed
 workflow when updating its route; no core server or SDK change is required here.
+
+## Device knowledge base
+
+Open **Device knowledge base** or choose **Device profile** on a device card.
+Load existing project profiles, or create one for selected monitored addresses.
+Give it a name, responsible person, model, purpose, expected services/behaviour and
+operator notes. These are operator-confirmed expectations, separate from observed
+TCP/DNS evidence. A profile association records its confirmation time; a reused
+address or randomized MAC does not prove that two observations concern one device.
+
+Each profile has a stable Application-assigned UUID and a named Markdown resource
+`network-privacy-device/<UUID>.md` in the Application's Plowshare project. The
+Application service account owns the document. Project/document authorization also
+covers its chapters and sections; there are no device-specific permission scopes.
+The collector submits only scoped public Information SDK requests, with
+`includeShared:false`. Existing source-processing allowances apply to admissions;
+a saved revision is not proof that extraction or model processing has finished.
+
+Edits create immutable revisions under the same resource. The editor checks that
+its base revision is still the latest visible revision before saving. This is a
+single-collector edit fence, not a server-wide compare-and-swap guarantee; reload
+profiles after changes made by another writer. Old revisions remain readable and
+listed in the editor. Profile Markdown is generated from its strictly validated
+record metadata. Edit through the dashboard so text and metadata stay consistent;
+external edits that disagree with the record are refused rather than guessed at.
+
+Evidence buttons show matching retained scans among the latest 50 local receipts,
+explicitly at the profile's currently associated addresses. Opening evidence also
+shows reports whose retained inputs cite it. Older address associations remain in
+older profile revisions; no automatic IP reassociation or scope expansion occurs.
+The analyst/reviewer/coordinator already have Information read grants. Their
+Application definitions now instruct them to find relevant current profile
+revisions, distinguish expectations from observations and cite profile context
+actually used. The server's existing input ledger controls report dependencies.
+
+Profile documents and versions are owned by Plowshare, not by a new app database or
+local Markdown directory. `device-profile-intents.json` stores private delivery
+identities and exact submitted text only. If a write reply is lost, **Check retained
+writes** looks for one matching project document revision, including the retained
+write UUID and exact content. A missing, different or ambiguous revision keeps the
+write fenced; no upload/revision is resent. The same request UUID cannot be reused
+for changed content. **Check and resume** includes unsettled profile writes when
+recovering a stopped collector.
+
+Reads are bounded to 32 profile resources and 400 visible revisions. Private intents
+are bounded to 128 entries and 1 MiB; archive settled receipts deliberately without
+discarding uncertain identities. Document history remains in Plowshare. Reload
+profiles explicitly when needed; the dashboard does not repeatedly read all profile
+text on its five-second health poll. Never put passwords in device notes.
+
+The separate scoped chapter-outline SDK limitation is recorded in
+[GAPS.md](GAPS.md); it does not block profile creation, revision or reading.

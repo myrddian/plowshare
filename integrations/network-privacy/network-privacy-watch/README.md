@@ -146,3 +146,9 @@ separately from evidence. New completion decisions are immutable once retained;
 withheld changes never remove original observations. See the
 [operator guide](../OPERATIONS.md) for background operation, reviewed Application
 schedule updates, explicit investigation receipts and recovery.
+
+Operator device profiles are project Information sources named
+`network-privacy-device/<UUID>.md`. Existing Information grants let agents read
+relevant current revisions as context; agents do not edit those profiles. The
+external dashboard creates/revises them through the public scoped SDK. See the
+[operator guide](../OPERATIONS.md#device-knowledge-base) and [capability gaps](../GAPS.md).

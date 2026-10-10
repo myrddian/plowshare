@@ -18,6 +18,19 @@
       <div class="toolbar"><div><span class="eyebrow" id="project">PROJECT</span><h2 id="collector">Collector</h2></div><div class="actions"><button id="refresh" class="secondary">Refresh</button><button id="scan">Request a scan <span aria-hidden="true">↗</span></button><button id="disconnect" class="secondary">Disconnect</button></div></div>
       <section class="panel setup-panel"><div class="panel-heading"><h2>System health</h2><button id="recover" class="secondary">Check and resume</button></div><div class="setup-content"><div id="health" class="health-grid"></div><ul id="checklist"></ul><div id="recovery"></div></div></section>
       <section class="panel setup-panel"><div class="panel-heading"><h2>Your devices</h2><button id="check-moves" class="secondary">Check moved devices</button></div><div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div></section>
+      <details id="device-profiles" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary><div class="panel-body">
+        <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
+        <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>
+        <p id="profile-detail" class="hint">Load existing profiles or create one for a monitored device.</p><div id="profile-records" class="entries"></div><div id="profile-intents" class="hint"></div>
+        <form id="profile-form" hidden><h3 id="profile-editor-title">Device profile</h3>
+          <label>Name<input id="profile-name" maxlength="128" required></label><label>Owner or responsible person<input id="profile-owner" maxlength="128"></label><label>Model<input id="profile-model" maxlength="128"></label>
+          <label>Associated monitored addresses<select id="profile-addresses" multiple required></select></label>
+          <label>Purpose<textarea id="profile-purpose" maxlength="512" rows="2"></textarea></label>
+          <label>Expected services and behaviour<textarea id="profile-expected" maxlength="1024" rows="3"></textarea></label>
+          <label>Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
+          <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p><button id="save-profile" type="submit">Save project document</button><button id="cancel-profile" type="button">Close editor</button>
+        </form><div id="profile-history"></div><pre id="profile-markdown" hidden></pre>
+      </div></details>
       <section class="panel setup-panel"><div class="panel-heading"><h2>Findings to review</h2><span>Expected changes keep their evidence</span></div><div id="findings" class="entries"></div></section>
       <section id="monitoring" class="panel setup-panel" hidden>
         <div class="panel-heading"><h2>Choose what to monitor</h2><span id="monitor-state">Device discovery</span></div>

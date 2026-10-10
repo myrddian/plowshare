@@ -13,6 +13,8 @@ let scheduleDraft = null;
 let notified = null;
 let deviceSignature = null;
 let findingSignature = null;
+let profileEdit = null;
+let profileBlocked = false;
 const byId = (name) => document.getElementById(name);
 const phases = {queued:'Queued',collected:'Collected',uploading:'Upload outcome pending',uploaded:'Evidence retained',publishing:'Publication outcome pending',done:'Evidence published'};
 
@@ -148,6 +150,7 @@ async function refresh() {
     const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     byId('mode').textContent = status.collection_enabled === false ? 'Collection not configured' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
+    byId('device-profiles').hidden = !status.profiles_available;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
     byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.state.replaceAll('_', ' ');
@@ -184,6 +187,9 @@ byId('connect').addEventListener('submit', event => {
 byId('refresh').addEventListener('click', () => {refresh().catch(error => notice(error.message, true));});
 byId('disconnect').addEventListener('click', async () => {
   try {await api('/api/session/logout', {method:'POST', body:'{}'});} catch (error) {notice(error.message, true); return;}
+  profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
+  for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
+  for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses']) byId(id).replaceChildren();
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
@@ -296,6 +302,9 @@ async function connectLocal() {
   await refresh();
 }
 connectLocal().catch(error => {
+  profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
+  for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
+  for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses']) byId(id).replaceChildren();
   bearer = ''; authenticated = false;
   if (handoff) notice(error.message, true);
 });
@@ -328,7 +337,9 @@ function renderOverview(value) {
     const destinations = element('details'); destinations.append(element('summary', `${device.dns.length} sampled DNS destinations`)); for (const query of device.dns) destinations.append(element('p', `${query.domain}: ${query.queries} sampled queries`, 'hint')); card.append(destinations);
     const history = element('details'); history.append(element('summary', `${device.history.length} collections at this address`));
     for (const id of [...device.history].reverse()) {const button = element('button', `Read ${id.slice(0,8)}`, 'entry'); button.addEventListener('click', () => showEvidence(id).catch(error => notice(error.message, true))); history.append(button);}
-    card.append(history); cards.append(card);
+    const profile = element('button', 'Device profile');
+    profile.addEventListener('click', () => openDeviceProfile(device.address).catch(error => notice(error.message, true)));
+    card.append(history, profile); cards.append(card);
   }
   }
   const nextFindingSignature = JSON.stringify(value.findings);
@@ -416,3 +427,73 @@ byId('check-deployment').addEventListener('click', async () => {
   byId('check-deployment').disabled = true;
   try {const result = await api('/api/schedule/reconcile', {method:'POST', body:JSON.stringify({password})}); await refresh(); notice(result.revision ? `Confirmed active revision ${result.revision}. No deployment was resent.` : 'No unsettled schedule deployment.');} catch (error) {notice(error.message, true);} finally {byId('check-deployment').disabled = false;}
 });
+
+
+async function profileReceipts() {
+  const intents = await api('/api/profile-intents');
+  profileBlocked = intents.some(value => value.phase === 'pending');
+  byId('save-profile').disabled = profileBlocked;
+  byId('new-profile').disabled = profileBlocked;
+  const pending = intents.filter(value => value.phase === 'pending');
+  byId('profile-intents').replaceChildren(...(pending.length ? pending.map(value => element('p', `Pending write: ${value.request_id}`)) : [element('p', 'No unsettled profile writes.')]));
+  if (profileBlocked) byId('profile-detail').textContent = 'A profile write has an unknown outcome. Check retained writes; it will not be resent.';
+}
+async function loadProfiles() {
+  await profileReceipts();
+  const result = await api('/api/profiles');
+  const records = byId('profile-records'); records.replaceChildren();
+  if (!result.profiles.length) records.append(element('p', 'No device profiles in this project yet.', 'empty'));
+  for (const view of result.profiles) {
+    const button = element('button', `${view.profile.fields.name} · ${view.profile.fields.addresses.join(', ')}`, 'entry');
+    button.addEventListener('click', () => editProfile(view).catch(error => notice(error.message, true))); records.append(button);
+  }
+  if (!profileBlocked) byId('profile-detail').textContent = `${result.profiles.length} device profiles loaded from Plowshare. Older revisions remain available below each profile.`;
+  return result.profiles;
+}
+async function editProfile(view, address = null) {
+  await profileReceipts();
+  const settings = await api('/api/monitoring');
+  const fields = view ? view.profile.fields : {name:'',owner:'',model:'',purpose:'',expected_services:'',notes:'',addresses:address ? [address] : []};
+  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null};
+  for (const [id, key] of [['profile-name','name'],['profile-owner','owner'],['profile-model','model'],['profile-purpose','purpose'],['profile-expected','expected_services'],['profile-notes','notes']]) byId(id).value = fields[key];
+  const choices = [...new Set([...settings.targets, ...fields.addresses])];
+  byId('profile-addresses').replaceChildren(...choices.map(value => {const option = element('option', value); option.value = value; option.selected = fields.addresses.includes(value); return option;}));
+  byId('profile-editor-title').textContent = view ? `Edit ${fields.name}` : 'Create a device profile';
+  byId('profile-form').hidden = false; byId('device-profiles').open = true;
+  const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
+  if (view) {
+    history.append(element('h3', 'Retained profile revisions'));
+    for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
+      const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');
+      read.title = version.revision;
+      read.addEventListener('click', async () => {try {const source = await api(`/api/profiles/${view.profile.profile_id}/${version.revision}`); byId('profile-markdown').textContent = source.text; byId('profile-markdown').hidden = false;} catch(error) {notice(error.message,true);}}); history.append(read);
+    }
+    history.append(element('h3', 'Recent retained evidence at associated addresses'));
+    if (!view.evidence.length) history.append(element('p', 'No matching evidence among the latest 50 local collections.'));
+    for (const revision of view.evidence) {
+      const read = element('button', revision, 'entry');
+      read.addEventListener('click', async () => {try {const scans = await api('/api/scans'); const scan = scans.find(value => value.revision === revision); if (!scan) throw new Error('Evidence is outside the current local history window.'); await showEvidence(scan.scan_id);} catch(error) {notice(error.message,true);}}); history.append(read);
+    }
+  }
+  byId('device-profiles').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function openDeviceProfile(address) {
+  const profiles = await loadProfiles();
+  const matches = profiles.filter(value => value.profile.fields.addresses.includes(address));
+  if (matches.length > 1) throw new Error('Several profiles claim this address. Review their retained documents before editing.');
+  await editProfile(matches[0] || null, address);
+}
+byId('load-profiles').addEventListener('click', () => loadProfiles().catch(error => notice(error.message,true)));
+byId('new-profile').addEventListener('click', () => editProfile(null).catch(error => notice(error.message,true)));
+byId('cancel-profile').addEventListener('click', () => {profileEdit = null; byId('profile-form').hidden = true;});
+byId('profile-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (!profileEdit || profileBlocked) return;
+  byId('save-profile').disabled = true;
+  const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value)};
+  try {
+    const receipt = await api('/api/profiles', {method:'POST',body:JSON.stringify({profile_id:profileEdit.id,request_id:crypto.randomUUID(),expected_revision:profileEdit.revision,fields})});
+    if (receipt.phase === 'confirmed') {profileEdit = null; byId('profile-form').hidden = true; notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}
+    else notice(`Profile write ${receipt.request_id} needs reconciliation. It has not been resent.`, true);
+  } catch(error) {notice(error.message,true);} finally {await profileReceipts().catch(() => {byId('save-profile').disabled = true;});}
+});
+byId('reconcile-profiles').addEventListener('click', async () => {try {await api('/api/profiles/reconcile',{method:'POST',body:'{}'}); await loadProfiles(); notice('Retained profile writes checked; no mutation was resent.');} catch(error) {notice(error.message,true);}});
