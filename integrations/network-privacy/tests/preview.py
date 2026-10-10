@@ -26,6 +26,8 @@ from support import (
 )
 from test_device_profiles import Documents
 from test_operator_console import ConsoleFixture, Settings
+from test_privacy_issues import IssueDocuments
+from test_privacy_issues import fields as issue_fields
 
 from plowshare_privacy.console import FileManualInvestigations, OperatorConsole
 from plowshare_privacy.device_profiles import (
@@ -34,8 +36,10 @@ from plowshare_privacy.device_profiles import (
     ProfileFields,
 )
 from plowshare_privacy.discovery import LocalDeviceDiscovery
+from plowshare_privacy.issue_records import FileIssueIntents, PrivacyIssues
 from plowshare_privacy.monitor import MonitorView
 from plowshare_privacy.operator_state import FileOperatorStore, Preferences
+from plowshare_privacy.privacy_issues import IssueLink
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
@@ -100,6 +104,13 @@ async def preview(bind: str, port: int) -> None:
                     "Synthetic fixture settings",
                 )
 
+        issues = PrivacyIssues(
+            IssueDocuments(),
+            FileIssueIntents(Path(folder).resolve(), config.project, config.collector),
+        )
+        issue_id = str(uuid4())
+        issue_receipt = await issues.save(issue_id, str(uuid4()), None, issue_fields())
+        assert issue_receipt.revision is not None
         profiles = DeviceProfiles(
             Documents(),
             FileProfileIntents(
@@ -107,6 +118,7 @@ async def preview(bind: str, port: int) -> None:
             ),
             receipts,
             lambda: config.collection.targets,
+            issues,
         )
         await profiles.save(
             str(uuid4()),
@@ -120,6 +132,16 @@ async def preview(bind: str, port: int) -> None:
                 "HTTPS for media and firmware updates; investigate unexplained services",
                 "Synthetic preview profile; physical identity is not verified",
                 config.collection.targets,
+                (
+                    IssueLink(
+                        issue_id,
+                        issue_receipt.revision,
+                        "potentially_affected",
+                        "proposed",
+                        "Synthetic issue; confirm firmware and attribution before deciding",
+                        (revision,),
+                    ),
+                ),
             ),
         )
         runner = web.AppRunner(
@@ -128,6 +150,7 @@ async def preview(bind: str, port: int) -> None:
                 "fixture-web-token-1234567890",
                 console=console,
                 profiles=profiles,
+                issues=issues,
                 settings=PreviewSettings(),
             ),
             access_log=None,

@@ -21,9 +21,11 @@ from .contracts import integer, items, object_fields, parse_json, text, uuid
 from .device_profiles import ProfileFields, ProfileManagement
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
+from .issue_records import IssueManagement
 from .journal import Publication
 from .monitor import MonitorChoice, MonitorSettings, SettingsBusy
 from .operator_state import Preferences
+from .privacy_issues import IssueFields, IssueValidation
 from .schedule_editor import ScheduleManagement
 from .tools import DEFINITIONS, PrivacyTools, WorkerTools, decode_call
 from .worker import ReconciliationRequired, Worker
@@ -39,6 +41,7 @@ def application(
     console: OperatorConsole | None = None,
     schedule_editor: ScheduleManagement | None = None,
     profiles: ProfileManagement | None = None,
+    issues: IssueManagement | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -97,6 +100,8 @@ def application(
                 },
                 status=409,
             )
+        except IssueValidation as error:
+            response = web.json_response({"error": str(error)}, status=400)
         except ValueError:
             response = web.json_response(
                 {"error": "Invalid request or unavailable evidence"}, status=400
@@ -123,7 +128,7 @@ def application(
         )
         return response
 
-    app = web.Application(middlewares=[boundary], client_max_size=8192)
+    app = web.Application(middlewares=[boundary], client_max_size=16384)
     provider: PrivacyTools = tools if tools is not None else WorkerTools(worker)
 
     def operator() -> OperatorConsole:
@@ -312,6 +317,55 @@ def application(
         await profile_service().reconcile()
         return web.json_response({"checked": True})
 
+    def issue_service() -> IssueManagement:
+        if issues is None:
+            raise web.HTTPNotFound(text="Privacy issues are not enabled")
+        return issues
+
+    async def issue_list(request: web.Request) -> web.Response:
+        service = issue_service()
+        return web.json_response(
+            {
+                "issues": [asdict(v) for v in await service.list()],
+                "intents": [asdict(v) for v in service.writes()],
+            }
+        )
+
+    async def issue_intents(request: web.Request) -> web.Response:
+        return web.json_response([asdict(v) for v in issue_service().writes()])
+
+    async def issue_source(request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "text": await issue_service().read(
+                    uuid(request.match_info["identity"]),
+                    uuid(request.match_info["revision"]),
+                )
+            }
+        )
+
+    async def issue_save(request: web.Request) -> web.Response:
+        row = object_fields(
+            parse_json(await request.read()),
+            {"issue_id", "request_id", "expected_revision", "fields"},
+        )
+        result = await issue_service().save(
+            uuid(row["issue_id"]),
+            uuid(row["request_id"]),
+            uuid(row["expected_revision"])
+            if row["expected_revision"] is not None
+            else None,
+            IssueFields.decode(row["fields"]),
+        )
+        return web.json_response(
+            asdict(result), status=202 if result.phase == "pending" else 200
+        )
+
+    async def issue_reconcile(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        await issue_service().reconcile()
+        return web.json_response({"checked": True})
+
     async def monitoring(request: web.Request) -> web.Response:
         if settings is None:
             raise web.HTTPNotFound(text="Dashboard settings are not enabled")
@@ -396,6 +450,7 @@ def application(
                 "collection_enabled": worker.config.collection.enabled,
                 "settings_available": settings is not None,
                 "profiles_available": profiles is not None,
+                "issues_available": issues is not None,
                 "state": worker.state,
                 "detail": worker.detail,
                 "requests": [
@@ -522,6 +577,11 @@ def application(
     app.router.add_get("/api/scans", scans)
     app.router.add_get("/api/scans/{scan_id}", evidence)
     app.router.add_post("/api/scans", collect)
+    app.router.add_get("/api/issue-intents", issue_intents)
+    app.router.add_get("/api/issues", issue_list)
+    app.router.add_get("/api/issues/{identity}/{revision}", issue_source)
+    app.router.add_post("/api/issues", issue_save)
+    app.router.add_post("/api/issues/reconcile", issue_reconcile)
     app.router.add_get("/api/profile-intents", profile_intents)
     app.router.add_get("/api/profiles", profile_list)
     app.router.add_get("/api/profiles/{identity}/{revision}", profile_source)

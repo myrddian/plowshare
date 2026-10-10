@@ -33,6 +33,8 @@ from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
 from .device_profiles import DeviceProfiles, FileProfileIntents
 from .discovery import LocalDeviceDiscovery
+from .issue_port import SdkIssuePort
+from .issue_records import FileIssueIntents, PrivacyIssues
 from .journal import FileReceipts
 from .monitor import FileMonitorSettings
 from .native_tools import DECLARATIONS, CataloguedProvider, registered
@@ -227,6 +229,16 @@ async def execute(args: argparse.Namespace) -> None:
                 else None
             )
 
+            issues = (
+                PrivacyIssues(
+                    SdkIssuePort(client, config, worker.port),
+                    FileIssueIntents(
+                        Path(args.config).parent, config.project, config.collector
+                    ),
+                )
+                if operator_store
+                else None
+            )
             profiles = (
                 DeviceProfiles(
                     SdkProfilePort(client, config, worker.port),
@@ -235,6 +247,7 @@ async def execute(args: argparse.Namespace) -> None:
                     ),
                     receipts,
                     lambda: worker.config.collection.targets,
+                    issues,
                 )
                 if operator_store
                 else None
@@ -277,6 +290,10 @@ async def execute(args: argparse.Namespace) -> None:
                         old = client
                         client = replacement
                         worker.port = candidate_port
+                        if issues is not None:
+                            issues.port = SdkIssuePort(
+                                replacement, worker.config, worker.port
+                            )
                         if profiles is not None:
                             profiles.port = SdkProfilePort(
                                 replacement, worker.config, worker.port
@@ -315,6 +332,8 @@ async def execute(args: argparse.Namespace) -> None:
                         raise ReconciliationRequired(
                             "Required Relay topics remain unavailable"
                         )
+                    if issues is not None:
+                        await issues.reconcile()
                     if profiles is not None:
                         await profiles.reconcile()
                     await reconcile_manual()
@@ -345,6 +364,7 @@ async def execute(args: argparse.Namespace) -> None:
                     discovery=discovery,
                     console=console,
                     profiles=profiles,
+                    issues=issues,
                     schedule_editor=ScheduleEditor(Path(args.config).parent)
                     if getattr(args, "deployment_controls", False)
                     else None,

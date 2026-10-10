@@ -28,8 +28,37 @@
           <label>Purpose<textarea id="profile-purpose" maxlength="512" rows="2"></textarea></label>
           <label>Expected services and behaviour<textarea id="profile-expected" maxlength="1024" rows="3"></textarea></label>
           <label>Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
+          <fieldset><legend>Linked privacy issues and mitigation progress</legend><p class="hint">Choose up to four issues. Links retain the reviewed plan; progress is your report of actions performed separately.</p><div id="profile-issue-links"></div></fieldset>
           <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p><button id="save-profile" type="submit">Save project document</button><button id="cancel-profile" type="button">Close editor</button>
         </form><div id="profile-history"></div><pre id="profile-markdown" hidden></pre>
+      </div></details>
+      <details id="privacy-issues" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Privacy issues &amp; mitigations</h2><span>Shared issue documents · proposed actions</span></summary><div class="panel-body">
+        <p>Keep source-backed issues here, then link them to affected devices in their profiles. Firewall and Pi-hole plans are suggestions for you to review and apply separately.</p>
+        <div class="row"><button id="load-issues" type="button">Load issues</button><button id="new-issue" type="button">Create privacy issue</button><button id="reconcile-issues" type="button">Check retained writes</button></div><p id="issue-detail" class="hint">No network settings are changed by saving a plan.</p><div id="issue-records" class="entries"></div><div id="issue-intents" class="hint"></div>
+        <form id="issue-form" hidden><h3 id="issue-editor-title">Privacy issue</h3>
+          <label>Title<input id="issue-title" maxlength="128" required></label>
+          <label>Known issue and supporting facts<textarea id="issue-description" rows="3" maxlength="1024" required></textarea></label>
+          <label>Affected manufacturers and models<textarea id="issue-models" rows="2" maxlength="1024" required></textarea></label>
+          <label>Firmware versions (write unknown when unconfirmed)<input id="issue-firmware" maxlength="1024" required></label>
+          <label>Relevant settings and conditions<textarea id="issue-conditions" rows="2" maxlength="1024" required></textarea></label>
+          <label>Sources last checked<input id="issue-checked" type="date" required></label>
+          <fieldset><legend>Source citations</legend><div id="issue-sources"></div><button id="add-issue-source" type="button">Add source</button></fieldset>
+          <fieldset><legend>Proposed mitigation for a linked device</legend>
+            <label>Mechanism<select id="issue-mechanism"><option value="firewall">Router / firewall rule</option><option value="pihole">Pi-hole domain block</option><option value="segmentation">Network segmentation</option><option value="device_setting">Device privacy setting</option></select></label>
+            <label>Direction<select id="issue-direction"><option value="outbound">Outbound from device</option><option value="inbound">Inbound to device</option><option value="lateral">Between local devices</option><option value="not_applicable">Not a traffic rule</option></select></label>
+            <label>Action<select id="issue-action"><option value="block">Block</option><option value="restrict">Restrict</option><option value="disable">Disable setting/service</option></select></label>
+            <label>Source<select id="issue-source-kind"><option value="device">This device</option><option value="peer">An IP / network / internet</option></select></label><label id="issue-source-address-label">Source IP or network<input id="issue-source" maxlength="253" required placeholder="Exact source IP/CIDR or internet"></label>
+            <label id="issue-destination-choice-label">Destination<select id="issue-destination-kind"><option value="peer">An IP / network / internet</option><option value="device">This device</option></select></label><label id="issue-destination-address-label">Destination IP/domain or setting<input id="issue-destination" maxlength="253" required placeholder="IP/CIDR or internet · domain · setting"></label>
+            <label>Protocol<select id="issue-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">All protocols</option><option value="not_applicable">Not a port rule</option></select></label>
+            <label>Destination ports<input id="issue-ports" placeholder="Up to eight comma-separated ports"></label>
+            <p id="issue-rule-help" class="hint"></p>
+            <label>Why this mitigation addresses the issue<textarea id="issue-reason" maxlength="768" rows="2" required></textarea></label>
+            <label>Expected impact and features to test<textarea id="issue-impact" maxlength="768" rows="2" required></textarea></label>
+            <label>Verification procedure<textarea id="issue-verification" maxlength="768" rows="3" required></textarea></label>
+            <label>Rollback procedure<textarea id="issue-rollback" maxlength="768" rows="2" required></textarea></label>
+          </fieldset><p class="hint">Save this shared issue first, then open a device profile to record applicability and progress. A listening-port scan cannot establish outbound traffic or that a mitigation works.</p>
+          <button id="save-issue" type="submit">Save issue document</button><button id="cancel-issue" type="button">Close editor</button>
+        </form><div id="issue-history"></div><pre id="issue-markdown" hidden></pre>
       </div></details>
       <section class="panel setup-panel"><div class="panel-heading"><h2>Findings to review</h2><span>Expected changes keep their evidence</span></div><div id="findings" class="entries"></div></section>
       <section id="monitoring" class="panel setup-panel" hidden>

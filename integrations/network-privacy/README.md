@@ -668,3 +668,14 @@ for equivalent SDK operations and the present MCP transport/schema limits.
 The dashboard also maintains a [device knowledge base](OPERATIONS.md#device-knowledge-base)
 using the project's existing Plowshare Information documents. The [public capability
 gaps](GAPS.md) record the separately scoped chapter-outline read limitation.
+
+## Device privacy knowledge and advisory mitigations
+
+The dashboard keeps device profiles and shared privacy issues as revisioned
+Markdown documents in the Plowshare project. Link one sourced issue to several
+devices, pin the reviewed plan, and record applicability plus accepted/applied/
+verified/reverted progress with evidence and operator results. Plans describe
+firewall ports/endpoints/direction, exact Pi-hole domains, segmentation or privacy
+settings, including expected impact, verification and rollback. They are advisory;
+network changes are performed separately by the operator. See the
+[walkthrough](OPERATIONS.md#privacy-issues-and-network-mitigations).

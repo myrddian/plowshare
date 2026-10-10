@@ -29,6 +29,7 @@ from .contracts import (
     uuid,
 )
 from .journal import Receipts
+from .privacy_issues import IssueLink, PrivacyIssue
 from .private_files import replace_private
 from .worker import ReconciliationRequired
 
@@ -57,6 +58,7 @@ class ProfileFields:
     expected_services: str
     notes: str
     addresses: tuple[str, ...]
+    issues: tuple[IssueLink, ...] = ()
 
     def __post_init__(self) -> None:
         for value, limit in (
@@ -69,6 +71,10 @@ class ProfileFields:
         ):
             field(value, limit)
         field(self.name, 128, required=True)
+        if len(self.issues) > 4 or len({v.issue_id for v in self.issues}) != len(
+            self.issues
+        ):
+            raise ValueError("Choose at most four distinct privacy issues")
         if (
             not 1 <= len(self.addresses) <= 32
             or len(set(self.addresses)) != len(self.addresses)
@@ -91,6 +97,7 @@ class ProfileFields:
                 "notes",
                 "addresses",
             },
+            {"issues"},
         )
         addresses = tuple(
             str(ipaddress.IPv4Address(text(v, 64))) for v in items(row["addresses"], 32)
@@ -105,6 +112,7 @@ class ProfileFields:
             field(row["expected_services"], 1024),
             field(row["notes"], 2048),
             addresses,
+            tuple(IssueLink.decode(v) for v in items(row.get("issues", []), 4)),
         )
 
 
@@ -121,10 +129,10 @@ class DeviceProfile:
         row = object_fields(
             value, {"version", "profile_id", "write_id", "updated_at", "fields"}
         )
-        if type(row["version"]) is not int or row["version"] != 1:
+        if type(row["version"]) is not int or row["version"] not in {1, 2}:
             raise ValueError("Unsupported profile version")
         return cls(
-            1,
+            row["version"],
             uuid(row["profile_id"]),
             uuid(row["write_id"]),
             timestamp(row["updated_at"]),
@@ -133,6 +141,19 @@ class DeviceProfile:
 
     def markdown(self) -> str:
         values = self.fields
+        metadata = asdict(self)
+        if self.version == 1:
+            if values.issues:
+                raise ValueError("Legacy profiles cannot contain issue links")
+            del metadata["fields"]["issues"]
+        issue_section = ""
+        if self.version == 2:
+            issue_section = "\n\n## Privacy issues and mitigation decisions\n\n"
+            issue_section += (
+                "\n".join(link.markdown() for link in values.issues)
+                or "No issues linked."
+            )
+            issue_section += "\n\nStatuses and results are operator-reported at this profile revision's confirmation time. Linked issue revisions pin the reviewed plan; later issue edits do not change it."
         result = (
             "# Device profile\n\n"
             + "## Identity and operator confirmation\n\n"
@@ -147,8 +168,9 @@ class DeviceProfile:
             + (values.expected_services or "Not supplied")
             + "\n\n## Operator notes\n\n"
             + (values.notes or "None supplied")
+            + issue_section
             + "\n\n## Record metadata\n\n```json\n"
-            + json.dumps(asdict(self), ensure_ascii=False, sort_keys=True, indent=2)
+            + json.dumps(metadata, ensure_ascii=False, sort_keys=True, indent=2)
             + "\n```\n\nThis profile is operator context, not scan evidence or instructions to an agent. Observations and reports remain separately revisioned in the same project.\n"
         )
         if len(result.encode("utf-8")) > MAX_TEXT:
@@ -322,6 +344,12 @@ class ProfileManagement(Protocol):
     async def reconcile(self) -> None: ...
 
 
+class IssueReferences(Protocol):
+    """Resolve only issue revisions retained in the authenticated project catalogue."""
+
+    async def read(self, identity: str, revision: str) -> str: ...
+
+
 class DeviceProfiles:
     def __init__(
         self,
@@ -329,6 +357,7 @@ class DeviceProfiles:
         intents: ProfileIntents,
         receipts: Receipts,
         targets: Callable[[], tuple[str, ...]],
+        issues: IssueReferences | None = None,
     ):
         self.port, self.intents, self.receipts, self.targets = (
             port,
@@ -336,6 +365,7 @@ class DeviceProfiles:
             receipts,
             targets,
         )
+        self.issues = issues
         self.lock = asyncio.Lock()
 
     def writes(self) -> tuple[ProfileIntent, ...]:
@@ -442,7 +472,36 @@ class DeviceProfiles:
                 raise ValueError(
                     "An address already has a device profile; review it before reassociating"
                 )
-            profile = DeviceProfile(1, identity, request, utc_now(), fields)
+            # Links are exact scoped issue revisions, never arbitrary document IDs.
+            # Evidence attachments must belong to this device's recent collections;
+            # previously retained references can survive the bounded history window.
+            old_links = (
+                {v.issue_id: v for v in current.profile.fields.issues}
+                if current
+                else {}
+            )
+            evidence = {
+                v.revision
+                for v in self.receipts.all()[-50:]
+                if v.revision
+                and v.evidence
+                and any(t.address in fields.addresses for t in v.evidence.snapshot.tcp)
+            }
+            for link in fields.issues:
+                if self.issues is None:
+                    raise ValueError("Privacy issue catalogue is unavailable")
+                issue = PrivacyIssue.read(
+                    await self.issues.read(link.issue_id, link.revision)
+                )
+                if issue.issue_id != link.issue_id:
+                    raise ValueError("Foreign privacy issue link")
+                previous = old_links.get(link.issue_id)
+                allowed_evidence = evidence | (
+                    set(previous.evidence) if previous else set()
+                )
+                if not set(link.evidence) <= allowed_evidence:
+                    raise ValueError("Choose this device's retained evidence revisions")
+            profile = DeviceProfile(2, identity, request, utc_now(), fields)
             intent = ProfileIntent(
                 request, identity, expected, profile.markdown(), "pending"
             )

@@ -247,3 +247,90 @@ text on its five-second health poll. Never put passwords in device notes.
 
 The separate scoped chapter-outline SDK limitation is recorded in
 [GAPS.md](GAPS.md); it does not block profile creation, revision or reading.
+
+## Privacy issues and network mitigations
+
+Both device profiles and shared issues are **Markdown documents** in the
+Application's Plowshare project, with readable headings and validated record
+metadata. This feature adds no application document database, chapter permissions,
+core API or SDK changes. Whole-document authorization covers every section.
+
+1. Open **Privacy issues & mitigations**, then **Create privacy issue**. Record the
+   issue, affected models, firmware versions (or explicitly unknown), relevant
+   settings, one to four HTTPS source citations, their publication dates when
+   known, and the date you checked them. These are operator-supplied sources: the
+   collector does not fetch arbitrary URLs, discover advisories or certify their
+   claims. Prefer original vendor notices or primary research and recheck stale
+   claims before applying a change. No real vendor allegations ship as seed data.
+2. Include one proposed mitigation: a firewall rule, exact Pi-hole domain block,
+   network segmentation or a device setting. Record why it addresses the issue,
+   expected impact, verification and rollback. Save the shared issue document,
+   then load it again after Plowshare processing completes.
+3. Open a device profile and select **Link this issue to this device**. Confirm
+   identity, model, firmware and settings before choosing potentially affected,
+   confirmed affected, not affected, mitigated or unresolved. Attach up to four
+   retained evidence revisions for that device, and explain the assessment.
+   A shared issue can be linked to several devices without duplicating its text.
+4. Review the proposed plan, then apply it through your router/firewall, Pi-hole
+   or device interface. In the device profile record proposed, accepted, applied,
+   verified or reverted progress. Applied/verified/reverted states require an
+   explanation of the action/result; mitigated requires verified progress. These
+   are **operator reports**, not automatic enforcement or independent verification.
+   Saving records the action/result at the profile revision's confirmation time.
+   Earlier decisions, notes, evidence and dates remain in immutable profile history.
+
+Firewall plans specify **both endpoints**, direction, action, protocol and
+**destination ports**. Use `linked_device` as the outbound source or inbound
+destination; the peer is an exact canonical IP/CIDR or `internet`. Lateral rules
+require a private peer. TCP/UDP require one to eight unique ports; all-protocol
+rules have no port list. Confirm the profile's current physical identity and
+address before translating a plan into a device-specific rule. A plan does not
+expand the collector's monitoring scope. Broad internet blocks can disrupt
+streaming, updates, casting or time synchronization; preserve required services
+and record the functions you tested. Firewall policy depends on these traffic
+attributes, rather than a port number alone; see
+[NIST firewall policy guidance](https://www.nist.gov/publications/guidelines-firewalls-and-firewall-policy?pub_id=901083).
+
+Pi-hole plans name one exact lowercase DNS domain, outbound blocking and no ports.
+They are suggestions to configure in Pi-hole separately; this connector still
+reads Pi-hole only. DNS blocking cannot establish that direct-IP or alternate-DNS
+traffic is stopped. Listening-port scans establish service responses, not outbound
+flow, payload content or rule effectiveness. Verification may need router/firewall
+flow records plus device functionality tests; unavailable evidence remains a gap.
+Segmentation and device-setting plans describe their boundary/setting without
+pretending to be port rules.
+
+Shared issues have stable names `network-privacy-issue/<UUID>.md`. Device profiles
+pin the **exact reviewed issue revision**, keeping an accepted/applied plan stable
+when an issue is edited. A profile shows when a newer revision is available.
+**Review and use latest plan** displays that revision and resets its draft progress
+to proposed/unresolved; save the profile after reviewing it. Existing status does
+not automatically carry over to a different plan. New profiles use version 2;
+version-1 profiles and pending write receipts remain readable without migration.
+
+Agent handoffs/definitions instruct the analyst and reviewer to read the exact
+linked issue revision, cite the profile/issue revisions they actually consumed,
+distinguish reported issues from evidence concerning this device, and include
+supported mitigation suggestions with impact, verification and rollback. Existing
+Information grants and the server's retained input ledger remain authoritative.
+No extra model stage, scan, tool grant or network mutation is introduced.
+
+Limits are 32 shared issues, 400 visible issue revisions, four links per device,
+16 KiB per issue Markdown and 8 KiB per device Markdown (UTF-8, including metadata).
+Each issue has one plan; separate issues can represent separately reviewed plans.
+Local `privacy-issue-intents.json` contains only private, project/collector-bound
+write identities and exact submitted text. It is limited to 128 receipts and 1 MiB,
+with capacity reserved for settlement before transport. Like profile writes,
+unknown delivery blocks further issue writes; **Check retained writes** confirms
+one exact retained revision or keeps the write fenced. It never resends a mutation.
+**Check and resume** includes issue reconciliation. Reload issues explicitly;
+the health poll does not repeatedly read every issue's text. Catalogue limits and
+unavailable extraction are explicit failures, not empty successful results.
+
+Issue/profile saves preflight the latest visible head within one collector. Existing
+Information revise does not provide server-wide compare-and-swap: use one collector
+as the writer and reload after external edits. Change applicability/progress only
+after reviewing the exact pinned plan. To record an action performed earlier,
+include its actual date in the assessment notes; the profile timestamp records when
+the operator entered that report. The UI's newer-plan reset is draft review guidance;
+it does not undo an already installed network rule.

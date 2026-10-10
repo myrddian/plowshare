@@ -152,3 +152,9 @@ Operator device profiles are project Information sources named
 relevant current revisions as context; agents do not edit those profiles. The
 external dashboard creates/revises them through the public scoped SDK. See the
 [operator guide](../OPERATIONS.md#device-knowledge-base) and [capability gaps](../GAPS.md).
+
+Shared privacy issues use `network-privacy-issue/<UUID>.md` Markdown resources in
+project Information. Profiles pin reviewed issue revisions and retain per-device
+applicability, mitigation progress and supporting evidence. Existing read grants
+let agents use that context without adding model stages or enforcement privileges.
+Plans remain advisory. See [the mitigation guide](../OPERATIONS.md#privacy-issues-and-network-mitigations).
