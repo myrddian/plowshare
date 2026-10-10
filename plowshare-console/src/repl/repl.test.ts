@@ -1182,7 +1182,10 @@ describe('a run that asked before running a command', () => {
     side: 'server',
     command: ['./gradlew', 'test', '--tests', 'Foo'],
     cwd: '/repo',
-    reason: null,
+    reason: '',
+    askedIn: 'conv-a',
+    commands: null,
+    judged: null,
     state: 'asked',
     scope: null,
     prefix: null,
@@ -1198,7 +1201,17 @@ describe('a run that asked before running a command', () => {
         return { code: 'OK', payload: { approvals: [asked] } };
       }
       if (type === 'approval.answer') {
-        return { code: 'OK', payload: answered };
+        return {
+          code: 'OK',
+          payload: {
+            id: 'apr_1',
+            state: 'allowed',
+            job: null,
+            busy: false,
+            note: null,
+            ...answered,
+          },
+        };
       }
       return { code: 'NOT_FOUND' };
     });
@@ -1236,7 +1249,9 @@ describe('a run that asked before running a command', () => {
       conversation: 'conv-a',
     });
     expect(block()).not.toBeNull();
-    expect(block().textContent).toContain('./gradlew test --tests Foo');
+    expect(block().querySelector('[data-approval-command]')?.textContent).toBe(
+      JSON.stringify([asked.command], null, 2),
+    );
     expect((root.querySelector('[data-approvals]') as HTMLElement).hidden).toBe(
       false,
     );
@@ -1357,6 +1372,24 @@ describe('a run that asked before running a command', () => {
 
     await vi.waitFor(() => expect(once.disabled).toBe(false));
     expect(block().textContent).toContain('already answered');
+  });
+
+  it('keeps a malformed successful receipt uncertain and never follows its claimed job', async () => {
+    answering({ id: 'another-request', job: 'job_wrong' });
+    await endAwaiting();
+    const once = block().querySelector<HTMLButtonElement>(
+      '[data-decision="once"]',
+    )!;
+    once.click();
+    await vi.waitFor(() =>
+      expect(block().textContent).toContain('delivery is uncertain'),
+    );
+    expect(once.disabled).toBe(true);
+    expect(block().dataset['answered']).toBeUndefined();
+    expect(
+      asker.mock.calls.filter(([type]) => type === 'approval.answer'),
+    ).toHaveLength(1);
+    expect(root.textContent).not.toContain('job_wrong');
   });
 
   it('shows a question again when a conversation is opened on a turn still waiting', async () => {

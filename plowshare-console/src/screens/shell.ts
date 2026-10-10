@@ -1,3 +1,5 @@
+import { socketWorkRecords } from '../work';
+import { recoverSession } from '../api';
 import { socketTransport } from '../transport';
 import { background } from '../background.ts';
 import { createUsage } from './usage';
@@ -15,33 +17,24 @@ import { createInformation } from './information';
 import { createDocuments } from './documents';
 import { el } from './dom';
 import { createInbox } from './inbox';
+import { createOverview } from './overview';
+import { createApprovals } from './approvals';
 import { createJobs } from './jobs';
 import { createMemory } from './memory';
 import { createProjects } from './projects';
 import { createProposals } from './proposals';
 import type { Screen, Transport } from './screen';
-import { asInboxChanged, type InboxPage } from './wire';
+import { asInboxChanged } from './wire';
 
 /**
- * The eight views, and the moving between them.
+ * The console views, and the moving between them.
  *
- * <h2>No router, and no framework</h2>
+ * <h2>Navigation and record recovery</h2>
  *
- * A rail of grouped buttons, one host element per view, and `hidden` on the
- * seven that are not showing. The whole of the state is which name is current.
- * What a router would add here is a URL grammar this console has no second
- * page to need and a dependency on somebody else's history handling; what it
- * would cost is that `auth.ts` already rewrites this page's URL once, on the
- * one navigation that matters, and a library that also owned the URL would be
- * a second writer of it.
- *
- * The current view is kept in `location.hash` through `history.replaceState`,
- * which is the same call `auth.ts` makes and for a compatible reason: replacing
- * rather than pushing means a reload comes back to the view somebody was on and
- * the browser's back button still leaves the console, which is where it went
- * before there were six views. The hash is read once, at start; a hash typed
- * into the bar afterwards is not followed, because nothing here listens for
- * `hashchange` and a half-implemented history is worse than none.
+ * A rail of grouped buttons retains screen instances. Hash routes identify a
+ * view and optional owning record. Explicit navigation pushes history; reload,
+ * back and forward restore it through read-only selection. Auth strips bootstrap
+ * tokens before the shell starts. One socket belongs to the tab throughout.
  *
  * <h2>Every view is built once and never torn down</h2>
  *
@@ -88,12 +81,14 @@ import { asInboxChanged, type InboxPage } from './wire';
  * five (`jobs` included) are the archive and the machinery around it.
  */
 export const VIEWS = [
+  'overview',
   'inbox',
+  'approvals',
   'chat',
+  'jobs',
   'documents',
   'information',
   'usage',
-  'jobs',
   'proposals',
   'memory',
   'projects',
@@ -104,7 +99,9 @@ export type ViewName = (typeof VIEWS)[number];
 
 /** The word in the rail, per view. */
 const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
+  overview: 'work overview',
   inbox: 'inbox',
+  approvals: 'approvals',
   chat: 'chat',
   documents: 'documents',
   information: 'information',
@@ -125,7 +122,9 @@ const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
  * configuration rather than about a conversation or its archive.
  */
 const GROUPS: Readonly<Record<ViewName, 'work' | 'system'>> = Object.freeze({
+  overview: 'work',
   inbox: 'work',
+  approvals: 'work',
   chat: 'work',
   documents: 'work',
   information: 'work',
@@ -147,12 +146,11 @@ export interface ShellOptions {
   /** The project tier the screens start on, or null for global. */
   readonly project?: string | null;
   /**
-   * Passed to the two screens that poll — jobs and documents; `null` for a
+   * Passed to screens that poll — jobs, documents and approvals; `null` for a
    * shell that never polls.
    *
-   * One number for both, because both are polling the same listing for the
-   * same reason: `GET /v1/jobs` is the record and an event is not, and an
-   * ingest is the case where no event exists at all.
+   * Periodic reads reconcile authoritative state even when the tab receives
+   * no event for work started by another client.
    */
   readonly pollMs?: number | null;
   /** The window whose hash is read and rewritten. The real one by default. */
@@ -161,12 +159,12 @@ export interface ShellOptions {
 
 export interface Shell {
   /** Build the view if it has not been built, show it, and hide the rest. */
-  show(name: ViewName): Promise<void>;
+  show(name: ViewName, record?: string): Promise<void>;
   /** Which view is showing. */
   current(): ViewName;
   /** The element this shell built. */
   element(): HTMLElement;
-  /** Start on the view the URL names, or on chat. */
+  /** Start on the view/record the URL names, or the work overview. */
   start(): Promise<void>;
   /** Close the socket and every view. Idempotent. */
   destroy(): void;
@@ -189,7 +187,7 @@ function mintSession(): string {
 
 /** A name this shell knows, or null. */
 export function viewFromHash(hash: string): ViewName | null {
-  const wanted = hash.replace(/^#/, '');
+  const wanted = hash.replace(/^#/, '').split('?')[0] ?? '';
   return (VIEWS as readonly string[]).includes(wanted)
     ? (wanted as ViewName)
     : null;
@@ -276,7 +274,10 @@ export function createShell(options: ShellOptions): Shell {
   const scope = options.scope ?? window;
   const session = options.session ?? mintSession();
   let project = options.project ?? null;
-  const openReal = options.openStream ?? openEventStream;
+  const openReal =
+    options.openStream ??
+    ((streamOptions: EventStreamOptions) =>
+      openEventStream({ ...streamOptions, recoverSession }));
   const shared = multiplex(openReal, session);
   let borrowed: EventStream | undefined;
   const transport: Transport =
@@ -289,6 +290,15 @@ export function createShell(options: ShellOptions): Shell {
 
   const shell = el('div', 'shell');
   const rail = el('nav', 'rail');
+  rail.setAttribute('aria-label', 'Console navigation');
+  const brand = el('div', 'console-brand');
+  brand.append(el('strong', '', 'Plowshare'), el('span', 'note', 'Workbench'));
+  const browse = document.createElement('details');
+  browse.className = 'rail-browse';
+  const browseLabel = document.createElement('summary');
+  browseLabel.textContent = 'Browse & settings';
+  browse.append(browseLabel);
+  const primary = el('div', 'rail-primary');
   const railGroups: Readonly<Record<'work' | 'system', HTMLElement>> = {
     work: el('div', 'rail-group'),
     system: el('div', 'rail-group'),
@@ -314,7 +324,9 @@ export function createShell(options: ShellOptions): Shell {
       background(show(name));
     });
     buttons.set(name, control);
-    railGroups[GROUPS[name]].append(control);
+    if (['overview', 'inbox', 'approvals', 'chat', 'jobs'].includes(name))
+      primary.append(control);
+    else railGroups[GROUPS[name]].append(control);
 
     const host = el('div', 'view');
     host.dataset['view'] = name;
@@ -350,17 +362,29 @@ export function createShell(options: ShellOptions): Shell {
       control.textContent =
         unread === 0 ? LABELS.inbox : `${LABELS.inbox} ${unread}`;
       control.dataset['unread'] = String(unread);
+      delete control.dataset['stale'];
+      control.title = '';
     }
   };
   const askUnread = (): void => {
+    const stream = badgeStream;
+    if (stream === null || stopped) return;
     background(
-      badgeStream?.ask('inbox.list', { unread: true, limit: 1 }).then(
-        (outcome) => {
-          if (outcome.code === 'OK')
-            badge((outcome.payload as InboxPage).unread);
-        },
-        () => {},
-      ),
+      socketWorkRecords(stream)
+        .unread()
+        .then(
+          (count) => {
+            if (!stopped) badge(count);
+          },
+          () => {
+            if (stopped) return;
+            const control = buttons.get('inbox');
+            if (control) {
+              control.dataset['stale'] = 'true';
+              control.title = 'Unread count unavailable; open inbox to retry.';
+            }
+          },
+        ),
     );
   };
 
@@ -378,6 +402,14 @@ export function createShell(options: ShellOptions): Shell {
   streamLabel.dataset['stream'] = '';
   function showStream(status: StreamStatus): void {
     streamLabel.dataset['state'] = status.state;
+    if (status.state === 'open' && showing === 'documents') {
+      const documents = built.get('documents');
+      if (documents) background(documents.load());
+    }
+    if (status.signedOut) {
+      streamLabel.textContent = 'signed out — reload to sign in';
+      return;
+    }
     if (status.state === 'reconnecting' && status.retryInMs !== null) {
       streamLabel.textContent = `stream reconnecting, next try in ${Math.round(status.retryInMs / 100) / 10}s`;
       return;
@@ -388,7 +420,8 @@ export function createShell(options: ShellOptions): Shell {
   foot.append(streamLabel);
   showStream({ state: 'connecting', attempt: 0, retryInMs: null });
 
-  rail.append(railGroups.work, railGroups.system, foot);
+  browse.append(railGroups.work, railGroups.system);
+  rail.append(brand, primary, browse, foot);
   shell.append(rail, stage);
   options.root.replaceChildren(shell);
 
@@ -401,8 +434,29 @@ export function createShell(options: ShellOptions): Shell {
    * the REPL used to be handed directly.
    */
   function build(name: ViewName, host: HTMLElement): Screen {
+    if (name === 'overview')
+      return createOverview({
+        root: host,
+        session,
+        transport,
+        openStream: shared.open,
+        ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+      });
+    if (name === 'approvals') {
+      return createApprovals({
+        root: host,
+        openStream: shared.open,
+        session,
+        ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+      });
+    }
     if (name === 'inbox') {
-      return createInbox({ root: host, openStream: shared.open, session });
+      return createInbox({
+        root: host,
+        openStream: shared.open,
+        session,
+        ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+      });
     }
     if (name === 'chat') {
       return createChat({
@@ -462,45 +516,66 @@ export function createShell(options: ShellOptions): Shell {
     return createMemory({ root: host, transport, project });
   }
 
-  async function show(name: ViewName): Promise<void> {
+  /** URL history holds selections only. Restoring a route performs reads and
+   * retains the chat instance; bootstrap exchange remains auth.ts's sole job. */
+  async function navigate(
+    name: ViewName,
+    record: string | undefined,
+    rememberRoute: boolean,
+  ): Promise<void> {
+    if (stopped) return;
     showing = name;
+    if (!['overview', 'inbox', 'approvals', 'chat', 'jobs'].includes(name))
+      browse.open = true;
     for (const each of VIEWS) {
-      const host = hosts.get(each) as HTMLElement;
+      const host = hosts.get(each);
+      const control = buttons.get(each);
+      if (!host || !control) throw new Error('Missing console view host.');
       host.hidden = each !== name;
-      const control = buttons.get(each) as HTMLButtonElement;
-      if (each === name) {
-        control.setAttribute('aria-current', 'page');
-      } else {
-        control.removeAttribute('aria-current');
+      if (each === name) control.setAttribute('aria-current', 'page');
+      else control.removeAttribute('aria-current');
+      if (each !== name) built.get(each)?.setActive?.(false);
+    }
+    if (rememberRoute) {
+      const hash =
+        `#${name}` +
+        (record === undefined ? '' : `?${new URLSearchParams({ record })}`);
+      if (scope.location.hash !== hash) {
+        try {
+          scope.history.pushState(null, '', hash);
+        } catch {
+          /* Opaque origins cannot keep history. */
+        }
       }
     }
-    remember(name);
-    if (built.has(name) || stopped) {
-      return;
-    }
-    const host = hosts.get(name) as HTMLElement;
-    const screen = build(name, host);
-    built.set(name, screen);
-    // Never rejects, by `Screen.load`'s own contract, so the switch cannot
-    // be taken down by whatever the server said. A screen that could not
-    // read draws that instead.
-    await screen.load().catch(() => undefined);
+    let screen = built.get(name);
+    if (screen === undefined) {
+      const host = hosts.get(name);
+      if (!host) throw new Error('Missing console view host.');
+      screen = build(name, host);
+      built.set(name, screen);
+      await screen.load();
+      if (showing !== name) screen.setActive?.(false);
+    } else screen.setActive?.(true);
+    if (record !== undefined) await screen.showRecord?.(record);
   }
-
-  /**
-   * Put the current view in the URL, and never fail over it.
-   *
-   * `replaceState` throws in a document with an opaque origin -- a `file:`
-   * page, a sandboxed frame -- and a console that would not switch views
-   * because it could not rewrite a hash would be broken over decoration.
-   */
-  function remember(name: ViewName): void {
-    try {
-      scope.history.replaceState(null, '', `#${name}`);
-    } catch {
-      // Nothing to do and nothing to say: the view has already switched.
-    }
+  function selectedRecord(hash: string): string | undefined {
+    const query = hash.split('?')[1];
+    if (query === undefined) return undefined;
+    const value = new URLSearchParams(query).get('record');
+    return value && value.length <= 256 && !/\p{Cc}/u.test(value)
+      ? value
+      : undefined;
   }
+  const followRoute = (): void => {
+    const name = viewFromHash(scope.location.hash) ?? 'overview';
+    background(navigate(name, selectedRecord(scope.location.hash), false));
+  };
+  async function show(name: ViewName, record?: string): Promise<void> {
+    await navigate(name, record, true);
+  }
+  scope.addEventListener?.('hashchange', followRoute);
+  scope.addEventListener?.('popstate', followRoute);
 
   return {
     show,
@@ -538,10 +613,16 @@ export function createShell(options: ShellOptions): Shell {
           /* Individual screens retain their own visible connection failures. */
         }
       }
-      return show(viewFromHash(scope.location.hash) ?? 'chat');
+      return navigate(
+        viewFromHash(scope.location.hash) ?? 'overview',
+        selectedRecord(scope.location.hash),
+        false,
+      );
     },
     destroy(): void {
       stopped = true;
+      scope.removeEventListener?.('hashchange', followRoute);
+      scope.removeEventListener?.('popstate', followRoute);
       for (const screen of built.values()) {
         screen.destroy();
       }

@@ -82,7 +82,11 @@ public final class JdbcDurableSessions implements DurableSessions {
   }
 
   private TokenStore.Pair issueOn(UUID chain, Instant now) {
-    String access = Tokens.mint(), refresh = Tokens.mint();
+    return issueOn(chain, now, new TokenStore.Pair(Tokens.mint(), Tokens.mint()));
+  }
+
+  private TokenStore.Pair issueOn(UUID chain, Instant now, TokenStore.Pair pair) {
+    String access = pair.access(), refresh = pair.refresh();
     jdbc.update(
         "INSERT INTO auth_session_grants (digest, chain_id, kind, expires_at) VALUES (?, ?, 'access', ?)",
         Tokens.hash(access),
@@ -136,6 +140,14 @@ public final class JdbcDurableSessions implements DurableSessions {
   private record Grant(UUID chain, Instant expiresAt, Instant chainExpiresAt, boolean revoked) {}
 
   public Optional<TokenStore.Pair> refresh(String presented) {
+    return rotate(presented, Optional.empty()).map(RefreshRotation::pair);
+  }
+
+  public Optional<RefreshRotation> refresh(String presented, RefreshIntent intent) {
+    return rotate(presented, Optional.of(java.util.Objects.requireNonNull(intent, "intent")));
+  }
+
+  private Optional<RefreshRotation> rotate(String presented, Optional<RefreshIntent> intent) {
     if (!usableToken(presented)) return Optional.empty();
     String digest = Tokens.hash(presented);
     return transaction.execute(
@@ -159,6 +171,13 @@ public final class JdbcDurableSessions implements DurableSessions {
                   .findFirst();
           if (found.isEmpty()) return Optional.empty();
           Grant grant = found.get();
+          // The EXISTS above may have used a pre-lock snapshot while waiting.
+          // Recheck current account authority after acquiring the chain lock.
+          if (jdbc.queryForList(
+                  "SELECT 1 FROM auth_session_chains c JOIN admins a ON a.handle=c.handle WHERE c.id=? AND a.enabled AND a.session_version=c.session_version",
+                  Integer.class,
+                  grant.chain())
+              .isEmpty()) return Optional.empty();
           Instant now = clock.instant();
           if (grant.revoked()
               || !now.isBefore(grant.expiresAt())
@@ -172,6 +191,9 @@ public final class JdbcDurableSessions implements DurableSessions {
                       Boolean.class,
                       digest));
           if (spent) {
+            Optional<RefreshRotation> receipt =
+                recover(presented, digest, grant.chain(), intent, now);
+            if (receipt.isPresent()) return receipt;
             jdbc.update(
                 "UPDATE auth_session_chains SET revoked = TRUE WHERE id = ?", grant.chain());
             return Optional.empty();
@@ -186,8 +208,61 @@ public final class JdbcDurableSessions implements DurableSessions {
               "DELETE FROM auth_session_grants WHERE chain_id = ? AND expires_at <= ?",
               grant.chain(),
               Timestamp.from(now));
-          return Optional.of(issueOn(grant.chain(), now));
+          // Receipt and successor grants commit atomically under the same chain lock.
+          jdbc.update(
+              "DELETE FROM auth_refresh_receipts r USING auth_session_grants g WHERE r.parent_digest=g.digest AND g.chain_id=? AND r.expires_at<=?",
+              grant.chain(),
+              Timestamp.from(now));
+          if (intent.isEmpty())
+            return Optional.of(
+                new RefreshRotation(issueOn(grant.chain(), now), accessLifetime, refreshLifetime));
+          RefreshReceipt receipt = new RefreshReceipt(intent.get(), Tokens.mint(), now);
+          TokenStore.Pair pair = issueOn(grant.chain(), now, receipt.pair(presented));
+          jdbc.update(
+              "INSERT INTO auth_refresh_receipts (parent_digest, intent, nonce, issued_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+              digest,
+              receipt.intent().value(),
+              receipt.nonce(),
+              Timestamp.from(now),
+              Timestamp.from(receipt.expiresAt(accessLifetime, refreshLifetime)));
+          return Optional.of(new RefreshRotation(pair, accessLifetime, refreshLifetime));
         });
+  }
+
+  /** Called only after obtaining the live account chain lock and re-reading spent. */
+  private Optional<RefreshRotation> recover(
+      String presented, String digest, UUID chain, Optional<RefreshIntent> intent, Instant now) {
+    if (intent.isEmpty()) return Optional.empty();
+    var receipts =
+        jdbc.query(
+            "SELECT intent, nonce, issued_at FROM auth_refresh_receipts WHERE parent_digest=? AND intent=? AND expires_at>?",
+            (rs, n) ->
+                new RefreshReceipt(
+                    new RefreshIntent(rs.getObject(1, UUID.class)),
+                    rs.getString(2),
+                    rs.getTimestamp(3).toInstant()),
+            digest,
+            intent.get().value(),
+            Timestamp.from(now));
+    if (receipts.isEmpty()) return Optional.empty();
+    RefreshReceipt receipt = receipts.getFirst();
+    // Reconfiguration may shorten lifetimes after restart; never return an expired pair.
+    if (!now.isBefore(receipt.expiresAt(accessLifetime, refreshLifetime))) return Optional.empty();
+    TokenStore.Pair pair = receipt.pair(presented);
+    var expiries =
+        jdbc.query(
+            "SELECT a.expires_at, r.expires_at FROM auth_session_grants a JOIN auth_session_grants r ON r.chain_id=a.chain_id WHERE a.digest=? AND a.kind='access' AND r.digest=? AND r.kind='refresh' AND NOT r.spent AND a.chain_id=? AND a.expires_at>? AND r.expires_at>?",
+            (rs, n) ->
+                new RefreshRotation(
+                    pair,
+                    Duration.between(now, rs.getTimestamp(1).toInstant()),
+                    Duration.between(now, rs.getTimestamp(2).toInstant())),
+            Tokens.hash(pair.access()),
+            Tokens.hash(pair.refresh()),
+            chain,
+            Timestamp.from(now),
+            Timestamp.from(now));
+    return expiries.stream().findFirst();
   }
 
   public java.util.Optional<Long> version(String handle) {

@@ -303,23 +303,29 @@ public final class AuthFilter implements Filter {
   @Override
   public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
       throws IOException, ServletException {
-    if (!properties.isEnabled()) {
-      // Auth is off, so nothing below asks TokenStore anything — but a
-      // gated request still needs an account, and the only one this filter can name with no
-      // credential to read at all is the seeded admin. See the class note
-      // on HANDLE_ATTRIBUTE.
-      if (request instanceof HttpServletRequest disabledHttp && gates(path(disabledHttp))) {
-        admin().ifPresent(h -> request.setAttribute(HANDLE_ATTRIBUTE, h));
-      }
-      chain.doFilter(request, response);
-      return;
-    }
     if (!(request instanceof HttpServletRequest http)
         || !(response instanceof HttpServletResponse answer)) {
       chain.doFilter(request, response);
       return;
     }
     String path = path(http);
+    if (path.equals("/v1/auth") || path.startsWith("/v1/auth/")) {
+      // A cached session 204 would outlive revocation, and cookie/token delivery
+      // must never enter a shared cache. Cover refusals and open login/refresh
+      // routes here as well as successful controller responses, even with auth off.
+      answer.setHeader("Cache-Control", "no-store");
+    }
+    if (!properties.isEnabled()) {
+      // Auth is off, so nothing below asks TokenStore anything — but a
+      // gated request still needs an account, and the only one this filter can name with no
+      // credential to read at all is the seeded admin. See the class note
+      // on HANDLE_ATTRIBUTE.
+      if (gates(path)) {
+        admin().ifPresent(h -> request.setAttribute(HANDLE_ATTRIBUTE, h));
+      }
+      chain.doFilter(request, response);
+      return;
+    }
     if (!gates(path)) {
       chain.doFilter(request, response);
       return;

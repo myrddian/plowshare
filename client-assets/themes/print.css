@@ -1,0 +1,50 @@
+/* Shared mid-century print palette. Clients own layout and semantic state colours. */
+:root {
+  --print-paper: #f4f0e4;
+  --print-ink: #22221e;
+  --print-muted: #59584e;
+  --print-rule: #b8b2a3;
+  --print-accent: #a14529;
+  --print-surface: #eae5d8;
+  --print-body-font: Lato, Arial, sans-serif;
+  --print-display-font: Barlow, 'Arial Narrow', Impact, sans-serif;
+  --print-scheme: light;
+  --print-danger: #a33127;
+  --print-warning: #92400e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --print-paper: #22221e;
+    --print-ink: #f4f0e4;
+    --print-muted: #beb9ac;
+    --print-rule: #706b60;
+    --print-accent: #e7b396;
+    --print-surface: #2d2d27;
+    --print-scheme: dark;
+    --print-danger: #f2a69a;
+    --print-warning: #e0a458;
+  }
+}
+/* Explicit Desktop choices override the system palette without changing OS settings. */
+:root[data-print-mode='light'] {
+  --print-paper: #f4f0e4;
+  --print-ink: #22221e;
+  --print-muted: #59584e;
+  --print-rule: #b8b2a3;
+  --print-accent: #a14529;
+  --print-surface: #eae5d8;
+  --print-scheme: light;
+  --print-danger: #a33127;
+  --print-warning: #92400e;
+}
+:root[data-print-mode='dark'] {
+  --print-paper: #22221e;
+  --print-ink: #f4f0e4;
+  --print-muted: #beb9ac;
+  --print-rule: #706b60;
+  --print-accent: #e7b396;
+  --print-surface: #2d2d27;
+  --print-scheme: dark;
+  --print-danger: #f2a69a;
+  --print-warning: #e0a458;
+}

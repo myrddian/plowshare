@@ -492,15 +492,31 @@ public class AuthController {
    * no record returns empty and retires nothing, so a stray cookie cannot trip the reuse detector
    * that would kill a live chain.
    *
-   * @return 204 with a fresh pair of {@code Set-Cookie} headers, or 401 with nothing — one answer
-   *     for all four ways {@link TokenStore#refresh} can decline
+   * <p>An optional canonical refresh intent coalesces identical physical deliveries under the
+   * store's bounded receipt contract. Malformed or repeated headers fail before spending a token.
+   *
+   * @return 204 with the rotated pair and remaining cookie lifetimes; 400 for malformed intent, or
+   *     401 with nothing for any credential refusal
    */
   @PostMapping("/v1/auth/refresh")
   public ResponseEntity<Void> refresh(HttpServletRequest request) {
+    var headers = java.util.Collections.list(request.getHeaders(RefreshIntent.HEADER));
+    if (headers.size() > 1) return ResponseEntity.badRequest().build();
+    Optional<RefreshIntent> intent = Optional.empty();
+    if (!headers.isEmpty()) {
+      try {
+        intent = Optional.of(RefreshIntent.parse(headers.getFirst()));
+      } catch (IllegalArgumentException malformed) {
+        return ResponseEntity.badRequest().build();
+      }
+    }
     for (String presented : cookies(request, properties.getRefreshCookie())) {
-      Optional<TokenStore.Pair> rotated = tokens.refresh(presented);
-      if (rotated.isPresent()) {
-        return issued(rotated.get(), request);
+      if (intent.isPresent()) {
+        Optional<RefreshRotation> rotated = tokens.refresh(presented, intent.get());
+        if (rotated.isPresent()) return issued(rotated.get(), request);
+      } else {
+        Optional<TokenStore.Pair> rotated = tokens.refresh(presented);
+        if (rotated.isPresent()) return issued(rotated.get(), request);
       }
     }
     return ResponseEntity.status(401).build();
@@ -943,9 +959,32 @@ public class AuthController {
 
   /** 204, two {@code Set-Cookie} headers, and no body at all. */
   private ResponseEntity<Void> issued(TokenStore.Pair pair, HttpServletRequest request) {
+    return issued(
+        new RefreshRotation(pair, properties.getAccessLifetime(), properties.getRefreshLifetime()),
+        request);
+  }
+
+  /** Re-delivery uses remaining lifetimes, preserving the first rotation's absolute expiry. */
+  private ResponseEntity<Void> issued(RefreshRotation rotation, HttpServletRequest request) {
     return ResponseEntity.noContent()
-        .header(HttpHeaders.SET_COOKIE, accessCookie(pair, request))
-        .header(HttpHeaders.SET_COOKIE, refreshCookie(pair, request))
+        .header(
+            HttpHeaders.SET_COOKIE,
+            cookie(
+                    properties.getAccessCookie(),
+                    rotation.pair().access(),
+                    ACCESS_PATH,
+                    rotation.accessLifetime(),
+                    request)
+                .toString())
+        .header(
+            HttpHeaders.SET_COOKIE,
+            cookie(
+                    properties.getRefreshCookie(),
+                    rotation.pair().refresh(),
+                    REFRESH_PATH,
+                    rotation.refreshLifetime(),
+                    request)
+                .toString())
         .build();
   }
 

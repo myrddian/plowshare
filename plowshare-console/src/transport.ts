@@ -1,3 +1,5 @@
+import { succeeded } from '../../sdk/typescript/src/binding/codes.ts';
+import { checkedTransport } from '../../sdk/typescript/src/operations/transport.ts';
 import { openEventStream, type EventStream } from './events';
 import { request, ApiError } from './api';
 import {
@@ -146,9 +148,8 @@ export interface Transport {
 }
 
 const REFUSALS: Readonly<Record<string, number>> = {
-  INVALID_INPUT: 400,
-  UNAUTHENTICATED: 401,
-  FORBIDDEN: 403,
+  BAD_REQUEST: 400,
+  VALIDATION_FAILED: 400,
   NOT_FOUND: 404,
   CONFLICT: 409,
   INTERNAL_ERROR: 500,
@@ -163,8 +164,11 @@ export function socketTransport(stream: () => EventStream): Transport {
     const checked = decodeRequest(type, input);
     const active = stream();
     await ready(active);
-    const outcome = await active.ask(checked.type, checked.payload);
-    if (outcome.code !== 'OK')
+    const outcome = await checkedTransport(active).ask(
+      checked.type,
+      checked.payload,
+    );
+    if (!succeeded(outcome.code))
       throw new ApiError(
         outcome.said ?? `${type} was refused (${outcome.code})`,
         REFUSALS[outcome.code] ?? 500,

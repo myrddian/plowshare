@@ -166,6 +166,54 @@ Authentication, refresh, ticket acquisition and logout use HTTP. Supported
 application operations and file bytes continue over WS; PDF/image conversion
 continues on the server. The existing Git-object HTTP exception is unchanged.
 
+## Browser connection recovery
+
+The console checks the current cookie session before opening its workspace.
+An explicit authentication refusal offers sign-in. A failed connection, server
+error or unexpected session response shows an unavailable state with **Retry
+connection**; it does not establish that the account is signed out. Retry reads
+session status without renewing a bootstrap token or submitting work.
+
+Session probes bypass browser caches and refuse redirects. Authentication
+responses, including login, refresh and refused session probes, carry
+`Cache-Control: no-store` from the server filter. A cached successful probe cannot
+establish current authority after revocation or reconcile uncertain rotation.
+Refresh also refuses redirects: following a 307 or 308 would submit the rotating
+POST to another target. A redirect failure preserves the uncertainty marker;
+subsequent recovery only probes the session and does not repeat that rotation.
+
+Automatic cookie rotation requires Web Locks and writable browser storage. The
+origin lock serializes participating tabs, and a non-secret uncertainty marker
+prevents another tab or reload from repeating a rotation whose reply was lost.
+A successful access probe under that lock reconciles the marker. Browsers without
+Web Locks (including unsupported or insecure origins) keep existing sessions but
+require explicit sign-in after expiry; they never rotate shared cookies through
+a per-tab fallback.
+
+This controls application submissions, not exactly-once HTTP delivery. An abrupt
+connection-close fixture received duplicate arrivals for one instrumented fetch.
+The refresh endpoint now accepts one explicit rotation intent and retains a
+bounded server-owned receipt, so identical physical deliveries receive the same
+cookie pair rather than rotating twice or retiring the session. The browser
+creates one intent per new fetch. The neutral TypeScript SDK accepts an optional
+validated intent from its caller. Neither initiates replay after uncertain
+delivery. Missing/different intents retain spent-token reuse revocation. Receipt recovery lasts at most thirty seconds, checks current
+account/chain and successor authority, and preserves original token/cookie
+expiry. It stores reconstruction metadata and digests, not plaintext tokens.
+Exact captured parent-and-intent replay is indistinguishable from duplicate
+delivery within that fixed window; see the
+[refresh-intent decision](decisions/0004-refresh-intent-receipts.md) for the
+explicit tradeoff and compatibility contract.
+If a direct session probe cannot establish access after uncertain rotation,
+reload and sign in again. Admitted work remains on the server.
+
+A refused single-use bootstrap token cannot be renewed by reloading. Use an
+existing account, or ask the operator for the current handoff from the configured
+protected token file when setting up a new installation.
+
+Document job reads pause when the Documents view or browser tab is hidden and
+reconcile when it becomes visible or its connection reopens. An already admitted
+ingest continues on the server. Leaving the view does not cancel or resubmit it.
 
 ## Local FileStores
 

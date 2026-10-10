@@ -1,0 +1,103 @@
+/* Classic retains the original per-view colours. Print uses shared client assets. */
+:root[data-theme='print'] {
+  color-scheme: var(--print-scheme);
+  font-family: var(--print-body-font);
+  --bg: var(--print-paper);
+  --side: var(--print-surface);
+  --panel: var(--print-paper);
+  --ink: var(--print-ink);
+  --muted: var(--print-muted);
+  --line: var(--print-rule);
+  --accent: var(--print-accent);
+  --tint: color-mix(in srgb, var(--print-accent) 9%, var(--print-paper));
+  --theme-paper: var(--bg);
+  --theme-surface: var(--side);
+  --theme-ink: var(--ink);
+  --theme-muted: var(--muted);
+  --theme-rule: var(--line);
+  --theme-accent: var(--accent);
+  --theme-tint: var(--tint);
+  --theme-on-accent: var(--bg);
+  --danger: var(--print-danger);
+  --theme-danger: var(--print-danger);
+  --theme-warning: var(--print-warning);
+  --theme-danger-surface: color-mix(in srgb, var(--theme-danger) 8%, var(--bg));
+  --theme-warning-surface: color-mix(
+    in srgb,
+    var(--theme-warning) 8%,
+    var(--bg)
+  );
+}
+:root[data-theme='print'] .brand strong,
+:root[data-theme='print'] h1,
+:root[data-theme='print'] h2,
+:root[data-theme='print'] .trajectory-title {
+  font-family: var(--print-display-font);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+:root[data-theme='print'] .brand strong {
+  font-size: 30px;
+  line-height: 1.1;
+}
+:root[data-theme='print'] .brand {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 16px;
+}
+:root[data-theme='print'] .titlebar,
+:root[data-theme='print'] .chat-header,
+:root[data-theme='print'] .activity-toolbar,
+:root[data-theme='print'] .trajectory-toolbar {
+  border-bottom: 2px solid var(--ink);
+}
+:root[data-theme='print'] .sidebar {
+  border-right: 2px solid var(--ink);
+}
+:root[data-theme='print'] .chat,
+:root[data-theme='print'] .inspector,
+:root[data-theme='print'] dialog,
+:root[data-theme='print'] .activity-columns,
+:root[data-theme='print'] .trajectory-columns,
+:root[data-theme='print'] .board-columns {
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-theme='print'] .composer,
+:root[data-theme='print'] .markdown-code {
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-theme='print'] .inspector {
+  border-top: 3px solid var(--accent);
+}
+:root[data-theme='print'] button,
+:root[data-theme='print'] input,
+:root[data-theme='print'] textarea,
+:root[data-theme='print'] select {
+  border-radius: 0;
+}
+:root[data-theme='print'] .sidebar-heading {
+  font-family: var(--print-body-font);
+}
+:root[data-theme='print'] .account-navigation button[aria-current='page'] {
+  color: var(--bg);
+  background: var(--ink);
+}
+.appearance-control {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+.appearance-control select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+}
+#appearance-status {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 12px;
+}

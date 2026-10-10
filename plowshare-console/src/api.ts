@@ -11,14 +11,17 @@
  * cannot, because a browser cannot set headers on a WebSocket upgrade, which is
  * why the cookie exists at all.
  *
- * **A refresh is spent exactly once, and is never retried.** `POST
+ * **This client submits a refresh once and never initiates a replay.** `POST
  * /v1/auth/refresh` rotates both cookies, and presenting a refresh token that
- * has already been spent RETIRES THE WHOLE CHAIN on the server. A client that
- * retries a refresh, or that lets two requests refresh concurrently, logs
+ * has already been spent retires the chain unless it is an identical intent
+ * within the server's bounded duplicate-delivery window. A client that
+ * retries with a new intent, or lets two requests refresh concurrently, logs
  * itself out -- and it logs itself out in a way that looks like the server's
  * fault. Hence {@link refreshOnce}'s single-flight latch below, and hence the
  * absence of any retry loop anywhere in this file.
  */
+
+import { REFRESH_INTENT_HEADER } from '../../sdk/typescript/src/binding/refresh-intent.ts';
 
 /** `POST /v1/auth/refresh`: rotates both cookies, 204, no body. */
 export const REFRESH_PATH = '/v1/auth/refresh';
@@ -35,9 +38,8 @@ export const REFRESH_PATH = '/v1/auth/refresh';
  */
 export const SIGNED_OUT =
   'This console is no longer signed in. Reload this page and sign in again on the screen it' +
-  ' lands on. If nobody knows a password yet, reopen the bootstrap URL the server printed' +
-  ' when it started — the line beginning "Plowshare console:" — and restart the server if' +
-  ' that token has already been spent; it is single-use.';
+  ' lands on. For first-time setup, ask the operator for the current bootstrap handoff' +
+  ' from the configured protected token file. Reloading cannot renew a single-use token.';
 
 /**
  * A response the server refused, carried with the status that says how.
@@ -87,7 +89,7 @@ export class ApiError extends Error {
 /**
  * The refresh in flight, or null.
  *
- * **This latch is the whole defence against a self-inflicted logout.** Two
+ * **This latch coordinates callers in one tab.** Two
  * screens polling at once both meet the 401 that follows an access cookie
  * expiring; without this they would both `POST /v1/auth/refresh`, the second
  * with the cookie the first has already spent, and the server would retire the
@@ -99,25 +101,108 @@ export class ApiError extends Error {
  * one.
  */
 let refreshInFlight: Promise<boolean> | null = null;
+// Stored under the origin lock before rotation. It contains no credential or
+// work record: another tab (or reload after a crash) must know that the shared
+// HttpOnly cookie may already have been spent. Only a definitive response or a
+// successful locked access probe clears it. Storage failure prevents rotation.
+const REFRESH_UNCERTAIN = 'plowshare-session-refresh-uncertain';
+const REFRESH_LOCK = 'plowshare-session-refresh';
+
+/** Read the cookie session from the server, never from a cached or redirected
+ * response. A stale 204 cannot establish current authority or reconcile a
+ * possibly spent refresh cookie. This probe does not renew either cookie. */
+export function probeCookieSession(): Promise<Response> {
+  return fetch('/v1/auth/session', {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** After login or reload establishes a session, reconcile an older uncertain
+ * rotation under the same lock. The extra probe is only needed when a marker
+ * exists; its failure leaves the marker intact and never submits a refresh. */
+export async function reconcileSessionRefresh(): Promise<void> {
+  const locks = globalThis.navigator?.locks;
+  if (
+    locks === undefined ||
+    window.localStorage.getItem(REFRESH_UNCERTAIN) === null
+  )
+    return;
+  await locks.request(REFRESH_LOCK, async () => {
+    if (window.localStorage.getItem(REFRESH_UNCERTAIN) === null) return;
+    const probe = await probeCookieSession();
+    if (probe.status === 204) window.localStorage.removeItem(REFRESH_UNCERTAIN);
+  });
+}
 
 /**
  * Rotate the cookie pair, at most once concurrently.
  *
- * @returns whether the server issued a new pair. A rejection is reported as
- *     `false` rather than thrown: a transport failure and a refused refresh
- *     leave the caller with the same single option, which is to stop.
- */
+ * @returns whether the server established access. Only an explicit credential
+ *     refusal returns false; unavailable or uncertain responses throw.
+ *
+ * Cooperate across browser tabs before rotating a shared cookie pair. Under
+ * the origin lock, re-probe: another tab may already have rotated successfully.
+ * Without Web Locks, automatic rotation is unavailable: a per-tab latch cannot
+ * protect a cookie shared by other tabs, so failing closed avoids retiring it. */
 function refreshOnce(): Promise<boolean> {
   if (refreshInFlight === null) {
-    refreshInFlight = fetch(REFRESH_PATH, {
-      method: 'POST',
-      credentials: 'same-origin',
-    })
-      .then((response) => response.status === 204)
-      .catch(() => false)
-      .finally(() => {
-        refreshInFlight = null;
+    const rotate = async (): Promise<boolean> => {
+      if (window.localStorage.getItem(REFRESH_UNCERTAIN) !== null)
+        throw new Error(
+          'Session refresh delivery is uncertain. Reload to recheck your session.',
+        );
+      // One immutable intent per fetch. The HTTP stack may redeliver that fetch
+      // after a lost response; the server can coalesce it without another rotation.
+      // This is deliberately not persisted or reused by application code.
+      const intent = crypto.randomUUID();
+      window.localStorage.setItem(REFRESH_UNCERTAIN, 'pending');
+      const response = await fetch(REFRESH_PATH, {
+        method: 'POST',
+        headers: { [REFRESH_INTENT_HEADER]: intent },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        // Following 307/308 would submit the rotating mutation again at the
+        // redirect target. Refuse all redirects and retain uncertainty instead.
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
       });
+      if (
+        response.status === 204 ||
+        response.status === 401 ||
+        response.status === 403
+      ) {
+        window.localStorage.removeItem(REFRESH_UNCERTAIN);
+        return response.status === 204;
+      }
+      throw new Error(
+        'Session refresh is unavailable. Reload to recheck your session.',
+      );
+    };
+    const locks = globalThis.navigator?.locks;
+    const work: Promise<boolean> = (async () => {
+      if (locks === undefined)
+        throw new Error(
+          'Automatic session refresh requires browser Web Locks. Reload to sign in, or use a secure console origin in a supported browser.',
+        );
+      return await locks.request(REFRESH_LOCK, async () => {
+        const probe = await probeCookieSession();
+        if (probe.status === 204) {
+          window.localStorage.removeItem(REFRESH_UNCERTAIN);
+          return true;
+        }
+        if (probe.status === 403) return false;
+        if (probe.status !== 401)
+          throw new Error('Session status is unavailable.');
+        return await rotate();
+      });
+    })();
+    refreshInFlight = work.finally(() => {
+      refreshInFlight = null;
+    });
   }
   return refreshInFlight;
 }
@@ -129,12 +214,14 @@ function refreshOnce(): Promise<boolean> {
  * "never loop" is a claim about a number:
  *
  * - anything but 401 -- **1 call**, answered or thrown.
- * - 401, refresh 204, retry succeeds -- **3 calls**.
- * - 401, refresh 204, retry 401 -- **3 calls**, then {@link SIGNED_OUT}. The
+ * - 401, locked probe 204, retry succeeds -- **3 calls**, no rotation.
+ * - 401, locked probe 401, refresh 204, retry succeeds -- **4 calls**.
+ * - 401, locked probe 401, refresh 204, retry 401 -- **4 calls**, then {@link SIGNED_OUT}. The
  *   second 401 is not refreshed again; a fresh access cookie that is refused
  *   immediately is not an expiry.
- * - 401, refresh refused -- **2 calls**, then {@link SIGNED_OUT}. The refresh
+ * - 401, locked probe 401, refresh refused -- **3 calls**, then {@link SIGNED_OUT}. The refresh
  *   is not retried, ever: see this file's header.
+ * - No cross-tab lock or an uncertain rotation -- unavailable, without rotation.
  *
  * @param path an absolute path on this origin, like `/v1/jobs`. Never a full
  *     URL: a caller that could name a host could send the cookie somewhere else
@@ -367,3 +454,28 @@ async function body(response: Response): Promise<unknown> {
  * of it in one line and a screen can import exactly the verb it uses.
  */
 export const api = { request, get, post, put };
+
+/** Re-establish cookie/session availability before reconnecting the browser
+ * listener. A refusal closes the listener; network trouble retains backoff. */
+export async function recoverSession(): Promise<
+  'ready' | 'signed-out' | 'unavailable'
+> {
+  try {
+    const response = await request('/v1/auth/session', {
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 204) await reconcileSessionRefresh();
+    return response.status === 204
+      ? 'ready'
+      : response.status === 403
+        ? 'signed-out'
+        : 'unavailable';
+  } catch (problem) {
+    return problem instanceof ApiError && problem.status === 401
+      ? 'signed-out'
+      : 'unavailable';
+  }
+}

@@ -1,0 +1,10 @@
+The console bundles these unmodified font files under the SIL Open Font License 1.1:
+
+Barlow Condensed ExtraBold
+Copyright 2017 The Barlow Project Authors
+See BarlowCondensed-OFL.txt.
+
+Lato Regular and Bold
+Copyright (c) 2010-2014 by tyPoland Lukasz Dziedzic
+Reserved Font Name: Lato
+See Lato-OFL.txt.

@@ -52,6 +52,8 @@ export interface StreamStatus {
   readonly attempt: number;
   /** Milliseconds until the next attempt, or null when none is scheduled. */
   readonly retryInMs: number | null;
+  /** Authentication recovery established that this account session is gone. */
+  readonly signedOut?: boolean;
 }
 
 /** A handle on a running stream. */
@@ -94,6 +96,10 @@ export interface EventStreamOptions {
    * of the id either way: a timed-out frame may still have been acted on.
    */
   readonly askTimeoutMs?: number;
+  /** Explicit HTTP authentication boundary; never retries a submitted frame. */
+  readonly recoverSession?: () => Promise<
+    'ready' | 'signed-out' | 'unavailable'
+  >;
 }
 
 /** How long an ask waits, when nothing says otherwise. */
@@ -134,13 +140,10 @@ export function eventUrl(session: string, scope: Window = window): string {
  * exists to de-synchronise a fleet, and here it would only make the retry
  * schedule unpredictable to the person reading it off the screen.
  *
- * **One case where retrying forever is the wrong-looking answer, stated
- * plainly:** the server's token store is in memory, so a restart invalidates
- * the cookie this socket rides on. Every subsequent upgrade is then refused 401
- * and this will retry at the ceiling until the tab is closed. That is why the
- * status is surfaced rather than swallowed -- the remedy is the new bootstrap
- * URL the restarted server printed, and nothing this module can do gets there
- * on its own.
+ * The shell supplies a session probe after a lost connection. A confirmed
+ * credential refusal ends retries and asks the user to sign in; an unavailable
+ * probe retains backoff. This module cannot read HttpOnly cookies or infer
+ * authentication failure from a WebSocket close alone.
  */
 export function openEventStream(options: EventStreamOptions): EventStream {
   const scope = options.scope ?? window;
@@ -174,7 +177,13 @@ export function openEventStream(options: EventStreamOptions): EventStream {
     waiting.clear();
   };
 
-  const status = (): StreamStatus => ({ state, attempt, retryInMs });
+  let signedOut = false;
+  const status = (): StreamStatus => ({
+    state,
+    attempt,
+    retryInMs,
+    ...(signedOut ? { signedOut: true } : {}),
+  });
   const announce = (): void => options.onStatus?.(status());
 
   const malformed =
@@ -226,7 +235,24 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       messages = null;
       socket = null;
       failWaiting('the socket closed before it answered');
-      scheduleRetry();
+      if (options.recoverSession === undefined) scheduleRetry();
+      else {
+        void options.recoverSession().then(
+          (recovery) => {
+            if (stopped) return;
+            if (recovery === 'signed-out') {
+              stopped = true;
+              signedOut = true;
+              state = 'closed';
+              retryInMs = null;
+              announce();
+            } else scheduleRetry();
+          },
+          () => {
+            if (!stopped) scheduleRetry();
+          },
+        );
+      }
     };
 
     socket = openSocket(url);

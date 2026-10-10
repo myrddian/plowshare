@@ -472,12 +472,15 @@ function textOf(value: unknown): string {
 /**
  * What answering one approval came to, as the block that asked needs to know it.
  *
- * `answered` false puts the buttons back: nothing was recorded, so the question
- * is still the person's to answer. `note` is shown under the block either way --
+ * An explicit refusal puts the buttons back. Unknown delivery keeps them closed
+ * until a fresh retained read: a lost receipt does not establish no effect.
+ * `note` is shown under the block either way --
  * the server's sentence for a busy conversation, or why the answer was not taken.
  */
 export interface ApprovalResult {
   readonly answered: boolean;
+  /** Unknown delivery leaves controls closed until a fresh retained read. */
+  readonly uncertain?: boolean;
   readonly note: string | null;
 }
 
@@ -545,7 +548,11 @@ export function renderApproval(
       `${textOf(view.agent) || 'the agent'} asks before running this command`,
     ),
   );
-  const shown = el('pre', 'approval-command', command.join(' '));
+  const shown = el(
+    'pre',
+    'approval-command',
+    JSON.stringify(view.commands ?? [command], null, 2),
+  );
   shown.dataset['approvalCommand'] = '';
   block.appendChild(shown);
   block.appendChild(detail('side', textOf(view.side)));
@@ -624,14 +631,18 @@ export function renderApproval(
   function settle(result: ApprovalResult, decision: ApprovalDecision): void {
     if (result.answered) {
       block.dataset['answered'] = decision;
-    } else {
+    } else if (!result.uncertain) {
       for (const control of buttons) {
         control.disabled = false;
       }
     }
     said.hidden = result.note === null;
     said.textContent = result.note ?? '';
-    said.dataset['approvalNote'] = result.answered ? 'answered' : 'refused';
+    said.dataset['approvalNote'] = result.uncertain
+      ? 'uncertain'
+      : result.answered
+        ? 'answered'
+        : 'refused';
   }
 
   function send(
@@ -647,6 +658,7 @@ export function renderApproval(
         settle(
           {
             answered: false,
+            uncertain: true,
             note:
               problem instanceof Error
                 ? problem.message

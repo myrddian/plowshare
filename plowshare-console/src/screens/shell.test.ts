@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
-import type { EventStream, EventStreamOptions, StreamStatus } from '../events';
+import type {
+  EventStream,
+  EventStreamOptions,
+  FrameOutcome,
+  StreamStatus,
+} from '../events';
 import {
   createShell,
   multiplex,
@@ -83,7 +88,7 @@ function scopeAt(hash: string): Window {
   return {
     location: { hash },
     history: {
-      replaceState: (_state: unknown, _title: string, url: string): void => {
+      pushState: (_state: unknown, _title: string, url: string): void => {
         rewritten.push(url);
       },
     },
@@ -119,17 +124,19 @@ afterEach(() => {
 describe('eight views and no router', () => {
   it('offers every view in the nav, with inbox first', () => {
     expect(
-      [...root.querySelectorAll('[data-nav]')].map((node) => node.textContent),
+      [...root.querySelectorAll<HTMLElement>('[data-nav]')].map(
+        (node) => node.dataset['nav'],
+      ),
     ).toEqual([...VIEWS]);
   });
 
-  it('lands on chat and marks it as the one showing', async () => {
+  it('lands on the work overview and marks it as the one showing', async () => {
     await shell.start();
 
-    expect(shell.current()).toBe('chat');
-    expect(host('chat').hidden).toBe(false);
+    expect(shell.current()).toBe('overview');
+    expect(host('overview').hidden).toBe(false);
     expect(host('jobs').hidden).toBe(true);
-    expect(nav('chat').getAttribute('aria-current')).toBe('page');
+    expect(nav('overview').getAttribute('aria-current')).toBe('page');
     expect(nav('jobs').getAttribute('aria-current')).toBeNull();
   });
 
@@ -163,6 +170,7 @@ describe('eight views and no router', () => {
     // socket: it is the reason this console exists, and coming back has to
     // land on what was left.
     await shell.start();
+    await shell.show('chat');
     const chat = host('chat').firstElementChild;
     await shell.show('jobs');
     await shell.show('chat');
@@ -188,9 +196,9 @@ describe('eight views and no router', () => {
     await another.start();
 
     expect(another.current()).toBe('memory');
-    expect(other.rewritten).toEqual(['#memory']);
+    expect(other.rewritten).toEqual([]);
     await another.show('jobs');
-    expect(other.rewritten).toEqual(['#memory', '#jobs']);
+    expect(other.rewritten).toEqual(['#jobs']);
     another.destroy();
   });
 
@@ -207,7 +215,7 @@ describe('eight views and no router', () => {
     // that would not change view because it could not rewrite decoration
     // would be broken over decoration.
     const hostile = scopeAt('') as Window & { rewritten: string[] };
-    (hostile.history as unknown as { replaceState: () => void }).replaceState =
+    (hostile.history as unknown as { pushState: () => void }).pushState =
       () => {
         throw new Error('SecurityError');
       };
@@ -353,7 +361,7 @@ describe('the inbox badge', () => {
       // synchronously, as this fake reports it -- so INBOX's badge, which
       // subscribes right after in the same `start()`, hits exactly the moment
       // a `badgeStream` read in its own temporal dead zone would throw.
-      const ask = vi.fn(() =>
+      const ask = vi.fn((_type: string, _payload?: { unread?: boolean }) =>
         Promise.resolve({ code: 'OK', payload: { items: [], unread: 2 } }),
       );
       const alreadyOpen = (options: EventStreamOptions): EventStream => {
@@ -380,7 +388,11 @@ describe('the inbox badge', () => {
 
       await another.start();
 
-      expect(ask).toHaveBeenCalledTimes(1);
+      expect(
+        ask.mock.calls.filter(
+          (call) => call[0] === 'inbox.list' && call[1]?.unread === true,
+        ),
+      ).toHaveLength(1);
       expect(ask).toHaveBeenCalledWith('inbox.list', {
         unread: true,
         limit: 1,
@@ -388,4 +400,170 @@ describe('the inbox badge', () => {
       another.destroy();
     },
   );
+});
+
+describe('read-only owning-record routes', () => {
+  it('restores a job deep link on reload and follows back/forward without a mutation', async () => {
+    window.history.replaceState(null, '', '#jobs?record=job_saved');
+    const read = transport();
+    get.mockImplementation(async (path: string) => {
+      if (path === '/v1/jobs/job_saved')
+        return {
+          id: 'job_saved',
+          agent: 'reviewer',
+          state: 'RUNNING',
+          cancelRequested: false,
+          conversation: 'cnv_saved',
+          limits: null,
+          outcome: null,
+        };
+      return [];
+    });
+    const another = createShell({
+      root,
+      transport: read,
+      openStream: opener,
+      scope: window,
+      session: 'route-tab',
+      pollMs: null,
+    });
+    await another.start();
+    expect(root.querySelector('.job-selection')?.textContent).toContain(
+      'job_saved',
+    );
+    expect(post).not.toHaveBeenCalled();
+    await another.show('inbox');
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('jobs'));
+    window.history.forward();
+    await vi.waitFor(() => expect(another.current()).toBe('inbox'));
+    expect(post).not.toHaveBeenCalled();
+    another.destroy();
+    window.history.replaceState(null, '', '#');
+  });
+});
+
+it('suspends document reads across navigation and reconciles the selected view after reconnect', async () => {
+  vi.useFakeTimers();
+  shell.destroy();
+  shell = createShell({
+    root,
+    transport: transport(),
+    openStream: opener,
+    session: 'poll-test',
+    scope,
+    pollMs: 100,
+  });
+  try {
+    await shell.start();
+    const count = () =>
+      get.mock.calls.filter(([path]) => path === '/v1/jobs').length;
+    const initial = count();
+    await shell.show('documents');
+    expect(count()).toBe(initial + 1);
+    await shell.show('chat');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(count()).toBe(initial + 1);
+    await shell.show('documents');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(count()).toBe(initial + 2);
+    if (!statuses) throw new Error('Expected shared stream status owner');
+    statuses({ state: 'open', attempt: 0, retryInMs: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(count()).toBe(initial + 3);
+    expect(sockets).toHaveLength(1);
+  } finally {
+    shell.destroy();
+    vi.useRealTimers();
+  }
+});
+
+it('restores an exact approval route on reload and history without sending a decision', async () => {
+  const originalHash = window.location.hash;
+  window.history.replaceState(null, '', '#approvals?record=apr_34');
+  const requests = Array.from({ length: 35 }, (_, index) => ({
+    id: `apr_${index}`,
+    conversation: 'cnv_saved',
+    askedIn: 'cnv_saved',
+    agent: 'reviewer',
+    side: 'server',
+    command: ['echo', 'review'],
+    cwd: '/fixture',
+    reason: 'Review this exact request',
+    state: 'asked',
+    scope: null,
+    prefix: null,
+    defaultPrefix: ['echo'],
+    createdAt: '2026-10-07T00:00:00Z',
+    answeredAt: null,
+    commands: null,
+    judged: null,
+  }));
+  const ask = vi.fn(async (type: string): Promise<FrameOutcome> =>
+    type === 'approval.list'
+      ? { code: 'OK', payload: { approvals: requests } }
+      : { code: 'OK', payload: { items: [], unread: 0 } },
+  );
+  const open = (options: EventStreamOptions): EventStream => ({
+    ...opener(options),
+    ask,
+  });
+  const another = createShell({
+    root,
+    transport: transport(),
+    openStream: open,
+    scope: window,
+    session: 'approval-route',
+    pollMs: null,
+  });
+  let restored: Shell | undefined;
+  try {
+    await another.start();
+    expect(
+      root
+        .querySelector('[data-approval="apr_34"]')
+        ?.getAttribute('data-selected'),
+    ).toBe('true');
+    expect(root.querySelectorAll('[data-approval]')).toHaveLength(5);
+    await another.show('inbox');
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('approvals'));
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector<HTMLButtonElement>(
+          '[data-approval="apr_34"] .approval-decision',
+        )?.disabled,
+      ).toBe(false),
+    );
+    window.history.forward();
+    await vi.waitFor(() => expect(another.current()).toBe('inbox'));
+    window.history.back();
+    await vi.waitFor(() => expect(another.current()).toBe('approvals'));
+    another.destroy();
+    restored = createShell({
+      root,
+      transport: transport(),
+      openStream: open,
+      scope: window,
+      session: 'approval-reload',
+      pollMs: null,
+    });
+    await restored.start();
+    expect(
+      root
+        .querySelector('[data-approval="apr_34"]')
+        ?.getAttribute('data-selected'),
+    ).toBe('true');
+    expect(window.location.hash).toBe('#approvals?record=apr_34');
+    expect(
+      ask.mock.calls.every(
+        ([type]) => type === 'approval.list' || type === 'inbox.list',
+      ),
+    ).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+  } finally {
+    another.destroy();
+    restored?.destroy();
+    window.history.replaceState(null, '', originalHash);
+  }
 });

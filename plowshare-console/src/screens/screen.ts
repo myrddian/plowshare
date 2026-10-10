@@ -26,6 +26,10 @@
 export type { Transport } from '../repl/repl';
 
 export interface Screen {
+  /** Pause background reads while hidden; reactivation reconciles server state. */
+  setActive?(active: boolean): void;
+  /** Read an explicitly selected owning record. Never submits or resumes work. */
+  showRecord?(id: string): Promise<void>;
   /** The element this screen built, for a caller that wants to place it. */
   element(): HTMLElement;
   /**

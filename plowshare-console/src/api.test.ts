@@ -4,6 +4,7 @@ import { api, ApiError } from './api';
 /** Every path `fetch` was called with, in order. */
 let calls: string[];
 let fetchMock: ReturnType<typeof vi.fn>;
+let storage: Storage;
 
 /**
  * A server whose access cookie has expired and whose refresh still works.
@@ -16,6 +17,8 @@ function serverWithExpiredAccess(refreshAnswers = 204): void {
   let signedIn = false;
   fetchMock.mockImplementation(async (path: string) => {
     calls.push(path);
+    if (path === '/v1/auth/session')
+      return new Response(null, { status: signedIn ? 204 : 401 });
     if (path === '/v1/auth/refresh') {
       signedIn = refreshAnswers === 204;
       return new Response(null, { status: refreshAnswers });
@@ -30,13 +33,36 @@ function serverWithExpiredAccess(refreshAnswers = 204): void {
 }
 
 beforeEach(() => {
+  const saved = new Map<string, string>();
+  storage = {
+    get length() {
+      return saved.size;
+    },
+    clear: () => saved.clear(),
+    getItem: (key) => saved.get(key) ?? null,
+    setItem: (key, value) => {
+      saved.set(key, value);
+    },
+    removeItem: (key) => {
+      saved.delete(key);
+    },
+    key: (index) => [...saved.keys()][index] ?? null,
+  };
+  vi.stubGlobal('localStorage', storage);
   calls = [];
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: {
+      request: (_name: string, callback: () => Promise<boolean>) => callback(),
+    },
+  });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, 'locks');
 });
 
 describe('api', () => {
@@ -45,8 +71,54 @@ describe('api', () => {
 
     await expect(api.get('/v1/jobs')).resolves.toEqual([]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(calls).toEqual(['/v1/jobs', '/v1/auth/refresh', '/v1/jobs']);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(calls).toEqual([
+      '/v1/jobs',
+      '/v1/auth/session',
+      '/v1/auth/refresh',
+      '/v1/jobs',
+    ]);
+  });
+
+  it('attaches one fresh intent per rotation without persisting it or resubmitting after loss', async () => {
+    const intents: string[] = [];
+    let signedIn = false;
+    let loseResponse = false;
+    fetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      calls.push(path);
+      if (path === '/v1/auth/session')
+        return new Response(null, { status: signedIn ? 204 : 401 });
+      if (path === '/v1/auth/refresh') {
+        const intent = new Headers(init?.headers).get(
+          'X-Plowshare-Refresh-Intent',
+        );
+        if (intent === null) throw new Error('refresh omitted its intent');
+        intents.push(intent);
+        if (loseResponse) throw new TypeError('response lost');
+        signedIn = true;
+        return new Response(null, { status: 204 });
+      }
+      return signedIn
+        ? new Response('[]', { status: 200 })
+        : new Response(null, { status: 401 });
+    });
+    await api.get('/v1/jobs');
+    expect(intents[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(storage.length).toBe(0);
+    signedIn = false;
+    loseResponse = true;
+    await expect(api.get('/v1/jobs')).rejects.toThrow('response lost');
+    expect(intents[1]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(intents[1]).not.toBe(intents[0]);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBe(
+      'pending',
+    );
+    await expect(api.get('/v1/jobs')).rejects.toThrow(/uncertain/);
+    expect(intents).toHaveLength(2);
   });
 
   it('gives up rather than looping when the refresh itself is refused', async () => {
@@ -58,8 +130,8 @@ describe('api', () => {
 
     await expect(api.get('/v1/jobs')).rejects.toThrow(/sign in again/);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(calls).toEqual(['/v1/jobs', '/v1/auth/refresh']);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(calls).toEqual(['/v1/jobs', '/v1/auth/session', '/v1/auth/refresh']);
   });
 
   it('gives up when the retry is refused too, without a second refresh', async () => {
@@ -75,7 +147,12 @@ describe('api', () => {
 
     await expect(api.get('/v1/jobs')).rejects.toThrow(/sign in again/);
 
-    expect(calls).toEqual(['/v1/jobs', '/v1/auth/refresh', '/v1/jobs']);
+    expect(calls).toEqual([
+      '/v1/jobs',
+      '/v1/auth/session',
+      '/v1/auth/refresh',
+      '/v1/jobs',
+    ]);
   });
 
   it('refreshes once for two requests that expire together', async () => {
@@ -90,7 +167,7 @@ describe('api', () => {
     ).resolves.toEqual([[], []]);
 
     expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
   });
 
   it('refreshes again for an expiry that comes later', async () => {
@@ -267,4 +344,206 @@ describe('a refusal reaches the person who caused it', () => {
     );
     await expect(api.get('/v1/jobs')).rejects.toMatchObject({ said: null });
   });
+});
+
+describe('refresh coordination across browser tabs', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
+  });
+
+  it('serializes independent tab refresh owners and rechecks the shared access cookie', async () => {
+    let tail = Promise.resolve();
+    const lock = vi.fn((_name: string, callback: () => Promise<boolean>) => {
+      const result = tail.then(callback);
+      tail = result.then(() => undefined);
+      return result;
+    });
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: lock },
+    });
+    let signedIn = false;
+    fetchMock.mockImplementation(async (path: string) => {
+      calls.push(path);
+      if (path === '/v1/auth/refresh') {
+        signedIn = true;
+        return new Response(null, { status: 204 });
+      }
+      if (path === '/v1/auth/session')
+        return new Response(null, { status: signedIn ? 204 : 401 });
+      return signedIn
+        ? new Response('[]', { status: 200 })
+        : new Response(null, { status: 401 });
+    });
+    const first = await import('./api');
+    vi.resetModules();
+    const second = await import('./api');
+    await Promise.all([
+      first.api.get('/v1/jobs'),
+      second.api.get('/v1/projects'),
+    ]);
+    expect(lock).toHaveBeenCalledTimes(2);
+    expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
+  });
+});
+
+describe('session recovery availability', () => {
+  it('requires current, direct authority for every probe and refuses redirect replay of refresh', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    fetchMock.mockImplementation(async (path: string, init: RequestInit) => {
+      calls.push(path);
+      expect(init.cache).toBe('no-store');
+      expect(init.redirect).toBe('error');
+      expect(init.credentials).toBe('same-origin');
+      if (path === '/v1/auth/refresh') {
+        // Fetch rejects a redirect rather than resending this POST. Delivery
+        // to the first endpoint is still uncertain, so another owner may only probe.
+        throw new TypeError('redirect refused');
+      }
+      return new Response(null, { status: 401 });
+    });
+    await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+    vi.resetModules();
+    const reloaded = await import('./api');
+    await expect(reloaded.recoverSession()).resolves.toBe('unavailable');
+    expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBe(
+      'pending',
+    );
+  });
+
+  it('reconciles an uncertain refresh only with an uncached, direct session probe', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    storage.setItem('plowshare-session-refresh-uncertain', 'pending');
+    fetchMock.mockImplementation(async (path: string, init: RequestInit) => {
+      calls.push(path);
+      expect(init.cache).toBe('no-store');
+      expect(init.redirect).toBe('error');
+      return new Response(null, { status: 204 });
+    });
+    await isolated.reconcileSessionRefresh();
+    expect(calls).toEqual(['/v1/auth/session']);
+    expect(storage.getItem('plowshare-session-refresh-uncertain')).toBeNull();
+  });
+
+  it.each(['lost', 'unhealthy'])(
+    'keeps an uncertain %s refresh distinct from sign-out and does not replay it',
+    async (failure) => {
+      vi.resetModules();
+      const isolated = await import('./api');
+      fetchMock.mockImplementation(async (path: string) => {
+        calls.push(path);
+        if (path === '/v1/auth/refresh') {
+          if (failure === 'lost') throw new Error('connection lost');
+          return new Response(null, { status: 503 });
+        }
+        return new Response(null, { status: 401 });
+      });
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it('does not rotate when the locked session probe is unhealthy', async () => {
+    vi.resetModules();
+    const isolated = await import('./api');
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: (_name: string, callback: () => Promise<boolean>) =>
+          callback(),
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    try {
+      await expect(isolated.recoverSession()).resolves.toBe('unavailable');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        '/v1/auth/refresh',
+        expect.anything(),
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+});
+
+it('fails closed without cross-tab Web Locks instead of rotating a shared cookie', async () => {
+  Reflect.deleteProperty(navigator, 'locks');
+  vi.resetModules();
+  const first = await import('./api');
+  vi.resetModules();
+  const second = await import('./api');
+  fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+  await Promise.all([
+    expect(first.recoverSession()).resolves.toBe('unavailable'),
+    expect(second.recoverSession()).resolves.toBe('unavailable'),
+  ]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(
+    fetchMock.mock.calls.every(([path]) => path === '/v1/auth/session'),
+  ).toBe(true);
+});
+
+it('shares uncertain rotation across tab owners and reloads until a successful access probe reconciles it', async () => {
+  vi.resetModules();
+  const first = await import('./api');
+  vi.resetModules();
+  const second = await import('./api');
+  let signedIn = false;
+  let allowRotation = false;
+  let fixtureReads = 0;
+  fetchMock.mockImplementation(async (path: string) => {
+    calls.push(path);
+    if (path === '/fixture')
+      return new Response(null, { status: fixtureReads++ === 0 ? 401 : 204 });
+    if (path === '/v1/auth/refresh') {
+      if (!allowRotation) throw new Error('lost rotation reply');
+      signedIn = true;
+    }
+    return new Response(null, { status: signedIn ? 204 : 401 });
+  });
+  await expect(first.recoverSession()).resolves.toBe('unavailable');
+  await expect(second.recoverSession()).resolves.toBe('unavailable');
+  vi.resetModules();
+  const reloaded = await import('./api');
+  await expect(reloaded.recoverSession()).resolves.toBe('unavailable');
+  expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(1);
+  signedIn = true;
+  await expect(reloaded.recoverSession()).resolves.toBe('ready');
+  // The successful access probe clears the shared uncertainty marker; a
+  // genuinely later expiry may rotate its current cookie pair.
+  await expect(reloaded.api.request('/fixture')).resolves.toMatchObject({
+    status: 204,
+  });
+  signedIn = false;
+  allowRotation = true;
+  await expect(reloaded.recoverSession()).resolves.toBe('ready');
+  expect(calls.filter((path) => path === '/v1/auth/refresh')).toHaveLength(2);
+});
+
+it('does not spend a rotating cookie when uncertainty cannot be recorded', async () => {
+  vi.resetModules();
+  const isolated = await import('./api');
+  fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+  const store = vi.spyOn(storage, 'setItem').mockImplementation(() => {
+    throw new Error('storage unavailable');
+  });
+  try {
+    await expect(isolated.api.get('/fixture')).rejects.toThrow(
+      'storage unavailable',
+    );
+    expect(
+      fetchMock.mock.calls.every(([path]) => path !== '/v1/auth/refresh'),
+    ).toBe(true);
+  } finally {
+    store.mockRestore();
+  }
 });

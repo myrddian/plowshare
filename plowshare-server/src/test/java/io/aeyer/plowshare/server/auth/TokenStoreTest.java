@@ -91,6 +91,101 @@ class TokenStoreTest {
 
   private final TokenStore store = new TokenStore(clock, ACCESS, REFRESH, TICKET);
 
+  @Test
+  void duplicate_intent_returns_the_same_pair_without_extending_lifetimes() {
+    var parent = store.issuePair();
+    var intent = new RefreshIntent(java.util.UUID.randomUUID());
+    var one = store.refresh(parent.refresh(), intent).orElseThrow();
+    int count = store.trackedRecords();
+    clock.advance(Duration.ofSeconds(5));
+    var two = store.refresh(parent.refresh(), intent).orElseThrow();
+    assertTrue(one.pair().access().equals(two.pair().access()));
+    assertTrue(one.pair().refresh().equals(two.pair().refresh()));
+    assertEquals(ACCESS.minusSeconds(5), two.accessLifetime());
+    assertEquals(REFRESH.minusSeconds(5), two.refreshLifetime());
+    assertEquals(count, store.trackedRecords());
+    assertTrue(store.validAccess(two.pair().access()));
+  }
+
+  @Test
+  void changed_or_missing_intent_still_retires_the_chain() {
+    var parent = store.issuePair();
+    var one =
+        store
+            .refresh(parent.refresh(), new RefreshIntent(java.util.UUID.randomUUID()))
+            .orElseThrow();
+    assertTrue(
+        store.refresh(parent.refresh(), new RefreshIntent(java.util.UUID.randomUUID())).isEmpty());
+    assertFalse(store.validAccess(one.pair().access()));
+    var other = store.issuePair();
+    var two =
+        store
+            .refresh(other.refresh(), new RefreshIntent(java.util.UUID.randomUUID()))
+            .orElseThrow();
+    assertTrue(store.refresh(other.refresh()).isEmpty());
+    assertFalse(store.validAccess(two.pair().access()));
+  }
+
+  @Test
+  void intent_cannot_recover_a_legacy_rotation_or_an_expired_receipt() {
+    var parent = store.issuePair();
+    var legacy = store.refresh(parent.refresh()).orElseThrow();
+    assertTrue(
+        store.refresh(parent.refresh(), new RefreshIntent(java.util.UUID.randomUUID())).isEmpty());
+    assertFalse(store.validAccess(legacy.access()));
+    parent = store.issuePair();
+    var intent = new RefreshIntent(java.util.UUID.randomUUID());
+    var one = store.refresh(parent.refresh(), intent).orElseThrow();
+    clock.advance(Duration.ofSeconds(29));
+    assertTrue(store.refresh(parent.refresh(), intent).isPresent());
+    clock.advance(Duration.ofSeconds(1));
+    assertTrue(store.refresh(parent.refresh(), intent).isEmpty());
+    assertFalse(store.validAccess(one.pair().access()));
+  }
+
+  @Test
+  void logout_and_a_spent_successor_fence_duplicate_recovery() {
+    var parent = store.issuePair();
+    var intent = new RefreshIntent(java.util.UUID.randomUUID());
+    var one = store.refresh(parent.refresh(), intent).orElseThrow();
+    store.revoke(one.pair().access());
+    assertTrue(store.refresh(parent.refresh(), intent).isEmpty());
+    parent = store.issuePair();
+    one = store.refresh(parent.refresh(), intent).orElseThrow();
+    var later =
+        store
+            .refresh(one.pair().refresh(), new RefreshIntent(java.util.UUID.randomUUID()))
+            .orElseThrow();
+    assertTrue(store.refresh(parent.refresh(), intent).isEmpty());
+    assertFalse(store.validAccess(later.pair().access()));
+  }
+
+  @Test
+  void simultaneous_identical_intents_issue_only_one_pair() throws Exception {
+    var parent = store.issuePair();
+    var intent = new RefreshIntent(java.util.UUID.randomUUID());
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var barrier = new java.util.concurrent.CyclicBarrier(2);
+      var a =
+          executor.submit(
+              () -> {
+                barrier.await();
+                return store.refresh(parent.refresh(), intent).orElseThrow();
+              });
+      var b =
+          executor.submit(
+              () -> {
+                barrier.await();
+                return store.refresh(parent.refresh(), intent).orElseThrow();
+              });
+      var one = a.get();
+      var two = b.get();
+      assertTrue(one.pair().access().equals(two.pair().access()));
+      assertTrue(one.pair().refresh().equals(two.pair().refresh()));
+      assertTrue(store.validAccess(one.pair().access()));
+    }
+  }
+
   // --- the bootstrap token -------------------------------------------------
 
   /**

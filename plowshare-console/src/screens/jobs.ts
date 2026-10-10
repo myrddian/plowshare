@@ -1,3 +1,6 @@
+import { ApiError } from '../api';
+import { recordLinks } from './record-link';
+import { reconciliation } from './reconciliation';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
 import {
@@ -36,7 +39,7 @@ import type { Screen, Transport } from './screen';
  * overflow rather than let a slow listener hold a job's turn. The stream is
  * droppable *by design*, so **nothing on this screen is derived from an event**:
  * a frame arriving means only "ask again now", and every field of every row
- * comes from `GET /v1/jobs`. The failure this prevents is precise -- a job whose
+ * comes from the typed `job.list` operation. The failure this prevents is precise -- a job whose
  * events were dropped rendering as a job that did nothing -- and the REPL
  * solved it the same way, by making a frame move a poll forward rather than
  * move a state.
@@ -67,7 +70,8 @@ import type { Screen, Transport } from './screen';
  * entirely. That is on the roadmap and is deliberately not fixed from the
  * console. What this screen does about it is refuse to fall over: it draws a
  * window of the most recent runs by default, says how many the process is
- * holding, and leaves drawing all of them to somebody who asks for it.
+ * holding, and pages through bounded windows on request. The supported operation
+ * still returns the whole process listing; client windowing cannot bound that reply.
  */
 
 /** The two verbs and the socket a test replaces. */
@@ -147,7 +151,9 @@ function parsePositiveWholeNumber(raw: string): number | null {
     return null;
   }
   const value = Number(trimmed);
-  return value > 0 ? value : null;
+  return Number.isSafeInteger(value) && value > 0 && value <= 2147483647
+    ? value
+    : null;
 }
 
 /**
@@ -181,19 +187,36 @@ export function createJobs(options: JobsOptions): Screen {
   const pollMs = options.pollMs === undefined ? POLL_MS : options.pollMs;
 
   let held: readonly JobView[] = [];
-  let all = false;
+  let page = 0;
+  let active = true;
+  let fresh = false;
+  let epoch = 0;
+  let selected: string | null = null;
+  let selectedJob: JobView | null = null;
+  let selectedConversation: string | null = null;
+  let selectionProblem: string | null = null;
+  let focusSelection = false;
+  const blocked = new Map<string, string>();
+  const raiseAmounts = new Map<string, string>();
+  const continuationAmounts = new Map<string, string>();
   let stream: EventStream | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
-  /** A read is in flight. */
-  let reading = false;
-  /** Something asked for a read while one was in flight. */
-  let asked = false;
 
   const shell = el('section', 'screen jobs');
   const head = el('header', 'screen-head');
   const reload = button('reload', 'reload');
-  const widen = button('widen', 'draw all of them');
+  const widen = button('widen', 'Next jobs page');
+  const previous = button('previous', 'Previous jobs page');
+  previous.hidden = true;
+  const status = el(
+    'p',
+    'job-status',
+    'Connecting to read current process jobs…',
+  );
+  status.setAttribute('role', 'status');
+  const detail = el('section', 'job-selection');
+  detail.setAttribute('aria-label', 'Selected job');
+  detail.tabIndex = -1;
   const body = el('div', 'screen-body');
   body.dataset['jobs'] = '';
   widen.hidden = true;
@@ -203,17 +226,50 @@ export function createJobs(options: JobsOptions): Screen {
   // once, at the rail's foot, where it is on screen whichever view is
   // showing. A copy here was a second [data-stream] element saying the same
   // thing about the same socket beside the first.
-  head.append(el('h2', 'screen-title', 'jobs'), reload, widen);
+  head.append(el('h2', 'screen-title', 'jobs'), reload, previous, widen);
+  body.append(status, detail);
   shell.append(head, body);
   options.root.replaceChildren(shell);
 
+  const refresh = reconciliation({ available: canRead, pollMs, read });
+
   reload.addEventListener('click', () => {
-    background(refresh());
+    background(refresh.refresh());
   });
   widen.addEventListener('click', () => {
-    all = true;
+    page += 1;
     draw();
   });
+
+  previous.addEventListener('click', () => {
+    page = Math.max(0, page - 1);
+    draw();
+  });
+
+  function failure(
+    key: string,
+    control: HTMLButtonElement,
+    card: HTMLElement,
+    problem: unknown,
+    fallback: string,
+  ): void {
+    if (stopped) return;
+    if (problem instanceof ApiError && problem.status < 500) {
+      blocked.delete(key);
+      // A refusal may reflect changed access or lifecycle. Keep all cached
+      // controls closed until the next authorized snapshot, even for this ID.
+      fresh = false;
+      disableActions();
+      control.disabled = true;
+    } else
+      blocked.set(
+        key,
+        'Delivery is uncertain. This action was not replayed. Inspect server state before acting again.',
+      );
+    card.append(trouble(problemText(problem, fallback)));
+    const note = blocked.get(key);
+    if (note) card.append(trouble(note));
+  }
 
   /**
    * A frame moves the poll forward and moves nothing else.
@@ -227,7 +283,7 @@ export function createJobs(options: JobsOptions): Screen {
     if (asJobEvent(frame) === null) {
       return;
     }
-    background(refresh());
+    background(refresh.refresh());
   }
 
   // --- drawing -------------------------------------------------------------
@@ -333,7 +389,7 @@ export function createJobs(options: JobsOptions): Screen {
     came: OutcomeView,
     id: string,
     card: HTMLElement,
-  ): HTMLButtonElement | null {
+  ): HTMLElement | null {
     if (
       came.resumable !== true ||
       job.conversation === null ||
@@ -342,33 +398,75 @@ export function createJobs(options: JobsOptions): Screen {
       return null;
     }
     const conversation = job.conversation;
+    const grant = grantBody(job, came);
+    const grantField =
+      grant.maxTurns !== undefined
+        ? 'maxTurns'
+        : grant.maxModelCalls !== undefined
+          ? 'maxModelCalls'
+          : null;
+    const amount = input('Continuation allowance', 'Positive whole number');
+    if (grantField !== null) {
+      amount.value = continuationAmounts.get(id) ?? String(grant[grantField]);
+      amount.addEventListener('input', () =>
+        continuationAmounts.set(id, amount.value),
+      );
+    }
     const resume = button('continue', 'continue this run');
     resume.dataset['continue'] = id;
+    const key = `continue:${id}`;
+    resume.disabled = !canAct() || blocked.has(key);
     resume.addEventListener('click', () => {
+      if (!canAct() || !shell.contains(card) || blocked.has(key)) return;
+      if (grantField !== null) {
+        const value = parsePositiveWholeNumber(amount.value);
+        if (value === null) {
+          card.append(
+            trouble(
+              'Choose a positive whole-number continuation allowance within the supported range.',
+            ),
+          );
+          return;
+        }
+        grant[grantField] = value;
+      }
+      blocked.set(key, 'Continuation requested. Inspect the resulting job.');
       resume.disabled = true;
       background(
         transport
           .post(
             `/v1/conversations/${encodeURIComponent(conversation)}/resume`,
-            grantBody(job, came),
+            grant,
           )
           .then(
             // The continued run is a new job under the same conversation;
             // the listing is re-read rather than the answer trusted, same
             // rule as `cancel` and the raise control above it.
-            () => refresh(),
+            () => refresh.refresh(),
             (problem: unknown) => {
-              resume.disabled = false;
-              card.append(
-                trouble(
-                  problemText(problem, 'That run could not be continued.'),
-                ),
+              failure(
+                key,
+                resume,
+                card,
+                problem,
+                'That run could not be continued.',
               );
             },
           ),
       );
     });
-    return resume;
+    const controls = el('div', 'continue-control');
+    if (grantField !== null)
+      controls.append(
+        labelled(
+          grantField === 'maxTurns'
+            ? 'Continuation turn cap'
+            : 'New total model-call budget',
+          amount,
+        ),
+      );
+    controls.append(resume);
+    return controls;
   }
 
   /**
@@ -481,10 +579,14 @@ export function createJobs(options: JobsOptions): Screen {
       return null;
     }
     const amount = input('raise by', 'how many more');
-    amount.value = String(DEFAULT_RAISE_BY);
+    amount.value = raiseAmounts.get(id) ?? String(DEFAULT_RAISE_BY);
+    amount.addEventListener('input', () => raiseAmounts.set(id, amount.value));
     const raise = button('raise', 'raise the ceiling');
     raise.dataset['raise'] = id;
+    const key = `limits:${id}`;
+    raise.disabled = !canAct() || blocked.has(key);
     raise.addEventListener('click', () => {
+      if (!canAct() || !shell.contains(card) || blocked.has(key)) return;
       const by = parsePositiveWholeNumber(amount.value);
       if (by === null) {
         // Refused here and not sent for the server to refuse: neither
@@ -509,6 +611,19 @@ export function createJobs(options: JobsOptions): Screen {
       if (raisesBudget && typeof bounds.maxModelCalls === 'number') {
         body.maxModelCalls = bounds.maxModelCalls + by;
       }
+      if (
+        Object.values(body).some(
+          (value) => !Number.isSafeInteger(value) || value > 2147483647,
+        )
+      ) {
+        card.append(
+          trouble(
+            'The resulting limit exceeds the supported whole-number range.',
+          ),
+        );
+        return;
+      }
+      blocked.set(key, 'Sending limit change…');
       raise.disabled = true;
       // One `.then` with both handlers, and not a `.then().catch()`
       // pair: the two-argument form settles on the *first* microtask
@@ -524,13 +639,17 @@ export function createJobs(options: JobsOptions): Screen {
           // the answer believed, because what a run's ceiling now is
           // comes from the listing and not from echoing back what was
           // asked.
-          () => refresh(),
+          () => {
+            blocked.delete(key);
+            return refresh.refresh();
+          },
           (problem: unknown) => {
-            raise.disabled = false;
-            card.append(
-              trouble(
-                problemText(problem, 'That run’s ceiling could not be raised.'),
-              ),
+            failure(
+              key,
+              raise,
+              card,
+              problem,
+              'That run’s ceiling could not be raised.',
             );
           },
         ),
@@ -571,7 +690,22 @@ export function createJobs(options: JobsOptions): Screen {
 
     const stop = button('cancel', 'ask this run to stop');
     stop.dataset['cancel'] = id;
+    const key = `cancel:${id}`;
+    stop.disabled =
+      !canAct() ||
+      blocked.has(key) ||
+      job.cancelRequested === true ||
+      job.state !== 'RUNNING';
     stop.addEventListener('click', () => {
+      if (
+        !canAct() ||
+        !shell.contains(card) ||
+        blocked.has(key) ||
+        job.state !== 'RUNNING' ||
+        job.cancelRequested
+      )
+        return;
+      blocked.set(key, 'Cancellation requested; waiting for server state.');
       stop.disabled = true;
       void transport
         .post(`/v1/jobs/${encodeURIComponent(id)}/cancel`)
@@ -579,13 +713,14 @@ export function createJobs(options: JobsOptions): Screen {
         // cancel changes what the run will do, not what it has done,
         // and this screen's rule is that what a run has done comes from
         // the listing.
-        .then(() => refresh())
+        .then(() => refresh.refresh())
         .catch((problem: unknown) => {
-          stop.disabled = false;
-          card.append(
-            trouble(
-              problemText(problem, 'That run could not be asked to stop.'),
-            ),
+          failure(
+            key,
+            stop,
+            card,
+            problem,
+            'That run could not be asked to stop.',
           );
         });
     });
@@ -595,7 +730,11 @@ export function createJobs(options: JobsOptions): Screen {
     if (raise !== null) {
       line.append(raise);
     }
-    card.append(line);
+    card.append(line, recordLinks(job.conversation));
+    for (const verb of ['cancel', 'limits', 'continue']) {
+      const note = blocked.get(`${verb}:${id}`);
+      if (note) card.append(el('p', 'note', note));
+    }
 
     if (bounds === null || bounds === undefined) {
       // Not an empty row and not a guess: a curator pass carries its
@@ -635,12 +774,84 @@ export function createJobs(options: JobsOptions): Screen {
   }
 
   function draw(): void {
+    // A poll may replace nodes while the operator is editing a limit. Keep the
+    // explicit draft and caret, but never let the detached controls submit it.
+    const focused = options.root.ownerDocument.activeElement;
+    const headingFocused = focused === detail.querySelector('h3');
+    const editing =
+      focused instanceof HTMLInputElement && body.contains(focused);
+    const focusedId = editing
+      ? focused.closest<HTMLElement>('[data-job]')?.dataset['job']
+      : undefined;
+    const label = editing ? (focused.dataset['input'] ?? null) : null;
+    const start = editing ? focused.selectionStart : null;
+    const end = editing ? focused.selectionEnd : null;
+    const direction = editing ? focused.selectionDirection : null;
+    const scrollTop = body.scrollTop;
+    drawRows();
+    drawSelection();
+    if (focusSelection && fresh) {
+      (detail.querySelector<HTMLElement>('h3') ?? detail).focus();
+      focusSelection = false;
+    } else if (headingFocused) {
+      detail.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true });
+    } else if (focusedId !== undefined && label !== null) {
+      const replacement = [
+        ...body.querySelectorAll<HTMLInputElement>('[data-job] input'),
+      ].find(
+        (candidate) =>
+          candidate.closest<HTMLElement>('[data-job]')?.dataset['job'] ===
+            focusedId && candidate.dataset['input'] === label,
+      );
+      replacement?.focus({ preventScroll: true });
+      if (replacement && start !== null && end !== null)
+        replacement.setSelectionRange(start, end, direction ?? undefined);
+      body.scrollTop = scrollTop;
+    }
+  }
+
+  function drawSelection(): void {
+    detail.hidden = selected === null;
+    if (selected === null) {
+      detail.replaceChildren();
+      return;
+    }
+    const title = el('h3', '', `Selected job ${selected}`);
+    title.tabIndex = -1;
+    if (selectedJob !== null)
+      detail.replaceChildren(title, drawJob(selectedJob));
+    else {
+      const inbox = document.createElement('a');
+      inbox.href = '#inbox';
+      inbox.textContent = 'Open inbox and saved results';
+      detail.replaceChildren(
+        title,
+        trouble(
+          selectionProblem ??
+            'This job has not been verified against current server state.',
+        ),
+        el(
+          'p',
+          'note',
+          'Current-process job lookup does not provide historic jobs after a restart. Inspect the retained conversation or inbox delivery for saved results. A missing job does not establish its outcome.',
+        ),
+        recordLinks(selectedConversation),
+        inbox,
+      );
+    }
+  }
+
+  function drawRows(): void {
     if (held.length === 0) {
+      widen.hidden = true;
+      previous.hidden = true;
       body.replaceChildren(
+        status,
+        detail,
         nothing(
           'This process is holding no jobs. That is an answer and not a failure — and on' +
             ' a server that has been restarted it is the ordinary one, because these live' +
-            ' in this process’s memory. What earlier runs produced is in the archive.',
+            ' in this process’s memory. Inspect retained conversations or inbox deliveries for earlier results.',
         ),
       );
       return;
@@ -648,8 +859,10 @@ export function createJobs(options: JobsOptions): Screen {
     // Newest first: this list is read to see what just happened, and the
     // listing arrives newest last.
     const newestFirst = [...held].reverse();
-    const shown = all ? newestFirst : newestFirst.slice(0, WINDOW);
-    widen.hidden = all || held.length <= WINDOW;
+    page = Math.min(page, Math.max(0, Math.ceil(held.length / WINDOW) - 1));
+    const shown = newestFirst.slice(page * WINDOW, (page + 1) * WINDOW);
+    widen.hidden = (page + 1) * WINDOW >= held.length;
+    previous.hidden = page === 0;
 
     const nodes: HTMLElement[] = [];
     const note = el(
@@ -658,7 +871,7 @@ export function createJobs(options: JobsOptions): Screen {
       held.length === shown.length
         ? `this process is holding ${describeCount(held.length, 'run', 'runs')}, all drawn`
         : `this process is holding ${describeCount(held.length, 'run', 'runs')};` +
-            ` the most recent ${shown.length} are drawn`,
+            ` page ${page + 1} shows ${shown.length} runs`,
     );
     note.dataset['window'] = String(shown.length);
     note.dataset['held'] = String(held.length);
@@ -671,83 +884,165 @@ export function createJobs(options: JobsOptions): Screen {
           ' again after a restart. It is what this process is holding and not a history.',
       ),
     );
-    body.replaceChildren(...nodes, ...shown.map(drawJob));
+    body.replaceChildren(
+      status,
+      detail,
+      ...nodes,
+      ...shown.filter((job) => job.id !== selectedJob?.id).map(drawJob),
+    );
   }
 
   // --- the server ----------------------------------------------------------
 
   async function read(): Promise<void> {
-    let listed: readonly JobView[];
+    const stamp = epoch;
+    const id = selected;
+    fresh = false;
+    disableActions();
+    shell.setAttribute('aria-busy', 'true');
+    status.textContent =
+      'Refreshing jobs. The displayed snapshot may be stale.';
     try {
-      listed = (await transport.get('/v1/jobs')) ?? [];
+      const listed = (await transport.get('/v1/jobs')) ?? [];
+      if (!canRead() || stamp !== epoch) return;
+      let inspected: JobView | null = null;
+      let problem: string | null = null;
+      if (id !== null) {
+        try {
+          // Selection belongs to this read generation. Use its authorized list
+          // when possible; at most one status read handles an absent list row.
+          inspected =
+            listed.find((job) => job.id === id) ??
+            (await transport.get(`/v1/jobs/${encodeURIComponent(id)}`));
+          if (!inspected)
+            throw new Error('The server did not return this job.');
+          if (inspected.id !== id)
+            throw new Error('The server returned a different job.');
+        } catch (failure) {
+          inspected = null;
+          problem = problemText(failure, 'This job is unavailable.');
+        }
+      }
+      if (!canRead() || stamp !== epoch || id !== selected) return;
+      held = listed;
+      selectedJob = inspected;
+      // Retain only the previously verified owning-record link on a miss, never
+      // its job state or effect controls. Navigation rechecks access at the owner.
+      if (inspected !== null)
+        selectedConversation = inspected.conversation ?? null;
+      selectionProblem = problem;
+      fresh = true;
+      draw();
+      status.textContent = `${held.length} current-process jobs reconciled from server state.`;
     } catch (problem) {
-      // The listing is left as it was rather than emptied. An unreadable
-      // answer is not a server with no jobs on it, and drawing one would
-      // be this screen concluding from a failure the same way it refuses
-      // to conclude from silence.
-      body.prepend(
-        trouble(problemText(problem, 'The jobs could not be listed.')),
+      if (!canRead() || stamp !== epoch) return;
+      // Keep the context, with effects disabled. An unreadable list is never an
+      // empty list, and cached selected-job state cannot authorize an action.
+      body.querySelector('[data-list-error]')?.remove();
+      const error = trouble(
+        problemText(problem, 'The jobs could not be listed.'),
       );
-      return;
-    }
-    held = listed;
-    draw();
-  }
-
-  /**
-   * One read at a time, and one more if anything asked while it was going.
-   *
-   * A burst of frames is exactly the case this screen exists to survive, and
-   * a read per frame would answer a dropped-event problem with a thundering
-   * one. There is no timer in this: the coalescing is a latch, so a suite
-   * driving it does not have to wait for a clock.
-   */
-  async function refresh(): Promise<void> {
-    if (reading) {
-      asked = true;
-      return;
-    }
-    reading = true;
-    try {
-      await read();
+      error.dataset['listError'] = '';
+      body.prepend(error);
+      status.textContent =
+        'Current job authority could not be read. Refresh to retry; displayed jobs may be stale.';
     } finally {
-      reading = false;
+      if (!stopped) shell.setAttribute('aria-busy', 'false');
     }
-    if (asked && !stopped) {
-      asked = false;
-      await refresh();
-    }
-  }
-
-  function schedulePoll(): void {
-    if (pollMs === null || stopped || timer !== null) {
-      return;
-    }
-    timer = setTimeout(() => {
-      timer = null;
-      background(refresh().finally(schedulePoll));
-    }, pollMs);
   }
 
   async function load(): Promise<void> {
     if (stream === null && !stopped) {
-      // No `onStatus`: this screen subscribes to be told a run moved, and
-      // the socket's own state is reported at the rail's foot.
-      stream = openSocket({ session: options.session, onEvent });
+      stream = openSocket({
+        session: options.session,
+        onEvent,
+        onStatus: (status) => {
+          if (stopped) return;
+          pause();
+          if (status.state === 'open' && !status.signedOut)
+            background(refresh.refresh());
+        },
+      });
     }
-    await refresh();
-    schedulePoll();
+    await refresh.refresh();
   }
+
+  async function showRecord(id: string): Promise<void> {
+    if (stopped) return;
+    if (selected !== id) {
+      selectedJob = null;
+      selectedConversation = null;
+      selectionProblem = null;
+    }
+    selected = id;
+    focusSelection = true;
+    pause();
+    drawSelection();
+    await refresh.refresh();
+  }
+
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      active &&
+      options.root.ownerDocument.visibilityState !== 'hidden' &&
+      stream?.status().state === 'open' &&
+      !stream.status().signedOut
+    );
+  }
+
+  function canAct(): boolean {
+    return fresh && canRead();
+  }
+
+  function disableActions(): void {
+    for (const control of body.querySelectorAll<HTMLButtonElement>(
+      '[data-cancel], [data-raise], [data-continue]',
+    ))
+      control.disabled = true;
+  }
+
+  /** A snapshot belongs to its visible connection generation. Navigation or
+   * socket loss fences late reads and requires a fresh read before effects. */
+  function pause(): void {
+    ++epoch;
+    fresh = false;
+    status.textContent =
+      'The displayed jobs may be stale. Reconnect or refresh before acting.';
+    disableActions();
+  }
+
+  function visibilityChanged(): void {
+    pause();
+    refresh.setActive(
+      active && options.root.ownerDocument.visibilityState !== 'hidden',
+    );
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
 
   return {
     element: () => shell,
+    showRecord,
+    setActive(next) {
+      if (stopped || active === next) return;
+      active = next;
+      pause();
+      refresh.setActive(
+        active && options.root.ownerDocument.visibilityState !== 'hidden',
+      );
+    },
     load,
     destroy(): void {
       stopped = true;
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      ++epoch;
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
+      refresh.stop();
       stream?.close();
       stream = null;
     },

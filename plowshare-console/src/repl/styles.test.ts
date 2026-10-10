@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { STYLES } from './styles';
 
 /**
@@ -69,6 +72,12 @@ function parse(css: string): readonly Rule[] {
     if (opens < 0) {
       break;
     }
+    // Whitespace after an at-rule can put its closing brace in the next
+    // selector's prefix. Determine scope from the next opening brace too.
+    if (mediaEnds >= 0 && opens > mediaEnds) {
+      media = null;
+      mediaEnds = -1;
+    }
     // A `}` between here and the brace closed a block; it is never part of
     // a selector, so it is whitespace as far as this is concerned.
     const head = source.slice(at, opens).replace(/}/g, ' ').trim();
@@ -115,6 +124,15 @@ function closeOf(source: string, opens: number): number {
 }
 
 const RULES = parse(STYLES);
+const PRINT_RULES = parse(
+  readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../client-assets/themes/print.css',
+    ),
+    'utf8',
+  ),
+);
 
 /** The custom properties one block declares, in declaration order. */
 function tokensOf(rule: Rule): readonly string[] {
@@ -247,15 +265,18 @@ describe('the tokens', () => {
   });
 
   /**
-   * And the other direction, which has one honest exception: three custom
+   * And the other direction: shared print assets declare the appearance tokens;
+   * three custom
    * properties are set on an element by `trajectory.ts` and read by a rule
    * here, which is this sheet's own instruction for how a value reaches a
    * rule. Naming them holds that list to three — a fourth would be either a
    * typo in a `var()` or a token somebody forgot to declare, and both render
    * as nothing at all.
    */
-  it('are declared here, except the three the script sets on an element', () => {
-    const declared = new Set(RULES.flatMap((rule) => tokensOf(rule)));
+  it('are declared by the application or shared palette, except the three set by script', () => {
+    const declared = new Set(
+      [...RULES, ...PRINT_RULES].flatMap((rule) => tokensOf(rule)),
+    );
     const used = [
       ...new Set(
         [...STYLES.matchAll(/var\((--[\w-]+)\)/g)].map(

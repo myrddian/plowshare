@@ -383,11 +383,14 @@ describe('approved commands', () => {
   const standing = {
     id: 'apr_9',
     conversation: 'conv-a',
+    askedIn: 'conv-a',
+    commands: null,
+    judged: null,
     agent: 'builder',
     side: 'server',
     command: ['./gradlew', 'test', '--tests', 'Foo'],
     cwd: '/repo',
-    reason: null,
+    reason: '',
     state: 'allowed',
     scope: 'project',
     prefix: ['./gradlew', 'test'],
@@ -430,7 +433,20 @@ describe('approved commands', () => {
       current = 'open';
       onStatus?.({ state: 'open', attempt: 0, retryInMs: null });
     };
-    return { ask, open, opens };
+    return {
+      ask,
+      open,
+      opens,
+      status: (next: StreamStatus['state']) => {
+        current = next;
+        onStatus?.({
+          state: next,
+          attempt: 0,
+          retryInMs: null,
+          ...(next === 'closed' ? { signedOut: true } : {}),
+        });
+      },
+    };
   }
 
   it('lists the project’s standing approvals over the socket, as the prefix they allow', async () => {
@@ -452,7 +468,7 @@ describe('approved commands', () => {
     expect(
       root.querySelector('[data-approval="apr_9"] .approved-prefix')
         ?.textContent,
-    ).toBe('./gradlew test');
+    ).toBe('["./gradlew","test"]');
   });
 
   it('revokes one with approval.revoke and re-reads the list', async () => {
@@ -499,6 +515,39 @@ describe('approved commands', () => {
     await vi.waitFor(() =>
       expect(root.querySelector('[data-approval="apr_9"]')).not.toBeNull(),
     );
+  });
+
+  it('closes stale controls on session loss, pauses hidden reads, and reconciles once on return', async () => {
+    const fake = socket();
+    screen = createProjects({
+      root,
+      transport: transport(),
+      openStream: fake.open,
+      session: 's',
+    });
+    await screen.load();
+    await vi.waitFor(() =>
+      expect(root.querySelector('[data-revoke]')).not.toBeNull(),
+    );
+    fake.status('closed');
+    const revoke = root.querySelector<HTMLButtonElement>('[data-revoke]');
+    if (!revoke) throw new Error('Expected standing grant');
+    expect(revoke.disabled).toBe(true);
+    revoke.click();
+    expect(fake.ask).toHaveBeenCalledOnce();
+    screen.setActive?.(false);
+    fake.opens();
+    expect(fake.ask).toHaveBeenCalledOnce();
+    screen.setActive?.(true);
+    await vi.waitFor(() => expect(fake.ask).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector<HTMLButtonElement>('[data-revoke]')?.disabled,
+      ).toBe(false),
+    );
+    screen.destroy();
+    fake.opens();
+    expect(fake.ask).toHaveBeenCalledTimes(2);
   });
 
   it('draws no list at all for a screen with no socket', async () => {

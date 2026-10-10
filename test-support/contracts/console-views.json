@@ -1,5 +1,6 @@
 {
   "views": [
+    "approvals",
     "chat",
     "config",
     "documents",
@@ -7,6 +8,7 @@
     "information",
     "jobs",
     "memory",
+    "overview",
     "projects",
     "proposals",
     "usage"

@@ -29,6 +29,8 @@ export default defineConfig(({ command, mode }) => {
     proxyOrigin = url.origin;
   }
   return {
+    // Shared, licensed appearance assets are served from this origin.
+    publicDir: '../client-assets',
     build: {
       outDir: 'dist',
       emptyOutDir: true,

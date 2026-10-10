@@ -22,51 +22,13 @@ import { figure } from './trajectory';
 import type { DocumentHit, DocumentSearchResponse } from './wire';
 
 /**
- * The corpus: putting a document into it, and asking it a question.
- *
- * Both endpoints existed with no UI at all — an ingest was a `curl` and a search
- * was a `curl` — and the two halves are on one screen because they are one
- * thing: the second is what the first is for, and a corpus you cannot query is
- * indistinguishable from an ingest that failed.
- *
- * <h2>An ingest is a job, and this screen refuses to draw a progress bar</h2>
- *
- * A 30-page document is about 26 minutes and about 220 model calls, so the one
- * thing this screen must not do is render it as though a button had finished
- * something. What it can honestly draw is bounded, and the bound is worth
- * stating exactly because it looks like an omission:
- *
- * `DocumentController.upload` submits through `JobStore.submit(String,
- * Function)` — **the door that takes no session and puts no limits on the
- * handle**. So there is nothing published to this tab's socket (that overload
- * publishes a start and an ending *to no session*), and `JobView.limits` is null
- * with no `modelCallsSpent` to count against. `JobView` carries no timestamp
- * either, so even "how long has this been going" is not a question the wire
- * answers. What is left while a run is going is `state` and `cancelRequested`,
- * and what arrives when it ends is the outcome — which carries the counts.
- *
- * **So the screen polls, and every field on every card comes from `GET
- * /v1/jobs`.** That is `jobs.ts`'s rule for the same reason and one more: an
- * ingest started by a `curl` or by another tab publishes to nobody here, and a
- * screen that believed its own socket would show a corpus filling up from
- * nowhere.
- *
- * <h2>Two refusals arrive before there is a job at all</h2>
- *
- * `TextExtraction.extract` runs on the request thread, so a format this server
- * will not read — a PDF, refused **by signature and not by extension** — comes
- * back as a `415` to the upload itself, and a file over the multipart cap comes
- * back as a `413`. Neither produces a handle. That is why the upload's failure
- * is drawn beside the form rather than as a job that went wrong.
- *
- * <h2>What a search answers, and what a hit is for</h2>
- *
- * The search is fused vector + lexical, so a hit may have matched by meaning, by
- * words, or by both, and `mode` is echoed because a hybrid answer and a
- * vector-only answer to one question are two different claims. The hit carries
- * a chunk id and a paragraph id and **only one of them is a citation** — see
- * {@link WHAT_TO_CITE}, which is on the screen because a person copying an id
- * out of this list is the exact person the distinction was built for.
+ * Upload documents and read the corpus through the existing public contracts.
+ * Upload is the explicit multipart HTTP boundary; job and search reads use the
+ * tab's checked WebSocket transport. A submitted ingest remains server-owned.
+ * Job snapshots describe current-process handles, not historical job enumeration.
+ * Retained document/paragraph records are separate owners of the produced data.
+ * Polling runs only while this view and its browser tab are visible; reconnect
+ * reconciles a snapshot without repeating an upload or inventing a terminal state.
  */
 
 /**
@@ -84,20 +46,14 @@ export const POLL_MS = 4000;
 
 /** Why there is no percentage, said where the percentage would have been. */
 export const NO_PROGRESS =
-  'There is no progress figure here and there could not be one. A 30-page document is about' +
-  ' 26 minutes and about 220 model calls, and DocumentController submits it through the' +
-  ' JobStore door that takes no session and puts no limits on the handle — so nothing is' +
-  ' published to this tab’s socket and there is no spent-against-limit to count. JobView' +
-  ' carries no timestamp either, so how long it has been going is not on the wire. While it' +
-  ' runs, what is true is that it is running; what it did arrives with the outcome.';
+  'Ingests continue on the server. The job record reports the latest observed state and' +
+  ' final outcome, without a percentage or elapsed-time estimate.';
 
-/** What a restart costs, which is a hole and not a property. */
+/** Current-process job handles and retained corpus records have different lifetimes. */
 export const RESTART_NOTE =
-  'These live in this process’s memory and nothing reaps them, so a restart empties this list' +
-  ' and the next ingest is job_000001 again — the same handle a run from another day already' +
-  ' had. An ingest that was going when the server stopped left its work in the corpus; what' +
-  ' is lost is the handle that said it ran. A paragraph carrying no summary is the query that' +
-  ' says what is still owed.';
+  'This list shows jobs held by the current server process. A restart clears live handles;' +
+  ' job identifiers remain unique. An absent job is not a completion result. Retained' +
+  ' documents and searchable paragraphs are read through the corpus.';
 
 /** Which id is the one to keep. */
 export const WHAT_TO_CITE =
@@ -198,6 +154,8 @@ export function createDocuments(options: DocumentsOptions): Screen {
   let jobs: readonly JobView[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+  let visible = true;
+  let epoch = 0;
   let reading = false;
   let asked = false;
 
@@ -470,10 +428,12 @@ export function createDocuments(options: DocumentsOptions): Screen {
   // --- the server ----------------------------------------------------------
 
   async function read(): Promise<void> {
+    const stamp = epoch;
     let listed: readonly JobView[];
     try {
       listed = (await transport.get('/v1/jobs')) ?? [];
     } catch (problem) {
+      if (stamp !== epoch || !canRead()) return;
       // Left as it was rather than emptied, on jobs.ts's rule: an
       // unreadable answer is not a process with no ingests on it.
       running.prepend(
@@ -481,12 +441,14 @@ export function createDocuments(options: DocumentsOptions): Screen {
       );
       return;
     }
+    if (stamp !== epoch || !canRead()) return;
     jobs = listed;
     drawRuns();
   }
 
   /** One read at a time, and one more if anything asked while it was going. */
   async function refresh(): Promise<void> {
+    if (!canRead()) return;
     if (reading) {
       asked = true;
       return;
@@ -497,7 +459,7 @@ export function createDocuments(options: DocumentsOptions): Screen {
     } finally {
       reading = false;
     }
-    if (asked && !stopped) {
+    if (asked && canRead()) {
       asked = false;
       await refresh();
     }
@@ -549,8 +511,8 @@ export function createDocuments(options: DocumentsOptions): Screen {
     } finally {
       start.disabled = false;
     }
-    // The listing and not the answer: the handle came back, and what the
-    // handle is doing is a question only GET /v1/jobs answers.
+    // Admission is not completion. Re-read the checked job snapshot instead of
+    // interpreting the upload receipt as a terminal result.
     await refresh();
   }
 
@@ -589,7 +551,7 @@ export function createDocuments(options: DocumentsOptions): Screen {
   }
 
   function schedulePoll(): void {
-    if (pollMs === null || stopped || timer !== null) {
+    if (pollMs === null || !canRead() || timer !== null) {
       return;
     }
     timer = setTimeout(() => {
@@ -597,6 +559,33 @@ export function createDocuments(options: DocumentsOptions): Screen {
       background(refresh().finally(schedulePoll));
     }, pollMs);
   }
+
+  function canRead(): boolean {
+    return (
+      !stopped &&
+      visible &&
+      options.root.ownerDocument.visibilityState !== 'hidden'
+    );
+  }
+
+  /** Late replies cannot overwrite the snapshot selected on the next visit. */
+  function pause(): void {
+    ++epoch;
+    asked = false;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }
+
+  function visibilityChanged(): void {
+    if (!canRead()) pause();
+    else background(load());
+  }
+  options.root.ownerDocument.addEventListener(
+    'visibilitychange',
+    visibilityChanged,
+  );
 
   reload.addEventListener('click', () => {
     background(refresh());
@@ -616,12 +605,19 @@ export function createDocuments(options: DocumentsOptions): Screen {
   return {
     element: () => shell,
     load,
+    setActive(next): void {
+      if (stopped || visible === next) return;
+      visible = next;
+      if (!next) pause();
+      else background(load());
+    },
     destroy(): void {
       stopped = true;
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      pause();
+      options.root.ownerDocument.removeEventListener(
+        'visibilitychange',
+        visibilityChanged,
+      );
     },
   };
 }

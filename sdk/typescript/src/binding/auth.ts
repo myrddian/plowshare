@@ -1,3 +1,7 @@
+import {
+  validateRefreshIntent,
+  REFRESH_INTENT_HEADER,
+} from './refresh-intent.ts';
 import { connect } from './connection.ts';
 import type { Connection, Socket } from './connection.ts';
 import { FILES_PATH } from './files.ts';
@@ -431,7 +435,10 @@ export async function changePassword(
 }
 
 /**
- * Rotate the pair.
+ * Rotate the pair. An optional random intent identifies this fetch if its HTTP
+ * transport duplicates delivery. The caller owns platform randomness and creates
+ * one intent per new fetch; this binding never resubmits an uncertain result.
+ * Omitting the intent preserves legacy strict spent-token reuse behavior.
  *
  * <p>The one endpoint of the four that speaks only cookies: the token goes out
  * as a `Cookie` header this module writes by hand and the new pair comes back
@@ -454,14 +461,20 @@ export async function changePassword(
  *     person has to sign in again. Not {@link SignInRefused}, which is about a
  *     password that was just typed
  */
-export async function refresh(door: Door, tokens: Tokens): Promise<Tokens> {
+export async function refresh(
+  door: Door,
+  tokens: Tokens,
+  intent?: string,
+): Promise<Tokens> {
   if (tokens.refresh === undefined) {
     throw new MustChangePassword();
   }
+  if (intent !== undefined) validateRefreshIntent(intent);
   const answer = await door.fetch(`${door.base}/v1/auth/refresh`, {
     method: 'POST',
     headers: {
       Cookie: `${door.refreshCookie ?? REFRESH_COOKIE}=${tokens.refresh}`,
+      ...(intent === undefined ? {} : { [REFRESH_INTENT_HEADER]: intent }),
     },
   });
   if (answer.status === 401) {
