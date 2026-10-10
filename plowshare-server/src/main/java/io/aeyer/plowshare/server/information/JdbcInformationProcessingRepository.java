@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.documents.Extracted;
 import io.aeyer.plowshare.server.information.InformationLifecycle.*;
 import java.time.*;
@@ -10,10 +12,32 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcInformationProcessingRepository implements InformationProcessingRepository {
   private final JdbcTemplate jdbc;
   private final Clock clock;
+  private final ProjectMembers members;
 
-  public JdbcInformationProcessingRepository(JdbcTemplate jdbc, Clock clock) {
+  // Token principals retain ownership; their owner's membership and credential ceiling determine
+  // authority. Ordinary processing retains the existing explicit-membership requirement.
+  private static final String OWNER_AUTHORIZED =
+      "account_active(q.owner_handle) AND ((q.project_id IS NULL AND q.owner_handle NOT LIKE '@service/%')"
+          + " OR (q.project_id IS NOT NULL AND ((q.owner_handle LIKE '@service/%' AND"
+          + " service_project_role((SELECT name FROM projects WHERE id=q.project_id),q.owner_handle) IS NOT NULL)"
+          + " OR (q.owner_handle NOT LIKE '@service/%' AND EXISTS(SELECT 1 FROM project_members m"
+          + " WHERE m.project_id=q.project_id AND m.handle=q.owner_handle)))))";
+
+  private record Authority(String owner, String project) {}
+
+  private boolean authorized(Authority authority) {
+    return authority.project() == null || members.mayUse(authority.project(), authority.owner());
+  }
+
+  private Authority authority(Lease lease) {
+    return new Authority(lease.owner(), projectName(lease.project()));
+  }
+
+  public JdbcInformationProcessingRepository(
+      JdbcTemplate jdbc, Clock clock, ProjectMembers members) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
+    this.members = Objects.requireNonNull(members);
   }
 
   private OffsetDateTime now() {
@@ -24,11 +48,13 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     return clock.instant().plusSeconds(300).atOffset(ZoneOffset.UTC);
   }
 
+  private record SweepRow(Queued queued, Authority authority) {}
+
   public List<Queued> sweepUntagged() {
 
     var candidates =
-        jdbc.queryForList(
-            "SELECT r.id,r.generation,q.owner_handle FROM information_revisions r"
+        sweepCandidates(
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r"
                 + " JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='autoTag'"
                 + " WHERE r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL"
@@ -38,35 +64,28 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + " AND (SELECT count(*) FROM information_steps prior WHERE prior.revision_id=r.id AND prior.generation=r.generation"
                 + " AND prior.stage IN ('extract','derive') AND prior.state IN ('ready','skipped'))=2"
                 + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-                + " AND (q.project_id IS NULL OR EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=q.project_id AND m.handle=q.owner_handle))"
+                + " AND "
+                + OWNER_AUTHORIZED
                 + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id))"
                 + " OR information_readable(r.id,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
-                + " (SELECT p.name FROM projects p WHERE p.id=q.project_id),true))"
+                + " (SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
                 + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,"
-                + " q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),true))"
-                + " ORDER BY r.created_at,r.id LIMIT 100 FOR UPDATE OF r,s SKIP LOCKED");
+                + " q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='autoTag'",
-          candidate.get("id"),
-          candidate.get("generation"));
+          candidate.queued().revision(),
+          candidate.queued().generation());
     }
-    return candidates.stream()
-        .map(
-            row ->
-                new Queued(
-                    (UUID) row.get("id"),
-                    ((Number) row.get("generation")).longValue(),
-                    (String) row.get("owner_handle")))
-        .toList();
+    return candidates.stream().map(SweepRow::queued).toList();
   }
 
   public List<Queued> sweepTagGroups() {
 
     String tags = InformationFacetSql.visibleTags("r", "q");
     var candidates =
-        jdbc.queryForList(
-            "SELECT r.id,r.generation,q.owner_handle FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
+        sweepCandidates(
+            "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='tagGroups'"
                 + " WHERE r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL AND NOT q.tag_groups_manual"
                 + " AND jsonb_array_length("
@@ -78,64 +97,114 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + tags
                 + ")) AND s.state IN ('skipped','ready')"
                 + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-                + " AND (q.project_id IS NULL OR EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=q.project_id AND m.handle=q.owner_handle))"
+                + " AND "
+                + OWNER_AUTHORIZED
                 + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id)) OR information_readable(r.id,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),true))"
+                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
                 + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),true))"
-                + " ORDER BY r.created_at,r.id LIMIT 100 FOR UPDATE OF r,s SKIP LOCKED");
+                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='tagGroups'",
-          candidate.get("id"),
-          candidate.get("generation"));
+          candidate.queued().revision(),
+          candidate.queued().generation());
     }
-    return candidates.stream()
-        .map(
-            row ->
-                new Queued(
-                    (UUID) row.get("id"),
-                    ((Number) row.get("generation")).longValue(),
-                    (String) row.get("owner_handle")))
-        .toList();
+    return candidates.stream().map(SweepRow::queued).toList();
+  }
+
+  // A full page of withdrawn Application grants must not hide eligible work in other projects.
+  // Excluding principal/project pairs is safe because that live authority applies to every row.
+  private List<SweepRow> sweepCandidates(String stageQuery) {
+    List<Authority> denied = new ArrayList<>();
+    while (true) {
+      List<Object> parameters = new ArrayList<>();
+      StringBuilder excluded = new StringBuilder();
+      for (Authority authority : denied) {
+        excluded.append(
+            " AND NOT (q.owner_handle=? AND (SELECT name FROM projects WHERE id=q.project_id) IS NOT DISTINCT FROM ?)");
+        parameters.add(authority.owner());
+        parameters.add(authority.project());
+      }
+      var rows =
+          jdbc.query(
+              stageQuery
+                  + excluded
+                  + " ORDER BY r.created_at,r.id LIMIT 100 FOR UPDATE OF r,s SKIP LOCKED",
+              (row, index) ->
+                  new SweepRow(
+                      new Queued(
+                          row.getObject("id", UUID.class),
+                          row.getLong("generation"),
+                          row.getString("owner_handle")),
+                      new Authority(row.getString("owner_handle"), row.getString("project_name"))),
+              parameters.toArray());
+      if (rows.isEmpty()) return List.of();
+      Map<Authority, Boolean> grants = new HashMap<>();
+      var allowed =
+          rows.stream()
+              .filter(row -> grants.computeIfAbsent(row.authority(), this::authorized))
+              .toList();
+      if (!allowed.isEmpty()) return allowed;
+      denied.addAll(grants.keySet());
+    }
   }
 
   public Optional<Candidate> candidate(UUID revision, boolean syntaxOnly) {
-    List<Map<String, Object>> rows =
-        jdbc.queryForList(
-            "SELECT s.*,r.resource_id,q.owner_handle,q.project_id FROM information_steps s"
-                + " JOIN information_revisions r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id"
-                + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
-                + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
-                + " AND (q.project_id IS NULL OR EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=q.project_id AND m.handle=q.owner_handle))"
-                + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"
-                + " AND NOT EXISTS(SELECT 1 FROM information_steps prior WHERE prior.revision_id=s.revision_id AND prior.generation=s.generation"
-                + " AND ((s.stage='autoTag' AND prior.stage IN ('extract','derive') AND prior.state NOT IN ('ready','skipped'))"
-                + " OR (s.stage='tagGroups' AND prior.stage IN ('extract','derive','autoTag') AND prior.state IN ('pending','running','blocked'))"
-                + " OR (s.stage NOT IN ('autoTag','tagGroups') AND array_position(ARRAY['extract','derive','embed','summarise','summary_embed'],prior.stage)"
-                + " < array_position(ARRAY['extract','derive','embed','summarise','summary_embed'],s.stage) AND prior.state NOT IN ('ready','skipped'))))"
-                + (revision == null ? "" : " AND r.id=?")
-                + (syntaxOnly
-                    ? " AND r.document_type='code' AND s.stage IN ('extract','derive')"
-                    : "")
-                + " ORDER BY array_position(ARRAY['extract','derive','embed','summarise','summary_embed','autoTag','tagGroups'],s.stage),r.created_at,r.id"
-                + " LIMIT 1 FOR UPDATE OF s SKIP LOCKED",
-            revision == null ? new Object[] {now()} : new Object[] {now(), revision});
-    if (rows.isEmpty()) return Optional.empty();
-    Map<String, Object> row = rows.getFirst();
-    Lease lease =
-        new Lease(
-            (UUID) row.get("revision_id"),
-            (UUID) row.get("resource_id"),
-            ((Number) row.get("generation")).longValue(),
-            (String) row.get("stage"),
-            ((Number) row.get("attempt")).intValue() + 1,
-            UUID.randomUUID(),
-            (String) row.get("owner_handle"),
-            (Long) row.get("project_id"));
-
-    return Optional.of(new Candidate(lease, (String) row.get("fingerprint")));
+    List<Authority> denied = new ArrayList<>();
+    while (true) {
+      List<Object> parameters = new ArrayList<>();
+      parameters.add(now());
+      if (revision != null) parameters.add(revision);
+      StringBuilder excluded = new StringBuilder();
+      for (Authority authority : denied) {
+        excluded.append(" AND NOT (q.owner_handle=? AND p.name IS NOT DISTINCT FROM ?)");
+        parameters.add(authority.owner());
+        parameters.add(authority.project());
+      }
+      var rows =
+          jdbc.query(
+              "SELECT s.*,r.resource_id,q.owner_handle,q.project_id,p.name AS project_name FROM information_steps s"
+                  + " JOIN information_revisions r ON r.id=s.revision_id JOIN information_resources q ON q.id=r.resource_id LEFT JOIN projects p ON p.id=q.project_id"
+                  + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
+                  + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
+                  + " AND "
+                  + OWNER_AUTHORIZED
+                  + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"
+                  + " AND NOT EXISTS(SELECT 1 FROM information_steps prior WHERE prior.revision_id=s.revision_id AND prior.generation=s.generation"
+                  + " AND ((s.stage='autoTag' AND prior.stage IN ('extract','derive') AND prior.state NOT IN ('ready','skipped'))"
+                  + " OR (s.stage='tagGroups' AND prior.stage IN ('extract','derive','autoTag') AND prior.state IN ('pending','running','blocked'))"
+                  + " OR (s.stage NOT IN ('autoTag','tagGroups') AND array_position(ARRAY['extract','derive','embed','summarise','summary_embed'],prior.stage)"
+                  + " < array_position(ARRAY['extract','derive','embed','summarise','summary_embed'],s.stage) AND prior.state NOT IN ('ready','skipped'))))"
+                  + (revision == null ? "" : " AND r.id=?")
+                  + (syntaxOnly
+                      ? " AND r.document_type='code' AND s.stage IN ('extract','derive')"
+                      : "")
+                  + excluded
+                  + " ORDER BY array_position(ARRAY['extract','derive','embed','summarise','summary_embed','autoTag','tagGroups'],s.stage),r.created_at,r.id"
+                  + " LIMIT 1 FOR UPDATE OF s SKIP LOCKED",
+              (row, index) ->
+                  new CandidateRow(
+                      new Candidate(
+                          new Lease(
+                              row.getObject("revision_id", UUID.class),
+                              row.getObject("resource_id", UUID.class),
+                              row.getLong("generation"),
+                              row.getString("stage"),
+                              row.getInt("attempt") + 1,
+                              UUID.randomUUID(),
+                              row.getString("owner_handle"),
+                              row.getObject("project_id", Long.class)),
+                          row.getString("fingerprint")),
+                      new Authority(row.getString("owner_handle"), row.getString("project_name"))),
+              parameters.toArray());
+      if (rows.isEmpty()) return Optional.empty();
+      var row = rows.getFirst();
+      if (authorized(row.authority())) return Optional.of(row.candidate());
+      denied.add(row.authority());
+    }
   }
+
+  private record CandidateRow(Candidate candidate, Authority authority) {}
 
   public void configurationChanged(Lease lease) {
     jdbc.update(
@@ -160,12 +229,20 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   }
 
   public boolean renew(Lease lease) {
-
+    if (!authorized(authority(lease))) return false;
     return jdbc.update(
-            "UPDATE information_steps s SET lease_until=? FROM information_revisions r"
-                + " WHERE r.id=s.revision_id AND r.availability='active' AND r.generation=s.generation AND s.revision_id=?"
+            "UPDATE information_steps s SET lease_until=? FROM information_revisions r,information_resources q"
+                + " WHERE r.id=s.revision_id AND q.id=r.resource_id AND "
+                + OWNER_AUTHORIZED
+                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
+                + " AND NOT information_readable(i.input_revision,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
+                + " (SELECT name FROM projects WHERE id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
+                + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
+                + " AND r.availability='active' AND r.generation=s.generation AND s.revision_id=?"
                 + " AND s.generation=? AND s.stage=? AND s.lease_token=? AND s.state='running' AND s.lease_until>=?",
             expires(),
+            lease.owner(),
+            lease.project(),
             lease.revision(),
             lease.generation(),
             lease.stage(),
@@ -176,31 +253,28 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   public void requireLease(Lease lease) {
 
-    if (lease.project() != null
-        && jdbc.queryForObject(
-                "SELECT count(*) FROM project_members WHERE project_id=? AND handle=?",
-                Integer.class,
-                lease.project(),
-                lease.owner())
-            == 0) throw new StaleLease();
-    String selectedProject =
-        lease.project() == null
-            ? null
-            : jdbc.queryForObject(
-                "SELECT name FROM projects WHERE id=?", String.class, lease.project());
+    if (!authorized(authority(lease))) throw new StaleLease();
+    String selectedProject = projectName(lease.project());
     if (jdbc.queryForObject(
-            "SELECT count(*) FROM information_inputs WHERE derived_revision=? AND NOT information_readable(input_revision,?,?,?,true)",
+            "SELECT count(*) FROM information_inputs WHERE derived_revision=? AND NOT information_readable(input_revision,?,?,?,?)",
             Integer.class,
             lease.revision(),
             lease.owner(),
             selectedProject == null ? "personal" : "project",
-            selectedProject)
+            selectedProject,
+            !ServiceCredentials.principal(lease.owner()))
         != 0) throw new StaleLease();
-    List<Map<String, Object>> valid =
-        jdbc.queryForList(
-            "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id"
-                + " WHERE r.id=? AND r.availability='active' AND r.generation=? AND s.generation=r.generation AND s.stage=?"
+    List<UUID> valid =
+        jdbc.query(
+            "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
+                + " WHERE "
+                + OWNER_AUTHORIZED
+                + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
+                + " AND r.id=? AND r.availability='active' AND r.generation=? AND s.generation=r.generation AND s.stage=?"
                 + " AND s.lease_token=? AND s.state='running' AND s.lease_until>=? FOR UPDATE OF r,s",
+            (row, index) -> row.getObject("id", UUID.class),
+            lease.owner(),
+            lease.project(),
             lease.revision(),
             lease.generation(),
             lease.stage(),

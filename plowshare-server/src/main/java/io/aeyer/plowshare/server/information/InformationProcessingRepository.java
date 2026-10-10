@@ -51,16 +51,23 @@ public interface InformationProcessingRepository {
 
   List<Queued> sweepTagGroups();
 
-  /** Locks one eligible stage with SKIP LOCKED. Call start before the transaction ends. */
+  /**
+   * Locks one eligible, currently authorized stage with SKIP LOCKED. Call start before the
+   * transaction ends.
+   */
   Optional<Candidate> candidate(UUID revision, boolean syntaxOnly);
 
   void configurationChanged(Lease lease);
 
   void start(Lease lease, String expected);
 
+  /** Extend only a current lease whose owner and inputs remain authorized. */
   boolean renew(Lease lease);
 
-  /** Checks membership, dependency readability and the token while locking revision and stage. */
+  /**
+   * Checks current principal authority (including service scope and Application grants), dependency
+   * readability and the lease token while locking revision and stage. Throws StaleLease on loss.
+   */
   void requireLease(Lease lease);
 
   void finish(Lease lease, String state, String detail);

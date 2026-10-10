@@ -167,6 +167,19 @@ queued from retained rows. Expired worker leases resume after restart, with
 revision/generation fencing against late writes. Model responses are checkpointed
 before post gates, so a denied completion can reuse paid work.
 
+Admission retains the source; it does not guarantee extraction is already ready.
+Inspect `information.status` before reading newly admitted evidence. The worker
+uses the source owner's authenticated principal throughout processing. Service
+tokens use their owning service account's live project membership, capped by the
+token's project scope and current Application grants; token principals do not need
+separate membership rows. Processing requires ongoing project visibility, including
+for already admitted work, and checks it again at renewal and checkpoint commit.
+Expired or revoked tokens, disabled accounts and withdrawn project access prevent
+new processing and late writes. Pending work remains retained; restoring access
+allows the queue to resume without uploading the source again. Running work resumes
+once its existing lease expires. Processing attribution and retained ownership do
+not change.
+
 Reports are documents from admission. `information.record.report` retains Markdown,
 all inputs, exact evidence citations and optional objectives/findings/reviews/scope
 changes. Findings retain `holds`, `weakened`, `refuted` or `not_checked` judgments;

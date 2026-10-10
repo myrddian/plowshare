@@ -204,6 +204,7 @@ public class InformationConfig {
   @Bean(destroyMethod = "close")
   public InformationLifecycle informationLifecycle(
       JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
       UnitOfWork work,
       InformationCatalogue catalogue,
       DocumentStore store,
@@ -239,10 +240,10 @@ public class InformationConfig {
                 GlobalAgentSnapshots.supply(globals, agents).get(),
                 dual,
                 counters));
+    var processing = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
     var processor =
         InformationLifecycle.processing(
-            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+            processing,
             work,
             catalogue,
             store,
@@ -272,13 +273,7 @@ public class InformationConfig {
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));
     catalogue.withGates(gates);
-    return new InformationLifecycle(
-        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-            jdbc, Clock.systemUTC()),
-        work,
-        catalogue,
-        processor,
-        gates);
+    return new InformationLifecycle(processing, work, catalogue, processor, gates);
   }
 
   @Bean
