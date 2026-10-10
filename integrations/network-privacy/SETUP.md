@@ -1,9 +1,78 @@
 # Set up Network Privacy Watch
 
-The guided Python helper prepares a private configuration, deploys the Plowshare
-Application and creates its separate execution account. It also starts the external
-Python collector when you ask it to. Each stage has a separate command so you can
-review the configuration before changing the server.
+Run the guided `start` command on the machine that can reach your devices. It
+prepares configuration if needed, installs the Application with its separate service
+account, waits for readiness and opens an authenticated dashboard. Confirmed setup
+is reused on later starts. You choose devices in the dashboard.
+
+## Start and use the dashboard
+
+After installing the Python package below, use this single command for a new setup:
+
+```sh
+build/privacy-python-env/bin/plowshare-privacy-bootstrap \
+  --directory "$PRIVACY_PRIVATE" start --source "$PRIVACY_APP_SOURCE" \
+  --bind "$PRIVACY_BIND"
+```
+
+Set `PRIVACY_PRIVATE` to an absolute private directory outside Git,
+`PRIVACY_APP_SOURCE` to the Application folder, and `PRIVACY_BIND` to an explicit
+loopback IP on the collector machine. For a **local-only dashboard**, an operator
+can choose `127.0.0.1`. The operating system chooses an available port unless you
+supply `--port`. The helper remembers the bind address and port in private
+`dashboard.json`; subsequent starts need only `--directory ... start`.
+
+For an already installed Application, omit `--source`. No deployment, account or
+credential creation is repeated. If schedule registration is still pending, the
+helper waits using read-only requests. An interrupted installation remains fenced
+until its retained receipts are reconciled; see recovery below.
+
+For new setup, the prompts ask for the server, collector name, separate service
+account, human manager, deployment administrator and model binding. Device scope
+is chosen in the dashboard; the guided flow uses bounded probe settings and a
+30-day service credential. The staged `configure` command below exposes advanced
+settings before installation.
+
+The helper also creates **Start Network Privacy Watch.command** on macOS, or
+**start-network-privacy-watch.sh** on other systems, in your private setup directory.
+Open that launcher next time. It contains the interpreter and configuration path,
+with no credentials. Double-clicking it while the updated collector is running
+reopens that dashboard. Keep its Python environment installed. Closing the running
+terminal stops the collector; the launcher is not a background-service installer.
+
+In the dashboard:
+
+1. Enter your private network subnet and the TCP ports you want to check, then
+   choose **Find devices**. Previous local discovery results are displayed when available.
+2. Select devices, check **Enable collection**, and choose **Save monitoring**.
+   You can also enter explicit private IPv4 addresses. The scope is limited to
+   32 devices and eight ports; discovery checks at most 256 addresses.
+3. Choose **Request a scan**. Results refresh automatically as evidence is retained.
+
+There is no dashboard-token copying. `start` generates a new dashboard credential
+for this process and opens the browser with a fragment handoff, removed immediately
+from history and exchanged for an HttpOnly, SameSite=Strict session cookie. Browser
+reloads remain authenticated. The Plowshare service credential stays in Python. A private `dashboard-runtime.json`
+contains only the local dashboard handoff while the process is running; normal
+shutdown removes it, and restart verifies its process nonce before reopening it.
+Automatic browser login is restricted to the explicitly configured loopback listener.
+Use advanced `serve` mode below for a remotely hosted dashboard.
+
+Monitoring changes apply immediately without restarting. Settled evidence and request
+identities are preserved. In-progress scans, published requests awaiting collection,
+and uncertain effects block changes until they finish or are reconciled. Every
+collection retains its scope, and a changed scope begins a new comparison baseline.
+No discovery or scope expansion is exposed as an agent tool.
+
+A paused schedule may not have published its first event, so `schedule.due` may
+not exist yet. The collector checks topic registration before intake, waits for
+unregistered channels and continues processing dashboard scan requests. A registered
+channel that refuses access still stops collection and shows the operation, refusal
+code and available server reason in the private dashboard.
+
+The packaged server schedule remains paused until you enable it as its administrator.
+Agent investigations also need service-owned Relay processing as described below.
+The dashboard can collect and retain evidence before either is enabled.
 
 ## Understand the two parts
 
@@ -49,7 +118,7 @@ Before installing an Application, configure these server resources:
   administrator. The helper lists eligible stores for selection. An Application
   cannot configure the server's underlying storage root for itself.
 - A working server model binding. The helper asks for its name and writes it into
-  all three agents and the investigation conductor. This can use local inference.
+  all three agents and both orchestration scripts. This can use local inference.
   The helper does not install a model or configure its provider.
 
 See [server administration](../../docs/server-administration.md),
@@ -68,7 +137,30 @@ folder: it will contain the service credential and operational state.
 : "${PRIVACY_APP_SOURCE:?Set the absolute path to integrations/network-privacy/network-privacy-watch}"
 ```
 
-## 2. Configure and review offline
+## 2. Discover devices, or configure them later
+
+You do not need a device inventory to deploy the Application. Run a discovery pass
+on the collector machine when convenient:
+
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap discover \
+  --network "$PRIVACY_NETWORK" --ports "$PRIVACY_DISCOVERY_PORTS"
+```
+
+Set `PRIVACY_NETWORK` to an explicit private IPv4 CIDR reachable from that machine
+(for example, an operator-selected `/24`), and `PRIVACY_DISCOVERY_PORTS` to a
+comma-separated list of TCP ports. Discovery requires no Plowshare login, private
+setup directory, administrator privileges or external scanner installation. It
+checks at most 256 addresses and eight ports, with at most 32 concurrent connections.
+It sends no application payloads. Output lists responding IPs with open or refused
+ports; filtered/silent devices may be missed. Ports do not establish vendor or
+device identity. Retain discovery output outside source if you want to keep it.
+
+Discovery does not automatically change the monitored scope or give an agent
+permission to scan a subnet. Choose monitored devices from the results when ready.
+You can also defer that choice and prepare the Application now.
+
+### Configure and review offline
 
 ```sh
 build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
@@ -81,7 +173,7 @@ The prompts ask for:
 | --- | --- |
 | Server origin | Your actual HTTP(S) origin, including a port if needed; no API path |
 | Collector identifier | A stable name for this collector and its Relay consumer group |
-| IP addresses and TCP ports | Comma-separated explicit device addresses and port numbers; no CIDR sweep or hostnames |
+| IP addresses and TCP ports | Enter device addresses and ports, or press Enter at the device prompt to configure collection later |
 | Timeout and concurrency | Probe timeout 0.1–5 seconds and 1–32 concurrent probes |
 | Service handle | A separate service account, distinct from both human accounts |
 | Human manager | An existing enabled account that should manage this Application |
@@ -108,11 +200,22 @@ private-directory/
     application/
       plowshare.json             # Human MANAGERs, service CONTRIBUTOR and explicit tool scopes
       agents/                    # Configured model binding and tool requests
-      orchestrations/            # Configured investigation conductor
+      orchestrations/            # Configured schedule and investigation scripts
       schedules/                 # network_scan remains paused
       Relay/
-      server/                    # Application-owned tools/provider and port authority
+      server/                    # Tools/provider, ports and service-owned Relay worker
 ```
+
+If you defer device selection, `collector.json` contains `collection.enabled: false`
+and empty target/port lists. Installation still works. The dashboard explains that
+collection needs configuration, rejects scan requests and leaves Relay scan intake
+untouched. Keep the schedule paused.
+
+To enable collection later, stop the Python process, edit `collector.json`, set
+`collection.targets` and `collection.ports`, and change `collection.enabled` to
+`true`. Restart the collector. Its scope tool reports whether collection is enabled.
+If you are changing a scope that already has retained work, preserve its journals
+and follow the scope-change/recovery instructions instead of deleting state.
 
 Review `collector.json` and `deployment/application` before continuing. There is
 no `.plowshare/` directory. The first manifest's `executionAccount` temporarily
@@ -147,7 +250,7 @@ Installation:
    project membership and issues a named token with only this project's
    `CONTRIBUTOR` scope. It refuses a token that already has that name.
 4. Saves the token privately and substitutes its principal into the Application
-   manifest and provider/port declarations.
+   manifest, provider/port declarations and Relay worker enrollment.
 5. Deploys the updated source using a fresh request UUID and the confirmed first
    revision as `expectedRevision`. It verifies the active revision.
 6. Reads the deployed schedule's internal name into `collector.json` when server
@@ -156,9 +259,11 @@ Installation:
 The helper writes the private directory with POSIX mode `0700` and credentials,
 intents and receipts with `0600`. On Windows, restrict the directory's ACLs.
 It never prints the administrator password, service token or dashboard bearer.
-It does not scan or configure an automatic Relay worker during installation.
+It does not scan during installation. The prepared `server/relay-workers.json`
+enrolls the automatic Relay worker under the issued service principal when the
+updated Application is deployed; no whole-server configuration edit is needed.
 
-If schedule discovery is still pending, run:
+The `start` flow waits for schedule registration automatically. For a separate read-only diagnostic, run:
 
 ```sh
 build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
@@ -172,15 +277,31 @@ server work. It is safe to use again after reconciliation.
 ## 4. Enable investigation processing
 
 The service account owns collector tools, evidence uploads and completion-triggered
-agent work. The **account that processes the Relay subscriptions** owns those
+agent work. Collector information requests explicitly exclude shared information;
+the service credential reads and writes only its granted project scope. The **account that processes the Relay subscriptions** owns those
 investigations, so use the service credential for that processing.
 
-Follow [Run investigations as the service identity](README.md#run-investigations-as-the-service-identity)
-to configure the existing automatic Relay worker using the principal in
-`deployment/identity.json`, or supervise explicit Relay processing under the
-credential in `deployment/service-token`. The helper does not edit a whole server
-configuration to install a worker. Without a worker or explicit processing pass,
-scan evidence can be retained while its investigation has not started.
+The helper fills `server/relay-workers.json` with the principal in
+`deployment/identity.json` and includes it in the confirmed identity deployment.
+The server discovers this Application-owned enrollment within its Relay
+configuration interval (30 seconds by default), without restarting. Keep the
+worker bound to the service principal so investigations use the same identity as
+the collector. If upgrading an older private source copy, follow
+[Run investigations as the service identity](README.md#run-investigations-as-the-service-identity)
+to add and deploy the declaration, or supervise explicit Relay processing under
+the credential in `deployment/service-token`. Without enrollment or an explicit
+processing pass, scan evidence can be retained while its investigation has not started.
+
+Contributor processing uses the broker's stored topic policy, or the standard
+four-day default when registering a new topic. Declared values in `Relay/topics.json`
+are applied only by a manager processing pass. The service account can process
+investigations without acquiring policy-write authority; setup keeps its CONTRIBUTOR
+role. Inspect `relay.log` for the effective stored policy.
+
+Older servers refused contributor processing whenever source declared topic policies.
+If you receive `Changing Relay topic policies requires project manager access`, update
+the server with the Relay processing permission fix. Using a human manager instead
+changes investigation ownership and does not verify service-account processing.
 
 The packaged schedule is still owned by the deploying administrator. Its
 `privacy_tick` action invokes no model. Setup does not transfer that schedule's
@@ -248,7 +369,7 @@ retry. Follow [interrupted provisioning](README.md#rotation-and-interrupted-setu
 There is no automatic rollback or retry of an uncertain install. Finish a reconciled
 partial install using the lower-level setup and deployment commands, retain all
 intents, and verify the final principal and active source before starting Python.
-The guided `serve` command requires its completion marker; manually recovered
+The guided `start` and `serve` commands require its completion marker; manually recovered
 installations can use the documented lower-level collector command instead.
 
 For updates, edit the private Application copy and use the normal deployment

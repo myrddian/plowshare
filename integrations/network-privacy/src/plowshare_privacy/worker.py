@@ -21,6 +21,7 @@ from .contracts import (
     utc_now,
     uuid,
 )
+from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
 from .ports import PrivacyPort, evidence_name
 
@@ -48,14 +49,30 @@ class Worker:
         self.consumer = str(uuid4())
         self.lock = asyncio.Lock()
         self.request_lock = asyncio.Lock()
-        self.state = "ready"
-        self.detail = "Waiting for scheduled or requested collection."
+        self.operation = "collector startup"
+        self.state = "ready" if config.collection.enabled else "configuration_required"
+        self.detail = (
+            "Waiting for scheduled or requested collection."
+            if config.collection.enabled
+            else "Choose devices in the dashboard to begin monitoring."
+        )
 
     async def poll(self) -> None:
         """Copy intake durably and acknowledge promptly; scans run outside the batch lease."""
         async with self.lock:
+            if not self.config.collection.enabled:
+                # Scope changes hold the same lock; disabled intake cannot race an edit.
+                return
             await self._drain()
+            self.operation = "relay.topics"
+            available = await self.port.available_topics()
             for topic in ("schedule.due", self.config.request_topic):
+                if topic not in available:
+                    # Topics appear on first publication. A paused schedule and an
+                    # unused request channel must not prevent other registered intake.
+                    # No missing topic is consumed, acknowledged or considered complete.
+                    continue
+                self.operation = "relay.consume (" + topic + ")"
                 batch = await self.port.consume(topic, self.consumer)
                 if batch.status == "GAP":
                     raise ReconciliationRequired(
@@ -111,8 +128,14 @@ class Worker:
                     ):
                         raise ValueError("Conflicting scan redelivery")
                 # This acknowledges copied availability, not scan or agent completion.
+                self.operation = "relay.ack (" + topic + ")"
                 await self.port.acknowledge(batch)
             await self._drain()
+            self.detail = (
+                "Ready for dashboard scans. Scheduled intake is waiting for its first event."
+                if "schedule.due" not in available
+                else "Waiting for scheduled or requested collection."
+            )
 
     async def _drain(self) -> None:
         for receipt in self.receipts.all():
@@ -124,6 +147,7 @@ class Worker:
                 continue
             if receipt.phase == "queued":
                 self.state = "collecting"
+                self.operation = "network collection"
                 previous = next(
                     (
                         item
@@ -147,6 +171,7 @@ class Worker:
             if receipt.phase == "collected":
                 self.state = "retaining"
                 self.receipts.save(replace(receipt, phase="uploading"))
+                self.operation = "information.upload"
                 try:
                     retained = await self.port.upload(
                         receipt.evidence, str(uuid5(UUID(receipt.scan_id), "evidence"))
@@ -163,6 +188,7 @@ class Worker:
             if receipt.phase == "uploaded":
                 self.state = "publishing"
                 self.receipts.save(replace(receipt, phase="publishing"))
+                self.operation = "relay.publish (" + self.config.result_topic + ")"
                 try:
                     await self.port.publish(self.completion_request(receipt))
                 except Refusal:
@@ -226,6 +252,10 @@ class Worker:
         # SDK submissions may overlap a scan; journal writes themselves are synchronous.
         # Holding the collection lock here would make the UI wait for every TCP timeout.
         async with self.request_lock:
+            if not self.config.collection.enabled:
+                raise ValueError(
+                    "Collection is disabled; choose devices in the dashboard first"
+                )
             existing = next(
                 (
                     item
@@ -309,6 +339,7 @@ class Worker:
         while not stop.is_set():
             try:
                 if external is not None:
+                    self.operation = "external tool provider"
                     await external.poll()
                 await self.poll()
             except (
@@ -322,9 +353,13 @@ class Worker:
                 # Keep the dashboard available; reconnection and mutation replay are explicit.
                 self.state = "attention_required"
                 self.detail = (
-                    "Collection stopped. Inspect receipts and restart after resolving the cause ("
-                    + type(error).__name__
-                    + ")."
+                    refusal_detail(error, self.operation)
+                    if isinstance(error, Refusal)
+                    else (
+                        "Collection stopped. Inspect receipts and restart after resolving the cause ("
+                        + type(error).__name__
+                        + ")."
+                    )
                 )
                 await stop.wait()
                 return

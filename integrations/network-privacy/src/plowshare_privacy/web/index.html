@@ -8,21 +8,38 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/">◈ <span>Network Privacy Watch <small>POWERED BY PLOWSHARE</small></span></a><span class="language">Python + public SDK</span></header>
+  <header><a class="brand" href="/">◈ <span>Network Privacy Watch <small>POWERED BY PLOWSHARE</small></span></a><span class="language">Private network monitoring</span></header>
   <main>
     <div class="eyebrow">YOUR NETWORK, WITH CONTEXT</div>
     <section class="intro"><div><h1>Know what changed.</h1><p>Collect observations. Keep the evidence. Let agents help you understand it.</p></div><span id="mode" class="pill">Not connected</span></section>
     <form id="connect" class="connect"><label for="token">Dashboard access token</label><div class="connection-row"><input id="token" type="password" autocomplete="off" placeholder="Enter your configured web token" required><button type="submit">Connect dashboard</button></div><small>Your token stays in this tab’s memory. It is separate from the Plowshare credential.</small></form>
     <p id="notice" class="notice" role="status" aria-live="polite">Connect to view this collector’s private evidence.</p>
     <section id="dashboard" hidden>
+      <section id="monitoring" class="panel setup-panel" hidden>
+        <div class="panel-heading"><h2>Choose what to monitor</h2><span id="monitor-state">Device discovery</span></div>
+        <div class="setup-content">
+          <p>Find devices on your network, then select the ones you want to watch.</p>
+          <form id="discover-form" class="discover-form">
+            <div><label for="network">Network subnet</label><input id="network" placeholder="Private network CIDR, e.g. 192.168.0.0/24" required></div>
+            <div><label for="ports">TCP ports to check</label><input id="ports" placeholder="Comma-separated ports, e.g. 80,443" required></div>
+            <button id="discover" type="submit">Find devices</button>
+          </form>
+          <p id="discovery-detail" class="hint">Checks only the chosen ports. No device settings are changed.</p>
+          <div id="devices" class="devices"></div>
+          <form id="monitor-form">
+            <label for="targets">Selected device addresses</label><input id="targets" placeholder="Select devices above or enter private IPv4 addresses, separated by commas">
+            <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
+          </form>
+        </div>
+      </section>
       <div class="toolbar"><div><span class="eyebrow" id="project">PROJECT</span><h2 id="collector">Collector</h2></div><div class="actions"><button id="refresh" class="secondary">Refresh</button><button id="scan">Request a scan <span aria-hidden="true">↗</span></button><button id="disconnect" class="secondary">Disconnect</button></div></div>
       <div class="metrics"><article><span>Collection</span><strong id="state">Loading</strong><p id="detail">Reading collector status…</p></article><article><span>Latest comparison</span><strong id="change-count">—</strong><p>Changes in observed evidence</p></article><article><span>Investigation reports</span><strong id="report-count">—</strong><p>Retained in the Plowshare project</p></article></div>
-      <div class="flow" aria-label="Application workflow"><span><b>01</b> Schedule or request</span><i>→</i><span><b>02</b> Python collection</span><i>→</i><span><b>03</b> Retained evidence</span><i>→</i><span><b>04</b> Agent investigation</span></div>
+      <div class="flow" aria-label="Application workflow"><span><b>01</b> Schedule or request</span><i>→</i><span><b>02</b> Collect observations</span><i>→</i><span><b>03</b> Retained evidence</span><i>→</i><span><b>04</b> Agent investigation</span></div>
       <div class="workspace"><section class="panel"><div class="panel-heading"><h2>Collections</h2><span>Latest 50</span></div><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section><section class="panel"><div class="panel-heading"><h2>Evidence & findings</h2><span id="selection">Select a collection</span></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section></div>
       <section class="panel reports"><div class="panel-heading"><h2>Agent investigations</h2><span>From Plowshare</span></div><div id="reports" class="entries"><p class="empty">Loading reports…</p></div></section>
       <p class="footnote">An observed DNS query does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
     </section>
   </main>
-  <footer>Collection in Python. Durable work in Plowshare. Judgment where it helps.</footer>
+  <footer>Your devices. Your evidence. Powered by Plowshare.</footer>
 </body>
 </html>

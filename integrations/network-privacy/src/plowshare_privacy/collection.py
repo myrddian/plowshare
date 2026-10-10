@@ -34,6 +34,9 @@ class Collector(Protocol):
 
 def scope_fingerprint(plan: CollectionPlan) -> str:
     values = asdict(plan)
+    # Default-enabled plans retain their historical fingerprints and journal identity.
+    if plan.enabled:
+        values.pop("enabled")
     values["observations_file"] = (
         str(plan.observations_file) if plan.observations_file else None
     )
@@ -83,6 +86,10 @@ class NetworkCollector:
         previous: Evidence | None,
         previous_revision: str | None,
     ) -> Evidence:
+        if not self.plan.enabled:
+            raise ValueError(
+                "Collection is disabled; configure targets and enable it before scanning"
+            )
         started = utc_now()
         issues: list[str] = []
         imported: Snapshot | None = None

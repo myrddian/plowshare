@@ -2,9 +2,10 @@
 
 Network Privacy Watch helps an operator understand changes in their network,
 retain the observations and investigate them with an LLM, including a local model.
-Start with the [Application README](network-privacy-watch/README.md) for
-the workflow and deployment checklist; this guide covers the Python integration,
-tool configuration and recovery.
+Use the [guided start and dashboard](SETUP.md#start-and-use-the-dashboard) to install once,
+open the dashboard and select devices. Later starts use the generated launcher
+in your private setup folder. The [Application README](network-privacy-watch/README.md)
+explains the platform workflow; this guide covers integration configuration and recovery.
 
 The Plowshare Application contains the manifest, agents, orchestrations and Relay
 definitions that Plowshare runs. The collector and its web interface are an
@@ -36,6 +37,12 @@ model pool can serve the same `reasoning` binding used by these definitions.
 
 ## What the collector observes
 
+`collection.enabled` defaults to `true` for existing TCP configurations. Set it
+explicitly to `false` to deploy and start the dashboard before selecting devices;
+targets and ports may then be empty. Disabled collection makes no probes, consumes
+no scan batches and refuses new scan requests. The authenticated dashboard discovers devices and saves the explicit monitored scope
+without restarting. The independent `discover` command is also available.
+
 `tcp` performs bounded TCP connection probes against **explicit IP addresses and
 ports** in private deployment configuration. It sends no application payloads,
 requires no raw sockets or elevated scan privileges, and records open, refused,
@@ -66,12 +73,19 @@ These are observations and hypotheses for an investigator, not vendor allegation
 
 ## Guided setup
 
-Use the [step-by-step setup walkthrough](SETUP.md) and installed
-`plowshare-privacy-bootstrap` helper to configure a private collector, select a
-server FileStore, deploy the paused Application, provision a separate service
-account and redeploy with its execution principal. The guide explains each identity,
-provider scope, Relay processing, Python startup and interrupted-install recovery.
-The lower-level preparation and provisioning commands below remain available.
+Use the [guided start walkthrough](SETUP.md#start-and-use-the-dashboard). The
+`plowshare-privacy-bootstrap start` command prepares new setup, selects a server
+FileStore, deploys the paused Application, provisions its separate service account,
+waits for readiness and opens the dashboard. Completed setup is reused without
+another administrator login. It remembers an explicitly configured loopback listener
+and creates a private launcher for subsequent starts.
+
+In the dashboard, discover a private subnet, select devices, save monitoring and
+request a collection. Saved local discovery results are reused; selecting devices
+can be deferred. Browser authentication is automatic and survives reloads. Settings
+changes preserve evidence and are refused while admitted work remains unsettled.
+The guide also explains each identity, provider scope, Relay processing and recovery.
+Lower-level preparation and provisioning commands remain available below.
 
 ## Install the Python application
 

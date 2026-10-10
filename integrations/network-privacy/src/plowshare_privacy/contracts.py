@@ -186,6 +186,7 @@ class CollectionPlan:
     concurrency: int
     observations_file: Path | None
     max_observation_age: int
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -205,8 +206,13 @@ class Configuration:
 
     @classmethod
     def read(cls, path: Path) -> Configuration:
+        return cls.decode(load_json(path), path)
+
+    @classmethod
+    def decode(cls, value: object, path: Path) -> Configuration:
+        """Validate a complete configuration before installing or saving it."""
         row = object_fields(
-            load_json(path),
+            value,
             {
                 "origin",
                 "project",
@@ -252,6 +258,7 @@ class Configuration:
                 "concurrency",
                 "observationsFile",
                 "maxObservationAgeSeconds",
+                "enabled",
             },
         )
         mode = plan["mode"]
@@ -271,6 +278,9 @@ class Configuration:
                 raise ValueError("Fixture mode requires only observationsFile")
             collection = CollectionPlan("fixture", (), (), 1.0, 1, observations, 0)
         else:
+            enabled = plan.get("enabled", True)
+            if type(enabled) is not bool:
+                raise ValueError("TCP collection enabled must be a boolean")
             if not {"targets", "ports", "timeoutSeconds", "concurrency"} <= set(plan):
                 raise ValueError(
                     "TCP collection requires explicit targets, ports and limits"
@@ -289,8 +299,8 @@ class Configuration:
             ):
                 raise ValueError("Timeout must be between 0.1 and 5 seconds")
             if (
-                not targets
-                or not ports
+                enabled
+                and (not targets or not ports)
                 or len(targets) * len(ports) > 256
                 or len(set(targets)) != len(targets)
                 or len(set(ports)) != len(ports)
@@ -313,6 +323,7 @@ class Configuration:
                 integer(plan["concurrency"], 1, 32),
                 observations,
                 age,
+                enabled,
             )
         tokens = (
             identifier(row["tokenEnvironment"]),
