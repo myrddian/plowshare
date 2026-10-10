@@ -35,3 +35,17 @@ Code references:
 - [Scoped document frames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/DocumentFrames.java)
 - [Python request contracts](../../sdk/python/src/plowshare/contracts.py)
 - [TypeScript request validation](../../sdk/typescript/src/operations/payload-validation.ts)
+
+## Scoped schedule runtime inspection
+
+`schedule.list` and `schedule.files` expose no typed project selection, and service
+tokens cannot call either operation. Application source reads also require direct
+FileStore grants that the execution identity does not receive. The collector cannot
+inspect next-fire time or registration through its existing project-scoped token.
+It reports this read as unavailable, while continuing independent scoped agent,
+context-projection and orchestration health reads. It does not interpret an
+unavailable read as a missing schedule or poll using human credentials.
+
+An administrator can inspect schedules through the CLI, and the dashboard's
+explicit schedule editor uses a temporary administrator login. A project-scoped
+runtime inspection contract is a separate platform follow-up.

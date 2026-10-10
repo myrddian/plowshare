@@ -41,7 +41,7 @@ The server may need a reconciliation pass before the new schedule is visible.
 ## Read health, devices and findings
 
 **System health** shows collector state, last successful contact, last completed
-scan, next scheduled scan, Pi-hole coverage, project agents, visible dynamic tools,
+scan, Pi-hole coverage, project agents, projected dynamic tools,
 recent project investigations and service credential expiry. Remote checks and
 report projections are cached for 20 seconds. Visibility is an inspection result;
 permissions and availability are still enforced by Plowshare on each tool call.
@@ -195,6 +195,13 @@ while the evidence and optional `observed_changes` retain every observation. Thi
 also works with the previous Application completion route, which already skips
 empty changes. Deploy the updated Application package through its normal reviewed
 workflow when updating its route; no core server or SDK change is required here.
+
+The service token cannot inspect global schedule runtime status; the dashboard
+labels that read unavailable without marking the project connection broken.
+Use administrator `schedule list` / `schedule files` or the explicit schedule
+editor to inspect/change it. Tool visibility comes from a current unmeasured
+context projection of an existing project conversation, not declared agent grants.
+Before a project conversation exists, visibility remains unknown.
 
 ## Device knowledge base
 

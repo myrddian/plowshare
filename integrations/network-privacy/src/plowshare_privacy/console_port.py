@@ -9,10 +9,11 @@ from typing import Protocol
 from plowshare import Client
 from plowshare.contracts import (
     AgentListRequest,
+    ConversationContextSnapshotRequest,
+    ConversationListRequest,
     OrchestrationListRequest,
     OrchestrationReceiptRequest,
     OrchestrationStartRequest,
-    ScheduleListRequest,
 )
 
 from .contracts import Configuration, uuid
@@ -34,6 +35,7 @@ class AgentHealth:
     unavailable: tuple[str, ...]
     tools: tuple[str, ...]
     missing_tools: tuple[str, ...]
+    tool_visibility: str = "projected"
 
 
 @dataclass(frozen=True)
@@ -63,27 +65,10 @@ class SdkConsolePort:
         self.client, self.config = client, config
 
     async def schedule(self) -> ScheduleView | None:
-        # Global schedule.list is filtered at this owning boundary. No other
-        # account/project names or definitions enter the private dashboard DTO.
-        matches = [
-            value
-            for value in (
-                await self.client.request(ScheduleListRequest())
-            ).require_payload()
-            if value.name == self.config.schedule
-        ]
-        if len(matches) > 1:
-            raise ValueError("Ambiguous registered schedule")
-        if not matches:
-            return None
-        item = matches[0]
-        return ScheduleView(
-            item.name,
-            item.cron,
-            item.zone,
-            item.paused,
-            None if item.paused else item.next_fire_at,
-        )
+        # The public schedule listing has no project selection and service tokens
+        # cannot call it. Absence of this read is not evidence of no registration.
+        # Do not borrow the deployment administrator's credential for polling.
+        return None
 
     async def agents(self) -> AgentHealth:
         from .native_tools import DECLARATIONS
@@ -101,13 +86,50 @@ class SdkConsolePort:
         ]
         if len(coordinators) > 1:
             raise ValueError("Ambiguous project coordinator")
-        visible = set(coordinators[0].tools) if coordinators else set()
         names = {item.name for item in DECLARATIONS}
+        visible: set[str] = set()
+        visibility = "awaiting_context"
+        if coordinators:
+            # Agent listings describe definition grants, not the live dynamic
+            # registry. Project an existing project conversation without counting
+            # tokens or opening/running a conversation. The server resolves current
+            # tools for this account and coordinator; discard all message content.
+            conversations = (
+                await self.client.request(
+                    ConversationListRequest(project=self.config.project)
+                )
+            ).require_payload()
+            selected = next(
+                (
+                    value
+                    for value in conversations
+                    if value.project == self.config.project
+                ),
+                None,
+            )
+            if selected is not None:
+                snapshot = (
+                    await self.client.request(
+                        ConversationContextSnapshotRequest(
+                            conversation=selected.id,
+                            agent="privacy_coordinator",
+                            measure=False,
+                        )
+                    )
+                ).require_payload()
+                if (
+                    snapshot.conversation != selected.id
+                    or snapshot.agent != "privacy_coordinator"
+                ):
+                    raise ValueError("Foreign tool visibility projection")
+                visible = {item.name for item in snapshot.tools}
+                visibility = "projected"
         return AgentHealth(
             tuple(sorted(served)),
             tuple(sorted(expected - served)),
             tuple(sorted(visible & names)),
-            tuple(sorted(names - visible)),
+            tuple(sorted(names - visible)) if visibility == "projected" else (),
+            visibility,
         )
 
     async def runs(self) -> tuple[RunSummary, ...]:
