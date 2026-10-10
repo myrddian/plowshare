@@ -18,7 +18,7 @@ from plowshare.tools import ToolAttention
 
 from .console import OperatorConsole
 from .contracts import integer, items, object_fields, parse_json, text, uuid
-from .device_profiles import DeviceProfiles, ProfileFields
+from .device_profiles import ProfileFields, ProfileManagement
 from .diagnostics import refusal_detail
 from .discovery import DeviceDiscovery, DiscoveryPlan
 from .journal import Publication
@@ -38,7 +38,7 @@ def application(
     instance: str | None = None,
     console: OperatorConsole | None = None,
     schedule_editor: ScheduleManagement | None = None,
-    profiles: DeviceProfiles | None = None,
+    profiles: ProfileManagement | None = None,
 ) -> web.Application:
     """Serve static UI and bearer-protected APIs without exposing deployment credentials.
 
@@ -263,7 +263,7 @@ def application(
         response.del_cookie(cookie, path="/api")
         return response
 
-    def profile_service() -> DeviceProfiles:
+    def profile_service() -> ProfileManagement:
         if profiles is None:
             raise web.HTTPNotFound(text="Device profiles are not enabled")
         return profiles
@@ -273,12 +273,12 @@ def application(
         return web.json_response(
             {
                 "profiles": [asdict(v) for v in await service.list()],
-                "intents": [asdict(v) for v in service.intents.all()],
+                "intents": [asdict(v) for v in service.writes()],
             }
         )
 
     async def profile_intents(request: web.Request) -> web.Response:
-        return web.json_response([asdict(v) for v in profile_service().intents.all()])
+        return web.json_response([asdict(v) for v in profile_service().writes()])
 
     async def profile_source(request: web.Request) -> web.Response:
         return web.json_response(

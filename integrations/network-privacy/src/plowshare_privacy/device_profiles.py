@@ -310,6 +310,18 @@ class FileProfileIntents:
         replace_private(self.path, encoded)
 
 
+class ProfileManagement(Protocol):
+    """Operator document management; callers receive records, never persistence handles."""
+
+    def writes(self) -> tuple[ProfileIntent, ...]: ...
+    async def list(self) -> tuple[ProfileView, ...]: ...
+    async def read(self, identity: str, revision: str) -> str: ...
+    async def save(
+        self, identity: str, request: str, expected: str | None, fields: ProfileFields
+    ) -> ProfileIntent: ...
+    async def reconcile(self) -> None: ...
+
+
 class DeviceProfiles:
     def __init__(
         self,
@@ -325,6 +337,9 @@ class DeviceProfiles:
             targets,
         )
         self.lock = asyncio.Lock()
+
+    def writes(self) -> tuple[ProfileIntent, ...]:
+        return self.intents.all()
 
     async def list(self) -> tuple[ProfileView, ...]:
         """Select the highest visible ordinal per resource; evidence links remain address-based."""

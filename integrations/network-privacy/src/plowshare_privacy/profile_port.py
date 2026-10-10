@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import Protocol
 
 from plowshare import Client
 from plowshare.contracts import (
@@ -15,11 +16,18 @@ from plowshare.contracts import (
 
 from .contracts import Configuration, integer, text, timestamp, uuid
 from .device_profiles import PREFIX, DeviceProfile, ProfileVersion, source_name
-from .ports import PrivacyPort
+
+
+class RetainedSourceReader(Protocol):
+    """A bounded source read through its configured Information scope."""
+
+    async def read_source(self, revision: str) -> str: ...
 
 
 class SdkProfilePort:
-    def __init__(self, client: Client, config: Configuration, reader: PrivacyPort):
+    def __init__(
+        self, client: Client, config: Configuration, reader: RetainedSourceReader
+    ):
         self.client, self.reader = client, reader
         self.scope = InformationAcquirePayloadDtoScopeVariant2Dto(
             kind="project", project=config.project, include_shared=False
