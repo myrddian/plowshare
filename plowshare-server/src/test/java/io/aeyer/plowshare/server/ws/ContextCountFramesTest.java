@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class ContextCountFramesTest {
-  final UsageQueryService access = mock(UsageQueryService.class);
+  final ConversationContextAccess access = mock(ConversationContextAccess.class);
   final Callers callers = mock(Callers.class);
   final Compaction compaction = mock(Compaction.class);
   final JobRuntime runtime = mock(JobRuntime.class);
@@ -58,7 +58,7 @@ class ContextCountFramesTest {
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any()))
         .thenReturn(tools);
-    when(access.countOwner("alice", "conversation")).thenReturn(owner);
+    when(access.owner("alice", "conversation")).thenReturn(owner);
     when(models.count(any(ChatRequest.class)))
         .thenReturn(PromptCount.unknown("pool", "model", "not_configured"));
 
@@ -84,10 +84,10 @@ class ContextCountFramesTest {
     assertEquals(tools, captured.getValue().tools());
     assertEquals(owner, captured.getValue().attribution());
     var order = inOrder(access, callers, models);
-    order.verify(access).requireConversation("alice", "conversation");
+    order.verify(access).owner("alice", "conversation");
     order.verify(callers).callerForConversation("conversation", "session");
     order.verify(callers).readAgent("talker", caller);
-    order.verify(access).countOwner("alice", "conversation");
+    order.verify(access).owner("alice", "conversation");
     order.verify(models).count(any(ChatRequest.class));
     verifyNoMoreInteractions(models);
   }
@@ -112,7 +112,7 @@ class ContextCountFramesTest {
         .thenReturn(List.of());
     var messages = List.of(ChatMessage.system(ruled.prompt()), ChatMessage.user("stored question"));
     when(compaction.projectionFor("conversation", ruled)).thenReturn(messages);
-    when(access.countOwner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
+    when(access.owner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
     when(models.count(any(ChatRequest.class)))
         .thenReturn(PromptCount.unknown("pool", "model", "not_configured"));
     assertEquals(
@@ -128,7 +128,7 @@ class ContextCountFramesTest {
 
   @Test
   void denied_or_unsigned_count_never_resolves_content_or_contacts_a_model() {
-    doThrow(new CallerFault("unavailable")).when(access).requireConversation("alice", "private");
+    doThrow(new CallerFault("unavailable")).when(access).owner("alice", "private");
     assertEquals(
         Code.BAD_REQUEST,
         router.route(frame(Map.of("conversation", "private", "agent", "talker")), asking).code());
@@ -171,7 +171,7 @@ class ContextCountFramesTest {
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any()))
         .thenReturn(tools);
-    when(access.countOwner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
+    when(access.owner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
     var asked =
         new Envelope(
             "snapshot",
@@ -240,7 +240,7 @@ class ContextCountFramesTest {
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any()))
         .thenReturn(List.of());
-    when(access.countOwner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
+    when(access.owner("alice", "conversation")).thenReturn(UsageAttribution.LEGACY);
     var result =
         router.route(
             new Envelope(
@@ -253,11 +253,125 @@ class ContextCountFramesTest {
     assertEquals(
         "UNKNOWN", ((PromptCount) ((Map<?, ?>) result.payload()).get("count")).basis().name());
     verifyNoInteractions(models);
+    // Both inspection operations share the same empty-conversation contract, including no messages.
+    for (var messages : List.of(List.of(ChatMessage.system("system")), List.<ChatMessage>of())) {
+      when(compaction.projectionFor("conversation", agent)).thenReturn(messages);
+      var counted =
+          router.route(frame(Map.of("conversation", "conversation", "agent", "talker")), asking);
+      assertEquals(Code.OK, counted.code());
+      var count = (PromptCount) ((Map<?, ?>) counted.payload()).get("count");
+      assertEquals(PromptCount.Basis.UNKNOWN, count.basis());
+      assertNull(count.tokens());
+      assertEquals(List.of("empty_conversation"), count.gaps());
+    }
+    verifyNoInteractions(models);
+  }
+
+  @Test
+  void access_withdrawn_during_projection_prevents_counting_or_returning_snapshot() {
+    var agent =
+        new AgentDefinition(
+            "talker", "fixture", "fast", List.of(), List.of(), List.of(), 2, 4, "system");
+    var caller = new DefinitionResolver.Caller(null, "session");
+    when(callers.callerForConversation("conversation", "session")).thenReturn(caller);
+    when(callers.readAgent("talker", caller)).thenReturn(agent);
+    when(runtime.withAgentRules(any(), any(), any(), any())).thenReturn(agent);
+    when(compaction.projectionFor("conversation", agent))
+        .thenReturn(List.of(ChatMessage.system("system"), ChatMessage.user("private content")));
+    for (String type :
+        List.of(FrameTypes.CONVERSATION_CONTEXT_COUNT, FrameTypes.CONVERSATION_CONTEXT_SNAPSHOT)) {
+      when(access.owner("alice", "conversation"))
+          .thenReturn(UsageAttribution.LEGACY)
+          .thenThrow(new CallerFault("access withdrawn"));
+      var outcome =
+          router.route(
+              new Envelope(
+                  "revoked",
+                  type,
+                  Envelope.CURRENT_VERSION,
+                  Map.of("conversation", "conversation", "agent", "talker", "measure", true)),
+              asking);
+      assertEquals(Code.BAD_REQUEST, outcome.code());
+      assertFalse(outcome.toString().contains("private content"));
+      reset(access);
+    }
+    verifyNoInteractions(models);
+  }
+
+  @Test
+  void service_owned_context_uses_the_authenticated_principal_for_both_operations() {
+    String principal = "@service/fixture-token";
+    var ownership = mock(io.aeyer.plowshare.server.archive.ConversationContextRepository.class);
+    var accounts = mock(io.aeyer.plowshare.server.auth.AccountAdministrationRepository.class);
+    var members = mock(io.aeyer.plowshare.server.archive.ProjectMembers.class);
+    when(ownership.ownership("conversation"))
+        .thenReturn(
+            java.util.Optional.of(
+                new io.aeyer.plowshare.server.archive.ConversationContextRepository.Ownership(
+                    principal, "7", "application", false)));
+    when(members.authorityAccount(principal))
+        .thenReturn(java.util.Optional.of("application-account"));
+    when(members.role("application", principal))
+        .thenReturn(
+            java.util.Optional.of(io.aeyer.plowshare.server.archive.ProjectRole.CONTRIBUTOR));
+    var serviceRouter =
+        new FrameRouter(
+            new ContextCountFrames(
+                    new OwnedConversationContext(ownership, accounts, members),
+                    callers,
+                    compaction,
+                    runtime,
+                    models)
+                .frames());
+    var agent =
+        new AgentDefinition(
+            "talker", "fixture", "fast", List.of(), List.of(), List.of(), 2, 4, "system");
+    var caller = new DefinitionResolver.Caller(7L, "session");
+    var home = io.aeyer.plowshare.protocol.Home.of("application");
+    when(callers.callerForConversation("conversation", "session")).thenReturn(caller);
+    when(callers.homeOfConversation("conversation")).thenReturn(home);
+    when(callers.readAgent("talker", caller)).thenReturn(agent);
+    when(runtime.withAgentRules(agent, home, "session", "conversation")).thenReturn(agent);
+    when(runtime.schemasOfferedTo(agent, home, "session", principal)).thenReturn(List.of());
+    when(compaction.projectionFor("conversation", agent))
+        .thenReturn(List.of(ChatMessage.system("system"), ChatMessage.user("stored question")));
+    when(models.count(any(ChatRequest.class)))
+        .thenReturn(PromptCount.unknown("pool", "model", "not_configured"));
+    for (String type :
+        List.of(FrameTypes.CONVERSATION_CONTEXT_COUNT, FrameTypes.CONVERSATION_CONTEXT_SNAPSHOT)) {
+      assertEquals(
+          Code.OK,
+          serviceRouter
+              .route(
+                  new Envelope(
+                      "service",
+                      type,
+                      Envelope.CURRENT_VERSION,
+                      Map.of(
+                          "conversation",
+                          "conversation",
+                          "agent",
+                          "talker",
+                          "measure",
+                          true,
+                          "account",
+                          "application-account")),
+                  new Asking("session", principal, "socket"))
+              .code());
+    }
+    var requests = ArgumentCaptor.forClass(ChatRequest.class);
+    verify(models, times(2)).count(requests.capture());
+    for (var request : requests.getAllValues()) {
+      assertEquals(principal, request.attribution().accountHandle());
+      assertEquals("7", request.attribution().projectId());
+    }
+    verify(runtime, times(2)).schemasOfferedTo(agent, home, "session", principal);
+    verifyNoInteractions(accounts);
   }
 
   @Test
   void snapshot_authorizes_before_resolving_content_or_measuring() {
-    doThrow(new CallerFault("unavailable")).when(access).requireConversation("alice", "private");
+    doThrow(new CallerFault("unavailable")).when(access).owner("alice", "private");
     var frame =
         new Envelope(
             "snapshot",
