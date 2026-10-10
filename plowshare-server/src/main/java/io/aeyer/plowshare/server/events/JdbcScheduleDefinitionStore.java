@@ -76,20 +76,30 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
   }
 
   public List<ScheduledWork.File> files(Source source) {
+    return files(source, true);
+  }
+
+  private List<ScheduledWork.File> files(Source source, boolean effective) {
     return jdbc.query(
-        "SELECT name,internal_name,definition,status,error FROM schedule_files WHERE source_id=? ORDER BY name",
-        (r, i) ->
-            new ScheduledWork.File(
-                r.getString("name"),
-                source.project(),
-                source.source(),
-                path(source, r.getString("name")),
-                r.getString("internal_name"),
-                r.getString("definition") == null
-                    ? null
-                    : ScheduleDefinitionCodec.read(r.getString("definition")),
-                r.getString("status"),
-                r.getString("error")),
+        "SELECT name,internal_name,definition,paused_override,status,error FROM schedule_files WHERE source_id=? ORDER BY name",
+        (r, i) -> {
+          ScheduledWork definition =
+              r.getString("definition") == null
+                  ? null
+                  : ScheduleDefinitionCodec.read(r.getString("definition"));
+          Boolean paused = r.getObject("paused_override", Boolean.class);
+          if (effective && definition != null && paused != null)
+            definition = withPaused(definition, paused);
+          return new ScheduledWork.File(
+              r.getString("name"),
+              source.project(),
+              source.source(),
+              path(source, r.getString("name")),
+              r.getString("internal_name"),
+              definition,
+              r.getString("status"),
+              r.getString("error"));
+        },
         source.id());
   }
 
@@ -129,7 +139,8 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         () -> {
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
-          var old = files(source).stream().filter(f -> f.name().equals(name)).findFirst();
+          // Compare immutable source content, not its operational pause projection.
+          var old = files(source, false).stream().filter(f -> f.name().equals(name)).findFirst();
           if (old.isEmpty()
               && (schedules.find(internal).isPresent() || triggers.find(internal).isPresent()))
             throw new CallerFault("The internal schedule name is already in use");
@@ -147,7 +158,20 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                                   : definition.target().project() == null
                                       ? source.project()
                                       : definition.target().project()))
-                  .isPresent()) return old.get();
+                  .isPresent())
+            return files(source).stream()
+                .filter(f -> f.name().equals(name))
+                .findFirst()
+                .orElseThrow();
+          boolean unchanged = old.filter(f -> definition.equals(f.definition())).isPresent();
+          var projected =
+              unchanged
+                  ? files(source).stream()
+                      .filter(f -> f.name().equals(name))
+                      .findFirst()
+                      .orElseThrow()
+                      .definition()
+                  : definition;
           var timing = CronSchedule.parse(definition.cron(), definition.zone());
           if (old.filter(f -> f.status().equals("refused")).isPresent()
               || schedules
@@ -159,7 +183,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
               "UPDATE schedules SET file_managed=TRUE WHERE name=? AND defined_by=?",
               internal,
               source.account());
-          schedules.pause(internal, definition.paused(), source.account());
+          schedules.pause(internal, projected.paused(), source.account());
           var target = definition.target();
           var limits = definition.limits();
           triggers.define(
@@ -175,11 +199,11 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                   limits.maxModelCalls(),
                   limits.maxTurns(),
                   limits.queueCap(),
-                  definition.paused(),
+                  projected.paused(),
                   source.account()));
-          if (definition.paused()) firings.refuseWaiting(internal, "schedule file paused");
+          if (projected.paused()) firings.refuseWaiting(internal, "schedule file paused");
           jdbc.update(
-              "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,status='active',error=NULL",
+              "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,paused_override=CASE WHEN schedule_files.definition=EXCLUDED.definition THEN schedule_files.paused_override ELSE NULL END,status='active',error=NULL",
               source.id(),
               name,
               internal,
@@ -221,6 +245,58 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
           jdbc.update("DELETE FROM schedule_files WHERE source_id=? AND name=?", source.id(), name);
           return null;
         });
+  }
+
+  public void pause(
+      Source source, String name, ScheduledWork expected, boolean paused, Instant now) {
+    ScheduledWork.identity(name, "file name");
+    java.util.Objects.requireNonNull(expected);
+    java.util.Objects.requireNonNull(now);
+    work.inTransaction(
+        () -> {
+          lock(source);
+          var file =
+              files(source).stream()
+                  .filter(f -> f.name().equals(name))
+                  .findFirst()
+                  .orElseThrow(() -> new CallerFault("The schedule file was removed"));
+          if (!file.status().equals("active") || !expected.equals(file.definition()))
+            throw new CallerFault(
+                "Schedule changed; inspect its current state before controlling it");
+          var schedule =
+              schedules
+                  .find(file.internalName())
+                  .orElseThrow(() -> new CallerFault("The schedule runtime is unavailable"));
+          if (triggers.find(file.internalName()).isEmpty())
+            throw new CallerFault("The schedule trigger is unavailable");
+          if (!paused && schedule.paused())
+            schedules.define(
+                file.internalName(),
+                CronSchedule.parse(expected.cron(), expected.zone()),
+                file.internalName(),
+                source.account(),
+                now);
+          schedules.pause(file.internalName(), paused, source.account());
+          triggers.pause(file.internalName(), paused, source.account());
+          if (paused) firings.refuseWaiting(file.internalName(), "schedule paused by operator");
+          jdbc.update(
+              "UPDATE schedule_files SET paused_override=? WHERE source_id=? AND name=?",
+              paused,
+              source.id(),
+              name);
+          return null;
+        });
+  }
+
+  private static ScheduledWork withPaused(ScheduledWork value, boolean paused) {
+    return new ScheduledWork(
+        value.version(),
+        value.cron(),
+        value.zone(),
+        paused,
+        value.action(),
+        value.target(),
+        value.limits());
   }
 
   private void lock(Source source) {

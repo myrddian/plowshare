@@ -36,7 +36,17 @@ configured events tick interval. It also reconciles before boot recovery drains
 queued firings. An unchanged file preserves its next-fire time. Timing changes
 calculate the next future fire. Deleting a file removes its schedule and trigger
 and refuses waiting firings; historical firings remain. Pause/resume updates JSON
-and both runtime rows together. Legacy schedule/trigger definitions still work.
+and both runtime rows together for mutable file definitions. Deployed Application
+files remain immutable: an operational pause override updates both runtime rows
+without a new release. Legacy schedule/trigger definitions still work.
+
+Application overrides survive unchanged source reconciliation and restart. A
+changed schedule definition or removal clears the override. `schedule.files`
+reports the effective pause state while the deployed JSON retains its source
+default. Resuming a paused Application schedule uses the next future occurrence;
+missed ticks are not replayed, and existing runs are neither resumed nor cancelled.
+Only the registered owner with current project management authority can control
+it. Source action/grant validation still applies.
 
 Invalid JSON, lost execution authority or an offline/incomplete remote scan suspends
 that source's affected schedules and refuses queued firings. An incomplete scan
@@ -118,7 +128,8 @@ plowshare-cli --project research --payload - schedule save < schedule-request.js
 plowshare-cli --project research schedule sync '{"source":"server"}'
 plowshare-cli --project research --root /path/to/project schedule sync '{"source":"workspace"}'
 plowshare-cli schedule files
-plowshare-cli schedule pause '{"schedule":"scheduled-1-weekday","paused":true}'
+plowshare-cli schedule pause scheduled-1-weekday
+plowshare-cli schedule resume scheduled-1-weekday
 plowshare-cli schedule forget '{"schedule":"scheduled-1-weekday"}'
 ```
 
@@ -127,6 +138,13 @@ serves workspace files for that CLI session; keep a desktop/TUI or another persi
 owner provider connected for ongoing workspace monitoring. There is no HTTP fallback
 or automatic replay after uncertain delivery; inspect file status before deciding
 whether to retry.
+
+TUI `/schedule pause <name>` and `/schedule resume <name>`, desktop Activity
+Pause/Resume buttons, and web console **Schedules** controls use the same
+`schedule.pause` operation (`paused:true` or `paused:false`). SDK clients in all
+languages can use that existing typed request. These are runtime controls and make
+no model call. Refresh after uncertain delivery; no client automatically repeats
+a control.
 
 TUI `/schedule <description>` still reviews timing before saving. It creates a server
 schedule file. An explicit qualified skill/orchestration command in the proposal is

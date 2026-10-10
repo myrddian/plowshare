@@ -284,7 +284,7 @@ describe('administrative commands preserve authority', () => {
     'approval answer {"id":"a","decision":"allow"}',
     'approval answer {"id":"a","decision":"project"}',
     'inbox read {"items":[]}',
-    'schedule pause {"schedule":"s"}',
+    'schedule resume {"schedule":"s","paused":true}',
     'trigger pause {"trigger":"t","paused":"yes"}',
     'trigger define {"trigger":"t","event":"e","agent":"a","task":"x","conversation":"c","maxModelCalls":5}',
     'board topup {"topic":"t"}',
@@ -302,6 +302,29 @@ describe('administrative commands preserve authority', () => {
       expect(parseCommand(line).kind).toBe('usage');
     },
   );
+  it('exposes symmetric pause and resume controls using the same SDK operation', () => {
+    for (const [command, paused] of [
+      ['pause', true],
+      ['resume', false],
+    ] as const) {
+      expect(parseCommand(`schedule ${command} scheduled-1-daily`)).toEqual({
+        kind: 'request',
+        request: {
+          type: 'schedule.pause',
+          payload: { schedule: 'scheduled-1-daily', paused },
+        },
+      });
+    }
+    expect(
+      parseCommand('schedule resume {"schedule":"s","paused":false}'),
+    ).toMatchObject({ kind: 'request' });
+    expect(
+      parseCommand('schedule pause {"schedule":"s","paused":false}'),
+    ).toMatchObject({ kind: 'request' });
+    expect(
+      parseCommand('schedule resume {"schedule":"s","paused":null}').kind,
+    ).toBe('usage');
+  });
   it('does not claim a persistent subscription or rooted union mutation from a one-shot invocation', () => {
     for (const line of [
       'job stream',

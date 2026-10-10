@@ -11,6 +11,11 @@ public interface ScheduleFiles {
     return null;
   }
 
+  /** Deployed Application files are immutable; lifecycle controls belong to the runtime. */
+  default boolean applicationOwned(ScheduleDefinitionStore.Source source) {
+    return false;
+  }
+
   List<Entry> read(ScheduleDefinitionStore.Source source);
 
   void write(ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite);

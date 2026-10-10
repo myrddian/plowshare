@@ -33,7 +33,10 @@ public interface ScheduleDefinitions {
    */
   String executionSession(ScheduleDefinitionStore.Source source);
 
-  /** Managed controls rewrite/remove the desired file and both runtime projections. */
+  /**
+   * Controls update both runtime projections. Mutable sources also rewrite desired files; deployed
+   * Applications retain an operational override without modifying the release.
+   */
   boolean pause(String internal, boolean paused, String account);
 
   boolean forget(String internal, String account);

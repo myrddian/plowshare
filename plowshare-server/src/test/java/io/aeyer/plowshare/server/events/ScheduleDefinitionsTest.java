@@ -139,4 +139,59 @@ class ScheduleDefinitionsTest {
     assertThrows(RuntimeException.class, () -> service.pause("scheduled-1-daily", true, "owner"));
     verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
   }
+
+  @Test
+  void applicationPauseAndResumeControlRuntimeWithoutWritingARelease() {
+    when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
+    when(store.managed(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(prior));
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    when(files.applicationOwned(source)).thenReturn(true);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    assertTrue(service.pause(prior.internalName(), true, "owner"));
+    assertTrue(service.pause(prior.internalName(), false, "owner"));
+    verify(store).pause(eq(source), eq("daily"), eq(definition), eq(true), any());
+    verify(store).pause(eq(source), eq("daily"), eq(definition), eq(false), any());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+  }
+
+  @Test
+  void applicationControlRequiresCurrentManagerAuthority() {
+    when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
+    when(store.managed(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(prior));
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    when(files.applicationOwned(source)).thenReturn(true);
+    assertThrows(RuntimeException.class, () -> service.pause(prior.internalName(), false, "owner"));
+    verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+  }
+
+  @Test
+  void applicationControlRequiresCurrentActionGrantsEvenForAManager() {
+    when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
+    when(store.managed(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(prior));
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    when(files.applicationOwned(source)).thenReturn(true);
+    when(members.mayManage("project", "owner")).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("Action grant revoked"))
+        .when(authority)
+        .validate(source, definition);
+    assertThrows(RuntimeException.class, () -> service.pause(prior.internalName(), false, "owner"));
+    verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+  }
+
+  @Test
+  void foreignAndUnavailableSourcesCannotControlAnApplication() {
+    assertFalse(service.pause(prior.internalName(), false, "foreign"));
+    when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
+    when(files.read(source)).thenThrow(new WorkspaceUnavailableException("offline"));
+    assertThrows(RuntimeException.class, () -> service.pause(prior.internalName(), false, "owner"));
+    verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
+  }
 }
