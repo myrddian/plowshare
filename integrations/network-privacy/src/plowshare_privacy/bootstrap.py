@@ -182,6 +182,19 @@ def configure(directory: Path, source: Path) -> None:
             content.replace("\nmodel: reasoning\n", "\nmodel: " + model + "\n"),
             encoding="utf-8",
         )
+    # These bundled templates own exactly one manifest model declaration. Scripts must
+    # use the selected binding too, even when their conductor itself needs no inference.
+    for script in (setup.output / "application/orchestrations").glob("*.js"):
+        content = script.read_text(encoding="utf-8")
+        declaration = "model: 'reasoning'"
+        if content.count(declaration) != 1:
+            raise SetupProblem(
+                "Script model declaration changed; review the source package."
+            )
+        script.write_text(
+            content.replace(declaration, "model: " + json.dumps(model)),
+            encoding="utf-8",
+        )
     private_write(
         root / "destination.json", json.dumps({"path": destination}, indent=2) + "\n"
     )
