@@ -25,7 +25,7 @@ from plowshare.contracts import (
 from plowshare.tool_journal import SqliteToolJournal
 from plowshare.tools import ToolAttention, ToolProvider, deployment_config
 
-from .collection import NetworkCollector
+from .collector_factory import configured_collector
 from .contracts import Configuration, Snapshot, load_json
 from .dashboard import RunningDashboard
 from .discovery import LocalDeviceDiscovery
@@ -74,9 +74,9 @@ async def execute(args: argparse.Namespace) -> None:
         # Local diagnostics use the same bounded collector without server credentials
         # or durable admission. They are explicitly labelled as unretained evidence.
         identity = str(uuid4())
-        evidence = await NetworkCollector(config.collector, config.collection).collect(
-            identity, "diagnostic:" + identity, None, None
-        )
+        evidence = await configured_collector(
+            config.collector, config.collection
+        ).collect(identity, "diagnostic:" + identity, None, None)
         print(
             json.dumps(
                 {"retained": False, "evidence": asdict(evidence)}, allow_nan=False
@@ -136,7 +136,7 @@ async def execute(args: argparse.Namespace) -> None:
                 config,
                 SdkPrivacyPort(client, config),
                 receipts,
-                NetworkCollector(config.collector, config.collection),
+                configured_collector(config.collector, config.collection),
             )
             peer = (
                 IntegrationPeer(

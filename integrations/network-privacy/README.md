@@ -57,7 +57,8 @@ version, an offset-bearing `observed_at`, `tcp` and `dns` arrays. For a DNS-only
 export, set `tcp` to `[]`. Each DNS row identifies the device, lowercase domain
 and count of observed queries in the exporter’s window. Exporter identity and
 attribution remain its responsibility; the collector does not parse Pi-hole or
-router-specific files. A missing or stale export is an explicit evidence gap.
+router-specific files. Alternatively, connect the documented Pi-hole v6 API as
+described below. A missing or stale export is an explicit evidence gap.
 Malformed exports refuse collection before network probes. A DNS query is not
 proof of a connection, encrypted payload content or malicious behavior.
 
@@ -70,6 +71,55 @@ Comparison records changed observable TCP responses and newly observed DNS
 destinations. It compares equal configured scopes and does not infer device
 disappearance from missing data or compare counts across different export windows.
 These are observations and hypotheses for an investigator, not vendor allegations.
+
+## Pi-hole v6 and device names
+
+Pi-hole v6 is an optional source for selected devices' hostnames, MAC addresses,
+vendors and recent DNS queries. It runs in the Python collector; the same six
+existing network tools expose the enriched evidence to agents. No new core code,
+server configuration or tool grants are required. See the
+[connection walkthrough](SETUP.md#connect-pi-hole-v6).
+
+Give devices your own names in the authenticated dashboard's **Device names**
+field, one selected `address=name` per line. These labels work without Pi-hole.
+The evidence view displays the name, address, identity and observation time.
+Configured labels never assert a discovered MAC or vendor. Each name is limited
+to 128 characters, and all names together must fit an 8 KiB escaped JSON budget
+for the scope tool.
+
+The connector opens one API session per collection, reads `/api/network/devices`
+and `/api/queries`, then closes its own session. It does not change Pi-hole
+settings, blocklists or leases. Use a Pi-hole application password; the
+[official authentication guide](https://docs.pi-hole.net/api/auth/) describes
+application passwords, SID sessions and HTTPS. The credential stays in a private
+file or environment variable and is excluded from evidence, tools and the browser.
+
+Only configured client addresses appear in retained evidence. The network table
+read is capped at 256 devices and 16 addresses per device. DNS reads use exact
+client-IP filters, a configured window (one hour by default), and up to 64 query
+rows per device by default. `queryLimit` can be 1–256 and `lookbackSeconds` 60–86400.
+The connector reads Pi-hole's in-memory query log. Short retention, truncated
+samples, unsupported query names and API failures produce explicit coverage gaps;
+TCP collection continues. The snapshot's `dns_window` records the requested range,
+rows read, matching rows available and completeness. Completeness describes that
+API sample, not every DNS request or network connection a device makes.
+
+MAC/name associations must be fresh (24 hours by default, configurable through
+`maxIdentityAgeSeconds`). Stale or conflicting associations are withheld. DHCP
+reuse, random MACs, routed clients and router-proxied DNS can prevent reliable
+physical-device attribution. A changed MAC at one selected address is reported as
+an association change; monitoring never follows a device to a new IP automatically.
+DNS counts are sample counts, not totals across scans. Queries prove neither a
+connection nor payload exfiltration, and absent queries do not prove silence.
+
+Pi-hole and `observationsFile` are alternative sources; configure one. Adding the
+source or changing labels starts a new comparison baseline while preserving settled
+receipts. New snapshots add optional `devices` and `dns_window` fields to the v1
+format. Legacy receipts keep their exact retained encoding for reconciliation.
+New evidence is capped at 16,000 bytes, leaving room for the native tool reply
+wrapper within its 16,384-character limit and fitting the investigation source
+budget. Oversized DNS samples are trimmed with a visible gap, while an oversized
+TCP/device selection must be reduced explicitly.
 
 ## Guided setup
 

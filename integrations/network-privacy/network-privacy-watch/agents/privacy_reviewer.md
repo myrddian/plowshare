@@ -18,3 +18,9 @@ connections and payload content. Flag unsupported vendor attribution, vulnerabil
 claims, and claims that a proposed protection already worked. Distinguish a useful
 hypothesis from a verified conclusion. Give the coordinator concrete corrections
 and a list of unverified questions; do not mutate documents or network settings.
+
+Device names and MAC addresses are observed, time-specific associations. Operator
+labels are not proof of manufacturer or physical identity; DHCP reuse, stale records
+and randomized MAC addresses can change associations. DNS sample counts cover only
+the stated window and recorded queries. Treat incomplete, truncated or unavailable
+DNS history as a gap, and never infer that an absent query proves no traffic.

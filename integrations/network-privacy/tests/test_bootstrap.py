@@ -22,12 +22,13 @@ from plowshare.contracts import (
     ScheduleFileDto,
     ServerAccountDto,
 )
-from support import EXAMPLES, STAMP
+from support import EXAMPLES, STAMP, CountingCollector, configuration
 
 from plowshare_privacy.bootstrap import (
     SetupProblem,
     application_files,
     configure,
+    connect_pihole,
     deploy,
     inspect,
     install,
@@ -36,7 +37,8 @@ from plowshare_privacy.bootstrap import (
     start,
     wait_for_schedule,
 )
-from plowshare_privacy.contracts import Configuration
+from plowshare_privacy.contracts import Configuration, utc_now
+from plowshare_privacy.journal import FileReceipts, Publication, Receipt
 from plowshare_privacy.setup import Setup, bind_provider, prepare, private_write
 
 FIRST = "00000000-0000-0000-0000-000000000001"
@@ -529,3 +531,87 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         (root / ".plowshare").mkdir()
         with self.assertRaises(SetupProblem):
             application_files(root)
+
+    def tcp_configuration(self) -> Configuration:
+        row = json.loads(self.config.read_text())
+        row["collection"] = {
+            "mode": "tcp",
+            "targets": ["192.0.2.12"],
+            "ports": [443],
+            "timeoutSeconds": 1,
+            "concurrency": 1,
+        }
+        self.config.write_text(json.dumps(row))
+        return Configuration.read(self.config)
+
+    async def test_connect_pihole_is_offline_private_and_preserves_completed_history(
+        self,
+    ) -> None:
+        config = self.tcp_configuration()
+        evidence = await CountingCollector(configuration(self.root)).collect(
+            SECOND, FIRST, None, None
+        )
+        with FileReceipts(config) as receipts:
+            receipts.save(
+                Receipt(
+                    SECOND,
+                    FIRST,
+                    config.request_topic,
+                    utc_now(),
+                    "done",
+                    evidence,
+                    SECOND,
+                )
+            )
+            receipts.save_publication(Publication(FIRST, utc_now(), "published"))
+        with patch("plowshare_privacy.bootstrap.administrator_login") as login:
+            connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+            login.assert_not_called()
+        configured = Configuration.read(self.config)
+        assert configured.collection.pihole is not None
+        secret = configured.collection.pihole.password_file
+        assert secret is not None
+        self.assertEqual(secret.read_text(), "fixture-app-password\n")
+        self.assertNotIn("fixture-app-password", self.config.read_text())
+        self.assertEqual(configured.project, config.project)
+        self.assertEqual(configured.token_environment, config.token_environment)
+        if os.name == "posix":
+            self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+        with FileReceipts(configured) as receipts:
+            self.assertEqual(receipts.publications()[0].state, "published")
+            self.assertEqual(receipts.all()[0].evidence, evidence)
+        with self.assertRaisesRegex(SetupProblem, "already configured"):
+            connect_pihole(self.setup, "https://other.example", "new-password")
+
+    def test_connect_pihole_refuses_busy_and_unsettled_receipts_before_writes(
+        self,
+    ) -> None:
+        config = self.tcp_configuration()
+        retained = self.config.read_text()
+        with FileReceipts(config) as receipts:
+            with self.assertRaises(BlockingIOError):
+                connect_pihole(
+                    self.setup, "https://pihole.example", "fixture-app-password"
+                )
+            receipts.save_publication(Publication(FIRST, utc_now(), "pending"))
+        with self.assertRaisesRegex(ValueError, "Settle retained work"):
+            connect_pihole(self.setup, "https://pihole.example", "fixture-app-password")
+        self.assertEqual(self.config.read_text(), retained)
+        self.assertEqual(list(self.root.glob("pihole-password-*")), [])
+
+    def test_connect_pihole_after_config_write_interruption_can_reopen_new_scope(
+        self,
+    ) -> None:
+        self.tcp_configuration()
+        with patch.object(
+            FileReceipts,
+            "complete_scope_change",
+            side_effect=OSError("fixture interruption"),
+        ):
+            with self.assertRaises(OSError):
+                connect_pihole(
+                    self.setup, "https://pihole.example", "fixture-app-password"
+                )
+        configured = Configuration.read(self.config)
+        with FileReceipts(configured) as receipts:
+            self.assertEqual(receipts.all(), ())

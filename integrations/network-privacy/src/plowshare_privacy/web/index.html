@@ -28,6 +28,7 @@
           <div id="devices" class="devices"></div>
           <form id="monitor-form">
             <label for="targets">Selected device addresses</label><input id="targets" placeholder="Select devices above or enter private IPv4 addresses, separated by commas">
+            <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 can add observed hostnames, MAC addresses and DNS activity.</p>
             <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
           </form>
         </div>
