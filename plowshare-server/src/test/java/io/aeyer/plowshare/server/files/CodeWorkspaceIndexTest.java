@@ -107,12 +107,14 @@ class CodeWorkspaceIndexTest {
     lifecycle =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, CLOCK),
+                jdbc, CLOCK, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             InformationLifecycle.processing(
                 new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                    jdbc, java.time.Clock.systemUTC()),
+                    jdbc,
+                    java.time.Clock.systemUTC(),
+                    new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
                 work,
                 catalogue,
                 new DocumentStore(jdbc, work),
@@ -401,7 +403,9 @@ class CodeWorkspaceIndexTest {
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             new DocumentStore(jdbc, work),
@@ -416,7 +420,7 @@ class CodeWorkspaceIndexTest {
     lifecycle =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, CLOCK),
+                jdbc, CLOCK, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             processor,

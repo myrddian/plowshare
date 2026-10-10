@@ -805,12 +805,15 @@ class DocumentPoliciesTest {
       InformationLifecycle.Gates gates) {
     var store = new DocumentStore(jdbc, transactions);
     return new InformationLifecycle(
-        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(jdbc, CLOCK),
+        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
+            jdbc, CLOCK, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
         transactions,
         catalogue,
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             transactions,
             catalogue,
             store,
@@ -1507,7 +1510,9 @@ class DocumentPoliciesTest {
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             transactions,
             catalogue,
             store,
@@ -1520,7 +1525,7 @@ class DocumentPoliciesTest {
     var first =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, CLOCK),
+                jdbc, CLOCK, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             transactions,
             catalogue,
             processor,
@@ -1547,7 +1552,7 @@ class DocumentPoliciesTest {
     var recovered =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, CLOCK),
+                jdbc, CLOCK, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             transactions,
             catalogue,
             processor,
@@ -1688,7 +1693,7 @@ class DocumentPoliciesTest {
     var recovered =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, later),
+                jdbc, later, new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             transactions,
             catalogue,
             (lease, cancelled, fence) -> {
