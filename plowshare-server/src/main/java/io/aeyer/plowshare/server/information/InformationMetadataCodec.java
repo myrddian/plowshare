@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.information;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import io.aeyer.plowshare.server.llm.LlmJson;
 import java.util.List;
 import java.util.Map;
 
@@ -115,10 +116,16 @@ public final class InformationMetadataCodec {
   private static JsonNode tree(String wire) {
     if (wire == null || wire.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65536)
       throw new IllegalStateException("Information metadata exceeds 64 KiB or is absent");
-    try {
-      return JSON.readTree(wire);
-    } catch (java.io.IOException invalid) {
-      throw new IllegalStateException("Information metadata is not valid JSON", invalid);
-    }
+    // Paid model answers may contain fences or recoverable formatting. Recovery is
+    // local and bounded; the validated metadata conversion below still rejects
+    // unknown fields, coercions, unsupported attribution and invented group members.
+    // A host refusal is not model JSON, even if its detail contains an object.
+    if (wire.stripLeading()
+        .matches("(?s)^E_(NO_ACCESS|NO_CONNECTION|NO_EXEC|GENERAL_TOOL_FAILURE):.*"))
+      throw new IllegalStateException("Information metadata worker returned a host refusal");
+    var recovered = LlmJson.parse(wire);
+    if (!recovered.recovered())
+      throw new IllegalStateException("Information metadata is not valid JSON");
+    return recovered.value();
   }
 }
