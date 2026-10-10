@@ -21,6 +21,21 @@ public interface DefinitionSource {
   /** This source, as an operator would name it in a log line. */
   String describe();
 
+  /** Freeze one reading so validation, comparison and loading consume exactly the same bytes. */
+  static DefinitionSource snapshot(DefinitionSource source) {
+    var definitions = List.copyOf(source.list());
+    var description = source.describe();
+    return new DefinitionSource() {
+      public String describe() {
+        return description;
+      }
+
+      public List<Definition> list() {
+        return definitions;
+      }
+    };
+  }
+
   /** Every definition here, in a stable order. Empty rather than null. */
   List<Definition> list();
 

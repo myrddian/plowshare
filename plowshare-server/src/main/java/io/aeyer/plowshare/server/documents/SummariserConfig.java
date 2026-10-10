@@ -2,6 +2,8 @@ package io.aeyer.plowshare.server.documents;
 
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.GlobalAgentDefinitions;
+import io.aeyer.plowshare.server.agents.GlobalAgentSnapshots;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
@@ -51,6 +53,7 @@ public class SummariserConfig {
       DocumentStore store,
       JobRuntime runtime,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction,
       DocumentsProperties props,
       SummaryEmbeddings summaryVectors) {
@@ -64,6 +67,11 @@ public class SummariserConfig {
               + " is a paraphrase rather than a compression");
     }
     return new Summariser(
-        store, runtime, agents::getIfAvailable, props.getSpanSize(), compaction, summaryVectors);
+        store,
+        runtime,
+        GlobalAgentSnapshots.supply(globals, agents),
+        props.getSpanSize(),
+        compaction,
+        summaryVectors);
   }
 }

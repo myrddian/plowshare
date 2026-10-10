@@ -861,7 +861,12 @@ public class AgentsConfig {
               @Override
               public AgentRegistry visible(Home home, String session, String account) {
                 // Unscoped/global metadata inspection needs no run owner or caller bean.
-                if (home == null || home.isGlobal() && account == null) return agents.getObject();
+                if (home == null || home.isGlobal() && account == null) {
+                  var callers = contextCallers.getIfAvailable();
+                  return callers == null
+                      ? agents.getObject()
+                      : callers.visible(home, session, account);
+                }
                 return contextCallers.getObject().visible(home, session, account);
               }
 
@@ -1091,6 +1096,18 @@ public class AgentsConfig {
         guidance);
   }
 
+  /** Refresh only editable global files; release resources and admitted runs remain immutable. */
+  @Bean
+  public GlobalAgentDefinitions globalAgentDefinitions(
+      AgentRegistry boot,
+      DataLayout data,
+      JobRuntime runtime,
+      DefinitionChecks checks,
+      AgentGuidance guidance) {
+    return new ReloadingGlobalAgents(
+        data, runtime.knownTools(), checks, guidance, boot, new ClasspathDefinitions());
+  }
+
   /** Connects logical role selection to the same model profiles used by the running harness. */
   @Bean
   public AgentGuidance agentGuidance(
@@ -1191,11 +1208,10 @@ public class AgentsConfig {
    * The layer in front of {@link #agentRegistry}: what one caller, asking on behalf of one project,
    * sees on top of the boot set.
    *
-   * <p>Built over the same registry {@link #agentRegistry} already validated and never a second
-   * read of it — a project's own tier is what {@link DefinitionResolver} reads fresh, on demand,
-   * per project. {@code runtime.knownTools()} and {@link #REQUIRED} are the same two sets {@link
-   * #agentRegistry} was built with, so a project's definitions are judged by the same rules the
-   * boot set was.
+   * <p>Built over immutable global snapshots. Startup validates the required seed; current operator
+   * overrides and project tiers are read on demand, per project. {@code runtime.knownTools()} and
+   * {@link #REQUIRED} are the same two sets {@link #agentRegistry} was built with, so a project's
+   * definitions are judged by the same rules the boot set was.
    *
    * <p><b>{@code projects::exists} and not {@code projects::find}.</b> {@link
    * DefinitionResolver#forCaller} asks this once per cache miss for exactly one bit — does this id
@@ -1271,10 +1287,11 @@ public class AgentsConfig {
       PresenceRegistry presences,
       ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
       ObjectProvider<ProjectConfigurations> configurations,
-      ApplicationResources applicationResources) {
+      ApplicationResources applicationResources,
+      GlobalAgentDefinitions globals) {
     DefinitionResolver resolver =
         new DefinitionResolver(
-            agentRegistry,
+            globals,
             data,
             projects::exists,
             runtime.knownTools(),
@@ -1388,7 +1405,8 @@ public class AgentsConfig {
       DefinitionChecks checks,
       PresenceRegistry presences,
       ObjectProvider<io.aeyer.plowshare.server.personal.PersonalSpaces> personal,
-      ApplicationResources applicationResources) {
+      ApplicationResources applicationResources,
+      GlobalAgentDefinitions globals) {
     DefinitionSource shipped =
         new ClasspathDefinitions(ClasspathDefinitions.SHIPPED_ORCHESTRATIONS);
     List<OrchestrationRegistry.Layer> boot =
@@ -1404,7 +1422,8 @@ public class AgentsConfig {
         OrchestrationRegistry.readRequired(boot, runtime.knownTools(), agentRegistry, checks);
     OrchestrationResolver resolver =
         new OrchestrationResolver(
-            bootSet,
+            new ReloadingGlobalOrchestrations(
+                data, globals, runtime.knownTools(), checks, bootSet, shipped),
             data,
             projects::exists,
             runtime.knownTools(),
@@ -1439,8 +1458,12 @@ public class AgentsConfig {
    */
   @Bean
   public DefinitionWriter definitionWriter(
-      AgentRegistry agentRegistry, DataLayout data, JobRuntime runtime, DefinitionChecks checks) {
-    var writer = new DefinitionWriter(agentRegistry, data, runtime.knownTools(), REQUIRED, checks);
+      GlobalAgentDefinitions globals,
+      DataLayout data,
+      JobRuntime runtime,
+      DefinitionChecks checks) {
+    var writer =
+        new DefinitionWriter(globals::current, data, runtime.knownTools(), REQUIRED, checks);
     writer.useScopedTools(runtime.scopedTools());
     return writer;
   }
@@ -1455,7 +1478,7 @@ public class AgentsConfig {
    * between two directories an operator filled in by hand. Called beside the layering rather than
    * folded into it, so this is a boot-time refusal naming both paths rather than a quiet pick.
    */
-  private static void requireNoClash(FilesystemDefinitions agents, FilesystemDefinitions bots) {
+  static void requireNoClash(DefinitionSource agents, DefinitionSource bots) {
     Map<String, String> byName = new LinkedHashMap<>();
     for (DefinitionSource.Definition definition : agents.list()) {
       byName.put(definition.name(), definition.origin());
@@ -1691,8 +1714,11 @@ public class AgentsConfig {
    */
   @Bean
   public Scribe scribe(
-      LlmDispatcher dispatcher, Archive archive, ObjectProvider<AgentRegistry> agents) {
-    return new Scribe(dispatcher, archive, agents::getIfAvailable);
+      LlmDispatcher dispatcher,
+      Archive archive,
+      ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals) {
+    return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents));
   }
 
   /**
@@ -1710,8 +1736,15 @@ public class AgentsConfig {
       PromotionQueue queue,
       JobRuntime runtime,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction) {
-    return new Curator(archive, proposals, queue, runtime, agents::getIfAvailable, compaction);
+    return new Curator(
+        archive,
+        proposals,
+        queue,
+        runtime,
+        GlobalAgentSnapshots.supply(globals, agents),
+        compaction);
   }
 
   /**
@@ -1825,6 +1858,7 @@ public class AgentsConfig {
       LlmProperties llm,
       ConversationStore conversations,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<Learning> learning,
       ObjectProvider<Citing> citing,
       ObjectProvider<io.aeyer.plowshare.server.agents.digests.Digester> digester,
@@ -1839,7 +1873,7 @@ public class AgentsConfig {
             // than the one an operator is editing. A miss is the registry's
             // to report -- get(...) throws, summarise catches, and the turn
             // runs with its whole history.
-            () -> agents.getObject().get(Compaction.FOLDER),
+            () -> GlobalAgentSnapshots.supply(globals, agents).get().get(Compaction.FOLDER),
             turns,
             compactions,
             entries,
@@ -1884,8 +1918,15 @@ public class AgentsConfig {
       Archive archive,
       Scribe scribe,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests) {
-    return new Learner(models, entries, conversations, archive, scribe, agents::getIfAvailable)
+    return new Learner(
+            models,
+            entries,
+            conversations,
+            archive,
+            scribe,
+            GlobalAgentSnapshots.supply(globals, agents))
         .withProvenance(digests.getIfAvailable());
   }
 }

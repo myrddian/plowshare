@@ -9,7 +9,7 @@ import java.util.function.Supplier;
 public interface AgentDelegates {
   /**
    * Current descriptions after source/read authorization; this never starts a child. A null home
-   * requests startup metadata without an execution identity.
+   * requests current global metadata without an execution identity.
    */
   AgentRegistry visible(Home home, String session, String account);
 

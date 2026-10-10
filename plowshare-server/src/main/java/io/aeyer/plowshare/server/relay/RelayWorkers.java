@@ -31,6 +31,9 @@ public final class RelayWorkers
   private final RelaySubscriptionWork work;
   private final RelayPublicationSignals signals;
   private final RelayWorkerProperties properties;
+  private final RelayWorkerBindings bindings;
+  private final ConcurrentHashMap<RelayWorkerProperties.Project, FutureTask<?>> watchers =
+      new ConcurrentHashMap<>();
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ConcurrentHashMap<WorkerKey, Worker> workers = new ConcurrentHashMap<>();
   private final AtomicInteger workerCount = new AtomicInteger();
@@ -43,6 +46,16 @@ public final class RelayWorkers
       RelaySubscriptionWork work,
       RelayPublicationSignals signals,
       RelayWorkerProperties properties) {
+    this(projects, work, signals, properties, properties::getProjects);
+  }
+
+  public RelayWorkers(
+      ProjectWorkspaces projects,
+      RelaySubscriptionWork work,
+      RelayPublicationSignals signals,
+      RelayWorkerProperties properties,
+      RelayWorkerBindings bindings) {
+    this.bindings = Objects.requireNonNull(bindings);
     this.projects = Objects.requireNonNull(projects);
     this.work = Objects.requireNonNull(work);
     this.signals = Objects.requireNonNull(signals);
@@ -58,7 +71,55 @@ public final class RelayWorkers
   /** Idempotent start; restored configuration reuses the persisted subscription offsets. */
   public void start() {
     if (closed.get() || !started.compareAndSet(false, true)) return;
-    for (var binding : properties.getProjects()) executor.submit(() -> watch(binding));
+    executor.submit(this::supervise);
+  }
+
+  private void supervise() {
+    boolean failed = false;
+    try {
+      while (!closed.get() && !Thread.currentThread().isInterrupted()) {
+        try {
+          var desired = new HashSet<>(bindings.current());
+          if (desired.size() > 32
+              || desired.stream().map(RelayWorkerProperties.Project::project).distinct().count()
+                  != desired.size())
+            throw new IllegalStateException("Invalid Relay worker binding snapshot");
+          for (var entry : Map.copyOf(watchers).entrySet()) {
+            if (!desired.contains(entry.getKey()) || entry.getValue().isDone()) {
+              entry.getValue().cancel(true);
+              watchers.remove(entry.getKey(), entry.getValue());
+            }
+          }
+          for (var binding : desired) {
+            if (watchers.containsKey(binding)) continue;
+            var task =
+                new FutureTask<Void>(
+                    () -> {
+                      watch(binding);
+                      return null;
+                    });
+            watchers.put(binding, task);
+            if (closed.get()) task.cancel(true);
+            else executor.execute(task);
+          }
+          failed = false;
+        } catch (RuntimeException unavailable) {
+          if (!failed) LOG.warn("Relay worker enrollment paused; binding authority unavailable");
+          failed = true;
+          stopWatchers();
+        }
+        TimeUnit.NANOSECONDS.sleep(properties.getConfigurationInterval().toNanos());
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    } finally {
+      stopWatchers();
+    }
+  }
+
+  private void stopWatchers() {
+    watchers.values().forEach(task -> task.cancel(true));
+    watchers.clear();
   }
 
   private void watch(RelayWorkerProperties.Project binding) {

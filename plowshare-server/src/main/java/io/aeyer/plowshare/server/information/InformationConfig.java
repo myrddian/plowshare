@@ -219,6 +219,7 @@ public class InformationConfig {
       ObjectProvider<LogStages> logStages,
       ObjectProvider<Harness> harness,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
       ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
@@ -233,7 +234,11 @@ public class InformationConfig {
     catalogue.useConfiguration(
         () ->
             InformationConfiguration.fingerprints(
-                llm, properties, agents.getIfAvailable(), dual, counters));
+                llm,
+                properties,
+                GlobalAgentSnapshots.supply(globals, agents).get(),
+                dual,
+                counters));
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
@@ -262,7 +267,7 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE),
-            agents::getIfAvailable);
+            GlobalAgentSnapshots.supply(globals, agents));
     gates.useUsageOwners(
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));

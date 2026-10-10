@@ -3,19 +3,17 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.CallerAccess;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.api.ResumeRunRequest;
 import io.aeyer.plowshare.server.api.StartedJob;
 import io.aeyer.plowshare.server.archive.Conversations;
-import io.aeyer.plowshare.server.requests.RequestedAgent;
 import io.aeyer.plowshare.server.requests.RequestedSession;
 import io.aeyer.plowshare.server.requests.RequestedTurnCap;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.beans.factory.ObjectProvider;
 
 /**
  * {@code conversation.resume} — continue a run that stopped for want of allowance, and answer with
@@ -55,22 +53,22 @@ public final class ConversationResumeHandler implements FrameHandler {
 
   private final CallerAccess access;
   private final Conversations rules;
-  private final ObjectProvider<AgentRegistry> agents;
+  private final ConversationDefinitions definitions;
   private final Turn speaking;
 
   /**
    * @param rules the service that decides which agent continues
-   * @param agents the registry {@link RequestedAgent} resolves a name through
+   * @param definitions the conversation-scoped definition authority
    * @param speaking the one service both surfaces start a turn through
    */
   public ConversationResumeHandler(
       Conversations rules,
-      ObjectProvider<AgentRegistry> agents,
+      ConversationDefinitions definitions,
       Turn speaking,
       CallerAccess access) {
     this.access = access;
     this.rules = Objects.requireNonNull(rules, "rules");
-    this.agents = Objects.requireNonNull(agents, "agents");
+    this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.speaking = Objects.requireNonNull(speaking, "speaking");
   }
 
@@ -84,8 +82,7 @@ public final class ConversationResumeHandler implements FrameHandler {
             "the id POST /v1/conversations answered with. Nothing was started.");
     ResumeRunRequest asked =
         Payloads.as(payload, ResumeRunRequest.class, FrameTypes.CONVERSATION_RESUME);
-    AgentDefinition definition =
-        RequestedAgent.toRun(agents, rules.whoToContinueAs(conversation, asked.agent()));
+    String named = rules.whoToContinueAs(conversation, asked.agent());
     TurnCap turnCap = RequestedTurnCap.in(asked.maxTurns(), asked.noTurnCap(), "this run");
     String session = RequestedSession.in(asked.session());
     access.requireSession(session, asking.handle());
@@ -94,6 +91,8 @@ public final class ConversationResumeHandler implements FrameHandler {
       throw new io.aeyer.plowshare.server.faults.CallerFault(
           "Global conversations are read-only; open Personal or a project");
     access.requireWork(home.project(), asking.handle());
+    AgentDefinition definition =
+        definitions.requireAgent(named, definitions.callerForConversation(conversation, session));
     String job = speaking.resume(conversation, definition, session, turnCap, asked.maxModelCalls());
     return new Outcome(Code.ACCEPTED, null, new StartedJob(job, definition.name()));
   }

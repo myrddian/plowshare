@@ -453,7 +453,7 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
         matches[0].internal_name,
     )
     print(
-        "Review the paused schedule and configure service-owned Relay processing before resuming it."
+        "Review the paused schedule and verify service-owned Relay worker enrollment before resuming it."
     )
 
 

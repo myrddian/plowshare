@@ -2,6 +2,8 @@ package io.aeyer.plowshare.server.harness;
 
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.GlobalAgentDefinitions;
+import io.aeyer.plowshare.server.agents.GlobalAgentSnapshots;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.llm.LlmProperties;
@@ -45,8 +47,12 @@ public class HarnessConfig {
    */
   @Bean(destroyMethod = "close")
   public StuckTrapFactory stuckTrap(
-      LlmDispatcher dispatcher, ObjectProvider<AgentRegistry> agents) {
-    return new StuckTrapFactory(dispatcher, () -> agents.getObject().get(StuckTrapFactory.ADVISOR));
+      LlmDispatcher dispatcher,
+      ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals) {
+    return new StuckTrapFactory(
+        dispatcher,
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(StuckTrapFactory.ADVISOR));
   }
 
   /**
@@ -57,9 +63,12 @@ public class HarnessConfig {
    */
   @Bean(destroyMethod = "close")
   public ModelCallValidator callValidator(
-      LlmDispatcher dispatcher, ObjectProvider<AgentRegistry> agents) {
+      LlmDispatcher dispatcher,
+      ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals) {
     return new ModelCallValidator(
-        dispatcher, () -> agents.getObject().get(ModelCallValidator.AGENT));
+        dispatcher,
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCallValidator.AGENT));
   }
 
   /**
@@ -74,10 +83,11 @@ public class HarnessConfig {
   @Bean
   public ModelAcceptanceChecker acceptanceChecker(
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<JobRuntime> runtime,
       ObjectProvider<io.aeyer.plowshare.server.agents.Compaction> logs) {
     return new ModelAcceptanceChecker(
-        name -> agents.getObject().find(name),
+        name -> GlobalAgentSnapshots.supply(globals, agents).get().find(name),
         new ModelAcceptanceChecker.Runner() {
           @Override
           public String run(
@@ -153,7 +163,11 @@ public class HarnessConfig {
    */
   @Bean(destroyMethod = "close")
   public ModelCommandJudge commandJudge(
-      LlmDispatcher dispatcher, ObjectProvider<AgentRegistry> agents) {
-    return new ModelCommandJudge(dispatcher, () -> agents.getObject().get(ModelCommandJudge.AGENT));
+      LlmDispatcher dispatcher,
+      ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals) {
+    return new ModelCommandJudge(
+        dispatcher,
+        () -> GlobalAgentSnapshots.supply(globals, agents).get().get(ModelCommandJudge.AGENT));
   }
 }

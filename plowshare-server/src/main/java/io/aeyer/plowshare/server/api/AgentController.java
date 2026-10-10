@@ -297,14 +297,9 @@ public class AgentController {
    * <p>A {@link DefinedAgent}: the freshly resolved {@link AgentView}, judged by the identical
    * {@code DefinitionChecks} {@link DefinitionWriter} already applied to the same candidate (see
    * {@code AgentsConfig.definitionChecks}'s own javadoc for why the two cannot disagree), beside
-   * {@link DefinedAgent#restartRequired}. <b>A write to the global tier has no such view</b>:
-   * {@link DefinitionResolver}'s own top javadoc is explicit that the boot set is never rebuilt,
-   * only project tiers are, so a definition written to {@code global/bots/} lands on disk correctly
-   * and is not visible to this running process until it restarts. {@link Definitions.Defined}
-   * carries either a resolved definition or the reason there is none, never both and never neither,
-   * so this method cannot render a stale view for that case by forgetting to branch — there is
-   * nothing there to render. See {@link DefinedAgent}'s own javadoc for why the fact is a boolean
-   * field and not a status code or a sentence.
+   * {@link DefinedAgent#restartRequired}. Global and project writes are resolved after their owning
+   * snapshot is invalidated, so a successful write answers the current definition without a
+   * restart. The legacy restart field remains in the wire contract for compatibility.
    */
   public ResponseEntity<DefinedAgent> define(DefineAgentRequest request) {
     return define(request, null);

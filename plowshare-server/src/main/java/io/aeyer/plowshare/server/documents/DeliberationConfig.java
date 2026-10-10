@@ -2,6 +2,8 @@ package io.aeyer.plowshare.server.documents;
 
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.GlobalAgentDefinitions;
+import io.aeyer.plowshare.server.agents.GlobalAgentSnapshots;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
@@ -65,6 +67,7 @@ public class DeliberationConfig {
       CitationStore citations,
       JobRuntime runtime,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       Compaction compaction,
       DocumentsProperties props) {
 
@@ -86,7 +89,7 @@ public class DeliberationConfig {
         retrieval,
         citations,
         runtime,
-        agents::getIfAvailable,
+        GlobalAgentSnapshots.supply(globals, agents),
         Clock.systemUTC(),
         compaction);
   }

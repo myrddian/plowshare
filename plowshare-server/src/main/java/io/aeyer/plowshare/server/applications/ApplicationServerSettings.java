@@ -15,9 +15,10 @@ import java.util.*;
 public record ApplicationServerSettings(
     List<RelayToolDefinition> tools,
     List<RelayPortProperties.Binding> ports,
-    List<Provider> providers) {
+    List<Provider> providers,
+    Optional<Worker> worker) {
   public static final ApplicationServerSettings EMPTY =
-      new ApplicationServerSettings(List.of(), List.of(), List.of());
+      new ApplicationServerSettings(List.of(), List.of(), List.of(), Optional.empty());
   private static final ObjectMapper JSON =
       com.fasterxml.jackson.databind.json.JsonMapper.builder()
           .disable(com.fasterxml.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS)
@@ -25,13 +26,15 @@ public record ApplicationServerSettings(
           .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
           .enable(
               DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
-              DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+              DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
+              DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .build();
 
   public ApplicationServerSettings {
     tools = List.copyOf(tools);
     ports = List.copyOf(ports);
     providers = List.copyOf(providers);
+    Objects.requireNonNull(worker);
     if (tools.size() > 128
         || ports.size() > 128
         || providers.size() > 32
@@ -39,6 +42,22 @@ public record ApplicationServerSettings(
         || providers.stream().map(Provider::provider).distinct().count() != providers.size()
         || new HashSet<>(ports).size() != ports.size())
       throw new IllegalArgumentException("Invalid Application server declarations");
+  }
+
+  public ApplicationServerSettings(
+      List<RelayToolDefinition> tools,
+      List<RelayPortProperties.Binding> ports,
+      List<Provider> providers) {
+    this(tools, ports, providers, Optional.empty());
+  }
+
+  /** Explicit Application execution identity, never inferred from a manager or connected user. */
+  public record Worker(int version, String account) {
+    public Worker {
+      if (version != 1)
+        throw new IllegalArgumentException("Unsupported Application worker version");
+      new io.aeyer.plowshare.server.relay.RelayWorkerProperties.Project("validation", account);
+    }
   }
 
   public record Provider(String provider, String account, String prefix, int leaseSeconds) {
@@ -163,7 +182,7 @@ public record ApplicationServerSettings(
       try (var entries = Files.list(directory)) {
         if (entries.anyMatch(
             p ->
-                !Set.of("tools.json", "ports.json", "README.md")
+                !Set.of("tools.json", "ports.json", "relay-workers.json", "README.md")
                         .contains(p.getFileName().toString())
                     || Files.isSymbolicLink(p)
                     || !Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)))
@@ -176,7 +195,11 @@ public record ApplicationServerSettings(
       return new ApplicationServerSettings(
           tools.bindings().stream().map(t -> t.bind(project)).toList(),
           ports.bindings().stream().map(p -> p.bind(project)).toList(),
-          tools.providers());
+          tools.providers(),
+          Files.notExists(directory.resolve("relay-workers.json"), LinkOption.NOFOLLOW_LINKS)
+              ? Optional.empty()
+              : Optional.of(
+                  readRequiredFile(directory.resolve("relay-workers.json"), Worker.class)));
     } catch (IOException | IllegalArgumentException | NullPointerException invalid) {
       throw new CallerFault("Invalid Application server/ configuration");
     }
@@ -184,6 +207,10 @@ public record ApplicationServerSettings(
 
   private static <T> T readFile(Path file, Class<T> type, T absent) throws IOException {
     if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) return absent;
+    return readRequiredFile(file, type);
+  }
+
+  private static <T> T readRequiredFile(Path file, Class<T> type) throws IOException {
     if (Files.isSymbolicLink(file)
         || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
         || Files.size(file) > 65536)
@@ -191,7 +218,7 @@ public record ApplicationServerSettings(
     try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
       byte[] bytes = input.readNBytes(65537);
       if (bytes.length > 65536) throw new IOException("Declaration exceeds 64 KiB");
-      return JSON.readValue(bytes, type);
+      return Objects.requireNonNull(JSON.readValue(bytes, type), "Declaration cannot be null");
     }
   }
 }

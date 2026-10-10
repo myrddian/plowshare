@@ -100,6 +100,20 @@ workspace grants cannot exceed the admitted caller's grants. Children keep their
 own tools, inherit the account/home/session and share the tree's budget and
 cancellation while recording into separate conversations.
 
+Conversation resume, projection and cost preview resolve against the retained
+conversation's project and owner. WebSocket inspections can use an eligible rooted
+session; resume uses the requested session. REST inspections are sessionless.
+Read-only inspection can describe unexported agents; resume keeps exported admission
+and current work/session checks. A missing project refuses instead of becoming global.
+Historical projections retain the recorded system block when available.
+
+Operator files in `global/agents/`, `global/bots/` and `global/orchestrations/` refresh
+on the next resolution, including edits that preserve file size/timestamps. Global
+authoring returns the current definition immediately. Required definitions are still
+validated at startup, and new runtime snapshots apply the same model/tool/graph checks.
+Classpath resources belong to the installed release. Existing admitted work keeps its
+normal pinned definition; editing a file does not change a running workflow.
+
 ## The layers of authority
 
 | Layer | What it controls |

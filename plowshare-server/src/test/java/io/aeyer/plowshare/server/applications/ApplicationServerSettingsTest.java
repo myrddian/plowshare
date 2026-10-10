@@ -44,4 +44,31 @@ class ApplicationServerSettingsTest {
     Files.writeString(root.resolve("server/tools.json"), " ".repeat(65537));
     assertThrows(CallerFault.class, () -> ApplicationServerSettings.read("fixture", root));
   }
+
+  @Test
+  void worker_identity_is_optional_explicit_and_strictly_validated() throws Exception {
+    Files.createDirectory(root.resolve("server"));
+    assertTrue(ApplicationServerSettings.read("fixture", root).worker().isEmpty());
+    Path file = root.resolve("server/relay-workers.json");
+    Files.writeString(file, "{\"version\":1,\"account\":\"service\"}");
+    assertEquals(
+        "service",
+        ApplicationServerSettings.read("fixture", root).worker().orElseThrow().account());
+    for (String text :
+        java.util.List.of(
+            "{}",
+            "null",
+            "{\"version\":2,\"account\":\"service\"}",
+            "{\"version\":1,\"account\":\"\"}",
+            "{\"version\":\"1\",\"account\":\"service\"}",
+            "{\"version\":1,\"account\":\"service\",\"role\":\"ADMIN\"}")) {
+      Files.writeString(file, text);
+      assertThrows(CallerFault.class, () -> ApplicationServerSettings.read("fixture", root));
+    }
+    Files.delete(file);
+    var outside =
+        Files.writeString(root.resolve("outside.json"), "{\"version\":1,\"account\":\"service\"}");
+    Files.createSymbolicLink(file, outside);
+    assertThrows(CallerFault.class, () -> ApplicationServerSettings.read("fixture", root));
+  }
 }

@@ -151,6 +151,9 @@ class ConversationFramesTest {
     when(callers.readAgent(any(), any()))
         .thenAnswer(
             asked -> RequestedAgent.toRead(booted, booted::exportedNames, asked.getArgument(0)));
+    when(callers.requireAgent(any(), any()))
+        .thenAnswer(
+            asked -> RequestedAgent.toRun(booted, booted::exportedNames, asked.getArgument(0)));
     Tokenizer tokenizer = new RatioTokenizer(RatioTokenizer.DEFAULT_CHARACTERS_PER_TOKEN);
     ConversationsProperties properties = configured();
 
@@ -167,7 +170,7 @@ class ConversationFramesTest {
                 entries,
                 runtime,
                 speaking,
-                agents,
+                callers,
                 properties,
                 compaction,
                 tokenizer,
@@ -189,7 +192,6 @@ class ConversationFramesTest {
                         entries,
                         runtime,
                         speaking,
-                        agents,
                         properties,
                         compaction,
                         tokenizer,
@@ -1138,8 +1140,8 @@ class ConversationFramesTest {
    * <p><b>Measured before it was written:</b> a laptop's {@code .plowshare/bots/cathy.md} answered
    * every turn of {@code cnv_313C33636A926A69} and this frame refused her by name, because it
    * looked her up in the boot set — which no client tier is ever in. A run and {@code agent.list}
-   * both resolve for the caller; this now does too. The REST route keeps the boot set, for {@code
-   * AgentController.agents}' reason: it names no session and must not reach one.
+   * both resolve for the caller; this now does too. The REST route uses the conversation's
+   * project/account but no session, so it cannot reach resources held only by this client.
    */
   @Test
   void a_bot_the_asking_session_s_machine_defines_is_priced_on_the_socket() {

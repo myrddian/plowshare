@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.ws;
 
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.CallerAccess;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Compaction;
@@ -16,7 +15,6 @@ import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,7 +48,6 @@ public class ConversationFrames implements FrameArea {
   private final EntryStore entries;
   private final JobRuntime runtime;
   private final Turn speaking;
-  private final ObjectProvider<AgentRegistry> agents;
   private final ConversationsProperties properties;
   private final Compaction compaction;
   private final Tokenizer tokenizer;
@@ -66,7 +63,6 @@ public class ConversationFrames implements FrameArea {
    * @param entries the store a chat, a trajectory and a search are read from
    * @param runtime what assembles the schemas a definition is really offered
    * @param speaking the service a stopped run is continued through
-   * @param agents the registry an agent name is resolved through
    * @param properties the operator's own defaults, which decide an allowance no caller named
    * @param compaction what assembles a projection, and never sends one
    * @param tokenizer how this deployment counts tokens
@@ -81,7 +77,6 @@ public class ConversationFrames implements FrameArea {
       EntryStore entries,
       JobRuntime runtime,
       Turn speaking,
-      ObjectProvider<AgentRegistry> agents,
       ConversationsProperties properties,
       Compaction compaction,
       Tokenizer tokenizer,
@@ -96,7 +91,6 @@ public class ConversationFrames implements FrameArea {
     this.entries = Objects.requireNonNull(entries, "entries");
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.speaking = Objects.requireNonNull(speaking, "speaking");
-    this.agents = Objects.requireNonNull(agents, "agents");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.compaction = Objects.requireNonNull(compaction, "compaction");
     this.tokenizer = Objects.requireNonNull(tokenizer, "tokenizer");
@@ -145,12 +139,11 @@ public class ConversationFrames implements FrameArea {
                     rules, turns, runtime, callers, tokenizer, compaction)),
             Map.entry(
                 FrameTypes.CONVERSATION_PROJECTION,
-                new ConversationProjectionHandler(rules, turns, agents, compaction)
-                    .withRules(runtime, callers)),
+                new ConversationProjectionHandler(rules, turns, callers, compaction, runtime)),
             Map.entry(FrameTypes.CONVERSATION_SEARCH, new ConversationSearchHandler(entries)),
             Map.entry(
                 FrameTypes.CONVERSATION_RESUME,
-                new ConversationResumeHandler(rules, agents, speaking, access)));
+                new ConversationResumeHandler(rules, callers, speaking, access)));
     if (information == null) return handlers;
     Map<String, FrameHandler> secured = new java.util.LinkedHashMap<>();
     handlers.forEach(

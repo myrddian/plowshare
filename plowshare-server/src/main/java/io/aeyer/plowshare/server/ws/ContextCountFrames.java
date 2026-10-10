@@ -2,8 +2,8 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageReports;
@@ -26,14 +26,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class ContextCountFrames implements FrameArea {
   private final UsageReports access;
-  private final Callers callers;
+  private final ConversationDefinitions callers;
   private final Compaction compaction;
   private final JobRuntime runtime;
   private final LlmDispatcher models;
 
   public ContextCountFrames(
       UsageReports access,
-      Callers callers,
+      ConversationDefinitions callers,
       Compaction compaction,
       JobRuntime runtime,
       LlmDispatcher models) {

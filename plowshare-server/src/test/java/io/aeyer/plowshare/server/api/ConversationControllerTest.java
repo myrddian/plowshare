@@ -28,6 +28,8 @@ import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
+import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
@@ -148,6 +150,16 @@ class ConversationControllerTest {
     // The real registry and not a mock, on AgentControllerTest's reasoning:
     // it validates the set it is given exactly as the loader does, so a
     // fixture graph that could not exist at boot cannot be built here.
+    var booted = new AgentRegistry(Map.of("talker", agent(), "shadow", privately("shadow")));
+    var definitions = mock(ConversationDefinitions.class);
+    when(definitions.callerForConversation(any(), any()))
+        .thenAnswer(asked -> new DefinitionResolver.Caller(null, asked.getArgument(1)));
+    when(definitions.readAgent(any(), any()))
+        .thenAnswer(
+            asked -> RequestedAgent.toRead(booted, booted::exportedNames, asked.getArgument(0)));
+    when(definitions.requireAgent(any(), any()))
+        .thenAnswer(
+            asked -> RequestedAgent.toRun(booted, booted::exportedNames, asked.getArgument(0)));
     mvc =
         MockMvcBuilders.standaloneSetup(
                 new ConversationController(
@@ -157,9 +169,7 @@ class ConversationControllerTest {
                     entries,
                     runtime,
                     speaking,
-                    providerOf(
-                        new AgentRegistry(
-                            Map.of("talker", agent(), "shadow", privately("shadow")))),
+                    definitions,
                     configured(),
                     folding,
                     // The fallback, which is what a deployment with no real
