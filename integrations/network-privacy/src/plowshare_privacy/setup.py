@@ -258,6 +258,12 @@ def bind_provider(setup: Setup, account: str) -> None:
                     raise ValueError("Invalid application account declaration")
                 value["account"] = account
         path.write_text(json.dumps(row, indent=2) + "\n")
+    worker_path = setup.output / "application/server/relay-workers.json"
+    if worker_path.exists():
+        worker = object_fields(load_json(worker_path), {"version", "account"})
+        integer(worker["version"], 1, 1)
+        worker["account"] = account
+        worker_path.write_text(json.dumps(worker, indent=2) + "\n")
 
 
 async def provision(setup: Setup, client: SetupClient) -> None:

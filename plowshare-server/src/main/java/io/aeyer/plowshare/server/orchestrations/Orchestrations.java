@@ -771,6 +771,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
             run.conductorConversation(),
             "The person explicitly requested a retry after the transient failure. Continue the original task from its recorded history.",
             account,
+            liveSession(run.callerSession()),
             outcome -> {
               if (outcome.ending() == Outcome.Ending.ANSWERED) {
                 try {
@@ -1815,6 +1816,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
             run.conductorConversation(),
             utterance,
             run.callerHandle(),
+            liveSession(run.callerSession()),
             outcome -> delegateEnded(run.id(), agent, approval.id(), outcome, delegate.get().id()));
         return true;
       } catch (Turn.Refused refused) {

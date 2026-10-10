@@ -50,7 +50,7 @@ class WorkspaceApplicationResourcesTest {
     assertThrows(
         IllegalArgumentException.class, () -> resources.directory(7L, ".plowshare/agents"));
     for (String name :
-        List.of("", "agents", "bots", "skills", "orchestrations", "hooks", "schedules"))
+        List.of("", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server"))
       assertEquals(Optional.of(root.resolve(name)), resources.directory(7L, name));
   }
 
@@ -89,5 +89,20 @@ class WorkspaceApplicationResourcesTest {
     Path excluded = Files.writeString(directory.resolve("private.md"), "private");
     when(projects.effectiveExclusions(any())).thenReturn(List.of(excluded));
     assertThrows(WorkspaceRefusedException.class, () -> resources.directory(7L, "agents"));
+  }
+
+  @Test
+  void worker_authority_files_respect_the_application_workspace_fence() throws Exception {
+    Path server = Files.createDirectories(root.resolve("server"));
+    Path worker =
+        Files.writeString(
+            server.resolve("relay-workers.json"), "{\"version\":1,\"account\":\"service\"}");
+    assertEquals(Optional.of(server), resources.directory(7L, "server"));
+    when(projects.effectiveExclusions(any())).thenReturn(List.of(worker));
+    assertThrows(WorkspaceRefusedException.class, () -> resources.directory(7L, "server"));
+    when(projects.effectiveExclusions(any())).thenReturn(List.of());
+    Files.delete(worker);
+    Files.createSymbolicLink(worker, Files.writeString(root.resolve("private.json"), "private"));
+    assertThrows(WorkspaceRefusedException.class, () -> resources.directory(7L, "server"));
   }
 }

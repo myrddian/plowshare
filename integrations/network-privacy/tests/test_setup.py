@@ -152,6 +152,10 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
             (self.setup.output / "application/plowshare.json").read_text()
         )
         self.assertEqual(manifest["executionAccount"], PRINCIPAL)
+        worker = json.loads(
+            (self.setup.output / "application/server/relay-workers.json").read_text()
+        )
+        self.assertEqual(worker, {"version": 1, "account": PRINCIPAL})
         self.assertEqual(
             manifest["toolGrants"],
             [{"toolScope": "network_scanning", "agent": "privacy_coordinator"}],

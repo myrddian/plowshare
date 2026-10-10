@@ -75,7 +75,7 @@ import org.springframework.stereotype.Service;
  * a home for its own read-side helpers should take this one with it.
  */
 @Service
-public final class Callers implements WorkCallers, AgentDelegates {
+public final class Callers implements WorkCallers, AgentDelegates, ConversationDefinitions {
 
   private io.aeyer.plowshare.server.archive.ConversationStore conversations;
   private io.aeyer.plowshare.server.session.SessionRegistry sessions;
@@ -206,8 +206,12 @@ public final class Callers implements WorkCallers, AgentDelegates {
    * ArchiveException} {@link Turn#speak} would have, merely sooner.
    */
   public DefinitionResolver.Caller callerForConversation(String conversation, String session) {
+    var home = turns.homeOf(conversation);
+    var id = RequestedProjectId.of(projects, home);
+    if (!home.isGlobal() && id == null)
+      throw new CallerFault("the conversation's project is unavailable");
     return new DefinitionResolver.Caller(
-        RequestedProjectId.of(projects, turns.homeOf(conversation)),
+        id,
         session,
         conversations == null ? null : conversations.ownerOf(conversation).orElse(null));
   }

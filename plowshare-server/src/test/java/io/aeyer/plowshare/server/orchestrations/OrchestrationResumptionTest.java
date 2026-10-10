@@ -229,12 +229,18 @@ class OrchestrationResumptionTest {
     var callback = new java.util.concurrent.atomic.AtomicReference<Consumer<Outcome>>();
     doAnswer(
             call -> {
-              callback.set(call.getArgument(5));
+              callback.set(call.getArgument(6));
               return "job_child";
             })
         .when(voice)
         .resumeDelegate(
-            eq("cnv_child"), eq("worker"), eq("cnv_conductor"), anyString(), eq("owner"), any());
+            eq("cnv_child"),
+            eq("worker"),
+            eq("cnv_conductor"),
+            anyString(),
+            eq("owner"),
+            eq("session"),
+            any());
     engine.resume(ask, "owner");
     verify(voice, never()).speak(any(), any(), any(), any(), any(), any());
     callback.get().accept(new Outcome(Outcome.Ending.ANSWERED, "recovered result", 1, 1, ""));

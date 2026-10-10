@@ -2,7 +2,6 @@ package io.aeyer.plowshare.server.api;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -124,7 +123,26 @@ class AgentDefinitionApiTest {
             mock(SessionChannel.class),
             session -> true,
             DefinitionChecks.NONE);
-    writer = new DefinitionWriter(bootSet, layout, TOOLS, Set.of(), DefinitionChecks.NONE);
+    var globals =
+        new io.aeyer.plowshare.server.agents.ReloadingGlobalAgents(
+            layout,
+            TOOLS,
+            DefinitionChecks.NONE,
+            io.aeyer.plowshare.server.agents.AgentGuidance.NONE,
+            bootSet,
+            new io.aeyer.plowshare.server.agents.FilesystemDefinitions(data.resolve("shipped")));
+    resolver =
+        new DefinitionResolver(
+            globals,
+            layout,
+            id -> true,
+            TOOLS,
+            Set.of(),
+            mock(SessionChannel.class),
+            session -> true,
+            (id, session) -> true,
+            DefinitionChecks.NONE);
+    writer = new DefinitionWriter(globals::current, layout, TOOLS, Set.of(), DefinitionChecks.NONE);
 
     mvc = mvc();
   }
@@ -328,22 +346,22 @@ class AgentDefinitionApiTest {
    * restart required to demonstrate it.
    */
   @Test
-  void a_global_write_is_created_but_flagged_as_needing_a_restart() throws Exception {
+  void a_global_write_is_created_and_immediately_resolvable() throws Exception {
     mvc.perform(
             post("/v1/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(requestBody(null, "helper", definition("helper"), false)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.restartRequired").value(true))
+        .andExpect(jsonPath("$.restartRequired").value(false))
         .andExpect(jsonPath("$.agent.name").value("helper"))
-        .andExpect(jsonPath("$.agent.served").value(false));
+        .andExpect(jsonPath("$.agent.served").value(true));
 
     assertTrue(
         Files.exists(layout.botsFor(null).resolve("helper.md")),
-        "a global write must still land on disk even though this process cannot serve" + " it yet");
+        "a global write lands and resolves in the current process");
     mvc.perform(get("/v1/agents"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[*].name").value(not(hasItem("helper"))));
+        .andExpect(jsonPath("$[*].name").value(hasItem("helper")));
   }
 
   /**

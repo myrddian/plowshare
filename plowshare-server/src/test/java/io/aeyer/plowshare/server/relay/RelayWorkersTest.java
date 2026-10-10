@@ -133,4 +133,68 @@ class RelayWorkersTest {
                     new RelayWorkerProperties.Project("project", "operator"),
                     new RelayWorkerProperties.Project("project", "other"))));
   }
+
+  @Test
+  void live_enrollment_replaces_accounts_and_stops_on_removed_or_unavailable_authority()
+      throws Exception {
+    var projects = mock(ProjectWorkspaces.class);
+    when(projects.id("project")).thenReturn(9L);
+    var work = mock(RelaySubscriptionWork.class);
+    when(work.subscriptions(any())).thenReturn(List.of(SUB));
+    var processed = new java.util.concurrent.LinkedBlockingQueue<RelayProjectFiles.Access>();
+    when(work.process(any(), eq(SUB), anyString(), anyInt(), anyInt()))
+        .thenAnswer(
+            call -> {
+              processed.add(call.getArgument(0));
+              // Work owns offsets and admission; enrollment never creates or resets either.
+              return new RelaySubscriptionWork.Result(0, 0, null);
+            });
+    var stopped = new java.util.concurrent.LinkedBlockingQueue<Boolean>();
+    var signals = mock(RelayPublicationSignals.class);
+    when(signals.listen(SUB))
+        .thenAnswer(
+            call ->
+                new RelayPublicationSignals.Waiting() {
+                  public void await(Duration maximum) throws InterruptedException {
+                    new CountDownLatch(1).await();
+                  }
+
+                  public void close() {
+                    stopped.add(true);
+                  }
+                });
+    var declared = new AtomicReference<List<RelayWorkerProperties.Project>>(List.of());
+    var unavailable = new java.util.concurrent.atomic.AtomicBoolean();
+    var firstSnapshot = new CountDownLatch(1);
+    RelayWorkerBindings bindings =
+        () -> {
+          firstSnapshot.countDown();
+          if (unavailable.get()) throw new IllegalStateException("authority unavailable");
+          return declared.get();
+        };
+    try (var workers = new RelayWorkers(projects, work, signals, properties(), bindings)) {
+      workers.start();
+      assertTrue(firstSnapshot.await(3, TimeUnit.SECONDS));
+      verifyNoInteractions(work);
+      declared.set(List.of(new RelayWorkerProperties.Project("project", "service")));
+      assertEquals(
+          "service",
+          java.util.Objects.requireNonNull(processed.poll(3, TimeUnit.SECONDS)).account());
+      declared.set(List.of(new RelayWorkerProperties.Project("project", "replacement")));
+      assertNotNull(stopped.poll(3, TimeUnit.SECONDS));
+      assertEquals(
+          "replacement",
+          java.util.Objects.requireNonNull(processed.poll(3, TimeUnit.SECONDS)).account());
+      unavailable.set(true);
+      assertNotNull(stopped.poll(3, TimeUnit.SECONDS));
+      unavailable.set(false);
+      assertEquals(
+          "replacement",
+          java.util.Objects.requireNonNull(processed.poll(3, TimeUnit.SECONDS)).account());
+      declared.set(List.of());
+      assertNotNull(stopped.poll(3, TimeUnit.SECONDS));
+      assertTrue(processed.isEmpty());
+    }
+    verify(work, times(3)).process(any(), eq(SUB), anyString(), anyInt(), anyInt());
+  }
 }

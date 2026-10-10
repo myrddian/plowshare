@@ -49,7 +49,8 @@ public final class WorkspaceApplicationResources implements ApplicationResources
 
   @Override
   public Optional<Path> directory(Long id, String relative) {
-    if (!java.util.Set.of("", "agents", "bots", "skills", "orchestrations", "hooks", "schedules")
+    if (!java.util.Set.of(
+            "", "agents", "bots", "skills", "orchestrations", "hooks", "schedules", "server")
         .contains(relative))
       throw new IllegalArgumentException("Unknown Application resource directory");
     return root(id)

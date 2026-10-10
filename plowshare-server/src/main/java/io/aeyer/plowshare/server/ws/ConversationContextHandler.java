@@ -2,8 +2,8 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.api.ContextView;
 import io.aeyer.plowshare.server.archive.Conversations;
@@ -51,7 +51,7 @@ public final class ConversationContextHandler implements FrameHandler {
   private final Conversations rules;
   private final TurnStore turns;
   private final JobRuntime runtime;
-  private final Callers callers;
+  private final ConversationDefinitions callers;
   private final Tokenizer tokenizer;
   private final Compaction compaction;
 
@@ -67,7 +67,7 @@ public final class ConversationContextHandler implements FrameHandler {
       Conversations rules,
       TurnStore turns,
       JobRuntime runtime,
-      Callers callers,
+      ConversationDefinitions callers,
       Tokenizer tokenizer,
       Compaction compaction) {
     this.rules = Objects.requireNonNull(rules, "rules");

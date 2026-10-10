@@ -162,8 +162,18 @@ public class RelayConfiguration {
       ProjectWorkspaces projects,
       RelaySubscriptionWork work,
       RelayPublicationSignals signals,
+      RelayWorkerProperties properties,
+      RelayWorkerBindings bindings) {
+    return new RelayWorkers(projects, work, signals, properties, bindings);
+  }
+
+  @Bean
+  public RelayWorkerBindings relayWorkerBindings(
+      io.aeyer.plowshare.server.archive.ProjectCatalogue projects,
+      io.aeyer.plowshare.server.agents.ApplicationResources resources,
+      ProjectMembers members,
       RelayWorkerProperties properties) {
-    return new RelayWorkers(projects, work, signals, properties);
+    return new ApplicationRelayWorkerBindings(projects, resources, members, properties);
   }
 
   @Bean

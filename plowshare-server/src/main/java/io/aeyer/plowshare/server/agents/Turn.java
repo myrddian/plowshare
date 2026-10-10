@@ -502,6 +502,27 @@ public final class Turn {
         ended);
   }
 
+  /** Continue with the caller-validated retained session, so source and execution share a tier. */
+  public String speakToDelegate(
+      String child,
+      String conductorConversation,
+      AgentDefinition callee,
+      String utterance,
+      String callerHandle,
+      String sessionId,
+      Consumer<Outcome> ended) {
+    return speakToDelegate(
+        child,
+        conductorConversation,
+        callee,
+        utterance,
+        callerHandle,
+        sessionId,
+        null,
+        Speaker.harness(),
+        ended);
+  }
+
   /** Messaging supplies its own bounded continuation lease and approval attribution. */
   public String speakToDelegate(
       String child,
@@ -509,6 +530,20 @@ public final class Turn {
       AgentDefinition callee,
       String utterance,
       String callerHandle,
+      Budget given,
+      Speaker speaker,
+      Consumer<Outcome> ended) {
+    return speakToDelegate(
+        child, conductorConversation, callee, utterance, callerHandle, null, given, speaker, ended);
+  }
+
+  private String speakToDelegate(
+      String child,
+      String conductorConversation,
+      AgentDefinition callee,
+      String utterance,
+      String callerHandle,
+      String sessionId,
       Budget given,
       Speaker speaker,
       Consumer<Outcome> ended) {
@@ -569,7 +604,7 @@ public final class Turn {
       }
       Budget budget = external[0] == null ? conductor.budget() : external[0].budget();
       if (external[0] == null)
-        automaticLimits.budget(conductor.id(), budget, callee, null, Transcript.NONE);
+        automaticLimits.budget(conductor.id(), budget, callee, sessionId, Transcript.NONE);
       if (budget.exhausted()) {
         throw new Refused(
             "conversation "
@@ -590,7 +625,7 @@ public final class Turn {
               callee,
               utterance,
               delegate.home(),
-              null,
+              sessionId,
               budget,
               transcript,
               Origin.DELEGATION,

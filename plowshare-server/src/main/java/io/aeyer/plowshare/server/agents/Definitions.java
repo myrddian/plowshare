@@ -20,20 +20,12 @@ import org.springframework.stereotype.Service;
  * order the body is read in, the write, the cache invalidation that runs only when something
  * landed, and the one branch below that changes the shape of the answer rather than its status.
  *
- * <h2>The global tier, which is the dangerous half</h2>
+ * <h2>Read back the current tier</h2>
  *
- * <p>A write with no project <b>does not resolve at all</b>. {@link DefinitionResolver}'s own top
- * javadoc is explicit that the boot set is read once and never rebuilt while this process runs;
- * only project tiers are. So a definition written to {@code global/bots/} lands on disk correctly
- * and this process cannot serve it until it restarts, and asking the resolver would answer with
- * what was already believed — <b>stale data that looks current</b>. There is no status that differs
- * and no exception to catch: a surface that re-derived this by calling the writer and then
- * resolving normally would be wrong silently, in the one direction nothing fails in.
- *
- * <p>So the result type refuses to carry that mistake. {@link Defined} holds <em>either</em> a
- * resolved definition <em>or</em> a reason a restart is needed, never both and never neither, and
- * its own constructor enforces that. A surface rendering a global write has no resolved view
- * available to render — not because it was careful, but because there is not one.
+ * <p>Every successful write invalidates its owning tier, including global overrides, then resolves
+ * the result. A global write is visible without a restart and invalidates inherited project/session
+ * snapshots on their next resolution. Packaged resources and definitions already admitted into
+ * durable workflows keep their existing lifecycle.
  *
  * <h2>Filed on its own subject</h2>
  *
@@ -186,26 +178,6 @@ public final class Definitions {
     // produce that gap.
     resolver.invalidate(projectId);
 
-    if (projectId == null) {
-      // THE GLOBAL TIER, AND THE ONLY CASE THAT REACHES HERE:
-      // RequestedProjectId.forWrite has already refused an unknown
-      // project name, so nothing else can produce "written, but not
-      // found on re-resolution". The resolver is not asked, deliberately
-      // -- see this class's own javadoc. Resolving would answer with the
-      // boot set this process read at start-up, which cannot contain
-      // what was just written and never will until it restarts.
-      return new Defined(
-          ask.name(),
-          written,
-          null,
-          List.of(),
-          "written to "
-              + written.origin()
-              + ", but this server's global tier is read"
-              + " once at boot and is not rebuilt while running -- it will be"
-              + " resolvable once this process restarts. See DefinitionResolver's"
-              + " own javadoc, \"the boot set is never rebuilt\"");
-    }
     AgentRegistry registry = resolver.forCaller(new DefinitionResolver.Caller(projectId, null));
     AgentDefinition definition = registry.get(ask.name());
     return new Defined(

@@ -2,10 +2,10 @@ package io.aeyer.plowshare.server.api;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.CallerAccess;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.LogStages;
@@ -34,7 +34,6 @@ import io.aeyer.plowshare.server.requests.RequestedTurnCap;
 import io.aeyer.plowshare.server.requests.RequestedWindow;
 import java.util.List;
 import java.util.Set;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -204,7 +203,7 @@ public class ConversationController {
   private final EntryStore entries;
   private final JobRuntime runtime;
   private final Turn speaking;
-  private final ObjectProvider<AgentRegistry> agents;
+  private final ConversationDefinitions definitions;
   private final ConversationsProperties properties;
 
   /**
@@ -242,7 +241,7 @@ public class ConversationController {
       EntryStore entries,
       JobRuntime runtime,
       Turn speaking,
-      ObjectProvider<AgentRegistry> agents,
+      ConversationDefinitions definitions,
       ConversationsProperties properties,
       Compaction compaction,
       Tokenizer tokenizer,
@@ -256,7 +255,7 @@ public class ConversationController {
     this.entries = entries;
     this.runtime = runtime;
     this.speaking = speaking;
-    this.agents = agents;
+    this.definitions = definitions;
     this.properties = properties;
     this.compaction = compaction;
     this.tokenizer = tokenizer;
@@ -758,7 +757,8 @@ public class ConversationController {
       rules.aTurnThatHappened(id, spoken, turn);
     }
     String named = rules.whoToProjectAs(id, agent, spoken);
-    AgentDefinition definition = RequestedAgent.toRead(agents, named);
+    AgentDefinition definition =
+        definitions.readAgent(named, definitions.callerForConversation(id, null));
     if (turn == null)
       definition =
           runtime.withAgentRules(definition, conversations.find(id).orElseThrow().home(), null, id);
@@ -784,7 +784,8 @@ public class ConversationController {
    * model is shown.
    */
   private ContextView.Prefix priced(String conversation, String agent) {
-    AgentDefinition definition = RequestedAgent.toRead(agents, agent);
+    AgentDefinition definition =
+        definitions.readAgent(agent, definitions.callerForConversation(conversation, null));
     definition =
         runtime.withAgentRules(
             definition, conversations.find(conversation).orElseThrow().home(), null, conversation);
@@ -929,8 +930,7 @@ public class ConversationController {
       @RequestAttribute(name = AuthFilter.HANDLE_ATTRIBUTE, required = false) String handle) {
     requireInformation(id);
 
-    AgentDefinition definition =
-        RequestedAgent.toRun(agents, rules.whoToContinueAs(id, request.agent()));
+    String named = rules.whoToContinueAs(id, request.agent());
     // The narrowest of the three levels, exactly as an utterance says it.
     // Null for a body that decides nothing, which leaves the conversation's
     // answer, or the agent's when the conversation has none -- and a new run
@@ -943,6 +943,8 @@ public class ConversationController {
       throw new io.aeyer.plowshare.server.faults.CallerFault(
           "Global holds shared setup and resources; conversations run in Personal or a project");
     access.requireWork(home.project(), handle);
+    AgentDefinition definition =
+        definitions.requireAgent(named, definitions.callerForConversation(id, session));
     String job = speaking.resume(id, definition, session, turnCap, request.maxModelCalls());
     return ResponseEntity.accepted().body(new StartedJob(job, definition.name()));
   }
