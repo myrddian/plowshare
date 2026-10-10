@@ -284,7 +284,7 @@ class OperatorConsole:
                 None,
                 (),
                 True,
-                "Plowshare read checks passed; execution authorization is checked on each call.",
+                "Project read checks passed; execution authorization is checked on each call. Schedule runtime status requires deployment-administrator inspection.",
             )
             try:
                 schedule = await self.port.schedule()
@@ -340,7 +340,9 @@ class OperatorConsole:
             if not latest:
                 checklist.append("Request a first scan and inspect its evidence")
             if not schedule:
-                checklist.append("Check the Application schedule registration")
+                checklist.append(
+                    "Inspect the scan schedule with the deployment administrator"
+                )
             elif schedule.paused:
                 checklist.append("Review and enable the scan schedule below")
             if agents and (agents.unavailable or agents.missing_tools):
