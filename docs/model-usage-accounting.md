@@ -104,7 +104,7 @@ Reports include tracking start even before the first inference, projection water
 {"id":"unsubscribe-1","type":"usage.unsubscribe","protocol_version":"plowshare-v1","payload":{"subscription":"server-issued-id"}}
 ```
 
-Count refresh authorizes the conversation, resolves the named agent and its actual offered tool schemas, then counts the next projection. It accepts no supplied messages, URL or billing identity. It is a projection of the next ordinary request, not a recording of an in-flight prompt or its transient forced-tool/hook instructions.
+Count refresh measures the next ordinary request projection. See [Context inspection](#context-inspection) for the difference between counting and inspecting content, empty-conversation behavior and service-account authorization.
 
 Subscribe supports aggregate reports without pagination cursors, with at most eight per physical socket. The initial correlated snapshot has revision 0. `usage.updated` envelopes have no `id`, increasing revisions, and complete replacement reports. Replace displayed quantities instead of adding them. Updates are checked at most once per second, stay quiet while unchanged, and revalidate access. Revocation produces `usage.closed` with a safe failure code. Disconnect/replacement removes subscriptions; reconnect requires fresh reads/subscriptions. The sender keeps only the latest pending snapshot per subscription, separately from correlated replies and token deltas. Unsubscribe is idempotent on the owning socket.
 
@@ -187,4 +187,21 @@ Views replace complete durable snapshots, ignore old revisions/other subscriptio
 
 Usage occupies the desktop main workspace and is available from Connection settings and the sidebar. Initial reports, replacement updates and reconnection use authenticated WebSocket frames. The shared socket binding forwards null-id enveloped notifications such as `usage.updated` and `usage.closed`. Capture-disabled and empty states explain when totals cannot represent earlier activity.
 
-Conversation context is separate from accounting. `conversation.context.snapshot` accepts `conversation`, `agent` and optional `measure` (default false). The server authorizes the conversation before resolving the caller's session-local agent, then constructs its ordinary folded projection and actual offered tool schemas. The response includes full text, roles, tool calls/results, model, sampling overrides and a capture time. Image parts retain their IDs with an explicit omitted-bytes marker. Unsent drafts are never accepted. Transient hook/forced-tool prompts added during execution are not predicted. Explicit measurement counts that same captured request without generating or booking spend. An empty conversation can preview its system block, with an unknown count until there is stored conversation content. No application HTTP route or fallback is added.
+Conversation context is separate from accounting. The desktop uses the authenticated WebSocket operations below to inspect the next request.
+
+## Context inspection
+
+| Operation | Role | Payload |
+| --- | --- | --- |
+| `conversation.context.count` | Refresh the token count for the agent's next ordinary request, including its actual offered tools. | `conversation`, `agent` |
+| `conversation.context.snapshot` | Inspect the request's content and configuration: full text, roles, tool calls/results, tool schemas, model, sampling overrides and capture time. | `conversation`, `agent`, optional Boolean `measure` (default `false`) |
+
+Both operations build the ordinary folded projection from stored conversation content. They resolve the named agent through the conversation's registered home and the caller's session, including current Application definitions and authorized runtime tool schemas. They accept no supplied prompt, messages, URL or billing identity. Unsent drafts and transient hook/forced-tool prompts added during execution are not included. A snapshot is a construction preview, not a recording of an in-flight model request; image parts retain IDs and an explicit omitted-bytes marker.
+
+`count` contacts the configured counter when the projection contains conversation content. `snapshot` contacts it only with `measure: true`, counting that same captured projection. Neither operation generates an answer, executes tools or books inference spend. Count results distinguish `MEASURED`, `ESTIMATED` and `UNKNOWN` and include gap codes; they describe request size rather than consumed usage or an invoice. If there are no messages, or only a system block, both counting paths return `UNKNOWN`, null tokens and `empty_conversation` without contacting the counter. A snapshot can still show that system block and the offered tools. The server does not invent a user message or report zero tokens.
+
+Access requires the exact authenticated conversation owner and current project read permission (`VIEWER` or higher). Enabled human accounts can inspect their own global or Personal conversations. An active service-token principal can inspect its own project conversation when its current token ceiling, durable membership and Application account grant permit reading. Token expiry/revocation, account disablement or a withdrawn grant refuse subsequent reads. A service account owner, a sibling token or a server administrator does not gain access to another principal's context through this operation; service tokens cannot inspect global or Personal context. Authorization is checked before resolving content and again after building the projection, before measurement or returning the snapshot. This does not expand usage-report or fleet-report authority. All reads use authenticated WebSocket frames, with no HTTP fallback.
+
+```json
+{"id":"context-1","type":"conversation.context.snapshot","protocol_version":"plowshare-v1","payload":{"conversation":"conversation-id","agent":"agent-name","measure":false}}
+```
