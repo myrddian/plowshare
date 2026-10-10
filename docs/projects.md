@@ -110,7 +110,9 @@ load directly from that registered root: `agents/`, `bots/`, `skills/`,
 `orchestrations/`, `hooks/`, `schedules/` and `AGENTS.md`. Runtime settings use
 root `skills.yml`, `environment.yml` and `plowshare.json`; named swarms use
 `swarm/`, Relay uses `Relay/`, and project tool/provider and port declarations use
-`server/tools.json` and `server/ports.json` (see [live tools](relay-tools.md)).
+`server/tools.json`, `server/ports.json` (see [live tools](relay-tools.md)) and
+`server/relay-workers.json` for an explicit background processing identity
+(see [Relay workers](relay.md#automatic-subscription-workers)).
 They are validated before agent grants and activated without a server restart.
 These are narrow capabilities, not an arbitrary global server overlay. Deployment refuses `.plowshare/` source. These resources work without a connected client.
 Clients cannot replace the deployed Application tier. Server schedules are enrolled

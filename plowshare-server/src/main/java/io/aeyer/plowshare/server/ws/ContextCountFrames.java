@@ -2,11 +2,11 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationContextAccess;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
-import io.aeyer.plowshare.server.llm.accounting.UsageReports;
 import io.aeyer.plowshare.server.llm.counting.PromptCount;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
@@ -25,15 +25,15 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ContextCountFrames implements FrameArea {
-  private final UsageReports access;
-  private final Callers callers;
+  private final ConversationContextAccess access;
+  private final ConversationDefinitions callers;
   private final Compaction compaction;
   private final JobRuntime runtime;
   private final LlmDispatcher models;
 
   public ContextCountFrames(
-      UsageReports access,
-      Callers callers,
+      ConversationContextAccess access,
+      ConversationDefinitions callers,
       Compaction compaction,
       JobRuntime runtime,
       LlmDispatcher models) {
@@ -67,7 +67,7 @@ public class ContextCountFrames implements FrameArea {
     String account = asking.requireHandle(frame);
     String conversation =
         Payloads.required(payload, "conversation", frame, "the conversation to inspect");
-    access.requireConversation(account, conversation);
+    access.owner(account, conversation);
     String agent =
         Payloads.required(payload, "agent", frame, "the agent whose next projection to inspect");
     var definition =
@@ -80,11 +80,11 @@ public class ContextCountFrames implements FrameArea {
         compaction.projectionFor(conversation, definition),
         runtime.schemasOfferedTo(
             definition, callers.homeOfConversation(conversation), asking.sessionId(), account),
-        access.countOwner(account, conversation));
+        access.owner(account, conversation));
   }
 
   private Outcome count(Map<String, Object> payload, Asking asking) {
-    var request = projection(payload, asking, FrameTypes.CONVERSATION_CONTEXT_COUNT).request();
+    var projection = projection(payload, asking, FrameTypes.CONVERSATION_CONTEXT_COUNT);
     return Outcome.ok(
         Map.of(
             "conversation",
@@ -94,7 +94,7 @@ public class ContextCountFrames implements FrameArea {
             "projection",
             "next",
             "count",
-            models.count(request)));
+            measure(projection)));
   }
 
   /**
@@ -122,14 +122,15 @@ public class ContextCountFrames implements FrameArea {
     result.put(
         "messages", projection.messages().stream().map(ContextCountFrames::message).toList());
     result.put("tools", projection.tools());
-    result.put(
-        "count",
-        !Boolean.TRUE.equals(payload.get("measure"))
-            ? null
-            : projection.messages().stream().allMatch(m -> m.role() == ChatMessage.Role.SYSTEM)
-                ? PromptCount.unknown(null, projection.definition().model(), "empty_conversation")
-                : models.count(projection.request()));
+    result.put("count", !Boolean.TRUE.equals(payload.get("measure")) ? null : measure(projection));
     return Outcome.ok(result);
+  }
+
+  /** Empty context can be inspected, but is not a valid generation request to count. */
+  private PromptCount measure(Projection projection) {
+    return projection.messages().stream().allMatch(m -> m.role() == ChatMessage.Role.SYSTEM)
+        ? PromptCount.unknown(null, projection.definition().model(), "empty_conversation")
+        : models.count(projection.request());
   }
 
   private static Map<String, Object> message(ChatMessage message) {

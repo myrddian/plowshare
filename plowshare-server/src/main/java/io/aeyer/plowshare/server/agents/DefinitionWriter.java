@@ -192,7 +192,7 @@ public final class DefinitionWriter {
   private static final Set<PosixFilePermission> READABLE =
       PosixFilePermissions.fromString("rw-r--r--");
 
-  private final AgentRegistry bootSet;
+  private final java.util.function.Supplier<AgentRegistry> bootSet;
   private final DataLayout data;
   private ScopedTools scopedTools = ScopedTools.NONE;
 
@@ -260,6 +260,17 @@ public final class DefinitionWriter {
    */
   public DefinitionWriter(
       AgentRegistry bootSet,
+      DataLayout data,
+      Set<String> knownTools,
+      Set<String> required,
+      DefinitionChecks checks) {
+    this(() -> bootSet, data, knownTools, required, checks);
+    Objects.requireNonNull(bootSet, "bootSet");
+  }
+
+  /** Owning composition supplies the current global snapshot for every authoring validation. */
+  public DefinitionWriter(
+      java.util.function.Supplier<AgentRegistry> bootSet,
       DataLayout data,
       Set<String> knownTools,
       Set<String> required,
@@ -376,19 +387,20 @@ public final class DefinitionWriter {
     }
     String origin = target.toString();
 
+    var inherited = Objects.requireNonNull(bootSet.get(), "global definitions");
     DefinitionSource candidate = singleEntry(bareName, origin, text);
     // required is Set.of(): a candidate is never depended on by this
     // server's own Java, so every fault it can have is one AgentRegistry
     // itself already knows how to absorb rather than throw -- which is
     // what lets this method read the fault back from Loaded instead of
     // catching an IllegalStateException and re-wrapping its message.
-    // bootSet.names() is alsoDefined, exactly as DefinitionResolver hands
+    // inherited.names() is alsoDefined, exactly as DefinitionResolver hands
     // it to the same overload for a project tier's own read -- without it
     // a `calls:` naming an agent the boot set already serves reads as a
     // typo here and is withheld, though the very same file would have
     // loaded fine.
     AgentRegistry.Loaded read =
-        AgentRegistry.read(candidate, knownTools(projectId), Set.of(), bootSet.names());
+        AgentRegistry.read(candidate, knownTools(projectId), Set.of(), inherited.names());
 
     requireNothingDisabled(read);
     requireNothingWithheld(read);
@@ -415,7 +427,7 @@ public final class DefinitionWriter {
 
     // Serialize service-owned writes across filenames: two different names can compete for the
     // same alias/guidance slot. External edits are still revalidated by the normal tier loader.
-    requireValidAliases(projectId, candidate, checked.enabled().get(bareName));
+    requireValidAliases(projectId, candidate, checked.enabled().get(bareName), inherited);
 
     boolean existedBefore = Files.exists(target);
     if (existedBefore && !overwrite) {
@@ -434,14 +446,17 @@ public final class DefinitionWriter {
 
   /** Checks the family the candidate would join before accepting an edit on either API surface. */
   private void requireValidAliases(
-      Long projectId, DefinitionSource candidate, AgentDefinition definition) {
+      Long projectId,
+      DefinitionSource candidate,
+      AgentDefinition definition,
+      AgentRegistry inherited) {
     DefinitionSource tier =
         new LayeredDefinitions(
             List.of(
                 candidate,
                 new FilesystemDefinitions(data.agentsFor(projectId)),
                 new FilesystemDefinitions(data.botsFor(projectId))));
-    Map<String, AgentDefinition> merged = new LinkedHashMap<>(bootSet.byName());
+    Map<String, AgentDefinition> merged = new LinkedHashMap<>(inherited.byName());
     // Read individual entries before validating their union. Reading the union first would
     // discard a conflicting family, concealing the collision from the write's own refusal.
     for (DefinitionSource.Definition entry : tier.list()) {
@@ -450,7 +465,7 @@ public final class DefinitionWriter {
               singleEntry(entry.name(), entry.origin(), entry.text()),
               knownTools(projectId),
               Set.of(),
-              bootSet.names());
+              inherited.names());
       merged.putAll(item.enabled());
     }
     Map<String, String> faults = AgentAliases.faults(merged);

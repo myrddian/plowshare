@@ -43,6 +43,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
   private record Cached(
       String stamp,
       AgentRegistry agents,
+      OrchestrationRegistry.Loaded inherited,
       OrchestrationRegistry.Loaded tier,
       Map<String, OrchestrationDefinition> merged) {}
 
@@ -55,7 +56,12 @@ public final class OrchestrationResolver implements SessionCloseListener {
     this.personalIds = personalIds;
   }
 
-  private final OrchestrationRegistry.Loaded bootSet;
+  private final GlobalOrchestrationDefinitions globals;
+
+  private OrchestrationRegistry.Loaded globalSet() {
+    return globals.current();
+  }
+
   private ApplicationResources applicationResources = ApplicationResources.NONE;
 
   /** Composition supplies registered server sources; client sessions cannot replace them. */
@@ -95,7 +101,31 @@ public final class OrchestrationResolver implements SessionCloseListener {
       BiPredicate<Long, String> sessionRoots,
       Function<Caller, AgentRegistry> agentsFor,
       DefinitionChecks checks) {
-    this.bootSet = Objects.requireNonNull(bootSet, "bootSet");
+    this(
+        () -> bootSet,
+        data,
+        projectExists,
+        knownTools,
+        channel,
+        sessionLive,
+        sessionRoots,
+        agentsFor,
+        checks);
+    Objects.requireNonNull(bootSet, "bootSet");
+  }
+
+  /** Compose refreshable global procedures without changing a running procedure's pinned source. */
+  public OrchestrationResolver(
+      GlobalOrchestrationDefinitions globals,
+      DataLayout data,
+      LongPredicate projectExists,
+      Set<String> knownTools,
+      SessionChannel channel,
+      Predicate<String> sessionLive,
+      BiPredicate<Long, String> sessionRoots,
+      Function<Caller, AgentRegistry> agentsFor,
+      DefinitionChecks checks) {
+    this.globals = Objects.requireNonNull(globals, "globals");
     this.data = Objects.requireNonNull(data, "data");
     this.projectExists = Objects.requireNonNull(projectExists, "projectExists");
     this.knownTools = Set.copyOf(knownTools);
@@ -107,11 +137,12 @@ public final class OrchestrationResolver implements SessionCloseListener {
   }
 
   public Map<String, OrchestrationDefinition> bootSet() {
-    return bootSet.enabled();
+    return globalSet().enabled();
   }
 
   public Map<String, OrchestrationDefinition> forCaller(Caller caller) {
-    return resolve(caller).map(Cached::merged).orElse(bootSet.enabled());
+    var inherited = globalSet();
+    return resolve(caller, inherited).map(Cached::merged).orElse(inherited.enabled());
   }
 
   public Optional<OrchestrationDefinition> find(Caller caller, String name) {
@@ -120,8 +151,9 @@ public final class OrchestrationResolver implements SessionCloseListener {
 
   /** Every file that is not offered to this caller, and why; a project's refusal wins by name. */
   public Map<String, String> refusalsFor(Caller caller) {
-    Map<String, String> refused = new LinkedHashMap<>(bootSet.disabled());
-    resolve(caller).ifPresent(cached -> refused.putAll(cached.tier().disabled()));
+    var inherited = globalSet();
+    Map<String, String> refused = new LinkedHashMap<>(inherited.disabled());
+    resolve(caller, inherited).ifPresent(cached -> refused.putAll(cached.tier().disabled()));
     return Map.copyOf(refused);
   }
 
@@ -136,7 +168,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
   }
 
   /** The project tier for this caller, or empty when the caller only reaches the boot set. */
-  private Optional<Cached> resolve(Caller caller) {
+  private Optional<Cached> resolve(Caller caller, OrchestrationRegistry.Loaded inherited) {
     Objects.requireNonNull(caller, "caller");
     Long projectId = caller.projectId();
     if (projectId == null && personalIds.apply(caller) != null) {
@@ -157,7 +189,10 @@ public final class OrchestrationResolver implements SessionCloseListener {
                 ? ""
                 : DefinitionResolver.fingerprint(orchestrationsDirectory(key.personalId())));
     Cached cached = byProject.get(key);
-    if (cached != null && cached.stamp().equals(stamp) && cached.agents() == agents) {
+    if (cached != null
+        && cached.stamp().equals(stamp)
+        && cached.agents() == agents
+        && cached.inherited() == inherited) {
       return Optional.of(cached);
     }
     List<OrchestrationRegistry.Layer> layers = new ArrayList<>();
@@ -185,6 +220,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
           build(
               stamp,
               agents,
+              inherited,
               OrchestrationRegistry.read(
                   List.copyOf(layers), knownTools(projectId), agents, checks));
     } catch (RuntimeException brokenTier) {
@@ -201,8 +237,9 @@ public final class OrchestrationResolver implements SessionCloseListener {
           new Cached(
               stamp,
               agents,
+              inherited,
               new OrchestrationRegistry.Loaded(Map.of(), Map.of(BROKEN_TIER, warning)),
-              bootSet.enabled());
+              inherited.enabled());
     }
     byProject.put(key, built);
     if (key.sessionId() != null && !sessionLive.test(key.sessionId())) {
@@ -245,13 +282,17 @@ public final class OrchestrationResolver implements SessionCloseListener {
    * its own callees — can only make this check stricter than what is offered, never laxer, so it is
    * left alone: a granter of a file nobody is offered cannot start it either way.
    */
-  private Cached build(String stamp, AgentRegistry agents, OrchestrationRegistry.Loaded loaded) {
+  private Cached build(
+      String stamp,
+      AgentRegistry agents,
+      OrchestrationRegistry.Loaded inherited,
+      OrchestrationRegistry.Loaded loaded) {
     Map<String, OrchestrationDefinition> merged = new LinkedHashMap<>();
     Map<String, String> refused = new LinkedHashMap<>(loaded.disabled());
     // What this caller can reach, project shadowing boot by name — the same shape `merged`
     // ends up with — so a boot conductor's own `orchestrations:` grant is resolved against
     // what is actually offered here, not just the boot set it was originally checked in.
-    Map<String, OrchestrationDefinition> reachable = new LinkedHashMap<>(bootSet.enabled());
+    Map<String, OrchestrationDefinition> reachable = new LinkedHashMap<>(inherited.enabled());
     reachable.putAll(loaded.enabled());
     Map<String, OrchestrationDefinition> tier = new LinkedHashMap<>(loaded.enabled());
     boolean judgeAgain = true;
@@ -264,7 +305,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
           continue;
         }
         tier.remove(own.getKey());
-        OrchestrationDefinition unshadowed = bootSet.enabled().get(own.getKey());
+        OrchestrationDefinition unshadowed = inherited.enabled().get(own.getKey());
         if (unshadowed == null) {
           reachable.remove(own.getKey());
         } else {
@@ -274,7 +315,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
         judgeAgain = true;
       }
     }
-    for (Map.Entry<String, OrchestrationDefinition> boot : bootSet.enabled().entrySet()) {
+    for (Map.Entry<String, OrchestrationDefinition> boot : inherited.enabled().entrySet()) {
       if (tier.containsKey(boot.getKey())) {
         continue;
       }
@@ -298,7 +339,11 @@ public final class OrchestrationResolver implements SessionCloseListener {
     }
     merged.putAll(tier);
     return new Cached(
-        stamp, agents, new OrchestrationRegistry.Loaded(tier, refused), Map.copyOf(merged));
+        stamp,
+        agents,
+        inherited,
+        new OrchestrationRegistry.Loaded(tier, refused),
+        Map.copyOf(merged));
   }
 
   private Key keyFor(Caller caller) {
@@ -362,6 +407,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
     }
     Key key = keyFor(caller);
     AgentRegistry agents = agentsFor.apply(caller);
+    var inherited = globalSet();
     DefinitionSource project = new FilesystemDefinitions(orchestrationsDirectory(projectId), true);
     DefinitionSource session =
         key.sessionId() == null
@@ -375,6 +421,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
         build(
             "trial",
             agents,
+            inherited,
             OrchestrationRegistry.read(
                 layers(project, session, personal), knownTools(projectId), agents, checks, true));
     DefinitionSource withDraft = withDraft(project, name, text);
@@ -382,6 +429,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
         build(
             "trial",
             agents,
+            inherited,
             OrchestrationRegistry.read(
                 layers(withDraft, session, personal), knownTools(projectId), agents, checks, true));
     Map<String, String> newly = new LinkedHashMap<>();
@@ -401,7 +449,7 @@ public final class OrchestrationResolver implements SessionCloseListener {
     OrchestrationDefinition replaced =
         loaded != null && loaded.tier() == OrchestrationDefinition.Tier.PROJECT ? loaded : null;
     boolean onDisk = project.list().stream().anyMatch(each -> each.name().equals(name));
-    OrchestrationDefinition shadowed = bootSet.enabled().get(name);
+    OrchestrationDefinition shadowed = inherited.enabled().get(name);
     boolean hidesSession =
         session != null && session.list().stream().anyMatch(each -> each.name().equals(name));
     return new Trial(

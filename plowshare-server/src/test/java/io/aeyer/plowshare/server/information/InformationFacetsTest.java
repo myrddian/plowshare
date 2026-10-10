@@ -199,7 +199,9 @@ class InformationFacetsTest {
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             store,
@@ -212,7 +214,9 @@ class InformationFacetsTest {
     try (var queue =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, Clock.systemUTC()),
+                jdbc,
+                Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             processor,
@@ -364,7 +368,9 @@ class InformationFacetsTest {
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             store,
@@ -377,7 +383,9 @@ class InformationFacetsTest {
     try (var queue =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, Clock.systemUTC()),
+                jdbc,
+                Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             processor,
@@ -670,7 +678,9 @@ class InformationFacetsTest {
     var processor =
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             store,
@@ -682,7 +692,9 @@ class InformationFacetsTest {
             new DocumentsProperties());
     return new InformationLifecycle(
         new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-            jdbc, Clock.systemUTC()),
+            jdbc,
+            Clock.systemUTC(),
+            new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
         work,
         catalogue,
         processor,
@@ -844,7 +856,9 @@ class InformationFacetsTest {
     try (var queue =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, Clock.systemUTC()),
+                jdbc,
+                Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             (lease, cancelled, fence) -> {},
@@ -861,7 +875,9 @@ class InformationFacetsTest {
     try (var queue =
         new InformationLifecycle(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, Clock.systemUTC()),
+                jdbc,
+                Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             (lease, cancelled, fence) -> {},
@@ -1061,12 +1077,16 @@ class InformationFacetsTest {
         .thenReturn(summariser);
     return new InformationLifecycle(
         new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-            jdbc, Clock.systemUTC()),
+            jdbc,
+            Clock.systemUTC(),
+            new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
         work,
         catalogue,
         InformationLifecycle.processing(
             new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+                jdbc,
+                java.time.Clock.systemUTC(),
+                new io.aeyer.plowshare.server.archive.JdbcProjectMembers(jdbc)),
             work,
             catalogue,
             store,

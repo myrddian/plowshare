@@ -16,7 +16,11 @@ public interface Relay {
   /** Creates a topic or changes its policy; an existing payload family cannot be changed. */
   Topic configureTopic(TopicKey key, RelayPayload.Kind kind, Policy policy);
 
-  /** Registers a default once; explicit server deployment policy may override system retention. */
+  /**
+   * Registers an initial policy only when creating a topic; an existing policy is preserved.
+   * Explicit server deployment policy may override system retention. Callers without policy-write
+   * authority must supply the standard default, never a user-controlled policy.
+   */
   Topic registerTopic(TopicKey key, RelayPayload.Kind kind, Policy initialPolicy);
 
   /** Reads registered topic metadata without changing policy; an unavailable topic fails. */

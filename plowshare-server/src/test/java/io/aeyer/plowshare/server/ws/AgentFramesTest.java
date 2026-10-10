@@ -100,7 +100,7 @@ import org.springframework.test.web.servlet.MockMvc;
  *       {@code find} before {@code dataUri}.
  *   <li>{@link #a_budget_below_what_was_spent_leaves_the_turn_cap_alone_on_both_ surfaces} — {@code
  *       Limits.move} applies the budget first.
- *   <li>{@link #a_global_write_is_synthesised_and_never_resolved_on_both_ surfaces} — {@code
+ *   <li>{@link #a_global_write_is_resolved_without_restart_on_both_surfaces} — {@code
  *       Definitions.define} builds a view instead of asking.
  *   <li>{@link #a_pass_that_names_no_allowance_takes_the_operators_on_both_ surfaces} — {@code
  *       Passes.start} defaults from configuration.
@@ -640,18 +640,9 @@ class AgentFramesTest {
     verify(writer, times(2)).write(7L, "scribe", "---\nname: scribe\n---", true);
   }
 
-  /**
-   * <b>The synthesised view.</b> A write to the global tier is accepted and is <em>not</em>
-   * resolved: both surfaces answer a disabled view carrying the restart reason, rather than
-   * whatever the running process happens to serve under that name.
-   *
-   * <p>The definition written is {@code scribe}, which the boot set really does hold — so a handler
-   * that resolved instead of synthesising would answer a perfectly well-formed {@code served: true}
-   * view of an agent <em>that is not the one just written</em>, with the right status and the right
-   * shape. Naming a name the registry already serves is what makes this test discriminate.
-   */
+  /** Global authoring returns the current read-back without a restart on both surfaces. */
   @Test
-  void a_global_write_is_synthesised_and_never_resolved_on_both_surfaces() throws Exception {
+  void a_global_write_is_resolved_without_restart_on_both_surfaces() throws Exception {
     wrote("scribe", DefinitionWriter.Disposition.CREATED);
 
     String asked =
@@ -663,10 +654,10 @@ class AgentFramesTest {
     assertEquals(Code.CREATED, outcome.code());
     FrameParity.assertSameAnswer(http, outcome);
     assertTrue(
-        http.getContentAsString().contains("\"restartRequired\":true"),
-        "a global write is flagged rather than resolved: " + http.getContentAsString());
+        http.getContentAsString().contains("\"restartRequired\":false"),
+        "a global write answers without a restart: " + http.getContentAsString());
     assertTrue(
-        http.getContentAsString().contains("\"served\":false"),
+        http.getContentAsString().contains("\"served\":true"),
         "and the view says so machine-readably: " + http.getContentAsString());
   }
 

@@ -226,17 +226,38 @@ configuration order. It admits at most one publication per subscription and at
 most 32 inputs and 32 branch dispatches overall, or the requested lower limit.
 Each subscription uses the same distributed ownership lease as automatic workers;
 a subscription with another live owner is skipped for that pass.
-It requires contributor access; applying explicit topic policies requires manager
-access. Repeated passes drain queued input. Gaps stop new admission for that
-subscription while previously admitted branches can still dispatch. The result
+It requires contributor access. A contributor pass preserves the stored topic policy,
+or uses the standard four-day registration default for a new topic; declared policies
+in `Relay/topics.json` do not block processing and cannot change retention under that
+identity. A manager pass applies explicit policies for its active subscription topics
+before consumption. Editing or deploying the policy file alone does not apply those
+values; inspect `relay.log` for the effective persisted policy. Repeated passes drain
+queued input. Gaps stop new admission for that subscription while previously admitted
+branches can still dispatch. The result
 reports the gap; managers can acknowledge an inspected gap explicitly through
 `relay.operate`. Reading or running a pass never acknowledges it.
 
 ## Automatic subscription workers
 
-Automatic operation requires explicit project/account bindings in the server's
-configuration. This supplies execution identity; project JavaScript cannot choose
-or expand authority. For example, using your deployment's project and account names:
+Automatic operation requires an explicit processing identity. A deployed Application
+can declare it in root `server/relay-workers.json`, without changing server startup
+configuration:
+
+```json
+{"version": 1, "account": "application-service-principal"}
+```
+
+Use the service token's returned principal and grant its owning account CONTRIBUTOR
+project membership. The declaration grants no membership or topic-policy authority.
+It is validated on deployment and read through the Application workspace fence.
+Removing or changing it, or revoking work access, updates enrollment at
+`configuration-interval` (default 30 seconds). Redeploy reviewed source to change it;
+agents cannot edit their own enrollment. Conflicting Application/startup identities
+pause that project's enrollment until corrected. Up to 32 projects may be enrolled.
+
+Other server projects can retain explicit project/account bindings in the server's
+startup configuration. This supplies execution identity; Relay JavaScript cannot
+choose or expand authority. For example, using your deployment's project and account names:
 
 ```json
 {
@@ -256,9 +277,9 @@ The default list is empty. Each configured project has local lifecycle supervisi
 that reads its `active.json` and starts an independent virtual-thread consumer for
 each `(scope, topic, group)` subscription. The group is the existing subscriber
 name. Supervision starts and stops workers; it does not route or dispatch events,
-and it never scans unrelated projects. Server bindings change on restart;
-project activation changes are detected at `configuration-interval` (default 30
-seconds). Each processing pass also reloads configuration and checks live access.
+and it never processes an undeclared project. Application enrollment and project
+activation changes are detected at `configuration-interval` (default 30 seconds).
+Legacy startup bindings remain startup configuration. Each processing pass also reloads configuration and checks live access.
 Invalid configuration, lost authority and offline remote sources pause work with
 bounded backoff, preserving durable input. Restoring access resumes from the
 persisted offset.

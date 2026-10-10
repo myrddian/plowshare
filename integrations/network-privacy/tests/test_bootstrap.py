@@ -499,6 +499,12 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         for folder in ("agents", "orchestrations"):
             for path in (setup.output / f"application/{folder}").glob("*.md"):
                 self.assertIn("\nmodel: local-model\n", path.read_text())
+        scripts = tuple((setup.output / "application/orchestrations").glob("*.js"))
+        self.assertEqual(
+            {path.stem for path in scripts}, {"privacy_tick", "investigate_network"}
+        )
+        for path in scripts:
+            self.assertIn('model: "local-model"', path.read_text())
         self.assertFalse((setup.output / "provisioning-intent.json").exists())
         if os.name == "posix":
             self.assertEqual((root / "collector.json").stat().st_mode & 0o777, 0o600)

@@ -61,6 +61,7 @@ public class LogStagesConfig {
       ObjectProvider<Turn> speaking,
       ObjectProvider<Inbox> inbox,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<Compaction> compaction,
       ObjectProvider<io.aeyer.plowshare.server.orchestrations.Orchestrations> orchestrations,
       ObjectProvider<io.aeyer.plowshare.server.orchestrations.Delivery> orchestrationDelivery,
@@ -97,7 +98,7 @@ public class LogStagesConfig {
               }
             },
             name ->
-                required(agents.getIfAvailable(), "agent registry")
+                required(GlobalAgentSnapshots.supply(globals, agents).get(), "agent registry")
                     .find(name)
                     .map(AgentDefinition::bot)
                     .orElse(false),

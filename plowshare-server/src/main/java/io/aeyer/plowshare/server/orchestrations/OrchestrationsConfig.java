@@ -275,7 +275,7 @@ public class OrchestrationsConfig {
       OrchestrationChecks orchestrationChecks,
       RunApprovalStore approvals,
       Environments environments,
-      AgentRegistry agents,
+      io.aeyer.plowshare.server.agents.Callers agents,
       RecordKeeper recordKeeper,
       OrchestrationAcceptance orchestrationAcceptance,
       CapsSource capsSource,
@@ -1285,10 +1285,19 @@ public class OrchestrationsConfig {
 
   /**
    * {@code Turn}'s conductor door: the 6-argument {@code speakToConductor}, and {@code isSpeaking};
-   * and its delegate door, with the sub-agent resolved against {@code agents} — the boot set {@code
-   * AgentRunTool} delegated into, so a sub-agent resumes as the definition it was started as.
+   * and its delegate door, resolved with current inherited project/account/session authority. The
+   * fixed-registry overload is retained for isolated contexts.
    */
   static ConductorVoice conductorVoice(Turn turn, AgentRegistry agents) {
+    return conductorVoice(
+        turn, io.aeyer.plowshare.server.agents.AgentDelegates.fixed(() -> agents));
+  }
+
+  /**
+   * Re-admit delegates in their retained project/account; never use another project's definition.
+   */
+  static ConductorVoice conductorVoice(
+      Turn turn, io.aeyer.plowshare.server.agents.AgentDelegates agents) {
     return new ConductorVoice() {
       @Override
       public String speakFrom(
@@ -1328,15 +1337,28 @@ public class OrchestrationsConfig {
           String utterance,
           String callerHandle,
           Consumer<Outcome> ended) {
+        return resumeDelegate(
+            child, agent, conductorConversation, utterance, callerHandle, null, ended);
+      }
+
+      @Override
+      public String resumeDelegate(
+          String child,
+          String agent,
+          String conductorConversation,
+          String utterance,
+          String callerHandle,
+          String session,
+          Consumer<Outcome> ended) {
         AgentDefinition callee =
             agents
-                .find(agent)
+                .find(turn.homeOf(child), session, callerHandle, agent)
                 .orElseThrow(
                     () ->
                         new Turn.Refused(
                             "the agent '" + agent + "' no longer resolves, so it cannot carry on"));
         return turn.speakToDelegate(
-            child, conductorConversation, callee, utterance, callerHandle, ended);
+            child, conductorConversation, callee, utterance, callerHandle, session, ended);
       }
     };
   }

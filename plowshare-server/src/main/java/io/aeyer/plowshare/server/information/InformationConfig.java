@@ -204,6 +204,7 @@ public class InformationConfig {
   @Bean(destroyMethod = "close")
   public InformationLifecycle informationLifecycle(
       JdbcTemplate jdbc,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
       UnitOfWork work,
       InformationCatalogue catalogue,
       DocumentStore store,
@@ -219,6 +220,7 @@ public class InformationConfig {
       ObjectProvider<LogStages> logStages,
       ObjectProvider<Harness> harness,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
       ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
@@ -233,11 +235,15 @@ public class InformationConfig {
     catalogue.useConfiguration(
         () ->
             InformationConfiguration.fingerprints(
-                llm, properties, agents.getIfAvailable(), dual, counters));
+                llm,
+                properties,
+                GlobalAgentSnapshots.supply(globals, agents).get(),
+                dual,
+                counters));
+    var processing = new JdbcInformationProcessingRepository(jdbc, Clock.systemUTC(), members);
     var processor =
         InformationLifecycle.processing(
-            new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-                jdbc, java.time.Clock.systemUTC()),
+            processing,
             work,
             catalogue,
             store,
@@ -262,18 +268,12 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE),
-            agents::getIfAvailable);
+            GlobalAgentSnapshots.supply(globals, agents));
     gates.useUsageOwners(
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));
     catalogue.withGates(gates);
-    return new InformationLifecycle(
-        new io.aeyer.plowshare.server.information.JdbcInformationProcessingRepository(
-            jdbc, Clock.systemUTC()),
-        work,
-        catalogue,
-        processor,
-        gates);
+    return new InformationLifecycle(processing, work, catalogue, processor, gates);
   }
 
   @Bean

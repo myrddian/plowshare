@@ -33,13 +33,8 @@ import org.junit.jupiter.api.io.TempDir;
  * This file proves the decision, and above all <b>the one branch that changes the shape of the
  * answer rather than its status</b>.
  *
- * <p><b>The global-tier tests are the point of this class.</b> A write with no project does not
- * consult {@link DefinitionResolver} at all: the boot set is read once and never rebuilt, so
- * resolving would answer with what this process already believed and not with what was just
- * written. There is no status to compare and no exception to catch — a surface that resolved
- * normally here would return stale data that looks current. {@code
- * a_global_write_is_never_resolved_and_says_a_restart_is_required} is the test that fails when it
- * does.
+ * <p>Global writes invalidate and resolve the current snapshot just like project writes. The
+ * compatibility restart fields remain representable but successful writes never request a restart.
  */
 class DefinitionsTest {
 
@@ -70,33 +65,19 @@ class DefinitionsTest {
 
   // --- the branch that changes the shape of the answer -------------------------
 
-  /**
-   * The most dangerous line in this file's subject, pinned twice over: the answer says a restart is
-   * required, and {@link DefinitionResolver#forCaller} is never asked.
-   *
-   * <p>The second half is the one no body could show. A surface that wrote the file and then
-   * resolved normally would get a current-looking view of whatever this process read at boot —
-   * which does not include what was just written, and never will until it restarts.
-   */
+  /** Global writes return the current read-back after invalidation, without a restart. */
   @Test
-  void a_global_write_is_never_resolved_and_says_a_restart_is_required() throws Exception {
-    Definitions.Defined defined =
+  void a_global_write_is_resolved_and_reports_no_restart() throws Exception {
+    when(resolver.forCaller(any()))
+        .thenReturn(new AgentRegistry(Map.of("helper", agent("helper"))));
+    var defined =
         definitions.define(new Definitions.Ask(null, "helper", definition("helper", "hi"), false));
-
-    assertTrue(defined.restartRequired());
-    assertNull(
-        defined.definition(),
-        "a global write has nothing resolved to report, and saying so in the shape is"
-            + " what keeps a surface from rendering one");
-    assertTrue(
-        defined.restartReason().contains("the boot set is never rebuilt"), defined.restartReason());
-    assertTrue(
-        defined.restartReason().contains(layout.botsFor(null).resolve("helper.md").toString()),
-        defined.restartReason());
-    verify(resolver, never()).forCaller(any());
-    assertTrue(
-        Files.exists(layout.botsFor(null).resolve("helper.md")),
-        "the bytes land even though nothing serves them yet");
+    assertFalse(defined.restartRequired());
+    assertNull(defined.restartReason());
+    assertEquals("helper", defined.definition().name());
+    verify(resolver).invalidate(null);
+    verify(resolver).forCaller(new DefinitionResolver.Caller(null, null));
+    assertTrue(Files.exists(layout.botsFor(null).resolve("helper.md")));
   }
 
   /**

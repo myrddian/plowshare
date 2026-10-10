@@ -43,7 +43,7 @@ directory.
 | `orchestrations/` | Deterministic schedule action and agent investigation workflow |
 | `schedules/network_scan.json` | Packaged scan schedule, initially paused |
 | `Relay/` | Project topics and the scan-completion route |
-| `server/` | Project tool/provider catalogue and Relay port declarations |
+| `server/` | Project tool/provider catalogue, Relay ports and service-owned worker enrollment |
 
 The coordinator sets `dynamic: true`; its `tools` field lists built-in grants.
 The six external network tools are granted through the `network_scanning` provider
@@ -85,7 +85,7 @@ limit; setup does not transfer ownership of a deployed schedule.
 2. Make a private copy of this Application folder. Add explicit manifest account
    grants and matching server membership; the supplied manifest grants no
    accounts. Replace provider account placeholders with the service token principal in `server/tools.json` and
-   `server/ports.json`; configure the agents' model binding and review their tool grants.
+   `server/ports.json` and `server/relay-workers.json`; configure the agents' model binding and review their tool grants.
 3. Configure a server FileStore destination. As a server administrator with
    MANAGER access to that destination, deploy the private folder using CLI
    `application deploy` or Desktop **Applications → Deploy**. Retain the request
@@ -129,3 +129,10 @@ Relay port grants activate with this Application revision. No global server
 configuration edit or restart is required. The Python process remains separately
 operated and renews its live tool catalogue lease. See the
 [integration guide](../README.md#agent-tools-through-the-sdk) for startup.
+
+Investigation uses `orchestrations/investigate_network.js`. Plowshare journals its
+commands and state; code passes the complete analyst response and retained source
+text to the reviewer and assembles the draft from the actual review. Agents supply
+judgments within the shared allowance. Missing assessments, unavailable evidence
+and invalid tool results stop work explicitly. The collector remains an external
+Python integration.

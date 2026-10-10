@@ -164,7 +164,7 @@ scope for this read-only conductor; a grant cannot escalate file access.
 | Tier | Location | Lifecycle |
 | --- | --- | --- |
 | Shipped | Server classpath `orchestrations/<name>.md` or `.js` | Included in the build |
-| Server global | `<PLOWSHARE_DATA_DIR>/global/orchestrations/` | Loaded into the boot definition set |
+| Server global | `<PLOWSHARE_DATA_DIR>/global/orchestrations/` | Content snapshot refresh on resolution |
 | Account Personal | That account's Personal `Resources/orchestrations/`, synchronized to its server project tier | Inherited by other eligible account work |
 | Project | `<PLOWSHARE_DATA_DIR>/projects/<numeric-project-id>/orchestrations/` | Effective for that project; filesystem fingerprint invalidation |
 | Rooted session | Attached workspace `.plowshare/orchestrations/` | Served over its file channel; session resolution/cache lifetime |
@@ -176,7 +176,8 @@ authoritative override remains refused instead of falling back. Having both
 `<name>.md` and `<name>.js` in one tier disables that name as a duplicate.
 
 Project file changes can invalidate resolution; reconnect the client to refresh a
-session definition cache, and reload the server boot set for global changes.
+session definition cache. Global content changes refresh on the next resolution,
+including changes to the global agent dependency graph.
 Inspect `orchestration definitions` in the same project/session as the actual run.
 Running executions keep their pinned source and hash; editing a definition is not
 a live patch of a running conductor.

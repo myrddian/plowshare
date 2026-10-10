@@ -69,4 +69,16 @@ public interface ConductorVoice {
       String utterance,
       String callerHandle,
       Consumer<Outcome> ended);
+
+  /** The retained orchestration session is revalidated and inherited by the resumed delegate. */
+  default String resumeDelegate(
+      String child,
+      String agent,
+      String conductorConversation,
+      String utterance,
+      String callerHandle,
+      String session,
+      Consumer<Outcome> ended) {
+    return resumeDelegate(child, agent, conductorConversation, utterance, callerHandle, ended);
+  }
 }

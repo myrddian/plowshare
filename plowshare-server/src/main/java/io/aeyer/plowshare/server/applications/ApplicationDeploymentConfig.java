@@ -25,6 +25,7 @@ public class ApplicationDeploymentConfig {
   @Bean
   public ApplicationPackageValidator applicationPackageValidator(
       ObjectProvider<AgentRegistry> boot,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       ObjectProvider<JobRuntime> runtime,
       DefinitionChecks checks,
       LlmDispatcher dispatcher,
@@ -35,7 +36,12 @@ public class ApplicationDeploymentConfig {
       var names = new java.util.TreeSet<>(runtime.getObject().knownTools());
       names.addAll(scopedTools.stagedNames(project, root, names));
       new RuntimeApplicationPackageValidator(
-              boot.getObject(), names, checks, new DispatcherPools(dispatcher), hooks, relay)
+              GlobalAgentSnapshots.supply(globals, boot).get(),
+              names,
+              checks,
+              new DispatcherPools(dispatcher),
+              hooks,
+              relay)
           .validate(project, root);
     };
   }

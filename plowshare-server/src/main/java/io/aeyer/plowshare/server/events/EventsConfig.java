@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.events;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
+import io.aeyer.plowshare.server.agents.GlobalAgentDefinitions;
+import io.aeyer.plowshare.server.agents.GlobalAgentSnapshots;
 import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.Noticing;
@@ -138,9 +140,10 @@ public class EventsConfig {
   public ScheduleReader scheduleReader(
       LlmDispatcher llm,
       ObjectProvider<AgentRegistry> agents,
+      ObjectProvider<GlobalAgentDefinitions> globals,
       DefinitionResolver resolver,
       Callers callers) {
-    return new ScheduleReader(llm, agents::getIfAvailable, resolver, callers);
+    return new ScheduleReader(llm, GlobalAgentSnapshots.supply(globals, agents), resolver, callers);
   }
 
   @Bean

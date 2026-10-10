@@ -64,7 +64,12 @@ The tool-free `information_tagger` model worker fills revision-specific `autoTag
 from a bounded excerpt of the retained extraction. Generated tags are navigation
 suggestions, not evidence. The `autoTag` processing step uses the existing
 captured allowance, owned logs, hooks, paid-response checkpoints and generation
-fences. It can run after extraction/derivation even if embeddings or summaries
+fences. Metadata answers use bounded local model-JSON recovery, including code
+fences and common formatting mistakes, before strict field validation. Recovery
+makes no model call and does not widen attribution or tag-group membership.
+Unrecoverable answers and host refusals remain failed; an explicit
+`information.retry` can reuse the retained paid response after a parser fix.
+It can run after extraction/derivation even if embeddings or summaries
 fail; it never edits user tags. Inspect its state with `information.status`,
 retry failures with `information.retry`, or explicitly regenerate with
 `information.rebuild` and `stage: "autoTag"`. Rebuilding tags preserves summaries
@@ -166,6 +171,19 @@ success. Failed acquisition is retained and retryable. Processing is independent
 queued from retained rows. Expired worker leases resume after restart, with
 revision/generation fencing against late writes. Model responses are checkpointed
 before post gates, so a denied completion can reuse paid work.
+
+Admission retains the source; it does not guarantee extraction is already ready.
+Inspect `information.status` before reading newly admitted evidence. The worker
+uses the source owner's authenticated principal throughout processing. Service
+tokens use their owning service account's live project membership, capped by the
+token's project scope and current Application grants; token principals do not need
+separate membership rows. Processing requires ongoing project visibility, including
+for already admitted work, and checks it again at renewal and checkpoint commit.
+Expired or revoked tokens, disabled accounts and withdrawn project access prevent
+new processing and late writes. Pending work remains retained; restoring access
+allows the queue to resume without uploading the source again. Running work resumes
+once its existing lease expires. Processing attribution and retained ownership do
+not change.
 
 Reports are documents from admission. `information.record.report` retains Markdown,
 all inputs, exact evidence citations and optional objectives/findings/reviews/scope

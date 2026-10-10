@@ -12,6 +12,7 @@ from plowshare.contracts import (
     InformationListRequest,
     InformationReadRequest,
     InformationRevisionDto,
+    InformationStatusRequest,
     InformationUploadRequest,
     RelayAckRequest,
     RelayBatchDto,
@@ -163,11 +164,35 @@ class SdkPrivacyPort:
         ).require_payload()
 
     async def reports(self) -> tuple[InformationRevisionDto, ...]:
-        return (
+        candidates = (
             await self.client.request(
                 InformationListRequest(scope=self.scope, kind="report", limit=100)
             )
         ).require_payload()
+        reports: list[InformationRevisionDto] = []
+        for candidate in candidates:
+            # List entries are summaries and may omit inputs. The dashboard's
+            # evidence association must use the authoritative scoped status,
+            # not interpret a missing summary field as an unrelated report.
+            detail = candidate
+            if not isinstance(candidate.inputs, tuple):
+                status = (
+                    await self.client.request(
+                        InformationStatusRequest(
+                            scope=self.scope, revision=candidate.id
+                        )
+                    )
+                ).require_payload()
+                if (
+                    not isinstance(status, InformationRevisionDto)
+                    or status.id != candidate.id
+                    or status.kind != "report"
+                    or not isinstance(status.inputs, tuple)
+                ):
+                    raise ValueError("Report status is foreign or lacks dependencies")
+                detail = status
+            reports.append(detail)
+        return tuple(reports)
 
     async def read_source(self, revision: str) -> str:
         # Offsets come from the server (UTF-16 units), never Python string lengths.

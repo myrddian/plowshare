@@ -144,7 +144,7 @@ The service account has no password login, server administrator role or Personal
 space. Its **handle** goes in project membership and `plowshare.json`. Its token's
 **principal**, returned by token creation, goes in root `plowshare.json` as
 `executionAccount`, in `server/tools.json`,
-`server/ports.json` and `--tool-account`. Those declarations check the authenticated
+`server/ports.json`, `server/relay-workers.json` and `--tool-account`. Those declarations check the authenticated
 execution identity exactly; putting the account handle there will not authorize a
 service token. Rotation preserves the principal, so it preserves retained work and
 Relay identity. Creating another token changes the principal.
@@ -242,13 +242,18 @@ process secret manager in production; the `cat` command illustrates private-file
 loading without printing the token. Inspect the result and retained Relay/job state
 after a disconnect; do not blindly retry an uncertain processing call.
 
-For unattended operation, configure the existing
-[automatic Relay worker](../../docs/relay.md#automatic-subscription-workers) with
-this project and the token **principal**, or supervise explicit processing passes
-under that service credential. Do not also bind an automatic worker for this
-Application to the human account: processing identity determines investigation
-ownership. Without a worker or explicit pass, completed scans remain retained but
-do not launch an investigation. Contributor processing preserves the broker's current
+For unattended operation, the Application's `server/relay-workers.json` explicitly
+enrolls the [automatic Relay worker](../../docs/relay.md#automatic-subscription-workers).
+The setup helper fills its account with the returned service token **principal**,
+together with the tool/port declarations. Deploy that prepared private Application;
+the running server discovers it within its Relay configuration interval (30 seconds
+by default), without a restart or a human-account worker binding. If upgrading an
+existing private source copy, add `server/relay-workers.json` with `version: 1` and
+`account` set to the same service principal, then redeploy through the documented
+revision check. Keep its owning service account a CONTRIBUTOR. Removing the declaration
+pauses automatic processing; it preserves retained scan input, offsets and jobs.
+Without enrollment or an explicit processing pass, completed scans remain retained
+but do not launch an investigation. Contributor processing preserves the broker's current
 topic policies, using the standard default for a new topic. Declared retention in
 `Relay/topics.json` is applied only by a manager processing pass; it does not grant
 policy-write access or prevent this service account from processing investigations.
@@ -321,9 +326,19 @@ not used: SDK ports do not expose system scope.
 The result route starts `investigate_network` under `privacy_coordinator` for the
 baseline or a changed observation/coverage gap. Unchanged collections are retained
 without launching another model investigation. The
-analyst and reviewer have narrower tools, and the conductor retains a draft
-report with source dependencies. Memory supplies previously established operator
-context where permitted. Document-derived evidence and conclusions stay in the
+analyst and reviewer have narrower tools. The scripted `investigate_network.js`
+waits for extraction, reads complete bounded evidence windows, retains the actual
+analyst response and passes it verbatim with the sources to the reviewer. Each
+handoff is stored in the existing scoped command journal; a reviewer does not
+inherit the analyst's conversation. Missing input stops review immediately.
+Code validates the review and retains a draft report with source dependencies.
+An explicit `not_checked` review remains labelled unverified in the draft.
+Readiness, host refusals, invalid output and uncertain writes stop the workflow;
+the script never starts a replacement scan or invents another report request ID.
+The dashboard resolves report dependencies through scoped status reads when list
+summaries omit them, so a retained draft remains visible for its scan evidence.
+Admission confirms retention, not completed extraction of the new report. Memory
+supplies previously established operator context where permitted. Document-derived evidence and conclusions stay in the
 information store; the Application does not copy restricted evidence into memory.
 No shell, firewall or device-changing tools are granted to these agents.
 

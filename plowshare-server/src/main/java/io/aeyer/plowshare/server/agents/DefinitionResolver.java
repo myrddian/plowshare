@@ -40,13 +40,14 @@ import org.slf4j.LoggerFactory;
  * own {@link ChannelDefinitions} behind them, all layered over the boot set built once at wiring
  * time.
  *
- * <p><b>The boot set is never rebuilt.</b> Only project tiers are, and each is read fresh the first
- * time a project is asked for, cached after that, and read again when the directories it was read
- * from have changed — see "a bot dropped in resolves on the next lookup" below, which is the
- * guarantee this whole class exists to deliver. Nothing a project tier holds can be {@code
- * required} — {@link #readProject} passes {@code Set.of()} to the tier's own read, so nothing in it
- * can ever abort <em>that</em> read. A bad project definition is a disabled one, reported through
- * {@link #refusalsFor}, and so is a withheld edge or a withheld tool — the tier read's own {@code
+ * <p><b>Global snapshots are immutable.</b> Editable global files refresh independently; project
+ * tiers are rebuilt when their inherited snapshot changes, and each is read fresh the first time a
+ * project is asked for, cached after that, and read again when the directories it was read from
+ * have changed — see "a bot dropped in resolves on the next lookup" below, which is the guarantee
+ * this whole class exists to deliver. Nothing a project tier holds can be {@code required} — {@link
+ * #readProject} passes {@code Set.of()} to the tier's own read, so nothing in it can ever abort
+ * <em>that</em> read. A bad project definition is a disabled one, reported through {@link
+ * #refusalsFor}, and so is a withheld edge or a withheld tool — the tier read's own {@code
  * disabled()}, {@code withheldEdges()} and {@code withheldTools()} are all folded into it, because
  * nothing this class withholds may be withheld without being named.
  *
@@ -275,7 +276,7 @@ public final class DefinitionResolver implements SessionCloseListener {
    * and a second place for the pair to disagree — a registry serving under a stamp that had already
    * been replaced is a stale read that nothing would ever notice.
    */
-  private record Cached(Stamp stamp, AgentRegistry registry) {}
+  private record Cached(Stamp stamp, AgentRegistry inherited, AgentRegistry registry) {}
 
   /**
    * The {@link #refusalsFor} key for a project-wide fallback — no real agent name can collide with
@@ -291,7 +292,8 @@ public final class DefinitionResolver implements SessionCloseListener {
     this.personalIds = personalIds;
   }
 
-  private final AgentRegistry bootSet;
+  private final GlobalAgentDefinitions globals;
+
   private java.util.function.Function<Long, ProjectConfiguration> projectConfiguration =
       id -> ProjectConfiguration.NONE;
 
@@ -370,8 +372,31 @@ public final class DefinitionResolver implements SessionCloseListener {
       Predicate<String> sessionLive,
       BiPredicate<Long, String> sessionRoots,
       DefinitionChecks checks) {
+    this(
+        GlobalAgentDefinitions.fixed(bootSet),
+        data,
+        projectExists,
+        knownTools,
+        required,
+        channel,
+        sessionLive,
+        sessionRoots,
+        checks);
+  }
+
+  /** Current global snapshots are a required dependency; fixture seeds are explicitly fixed. */
+  public DefinitionResolver(
+      GlobalAgentDefinitions globals,
+      DataLayout data,
+      LongPredicate projectExists,
+      Set<String> knownTools,
+      Set<String> required,
+      SessionChannel channel,
+      Predicate<String> sessionLive,
+      BiPredicate<Long, String> sessionRoots,
+      DefinitionChecks checks) {
+    this.globals = Objects.requireNonNull(globals, "globals");
     this.sessionRoots = Objects.requireNonNull(sessionRoots, "sessionRoots");
-    this.bootSet = Objects.requireNonNull(bootSet, "bootSet");
     this.data = Objects.requireNonNull(data, "data");
     this.projectExists = Objects.requireNonNull(projectExists, "projectExists");
     this.knownTools = Set.copyOf(knownTools);
@@ -414,7 +439,7 @@ public final class DefinitionResolver implements SessionCloseListener {
    * directory) {@code global/agents/} and {@code global/bots/} layered over it.
    */
   public AgentRegistry bootSet() {
-    return bootSet;
+    return globals.current();
   }
 
   /**
@@ -496,11 +521,12 @@ public final class DefinitionResolver implements SessionCloseListener {
    * answering {@link #refusalsFor} until the next rebuild happens to overwrite it, and there is no
    * reason to let a caller read a stale one in the meantime.
    *
-   * <p>Harmless and a no-op for {@code projectId == null}: {@link #forCaller} answers the (never
-   * rebuilt) boot set directly for a caller with no project, before either map is ever consulted,
-   * so nothing is ever cached under a {@code null} project id for this to find.
+   * <p>For {@code projectId == null}, invalidate editable global definitions. Project/session cache
+   * entries detect the replacement inherited snapshot on their next lookup; admitted runs retain
+   * their existing immutable definition.
    */
   public void invalidate(Long projectId) {
+    if (projectId == null) globals.invalidate();
     byProject.keySet().removeIf(key -> Objects.equals(projectId, key.projectId()));
     refusals.keySet().removeIf(key -> Objects.equals(projectId, key.projectId()));
   }
@@ -554,11 +580,12 @@ public final class DefinitionResolver implements SessionCloseListener {
    */
   public AgentRegistry forCaller(Caller caller) {
     Objects.requireNonNull(caller, "caller");
+    AgentRegistry inherited = bootSet();
     if (caller.projectId() == null && personalIds.apply(caller) != null) {
       caller = new Caller(personalIds.apply(caller), caller.sessionId(), caller.handle());
     }
     if (caller.projectId() == null || !projectExists.test(caller.projectId())) {
-      return bootSet;
+      return inherited;
     }
     if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
       // No data directory means no tree to hold a project tier at all --
@@ -569,7 +596,7 @@ public final class DefinitionResolver implements SessionCloseListener {
       // below calls either of them rather than caught after. Nothing is
       // cached: there is no directory whose change could ever make this
       // answer different.
-      return bootSet;
+      return inherited;
     }
     CacheKey key = keyFor(caller);
     Stamp ownStamp = stamp(caller.projectId());
@@ -578,11 +605,11 @@ public final class DefinitionResolver implements SessionCloseListener {
         new Stamp(
             ownStamp.agents() + inheritedStamp.agents(), ownStamp.bots() + inheritedStamp.bots());
     Cached cached = byProject.get(key);
-    if (cached != null && cached.stamp().equals(stamp)) {
+    if (cached != null && cached.stamp().equals(stamp) && cached.inherited() == inherited) {
       return cached.registry();
     }
-    AgentRegistry built = readProject(key);
-    byProject.put(key, new Cached(stamp, built));
+    AgentRegistry built = readProject(key, inherited);
+    byProject.put(key, new Cached(stamp, inherited, built));
     if (key.sessionId() != null && !sessionLive.test(key.sessionId())) {
       // The session this entry is keyed by has stopped being attached to
       // anything since keyFor asked -- it closed while the tier above was
@@ -684,8 +711,8 @@ public final class DefinitionResolver implements SessionCloseListener {
     return shippedDefault()
         .filter(
             named ->
-                bootSet.find(named.name()).isPresent()
-                    || bootSet.disabled().containsKey(named.name()));
+                bootSet().find(named.name()).isPresent()
+                    || bootSet().disabled().containsKey(named.name()));
   }
 
   /**
@@ -837,7 +864,7 @@ public final class DefinitionResolver implements SessionCloseListener {
    * either way — every channel failure is already an empty listing by the time this method's caller
    * sees it.
    */
-  private AgentRegistry readProject(CacheKey key) {
+  private AgentRegistry readProject(CacheKey key, AgentRegistry inherited) {
     Long projectId = key.projectId();
     List<DefinitionSource> layers =
         new ArrayList<>(
@@ -854,8 +881,13 @@ public final class DefinitionResolver implements SessionCloseListener {
     DefinitionSource tier = new LayeredDefinitions(List.copyOf(layers));
 
     try {
-      return build(key, tier);
+      return build(key, tier, inherited);
     } catch (RuntimeException brokenTier) {
+      if (applicationResources.root(projectId).isPresent()) {
+        refusals.put(key, Map.of(TIER, "Application definitions are unavailable"));
+        throw new io.aeyer.plowshare.server.faults.CallerFault(
+            "Application definitions are unavailable", brokenTier);
+      }
       // The tier's own per-file disable rule could not absorb this: a
       // graph-level fault visible only once the tier is combined with
       // the boot set -- a caller of a name that failed to parse and so
@@ -887,7 +919,7 @@ public final class DefinitionResolver implements SessionCloseListener {
       // logs its own disablements at WARN in these same words, which is
       // where the voice comes from.
       log.warn("The definitions of project {} are ALL WITHHELD, because: {}", projectId, reason);
-      return bootSet;
+      return inherited;
     }
   }
 
@@ -896,19 +928,19 @@ public final class DefinitionResolver implements SessionCloseListener {
    * and nothing else — {@code data.keepsAnything()} and the layer construction above it must never
    * be caught, since a fault there is a wiring bug and not a project's own.
    */
-  private AgentRegistry build(CacheKey key, DefinitionSource tier) {
+  private AgentRegistry build(CacheKey key, DefinitionSource tier, AgentRegistry inherited) {
     Map<String, String> refused = new LinkedHashMap<>();
-    Map<String, AgentDefinition> merged = new LinkedHashMap<>(bootSet.byName());
+    Map<String, AgentDefinition> merged = new LinkedHashMap<>(inherited.byName());
 
     // No `required` predicate is passed to the tier's own read: nothing a
     // project directory holds may abort this resolution, so a bad
-    // definition there is disabled and never a throw. `bootSet.names()` is
+    // definition there is disabled and never a throw. `inherited.names()` is
     // passed as `alsoDefined` so a `calls:` naming an inherited agent is
     // not read as a typo and withheld before the merge below ever sees it
     // -- see AgentRegistry's four-Set `read` overload and this class's own
     // javadoc.
     AgentRegistry.Loaded read =
-        AgentRegistry.read(tier, knownTools(key.projectId()), Set.of(), bootSet.names());
+        AgentRegistry.read(tier, knownTools(key.projectId()), Set.of(), inherited.names());
     // The questions the registry cannot answer for itself -- is this model
     // served, does it see, and what sampling will it actually send -- asked
     // of a project's own definitions with the same lambda AgentsConfig asks
@@ -934,6 +966,13 @@ public final class DefinitionResolver implements SessionCloseListener {
     // Every way the tier's own read could have withheld something, folded
     // in: nothing this class withholds may be withheld without being
     // named in refusalsFor.
+    if (applicationResources.root(key.projectId()).isPresent()) {
+      // A refused authoritative Application override masks an ordinary inherited definition.
+      // Required system roles remain protected from Application overrides by the existing rule.
+      loaded.disabled().keySet().stream()
+          .filter(name -> !required.contains(name))
+          .forEach(merged::remove);
+    }
     loaded.disabled().forEach(refused::put);
     loaded.withheldEdges().forEach(refused::put);
     loaded.withheldTools().forEach(refused::put);
@@ -970,7 +1009,7 @@ public final class DefinitionResolver implements SessionCloseListener {
     // must find no refusalsFor entry from this attempt -- the two maps
     // must never disagree, and the whole-project fallback it records is
     // the only account of what happened.
-    AgentRegistry registry = bootSet.replacing(merged);
+    AgentRegistry registry = inherited.replacing(merged);
     refusals.put(key, Map.copyOf(refused));
     return registry;
   }

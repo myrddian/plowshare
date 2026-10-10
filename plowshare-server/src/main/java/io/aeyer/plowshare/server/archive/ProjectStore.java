@@ -113,7 +113,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * key and not {@code AgentsProperties}', which is evidence the old sentence's premise never
  * generalised past the one path it happened to name.
  */
-public final class ProjectStore implements ServerProjects, ProjectNames {
+public final class ProjectStore implements ServerProjects, ProjectNames, ProjectCatalogue {
 
   /*
    * `lent` sits between `workspace` and `exclusions` because that is the order

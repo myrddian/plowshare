@@ -118,7 +118,7 @@ Before installing an Application, configure these server resources:
   administrator. The helper lists eligible stores for selection. An Application
   cannot configure the server's underlying storage root for itself.
 - A working server model binding. The helper asks for its name and writes it into
-  all three agents and the investigation conductor. This can use local inference.
+  all three agents and both orchestration scripts. This can use local inference.
   The helper does not install a model or configure its provider.
 
 See [server administration](../../docs/server-administration.md),
@@ -200,10 +200,10 @@ private-directory/
     application/
       plowshare.json             # Human MANAGERs, service CONTRIBUTOR and explicit tool scopes
       agents/                    # Configured model binding and tool requests
-      orchestrations/            # Configured investigation conductor
+      orchestrations/            # Configured schedule and investigation scripts
       schedules/                 # network_scan remains paused
       Relay/
-      server/                    # Application-owned tools/provider and port authority
+      server/                    # Tools/provider, ports and service-owned Relay worker
 ```
 
 If you defer device selection, `collector.json` contains `collection.enabled: false`
@@ -250,7 +250,7 @@ Installation:
    project membership and issues a named token with only this project's
    `CONTRIBUTOR` scope. It refuses a token that already has that name.
 4. Saves the token privately and substitutes its principal into the Application
-   manifest and provider/port declarations.
+   manifest, provider/port declarations and Relay worker enrollment.
 5. Deploys the updated source using a fresh request UUID and the confirmed first
    revision as `expectedRevision`. It verifies the active revision.
 6. Reads the deployed schedule's internal name into `collector.json` when server
@@ -259,7 +259,9 @@ Installation:
 The helper writes the private directory with POSIX mode `0700` and credentials,
 intents and receipts with `0600`. On Windows, restrict the directory's ACLs.
 It never prints the administrator password, service token or dashboard bearer.
-It does not scan or configure an automatic Relay worker during installation.
+It does not scan during installation. The prepared `server/relay-workers.json`
+enrolls the automatic Relay worker under the issued service principal when the
+updated Application is deployed; no whole-server configuration edit is needed.
 
 The `start` flow waits for schedule registration automatically. For a separate read-only diagnostic, run:
 
@@ -279,12 +281,16 @@ agent work. Collector information requests explicitly exclude shared information
 the service credential reads and writes only its granted project scope. The **account that processes the Relay subscriptions** owns those
 investigations, so use the service credential for that processing.
 
-Follow [Run investigations as the service identity](README.md#run-investigations-as-the-service-identity)
-to configure the existing automatic Relay worker using the principal in
-`deployment/identity.json`, or supervise explicit Relay processing under the
-credential in `deployment/service-token`. The helper does not edit a whole server
-configuration to install a worker. Without a worker or explicit processing pass,
-scan evidence can be retained while its investigation has not started.
+The helper fills `server/relay-workers.json` with the principal in
+`deployment/identity.json` and includes it in the confirmed identity deployment.
+The server discovers this Application-owned enrollment within its Relay
+configuration interval (30 seconds by default), without restarting. Keep the
+worker bound to the service principal so investigations use the same identity as
+the collector. If upgrading an older private source copy, follow
+[Run investigations as the service identity](README.md#run-investigations-as-the-service-identity)
+to add and deploy the declaration, or supervise explicit Relay processing under
+the credential in `deployment/service-token`. Without enrollment or an explicit
+processing pass, scan evidence can be retained while its investigation has not started.
 
 Contributor processing uses the broker's stored topic policy, or the standard
 four-day default when registering a new topic. Declared values in `Relay/topics.json`

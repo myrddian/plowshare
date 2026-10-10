@@ -2,8 +2,9 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Compaction;
+import io.aeyer.plowshare.server.agents.ConversationDefinitions;
+import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.api.ProjectionView;
 import io.aeyer.plowshare.server.archive.Conversations;
 import io.aeyer.plowshare.server.archive.TurnRecord;
@@ -12,7 +13,6 @@ import io.aeyer.plowshare.server.requests.RequestedAgent;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.beans.factory.ObjectProvider;
 
 /**
  * {@code conversation.projection} — the exact message list a conversation's next prompt would
@@ -63,35 +63,27 @@ public final class ConversationProjectionHandler implements FrameHandler {
 
   private final Conversations rules;
   private final TurnStore turns;
-  private final ObjectProvider<AgentRegistry> agents;
+  private final ConversationDefinitions definitions;
+  private final JobRuntime runtime;
   private final Compaction compaction;
 
   /**
    * @param rules the service the controller asks all three of its questions of
    * @param turns the one store both surfaces read a history from
-   * @param agents the registry {@link RequestedAgent} resolves a name through
+   * @param definitions the conversation-scoped definition authority
    * @param compaction what assembles a projection, and never sends one
    */
   public ConversationProjectionHandler(
       Conversations rules,
       TurnStore turns,
-      ObjectProvider<AgentRegistry> agents,
-      Compaction compaction) {
+      ConversationDefinitions definitions,
+      Compaction compaction,
+      JobRuntime runtime) {
     this.rules = Objects.requireNonNull(rules, "rules");
     this.turns = Objects.requireNonNull(turns, "turns");
-    this.agents = Objects.requireNonNull(agents, "agents");
+    this.definitions = Objects.requireNonNull(definitions, "definitions");
+    this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.compaction = Objects.requireNonNull(compaction, "compaction");
-  }
-
-  private io.aeyer.plowshare.server.agents.JobRuntime runtime;
-  private io.aeyer.plowshare.server.agents.Callers callers;
-
-  public ConversationProjectionHandler withRules(
-      io.aeyer.plowshare.server.agents.JobRuntime runtime,
-      io.aeyer.plowshare.server.agents.Callers callers) {
-    this.runtime = runtime;
-    this.callers = callers;
-    return this;
   }
 
   @Override
@@ -109,12 +101,14 @@ public final class ConversationProjectionHandler implements FrameHandler {
       rules.aTurnThatHappened(conversation, spoken, asked.turn());
     }
     String named = rules.whoToProjectAs(conversation, asked.agent(), spoken);
-    AgentDefinition definition = RequestedAgent.toRead(agents, named);
-    if (asked.turn() == null && runtime != null) {
+    AgentDefinition definition =
+        definitions.readAgent(
+            named, definitions.callerForConversation(conversation, asking.sessionId()));
+    if (asked.turn() == null) {
       definition =
           runtime.withAgentRules(
               definition,
-              callers.homeOfConversation(conversation),
+              definitions.homeOfConversation(conversation),
               asking.sessionId(),
               conversation);
     }

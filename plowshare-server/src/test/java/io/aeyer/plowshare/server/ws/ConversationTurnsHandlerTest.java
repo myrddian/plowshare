@@ -123,7 +123,6 @@ class ConversationTurnsHandlerTest {
                         mock(EntryStore.class),
                         mock(JobRuntime.class),
                         mock(Turn.class),
-                        unusedAgents(),
                         new ConversationsProperties(),
                         mock(Compaction.class),
                         mock(Tokenizer.class),

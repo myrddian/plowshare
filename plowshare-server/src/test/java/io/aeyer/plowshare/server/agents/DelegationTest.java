@@ -1139,12 +1139,7 @@ class DelegationTest {
     String result = toolResults(transport, 1);
     assertTrue(result.contains("'nowhere'"), result);
     assertTrue(result.contains("not in the set this run can delegate into"), result);
-    // And the sentence names all three ways to get here rather than the two
-    // it used to. A project-tier agent calling another project-tier agent
-    // takes this path every time -- this tool holds the boot set -- and was
-    // being told its callee "was read and refused, or this process defines
-    // no such agent", both of which are false for it.
-    assertTrue(result.contains("project's own agents/ or bots/"), result);
+    assertTrue(result.contains("current account and project"), result);
     // And NOT through JobRuntime's generic tool-failure clause, which says
     // "this is a fault in the tool rather than in what you sent it". That is
     // exactly backwards: nothing is wrong with agent_run, and one agent this

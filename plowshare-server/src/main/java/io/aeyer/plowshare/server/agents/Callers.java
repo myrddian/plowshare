@@ -2,12 +2,15 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.requests.RequestedAgent;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedProjectId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -72,7 +75,7 @@ import org.springframework.stereotype.Service;
  * a home for its own read-side helpers should take this one with it.
  */
 @Service
-public final class Callers implements WorkCallers {
+public final class Callers implements WorkCallers, AgentDelegates, ConversationDefinitions {
 
   private io.aeyer.plowshare.server.archive.ConversationStore conversations;
   private io.aeyer.plowshare.server.session.SessionRegistry sessions;
@@ -96,6 +99,41 @@ public final class Callers implements WorkCallers {
     this.resolver = resolver;
     this.projects = projects;
     this.turns = turns;
+  }
+
+  @Override
+  public AgentRegistry visible(Home home, String session, String account) {
+    // Unscoped schema inspection is boot metadata, never a route into personal resources.
+    if (home == null || home.isGlobal() && account == null)
+      return resolver.forCaller(DefinitionResolver.Caller.server());
+    requireDelegateAccount(account);
+    access.requireSession(session, account);
+    access.requireProject(home.project(), account);
+    return resolver.forCaller(delegateCaller(home, session, account));
+  }
+
+  @Override
+  public Optional<AgentDefinition> find(Home home, String session, String account, String name) {
+    Objects.requireNonNull(home);
+    Objects.requireNonNull(name);
+    requireDelegateAccount(account);
+    // Admission is fresh even when the parent already holds a tool schema or resolver cache.
+    access.requireSession(session, account);
+    access.requireWork(home.project(), account);
+    return resolver.forCaller(delegateCaller(home, session, account)).find(name);
+  }
+
+  private DefinitionResolver.Caller delegateCaller(Home home, String session, String account) {
+    var caller = callerFor(home.project(), session, account);
+    // A vanished project must not turn a scoped child into a global/Personal lookup.
+    if (!home.isGlobal() && caller.projectId() == null)
+      throw new CallerFault("the current project is unavailable for delegation");
+    return caller;
+  }
+
+  private static void requireDelegateAccount(String account) {
+    if (account == null || account.isBlank())
+      throw new CallerFault("Delegation requires the admitted account identity");
   }
 
   /** The conversation's own home, for execution and prompt inspection alike. */
@@ -168,8 +206,12 @@ public final class Callers implements WorkCallers {
    * ArchiveException} {@link Turn#speak} would have, merely sooner.
    */
   public DefinitionResolver.Caller callerForConversation(String conversation, String session) {
+    var home = turns.homeOf(conversation);
+    var id = RequestedProjectId.of(projects, home);
+    if (!home.isGlobal() && id == null)
+      throw new CallerFault("the conversation's project is unavailable");
     return new DefinitionResolver.Caller(
-        RequestedProjectId.of(projects, turns.homeOf(conversation)),
+        id,
         session,
         conversations == null ? null : conversations.ownerOf(conversation).orElse(null));
   }

@@ -85,6 +85,35 @@ a less specific definition. Editing a definition affects future resolution; an
 ongoing workflow or skill invocation keeps its pinned source and identity where
 the lifecycle contract requires it.
 
+`agent_run` resolves delegates in the current run's account, project and eligible
+session, using the same definition loader as the agent listing. A registered
+Application's `agents/` directory participates without a connected client or a
+server restart; its deployed tier cannot be replaced by client definitions.
+Names are resolved only within that home, never by searching other projects.
+
+The caller must declare the delegate in `calls:` and hold current CONTRIBUTOR
+access to run work in the project. Delegation may reach an unexported agent when
+it is delegable; `exported` controls outside submissions. Missing, disabled or
+non-delegable targets are refused before a child starts. Losing work access returns
+`E_NO_ACCESS`, even if a previous tool schema described the delegate. Current child
+workspace grants cannot exceed the admitted caller's grants. Children keep their
+own tools, inherit the account/home/session and share the tree's budget and
+cancellation while recording into separate conversations.
+
+Conversation resume, projection and cost preview resolve against the retained
+conversation's project and owner. WebSocket inspections can use an eligible rooted
+session; resume uses the requested session. REST inspections are sessionless.
+Read-only inspection can describe unexported agents; resume keeps exported admission
+and current work/session checks. A missing project refuses instead of becoming global.
+Historical projections retain the recorded system block when available.
+
+Operator files in `global/agents/`, `global/bots/` and `global/orchestrations/` refresh
+on the next resolution, including edits that preserve file size/timestamps. Global
+authoring returns the current definition immediately. Required definitions are still
+validated at startup, and new runtime snapshots apply the same model/tool/graph checks.
+Classpath resources belong to the installed release. Existing admitted work keeps its
+normal pinned definition; editing a file does not change a running workflow.
+
 ## The layers of authority
 
 | Layer | What it controls |
