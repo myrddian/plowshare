@@ -78,7 +78,7 @@ class ConsoleFixture:
 
     async def investigate(self, receipt: Receipt, request_id: str) -> Admission:
         self.starts += 1
-        self.receipt = Admission(request_id, str(uuid4()), "RUNNING")
+        self.receipt = Admission(request_id, "orc_fixture_123", "RUNNING")
         if self.lost:
             raise TransportError(Delivery.UNKNOWN, "fixture lost reply")
         return self.receipt
@@ -163,7 +163,17 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.remote.starts, 1)
         await restored.check_and_resume()
         self.assertEqual(restored.manual[0].phase, "confirmed")
+        self.assertEqual(restored.manual[0].run_id, "orc_fixture_123")
+        persisted = FileManualInvestigations(self.root).all()[0]
+        self.assertEqual(persisted, restored.manual[0])
         self.recover.assert_awaited_once()
+        self.assertEqual(self.remote.starts, 1)
+
+    async def test_opaque_run_admission_survives_journal_reload(self) -> None:
+        entry = await self.console.investigate(self.scan.scan_id, str(uuid4()))
+        self.assertEqual(entry.phase, "confirmed")
+        self.assertEqual(entry.run_id, "orc_fixture_123")
+        self.assertEqual(FileManualInvestigations(self.root).all(), (entry,))
         self.assertEqual(self.remote.starts, 1)
 
     async def test_absence_does_not_resume_or_resubmit(self) -> None:

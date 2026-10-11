@@ -16,7 +16,7 @@ from plowshare.contracts import (
     OrchestrationStartRequest,
 )
 
-from .contracts import Configuration, uuid
+from .contracts import Configuration, identifier, text, uuid
 from .journal import Receipt
 
 
@@ -182,7 +182,13 @@ class SdkConsolePort:
         ).require_payload()
         if admitted.request_id != request_id:
             raise ValueError("Foreign investigation receipt")
-        return Admission(uuid(admitted.request_id), uuid(admitted.id), admitted.state)
+        # Request identities are UUIDs; server run identities are opaque IDs.
+        # Preserve the exact retained ID rather than interpreting it as a UUID.
+        return Admission(
+            uuid(admitted.request_id),
+            identifier(admitted.id),
+            text(admitted.state, 128),
+        )
 
     async def investigation_receipt(self, request_id: str) -> Admission:
         result = (
@@ -192,4 +198,6 @@ class SdkConsolePort:
         ).require_payload()
         if result.request_id != request_id:
             raise ValueError("Foreign investigation receipt")
-        return Admission(uuid(result.request_id), uuid(result.id), result.state)
+        return Admission(
+            uuid(result.request_id), identifier(result.id), text(result.state, 128)
+        )

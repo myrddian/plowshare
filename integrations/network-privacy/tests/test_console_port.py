@@ -19,11 +19,15 @@ from plowshare.contracts import (
     ConversationContextSnapshotRequest,
     ConversationListRequest,
     ConversationViewDto,
+    OrchestrationReceiptRequest,
     OrchestrationReceiptResultDto,
+    OrchestrationStartRequest,
+    OrchestrationStartResultDto,
 )
 from support import configuration
 
 from plowshare_privacy.console_port import SdkConsolePort
+from plowshare_privacy.journal import Receipt
 
 
 class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
@@ -137,6 +141,68 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         ]
         with self.assertRaises(ValueError):
             await self.port.agents()
+
+    async def test_start_preserves_opaque_run_identity(self) -> None:
+        from support import CountingCollector
+
+        identity = str(uuid4())
+        scan = str(uuid4())
+        evidence = await CountingCollector(self.config).collect(
+            scan, "schedule:fixture", None, None
+        )
+        receipt = Receipt(
+            scan,
+            "schedule:fixture",
+            "schedule.due",
+            evidence.finished_at,
+            "done",
+            evidence=evidence,
+            revision=str(uuid4()),
+        )
+        self.client.request.return_value = Reply(
+            "ACCEPTED",
+            None,
+            OrchestrationStartResultDto(
+                id="orc_0123456789ABCDEF", request_id=identity, state="running"
+            ),
+        )
+        result = await self.port.investigate(receipt, identity)
+        self.assertEqual(result.run_id, "orc_0123456789ABCDEF")
+        self.assertEqual(result.request_id, identity)
+        request = self.client.request.call_args.args[0]
+        self.assertIsInstance(request, OrchestrationStartRequest)
+        self.assertEqual(request.project, self.config.project)
+        self.assertEqual(request.request_id, identity)
+        self.client.request.assert_awaited_once()
+
+    async def test_receipt_preserves_opaque_run_identity_without_starting(self) -> None:
+        identity = str(uuid4())
+        self.client.request.return_value = Reply(
+            "OK",
+            None,
+            OrchestrationReceiptResultDto(
+                id="orc_0123456789ABCDEF", request_id=identity, state="finished"
+            ),
+        )
+        result = await self.port.investigation_receipt(identity)
+        self.assertEqual(result.run_id, "orc_0123456789ABCDEF")
+        self.assertEqual(result.request_id, identity)
+        self.client.request.assert_awaited_once_with(
+            OrchestrationReceiptRequest(request_id=identity)
+        )
+
+    async def test_invalid_run_identity_never_confirms_a_receipt(self) -> None:
+        identity = str(uuid4())
+        for run in ("", "orc bad", "orc_\\bad", "orc_\n", "x" * 129):
+            self.client.request.return_value = Reply(
+                "OK",
+                None,
+                OrchestrationReceiptResultDto(
+                    id=run, request_id=identity, state="running"
+                ),
+            )
+            with self.subTest(run=run), self.assertRaises(ValueError):
+                await self.port.investigation_receipt(identity)
 
     async def test_foreign_receipt_never_confirms_an_intent(self) -> None:
         identity = str(uuid4())
