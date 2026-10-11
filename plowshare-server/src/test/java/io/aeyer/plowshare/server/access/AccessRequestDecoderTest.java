@@ -98,6 +98,26 @@ class AccessRequestDecoderTest {
   }
 
   @Test
+  void receipt_request_ids_are_scoped_resources_only_for_receipt_reads() {
+    String requestId = "00000000-0000-0000-0000-000000000001";
+    var receipt =
+        AccessRequestDecoder.decode("orchestration.receipt", Map.of("requestId", requestId));
+    assertEquals(
+        List.of(new AccessRequest.Resource(ORCHESTRATION_RECEIPT, requestId)), receipt.resources());
+    assertTrue(receipt.projects().isEmpty());
+    assertTrue(
+        AccessRequestDecoder.decode("orchestration.start", Map.of("requestId", requestId))
+            .resources()
+            .isEmpty());
+    for (Object value : List.of("not-a-uuid", "1-1-1-1-1", 1, true))
+      assertThrows(
+          CallerFault.class,
+          () -> AccessRequestDecoder.decode("orchestration.receipt", Map.of("requestId", value)));
+    assertThrows(
+        CallerFault.class, () -> AccessRequestDecoder.decode("orchestration.receipt", Map.of()));
+  }
+
+  @Test
   void business_fields_are_not_authorization_references() {
     assertTrue(
         AccessRequestDecoder.decode(

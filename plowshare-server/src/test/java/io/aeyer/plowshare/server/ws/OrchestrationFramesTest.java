@@ -6,9 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,13 +20,21 @@ import io.aeyer.plowshare.protocol.Orchestration.Changed;
 import io.aeyer.plowshare.protocol.Orchestration.DefinitionView;
 import io.aeyer.plowshare.protocol.Orchestration.Definitions;
 import io.aeyer.plowshare.protocol.Orchestration.Listed;
+import io.aeyer.plowshare.protocol.Orchestration.Started;
 import io.aeyer.plowshare.protocol.Orchestration.Status;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.access.ProjectAuthorization;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository;
 import io.aeyer.plowshare.server.agents.OrchestrationDefinition;
 import io.aeyer.plowshare.server.agents.OrchestrationRegistry;
 import io.aeyer.plowshare.server.agents.OrchestrationResolver;
+import io.aeyer.plowshare.server.archive.ProjectMembers;
+import io.aeyer.plowshare.server.archive.ProjectRole;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.auth.AdminStore;
+import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationCancel;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationMessage;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationRecord;
@@ -150,6 +161,111 @@ class OrchestrationFramesTest {
     assertEquals(
         Code.BAD_REQUEST,
         routeAs("other", "orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
+  }
+
+  private static final String SERVICE = "@service/00000000-0000-0000-0000-000000000001";
+
+  @Test
+  void service_receipt_resolves_retained_project_before_returning_the_existing_run() {
+    var key = java.util.UUID.randomUUID();
+    var scopes = mock(ResourceScopeRepository.class);
+    var members = mock(ProjectMembers.class);
+    var accounts = mock(AdminStore.class);
+    when(scopes.orchestrationReceiptProjects(SERVICE, key)).thenReturn(List.of("story"));
+    router.useAuthorization(new ProjectAuthorization(scopes, members, accounts));
+    when(store.startReceipt(SERVICE, key))
+        .thenReturn(Optional.of(new OrchestrationStore.StartReceipt(key, "orc_original", false)));
+    when(store.find("orc_original"))
+        .thenReturn(Optional.of(run("orc_original", SERVICE, OrchestrationState.ASKING)));
+
+    for (int read = 0; read < 2; read++) {
+      var result = routeAs(SERVICE, "orchestration.receipt", "{\"requestId\":\"" + key + "\"}");
+      assertEquals(Code.OK, result.code());
+      assertEquals(new Started("orc_original", "asking", key), result.payload());
+    }
+    verify(scopes, times(2)).orchestrationReceiptProjects(SERVICE, key);
+    verify(members, times(2)).requireRole("story", SERVICE, ProjectRole.VIEWER);
+    verifyNoInteractions(orchestrations, cancel, todos, accounts);
+
+    doThrow(new CallerFault("Token scope revoked"))
+        .when(members)
+        .requireRole("story", SERVICE, ProjectRole.VIEWER);
+    assertEquals(
+        Code.BAD_REQUEST,
+        routeAs(SERVICE, "orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
+    verify(store, times(2)).startReceipt(SERVICE, key);
+  }
+
+  @Test
+  void service_receipt_cannot_use_a_foreign_uuid_or_global_scope_or_unavailable_repository() {
+    var key = java.util.UUID.randomUUID();
+    var scopes = mock(ResourceScopeRepository.class);
+    var members = mock(ProjectMembers.class);
+    router.useAuthorization(new ProjectAuthorization(scopes, members, mock(AdminStore.class)));
+    String body = "{\"requestId\":\"" + key + "\"}";
+    assertEquals(
+        Code.BAD_REQUEST,
+        routeAs(SERVICE, "orchestration.receipt", "{\"requestId\":\"1-1-1-1-1\"}").code());
+    verifyNoInteractions(scopes, store, members, orchestrations);
+    // Missing and foreign UUIDs have the same account-bound empty lookup.
+    assertEquals(Code.BAD_REQUEST, routeAs(SERVICE, "orchestration.receipt", body).code());
+    when(scopes.orchestrationReceiptProjects(SERVICE, key))
+        .thenReturn(java.util.Collections.singletonList(null));
+    assertEquals(Code.BAD_REQUEST, routeAs(SERVICE, "orchestration.receipt", body).code());
+    when(scopes.orchestrationReceiptProjects(SERVICE, key))
+        .thenThrow(new IllegalStateException("Repository unavailable"));
+    assertEquals(Code.INTERNAL_ERROR, routeAs(SERVICE, "orchestration.receipt", body).code());
+    verifyNoInteractions(store, members, orchestrations, cancel, todos);
+  }
+
+  @Test
+  void service_receipt_preserves_owned_run_and_information_visibility_checks() {
+    var key = java.util.UUID.randomUUID();
+    var scopes = mock(ResourceScopeRepository.class);
+    when(scopes.orchestrationReceiptProjects(SERVICE, key)).thenReturn(List.of("story"));
+    router.useAuthorization(
+        new ProjectAuthorization(scopes, mock(ProjectMembers.class), mock(AdminStore.class)));
+    when(store.startReceipt(SERVICE, key))
+        .thenReturn(Optional.of(new OrchestrationStore.StartReceipt(key, "orc_original", false)));
+    when(store.find("orc_original"))
+        .thenReturn(Optional.of(run("orc_original", "other", OrchestrationState.FINISHED)));
+    assertEquals(
+        Code.BAD_REQUEST,
+        routeAs(SERVICE, "orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
+
+    var inputs = mock(InformationJobs.class);
+    var frame =
+        new OrchestrationFrames(
+            store, orchestrations, cancel, todos, providerOf(resolver), projects);
+    frame.useInformationInputs(inputs);
+    router = new FrameRoutingConfig().frameRouter(List.of(frame));
+    router.useAuthorization(
+        new ProjectAuthorization(scopes, mock(ProjectMembers.class), mock(AdminStore.class)));
+    when(store.find("orc_original"))
+        .thenReturn(Optional.of(run("orc_original", SERVICE, OrchestrationState.FINISHED)));
+    doThrow(new CallerFault("Evidence inaccessible"))
+        .when(inputs)
+        .requireLog("orc_original", SERVICE);
+    assertEquals(
+        Code.BAD_REQUEST,
+        routeAs(SERVICE, "orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
+    verify(inputs).requireLog("orc_original", SERVICE);
+    verifyNoInteractions(orchestrations, cancel, todos);
+  }
+
+  @Test
+  void ordinary_receipt_reads_also_require_current_project_membership() {
+    var key = java.util.UUID.randomUUID();
+    var scopes = mock(ResourceScopeRepository.class);
+    var members = mock(ProjectMembers.class);
+    when(scopes.orchestrationReceiptProjects("enzo", key)).thenReturn(List.of("story"));
+    router.useAuthorization(new ProjectAuthorization(scopes, members, mock(AdminStore.class)));
+    doThrow(new CallerFault("Membership revoked"))
+        .when(members)
+        .requireRole("story", "enzo", ProjectRole.VIEWER);
+    assertEquals(
+        Code.BAD_REQUEST, route("orchestration.receipt", "{\"requestId\":\"" + key + "\"}").code());
+    verifyNoInteractions(store, orchestrations, cancel, todos);
   }
 
   @SuppressWarnings("unchecked")

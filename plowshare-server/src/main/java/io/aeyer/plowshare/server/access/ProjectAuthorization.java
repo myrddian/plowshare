@@ -212,10 +212,19 @@ public class ProjectAuthorization {
     return ProjectRole.CONTRIBUTOR;
   }
 
-  public Set<String> scopes(String operation, AccessRequest request) {
+  private Set<String> scopes(AccessRequest request, String account) {
     Set<String> projects = new LinkedHashSet<>(request.projects());
-    for (AccessRequest.Resource resource : request.resources())
-      projects.addAll(resources.projects(resource));
+    for (AccessRequest.Resource resource : request.resources()) {
+      if (resource.kind() == ResourceScopeRepository.Kind.ORCHESTRATION_RECEIPT) {
+        // A start UUID is account-owned, not a run ID. Resolve it before checking the
+        // service token's current project ceiling; the receipt handler still checks run visibility.
+        var receiptProjects =
+            resources.orchestrationReceiptProjects(account, UUID.fromString(resource.id()));
+        if (receiptProjects.isEmpty())
+          throw new CallerFault("No orchestration start receipt is owned by this account");
+        projects.addAll(receiptProjects);
+      } else projects.addAll(resources.projects(resource));
+    }
     return projects;
   }
 
@@ -269,7 +278,7 @@ public class ProjectAuthorization {
     if (ACCOUNT_OWNED.contains(operation)) {
       // Resuming a global emitter requires the same authority as defining one.
       if (operation.equals("schedule.pause") && Boolean.FALSE.equals(payload.paused())) {
-        var registered = scopes(operation, payload);
+        var registered = scopes(payload, account);
         if (registered.isEmpty() || registered.contains(null)) accounts.requireServerAdmin(account);
         else
           for (String project : registered)
@@ -278,7 +287,7 @@ public class ProjectAuthorization {
       return; // Services enforce account ownership of these controls.
     }
     ProjectRole permission = required(operation);
-    Set<String> projects = scopes(operation, payload);
+    Set<String> projects = scopes(payload, account);
     if (service && projects.isEmpty() && !SERVICE_LISTS.contains(operation))
       throw new CallerFault(
           "Service tokens require an explicit project or a resource in a granted project");
