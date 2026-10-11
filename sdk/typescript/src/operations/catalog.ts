@@ -433,6 +433,7 @@ export const CLI_OPERATIONS = {
   'schedule define': 'schedule.define',
   'schedule read': 'schedule.read',
   'schedule pause': 'schedule.pause',
+  'schedule resume': 'schedule.pause',
   'schedule forget': 'schedule.forget',
   'trigger list': 'trigger.list',
   'trigger define': 'trigger.define',

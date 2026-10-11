@@ -1427,6 +1427,7 @@ await test(
           { schedule: 'weekday', paused: false },
           0,
         ],
+        ['schedule resume', 'schedule.pause', { schedule: 'weekday' }, 0],
         ['schedule forget', 'schedule.forget', { schedule: 'weekday' }, 0],
         ['trigger list', 'trigger.list', {}, 0],
         [
@@ -1518,7 +1519,11 @@ await test(
         );
         assert.deepEqual(
           fake.frames.at(-1)?.payload,
-          type === 'schedule.save' ? { ...payload, overwrite: false } : payload,
+          type === 'schedule.save'
+            ? { ...payload, overwrite: false }
+            : command === 'schedule resume'
+              ? { ...payload, paused: false }
+              : payload,
         );
         const output = json(result.stdout);
         assert.equal(field(output, ['operation']), type);

@@ -77,6 +77,10 @@ public final class RegisteredScheduleFiles implements ScheduleFiles {
     }
   }
 
+  public boolean applicationOwned(ScheduleDefinitionStore.Source source) {
+    return !source.source().equals("workspace") && resources.root(source.projectId()).isPresent();
+  }
+
   public void write(
       ScheduleDefinitionStore.Source source, String name, String text, boolean overwrite) {
     if (!source.source().equals("workspace") && resources.root(source.projectId()).isPresent())

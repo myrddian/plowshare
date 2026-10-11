@@ -131,4 +131,108 @@ class ScheduleFilesDatabaseTest {
     assertEquals(global, store.register("owner", null, "server"));
     assertThrows(RuntimeException.class, () -> store.register("other", null, "server"));
   }
+
+  @Test
+  void operationalPauseSurvivesReconciliationAndRepositoryRestart() {
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var file = store.apply(source, "daily", definition, NOW);
+    var trigger = triggers.find(file.internalName()).orElseThrow();
+    var running =
+        firings
+            .arrive(file.internalName(), new EventPayload.Text("running"), null, null, trigger, NOW)
+            .orElseThrow();
+    assertTrue(firings.claimStart(running.id(), NOW));
+    var waiting =
+        firings
+            .arrive(file.internalName(), new EventPayload.Text("waiting"), null, null, trigger, NOW)
+            .orElseThrow();
+    store.pause(source, "daily", definition, true, NOW);
+    assertEquals("refused", firings.find(waiting.id()).orElseThrow().status());
+    assertEquals("started", firings.find(running.id()).orElseThrow().status());
+    assertTrue(store.files(source).getFirst().definition().paused());
+    assertTrue(schedules.find(file.internalName()).orElseThrow().paused());
+    assertTrue(triggers.find(file.internalName()).orElseThrow().paused());
+    store = new JdbcScheduleDefinitionStore(jdbc, work, schedules, triggers, firings);
+    store.apply(source, "daily", definition, NOW.plusSeconds(86400));
+    assertTrue(store.files(source).getFirst().definition().paused());
+    var effective = store.files(source).getFirst().definition();
+    store.pause(source, "daily", effective, false, NOW.plusSeconds(86400));
+    var next = schedules.find(file.internalName()).orElseThrow().nextFireAt();
+    assertTrue(next.isAfter(NOW.plusSeconds(86400)));
+    store.pause(source, "daily", definition, false, NOW.plusSeconds(172800));
+    assertEquals(next, schedules.find(file.internalName()).orElseThrow().nextFireAt());
+    store.reject(source, "daily", "temporarily unavailable");
+    store.apply(source, "daily", definition, NOW.plusSeconds(172800));
+    assertFalse(store.files(source).getFirst().definition().paused());
+    assertFalse(triggers.find(file.internalName()).orElseThrow().paused());
+    assertFalse(schedules.find(file.internalName()).orElseThrow().paused());
+  }
+
+  @Test
+  void changedSourceClearsAnOverrideAndStaleControlIsRefused() {
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    store.apply(source, "daily", definition, NOW);
+    store.pause(source, "daily", definition, true, NOW);
+    var changed =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            definition.version(),
+            "0 30 9 * * *",
+            definition.zone(),
+            false,
+            definition.action(),
+            definition.target(),
+            definition.limits());
+    store.apply(source, "daily", changed, NOW);
+    assertFalse(store.files(source).getFirst().definition().paused());
+    assertThrows(RuntimeException.class, () -> store.pause(source, "daily", definition, true, NOW));
+    var foreign =
+        new ScheduleDefinitionStore.Source(
+            source.id(), "other", source.projectId(), source.project(), source.source());
+    assertThrows(RuntimeException.class, () -> store.pause(foreign, "daily", changed, true, NOW));
+    store.remove(source, "daily");
+    store.apply(source, "daily", definition, NOW);
+    assertFalse(store.files(source).getFirst().definition().paused());
+  }
+
+  @Test
+  void failedOperationalPauseRollsBackOverrideScheduleAndTrigger() {
+    var definition = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var file = store.apply(source, "daily", definition, NOW);
+    TriggerStore broken = mock(TriggerStore.class);
+    when(broken.find(file.internalName())).thenReturn(triggers.find(file.internalName()));
+    doThrow(new IllegalStateException("fixture failure"))
+        .when(broken)
+        .pause(anyString(), anyBoolean(), anyString());
+    var atomic = new JdbcScheduleDefinitionStore(jdbc, work, schedules, broken, firings);
+    assertThrows(
+        IllegalStateException.class, () -> atomic.pause(source, "daily", definition, true, NOW));
+    assertFalse(schedules.find(file.internalName()).orElseThrow().paused());
+    assertFalse(store.files(source).getFirst().definition().paused());
+    assertFalse(triggers.find(file.internalName()).orElseThrow().paused());
+  }
+
+  @Test
+  void aPackagedPausedScheduleCanResumeAndItsSourceDefaultRemainsPaused() {
+    var active = ScheduleDefinitionCodecTest.definition("agent", null, null);
+    var definition =
+        new io.aeyer.plowshare.protocol.ScheduledWork(
+            active.version(),
+            active.cron(),
+            active.zone(),
+            true,
+            active.action(),
+            active.target(),
+            active.limits());
+    var file = store.apply(source, "daily", definition, NOW);
+    store.pause(source, "daily", definition, false, NOW);
+    store.apply(source, "daily", definition, NOW.plusSeconds(86400));
+    assertFalse(store.files(source).getFirst().definition().paused());
+    assertFalse(schedules.find(file.internalName()).orElseThrow().paused());
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT (definition->>'paused')::boolean FROM schedule_files WHERE source_id=? AND name=?",
+            Boolean.class,
+            source.id(),
+            "daily"));
+  }
 }

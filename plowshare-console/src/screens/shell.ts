@@ -16,6 +16,7 @@ import { createDocuments } from './documents';
 import { el } from './dom';
 import { createInbox } from './inbox';
 import { createJobs } from './jobs';
+import { createSchedules } from './schedules';
 import { createMemory } from './memory';
 import { createProjects } from './projects';
 import { createProposals } from './proposals';
@@ -96,6 +97,7 @@ export const VIEWS = [
   'jobs',
   'proposals',
   'memory',
+  'schedules',
   'projects',
   'config',
 ] as const;
@@ -110,6 +112,7 @@ const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
   information: 'information',
   usage: 'usage',
   jobs: 'jobs',
+  schedules: 'schedules',
   proposals: 'proposals',
   memory: 'memory',
   projects: 'projects',
@@ -131,6 +134,7 @@ const GROUPS: Readonly<Record<ViewName, 'work' | 'system'>> = Object.freeze({
   information: 'work',
   usage: 'work',
   jobs: 'work',
+  schedules: 'system',
   proposals: 'work',
   memory: 'work',
   projects: 'system',
@@ -453,6 +457,8 @@ export function createShell(options: ShellOptions): Shell {
         ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
       });
     }
+    if (name === 'schedules')
+      return createSchedules({ root: host, openStream: shared.open, session });
     if (name === 'proposals') {
       return createProposals({ root: host, transport, project });
     }

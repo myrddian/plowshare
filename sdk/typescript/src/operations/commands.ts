@@ -80,6 +80,15 @@ export function parseCommand(line: string, project?: string): Parsed {
   // explicit null or nonboolean values still fail validation.
   if (type === 'schedule.save' && !('overwrite' in body))
     body = { ...body, overwrite: false };
+  // Resume is an explicit CLI facade for the existing cross-SDK pause operation.
+  // Reject a contradictory payload rather than silently replacing caller intent.
+  if (name === 'schedule resume') {
+    if ('paused' in body && body['paused'] !== false)
+      return { kind: 'usage', said: 'schedule resume requires paused:false' };
+    body = { ...body, paused: false };
+  }
+  if (name === 'schedule pause' && !('paused' in body))
+    body = { ...body, paused: true };
   const said = commandProblem(type, body);
   if (said !== undefined) return { kind: 'usage', said: said };
   try {

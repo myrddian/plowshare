@@ -94,6 +94,12 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
     if (file.definition() == null || !file.status().equals("active"))
       throw new CallerFault("Repair this schedule file before changing it");
     var old = file.definition();
+    if (files.applicationOwned(source.get())) {
+      manage(source.get());
+      authority.validate(source.get(), old);
+      store.pause(source.get(), file.name(), old, paused, Instant.now());
+      return true;
+    }
     save(
         account,
         new ScheduledWork.Save(

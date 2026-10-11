@@ -29,6 +29,7 @@ class RegisteredScheduleFilesTest {
     Files.writeString(folder.resolve("daily.json"), "{}");
     assertEquals(java.util.List.of(new ScheduleFiles.Entry("daily", "{}")), files.read(source));
     assertNull(files.executionSession(source));
+    assertTrue(files.applicationOwned(source));
     assertThrows(
         IllegalArgumentException.class, () -> files.write(source, "daily", "changed", true));
     assertThrows(IllegalArgumentException.class, () -> files.delete(source, "daily"));

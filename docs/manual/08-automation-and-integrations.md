@@ -28,6 +28,12 @@ starts without erasing earlier firings. An event source should provide bounded,
 well-defined data and retain correlation so repeated delivery does not become
 uncontrolled repeated work.
 
+Application schedules can be paused and resumed through CLI `schedule pause` /
+`schedule resume`, TUI `/schedule pause` / `/schedule resume`, desktop Activity,
+or web console Schedules. These controls retain operational state without changing
+the deployed Application files. Timing/action edits still require deployment.
+See [schedule lifecycle controls](../scheduling.md#cli-and-tui).
+
 Unattended work cannot assume a person is present to answer every approval. Run
 under a configured account and project and choose an explicit permitted command
 policy. A human-required operation can remain refused or awaiting rather than
