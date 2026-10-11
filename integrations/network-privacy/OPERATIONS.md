@@ -30,10 +30,18 @@ and Pi-hole. Plowshare does not start or host this external process.
    active revision and source digest. Choose a managed FileStore from the dropdown,
    enter the password again, then **Deploy reviewed revision**.
 
-Application schedules are immutable source definitions. Frequency/pause changes
-therefore use a new Application deployment, with the reviewed revision as a
-concurrency fence. The dashboard uses short-lived public login sessions and typed
-SDK deployment operations. Administrator credentials are never saved or used by
+Application schedules are immutable source definitions. This dashboard editor
+changes the source timing and initial pause setting through a reviewed Application
+deployment, with the reviewed revision as a concurrency fence. For operational
+pause/resume without changing source, use Plowshare CLI `schedule pause <internalName>`
+or `schedule resume <internalName>`, TUI `/schedule pause` / `/schedule resume`, desktop
+Activity controls, or the web console **Schedules** view. Obtain the registered
+`internalName` from `schedule files`; use its owning account with project management
+authority. Runtime controls preserve an unchanged deployed definition and restart
+state; changing the schedule source clears the operational override.
+
+The dashboard editor uses short-lived public login sessions and typed SDK
+deployment operations. Administrator credentials are never saved or used by
 collection. A newer Application deployed outside this setup is refused until an
 operator reviews and synchronizes the private prepared source and its receipt.
 The server may need a reconciliation pass before the new schedule is visible.

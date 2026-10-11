@@ -47,5 +47,13 @@ public interface ScheduleDefinitionStore {
    */
   void reject(Source source, String name, String error);
 
+  /**
+   * Atomically retain an operational pause override and project it to schedule/trigger state.
+   * Expected is the effective definition last inspected by the service; a changed definition
+   * refuses this control. Reconciliation and restart preserve the override for unchanged source. A
+   * changed source definition or deletion clears it. Resume skips missed occurrences.
+   */
+  void pause(Source source, String name, ScheduledWork expected, boolean paused, Instant now);
+
   void remove(Source source, String name);
 }

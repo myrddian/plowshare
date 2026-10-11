@@ -326,3 +326,65 @@ await test('stale displayed configuration blocks pause/removal and event emissio
     false,
   );
 });
+
+await test('Application schedule controls use one runtime operation without changing source or triggers', async () => {
+  const f = fixture();
+  let paused = true;
+  const managed = { ...schedule, name: file.internalName, paused };
+  f.reply((ask) => {
+    if (ask.type === 'schedule.pause') {
+      if (
+        typeof ask.payload !== 'object' ||
+        ask.payload === null ||
+        !('paused' in ask.payload) ||
+        typeof ask.payload.paused !== 'boolean'
+      )
+        throw new Error('Invalid pause request');
+      paused = ask.payload.paused;
+      return { code: 'NO_CONTENT', payload: null };
+    }
+    return {
+      code: 'OK',
+      payload:
+        ask.type === 'schedule.list'
+          ? [{ ...managed, paused }]
+          : ask.type === 'schedule.files'
+            ? [file]
+            : [],
+    };
+  });
+  await f.client.refresh();
+  await f.client.change(
+    'schedule',
+    managed.name,
+    scheduleIdentity(managed),
+    false,
+  );
+  const active = { ...managed, paused: false };
+  await f.client.change(
+    'schedule',
+    active.name,
+    scheduleIdentity(active),
+    true,
+  );
+  assert.deepEqual(
+    f.calls
+      .filter((call) => call.type === 'schedule.pause')
+      .map((call) => call.payload),
+    [
+      { schedule: file.internalName, paused: false },
+      { schedule: file.internalName, paused: true },
+    ],
+  );
+  assert.equal(
+    f.calls.some((call) =>
+      [
+        'trigger.pause',
+        'schedule.save',
+        'application.deploy',
+        'agent.run',
+      ].includes(call.type),
+    ),
+    false,
+  );
+});

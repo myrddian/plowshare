@@ -5760,6 +5760,62 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
       expect(prompt.said).toContain('resumed daily');
     });
 
+    it('controls an Application schedule through its registered definition', async () => {
+      const fake = await withAPair();
+      fake.script('schedule.files', {
+        code: 'OK',
+        payload: [
+          {
+            name: 'network_scan',
+            project: 'privacy',
+            source: 'server',
+            path: 'schedules/network_scan.json',
+            internalName: 'daily',
+            definition: {
+              version: 1,
+              cron: '0 9 * * *',
+              zone: 'UTC',
+              paused: false,
+              action: {
+                kind: 'agent',
+                agent: 'interlocutor',
+                name: null,
+                input: 'say hello',
+                mode: null,
+              },
+              target: {
+                kind: 'mailbox',
+                project: null,
+                conversation: null,
+                to: null,
+                route: null,
+              },
+              limits: { maxModelCalls: null, maxTurns: null, queueCap: 1 },
+            },
+            status: 'active',
+            error: null,
+          },
+        ],
+      });
+      const prompt = scripted([
+        '/schedule pause daily',
+        '/schedule resume daily',
+      ]);
+      await converse(talkingTo(fake, prompt));
+      expect(managed(fake)).toEqual([
+        {
+          type: 'schedule.pause',
+          payload: { schedule: 'daily', paused: true },
+        },
+        {
+          type: 'schedule.pause',
+          payload: { schedule: 'daily', paused: false },
+        },
+      ]);
+      expect(prompt.said).toContain('paused daily');
+      expect(prompt.said).toContain('resumed daily');
+    });
+
     it('forgets the schedule first, so its clock stops, and then the trigger', async () => {
       const fake = await withAPair();
       const prompt = scripted(['/schedule forget daily']);
