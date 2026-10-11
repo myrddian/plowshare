@@ -31,6 +31,7 @@ from support import EXAMPLES, STAMP
 from plowshare_privacy.setup import (
     Setup,
     administrator_login,
+    bind_provider,
     prepare,
     private_write,
     provision,
@@ -59,6 +60,39 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
             "collector",
             30,
         )
+
+    async def test_legacy_binding_conversion_preserves_other_explicit_identities(
+        self,
+    ) -> None:
+        prepare(self.setup)
+        path = self.setup.output / "application/server/ports.json"
+        row = json.loads(path.read_text())
+        row["bindings"][0]["account"] = self.setup.service
+        row["bindings"][1]["account"] = "another-execution-account"
+        path.write_text(json.dumps(row))
+        bind_provider(self.setup, PRINCIPAL)
+        updated = json.loads(path.read_text())
+        self.assertNotIn("account", updated["bindings"][0])
+        self.assertEqual(updated["bindings"][1]["account"], "another-execution-account")
+        self.assertEqual(
+            json.loads((self.setup.output / "application/plowshare.json").read_text())[
+                "executionAccount"
+            ],
+            PRINCIPAL,
+        )
+
+    async def test_explicit_invalid_account_does_not_become_an_inherited_grant(
+        self,
+    ) -> None:
+        prepare(self.setup)
+        path = self.setup.output / "application/server/tools.json"
+        row = json.loads(path.read_text())
+        invalid_values: tuple[object, ...] = (None, [], " invalid ", 3)
+        for invalid in invalid_values:
+            row["providers"][0]["account"] = invalid
+            path.write_text(json.dumps(row))
+            with self.assertRaises(ValueError):
+                bind_provider(self.setup, PRINCIPAL)
 
     def client(self, *, lost_token: bool = False) -> AsyncMock:
         client = AsyncMock(spec=Client)
@@ -155,7 +189,7 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
         worker = json.loads(
             (self.setup.output / "application/server/relay-workers.json").read_text()
         )
-        self.assertEqual(worker, {"version": 1, "account": PRINCIPAL})
+        self.assertEqual(worker, {"version": 1})
         self.assertEqual(
             manifest["toolGrants"],
             [{"toolScope": "network_scanning", "agent": "privacy_coordinator"}],
@@ -165,7 +199,7 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
                 (self.setup.output / f"application/server/{name}.json").read_text()
             )
             for binding in row["bindings"] + row.get("providers", []):
-                self.assertEqual(binding["account"], PRINCIPAL)
+                self.assertNotIn("account", binding)
         requests = [call.args[0] for call in client.request.call_args_list]
         grants = [
             request

@@ -165,3 +165,17 @@ Review each conflict and choose mine, theirs, a merged result or done according 
 the supported workflow. The reviewed file and conflict must still match before
 resolution applies. A local edit after preview makes that preview stale. Leaving
 or withdrawing file presence does not mean resolving every pending conflict.
+
+### Application execution identity defaults
+
+In an Application, set `executionAccount` once in root `plowshare.json`. An omitted
+`account` in `server/tools.json` bindings/providers, `server/ports.json` bindings or
+`server/relay-workers.json` inherits it. Explicit accounts retain precedence,
+including separate identities and values equal to the default. Missing defaults
+and explicit null/invalid accounts are refused. An absent worker declaration does
+not enroll processing; `{"version":1}` explicitly enrolls the default identity.
+
+This is configuration inheritance, not account provisioning or a permission grant.
+Project membership, token ceilings, provider/tool scopes and agent grants still
+apply. Existing explicit packages keep working; omitted accounts require a server
+supporting this loader behavior. See [ADR 0016](../decisions/0016-application-execution-account-inheritance.md).

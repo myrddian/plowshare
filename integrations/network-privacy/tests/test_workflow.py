@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -73,6 +74,21 @@ class WorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.evidence.previous_revision, first.revision)
         self.assertEqual(len(second.evidence.changes), 2)
         self.assertIn("new-destination.example", second.evidence.changes[1])
+
+    async def test_completion_carries_baseline_and_legacy_receipts_keep_their_payload(
+        self,
+    ) -> None:
+        from dataclasses import replace
+
+        self.port.events["schedule.due"] = [event()]
+        await self.worker.poll()
+        receipt = self.receipts.all()[0]
+        self.assertTrue(json.loads(self.port.published[-1].text or "{}")["baseline"])
+        assert receipt.evidence is not None
+        legacy = replace(receipt, evidence=replace(receipt.evidence, baseline=None))
+        self.assertNotIn(
+            "baseline", json.loads(self.worker.completion_request(legacy).text or "{}")
+        )
 
     async def test_missing_schedule_topic_does_not_block_manual_collection(
         self,

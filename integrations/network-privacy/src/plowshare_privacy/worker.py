@@ -259,6 +259,11 @@ class Worker:
                     ),
                     "issues": receipt.evidence.issues,
                     **(
+                        {"baseline": receipt.evidence.baseline}
+                        if receipt.evidence.baseline is not None
+                        else {}
+                    ),
+                    **(
                         {"investigation": asdict(receipt.investigation)}
                         if receipt.investigation
                         else {}

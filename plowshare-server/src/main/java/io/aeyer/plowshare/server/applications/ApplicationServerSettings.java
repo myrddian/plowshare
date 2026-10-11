@@ -1,7 +1,9 @@
 package io.aeyer.plowshare.server.applications;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.RelayPortProperties;
 import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
@@ -51,7 +53,7 @@ public record ApplicationServerSettings(
     this(tools, ports, providers, Optional.empty());
   }
 
-  /** Explicit Application execution identity, never inferred from a manager or connected user. */
+  /** Resolved Application execution identity, never inferred from a manager or connected user. */
   public record Worker(int version, String account) {
     public Worker {
       if (version != 1)
@@ -188,10 +190,20 @@ public record ApplicationServerSettings(
                     || !Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)))
           throw new IOException("Unknown server declaration");
       }
+      // Resolve only omitted declaration accounts, never the authenticated deployer.
+      var executionAccount = new ManifestAccount(root);
       Tools tools =
           readFile(
-              directory.resolve("tools.json"), Tools.class, new Tools(1, List.of(), List.of()));
-      Ports ports = readFile(directory.resolve("ports.json"), Ports.class, new Ports(1, List.of()));
+              directory.resolve("tools.json"),
+              Tools.class,
+              new Tools(1, List.of(), List.of()),
+              executionAccount);
+      Ports ports =
+          readFile(
+              directory.resolve("ports.json"),
+              Ports.class,
+              new Ports(1, List.of()),
+              executionAccount);
       return new ApplicationServerSettings(
           tools.bindings().stream().map(t -> t.bind(project)).toList(),
           ports.bindings().stream().map(p -> p.bind(project)).toList(),
@@ -199,18 +211,55 @@ public record ApplicationServerSettings(
           Files.notExists(directory.resolve("relay-workers.json"), LinkOption.NOFOLLOW_LINKS)
               ? Optional.empty()
               : Optional.of(
-                  readRequiredFile(directory.resolve("relay-workers.json"), Worker.class)));
+                  readRequiredFile(
+                      directory.resolve("relay-workers.json"), Worker.class, executionAccount)));
     } catch (IOException | IllegalArgumentException | NullPointerException invalid) {
       throw new CallerFault("Invalid Application server/ configuration");
     }
   }
 
-  private static <T> T readFile(Path file, Class<T> type, T absent) throws IOException {
-    if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) return absent;
-    return readRequiredFile(file, type);
+  /**
+   * Load a default only when needed, once per declaration snapshot. Explicit legacy configurations
+   * keep their existing independent manifest-policy validation path.
+   */
+  private static final class ManifestAccount {
+    private final Path root;
+    private String account;
+
+    private ManifestAccount(Path root) {
+      this.root = root;
+    }
+
+    private String required() {
+      if (account == null) {
+        account = ApplicationToolScopes.read(root).executionAccount();
+        if (account == null)
+          throw new CallerFault(
+              "Application server/ account is omitted; declare root executionAccount or an explicit account");
+      }
+      return account;
+    }
   }
 
-  private static <T> T readRequiredFile(Path file, Class<T> type) throws IOException {
+  /** Omission inherits manifest authority; explicit null, empty and invalid values never do. */
+  private static void resolveAccount(JsonNode entry, ManifestAccount executionAccount)
+      throws IOException {
+    if (!entry.isObject()) throw new IOException("Account declaration must be an object");
+    if (entry.has("account")) {
+      if (!entry.get("account").isTextual()) throw new IOException("Account must be text");
+      return;
+    }
+    ((ObjectNode) entry).put("account", executionAccount.required());
+  }
+
+  private static <T> T readFile(
+      Path file, Class<T> type, T absent, ManifestAccount executionAccount) throws IOException {
+    if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) return absent;
+    return readRequiredFile(file, type, executionAccount);
+  }
+
+  private static <T> T readRequiredFile(Path file, Class<T> type, ManifestAccount executionAccount)
+      throws IOException {
     if (Files.isSymbolicLink(file)
         || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
         || Files.size(file) > 65536)
@@ -218,7 +267,21 @@ public record ApplicationServerSettings(
     try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
       byte[] bytes = input.readNBytes(65537);
       if (bytes.length > 65536) throw new IOException("Declaration exceeds 64 KiB");
-      return Objects.requireNonNull(JSON.readValue(bytes, type), "Declaration cannot be null");
+      JsonNode declaration = JSON.readTree(bytes);
+      if (declaration == null || !declaration.isObject())
+        throw new IOException("Declaration must be an object");
+      if (type == Worker.class) resolveAccount(declaration, executionAccount);
+      else {
+        for (String field : List.of("bindings", "providers")) {
+          JsonNode entries = declaration.get(field);
+          if (entries == null || field.equals("providers") && entries.isNull()) continue;
+          if (!entries.isArray()) throw new IOException("Declaration entries must be an array");
+          for (JsonNode entry : entries) resolveAccount(entry, executionAccount);
+        }
+      }
+      // JSON stays inside this configuration boundary. Accepted records always carry
+      // concrete, validated identities; registries and permission checks see no defaults.
+      return JSON.treeToValue(declaration, type);
     }
   }
 }

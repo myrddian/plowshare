@@ -195,8 +195,10 @@ including when the human manager and deployment administrator are the same perso
 The service account has no password login, server administrator role or Personal
 space. Its **handle** goes in project membership and `plowshare.json`. Its token's
 **principal**, returned by token creation, goes in root `plowshare.json` as
-`executionAccount`, in `server/tools.json`,
-`server/ports.json`, `server/relay-workers.json` and `--tool-account`. Those declarations check the authenticated
+`executionAccount`. Omitted accounts in `server/tools.json`, `server/ports.json`
+and `server/relay-workers.json` inherit it. The external provider receives that same
+principal as `--tool-account`; the bootstrap helper derives it from private identity
+metadata. Those declarations check the authenticated
 execution identity exactly; putting the account handle there will not authorize a
 service token. Rotation preserves the principal, so it preserves retained work and
 Relay identity. Creating another token changes the principal.
@@ -266,7 +268,8 @@ Relay identity. Creating another token changes the principal.
    The output directory is mode `0700`. The script prints no credential or password.
    On other operating systems, restrict the directory/file ACLs yourself.
 
-5. The script fills the private `server/` declarations with the returned principal.
+5. The script sets the returned principal once as manifest `executionAccount`.
+   The private `server/` declarations inherit it, preserving other explicitly configured identities.
    Deploy this updated copy with a **new request UUID** and the current active
    revision as `expectedRevision`. Verify the retained deployment receipt. Set
    `PRIVACY_TOOL_ACCOUNT` to the `principal` in `identity.json` and
@@ -296,12 +299,12 @@ after a disconnect; do not blindly retry an uncertain processing call.
 
 For unattended operation, the Application's `server/relay-workers.json` explicitly
 enrolls the [automatic Relay worker](../../docs/relay.md#automatic-subscription-workers).
-The setup helper fills its account with the returned service token **principal**,
-together with the tool/port declarations. Deploy that prepared private Application;
+The declaration inherits the manifest execution account. The setup helper sets it
+once to the returned service token **principal**, not the service handle. Deploy that prepared private Application;
 the running server discovers it within its Relay configuration interval (30 seconds
 by default), without a restart or a human-account worker binding. If upgrading an
 existing private source copy, add `server/relay-workers.json` with `version: 1` and
-`account` set to the same service principal, then redeploy through the documented
+no `account` field to inherit the manifest identity, then redeploy through the documented
 revision check. Keep its owning service account a CONTRIBUTOR. Removing the declaration
 pauses automatic processing; it preserves retained scan input, offsets and jobs.
 Without enrollment or an explicit processing pass, completed scans remain retained
@@ -328,7 +331,7 @@ project access, named token metadata and audit history as the administrator.
 Do not delete the intent and retry blindly. If a token exists but its credential
 reply was lost, rotate that **existing token UUID** explicitly; the server cannot
 recover its old secret. Save the replacement privately and use its retained
-principal when completing the private declarations. Review and deploy the corrected
+principal when setting the private manifest execution account. Review and deploy the corrected
 source before starting Python. If even token creation is unconfirmed, retain the
 intent and reconcile it first. The script never reconnects or replays mutations.
 
@@ -339,10 +342,10 @@ intent and reconcile it first. The script never reconnects or replays mutations.
    account grants and matching server project membership for the operator and
    collector. The supplied manifest has **no grants**. Use a project-scoped service credential;
    the collector needs work access for evidence uploads and reading for reports.
-2. Replace provider account placeholders with the authenticated execution identity
-   (the service token principal, not its handle) in the private Application root
-   `server/tools.json` and `server/ports.json`, matching the manifest account
-   grant and project membership. Configure a server FileStore and grant the deploying administrator MANAGER
+2. Set the authenticated execution identity once as root `plowshare.json`
+   `executionAccount` (the service token principal, not its handle). The bundled
+   `server/` files inherit it. Match the owning handle's manifest account grant and
+   project membership. Configure a server FileStore and grant the deploying administrator MANAGER
    access to its destination. Read `application.deployment.status`, then use
    `application deploy ./private-application '<deployment JSON>'` or Desktop
    **Applications → Deploy**. See the [deployment walkthrough](#deploy-the-plowshare-application).
@@ -350,11 +353,10 @@ intent and reconcile it first. The script never reconnects or replays mutations.
    `orchestrations/` and `schedules/`; named swarms
    load from `swarm/` and Relay from root `Relay/`. They need no desktop file
    session. Verify effective rosters after deploying the Application-owned tools below.
-4. Before deployment, replace provider account placeholders in the private
-   Application's [`server/tools.json`](network-privacy-watch/server/tools.json)
-   and [`server/ports.json`](network-privacy-watch/server/ports.json). Match the
-   authenticated Python principal; its owning service handle needs the manifest grant
-   and project membership. These
+4. Before deployment, set root `executionAccount` to the authenticated Python
+   principal. The Application's [`server/tools.json`](network-privacy-watch/server/tools.json)
+   and [`server/ports.json`](network-privacy-watch/server/ports.json) inherit it.
+   Its owning service handle needs the manifest grant and project membership. These
    declarations deploy with the Application; no global server edit or restart
    is needed. The collector receives EGRESS on `schedule.due` and the request
    topic, and INGRESS on requests/completions. It initiates an authenticated
@@ -523,8 +525,8 @@ use its root `server/tools.json`: `bindings` is empty and the provider declarati
 fixes the execution account, name prefix and catalogue lease. No tool schema needs
 to be known at deployment. Root `plowshare.json` supplies `executionAccount`,
 `toolScopes` and `toolGrants`; only `privacy_coordinator` owns the network scope.
-The setup script fills the execution principal in the manifest and server files.
-For manual setup, replace it in all three files before deploying and keep
+The setup script sets the execution principal once in the manifest; the bundled
+server files inherit it. For manual setup, set root `executionAccount` and keep
 `provider` equal to the configured Python provider name. Global tool/port fragments
 are unnecessary. Agents can deploy before the collector publishes its catalogue;
 network tools appear when that publication arrives.
@@ -679,3 +681,22 @@ firewall ports/endpoints/direction, exact Pi-hole domains, segmentation or priva
 settings, including expected impact, verification and rollback. They are advisory;
 network changes are performed separately by the operator. See the
 [walkthrough](OPERATIONS.md#privacy-issues-and-network-mitigations).
+
+### Completion routing and rejected input
+
+New evidence and completion records carry a boolean `baseline`. Investigation
+policy uses that field independently of display wording. Historical records keep
+their original encoding and use an isolated compatibility interpretation.
+
+An explicit retained `investigation.requested` decision controls routing even with
+an empty changes array. Without a decision, a typed baseline or nonempty legacy
+changes can select an investigation. An explicit refusal never starts one.
+
+Known malformed completion JSON, identifiers, arrays or decision fields select no
+work. Relay retains the original publication and its empty routing admission,
+advances the subscription, and can process later valid records. Inspect the
+project's `privacy.scan.completed` input and `relay.log`; an empty admission can
+also mean a valid policy-withheld record, so inspect the original payload before
+classifying it. This is not a separate dead-letter queue. Unexpected route/runtime
+failures still preserve the offset and back off; expiry requires explicit gap
+acknowledgement. No malformed record is repaired into an investigation automatically.

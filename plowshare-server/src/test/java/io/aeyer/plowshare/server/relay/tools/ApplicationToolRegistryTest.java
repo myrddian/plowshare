@@ -187,6 +187,27 @@ class ApplicationToolRegistryTest {
   }
 
   @Test
+  void inherited_provider_accounts_still_check_visibility_and_execution_grants_live()
+      throws Exception {
+    for (String name : List.of("tools", "ports")) {
+      Path file = root.resolve("server/" + name + ".json");
+      Files.writeString(file, Files.readString(file).replace("\"account\":\"provider\",", ""));
+    }
+    catalogue(DECLARATION);
+    var previouslyOffered = tool();
+    Files.writeString(root.resolve("plowshare.json"), "{\"executionAccount\":\"provider\"}");
+    assertTrue(
+        registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider").isEmpty());
+    assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    Files.delete(root.resolve("plowshare.json"));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> registry.tools(Home.of("fixture"), "coordinator", null, () -> false, "provider"));
+    assertTrue(previouslyOffered.run("{}", Home.of("fixture"), owner).startsWith("E_NO_ACCESS"));
+    verifyNoInteractions(invocations);
+  }
+
+  @Test
   void accounting_identity_must_match_the_durable_project_id() {
     catalogue(DECLARATION);
     var offered = tool();

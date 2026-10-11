@@ -213,7 +213,9 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
     async def test_expected_findings_keep_original_evidence(self) -> None:
         evidence = self.scan.evidence
         assert evidence is not None
-        changed = replace(evidence, changes=("TCP 192.0.2.12:443: closed -> open",))
+        changed = replace(
+            evidence, changes=("TCP 192.0.2.12:443: closed -> open",), baseline=False
+        )
         receipt = replace(self.scan, evidence=changed)
         self.receipts.save(receipt)
         finding = self.console.findings()[0]

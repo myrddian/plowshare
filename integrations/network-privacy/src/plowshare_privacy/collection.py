@@ -239,6 +239,7 @@ class NetworkCollector:
             tuple(issues),
             changes(previous, snapshot, scope, tuple(issues)),
             previous_revision,
+            baseline=previous is None or previous.scope != scope,
         )
 
         # Native SDK replies allow 16,384 characters. Keep 384 bytes for the

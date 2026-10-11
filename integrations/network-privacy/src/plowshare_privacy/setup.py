@@ -254,15 +254,31 @@ def bind_provider(setup: Setup, account: str) -> None:
             if not isinstance(values, list):
                 raise ValueError("Invalid application authority array")
             for value in values:
-                if not isinstance(value, dict) or "account" not in value:
+                if not isinstance(value, dict):
                     raise ValueError("Invalid application account declaration")
-                value["account"] = account
+                # Only the configured execution identity (or the shipped placeholder)
+                # becomes inherited. Other explicitly declared identities remain intact.
+                if "account" in value:
+                    declared = text(value["account"], 128)
+                    if any(character.isspace() for character in declared):
+                        raise ValueError("Invalid application account declaration")
+                    if declared in {
+                        account,
+                        setup.service,
+                        "REPLACE_WITH_PROVIDER_ACCOUNT",
+                    }:
+                        value.pop("account")
         path.write_text(json.dumps(row, indent=2) + "\n")
     worker_path = setup.output / "application/server/relay-workers.json"
     if worker_path.exists():
-        worker = object_fields(load_json(worker_path), {"version", "account"})
+        worker = object_fields(load_json(worker_path), {"version"}, {"account"})
         integer(worker["version"], 1, 1)
-        worker["account"] = account
+        if "account" in worker:
+            declared = text(worker["account"], 128)
+            if any(character.isspace() for character in declared):
+                raise ValueError("Invalid application worker account")
+            if declared in {account, setup.service, "REPLACE_WITH_PROVIDER_ACCOUNT"}:
+                worker.pop("account")
         worker_path.write_text(json.dumps(worker, indent=2) + "\n")
 
 

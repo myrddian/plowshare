@@ -488,7 +488,10 @@ def application(
         if result is None or result.evidence is None:
             raise web.HTTPNotFound(text="Evidence is not available")
         return web.json_response(
-            {"revision": result.revision, "evidence": asdict(result.evidence)}
+            {
+                "revision": result.revision,
+                "evidence": parse_json(result.evidence.encode()),
+            }
         )
 
     async def collect(request: web.Request) -> web.Response:
