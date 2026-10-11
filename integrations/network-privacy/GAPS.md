@@ -70,3 +70,23 @@ time does not prove admission. The collector never resubmits the start, replaces
 its request UUID, borrows a human credential or confirms an intent from those
 hints. Receipt inspection recovers existing admission without launching or
 resuming work. Missing receipts keep Check and resume fenced.
+
+## Single-pass Application service provisioning
+
+Manifest execution-account inheritance removes repeated principal fields, but
+current public provisioning still needs the project to exist before a scoped
+service token can be created. The bootstrap helper therefore still performs two
+reviewed deployments and retains both receipts. Packaged schedule ownership also
+remains with its existing owner. The [Application identity lifecycle proposal](../../docs/decisions/0017-application-owned-service-provisioning.md)
+describes the server-owned reservation, authorization and recovery work needed for
+single-pass deployment. No account is silently minted or adopted by this integration.
+
+## Zero-call native definition metadata
+
+Native `privacy_tick` executes only deterministic todo/finish commands, as verified
+by its sandbox tests. Its manifest still declares a model and a positive one-call
+allowance because the current orchestration loader shares the positive model-call
+validation with agent definitions. Setting it to zero is refused; it is not a
+supported way to enforce a native-only definition today. A general native-only
+metadata contract would remove the unnecessary model binding/allowance. This
+Application does not request inference from its tick script.

@@ -3,7 +3,6 @@
   "bindings": [
     {
       "topic": "schedule.due",
-      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
       "direction": "EGRESS",
       "groups": [
         "privacy-home-network"
@@ -11,7 +10,6 @@
     },
     {
       "topic": "privacy.scan.requests",
-      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
       "direction": "EGRESS",
       "groups": [
         "privacy-home-network"
@@ -19,13 +17,11 @@
     },
     {
       "topic": "privacy.scan.requests",
-      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
       "direction": "INGRESS",
       "groups": []
     },
     {
       "topic": "privacy.scan.completed",
-      "account": "REPLACE_WITH_PROVIDER_ACCOUNT",
       "direction": "INGRESS",
       "groups": []
     }

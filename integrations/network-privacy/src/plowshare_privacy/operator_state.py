@@ -90,9 +90,7 @@ def findings(receipt: Receipt, expected: frozenset[str]) -> tuple[Finding, ...]:
         return ()
     identities = {item.address: item for item in evidence.snapshot.devices}
     result = []
-    for change in evidence.changes:
-        if change.startswith("Baseline collection"):
-            continue
+    for change in () if evidence.is_baseline else evidence.changes:
         kind, address, device_id = "coverage", None, None
         explanation = "Compare the collection gaps with earlier evidence. Missing observations do not establish that a device disappeared."
         # These exact phrases are emitted by collection.changes; all original text
@@ -232,9 +230,7 @@ class FileOperatorStore:
         meaningful = any(
             not item.expected for item in findings(candidate, self.expected)
         )
-        baseline = any(
-            change.startswith("Baseline collection") for change in evidence.changes
-        )
+        baseline = evidence.is_baseline
         policy = self.preferences
         if not policy.automatic_investigations:
             return InvestigationDecision(

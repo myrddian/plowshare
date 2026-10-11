@@ -88,7 +88,8 @@ async def execute(args: argparse.Namespace) -> None:
         ).collect(identity, "diagnostic:" + identity, None, None)
         print(
             json.dumps(
-                {"retained": False, "evidence": asdict(evidence)}, allow_nan=False
+                {"retained": False, "evidence": json.loads(evidence.encode())},
+                allow_nan=False,
             )
         )
         return

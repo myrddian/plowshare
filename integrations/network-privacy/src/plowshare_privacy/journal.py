@@ -359,7 +359,17 @@ class FileReceipts:
                 "identity": self.identity,
                 "collectionScope": self.collection_scope,
                 "nextCollectionScope": self.next_collection_scope,
-                "receipts": [asdict(item) for item in receipts.values()],
+                # Use the evidence codec so absent historical extensions stay absent
+                # even when a later journal update rewrites its containing receipt.
+                "receipts": [
+                    {
+                        **asdict(item),
+                        "evidence": json.loads(item.evidence.encode())
+                        if item.evidence is not None
+                        else None,
+                    }
+                    for item in receipts.values()
+                ],
                 "publications": [asdict(item) for item in publications.values()],
             },
             allow_nan=False,

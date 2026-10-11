@@ -613,12 +613,26 @@ class Evidence:
     issues: tuple[str, ...]
     changes: tuple[str, ...]
     previous_revision: str | None
+    baseline: bool | None = None
+
+    @property
+    def is_baseline(self) -> bool:
+        """Prefer the typed signal; preserve the exact historical v1 baseline meaning."""
+        if self.baseline is not None:
+            return self.baseline
+        # Older retained receipts have no typed signal. Keep this compatibility
+        # path isolated from policy, and never rewrite their original encoded text.
+        return self.previous_revision is None or self.changes == (
+            "Baseline collection; no comparable previous evidence.",
+        )
 
     def encode(self) -> str:
         # Historical receipts are reconciled against exact retained text. Preserve
         # their original pretty encoding and omit absent v1 extensions. Enriched
         # evidence uses compact JSON to fit the bundled investigation's 32-KiB fence.
         row = asdict(self)
+        if self.baseline is None:
+            row.pop("baseline")
         enriched = bool(self.snapshot.devices) or self.snapshot.dns_window is not None
         if not self.snapshot.devices:
             row["snapshot"].pop("devices")
@@ -648,7 +662,10 @@ class Evidence:
                 "changes",
                 "previous_revision",
             },
+            {"baseline"},
         )
+        if "baseline" in row and type(row["baseline"]) is not bool:
+            raise ValueError("Evidence baseline must be a boolean")
         mode = row["mode"]
         if mode not in ("tcp", "fixture"):
             raise ValueError("Invalid evidence mode")
@@ -670,4 +687,5 @@ class Evidence:
             uuid(row["previous_revision"])
             if row["previous_revision"] is not None
             else None,
+            row["baseline"] is True if "baseline" in row else None,
         )

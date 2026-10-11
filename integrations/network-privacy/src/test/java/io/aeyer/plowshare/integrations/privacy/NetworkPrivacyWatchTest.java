@@ -211,8 +211,7 @@ class NetworkPrivacyWatchTest {
   }
 
   @Test
-  void operator_withheld_investigation_routes_no_work_and_malformed_decision_is_refused()
-      throws Exception {
+  void operator_withheld_investigation_and_malformed_decision_admit_no_effects() throws Exception {
     var pin =
         RelayDeliveries.SourcePin.of(
             "privacy/routes.js", Files.readString(application.resolve("Relay/privacy/routes.js")));
@@ -243,9 +242,91 @@ class NetworkPrivacyWatchTest {
         if (requested.equals("false")) {
           assertTrue(program.route(relay, subscription, input).isEmpty());
         } else {
-          assertThrows(RuntimeException.class, () -> program.route(relay, subscription, input));
+          assertTrue(program.route(relay, subscription, input).isEmpty());
         }
       }
     }
+  }
+
+  @Test
+  void explicit_decisions_and_typed_baselines_do_not_depend_on_changes() throws Exception {
+    String base =
+        """
+        {"version":1,"scan_id":"00000000-0000-0000-0000-000000000001",
+        "revision":"00000000-0000-0000-0000-000000000002","collector":"home-network",
+        "mode":"fixture","changes":[],"issues":[]%s}
+        """;
+    var pin =
+        RelayDeliveries.SourcePin.of(
+            "privacy/routes.js", Files.readString(application.resolve("Relay/privacy/routes.js")));
+    try (var program = new GraalRelayRouteProgram()) {
+      var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
+      var subscription = relay.manifest().subscriptions().getFirst();
+      for (String extension :
+          java.util.List.of(
+              ",\"baseline\":true",
+              ",\"investigation\":{\"requested\":true,\"reason\":\"operator policy\",\"decided_at\":\"2026-01-01T00:00:00Z\"}")) {
+        var input = completion(subscription.topic(), base.formatted(extension));
+        var selected = program.route(relay, subscription, input);
+        assertEquals(1, selected.size());
+        assertEquals("orchestration.start", selected.getFirst().receiver());
+      }
+      assertTrue(
+          program
+              .route(relay, subscription, completion(subscription.topic(), base.formatted("")))
+              .isEmpty());
+      assertTrue(
+          program
+              .route(
+                  relay,
+                  subscription,
+                  completion(
+                      subscription.topic(),
+                      base.formatted(
+                          ",\"baseline\":true,\"investigation\":{\"requested\":false,\"reason\":\"disabled\",\"decided_at\":\"2026-01-01T00:00:00Z\"}")))
+              .isEmpty());
+    }
+  }
+
+  @Test
+  void malformed_completion_does_not_throw_or_prevent_a_following_valid_record() throws Exception {
+    var pin =
+        RelayDeliveries.SourcePin.of(
+            "privacy/routes.js", Files.readString(application.resolve("Relay/privacy/routes.js")));
+    String valid =
+        """
+        {"version":1,"scan_id":"00000000-0000-0000-0000-000000000001",
+        "revision":"00000000-0000-0000-0000-000000000002","collector":"home-network",
+        "mode":"fixture","changes":[],"issues":[],"baseline":true}
+        """;
+    try (var program = new GraalRelayRouteProgram()) {
+      var relay = new RelayRouting.Package("privacy", pin, program.manifest(pin));
+      var subscription = relay.manifest().subscriptions().getFirst();
+      for (String malformed :
+          java.util.List.of(
+              "{",
+              "null",
+              "[]",
+              "{}",
+              valid.replace("\"baseline\":true", "\"baseline\":1"),
+              valid.replace("00000000-0000-0000-0000-000000000001", "invalid-scan-id"),
+              valid.replace("\"issues\":[]", "\"issues\":[null]"))) {
+        assertTrue(
+            program
+                .route(relay, subscription, completion(subscription.topic(), malformed))
+                .isEmpty());
+        assertEquals(
+            1, program.route(relay, subscription, completion(subscription.topic(), valid)).size());
+      }
+    }
+  }
+
+  private static Relay.Publication completion(String topic, String text) {
+    return new Relay.Publication(
+        new Relay.TopicKey(1, topic),
+        1,
+        Instant.EPOCH,
+        new Relay.Draft(
+            "fixture", "sdk:collector", Instant.EPOCH, null, null, new RelayPayload.Text(text)));
   }
 }
