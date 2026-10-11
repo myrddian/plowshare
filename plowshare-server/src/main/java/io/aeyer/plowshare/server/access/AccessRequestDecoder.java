@@ -45,6 +45,11 @@ public final class AccessRequestDecoder {
     // Their owning port/log services enforce topic and subscriber authority.
     if (!operation.startsWith("relay.")) add(resources, TOPIC, payload.get("topic"));
     add(resources, INSTANCE, payload.get("instance"));
+    if (operation.equals("orchestration.receipt")) {
+      String requestId = text(payload.get("requestId"));
+      if (requestId == null) throw new CallerFault("Orchestration receipt needs a request UUID");
+      resources.add(new AccessRequest.Resource(ORCHESTRATION_RECEIPT, requestId));
+    }
     if (operation.startsWith("orchestration.")) {
       add(resources, ORCHESTRATION, payload.get("id"));
       add(resources, ORCHESTRATION, payload.get("root"));

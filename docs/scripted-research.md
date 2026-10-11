@@ -23,8 +23,12 @@ bin/plowshare-cli orchestration wait orc_RETURNED_ID --json --timeout-ms 300000
 
 Use a fresh stable UUID per intended run. A lost response is recovered with
 `orchestration receipt UUID`; do not start another paid run to discover whether the
-first committed. Caller grants, account/project authorization and normal hooks
-apply. Any authorized user-defined definition uses the same start command. See the
+first committed. Receipt reads bind the UUID to the authenticated account and
+check the retained run's actual project with current read authority. Application
+service accounts can recover their own receipts in a currently granted project;
+receipt ownership does not bypass token scope or information visibility. Caller
+grants, account/project authorization and normal hooks apply. Any authorized
+user-defined definition uses the same start command. See the
 [CLI contract](../plowshare-cli/README.md) for offline discovery and structured recovery.
 
 Ask a bot granted `deep_research` for a research report, or use its `/research`

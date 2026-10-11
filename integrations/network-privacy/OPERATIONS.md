@@ -159,8 +159,11 @@ or project/provider grants first, then choose **Check and resume**. For a stoppe
 worker this creates a fresh public SDK connection, keeps the existing provider
 journal and checks exact retained evidence, publications, tool results and explicit
 investigation receipts before allowing intake again. Missing receipts keep the
-work fenced. Catalogue leases may be published with new metadata identities after
-recovery; old invocation and mutation identities are never replayed.
+work fenced. Investigation receipt reads use the same service account and original
+request UUID, with current project and evidence permissions. They do not submit
+another investigation or resume an existing run. Catalogue leases may be published
+with new metadata identities after recovery; old invocation and mutation identities
+are never replayed.
 
 For an uncertain schedule deployment, expand **Scan schedule**, enter the deployment
 administrator password and choose **Check retained deployment**. A positive receipt

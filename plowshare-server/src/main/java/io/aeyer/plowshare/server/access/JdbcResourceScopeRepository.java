@@ -1,6 +1,8 @@
 package io.aeyer.plowshare.server.access;
 
+import io.aeyer.plowshare.server.faults.CallerFault;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -29,6 +31,8 @@ public class JdbcResourceScopeRepository implements ResourceScopeRepository {
           case TOPIC -> "SELECT project FROM board_topics WHERE id=?";
           case INSTANCE -> "SELECT project FROM board_message_instances WHERE id=?";
           case ORCHESTRATION -> "SELECT project FROM orchestrations WHERE id=?";
+          case ORCHESTRATION_RECEIPT ->
+              throw new CallerFault("Receipt scopes require the authenticated account");
           case MESSAGE ->
               "SELECT i.project FROM board_message_routes r JOIN board_message_instances i ON i.id IN (r.sender,r.recipient) WHERE r.message=?";
           case SCHEDULE ->
@@ -44,6 +48,20 @@ public class JdbcResourceScopeRepository implements ResourceScopeRepository {
         sql,
         String.class,
         resource.kind() == Kind.OUTGOING ? UUID.fromString(resource.id()) : resource.id());
+  }
+
+  @Override
+  public List<String> orchestrationReceiptProjects(String account, UUID requestId) {
+    if (account == null || account.isBlank() || account.length() > 256)
+      throw new CallerFault("Receipt scopes require the authenticated account");
+    Objects.requireNonNull(requestId, "requestId");
+    // Read the retained run's current project, never a project supplied with the request.
+    // Receipt ownership is part of this bound query, not a later in-memory filter.
+    return jdbc.queryForList(
+        "SELECT o.project FROM orchestration_start_receipts r JOIN orchestrations o ON o.id=r.run_id WHERE r.account=? AND r.request_id=?",
+        String.class,
+        account,
+        requestId);
   }
 
   @Override

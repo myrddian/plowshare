@@ -52,22 +52,21 @@ runtime inspection contract is a separate platform follow-up.
 
 ## Project-scoped orchestration start receipts
 
-`orchestration.start` admits project work with an account-owned UUID request
-identity. Its response contains a separate opaque `orc_…` run ID. The public
-`orchestration.receipt` request exposes only `requestId`; it has no project
-selection. The current server cannot resolve a service token's project ceiling
-from that receipt identity, so it refuses the read before reaching the retained
-account-owned receipt.
+The [separately authorized platform fix](../../docs/decisions/0015-account-scoped-orchestration-receipts.md)
+resolves this gap without changing the public `orchestration.receipt` request.
+The server resolves the authenticated account and request UUID to the retained
+run's actual project, then checks current project/token read authority. It retains
+account ownership and information visibility checks, and refuses global work for
+service tokens. All SDK languages use the existing UUID-only receipt read.
 
-The dashboard can retain a successful start response, but after an unknown or
-unusable reply its manual intent must remain pending. Listing a similar run or
-matching creation time does not prove which request was admitted. The collector
-never resubmits the start, replaces its request UUID, borrows a human credential
-or marks an intent confirmed from those hints. Check and resume remains fenced
-if it cannot obtain the exact account-owned receipt.
+Servers built before this fix refuse service receipt reads before reaching the
+account-owned receipt. Upgrade the server and inspect current project/evidence
+permissions before recovering a pending intent. The separate opaque `orc_…` run
+ID is not the start request UUID; the dashboard preserves both identities.
 
-A separate platform task should authorize this receipt read against the retained
-request's project and caller, preserving foreign-account and foreign-project
-refusal. A bounded public SDK receipt read must recover the existing admission
-without launching another run. No server, shared contract or SDK changes are
-included in this integration fix.
+An unknown or unusable start reply must keep its manual intent pending until the
+exact account-owned receipt is read. Listing a similar run or matching creation
+time does not prove admission. The collector never resubmits the start, replaces
+its request UUID, borrows a human credential or confirms an intent from those
+hints. Receipt inspection recovers existing admission without launching or
+resuming work. Missing receipts keep Check and resume fenced.

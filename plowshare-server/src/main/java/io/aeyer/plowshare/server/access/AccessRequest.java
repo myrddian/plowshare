@@ -21,6 +21,14 @@ public record AccessRequest(
     public Resource {
       Objects.requireNonNull(kind, "resource kind");
       id = text(id);
+      if (kind == ResourceScopeRepository.Kind.ORCHESTRATION_RECEIPT) {
+        try {
+          if (!UUID.fromString(id).toString().equalsIgnoreCase(id))
+            throw new IllegalArgumentException();
+        } catch (IllegalArgumentException invalid) {
+          throw new CallerFault("Orchestration receipt request ID must be a UUID");
+        }
+      }
       if (kind == ResourceScopeRepository.Kind.OUTGOING) {
         try {
           UUID.fromString(id);
