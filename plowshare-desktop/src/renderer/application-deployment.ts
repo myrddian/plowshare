@@ -1,3 +1,4 @@
+import { applicationIdentityDialog } from './application-identity.ts';
 import type { Payloads } from 'plowshare-client-ts/operations/direct';
 import { decodePayload } from 'plowshare-client-ts/operations/schema';
 import { fileStorePlacement } from './server-filestores.ts';
@@ -13,6 +14,7 @@ export function installApplicationDeployment(
   state: () => DesktopState,
   request: (value: Request) => Promise<Reply>,
 ) {
+  const identityControls = applicationIdentityDialog(state, request);
   const dialog = document.createElement('dialog');
   dialog.id = 'application-deployment-dialog';
   dialog.setAttribute('aria-label', 'Deploy an Application');
@@ -21,6 +23,7 @@ export function installApplicationDeployment(
     <label>Application project<input data-project required></label><div data-placement></div><p>Leave writable areas blank for read-only runtime files.</p>
     <button type="button" data-status>Read deployment status</button><p data-active role="status">Read status before updating an existing deployment.</p>
     <label>Retained revision<select data-revision><option value="">No revisions loaded</option></select></label><button type="button" data-activate>Activate selected revision</button>
+    <button type="button" data-identity>Execution identity and credential</button>
     <p data-request></p><p data-result role="status"></p><p data-error role="alert" hidden></p>
     <div class="dialog-actions"><button type="button" data-close>Close</button><button type="button" data-recover>Read pending receipt</button><button type="button" data-new>New submission</button><button type="submit">Deploy source</button></div></form>`;
   document.body.append(dialog);
@@ -178,6 +181,9 @@ export function installApplicationDeployment(
     }),
   );
   get('[data-status]').addEventListener('click', run(readStatus));
+  get('[data-identity]').addEventListener('click', () =>
+    identityControls.open(project()),
+  );
   get('[data-recover]').addEventListener(
     'click',
     run(async () => {
@@ -285,6 +291,7 @@ export function installApplicationDeployment(
   );
   return {
     update: () => {
+      identityControls.update();
       if (draftKey && draftKey !== key()) {
         dialog.close();
         placement.reset();

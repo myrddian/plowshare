@@ -194,4 +194,28 @@ class ScheduleDefinitionsTest {
     assertThrows(RuntimeException.class, () -> service.pause(prior.internalName(), false, "owner"));
     verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
   }
+
+  @Test
+  void projectInspectionIncludesAnotherOwnersSourceButChecksLiveAccess() {
+    var foreign =
+        new ScheduleDefinitionStore.Source(2, "other-owner", 8L, "other-project", "server");
+    when(store.sources()).thenReturn(List.of(source, foreign));
+    assertEquals(List.of(prior), service.list("@service/fixture", "project"));
+    verify(members).requireRole("project", "@service/fixture", ProjectRole.VIEWER);
+    verify(store, never()).files(foreign);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("revoked"))
+        .when(members)
+        .requireRole("project", "@service/fixture", ProjectRole.VIEWER);
+    clearInvocations(store);
+    assertThrows(RuntimeException.class, () -> service.list("@service/fixture", "project"));
+    verifyNoInteractions(store);
+  }
+
+  @Test
+  void projectInspectionRefusesPrivateGlobalAndUntrimmedNamesBeforeReading() {
+    for (String project :
+        new String[] {"", " project", "personal:owner", "Personal:owner", "client:owner"})
+      assertThrows(RuntimeException.class, () -> service.list("owner", project));
+    verify(store, never()).sources();
+  }
 }

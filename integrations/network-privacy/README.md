@@ -171,7 +171,11 @@ connections, scans or journal writes:
 build/privacy-python-env/bin/plowshare-privacy --config "$PRIVACY_CONFIG" check
 ```
 
-## Separate the human manager from the service account
+## Manual provisioning: separate the human manager from the service account
+
+New installations should use the [guided Application-owned setup](SETUP.md), which
+deploys once and enrolls the schedule under its reserved service principal. The
+following steps describe the compatible manual provisioning path.
 
 Give Network Privacy Watch its own **service account**. Python collection, evidence
 uploads, tool serving and agent investigations use its project-scoped credential.
@@ -279,7 +283,7 @@ Relay identity. Creating another token changes the principal.
 
 ### Run investigations as the service identity
 
-Source deployment currently enrolls the packaged schedule under the deploying
+Manual source deployment enrolls the packaged schedule under the deploying
 administrator. The setup script **does not transfer schedule ownership**. Its
 scheduled `privacy_tick` action is deterministic and invokes no model; the service
 credential owns Python uploads and tools. To make the completion-triggered agents
@@ -313,10 +317,10 @@ topic policies, using the standard default for a new topic. Declared retention i
 `Relay/topics.json` is applied only by a manager processing pass; it does not grant
 policy-write access or prevent this service account from processing investigations.
 The service token cannot manage or assume the administrator-owned packaged schedule.
-Separating schedule ownership needs a platform lifecycle feature; this setup does not
-claim to provide it.
+New Application-owned installations enroll their initial schedule under the service
+principal. Existing manual installations retain their original owner on upgrade.
 
-### Rotation and interrupted setup
+### Manual rotation and interrupted setup
 
 Use [service token administration](../../docs/server-administration.md#service-accounts-and-scoped-tokens)
 to rotate the retained token UUID before expiry and replace the injected credential.
@@ -700,3 +704,25 @@ also mean a valid policy-withheld record, so inspect the original payload before
 classifying it. This is not a separate dead-letter queue. Unexpected route/runtime
 failures still preserve the offset and back off; expiry requires explicit gap
 acknowledgement. No malformed record is repaired into an investigation automatically.
+
+## Guided lifecycle and remaining boundaries
+
+New guided installations use one source deployment with an Application-owned
+service declaration, then explicit one-time credential issuance. The helper fills
+account/model configuration, confirms the human manager and discovers the schedule
+under project scope. Native-only `privacy_tick` omits its model and retains an
+immutable zero-call allowance. Inference remains in the investigation workflow.
+Older manual installations preserve their existing execution identity.
+
+Use [setup recovery and upgrades](SETUP.md#upgrade-the-application-and-collector)
+for interrupted delivery or newer source/wheels. Plans preserve identity, grants,
+local edits, configuration and evidence; unknown deployment/credential outcomes
+are reconciled with retained receipts, never repeated. Server credential controls
+are available through every SDK, CLI/TUI and desktop/web GUI.
+
+`schedule.files` and `schedule.list` can now inspect the collector's granted project
+without borrowing human credentials or global schedule enumeration. The dashboard
+reports effective pause/timing separately from source registration. Per-device
+Markdown documents continue to use the existing project Information record APIs;
+`document.detail` also supports project scope for an ingested document's outline.
+Document access covers its chapters; no granular chapter permissions are introduced.

@@ -18,8 +18,22 @@ public class ApplicationDeploymentConfig {
       JdbcTemplate jdbc,
       UnitOfWork work,
       ServerProjects projects,
-      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules) {
-    return new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules);
+      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
+      ApplicationIdentities identities) {
+    return new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities);
+  }
+
+  @Bean
+  public ApplicationIdentities applicationIdentities(
+      ApplicationIdentityRepository repository,
+      io.aeyer.plowshare.server.auth.ServiceAccountRepository services,
+      io.aeyer.plowshare.server.auth.AdminStore accounts,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      UnitOfWork work,
+      org.springframework.context.ApplicationEventPublisher events) {
+    return new OwnedApplicationIdentities(
+        repository, services, accounts, members, projects, work, events);
   }
 
   @Bean
@@ -52,7 +66,9 @@ public class ApplicationDeploymentConfig {
       ProjectMembers members,
       ProjectWorkspaces projects,
       FileStores fileStores,
-      ApplicationPackageValidator validator) {
-    return new SourceApplicationDeployments(store, members, projects, fileStores, validator);
+      ApplicationPackageValidator validator,
+      ApplicationIdentities identities) {
+    return new SourceApplicationDeployments(
+        store, members, projects, fileStores, validator, identities);
   }
 }

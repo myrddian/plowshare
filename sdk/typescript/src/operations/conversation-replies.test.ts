@@ -22,6 +22,17 @@ const fixtures = JSON.parse(
 const asked = (type: ConversationOperation): Request => {
   const requestId = '11111111-1111-1111-1111-111111111111',
     revision = '22222222-2222-2222-2222-222222222222';
+  if (type === 'application.identity.status')
+    return request(type, { project: 'app' });
+  if (type === 'application.token.receipt')
+    return request(type, { project: 'app', requestId });
+  if (type === 'application.token.issue')
+    return request(type, {
+      project: 'app',
+      requestId,
+      expiresInDays: 30,
+      rotate: false,
+    });
   if (type === 'filestore.list') return request(type, {});
   if (type === 'application.deploy')
     return request(type, {

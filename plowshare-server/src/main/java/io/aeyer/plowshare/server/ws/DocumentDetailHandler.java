@@ -38,8 +38,33 @@ public final class DocumentDetailHandler implements FrameHandler {
     this.documents = Objects.requireNonNull(documents, "documents");
   }
 
+  /** Validate the optional scope at the frame boundary before authorization or corpus reads. */
+  static void validate(Map<String, Object> payload) {
+    RequestedDocument.askedAbout(
+        Payloads.required(
+            payload, "document", FrameTypes.DOCUMENT_DETAIL, "the document identifier"));
+    if (payload.containsKey("scope")) {
+      if (!(payload.get("scope") instanceof Map<?, ?> scope)
+          || !java.util.Set.of("kind", "project", "includeShared").containsAll(scope.keySet())
+          || !(scope.get("kind") instanceof String kind)
+          || !java.util.Set.of("personal", "project", "shared").contains(kind)
+          || scope.containsKey("includeShared") && !(scope.get("includeShared") instanceof Boolean)
+          || !kind.equals("project") && scope.containsKey("project"))
+        throw new io.aeyer.plowshare.server.faults.CallerFault("Invalid document detail scope");
+      if (kind.equals("project")
+          && (!(scope.get("project") instanceof String project)
+              || project.isBlank()
+              || !project.equals(project.strip())
+              || project.length() > 256
+              || project.codePoints().anyMatch(Character::isISOControl)))
+        throw new io.aeyer.plowshare.server.faults.CallerFault("Invalid document project scope");
+      io.aeyer.plowshare.server.information.InformationScopes.from(payload);
+    }
+  }
+
   @Override
   public Outcome handle(Map<String, Object> payload, Asking asking) {
+    validate(payload);
     UUID document =
         RequestedDocument.askedAbout(
             Payloads.required(

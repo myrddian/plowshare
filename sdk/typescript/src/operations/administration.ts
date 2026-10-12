@@ -106,8 +106,8 @@ export interface AdministrativePayloads {
     readonly project?: string | null;
     readonly source: 'server' | 'workspace';
   };
-  'schedule.files': Record<string, never>;
-  'schedule.list': Record<string, never>;
+  'schedule.files': { readonly project?: string };
+  'schedule.list': { readonly project?: string };
   'schedule.define': {
     readonly schedule: string;
     readonly cron: string;

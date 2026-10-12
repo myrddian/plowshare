@@ -909,9 +909,10 @@ public final class Turn {
       // exhausted and so never gets here.
       boolean automaticBudgetGrant =
           given == null
+              && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
-      if (budget.exhausted()) {
+      if (budget.exhausted() && !definition.nativeOnly()) {
         throw new Refused(
             "conversation "
                 + id
@@ -1121,13 +1122,14 @@ public final class Turn {
       requireResumable(record);
       Budget budget = record.budget();
       grant(id, budget, maxModelCalls);
-      automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
+      if (!definition.nativeOnly())
+        automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
       // {@link #speak}'s line, for {@link #speak}'s reason: a lifted
       // conversation has no remaining to compare and no limit to name, and
       // this is the continue path into one. Read after grant() rather than
       // before, which is what makes a CALL_BUDGET stop continuable at all
       // — the raise has landed by the time this asks.
-      if (budget.exhausted()) {
+      if (budget.exhausted() && !definition.nativeOnly()) {
         throw new Refused(
             "conversation "
                 + id

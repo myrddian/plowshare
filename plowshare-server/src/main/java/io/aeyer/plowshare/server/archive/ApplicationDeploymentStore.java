@@ -31,7 +31,19 @@ public interface ApplicationDeploymentStore {
       String fingerprint,
       Retained release,
       java.nio.file.Path verifiedRoot,
-      boolean install) {
+      boolean install,
+      io.aeyer.plowshare.server.applications.ApplicationIdentitySource identity) {
+    public Mutation(
+        String project,
+        UUID requestId,
+        UUID expectedRevision,
+        String fingerprint,
+        Retained release,
+        java.nio.file.Path verifiedRoot,
+        boolean install) {
+      this(project, requestId, expectedRevision, fingerprint, release, verifiedRoot, install, null);
+    }
+
     public Mutation {
       java.util.Objects.requireNonNull(project);
       java.util.Objects.requireNonNull(requestId);

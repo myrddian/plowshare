@@ -18,11 +18,23 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
   private final ServerProjects projects;
   private final io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules;
 
+  private final io.aeyer.plowshare.server.applications.ApplicationIdentities identities;
+
   public JdbcApplicationDeploymentStore(
       JdbcTemplate jdbc,
       UnitOfWork work,
       ServerProjects projects,
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules) {
+    this(jdbc, work, projects, schedules, null);
+  }
+
+  public JdbcApplicationDeploymentStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ServerProjects projects,
+      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
+      io.aeyer.plowshare.server.applications.ApplicationIdentities identities) {
+    this.identities = identities;
     this.jdbc = jdbc;
     this.work = work;
     this.projects = projects;
@@ -83,6 +95,7 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       throw new IllegalArgumentException("Invalid deployment fingerprint");
     return work.inTransaction(
         () -> {
+          if (identities != null) identities.lockActivation(account, mutation.project());
           Long id = ProjectIds.toWrite(jdbc, Home.of(mutation.project()));
           jdbc.queryForObject("SELECT id FROM projects WHERE id = ? FOR UPDATE", Long.class, id);
           var prior =
@@ -141,7 +154,18 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
               id,
               mutation.fingerprint(),
               release.release().revision());
-          if (active == null) schedules.register(account, id, "server");
+          String scheduleOwner = account;
+          if (identities != null) {
+            var source = mutation.identity();
+            if (source == null)
+              throw new CallerFault("Deployment needs a validated identity declaration");
+            scheduleOwner =
+                identities.activate(
+                    account, mutation.project(), source.declaration(), source.principal());
+          }
+          // Only new sources acquire the declared owner. Updates never transfer historical
+          // schedules.
+          if (active == null) schedules.register(scheduleOwner, id, "server");
           return new Receipt(mutation.requestId(), mutation.project(), release.release());
         });
   }

@@ -82,6 +82,39 @@ class ContractsTest(unittest.TestCase):
             )
         )
 
+    def test_application_credential_is_redacted_and_correlated(self) -> None:
+        receipt = {
+            "project": "app",
+            "requestId": "11111111-1111-1111-1111-111111111111",
+            "tokenId": "22222222-2222-2222-2222-222222222222",
+            "principal": "@service/22222222-2222-2222-2222-222222222222",
+            "expiresAt": "2026-11-01T00:00:00Z",
+        }
+        secret = "pss_" + "1" * 48
+        issued = decode_reply(
+            "application.token.issue", {"receipt": receipt, "credential": secret}
+        )
+        self.assertNotIn(secret, repr(issued))
+        asked = {
+            "project": "app",
+            "requestId": receipt["requestId"],
+            "expiresInDays": 30,
+            "rotate": False,
+        }
+        self.assertTrue(deployment_matches("application.token.issue", asked, issued))
+        self.assertFalse(
+            deployment_matches(
+                "application.token.issue", {**asked, "project": "foreign"}, issued
+            )
+        )
+        self.assertFalse(
+            deployment_matches(
+                "application.token.issue",
+                {**asked, "requestId": receipt["tokenId"]},
+                issued,
+            )
+        )
+
     def test_selection_request_wrappers_emit_the_selected_operation_payload(
         self,
     ) -> None:

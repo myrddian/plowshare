@@ -232,3 +232,24 @@ filter-review types. Generated Python, Go and .NET request/result DTOs
 include all three operations. See [Relay](relay.md#sdk-topic-ports) for explicit
 acknowledgement, retention gaps, fencing and uncertain-delivery recovery, and
 [message filtering](message-filtering.md) for external detector protocols.
+
+## Application identity and scoped inspection
+
+Every SDK exposes `application.identity.status`, `application.token.issue` and
+`application.token.receipt`. Java provides `ApplicationClient.identity`, `issue`
+and `tokenReceipt`; TypeScript uses typed operations and the shared
+`ApplicationIdentityClient` control lifecycle; Python, Go and .NET have generated
+typed requests/results. Issuance is an explicit administrator mutation, reveals a
+secret once and requires a retained UUID. Never replay unknown delivery. Read the
+original receipt and explicitly rotate the same token if its secret was lost.
+
+`schedule.list` and `schedule.files` accept optional `project` selection. Scoped
+reads check live VIEWER membership and include the project's registered server
+schedule source/projection even when its owner differs from the caller. Service
+tokens must select a granted project; omission does not grant global enumeration.
+`schedule.list` returns effective pause/timing state, while `schedule.files` explains
+source registration and refusals. Both are read-only and do not resume schedules.
+Java exposes these reads through `ScheduleClient.list(project)` and
+`ScheduleClient.files(project)`. `document.detail` likewise supports Information
+project scope for metadata/outline; Java offers the scoped `describeDocument`
+overload, and the other SDKs use their typed operation/request DTOs.

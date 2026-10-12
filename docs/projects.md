@@ -78,6 +78,51 @@ the server cannot turn the Application back into a legacy External. Repair the
 manifest through its authorized source-management workflow. Agents cannot create,
 edit, delete or move the root `plowshare.json` or `server/` authority through workspace file tools.
 
+## Application-owned execution identities
+
+For a new deployed Application, declare its separate execution account at the root:
+
+```json
+{
+  "version": 1,
+  "name": "mychatbot",
+  "service": {"handle": "mychatbot-worker", "role": "CONTRIBUTOR"},
+  "access": {"accounts": [{"handle": "operator", "role": "MANAGER"}]}
+}
+```
+
+Deploy as a server administrator. The server reserves an unused service handle and
+stable token principal, resolves `executionAccount` in deployed source and commits
+initial bounded service membership with source activation. Do not repeat the
+service handle in `access.accounts`. Provider, port and worker account inheritance
+uses that principal. No bearer secret is returned by deployment, and its reserved
+token cannot authenticate before explicit issuance.
+
+Inspect, issue and reconcile through the public commands (also available in TUI):
+
+```sh
+bin/plowshare-cli application identity status '{"project":"mychatbot"}'
+bin/plowshare-cli application token issue '{"project":"mychatbot","requestId":"11111111-1111-1111-1111-111111111111","expiresInDays":30,"rotate":false}'
+bin/plowshare-cli application token receipt '{"project":"mychatbot","requestId":"11111111-1111-1111-1111-111111111111"}'
+```
+
+Use a fresh retained UUID for issuance. Save its secret privately; it appears once.
+After unknown delivery read the original receipt, then explicitly choose `rotate:true`
+with a new request UUID if the secret was lost. Rotation keeps the token UUID and
+principal. Status identifies the latest credential request; receipts contain no secret.
+Desktop's deployment dialog and the web console's Application card expose
+**Execution identity and credential** controls with pending-receipt recovery.
+Only server administrators may issue credentials; project managers retain normal
+source, schedule and membership management, subject to their existing permissions.
+
+Handle collisions fail closed. Updates/rollback cannot remove or substitute owned
+identity, restore revoked membership or transfer existing schedule ownership.
+Token expiry and revocation stop execution; renew through explicit owned-token
+rotation. Project deletion retains the identity reservation and cannot silently
+rebind it to a new project. Existing manual `executionAccount` deployments keep
+their identity and service-token workflow; they are not automatically converted.
+See [the lifecycle decision](decisions/0017-application-owned-service-provisioning.md).
+
 ## Deploy, update and activate an Application
 
 A server administrator can upload a complete source folder using the CLI or

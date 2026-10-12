@@ -290,10 +290,11 @@ If you are changing a scope that already has retained work, preserve its journal
 and follow the scope-change/recovery instructions instead of deleting state.
 
 Review `collector.json` and `deployment/application` before continuing. There is
-no `.plowshare/` directory. The first manifest's `executionAccount` temporarily
-names the service handle. Installation replaces it and the `server/` declarations
-with the token's authenticated `@service/<UUID>` principal before Python starts.
-The manifest's membership grants continue to use account handles.
+no `.plowshare/` directory. New guided source declares `service: {handle, role}`
+with CONTRIBUTOR access and explicit human managers. Deployment resolves the
+stable token principal and inherited provider/port/worker accounts on the server.
+No principal copying or second source deployment is needed. Previously prepared
+manual source retains its supported deploy/provision/redeploy workflow.
 
 You can edit `collector.json` to add a normalized DNS export using the
 [collector configuration guide](README.md#what-the-collector-observes). Keep its
@@ -312,28 +313,24 @@ uses a temporary login session, never reads saved CLI/Desktop credentials and
 revokes the temporary session afterward. Choose a **number from the server's
 FileStore list**; stores without `MANAGER` access are excluded.
 
-Installation:
+Installation for new guided source:
 
-1. Verifies the administrator, human manager, empty deployment history and
-   paused packaged schedule. It refuses to overwrite an existing Application.
-2. Deploys the private Application once, creating the project needed for a scoped
-   service token. It retains the request UUID before sending it.
-3. Creates or uses the enabled service account, establishes manager/service
-   project membership and issues a named token with only this project's
-   `CONTRIBUTOR` scope. It refuses a token that already has that name.
-4. Saves the token privately and substitutes its principal into the Application
-   manifest, provider/port declarations and Relay worker enrollment.
-5. Deploys the updated source using a fresh request UUID and the confirmed first
-   revision as `expectedRevision`. It verifies the active revision.
-6. Reads the deployed schedule's internal name into `collector.json` when server
-   reconciliation has made it available. The schedule remains paused.
+1. Verifies administrator, human manager, empty deployment history and paused schedule.
+2. Retains its request UUID and deploys the reviewed Application once. The server
+   reserves its unused service identity as a dormant token. Source activation
+   commits initial project scope and service-owned schedule enrollment together.
+3. Confirms or explicitly establishes the configured human MANAGER membership.
+4. Explicitly issues the reserved token's credential using a retained UUID. Saves
+   the secret in a private artifact linked to that receipt, then publishes local
+   `service-token` and `identity.json` runtime views. The secret is never printed.
+5. Reads the project-scoped schedule identity after reconciliation. It stays paused.
 
 The helper writes the private directory with POSIX mode `0700` and credentials,
 intents and receipts with `0600`. On Windows, restrict the directory's ACLs.
 It never prints the administrator password, service token or dashboard bearer.
 It does not scan during installation. The prepared `server/relay-workers.json`
 enrolls the automatic Relay worker under the issued service principal when the
-updated Application is deployed; no whole-server configuration edit is needed.
+Application is activated; no whole-server configuration edit is needed.
 
 The `start` flow waits for schedule registration automatically. For a separate read-only diagnostic, run:
 
@@ -375,10 +372,12 @@ If you receive `Changing Relay topic policies requires project manager access`, 
 the server with the Relay processing permission fix. Using a human manager instead
 changes investigation ownership and does not verify service-account processing.
 
-The packaged schedule is still owned by the deploying administrator. Its
-`privacy_tick` action invokes no model. Setup does not transfer that schedule's
-ownership; the service token cannot manage it. Keep the administrator identity
-for schedule administration and the service identity for collection/investigation.
+For a new Application-owned installation, the first deployment enrolls the
+packaged schedule under the retained service principal. Its `privacy_tick` action
+uses the native-only runtime, with no model binding and an immutable zero-call
+budget. A project manager controls schedule source and pause/resume; the service
+account can inspect its own project schedule. Existing manual installations retain
+their historical schedule owner; upgrading does not transfer that ownership.
 
 ## 5. Start the separately operated Python service
 
@@ -418,33 +417,74 @@ this operator-controlled activation step visible.
 The helper sends each mutation once and blocks re-entry after an attempted install.
 A disconnect is not evidence that the server rejected a mutation.
 
-Use `status` and inspect these private files:
+For Application-owned guided setup, run:
 
-| File | What it establishes |
-| --- | --- |
-| `deployment/bootstrap-intent.json` | First request UUID, expected revision and selected destination |
-| `deployment/bootstrap-receipt.json` | Confirmed first retained release |
-| `deployment/provisioning-intent.json` | Account/token provisioning was attempted |
-| `deployment/service-token` and `identity.json` | Credential received and its principal retained |
-| `deployment/provisioning-completed` | Account provisioning completed |
-| `deployment/identity-intent.json` and `identity-receipt.json` | Second request identity and confirmed release |
-| `deployment/installation-completed` | Both source deployments and provisioning were confirmed |
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+  --directory "$PRIVACY_PRIVATE" recover
+```
 
-If `status` cannot fetch a receipt, inspect that exact UUID through
-`application.deployment.receipt` as the same deployment administrator. A missing
-or refused receipt does not authorize a fresh deployment. See the
-[deployment recovery manual](../../docs/projects.md#deploy-update-and-activate-an-application).
-If token creation succeeded but its secret reply was lost, inspect token metadata
-and rotate that existing token UUID explicitly; do not create another token to
-retry. Follow [interrupted provisioning](README.md#rotation-and-interrupted-setup).
+Recovery reads the original deployment and credential UUIDs. It confirms the active
+head and human manager, then restores local runtime files only from a saved secret
+whose receipt is still the latest issuance and whose credential remains valid.
+It never repeats deployment or an
+uncertain credential mutation. If a confirmed issuance lost its secret, run
+`recover --rotate` to explicitly issue a new secret for the same token UUID.
+An absent receipt is not proof of non-delivery: inspect that original request.
+No recovery command starts a collector, scan, investigation or schedule.
 
-There is no automatic rollback or retry of an uncertain install. Finish a reconciled
-partial install using the lower-level setup and deployment commands, retain all
-intents, and verify the final principal and active source before starting Python.
-The guided `start` and `serve` commands require its completion marker; manually recovered
-installations can use the documented lower-level collector command instead.
+Private evidence includes `bootstrap-intent.json`/`bootstrap-receipt.json`,
+`credential-current.json`, the selected credential intent, request-linked credential
+and metadata artifacts, `identity.json`, `service-token` and `installation-completed`.
+Keep this directory private. Do not delete intents to bypass an uncertain result.
+Manual older packages retain their `provisioning-*` and `identity-*` receipts;
+follow [manual provisioning recovery](README.md#manual-rotation-and-interrupted-setup)
+instead of converting their identity automatically.
 
-For updates, edit the private Application copy and use the normal deployment
-workflow with a new request UUID and the reviewed active revision. This first-install
-helper does not silently upgrade existing installations. Rotate service credentials
-before expiry while keeping the same token UUID, principal and collector journals.
+## Upgrade the Application and collector
+
+Stop the external collector first, including its enrolled background service.
+Wait for active work to settle. Keep the Application schedule paused while the
+collector is stopped; stopping Python does not pause a server schedule.
+The helper preserves private configuration, credentials, local evidence and journals.
+
+Prepare a reviewed Application upgrade from your new checkout:
+
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+  --directory "$PRIVACY_PRIVATE" upgrade --source "$PRIVACY_APP_SOURCE"
+```
+
+It snapshots the active revision/destination, backs up private source/configuration,
+preserves the installed identity and grants, and stages candidate source under
+`upgrades/<request UUID>/prepared/application`. Local additions remain; edited
+files conflicting with the new package are retained and listed for review. Review
+the candidate against its backup. After resolving listed conflicts or making
+candidate edits, use `upgrade --review` to record their hashes, then:
+
+```sh
+build/privacy-python-env/bin/python -m plowshare_privacy.bootstrap \
+  --directory "$PRIVACY_PRIVATE" upgrade --apply
+```
+
+Apply sends one deployment with the retained UUID and reviewed expected revision.
+It refuses changed candidate/private source or a moved server head. Unknown delivery
+requires `upgrade --recover`, which reads the original receipt and completes the
+private source swap without another deployment. Pending plans fence new plans.
+Recovery never activates an old release over a newer head.
+
+For a collector package upgrade, build matching collector and SDK wheels first.
+Supply their absolute paths to preparation with `--collector-wheel` and `--sdk-wheel`.
+Use the same dedicated virtual environment for prepare/apply. The helper backs up
+that stopped environment, verifies the reviewed wheel hashes, uses offline pip
+with no dependency resolution and verifies installed package bytes. Same-version
+wheels are reinstalled explicitly. Existing dependencies must already be installed.
+No global Python environment or private runtime directory is upgraded as a package.
+
+An interrupted package installation is reconciled by comparing installed files.
+If they differ, inspect the preserved environment backup, then explicitly use
+`upgrade --repair-collector` to reinstall the retained reviewed wheels. This reads
+the deployment receipt and does not redeploy source. Neither apply nor recovery
+restarts the collector. Start the existing launcher when ready; then inspect health
+and deliberately resume the schedule. Renew expiring owned credentials through
+explicit Application token rotation, preserving token UUID, principal and journals.

@@ -178,7 +178,7 @@ def private_write(path: Path, content: str) -> None:
             os.close(directory)
 
 
-def prepare(setup: Setup) -> None:
+def prepare(setup: Setup, *, owned: bool = False) -> None:
     config = Configuration.read(setup.collector)
     # Read every source file before making output; linked files/directories are
     # never copied, and output cannot accidentally become tracked package source.
@@ -192,7 +192,7 @@ def prepare(setup: Setup) -> None:
     manifest = object_fields(
         load_json(setup.source / "plowshare.json"),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants"},
+        {"executionAccount", "toolScopes", "toolGrants", "service"},
     )
     if manifest["name"] != config.project or manifest["version"] != 1:
         raise ValueError("Collector and application project must match")
@@ -216,6 +216,20 @@ def prepare(setup: Setup) -> None:
         json.dumps(manifest, indent=2) + "\n"
     )
     bind_provider(setup, setup.service)
+    if owned:
+        # The server resolves the reserved principal. Only human managers appear in access.accounts;
+        # the reviewed service declaration supplies its own bounded grant.
+        path = setup.output / "application/plowshare.json"
+        manifest.pop("executionAccount", None)
+        manifest["service"] = {"handle": setup.service, "role": "CONTRIBUTOR"}
+        manifest["access"] = {
+            "accounts": [
+                {"handle": handle, "role": role}
+                for handle, role in grants.items()
+                if handle != setup.service
+            ]
+        }
+        path.write_text(json.dumps(manifest, indent=2) + "\n")
     private_write(
         setup.output / "setup.json",
         json.dumps(
@@ -240,7 +254,7 @@ def bind_provider(setup: Setup, account: str) -> None:
     manifest = object_fields(
         load_json(manifest_path),
         {"version", "name", "access", "caps", "commands"},
-        {"executionAccount", "toolScopes", "toolGrants"},
+        {"executionAccount", "toolScopes", "toolGrants", "service"},
     )
     manifest["executionAccount"] = account
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

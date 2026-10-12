@@ -1190,18 +1190,41 @@ public final class AgentRegistry {
       throw new IllegalStateException(refusal(entry) + ": " + invalid.getMessage(), invalid);
     }
 
+    boolean nativeOnly =
+        extraKeys.contains("native-only") && requireBoolean(entry, extras, "native-only", false);
+    if (nativeOnly
+        && (keys.containsKey(MODEL)
+            || !Integer.valueOf(0).equals(keys.get(MAX_MODEL_CALLS))
+            || !calls.isEmpty()
+            || !requireStringList(entry, keys, "orchestrations").isEmpty()
+            || extras.containsKey("checker")
+            || board
+            || requireBoolean(entry, keys, VISION, false)
+            || reviewWith != null
+            || keys.containsKey("fallback")
+            || keys.containsKey("sampling")
+            || keys.containsKey("temperature")
+            || tools.stream()
+                .anyMatch(
+                    t ->
+                        t.equals(AGENT_RUN)
+                            || t.equals("model_infer")
+                            || t.startsWith("orchestrate_"))))
+      throw new IllegalStateException(
+          refusal(entry)
+              + " native-only scripts omit model, declare max-model-calls: 0 and cannot grant model delegation or checking");
     return new Parsed(
         new AgentDefinition(
             name,
             requireString(entry, keys, DESCRIPTION),
-            requireString(entry, keys, MODEL),
+            nativeOnly ? null : requireString(entry, keys, MODEL),
             requireIntent(entry, keys),
             requireOverrides(entry, keys, name),
             tools,
             calls,
             requireGrants(entry, keys),
             requirePositiveInt(entry, keys, MAX_TURNS),
-            requirePositiveInt(entry, keys, MAX_MODEL_CALLS),
+            nativeOnly ? 0 : requirePositiveInt(entry, keys, MAX_MODEL_CALLS),
             prompt,
             requireBoolean(entry, keys, EXPORTED, false),
             requireBoolean(entry, keys, DELEGABLE, true),

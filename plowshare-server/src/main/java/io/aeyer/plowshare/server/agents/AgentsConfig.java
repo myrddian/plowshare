@@ -1544,6 +1544,10 @@ public class AgentsConfig {
     Map<String, AgentDefinition> resolved = new LinkedHashMap<>();
     for (Map.Entry<String, AgentDefinition> entry : loaded.enabled().entrySet()) {
       AgentDefinition definition = entry.getValue();
+      if (definition.nativeOnly()) {
+        resolved.put(entry.getKey(), definition);
+        continue;
+      }
       String wireModel = dispatcher.wireModelFor(definition.model());
       SamplingProfiles.Resolved match = profiles.resolve(wireModel, definition.intent());
       AgentDefinition sampled =
@@ -1637,6 +1641,7 @@ public class AgentsConfig {
    */
   private static void requireModelServed(
       LlmDispatcher dispatcher, AgentDefinition definition, String source) {
+    if (definition.nativeOnly()) return;
     try {
       dispatcher.requireServed(definition.model());
     } catch (LlmException unserved) {

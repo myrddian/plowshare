@@ -370,6 +370,11 @@ public final class JobRuntime {
   private AgentDefinition withAgentRules(
       AgentDefinition definition, Home home, String session, String conversation, String owner) {
     if (skills != null) definition = skills.decorate(conversation, definition);
+    if (definition.nativeOnly()
+        && !io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
+            definition.prompt()))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "Native-only execution requires a script manifest");
     if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
         definition.prompt())) return definition;
     definition = rulePrompts.apply(definition, home, session, owner);
@@ -1696,7 +1701,9 @@ public final class JobRuntime {
       if (!resuming) {
         io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Preparation next;
         try {
-          next = scripts.prepareNext(definition.prompt(), input, !budget.exhausted());
+          next =
+              scripts.prepareNext(
+                  definition.prompt(), input, definition.nativeOnly() || !budget.exhausted());
         } catch (IllegalStateException failed) {
           // Script evaluation includes output validation. Keep its reason and the
           // completed work counts instead of falling through JobStore's last resort.
@@ -1749,6 +1756,13 @@ public final class JobRuntime {
       var command =
           (io.aeyer.plowshare.server.orchestrations.scripted.ScriptStore.Tool) pending.command();
       String name = command.name();
+      if (definition.nativeOnly()
+          && (name.equals("agent_run")
+              || name.equals("model_infer")
+              || name.startsWith("orchestrate_")
+              || name.equals("orchestration_check")))
+        throw new IllegalStateException(
+            "Native-only scripts cannot request model execution: " + name);
       String arguments = command.arguments();
       String id = "script_" + pending.sequence();
       AgentTool tool = offered.get(name);
@@ -4059,6 +4073,8 @@ public final class JobRuntime {
     // that holds both a directory of definitions and a dispatcher that knows
     // which model serves each specifier. What is left here is the carrying,
     // and this is still the one place a definition becomes a request.
+    if (definition.nativeOnly())
+      throw new IllegalStateException("Native-only definitions cannot request inference");
     return ChatRequest.of(definition.model(), conversation).withSampling(definition.sampling());
   }
 

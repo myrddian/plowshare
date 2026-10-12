@@ -101,7 +101,10 @@ public class EventFrames implements FrameArea {
   public Map<String, FrameHandler> frames() {
     return Map.ofEntries(
         Map.entry(FrameTypes.SCHEDULE_DEFINE, new ScheduleDefineHandler(schedules, clock)),
-        Map.entry(FrameTypes.SCHEDULE_LIST, new ScheduleListHandler(schedules)),
+        Map.entry(
+            FrameTypes.SCHEDULE_LIST,
+            new ScheduleListHandler(
+                schedules, () -> definitions == null ? null : definitions.getIfAvailable())),
         Map.entry(
             FrameTypes.SCHEDULE_PAUSE,
             managedControl("schedule", true, new SchedulePauseHandler(schedules))),
