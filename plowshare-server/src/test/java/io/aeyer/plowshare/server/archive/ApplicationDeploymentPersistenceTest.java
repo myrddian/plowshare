@@ -245,6 +245,11 @@ class ApplicationDeploymentPersistenceTest {
   }
 
   private io.aeyer.plowshare.server.applications.ApplicationIdentities ownedLifecycle() {
+    return ownedLifecycle(java.time.Clock.systemUTC());
+  }
+
+  private io.aeyer.plowshare.server.applications.ApplicationIdentities ownedLifecycle(
+      java.time.Clock clock) {
     var identities =
         new io.aeyer.plowshare.server.applications.OwnedApplicationIdentities(
             new io.aeyer.plowshare.server.applications.JdbcApplicationIdentityRepository(jdbc),
@@ -253,7 +258,8 @@ class ApplicationDeploymentPersistenceTest {
             new JdbcProjectMembers(jdbc),
             projects,
             work,
-            event -> {});
+            event -> {},
+            clock);
     store = new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities);
     deployments =
         new SourceApplicationDeployments(
@@ -285,7 +291,14 @@ class ApplicationDeploymentPersistenceTest {
 
   @Test
   void ownedDeploymentReservesDormantCredentialAndSchedulesUseTheStablePrincipal() {
-    var identities = ownedLifecycle();
+    // Keep sub-microsecond digits nonzero so the regression cannot pass on a coarse host clock.
+    var identities =
+        ownedLifecycle(
+            java.time.Clock.fixed(
+                java.time.Instant.now()
+                    .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                    .plusNanos(676594204),
+                java.time.ZoneOffset.UTC));
     String handle = "worker-" + UUID.randomUUID();
     var request = ownedRequest(UUID.randomUUID(), null, handle);
     var deployed = deployments.deploy("deployer", request);
@@ -305,6 +318,7 @@ class ApplicationDeploymentPersistenceTest {
             "deployer",
             new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(name, issueId, 30, false));
     assertEquals(reserved.tokenId(), issued.receipt().tokenId());
+    assertEquals(676594000, issued.receipt().expiresAt().getNano());
     assertTrue(credentials.authentication(issued.credential()).isPresent());
     assertEquals(issued.receipt(), identities.receipt("deployer", name, issueId));
     assertThrows(
@@ -320,6 +334,11 @@ class ApplicationDeploymentPersistenceTest {
             new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
                 name, UUID.randomUUID(), 30, true));
     assertEquals(reserved.tokenId(), rotated.receipt().tokenId());
+    assertEquals(676594000, rotated.receipt().expiresAt().getNano());
+    assertEquals(
+        rotated.receipt(), identities.receipt("deployer", name, rotated.receipt().requestId()));
+    assertEquals(
+        rotated.receipt().expiresAt(), identities.status("deployer", name).identity().expiresAt());
     assertTrue(credentials.authentication(issued.credential()).isEmpty());
     assertTrue(credentials.authentication(rotated.credential()).isPresent());
     var services =

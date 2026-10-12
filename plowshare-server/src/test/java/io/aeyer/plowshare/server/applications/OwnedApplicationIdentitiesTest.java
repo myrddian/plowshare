@@ -7,9 +7,16 @@ import io.aeyer.plowshare.protocol.ApplicationIdentity.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.auth.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.nio.file.*;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Domain lifecycle and authorization tests use mocked specialist repositories. */
 class OwnedApplicationIdentitiesTest {
@@ -107,6 +114,43 @@ class OwnedApplicationIdentitiesTest {
         CallerFault.class,
         () -> identities.issue("operator", new Issue("other", request.requestId(), 30, false)));
     verify(repository, never()).issued(anyString(), any(), any(), anyString());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void issuedAndRotatedReceiptsUseRetainedPrecision(boolean rotate, @TempDir Path root)
+      throws Exception {
+    var clock = Clock.fixed(Instant.parse("2026-10-13T17:58:51.676594204Z"), ZoneOffset.UTC);
+    var lifecycle =
+        new OwnedApplicationIdentities(
+            repository, services, accounts, members, projects, UnitOfWork.NONE, event -> {}, clock);
+    var active =
+        new Binding(
+            "app",
+            declaration,
+            token,
+            binding.principal(),
+            State.ACTIVE,
+            rotate,
+            binding.expiresAt(),
+            null,
+            rotate ? UUID.randomUUID() : null);
+    when(repository.find("app", true)).thenReturn(Optional.of(active));
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        "{\"version\":1,\"name\":\"app\",\"service\":{\"handle\":\"worker\",\"role\":\"CONTRIBUTOR\"},\"executionAccount\":\""
+            + binding.principal()
+            + "\"}");
+    when(projects.find("app"))
+        .thenReturn(
+            Optional.of(
+                new ProjectRecord("app", root, List.of(), List.of(), "APPLICATION", List.of())));
+    when(services.account("worker", true))
+        .thenReturn(new ServiceAccounts.Account("worker", true, binding.expiresAt()));
+    var request = new Issue("app", UUID.randomUUID(), 30, rotate);
+    var issued = lifecycle.issue("operator", request);
+    assertEquals(OffsetDateTime.parse("2026-11-12T17:58:51.676594Z"), issued.receipt().expiresAt());
+    verify(repository).issued(eq("operator"), eq(request), eq(issued.receipt()), anyString());
   }
 
   @Test
