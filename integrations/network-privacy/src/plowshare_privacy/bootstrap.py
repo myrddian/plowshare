@@ -1,7 +1,7 @@
 """Guided, private setup for Network Privacy Watch using the public Python SDK.
 
-Configure is offline. Install performs two retained source deployments around
-service-account provisioning; it never retries mutations after a lost reply.
+Configure is offline. New installations deploy once with an owned service identity,
+then explicitly issue its credential. Lost replies are reconciled through receipts.
 Status is read-only on the server. Start reuses installation and opens a local
 dashboard; serve supports an explicitly configured remote collector listener.
 """
@@ -193,7 +193,7 @@ def configure(directory: Path, source: Path, *, guided: bool = False) -> None:
         )
         + "\n",
     )
-    prepare(Setup.read(settings))
+    prepare(Setup.read(settings), owned=True)
     definitions = tuple((setup.output / "application/agents").glob("*.md")) + tuple(
         (setup.output / "application/orchestrations").glob("*.md")
     )
@@ -207,10 +207,15 @@ def configure(directory: Path, source: Path, *, guided: bool = False) -> None:
             content.replace("\nmodel: reasoning\n", "\nmodel: " + model + "\n"),
             encoding="utf-8",
         )
-    # These bundled templates own exactly one manifest model declaration. Scripts must
-    # use the selected binding too, even when their conductor itself needs no inference.
+    # Inference scripts use the selected binding. The deterministic tick has no model.
     for script in (setup.output / "application/orchestrations").glob("*.js"):
         content = script.read_text(encoding="utf-8")
+        if script.name == "privacy_tick.js":
+            if "'native-only': true" not in content or "model:" in content:
+                raise SetupProblem(
+                    "Native tick declaration changed; review the source package."
+                )
+            continue
         declaration = "model: 'reasoning'"
         if content.count(declaration) != 1:
             raise SetupProblem(
@@ -421,12 +426,32 @@ async def install(
             "Keep the packaged network_scan schedule paused during installation."
         )
     revision = await deploy(setup, client, destination, "bootstrap", None)
-    print("Paused Application deployed; provisioning its separate execution identity.")
-    await provision(setup, client)
-    await deploy(setup, client, destination, "identity", revision)
+    manifest = object_fields(
+        load_json(setup.output / "application/plowshare.json"),
+        {"version", "name", "access", "caps", "commands"},
+        {"executionAccount", "toolScopes", "toolGrants", "service"},
+    )
+    if "service" in manifest:
+        from .owned_setup import provision_owned
+
+        print("Application deployed paused; issuing its reserved service credential.")
+        await provision_owned(setup, client)
+    else:
+        # Existing explicitly prepared manual packages retain their supported lifecycle.
+        print(
+            "Manual Application deployed; provisioning its separate execution identity."
+        )
+        await provision(setup, client)
+        await deploy(setup, client, destination, "identity", revision)
+    from .upgrades import hashes
+
+    replace_private(
+        setup.output / "package-baseline.json",
+        json.dumps({"files": hashes(setup.output / "application")}, indent=2) + "\n",
+    )
     private_write(
         setup.output / "installation-completed",
-        "Two deployments and service provisioning confirmed.\n",
+        "Application deployment and service credential confirmed.\n",
     )
     if guided:
         await wait_for_schedule(setup, client)
@@ -480,7 +505,9 @@ async def inspect(setup: Setup, client: SetupClient) -> None:
 async def resolve_schedule(setup: Setup, client: SetupClient) -> bool:
     """Resolve one active source schedule using read-only server requests."""
     config = Configuration.read(setup.collector)
-    schedules = (await client.request(ScheduleFilesRequest())).require_payload()
+    schedules = (
+        await client.request(ScheduleFilesRequest(project=config.project))
+    ).require_payload()
     matches = [
         s
         for s in schedules
@@ -794,7 +821,31 @@ def main() -> None:
     )
     commands.add_parser(
         "install",
-        help="Log in temporarily, deploy paused, provision service and redeploy",
+        help="Deploy paused once, then issue its reserved service credential",
+    )
+    upgrade = commands.add_parser(
+        "upgrade",
+        help="Prepare, review, apply or recover a stopped collector's upgrade",
+    )
+    upgrade.add_argument("--source", type=Path)
+    upgrade.add_argument("--collector-wheel", type=Path)
+    upgrade.add_argument("--sdk-wheel", type=Path)
+    upgrade_mode = upgrade.add_mutually_exclusive_group()
+    upgrade_mode.add_argument("--apply", action="store_true")
+    upgrade_mode.add_argument("--review", action="store_true")
+    upgrade_mode.add_argument("--recover", action="store_true")
+    upgrade_mode.add_argument(
+        "--repair-collector",
+        action="store_true",
+        help="Explicitly reinstall the retained reviewed wheels after interrupted pip installation",
+    )
+    recovery = commands.add_parser(
+        "recover", help="Reconcile interrupted installation from retained receipts"
+    )
+    recovery.add_argument(
+        "--rotate",
+        action="store_true",
+        help="Explicitly rotate the same retained token after confirmed lost-secret delivery",
     )
     commands.add_parser(
         "status",
@@ -951,6 +1002,51 @@ def main() -> None:
                             load_json(root / "destination.json"), {"path"}
                         )
                         await install(setup, client, text(row["path"], 512))
+                    elif args.command == "upgrade":
+                        from .upgrades import (
+                            apply_upgrade,
+                            prepare_upgrade,
+                            review_upgrade,
+                        )
+
+                        if (
+                            args.apply
+                            or args.recover
+                            or args.review
+                            or args.repair_collector
+                        ) and (
+                            args.source is not None
+                            or args.collector_wheel is not None
+                            or args.sdk_wheel is not None
+                        ):
+                            raise SetupProblem(
+                                "Prepare with --source and wheels separately from apply, review or recovery."
+                            )
+                        if args.apply or args.recover or args.repair_collector:
+                            await apply_upgrade(
+                                setup,
+                                client,
+                                recover=args.recover or args.repair_collector,
+                                repair=args.repair_collector,
+                            )
+                        elif args.review:
+                            review_upgrade(setup)
+                        elif args.source is not None:
+                            await prepare_upgrade(
+                                setup,
+                                client,
+                                args.source,
+                                collector_wheel=args.collector_wheel,
+                                sdk_wheel=args.sdk_wheel,
+                            )
+                        else:
+                            raise SetupProblem(
+                                "Select --source to prepare, --review, --apply or --recover."
+                            )
+                    elif args.command == "recover":
+                        from .owned_setup import recover_installation
+
+                        await recover_installation(setup, client, rotate=args.rotate)
                     else:
                         await inspect(setup, client)
 

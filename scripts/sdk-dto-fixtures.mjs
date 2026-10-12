@@ -32,6 +32,20 @@ const messageDelivery = { message: 'msg_fixture', sender: 'sender', recipient: '
   postedAt: '2026-10-07T00:00:00Z', body: 'hello', conversation: 'cnv_recipient', sourceConversation: 'cnv_sender' };
 result('message.delivery', messageDelivery, true);
 result('message.delivery', { ...messageDelivery, conversation: '' }, false);
+const appReceipt={project:'fixture',requestId:receipt,tokenId:receipt,principal:'@service/'+receipt,expiresAt:'2026-11-01T00:00:00Z'};
+const appIssue={project:'fixture',requestId:receipt,expiresInDays:30,rotate:false};
+input('application.token.issue',appIssue,true);
+for(const change of [{expiresInDays:0},{expiresInDays:366},{rotate:null},{requestId:'bad'},{project:'personal:operator'},{extra:1}]) input('application.token.issue',{...appIssue,...change},false);
+input('application.token.receipt',{project:'fixture',requestId:receipt},true);
+result('application.identity.status',{project:'fixture',identity:null},true);
+result('application.token.receipt',appReceipt,true);
+result('application.token.receipt',{...appReceipt,principal:'forged'},false);
+result('application.token.issue',{receipt:appReceipt,credential:'pss_'+'1'.repeat(48)},true);
+result('application.token.issue',{receipt:appReceipt,credential:'invalid'},false);
+input('schedule.list',{project:'fixture'},true);
+input('schedule.files',{project:null},false);
+input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeShared:false}},true);
+input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',extra:true}},false);
 input('project.list', {}, true);
 input('project.list', { future: 1 }, false);
 for (const job of ['job_fixture', '', '  '])

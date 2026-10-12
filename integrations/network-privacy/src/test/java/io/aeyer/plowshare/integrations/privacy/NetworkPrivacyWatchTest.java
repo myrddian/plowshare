@@ -28,6 +28,22 @@ class NetworkPrivacyWatchTest {
           "relay_tool_read");
   private final Path application = Path.of(System.getProperty("privacy.application"));
 
+  private static io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools emptyPools() {
+    return new io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools() {
+      public java.util.List<String> serving(String specifier) {
+        return java.util.List.of();
+      }
+
+      public int slots(String pool) {
+        return 0;
+      }
+
+      public java.util.List<String> all() {
+        return java.util.List.of();
+      }
+    };
+  }
+
   @Test
   void application_scope_loads_without_external_names_or_provider_schemas() throws Exception {
     var settings =
@@ -62,22 +78,48 @@ class NetworkPrivacyWatchTest {
               new AgentRegistry(java.util.Map.of()),
               TOOLS,
               DefinitionChecks.NONE,
-              new io.aeyer.plowshare.server.swarm.SwarmScheduler.Pools() {
-                public java.util.List<String> serving(String specifier) {
-                  return java.util.List.of();
-                }
-
-                public int slots(String pool) {
-                  return 0;
-                }
-
-                public java.util.List<String> all() {
-                  return java.util.List.of();
-                }
-              },
+              emptyPools(),
               hooks,
               relay)
           .validate("network-privacy-watch", application);
+    }
+  }
+
+  @Test
+  void owned_source_can_be_admitted_before_its_execution_account_exists(
+      @org.junit.jupiter.api.io.TempDir Path root) throws Exception {
+    try (var files = Files.walk(application)) {
+      for (Path file : files.toList()) {
+        Path target = root.resolve(application.relativize(file));
+        if (Files.isDirectory(file)) Files.createDirectories(target);
+        else Files.copy(file, target);
+      }
+    }
+    var json = new ObjectMapper();
+    var manifest =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            json.readTree(Files.readString(root.resolve("plowshare.json")));
+    manifest.remove("executionAccount");
+    manifest.putObject("service").put("handle", "privacy-worker").put("role", "CONTRIBUTOR");
+    String principal = "@service/" + java.util.UUID.randomUUID();
+    Files.writeString(
+        root.resolve("plowshare.json"),
+        io.aeyer.plowshare.server.applications.ApplicationServiceManifest.resolve(
+            json.writeValueAsString(manifest), principal));
+    var settings =
+        io.aeyer.plowshare.server.applications.ApplicationServerSettings.read(
+            "network-privacy-watch", root);
+    assertEquals(principal, settings.providers().getFirst().account());
+    try (var hooks = new io.aeyer.plowshare.server.hooks.script.HookEngine();
+        var relay = new GraalRelayRouteProgram()) {
+      new RuntimeApplicationPackageValidator(
+              new AgentRegistry(java.util.Map.of()),
+              TOOLS,
+              DefinitionChecks.NONE,
+              emptyPools(),
+              hooks,
+              relay)
+          .validate("network-privacy-watch", root);
     }
   }
 

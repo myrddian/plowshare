@@ -8,6 +8,14 @@ import {
   type ApplicationDeploymentReceipt,
   type ApplicationDeploymentStatus,
 } from './application-deployments.ts';
+import {
+  identityStatusCheck,
+  tokenReceiptCheck,
+  applicationCredentialCheck,
+  type ApplicationIdentityStatus,
+  type ApplicationTokenReceipt,
+  type ApplicationCredential,
+} from './application-identities.ts';
 import { utf8Length } from '../binding/files.ts';
 import {
   fileStoreReference,
@@ -385,6 +393,9 @@ export interface ConversationReplies {
   'application.files': ApplicationFileListing;
   'application.file.read': ApplicationFileDocument;
   'application.file.save': ApplicationFileDocument;
+  'application.identity.status': ApplicationIdentityStatus;
+  'application.token.issue': ApplicationCredential;
+  'application.token.receipt': ApplicationTokenReceipt;
   'application.deploy': ApplicationDeploymentReceipt;
   'application.activate': ApplicationDeploymentReceipt;
   'application.deployment.receipt': ApplicationDeploymentReceipt;
@@ -829,6 +840,9 @@ const readers = {
       );
     },
   ),
+  'application.identity.status': identityStatusCheck,
+  'application.token.issue': applicationCredentialCheck,
+  'application.token.receipt': tokenReceiptCheck,
   'application.deploy': deploymentReceiptCheck,
   'application.activate': deploymentReceiptCheck,
   'application.deployment.receipt': deploymentReceiptCheck,

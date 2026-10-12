@@ -1,3 +1,9 @@
+import type { Code } from 'plowshare-client-ts/binding/codes';
+import type {
+  ApplicationIdentityStatus,
+  ApplicationTokenReceipt,
+  ApplicationCredential,
+} from 'plowshare-client-ts/operations/application-identities';
 import type { FileStoreCatalog } from 'plowshare-client-ts/operations/server-filestores';
 import type { Payloads } from 'plowshare-client-ts/operations/direct';
 import type {
@@ -329,6 +335,21 @@ export interface ContextReading extends Load {
   detail?: string;
   sample?: boolean;
 }
+export type ApplicationIdentityCall = {
+  [
+    K in
+      | 'application.identity.status'
+      | 'application.token.issue'
+      | 'application.token.receipt'
+  ]: {
+    action: 'application-identity';
+    operation: K;
+    payload: Payloads[K];
+  };
+}[
+  | 'application.identity.status'
+  | 'application.token.issue'
+  | 'application.token.receipt'];
 export type ApplicationDeploymentCall = {
   [
     K in
@@ -348,6 +369,7 @@ export type ApplicationDeploymentCall = {
   | 'application.deployment.receipt'];
 export type Request =
   | ApplicationDeploymentCall
+  | ApplicationIdentityCall
   | { action: 'application-package' }
   | { action: 'server-filestore-list' }
   | { action: 'filestore-load' }
@@ -659,6 +681,12 @@ export interface Reply {
     files: readonly ApplicationSourceFile[];
   };
   deployment?: ApplicationDeploymentReceipt | ApplicationDeploymentStatus;
+  applicationIdentityRefusal?: {
+    code: Code;
+    said?: string;
+  };
+  applicationIdentity?:
+    ApplicationIdentityStatus | ApplicationTokenReceipt | ApplicationCredential;
 
   fileStoreRoot?: string;
   relay?: RelayReplies['relay.topics' | 'relay.log'];

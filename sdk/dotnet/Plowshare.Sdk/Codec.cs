@@ -73,6 +73,18 @@ internal static class Codec
     // Receipt ownership supplements structural decoding before the result escapes this boundary.
     public static void CorrelateDeployment(string operation, JsonElement request, JsonElement result)
     {
+        static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (operation is "application.identity.status" or "application.token.issue" or "application.token.receipt") {
+            if(operation == "application.identity.status") {
+                if(IdentityText(request,"project") != IdentityText(result,"project")) throw Invalid();
+                var identity=result.GetProperty("identity");
+                if(identity.ValueKind != JsonValueKind.Null && (IdentityText(identity,"project")!=IdentityText(result,"project") || IdentityText(identity,"principal")!="@service/"+IdentityText(identity,"tokenId"))) throw Invalid();
+            } else {
+                var receipt=operation == "application.token.issue" ? result.GetProperty("receipt") : result;
+                if(IdentityText(receipt,"project")!=IdentityText(request,"project") || !string.Equals(IdentityText(receipt,"requestId"),IdentityText(request,"requestId"),StringComparison.OrdinalIgnoreCase) || IdentityText(receipt,"principal")!="@service/"+IdentityText(receipt,"tokenId")) throw Invalid();
+            }
+            return;
+        }
         if (operation is not ("application.deploy" or "application.activate" or "application.deployment.status" or "application.deployment.receipt")) return;
         static string? TextAt(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         if (TextAt(request,"project") != TextAt(result,"project") || operation != "application.deployment.status" && !string.Equals(TextAt(request,"requestId"),TextAt(result,"requestId"),StringComparison.OrdinalIgnoreCase)) throw Invalid();

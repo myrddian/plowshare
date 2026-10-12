@@ -60,6 +60,59 @@ public final class ApplicationClient {
             Receipt.class));
   }
 
+  public io.aeyer.plowshare.protocol.ApplicationIdentity.Status identity(String project)
+      throws IOException {
+    io.aeyer.plowshare.protocol.ApplicationIdentity.project(project);
+    var result =
+        connection.request(
+            "application.identity.status",
+            Map.of("project", project),
+            io.aeyer.plowshare.protocol.ApplicationIdentity.Status.class);
+    if (result == null || !project.equals(result.project()))
+      throw new IOException("Foreign Application identity status");
+    return result;
+  }
+
+  /**
+   * Returns the secret once. Unknown delivery requires receipt inspection, then explicit rotation.
+   */
+  public io.aeyer.plowshare.protocol.ApplicationIdentity.Credential issue(
+      io.aeyer.plowshare.protocol.ApplicationIdentity.Issue request) throws IOException {
+    Objects.requireNonNull(request);
+    var result =
+        connection.exchange(
+            "application.token.issue",
+            request,
+            io.aeyer.plowshare.protocol.ApplicationIdentity.Credential.class);
+    if (result == null) throw new IOException("Unreadable Application credential");
+    tokenCoordinates(request.project(), request.requestId(), result.receipt());
+    return result;
+  }
+
+  public io.aeyer.plowshare.protocol.ApplicationIdentity.Receipt tokenReceipt(
+      String project, UUID requestId) throws IOException {
+    io.aeyer.plowshare.protocol.ApplicationIdentity.project(project);
+    Objects.requireNonNull(requestId);
+    var result =
+        connection.request(
+            "application.token.receipt",
+            Map.of("project", project, "requestId", requestId),
+            io.aeyer.plowshare.protocol.ApplicationIdentity.Receipt.class);
+    tokenCoordinates(project, requestId, result);
+    return result;
+  }
+
+  private static void tokenCoordinates(
+      String project,
+      UUID requestId,
+      io.aeyer.plowshare.protocol.ApplicationIdentity.Receipt receipt)
+      throws IOException {
+    if (receipt == null
+        || !project.equals(receipt.project())
+        || !requestId.equals(receipt.requestId()))
+      throw new IOException("Foreign Application credential receipt");
+  }
+
   private static void projectIdentity(String project) {
     ContractChecks.identity(project, "project");
     if (!project.equals(project.strip()) || project.length() > 512)

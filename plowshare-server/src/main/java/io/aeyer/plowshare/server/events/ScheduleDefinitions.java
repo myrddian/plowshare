@@ -19,6 +19,12 @@ public interface ScheduleDefinitions {
 
   List<ScheduledWork.File> list(String account);
 
+  /** Read project schedule projections under current VIEWER authority, regardless of deployer. */
+  default List<ScheduledWork.File> list(String account, String project) {
+    throw new io.aeyer.plowshare.server.faults.CallerFault(
+        "Scoped schedule inspection is unavailable");
+  }
+
   /** Suspends unavailable sources without treating an incomplete scan as deletion. */
   void poll();
 

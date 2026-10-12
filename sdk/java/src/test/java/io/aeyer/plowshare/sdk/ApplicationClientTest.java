@@ -138,4 +138,78 @@ class ApplicationClientTest {
                     new File("plowshare.json", "{}"),
                     new File(".plowshare/agents/worker.md", "hidden definitions"))));
   }
+
+  @Test
+  void ownedIdentityChecksAuthorityShapeAndCredentialCoordinatesWithoutRepeatingIssue()
+      throws Exception {
+    UUID requestId = UUID.randomUUID(), token = UUID.randomUUID();
+    String secret = "pss_" + "1".repeat(48);
+    var receipt =
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Receipt(
+            requestId,
+            "app",
+            token,
+            "@service/" + token,
+            java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(30));
+    assertFalse(
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Credential(receipt, secret)
+            .toString()
+            .contains(secret));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration("worker", "MANAGER"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration("worker", null));
+    AtomicInteger calls = new AtomicInteger();
+    try (var server = new MockWebServer()) {
+      server.enqueue(
+          new MockResponse()
+              .withWebSocketUpgrade(
+                  new WebSocketListener() {
+                    @Override
+                    public void onMessage(WebSocket socket, String wire) {
+                      try {
+                        var json = SdkJson.mapper();
+                        var frame = json.readTree(wire);
+                        calls.incrementAndGet();
+                        assertEquals("application.token.issue", frame.path("type").textValue());
+                        assertEquals(false, frame.path("payload").path("rotate").booleanValue());
+                        var foreign =
+                            new io.aeyer.plowshare.protocol.ApplicationIdentity.Receipt(
+                                requestId,
+                                "foreign",
+                                token,
+                                "@service/" + token,
+                                receipt.expiresAt());
+                        var payload =
+                            json.valueToTree(
+                                new io.aeyer.plowshare.protocol.ApplicationIdentity.Credential(
+                                    foreign, secret));
+                        var answer =
+                            json.createObjectNode()
+                                .put("id", frame.path("id").textValue())
+                                .put("type", frame.path("type").textValue())
+                                .put("protocol_version", "plowshare-v1");
+                        answer.putObject("payload").put("code", "OK").set("payload", payload);
+                        socket.send(answer.toString());
+                      } catch (IOException failure) {
+                        throw new AssertionError(failure);
+                      }
+                    }
+                  }));
+      try (var connection =
+          LegacyFixture.connect(
+              server.url("/").toString(), "fixture", Duration.ofSeconds(3), null)) {
+        var client = new ApplicationClient(connection);
+        assertThrows(
+            IOException.class,
+            () ->
+                client.issue(
+                    new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                        "app", requestId, 30, false)));
+        assertEquals(1, calls.get());
+      }
+    }
+  }
 }

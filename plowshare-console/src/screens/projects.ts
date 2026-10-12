@@ -1,3 +1,4 @@
+import { applicationIdentityControls } from './application-identities.ts';
 import { applicationFiles } from './application-files';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
@@ -153,6 +154,7 @@ export interface ProjectsOptions {
 
 export function createProjects(options: ProjectsOptions): Screen {
   const transport: Transport = options.transport ?? consoleTransport;
+  const identities: ReturnType<typeof applicationIdentityControls>[] = [];
 
   const shell = el('section', 'screen projects');
   const head = el('header', 'screen-head');
@@ -189,6 +191,14 @@ export function createProjects(options: ProjectsOptions): Screen {
           project.writableAreas ?? [],
         ),
       );
+    if (project.kind === 'application' && options.openStream !== undefined) {
+      const identity = applicationIdentityControls(
+        () => stream,
+        textOf(project.name),
+      );
+      identities.push(identity);
+      card.append(identity.element);
+    }
     card.append(mover(project));
     if (options.openStream !== undefined) {
       const section = el('section', 'approved');
@@ -476,6 +486,8 @@ export function createProjects(options: ProjectsOptions): Screen {
       );
       return;
     }
+    for (const identity of identities) identity.destroy();
+    identities.length = 0;
     const personal = projects.filter((project) => project.kind === 'personal');
     const ordinary = projects.filter((project) => project.kind !== 'personal');
     const personalRows = personal.map(() => {
@@ -519,6 +531,8 @@ export function createProjects(options: ProjectsOptions): Screen {
       // No timer; the socket subscription, when there is one, is the only
       // thing to let go of.
       stopped = true;
+      for (const identity of identities) identity.destroy();
+      identities.length = 0;
       stream?.close();
       stream = null;
     },

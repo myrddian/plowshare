@@ -171,6 +171,9 @@ public class ServiceAccounts {
           accounts.requireServerAdmin(actor);
           if (!account(handle, true).enabled())
             throw new CallerFault("Enable this service account before rotating a token");
+          if (repository.applicationOwned(id))
+            throw new CallerFault(
+                "Rotate Application-owned credentials with application.token.issue and a retained request UUID");
           Token previous = token(handle, id, true);
           validateScopes(handle, previous.scopes());
           String credential = ServiceCredentials.PREFIX + Tokens.mint();

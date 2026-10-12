@@ -48,7 +48,8 @@ public final class ScheduleFileFrames implements FrameArea {
   }
 
   private Outcome files(Map<String, Object> payload, Asking asking) {
-    if (!payload.isEmpty()) throw new CallerFault("schedule.files takes no fields");
-    return Outcome.ok(service().list(asking.requireHandle(FrameTypes.SCHEDULE_FILES)));
+    String project = ScheduleListHandler.project(payload);
+    String account = asking.requireHandle(FrameTypes.SCHEDULE_FILES);
+    return Outcome.ok(project == null ? service().list(account) : service().list(account, project));
   }
 }

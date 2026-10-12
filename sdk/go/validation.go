@@ -27,6 +27,7 @@ type constraints struct {
 	Trimmed               bool     `json:"trimmed"`
 	NoNul                 bool     `json:"noNul"`
 	Pattern               string   `json:"pattern"`
+	DisallowPrefixes      []string `json:"disallowPrefixes"`
 	Disallow              []string `json:"disallow"`
 	CanonicalRelativePath bool     `json:"canonicalRelativePath"`
 	SafeRelativePath      bool     `json:"safeRelativePath"`
@@ -193,7 +194,7 @@ func check(s shape, value any) error {
 		if s.MaxLength != nil {
 			maximum = *s.MaxLength
 		}
-		if s.CanonicalRelativePath && !canonicalRelativePath(v) || n < s.MinLength || n > maximum || s.Nonblank && strings.TrimSpace(v) == "" || s.Trimmed && strings.TrimSpace(v) != v || s.NoNul && strings.ContainsRune(v, 0) || s.Pattern != "" && !pattern(s.Pattern, v) || slices.Contains(s.Disallow, v) || s.SafeRelativePath && (strings.HasPrefix(v, "/") || strings.Contains(v, "\\") || slices.Contains(strings.Split(v, "/"), "..")) {
+		if s.CanonicalRelativePath && !canonicalRelativePath(v) || n < s.MinLength || n > maximum || s.Nonblank && strings.TrimSpace(v) == "" || s.Trimmed && strings.TrimSpace(v) != v || s.NoNul && strings.ContainsRune(v, 0) || s.Pattern != "" && !pattern(s.Pattern, v) || slices.Contains(s.Disallow, v) || slices.ContainsFunc(s.DisallowPrefixes, func(prefix string) bool { return strings.HasPrefix(v, prefix) }) || s.SafeRelativePath && (strings.HasPrefix(v, "/") || strings.Contains(v, "\\") || slices.Contains(strings.Split(v, "/"), "..")) {
 			return contractError
 		}
 	case json.Number:

@@ -1049,7 +1049,11 @@ background(
           applicationPackage: { folder, files: await applicationFiles(folder) },
         };
       }
-      if (request.action === 'application-deployment' && !main)
+      if (
+        (request.action === 'application-deployment' ||
+          request.action === 'application-identity') &&
+        !main
+      )
         throw new Error(
           'Deploy Applications from the administrator workspace.',
         );

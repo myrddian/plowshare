@@ -32,6 +32,18 @@ export type {
   IntegrationRequest,
   IntegrationResult,
 } from './external.ts';
+export {
+  ApplicationIdentityClient,
+  ApplicationIdentityRefused,
+} from './application-identity-client.ts';
+export type { IdentityIntentStore } from './application-identity-client.ts';
+export type {
+  ApplicationServiceDeclaration,
+  ApplicationIdentityBinding,
+  ApplicationIdentityStatus,
+  ApplicationTokenReceipt,
+  ApplicationCredential,
+} from './application-identities.ts';
 export type { SwarmSelection, SwarmType, SwarmTypes } from './swarm-types.ts';
 export type { OutgoingWork } from './outgoing.ts';
 export type {

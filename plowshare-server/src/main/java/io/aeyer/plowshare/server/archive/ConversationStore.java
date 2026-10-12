@@ -1098,7 +1098,8 @@ public final class ConversationStore {
     // the write puts the absence in the row -- no total and the boolean --
     // which is the same three-state encoding `write` uses on the way in.
     //
-    // The guard below is unchanged and is right for both: spending may rise
+    // A retained native zero-call budget also stays zero, even if a stale or malformed
+    // caller supplies a different Budget object. The guard is right for both: spending may rise
     // and may stay where it is and may never fall, whether or not anything
     // is stopping it, and it is what makes this write safe against a caller
     // holding a record read before another turn ran.
@@ -1111,13 +1112,16 @@ public final class ConversationStore {
                 jdbc.update(
                     "UPDATE conversations SET budget_total = ?, budget_spent = ?,"
                         + " budget_lifted = ?, last_turn_at = ?"
-                        + " WHERE id = ? AND budget_spent <= ?",
+                        + " WHERE id = ? AND budget_spent <= ?"
+                        + " AND (budget_total IS DISTINCT FROM 0 OR (? = 0 AND ? = FALSE))",
                     total,
                     spent,
                     lifted,
                     utc(at),
                     wanted,
-                    spent));
+                    spent,
+                    total,
+                    lifted));
     if (rows == 0) {
       // Which of the two it was, asked only once the write has already
       // declined — so the common path is one statement, and the second
@@ -1159,7 +1163,7 @@ public final class ConversationStore {
             () ->
                 jdbc.update(
                     "UPDATE conversations SET budget_total = ?, budget_spent = ?"
-                        + " WHERE id = ? AND budget_lifted = FALSE AND budget_total <= ? AND budget_spent <= ?",
+                        + " WHERE id = ? AND budget_lifted = FALSE AND budget_total > 0 AND budget_total <= ? AND budget_spent <= ?",
                     total,
                     spent,
                     wanted,

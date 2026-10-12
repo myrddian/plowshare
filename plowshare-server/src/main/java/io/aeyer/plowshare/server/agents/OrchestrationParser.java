@@ -126,7 +126,8 @@ final class OrchestrationParser {
                 entry.origin(),
                 "---\n" + manifest + "\n---\nExecute this orchestration's pinned script."),
             knownTools,
-            tier);
+            tier,
+            true);
     return new OrchestrationDefinition(
         checked.conductor().withPrompt(entry.text()),
         checked.stages(),
@@ -144,6 +145,14 @@ final class OrchestrationParser {
       DefinitionSource.Definition entry,
       Set<String> knownTools,
       OrchestrationDefinition.Tier tier) {
+    return parse(entry, knownTools, tier, false);
+  }
+
+  private static OrchestrationDefinition parse(
+      DefinitionSource.Definition entry,
+      Set<String> knownTools,
+      OrchestrationDefinition.Tier tier,
+      boolean scriptManifest) {
     if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(entry.text())) {
       return parseScript(entry, knownTools, tier);
     }
@@ -165,9 +174,11 @@ final class OrchestrationParser {
       // unbound, and a conductor naming one is handed it per run by its RunExtras.
       Set<String> conductorTools = new HashSet<>(knownTools);
       conductorTools.addAll(StudioTools.NAMES);
+      Set<String> keys = new HashSet<>(KEYS);
+      if (scriptManifest) keys.add("native-only");
       parsed =
           AgentRegistry.parseWith(
-              entry, Set.copyOf(conductorTools), dropped, KEYS, NOT_FOR_A_CONDUCTOR);
+              entry, Set.copyOf(conductorTools), dropped, Set.copyOf(keys), NOT_FOR_A_CONDUCTOR);
     } catch (IllegalStateException shared) {
       throw new IllegalStateException(asOrchestration(shared.getMessage()), shared);
     }

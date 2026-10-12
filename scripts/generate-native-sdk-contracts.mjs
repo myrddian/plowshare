@@ -62,6 +62,10 @@ function name(key, hint) {
 }
 // Prefer domain names over operation-specific names for shared nested values.
 for (const [k, s] of Object.entries(defs)) if (s.title) name(k, s.title);
+// Keep the published Information scope DTO names when earlier operations reuse this union.
+// Anonymous shared contracts must not change names with catalogue ordering.
+const informationScope = defs[id(OPERATION_SCHEMAS.inputs["information.acquire"])].properties.scope;
+name(id(informationScope), "InformationAcquirePayloadDtoScope");
 for (const op of operations) {
   name(id(OPERATION_SCHEMAS.inputs[op]), pascal(op) + 'Payload');
   name(id(OPERATION_SCHEMAS.results[op]), pascal(op) + 'Result');
@@ -147,13 +151,13 @@ function pyClass(n, k, base = '') {
     fields(k)
       .map(
         ([f, r]) =>
-          `    ${pyField(f)}: ${typ(id(r), 'py')}${required.has(f) ? '' : ' | Unset = UNSET'}\n`,
+          `    ${pyField(f)}: ${typ(id(r), 'py')}${required.has(f) ? '' : ' | Unset = UNSET'}${n === 'ApplicationCredentialDto' && f === 'credential' ? ' = field(repr=False)' : ''}\n`,
       )
       .join('')
   );
 }
 export function nativeContracts() {
-  let py = `# ${header}\nfrom __future__ import annotations\nfrom dataclasses import dataclass\nfrom typing import ClassVar, Generic, Literal, Mapping, TypeAlias, TypeVar\nfrom ._values import UNSET, Unset\nT = TypeVar("T", covariant=True)\nclass Request(Generic[T]):\n    """An operation paired with its validated result type; only generated requests are accepted."""\n    operation: ClassVar[str]\n`;
+  let py = `# ${header}\nfrom __future__ import annotations\nfrom dataclasses import dataclass, field\nfrom typing import ClassVar, Generic, Literal, Mapping, TypeAlias, TypeVar\nfrom ._values import UNSET, Unset\nT = TypeVar("T", covariant=True)\nclass Request(Generic[T]):\n    """An operation paired with its validated result type; only generated requests are accepted."""\n    operation: ClassVar[str]\n`;
   for (const [k, n] of classes) {
     const s = defs[k];
     if (s.type === 'object') py += '\n' + pyClass(n, k);
@@ -220,6 +224,7 @@ export function nativeContracts() {
         )
         .join('') +
       '}\n';
+    if(n === 'ApplicationCredentialDto') go += `func (value ${n}) String() string { return "ApplicationCredentialDto[credential=<redacted>]" }\nfunc (value ${n}) GoString() string { return value.String() }\n`;
     cs +=
       `\n/// <summary>Fields of the ${defs[k].title ?? n} protocol contract.</summary>\npublic sealed record ${n} {\n` +
       fields(k)
@@ -228,6 +233,7 @@ export function nativeContracts() {
             ` [JsonPropertyName(${quote(f)})] ${required.has(f) ? '' : '[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] '}public ${required.has(f) ? 'required ' : ''}${required.has(f) ? typ(id(r), 'cs') : `Optional<${typ(id(r), 'cs')}>`} ${pascal(f)} { get; init; }\n`,
         )
         .join('') +
+      (n === 'ApplicationCredentialDto' ? ' public override string ToString() => "ApplicationCredentialDto[credential=<redacted>]";\n' : '') +
       '}\n';
   }
   for (const [k, n] of classes) {

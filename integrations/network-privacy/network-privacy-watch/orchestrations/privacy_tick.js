@@ -3,9 +3,9 @@
 export const manifest = {
   name: 'privacy_tick',
   description: 'Records that the scheduled occurrence is available to the Python collector.',
-  model: 'reasoning', tools: [], calls: [], scopes: [],
+  'native-only': true, tools: [], calls: [], scopes: [],
   stages: [{id: 'available', 'done-when': 'The scheduler occurrence has been recorded.'}],
-  'max-turns': 8, 'max-model-calls': 1
+  'max-turns': 8, 'max-model-calls': 0
 };
 
 export function step(input) {

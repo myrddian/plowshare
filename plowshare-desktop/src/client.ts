@@ -1129,6 +1129,29 @@ export class DesktopClient {
           serverFileStores: decodeReply('filestore.list', result.payload),
         };
       }
+      case 'application-identity': {
+        if (!this.state.connected || !this.state.serverAdmin)
+          throw new Error(
+            'Connect as a server administrator to manage an Application execution identity.',
+          );
+        const result = await this.send(
+          decodeRequest(request.operation, request.payload),
+        );
+        if (result.code !== 'OK')
+          return {
+            state: structuredClone(this.state),
+            applicationIdentityRefusal: {
+              code: result.code,
+              ...(result.said === undefined ? {} : { said: result.said }),
+            },
+          };
+        const applicationIdentity = decodeReply(
+          request.operation,
+          result.payload,
+        );
+        // One-time secrets stay in this IPC reply, never in DesktopState or emitted events.
+        return { state: structuredClone(this.state), applicationIdentity };
+      }
       case 'application-package':
         throw new Error('Choose source through the desktop folder dialog.');
       case 'application-deployment': {

@@ -1,66 +1,73 @@
-# Proposal 0017: Application-owned execution identities
+# Decision 0017: Application-owned execution identities
 
-Status: proposed; no provisioning behavior is implemented by this proposal.
+Status: accepted and implemented.
 
-## Problem
+## Platform need and alternatives
 
-A project must exist before existing public service-token creation can grant it
-scope. The token principal then has to be incorporated into Application source,
-requiring a second deployment. SDK orchestration can hide this sequence, but it
-cannot make account creation, Application activation and their recovery one
-server-owned lifecycle. Packaged schedules also retain the deploying owner's
-identity; account inheritance alone does not transfer that ownership.
+Public service-token creation needs an existing project. An SDK-only installer can
+deploy, create a token, substitute its principal and deploy again, but cannot own
+atomic source activation, schedule ownership, dormant authentication or recovery.
+Applications need a server-owned identity lifecycle independent of any collector.
+This separately authorized platform extension keeps integrations on public SDKs.
 
-The user authorized starting setup simplification. ADR 0016 removes repeated
-principal configuration now. Single-pass provisioning needs the platform lifecycle
-and contracts below, rather than another integration-specific bootstrap shortcut.
+## Declaration and authority
 
-## Proposed lifecycle
+An optional root manifest `service: {handle, role}` requests one Application-owned
+service account. Roles are bounded to VIEWER or CONTRIBUTOR; MANAGER is refused.
+The handle must be unused. A matching name never adopts an existing human, service
+account or token. Server administrator authority is required for deployment,
+reservation, issuance and rotation. Ordinary Application membership is insufficient.
+Human manager grants remain explicit in the manifest and project membership.
 
-An optional manifest service declaration requests an Application-owned service
-handle and a bounded project role. A server administrator must explicitly authorize
-initial provisioning. Ordinary project management must not silently acquire global
-account-creation authority. Handle collisions fail closed; matching a handle is
-never enough to adopt an unrelated existing account or credential.
+The declaration supplies the service owner's manifest role. Do not repeat that
+handle in `access.accounts`. Deployed `executionAccount` resolves to the retained
+`@service/<token UUID>` principal. Requested provider, port and worker authority
+inherits that principal; it is still explicitly granted by the Application.
 
-First activation reserves a named token UUID and its existing `@service/<UUID>`
-principal, tied durably to the Application project. It does not expose a credential
-or make a dormant token authenticatable. Inherited declarations and requested
-Application execution grants can resolve against that retained identity before
-activation. This preserves today's token-principal isolation and stable rotation
-instead of assuming all tokens for a handle share one principal.
+## Reservation, activation and recovery
 
-A separate explicit credential-issuance operation activates that reserved token,
-returns its secret once and retains request/token metadata. Lost secret delivery
-requires reconciling the original request and rotating the same retained token
-UUID; neither deployment nor the collector may create a replacement identity or
-replay uncertain work. Client guidance must distinguish the public handle,
-execution principal and secret without asking the operator to copy the principal.
+The complete source package and destination are validated before reservation.
+Reservation retains one token UUID and public service handle, but discards the
+initial secret and sets `credential_issued=false`. Both authentication and queued
+account authorization reject this dormant token. Concurrent mutations serialize
+under the existing administrator transaction lock before identity and project locks.
 
-Requested service project membership and Application grants are bounded by the
-administrator's reviewed declaration. Human manager grants remain explicit.
-Schedules may use the declared execution identity only through a separately tested
-ownership policy; changing the deployer cannot transfer historical work. Existing
-manual executionAccount packages and their retained receipts remain supported.
+Filesystem staging and reservation are separate from database source activation.
+A failed activation may leave a dormant reservation and immutable staged source;
+neither can run. Source head, release, deployment receipt, project placement,
+initial service membership/token scope and schedule enrollment commit together.
+First enrollment uses the retained token principal. Updates and rollback preserve
+historical schedule owners and never restore removed live membership.
 
-## Required implementation and verification
+`application.token.issue` requires ACTIVE identity, matching active manifest,
+enabled service owner and current role. It returns a bearer secret once and stores
+only receipt metadata. A lost reply is reconciled through
+`application.token.receipt` with the original request UUID and submitting actor.
+The operation never reissues a committed UUID. Explicit rotation uses a new request
+UUID and the same retained token UUID, invalidates the old secret, retires session
+credentials and publishes session revocation after commit. Status includes the
+current credential request UUID so private recovery cannot restore an older secret.
 
-Define a typed Application identity service/repository and reserve/activate/revoke
-states before implementation. Reuse retained deployment request IDs and account
-administration rules. Source/FileStore publication and database reservation are not
-one atomic transaction: recovery must reconcile staged ownership and activation,
-never leave active source referring to unowned or missing authority. Explain
-rollback, redeployment, removal, handle reuse and token expiry explicitly.
+Tokens expire after the explicitly selected 1–365 days. Revoke with the existing
+service-token administration operation; an explicit owned-token rotation can
+renew its secret if owner, project membership and manifest grants remain valid.
+Generic token rotation refuses owned tokens and points to the Application operation.
+Deleting/recreating the project cannot rebind its retained identity or restore
+authority. The reservation survives deletion; handles and token UUIDs remain owned.
+Changing or removing the declaration, including through rollback, is refused.
+Manual `executionAccount` Applications remain supported and are not adopted.
 
-Update the shared protocol, every SDK facade and applicable CLI/TUI/GUI controls
-for explicit credential issuance and recovery together. Audit token validation so
-dormant reservations cannot log in. Audit Application role ceilings, information
-visibility, durable receipt ownership, accounting and live revocation on every
-call. PostgreSQL-specific tests will be required for reservation uniqueness,
-rollback, concurrent activation and retained request replay; default service and
-transport tests should mock repository boundaries.
+## Controls and verification
 
-This proposal does not alter current provisioning, token issuance, schedule
-ownership or the live Network Privacy Watch installation. It is the follow-up
-needed to change deploy → provision → redeploy into deploy → issue credential →
-start the external collector.
+All SDKs expose status, issuance and receipt operations. CLI and TUI use their
+shared command catalog. Desktop and web console reveal secrets only in transient
+controls, clear them on dismissal/closure and persist only pending request metadata.
+Unknown replies fence further issuance until receipt reconciliation; internal
+errors are uncertain, not permission to replay. Python installation uses one
+deployment, explicit issuance and private request-linked secret artifacts.
+
+Mock-based tests cover authorization, closed configuration and request ownership.
+Focused PostgreSQL tests cover dormant authentication, stable rotation/revocation,
+reservation uniqueness, concurrent activation/issuance, rollback and durable receipt
+identity. Existing manual deployment/rollback and membership revocation tests remain.
+The live Network Privacy Watch installation is not migrated by this change.

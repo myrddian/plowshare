@@ -203,7 +203,12 @@ public final class FrameRouter {
       Outcome answer = handler.handle(request.payload(), asking);
       return authorization == null
           ? answer
-          : new ProjectListingFilter(authorization).filter(request.type(), answer, asking.handle());
+          : new ProjectListingFilter(authorization)
+              .filter(
+                  request.type(),
+                  answer,
+                  asking.handle(),
+                  request.payload().get("project") instanceof String selected ? selected : null);
     } catch (RuntimeException thrown) {
       Fault fault = Faults.of(thrown);
       return Outcome.failed(fault.code(), fault.detail());

@@ -174,6 +174,13 @@ export function constrain(graph) {
       const f = s.properties.writePaths;
       if (f) add(f, { element: { safeRelativePath: true, minLength: 1 } });
     }
+    if (['application.identity.status','application.token.issue','application.token.receipt'].includes(op)) {
+      field(s, 'project', {maxLength:256,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$',disallowPrefixes:['personal:','Personal:','client:']});
+      field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
+      field(s, 'expiresInDays', integer(1,365));
+    }
+    if (op === 'schedule.list' || op === 'schedule.files')
+      field(s, 'project', {maxLength:256,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$',disallowPrefixes:['personal:','Personal:','client:']});
     if (op === 'application.deploy') {
       rules(s, present('destination.path'));
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
@@ -349,6 +356,15 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (title === 'ApplicationServiceDeclaration') {
+      field(s,'handle',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$',maxLength:64});
+    }
+    if (title === 'ApplicationIdentityBinding' || title === 'ApplicationTokenReceipt') {
+      field(s,'tokenId',{pattern:uuid,minLength:36,maxLength:36});
+      field(s,'principal',{pattern:'^@service/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$',maxLength:45});
+      if(title === 'ApplicationIdentityBinding') field(s,'credentialRequestId',{pattern:uuid,minLength:36,maxLength:36});
+    }
+    if (title === 'ApplicationCredential') field(s,'credential',{pattern:'^pss_[0-9a-f]{48}$',minLength:52,maxLength:52});
     if (title === 'ApplicationRelease') { field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'digest', {pattern:'^[a-f0-9]{64}$',minLength:64,maxLength:64}); field(s, 'fileCount', integer(1,128)); }
     if (title === 'ApplicationDeploymentReceipt') field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
     if (title === 'ApplicationDeploymentStatus') { field(s, 'activeRevision', {pattern:uuid,minLength:36,maxLength:36}); field(s, 'releases', {maxItems:100}); }

@@ -42,6 +42,11 @@ public interface ServiceAccountRepository {
       OffsetDateTime expires,
       List<Scope> scopes);
 
+  /** Application tokens must rotate through their owning receipt lifecycle. */
+  default boolean applicationOwned(UUID id) {
+    return false;
+  }
+
   void rotate(UUID id, String digest, OffsetDateTime expires);
 
   void revoke(UUID id);

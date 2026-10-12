@@ -663,10 +663,26 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
   )
     return { kind: 'invalid-response', outcome };
   if (
-    asked.type === 'application.deployment.status' &&
+    (asked.type === 'application.deployment.status' ||
+      asked.type === 'application.identity.status') &&
     body?.['project'] !== asked.payload.project
   )
     return { kind: 'invalid-response', outcome };
+  if (
+    asked.type === 'application.token.issue' ||
+    asked.type === 'application.token.receipt'
+  ) {
+    const receipt =
+      asked.type === 'application.token.issue'
+        ? fields(body?.['receipt'])
+        : body;
+    if (
+      receipt?.['project'] !== asked.payload.project ||
+      String(receipt?.['requestId']).toLowerCase() !==
+        asked.payload.requestId.toLowerCase()
+    )
+      return { kind: 'invalid-response', outcome };
+  }
   if (
     (asked.type === 'application.files' ||
       asked.type === 'application.file.read' ||

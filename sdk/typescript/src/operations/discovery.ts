@@ -11,6 +11,7 @@ const MUTATIONS = new Set<string>([
   'application.file.save',
   'application.deploy',
   'application.activate',
+  'application.token.issue',
   'admin.service.account.create',
   'admin.service.account.update',
   'admin.service.token.create',
@@ -114,6 +115,14 @@ export const EXIT_SEMANTICS = {
 
 export function effectiveScope(asked: Request): unknown {
   const payload = asked.payload as Record<string, unknown>;
+  if (
+    [
+      'application.identity.status',
+      'application.token.issue',
+      'application.token.receipt',
+    ].includes(asked.type)
+  )
+    return { kind: 'server-administration', project: payload['project'] };
   if (asked.type.startsWith('admin.'))
     return {
       kind: 'server-administration',
@@ -150,6 +159,17 @@ export function effectiveScope(asked: Request): unknown {
 }
 
 const examples: Record<string, unknown> = {
+  'application.identity.status': { project: 'my_application' },
+  'application.token.issue': {
+    project: 'my_application',
+    requestId: '00000000-0000-0000-0000-000000000001',
+    expiresInDays: 30,
+    rotate: false,
+  },
+  'application.token.receipt': {
+    project: 'my_application',
+    requestId: '00000000-0000-0000-0000-000000000001',
+  },
   'admin.service.account.create': { handle: 'ha-integration' },
   'admin.service.account.update': { handle: 'ha-integration', enabled: false },
   'admin.service.token.create': {

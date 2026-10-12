@@ -506,7 +506,17 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             {path.stem for path in scripts}, {"privacy_tick", "investigate_network"}
         )
         for path in scripts:
-            self.assertIn('model: "local-model"', path.read_text())
+            if path.name == "privacy_tick.js":
+                self.assertIn("'native-only': true", path.read_text())
+                self.assertNotIn("model:", path.read_text())
+                self.assertIn("'max-model-calls': 0", path.read_text())
+            else:
+                self.assertIn('model: "local-model"', path.read_text())
+        manifest = json.loads((setup.output / "application/plowshare.json").read_text())
+        self.assertEqual(
+            manifest["service"], {"handle": "worker", "role": "CONTRIBUTOR"}
+        )
+        self.assertNotIn("executionAccount", manifest)
         self.assertFalse((setup.output / "provisioning-intent.json").exists())
         if os.name == "posix":
             self.assertEqual((root / "collector.json").stat().st_mode & 0o777, 0o600)

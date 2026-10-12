@@ -826,7 +826,9 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                             start.home(),
                             conductor.name(),
                             null,
-                            Budget.of(conductor.maxModelCalls()),
+                            conductor.nativeOnly()
+                                ? Budget.noCalls()
+                                : Budget.of(conductor.maxModelCalls()),
                             // The caller's account owns the conductor's log (amendment 2).
                             start.callerHandle());
                     OrchestrationRecord inserted =

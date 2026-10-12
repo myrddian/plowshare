@@ -119,6 +119,9 @@ function fixture() {
               'application.activate',
               'application.deployment.status',
               'application.deployment.receipt',
+              'application.identity.status',
+              'application.token.issue',
+              'application.token.receipt',
             ].includes(type)
           )
             return onDeployment(type, payload);
@@ -2099,4 +2102,59 @@ await test('Application deployment requires administration, correlates receipts 
     payload: { project: 'app', requestId },
   });
   assert.deepEqual(recovered.deployment, receipt);
+});
+
+await test('Application issuance keeps its one-time secret outside desktop state and preserves explicit refusal', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await assert.rejects(
+    f.client.dispatch({
+      action: 'application-identity',
+      operation: 'application.identity.status',
+      payload: { project: 'app' },
+    }),
+    /administrator/,
+  );
+  f.admin(true);
+  await connect(f.client);
+  const requestId = '11111111-1111-1111-1111-111111111111',
+    tokenId = '22222222-2222-2222-2222-222222222222';
+  const credential = 'pss_' + '1'.repeat(48);
+  f.deployment(() => ({
+    code: 'OK',
+    payload: {
+      credential,
+      receipt: {
+        project: 'app',
+        requestId,
+        tokenId,
+        principal: '@service/' + tokenId,
+        expiresAt: '2026-11-01T00:00:00Z',
+      },
+    },
+  }));
+  const reply = await f.client.dispatch({
+    action: 'application-identity',
+    operation: 'application.token.issue',
+    payload: { project: 'app', requestId, expiresInDays: 30, rotate: false },
+  });
+  assert.equal(JSON.stringify(reply.state).includes(credential), false);
+  assert.equal(
+    JSON.stringify(reply.applicationIdentity).includes(credential),
+    true,
+  );
+  f.deployment(() => ({
+    code: 'BAD_REQUEST',
+    said: 'Already issued; select rotation',
+  }));
+  const refused = await f.client.dispatch({
+    action: 'application-identity',
+    operation: 'application.token.issue',
+    payload: { project: 'app', requestId, expiresInDays: 30, rotate: false },
+  });
+  assert.deepEqual(refused.applicationIdentityRefusal, {
+    code: 'BAD_REQUEST',
+    said: 'Already issued; select rotation',
+  });
 });
