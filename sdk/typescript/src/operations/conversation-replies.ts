@@ -1,4 +1,14 @@
 import {
+  providerConnectionCheck,
+  providerCredentialCheck,
+  providerReceiptCheck,
+  providerAuthorizationCheck,
+  type ProviderConnection,
+  type ProviderCredentialStatus,
+  type ProviderMutationReceipt,
+  type ProviderAuthorization,
+} from './provider-credentials.ts';
+import {
   fileStoreCatalogCheck,
   type FileStoreCatalog,
 } from './server-filestores.ts';
@@ -393,6 +403,17 @@ export interface ConversationReplies {
   'application.files': ApplicationFileListing;
   'application.file.read': ApplicationFileDocument;
   'application.file.save': ApplicationFileDocument;
+  'provider.connection.list': readonly ProviderConnection[];
+  'provider.connection.status': ProviderConnection;
+  'provider.connection.save': ProviderMutationReceipt;
+  'provider.connection.change': ProviderMutationReceipt;
+  'provider.connection.receipt': ProviderMutationReceipt;
+  'provider.credential.status': ProviderCredentialStatus;
+  'provider.credential.put': ProviderMutationReceipt;
+  'provider.credential.revoke': ProviderMutationReceipt;
+  'provider.credential.rekey': ProviderMutationReceipt;
+  'provider.credential.authorize': ProviderAuthorization;
+  'provider.credential.refresh': ProviderMutationReceipt;
   'application.identity.status': ApplicationIdentityStatus;
   'application.token.issue': ApplicationCredential;
   'application.token.receipt': ApplicationTokenReceipt;
@@ -840,6 +861,17 @@ const readers = {
       );
     },
   ),
+  'provider.connection.list': list(providerConnectionCheck),
+  'provider.connection.status': providerConnectionCheck,
+  'provider.connection.save': providerReceiptCheck,
+  'provider.connection.change': providerReceiptCheck,
+  'provider.connection.receipt': providerReceiptCheck,
+  'provider.credential.status': providerCredentialCheck,
+  'provider.credential.put': providerReceiptCheck,
+  'provider.credential.revoke': providerReceiptCheck,
+  'provider.credential.rekey': providerReceiptCheck,
+  'provider.credential.authorize': providerAuthorizationCheck,
+  'provider.credential.refresh': providerReceiptCheck,
   'application.identity.status': identityStatusCheck,
   'application.token.issue': applicationCredentialCheck,
   'application.token.receipt': tokenReceiptCheck,

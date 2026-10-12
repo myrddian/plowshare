@@ -8,6 +8,13 @@ import { OPERATION_SCHEMAS } from './operation-schemas.ts';
 
 /** Explicit mutation classification shared by help and recovery. No operation is replayed. */
 const MUTATIONS = new Set<string>([
+  'provider.connection.save',
+  'provider.connection.change',
+  'provider.credential.put',
+  'provider.credential.revoke',
+  'provider.credential.rekey',
+  'provider.credential.authorize',
+  'provider.credential.refresh',
   'application.file.save',
   'application.deploy',
   'application.activate',

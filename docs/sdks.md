@@ -257,3 +257,6 @@ Java exposes these reads through `ScheduleClient.list(project)` and
 `ScheduleClient.files(project)`. `document.detail` likewise supports Information
 project scope for metadata/outline; Java offers the scoped `describeDocument`
 overload, and the other SDKs use their typed operation/request DTOs.
+
+See [server-held provider credentials](provider-credentials.md) for the implemented
+connection and grant management contract, SDK operations and OAuth callback boundary.

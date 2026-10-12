@@ -1,5 +1,660 @@
 [
   {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "bad",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "bad",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "bad",
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "personal:owner",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      },
+      "extra": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "http://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://evil@provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example:99999/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp?query=1",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": " ",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": {
+          "issuer": "https://issuer.example"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": null,
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": "fixture-key"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": "someone",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": "fixture-key"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": "@service/bad",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": "fixture-key"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": null,
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": "pss_111111111111111111111111111111111111111111111111"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": null,
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": "bad\nkey"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": null,
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "secret": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.credential.put",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "subject": null,
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": "bad",
+      "secret": "fixture-key"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.connection.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "enabled": true,
+      "deleted": false,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.connection.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "enabled": true,
+      "deleted": true,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "API_KEY",
+        "apiKeyHeader": "X-API-Key",
+        "oauth": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "subject": "owner",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "connectionRevision": "11111111-1111-1111-1111-111111111111",
+      "state": "READY",
+      "expiresAt": null,
+      "keyId": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "subject": "owner",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "connectionRevision": "11111111-1111-1111-1111-111111111111",
+      "state": "NONE",
+      "expiresAt": null,
+      "keyId": "fixture"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "subject": "owner",
+      "generation": null,
+      "connectionRevision": "11111111-1111-1111-1111-111111111111",
+      "state": "READY",
+      "expiresAt": null,
+      "keyId": "fixture"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.status",
+    "value": {
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "project": "app",
+      "subject": "owner",
+      "generation": "11111111-1111-1111-1111-111111111111",
+      "connectionRevision": "11111111-1111-1111-1111-111111111111",
+      "state": "READY",
+      "expiresAt": null,
+      "keyId": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.put",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "provider.credential.put",
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "credential": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "subject": "owner",
+        "generation": "11111111-1111-1111-1111-111111111111",
+        "connectionRevision": "11111111-1111-1111-1111-111111111111",
+        "state": "READY",
+        "expiresAt": null,
+        "keyId": "fixture"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "provider.credential.put",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "provider.credential.put",
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "credential": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "foreign",
+        "subject": "owner",
+        "generation": "11111111-1111-1111-1111-111111111111",
+        "connectionRevision": "11111111-1111-1111-1111-111111111111",
+        "state": "READY",
+        "expiresAt": null,
+        "keyId": "fixture"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token",
+          "clientId": "fixture",
+          "redirectUri": "https://plowshare.example/provider-credentials/oauth/callback",
+          "scopes": [
+            "tools"
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token",
+          "clientId": "fixture",
+          "redirectUri": "https://plowshare.example/provider-credentials/oauth/callback",
+          "scopes": [
+            "tools",
+            "tools"
+          ]
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token",
+          "clientId": "fixture",
+          "redirectUri": "https://plowshare.example/provider-credentials/oauth/callback",
+          "scopes": [
+            "bad scope"
+          ]
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token",
+          "clientId": 1,
+          "redirectUri": "https://plowshare.example/provider-credentials/oauth/callback",
+          "scopes": [
+            "tools"
+          ]
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token#frag",
+          "clientId": "fixture",
+          "redirectUri": "https://plowshare.example/provider-credentials/oauth/callback",
+          "scopes": [
+            "tools"
+          ]
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "provider.connection.save",
+    "value": {
+      "project": "app",
+      "connection": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": null,
+      "definition": {
+        "name": "Fixture",
+        "endpoint": "https://provider.example/mcp",
+        "authentication": "OAUTH_PKCE",
+        "apiKeyHeader": null,
+        "oauth": {
+          "issuer": "https://issuer.example",
+          "resource": "https://provider.example/mcp",
+          "resourceMetadataUrl": "https://provider.example/.well-known/oauth-protected-resource/mcp",
+          "issuerMetadataUrl": "https://issuer.example/.well-known/oauth-authorization-server",
+          "authorizationEndpoint": "https://issuer.example/authorize",
+          "tokenEndpoint": "https://issuer.example/token",
+          "clientId": "fixture",
+          "redirectUri": "https://plowshare.example/callback%2f",
+          "scopes": [
+            "tools"
+          ]
+        }
+      }
+    },
+    "valid": false
+  },
+  {
     "boundary": "result",
     "operation": "conversation.trajectory",
     "value": {

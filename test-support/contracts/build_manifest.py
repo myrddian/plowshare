@@ -270,7 +270,7 @@ def inventory():
     bound_catalog = read(administrative_source).split("export const BOUND_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
     bound_frames = dict(re.findall(r"'([a-z.]+)': '([^']+)'", bound_catalog))
     typed_frames = set()
-    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts"]:
+    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts", "sdk/typescript/src/operations/provider-credentials.ts"]:
         typed_frames.update(re.findall(r"^\s*'([a-z]+(?:\.[a-z]+)+)':", read(source), re.M))
     assert typed_frames == set(areas), "typed payload catalog differs from the registered WS surface"
     assert one_shot_frames.isdisjoint(bound_frames) and cli_frames | set(bound_frames) == typed_frames
@@ -281,7 +281,7 @@ def inventory():
     response_families = {}
     for family, name, expected_types, expected_operations in [
         ("administrative", "AdministrativeReplies", 34, 35),
-        ("conversation", "ConversationReplies", 42, 55),
+        ("conversation", "ConversationReplies", 42, 66),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 33, 40),
         ("messaging", "MessagingReplies", 5, 9),

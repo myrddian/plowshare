@@ -259,3 +259,6 @@ distribution changes also require `sdkPackageCheck`. Use the smallest explicitly
 tagged `-PfullDb --tests` selection only for added migrations, credential row
 mapping, locking/refresh concurrency or transactional binding persistence that
 requires PostgreSQL. Mocked behavior tests do not prove live MCP interoperability.
+
+See [server-held provider credentials](provider-credentials.md) for the implemented
+connection and grant management contract, SDK operations and OAuth callback boundary.

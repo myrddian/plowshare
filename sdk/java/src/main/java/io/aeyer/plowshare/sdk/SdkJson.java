@@ -53,6 +53,10 @@ final class SdkJson {
       if (type.isPrimitive()) throw new IOException("Missing required " + path);
       return;
     }
+    if (type.getRawClass() == java.util.UUID.class
+        && (!node.isTextual()
+            || !node.textValue().matches("[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")))
+      throw new IOException("Invalid UUID at " + path);
     if (type.isCollectionLikeType()) {
       if (!node.isArray()) throw new IOException("Expected list at " + path);
       for (JsonNode item : node) shape(item, type.getContentType(), json, path + "[]");
@@ -72,6 +76,8 @@ final class SdkJson {
                 .map(com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition::getName)
                 .findFirst()
                 .orElse(component.getName());
+        if (!node.has(name) && property != null && property.required())
+          throw new IOException("Missing required " + path + "." + name);
         if (!node.has(name) && property != null && property.defaultValue().equals("false")) {
           ((com.fasterxml.jackson.databind.node.ObjectNode) node).put(name, false);
         }

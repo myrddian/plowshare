@@ -144,6 +144,8 @@ const fields = (k) =>
   Object.entries(defs[k].properties ?? {}).filter(
     ([, r]) => !defs[id(r)].forbidden,
   );
+const secretField = (n, f) => (n === 'ApplicationCredentialDto' && f === 'credential') || (n.startsWith('ProviderCredentialPut') && f === 'secret') || (n.startsWith('ProviderAuthorization') && f === 'authorizationUrl');
+const redacted = (n,k) => n + '[' + fields(k).filter(([f])=>secretField(n,f)).map(([f])=>f+'=<redacted>').join(', ') + ']';
 function pyClass(n, k, base = '') {
   const required = new Set(defs[k].required ?? []);
   return (
@@ -151,7 +153,7 @@ function pyClass(n, k, base = '') {
     fields(k)
       .map(
         ([f, r]) =>
-          `    ${pyField(f)}: ${typ(id(r), 'py')}${required.has(f) ? '' : ' | Unset = UNSET'}${n === 'ApplicationCredentialDto' && f === 'credential' ? ' = field(repr=False)' : ''}\n`,
+          `    ${pyField(f)}: ${typ(id(r), 'py')}${required.has(f) ? '' : ' | Unset = UNSET'}${secretField(n,f) ? ' = field(repr=False)' : ''}\n`,
       )
       .join('')
   );
@@ -224,7 +226,7 @@ export function nativeContracts() {
         )
         .join('') +
       '}\n';
-    if(n === 'ApplicationCredentialDto') go += `func (value ${n}) String() string { return "ApplicationCredentialDto[credential=<redacted>]" }\nfunc (value ${n}) GoString() string { return value.String() }\n`;
+    if(fields(k).some(([f]) => secretField(n,f))) go += `func (value ${n}) String() string { return "${redacted(n,k)}" }\nfunc (value ${n}) GoString() string { return value.String() }\n`;
     cs +=
       `\n/// <summary>Fields of the ${defs[k].title ?? n} protocol contract.</summary>\npublic sealed record ${n} {\n` +
       fields(k)
@@ -233,7 +235,7 @@ export function nativeContracts() {
             ` [JsonPropertyName(${quote(f)})] ${required.has(f) ? '' : '[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] '}public ${required.has(f) ? 'required ' : ''}${required.has(f) ? typ(id(r), 'cs') : `Optional<${typ(id(r), 'cs')}>`} ${pascal(f)} { get; init; }\n`,
         )
         .join('') +
-      (n === 'ApplicationCredentialDto' ? ' public override string ToString() => "ApplicationCredentialDto[credential=<redacted>]";\n' : '') +
+      (fields(k).some(([f]) => secretField(n,f)) ? ` public override string ToString() => "${redacted(n,k)}";\n` : '') +
       '}\n';
   }
   for (const [k, n] of classes) {

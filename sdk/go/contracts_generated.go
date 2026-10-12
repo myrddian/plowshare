@@ -1595,6 +1595,156 @@ func (v *IntegrationReadingDtoContext) UnmarshalJSON(data []byte) error {
 	return errors.New("invalid union")
 }
 
+// ProviderOAuthSettingsDto is the explicit ProviderOAuthSettings protocol shape.
+type ProviderOAuthSettingsDto struct {
+	AuthorizationEndpoint string   `json:"authorizationEndpoint"`
+	ClientId              string   `json:"clientId"`
+	Issuer                string   `json:"issuer"`
+	IssuerMetadataUrl     string   `json:"issuerMetadataUrl"`
+	RedirectUri           string   `json:"redirectUri"`
+	Resource              string   `json:"resource"`
+	ResourceMetadataUrl   string   `json:"resourceMetadataUrl"`
+	Scopes                []string `json:"scopes"`
+	TokenEndpoint         string   `json:"tokenEndpoint"`
+}
+
+// ProviderConnectionDefinitionDto is the explicit ProviderConnectionDefinition protocol shape.
+type ProviderConnectionDefinitionDto struct {
+	ApiKeyHeader   ProviderConnectionDefinitionDtoApiKeyHeader `json:"apiKeyHeader"`
+	Authentication string                                      `json:"authentication"`
+	Endpoint       string                                      `json:"endpoint"`
+	Name           string                                      `json:"name"`
+	Oauth          ProviderConnectionDefinitionDtoOauth        `json:"oauth"`
+}
+
+// ProviderConnectionDefinitionDtoApiKeyHeader is a closed union: exactly one variant must be selected.
+type ProviderConnectionDefinitionDtoApiKeyHeader struct {
+	Variant1 *Unit
+	Variant2 *string
+	Variant3 *string
+	Variant4 *string
+}
+
+func (v ProviderConnectionDefinitionDtoApiKeyHeader) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if v.Variant4 != nil {
+		chosen = v.Variant4
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte) error {
+	*v = ProviderConnectionDefinitionDtoApiKeyHeader{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape365", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape366", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	if matches("shape367", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant4 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// ProviderConnectionDefinitionDtoOauth is a closed union: exactly one variant must be selected.
+type ProviderConnectionDefinitionDtoOauth struct {
+	Variant1 *Unit
+	Variant2 *ProviderOAuthSettingsDto
+}
+
+func (v ProviderConnectionDefinitionDtoOauth) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *ProviderConnectionDefinitionDtoOauth) UnmarshalJSON(data []byte) error {
+	*v = ProviderConnectionDefinitionDtoOauth{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape373", data) {
+		var chosen ProviderOAuthSettingsDto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// ProviderCredentialMutationDto is the explicit ProviderCredentialMutation protocol shape.
+type ProviderCredentialMutationDto struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialTargetDto is the explicit ProviderCredentialTarget protocol shape.
+type ProviderCredentialTargetDto struct {
+	Connection string         `json:"connection"`
+	Project    string         `json:"project"`
+	Subject    TierDtoProject `json:"subject"`
+}
+
 // RelayAckRequestDto is the explicit RelayAckRequest protocol shape.
 type RelayAckRequestDto struct {
 	BatchId        string          `json:"batchId"`
@@ -1712,7 +1862,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape388", data) {
+	if matches("shape411", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1720,7 +1870,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape389", data) {
+	if matches("shape412", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1728,7 +1878,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape390", data) {
+	if matches("shape413", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1736,7 +1886,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape391", data) {
+	if matches("shape414", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1926,7 +2076,7 @@ func (v *PricingCardDtoRates) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape466", data) {
+	if matches("shape489", data) {
 		var chosen PricingRatesDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1981,7 +2131,7 @@ func (v *PricingEntryDtoCard) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape463", data) {
+	if matches("shape486", data) {
 		var chosen PricingCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2367,7 +2517,7 @@ func (v *ApplicationIdentityStatusDtoIdentity) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape502", data) {
+	if matches("shape525", data) {
 		var chosen ApplicationIdentityBindingDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2459,7 +2609,7 @@ func (v *ApprovalViewDtoCommands) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape515", data) {
+	if matches("shape538", data) {
 		var chosen [][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2571,7 +2721,7 @@ func (v *BoardTopicDtoSwarm) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape524", data) {
+	if matches("shape547", data) {
 		var chosen SwarmSelectionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2727,7 +2877,7 @@ func (v *AskedViewDtoOpened) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape545", data) {
+	if matches("shape568", data) {
 		var chosen OpenedViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2795,7 +2945,7 @@ func (v *EntryViewDtoSource) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape541", data) {
+	if matches("shape564", data) {
 		var chosen SourceViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2909,7 +3059,7 @@ func (v *ContextViewDtoMessageTokens) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape552", data) {
+	if matches("shape575", data) {
 		var chosen TokenCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2952,7 +3102,7 @@ func (v *ContextViewDtoPrefix) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape554", data) {
+	if matches("shape577", data) {
 		var chosen PrefixDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3009,7 +3159,7 @@ func (v ProjectionMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ProjectionMessageDtoPartsItem{}
-	if matches("shape573", data) {
+	if matches("shape596", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3017,7 +3167,7 @@ func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape575", data) {
+	if matches("shape598", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3137,7 +3287,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape588", data) {
+	if matches("shape611", data) {
 		var chosen []ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3145,7 +3295,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape589", data) {
+	if matches("shape612", data) {
 		var chosen map[string]ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3217,7 +3367,7 @@ func (v *ContextSnapshotDtoCount) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape568", data) {
+	if matches("shape591", data) {
 		var chosen ContextSnapshotDtoCountVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3360,7 +3510,7 @@ func (v *SearchRetrievalDtoCoverage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape607", data) {
+	if matches("shape630", data) {
 		var chosen PassageCoverageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3445,7 +3595,7 @@ func (v *ChunkDetailResponseDtoChapter) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape612", data) {
+	if matches("shape635", data) {
 		var chosen UnitViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3782,7 +3932,7 @@ func (v *InformationAcquisitionDtoPostGate) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape650", data) {
+	if matches("shape673", data) {
 		var chosen InformationGateDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4052,7 +4202,7 @@ func (v *MigrationEntryDtoToolCalls) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape725", data) {
+	if matches("shape748", data) {
 		var chosen []MigrationEntryDtoToolCallsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4204,7 +4354,7 @@ func (v InformationSearchPlacementDtoChapterTitle) MarshalJSON() ([]byte, error)
 }
 func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchPlacementDtoChapterTitle{}
-	if matches("shape755", data) {
+	if matches("shape778", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4212,7 +4362,7 @@ func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) e
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape756", data) {
+	if matches("shape779", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4276,7 +4426,7 @@ func (v InformationSearchChunkDtoPlacement) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchChunkDtoPlacement{}
-	if matches("shape753", data) {
+	if matches("shape776", data) {
 		var chosen InformationSearchPlacementDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4284,7 +4434,7 @@ func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape757", data) {
+	if matches("shape780", data) {
 		var chosen InformationUnplacedDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4395,7 +4545,7 @@ func (v *ObservedOutcomeDtoPace) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape769", data) {
+	if matches("shape792", data) {
 		var chosen PartialDto2
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4449,7 +4599,7 @@ func (v *ObservedJobDtoLimits) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape765", data) {
+	if matches("shape788", data) {
 		var chosen PartialDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4492,7 +4642,7 @@ func (v *ObservedJobDtoOutcome) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape767", data) {
+	if matches("shape790", data) {
 		var chosen ObservedOutcomeDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4579,7 +4729,7 @@ func (v *MemoryRecordDtoInvalidation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape777", data) {
+	if matches("shape800", data) {
 		var chosen MemoryInvalidationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4867,7 +5017,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape818", data) {
+	if matches("shape841", data) {
 		var chosen MessageViewDtoStructureVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4875,7 +5025,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape823", data) {
+	if matches("shape846", data) {
 		var chosen MessageViewDtoStructureVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5191,6 +5341,91 @@ type ResolvedProposalDto struct {
 	Proposal   ProposalViewDto `json:"proposal"`
 }
 
+// ProviderConnectionDto is the explicit ProviderConnection protocol shape.
+type ProviderConnectionDto struct {
+	Connection string                          `json:"connection"`
+	Definition ProviderConnectionDefinitionDto `json:"definition"`
+	Deleted    bool                            `json:"deleted"`
+	Enabled    bool                            `json:"enabled"`
+	Project    string                          `json:"project"`
+	Revision   string                          `json:"revision"`
+}
+
+// ProviderCredentialStatusDto is the explicit ProviderCredentialStatus protocol shape.
+type ProviderCredentialStatusDto struct {
+	Connection         string         `json:"connection"`
+	ConnectionRevision string         `json:"connectionRevision"`
+	ExpiresAt          TierDtoProject `json:"expiresAt"`
+	Generation         TierDtoProject `json:"generation"`
+	KeyId              TierDtoProject `json:"keyId"`
+	Project            string         `json:"project"`
+	State              string         `json:"state"`
+	Subject            string         `json:"subject"`
+}
+
+// ProviderMutationReceiptDto is the explicit ProviderMutationReceipt protocol shape.
+type ProviderMutationReceiptDto struct {
+	Connection ProviderConnectionDto                `json:"connection"`
+	Credential ProviderMutationReceiptDtoCredential `json:"credential"`
+	Operation  string                               `json:"operation"`
+	RequestId  string                               `json:"requestId"`
+}
+
+// ProviderMutationReceiptDtoCredential is a closed union: exactly one variant must be selected.
+type ProviderMutationReceiptDtoCredential struct {
+	Variant1 *Unit
+	Variant2 *ProviderCredentialStatusDto
+}
+
+func (v ProviderMutationReceiptDtoCredential) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *ProviderMutationReceiptDtoCredential) UnmarshalJSON(data []byte) error {
+	*v = ProviderMutationReceiptDtoCredential{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape884", data) {
+		var chosen ProviderCredentialStatusDto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// ProviderAuthorizationDto is the explicit ProviderAuthorization protocol shape.
+type ProviderAuthorizationDto struct {
+	AuthorizationUrl string                     `json:"authorizationUrl"`
+	ExpiresAt        string                     `json:"expiresAt"`
+	Receipt          ProviderMutationReceiptDto `json:"receipt"`
+}
+
+func (value ProviderAuthorizationDto) String() string {
+	return "ProviderAuthorizationDto[authorizationUrl=<redacted>]"
+}
+func (value ProviderAuthorizationDto) GoString() string { return value.String() }
+
 // ProviderFactsDto is the explicit ProviderFacts protocol shape.
 type ProviderFactsDto struct {
 	CostClass       string         `json:"costClass"`
@@ -5267,7 +5502,7 @@ func (v *RelayEventDtoCausation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape866", data) {
+	if matches("shape910", data) {
 		var chosen RelayCausationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5321,7 +5556,7 @@ func (v *RelayEventDtoPayloadDtoLifecycle) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape875", data) {
+	if matches("shape919", data) {
 		var chosen RelayEventDtoPayloadDtoLifecycleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5373,7 +5608,7 @@ func (v *RelayEventDtoPayloadDtoWake) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape877", data) {
+	if matches("shape921", data) {
 		var chosen RelayEventDtoPayloadDtoWakeVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5513,7 +5748,7 @@ func (v *ScheduleFileDtoDefinition) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape383", data) {
+	if matches("shape406", data) {
 		var chosen ScheduleDefinitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5807,7 +6042,7 @@ func (v *UsageCallDtoPreflightObservation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape560", data) {
+	if matches("shape583", data) {
 		var chosen ContextCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6363,7 +6598,7 @@ func (v *ConversationLatestResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape594", data) {
+	if matches("shape617", data) {
 		var chosen ConversationViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6976,7 +7211,7 @@ func (v InformationStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 	*v = InformationStatusResult{}
-	if matches("shape647", data) {
+	if matches("shape670", data) {
 		var chosen InformationAcquisitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6984,7 +7219,7 @@ func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape683", data) {
+	if matches("shape706", data) {
 		var chosen InformationRevisionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7383,7 +7618,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape839", data) {
+	if matches("shape862", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7391,7 +7626,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape840", data) {
+	if matches("shape863", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7399,7 +7634,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape841", data) {
+	if matches("shape864", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7442,7 +7677,7 @@ func (v *OutgoingClaimResultDtoWork) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape826", data) {
+	if matches("shape849", data) {
 		var chosen OutgoingWorkDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7613,6 +7848,56 @@ type ProposalResolvePayloadDto struct {
 	Reason   *string `json:"reason,omitempty"`
 }
 
+// ProviderConnectionChangePayloadDto is the explicit ProviderConnectionChangePayloadDto protocol shape.
+type ProviderConnectionChangePayloadDto struct {
+	Action           string `json:"action"`
+	Connection       string `json:"connection"`
+	ExpectedRevision string `json:"expectedRevision"`
+	Project          string `json:"project"`
+	RequestId        string `json:"requestId"`
+}
+
+// ProviderConnectionListPayloadDto is the explicit ProviderConnectionListPayloadDto protocol shape.
+type ProviderConnectionListPayloadDto struct {
+	Project string `json:"project"`
+}
+
+// ProviderConnectionReceiptPayloadDto is the explicit ProviderConnectionReceiptPayloadDto protocol shape.
+type ProviderConnectionReceiptPayloadDto struct {
+	Project   string `json:"project"`
+	RequestId string `json:"requestId"`
+}
+
+// ProviderConnectionSavePayloadDto is the explicit ProviderConnectionSavePayloadDto protocol shape.
+type ProviderConnectionSavePayloadDto struct {
+	Connection       string                          `json:"connection"`
+	Definition       ProviderConnectionDefinitionDto `json:"definition"`
+	ExpectedRevision TierDtoProject                  `json:"expectedRevision"`
+	Project          string                          `json:"project"`
+	RequestId        string                          `json:"requestId"`
+}
+
+// ProviderConnectionStatusPayloadDto is the explicit ProviderConnectionStatusPayloadDto protocol shape.
+type ProviderConnectionStatusPayloadDto struct {
+	Connection string `json:"connection"`
+	Project    string `json:"project"`
+}
+
+// ProviderCredentialPutPayloadDto is the explicit ProviderCredentialPutPayloadDto protocol shape.
+type ProviderCredentialPutPayloadDto struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Secret             string         `json:"secret"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+func (value ProviderCredentialPutPayloadDto) String() string {
+	return "ProviderCredentialPutPayloadDto[secret=<redacted>]"
+}
+func (value ProviderCredentialPutPayloadDto) GoString() string { return value.String() }
+
 // ProviderDeregisterPayloadDto is the explicit ProviderDeregisterPayloadDto protocol shape.
 type ProviderDeregisterPayloadDto struct {
 	Provider string `json:"provider"`
@@ -7652,7 +7937,7 @@ func (v RelayLogPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayLogPayload{}
-	if matches("shape362", data) {
+	if matches("shape385", data) {
 		var chosen RelayLogPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7660,7 +7945,7 @@ func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape363", data) {
+	if matches("shape386", data) {
 		var chosen RelayLogPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7779,7 +8064,7 @@ func (v RelayTopicsPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayTopicsPayload{}
-	if matches("shape374", data) {
+	if matches("shape397", data) {
 		var chosen RelayTopicsPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7787,7 +8072,7 @@ func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape375", data) {
+	if matches("shape398", data) {
 		var chosen RelayTopicsPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8038,7 +8323,7 @@ func (v UnionStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 	*v = UnionStatusResult{}
-	if matches("shape946", data) {
+	if matches("shape988", data) {
 		var chosen IneligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8046,7 +8331,7 @@ func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape947", data) {
+	if matches("shape989", data) {
 		var chosen EligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8119,7 +8404,7 @@ func (v UsageCallsResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 	*v = UsageCallsResult{}
-	if matches("shape955", data) {
+	if matches("shape997", data) {
 		var chosen UsageAuditDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8127,7 +8412,7 @@ func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape963", data) {
+	if matches("shape1005", data) {
 		var chosen UsageAttemptsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8317,7 +8602,7 @@ func (v Notification) MarshalJSON() ([]byte, error) {
 }
 func (v *Notification) UnmarshalJSON(data []byte) error {
 	*v = Notification{}
-	if matches("shape970", data) {
+	if matches("shape1012", data) {
 		var chosen JobEventDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8325,7 +8610,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape971", data) {
+	if matches("shape1013", data) {
 		var chosen JobDeltaDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8333,7 +8618,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape975", data) {
+	if matches("shape1017", data) {
 		var chosen NotificationVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8341,7 +8626,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape977", data) {
+	if matches("shape1019", data) {
 		var chosen NotificationVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8349,7 +8634,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape979", data) {
+	if matches("shape1021", data) {
 		var chosen NotificationVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8357,7 +8642,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape986", data) {
+	if matches("shape1028", data) {
 		var chosen NotificationVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8365,7 +8650,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape988", data) {
+	if matches("shape1030", data) {
 		var chosen NotificationVariant7Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8373,7 +8658,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant7 = &chosen
 		return nil
 	}
-	if matches("shape990", data) {
+	if matches("shape1032", data) {
 		var chosen NotificationVariant8Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8381,7 +8666,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant8 = &chosen
 		return nil
 	}
-	if matches("shape992", data) {
+	if matches("shape1034", data) {
 		var chosen NotificationVariant9Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8389,7 +8674,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant9 = &chosen
 		return nil
 	}
-	if matches("shape994", data) {
+	if matches("shape1036", data) {
 		var chosen NotificationVariant10Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8397,7 +8682,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant10 = &chosen
 		return nil
 	}
-	if matches("shape996", data) {
+	if matches("shape1038", data) {
 		var chosen NotificationVariant11Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -10538,6 +10823,154 @@ type ProposalResolveRequest struct {
 // ProposalResolve validates before submission and returns the paired result DTO.
 func (c *Client) ProposalResolve(ctx context.Context, request ProposalResolveRequest) (Reply[ResolvedProposalDto], error) {
 	return requestTyped[ResolvedProposalDto](ctx, c, "proposal.resolve", request)
+}
+
+// ProviderConnectionChangeRequest is the explicit ProviderConnectionChangeRequest protocol shape.
+type ProviderConnectionChangeRequest struct {
+	Action           string `json:"action"`
+	Connection       string `json:"connection"`
+	ExpectedRevision string `json:"expectedRevision"`
+	Project          string `json:"project"`
+	RequestId        string `json:"requestId"`
+}
+
+// ProviderConnectionChange validates before submission and returns the paired result DTO.
+func (c *Client) ProviderConnectionChange(ctx context.Context, request ProviderConnectionChangeRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.connection.change", request)
+}
+
+// ProviderConnectionListRequest is the explicit ProviderConnectionListRequest protocol shape.
+type ProviderConnectionListRequest struct {
+	Project string `json:"project"`
+}
+
+// ProviderConnectionList validates before submission and returns the paired result DTO.
+func (c *Client) ProviderConnectionList(ctx context.Context, request ProviderConnectionListRequest) (Reply[[]ProviderConnectionDto], error) {
+	return requestTyped[[]ProviderConnectionDto](ctx, c, "provider.connection.list", request)
+}
+
+// ProviderConnectionReceiptRequest is the explicit ProviderConnectionReceiptRequest protocol shape.
+type ProviderConnectionReceiptRequest struct {
+	Project   string `json:"project"`
+	RequestId string `json:"requestId"`
+}
+
+// ProviderConnectionReceipt validates before submission and returns the paired result DTO.
+func (c *Client) ProviderConnectionReceipt(ctx context.Context, request ProviderConnectionReceiptRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.connection.receipt", request)
+}
+
+// ProviderConnectionSaveRequest is the explicit ProviderConnectionSaveRequest protocol shape.
+type ProviderConnectionSaveRequest struct {
+	Connection       string                          `json:"connection"`
+	Definition       ProviderConnectionDefinitionDto `json:"definition"`
+	ExpectedRevision TierDtoProject                  `json:"expectedRevision"`
+	Project          string                          `json:"project"`
+	RequestId        string                          `json:"requestId"`
+}
+
+// ProviderConnectionSave validates before submission and returns the paired result DTO.
+func (c *Client) ProviderConnectionSave(ctx context.Context, request ProviderConnectionSaveRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.connection.save", request)
+}
+
+// ProviderConnectionStatusRequest is the explicit ProviderConnectionStatusRequest protocol shape.
+type ProviderConnectionStatusRequest struct {
+	Connection string `json:"connection"`
+	Project    string `json:"project"`
+}
+
+// ProviderConnectionStatus validates before submission and returns the paired result DTO.
+func (c *Client) ProviderConnectionStatus(ctx context.Context, request ProviderConnectionStatusRequest) (Reply[ProviderConnectionDto], error) {
+	return requestTyped[ProviderConnectionDto](ctx, c, "provider.connection.status", request)
+}
+
+// ProviderCredentialAuthorizeRequest is the explicit ProviderCredentialMutation protocol shape.
+type ProviderCredentialAuthorizeRequest struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialAuthorize validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialAuthorize(ctx context.Context, request ProviderCredentialAuthorizeRequest) (Reply[ProviderAuthorizationDto], error) {
+	return requestTyped[ProviderAuthorizationDto](ctx, c, "provider.credential.authorize", request)
+}
+
+// ProviderCredentialPutRequest is the explicit ProviderCredentialPutRequest protocol shape.
+type ProviderCredentialPutRequest struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Secret             string         `json:"secret"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+func (value ProviderCredentialPutRequest) String() string {
+	return "ProviderCredentialPutRequest[secret=<redacted>]"
+}
+func (value ProviderCredentialPutRequest) GoString() string { return value.String() }
+
+// ProviderCredentialPut validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialPut(ctx context.Context, request ProviderCredentialPutRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.credential.put", request)
+}
+
+// ProviderCredentialRefreshRequest is the explicit ProviderCredentialMutation protocol shape.
+type ProviderCredentialRefreshRequest struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialRefresh validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialRefresh(ctx context.Context, request ProviderCredentialRefreshRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.credential.refresh", request)
+}
+
+// ProviderCredentialRekeyRequest is the explicit ProviderCredentialMutation protocol shape.
+type ProviderCredentialRekeyRequest struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialRekey validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialRekey(ctx context.Context, request ProviderCredentialRekeyRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.credential.rekey", request)
+}
+
+// ProviderCredentialRevokeRequest is the explicit ProviderCredentialMutation protocol shape.
+type ProviderCredentialRevokeRequest struct {
+	Connection         string         `json:"connection"`
+	ExpectedGeneration TierDtoProject `json:"expectedGeneration"`
+	Project            string         `json:"project"`
+	RequestId          string         `json:"requestId"`
+	Subject            TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialRevoke validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialRevoke(ctx context.Context, request ProviderCredentialRevokeRequest) (Reply[ProviderMutationReceiptDto], error) {
+	return requestTyped[ProviderMutationReceiptDto](ctx, c, "provider.credential.revoke", request)
+}
+
+// ProviderCredentialStatusRequest is the explicit ProviderCredentialTarget protocol shape.
+type ProviderCredentialStatusRequest struct {
+	Connection string         `json:"connection"`
+	Project    string         `json:"project"`
+	Subject    TierDtoProject `json:"subject"`
+}
+
+// ProviderCredentialStatus validates before submission and returns the paired result DTO.
+func (c *Client) ProviderCredentialStatus(ctx context.Context, request ProviderCredentialStatusRequest) (Reply[ProviderCredentialStatusDto], error) {
+	return requestTyped[ProviderCredentialStatusDto](ctx, c, "provider.credential.status", request)
 }
 
 // ProviderDeregisterRequest is the explicit ProviderDeregisterRequest protocol shape.

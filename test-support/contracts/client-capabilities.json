@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 221,
+    "registeredRequestFrames": 232,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 212,
-    "headlessCliOneShotFrames": 202,
+    "headlessCliRequestFrames": 223,
+    "headlessCliOneShotFrames": 213,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 221,
+    "typedRequestFrames": 232,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -5721,6 +5721,193 @@
       ]
     },
     {
+      "frame": "provider.connection.change",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.connection.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.connection.receipt",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.connection.save",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.connection.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.authorize",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.put",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.refresh",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.rekey",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.revoke",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "provider.credential.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderCredentialFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "provider.deregister",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProviderFrames.java",
       "typescriptBuilders": [
@@ -7126,6 +7313,17 @@
             "application.files",
             "application.file.read",
             "application.file.save",
+            "provider.connection.list",
+            "provider.connection.status",
+            "provider.connection.save",
+            "provider.connection.change",
+            "provider.connection.receipt",
+            "provider.credential.status",
+            "provider.credential.put",
+            "provider.credential.revoke",
+            "provider.credential.rekey",
+            "provider.credential.authorize",
+            "provider.credential.refresh",
             "application.identity.status",
             "application.token.issue",
             "application.token.receipt",
@@ -7451,6 +7649,17 @@
           "proposal.list",
           "proposal.reconsider",
           "proposal.resolve",
+          "provider.connection.change",
+          "provider.connection.list",
+          "provider.connection.receipt",
+          "provider.connection.save",
+          "provider.connection.status",
+          "provider.credential.authorize",
+          "provider.credential.put",
+          "provider.credential.refresh",
+          "provider.credential.rekey",
+          "provider.credential.revoke",
+          "provider.credential.status",
           "provider.deregister",
           "provider.list",
           "relay.ack",
@@ -7492,7 +7701,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 202,
+        "count": 213,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -7504,9 +7713,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 221 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 232 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "212 WS operations: 202 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "223 WS operations: 213 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "incoming.catalog": "persistent inbound adapter",
         "incoming.receive": "persistent inbound adapter",

@@ -216,9 +216,18 @@ public final class AuthFilter implements Filter {
    * <p>{@code /v1/auth/login} joined the other two at task 2 of the admin-login slice for the same
    * reason either of them is here: a caller with no session yet has to be able to reach the
    * endpoint that would give it one, or the endpoint is unreachable by anyone who needs it.
+   *
+   * <p>The provider OAuth landing page is constant HTML only, with no account/state reads or
+   * exchanges. It restores a same-site browser context for Strict cookies; its completion POST
+   * stays gated and requires the authenticated actor plus single-use owner-bound state.
    */
   static final Set<String> OPEN =
-      Set.of("/v1/auth", "/v1/auth/refresh", "/v1/auth/login", "/ready");
+      Set.of(
+          "/v1/auth",
+          "/v1/auth/refresh",
+          "/v1/auth/login",
+          "/ready",
+          io.aeyer.plowshare.server.providers.ConfiguredProviderEndpoints.CALLBACK_PATH);
 
   /** The scheme, spelled once, with the trailing space the header carries. */
   private static final String BEARER = "Bearer ";

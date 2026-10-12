@@ -76,6 +76,10 @@ public class ProjectAuthorization {
           "swarm.status",
           "swarm.types",
           "provider.list",
+          "provider.connection.list",
+          "provider.connection.status",
+          "provider.connection.receipt",
+          "provider.credential.status",
           "schedule.list",
           "schedule.read",
           "trigger.list",
@@ -152,7 +156,13 @@ public class ProjectAuthorization {
           "firing.list");
 
   private static boolean serviceOperation(String operation) {
-    return operation.startsWith("incoming.")
+    return operation.startsWith("provider.credential.")
+        || Set.of(
+                "provider.connection.list",
+                "provider.connection.status",
+                "provider.connection.receipt")
+            .contains(operation)
+        || operation.startsWith("incoming.")
         || operation.startsWith("conversation.")
         || operation.startsWith("memory.")
         || operation.startsWith("proposal.")

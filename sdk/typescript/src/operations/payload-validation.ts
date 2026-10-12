@@ -1,3 +1,4 @@
+import { providerCredentialProblem } from './provider-credentials.ts';
 import { identityProblem } from './application-identities.ts';
 import { deploymentProblem } from './application-deployments.ts';
 import { swarmName } from './swarm-types.ts';
@@ -16,6 +17,11 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (
+    type.startsWith('provider.connection.') ||
+    type.startsWith('provider.credential.')
+  )
+    return providerCredentialProblem(type, payload);
   if (
     'project' in payload &&
     payload['project'] !== null &&
@@ -499,6 +505,45 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
+  'provider.connection.list': [['project'], []],
+  'provider.connection.status': [['project', 'connection'], []],
+  'provider.connection.save': [
+    ['project', 'connection', 'requestId', 'expectedRevision', 'definition'],
+    [],
+  ],
+  'provider.connection.change': [
+    ['project', 'connection', 'requestId', 'expectedRevision', 'action'],
+    [],
+  ],
+  'provider.connection.receipt': [['project', 'requestId'], []],
+  'provider.credential.status': [['project', 'connection', 'subject'], []],
+  'provider.credential.put': [
+    [
+      'project',
+      'connection',
+      'subject',
+      'requestId',
+      'expectedGeneration',
+      'secret',
+    ],
+    [],
+  ],
+  'provider.credential.revoke': [
+    ['project', 'connection', 'subject', 'requestId', 'expectedGeneration'],
+    [],
+  ],
+  'provider.credential.rekey': [
+    ['project', 'connection', 'subject', 'requestId', 'expectedGeneration'],
+    [],
+  ],
+  'provider.credential.authorize': [
+    ['project', 'connection', 'subject', 'requestId', 'expectedGeneration'],
+    [],
+  ],
+  'provider.credential.refresh': [
+    ['project', 'connection', 'subject', 'requestId', 'expectedGeneration'],
+    [],
+  ],
   'application.identity.status': [['project'], []],
   'application.token.issue': [
     ['project', 'requestId', 'expiresInDays', 'rotate'],
@@ -783,6 +828,14 @@ export function commandProblem(
     )
       return 'Saving needs bounded text and its reviewed file revision';
     return undefined;
+  }
+  if (
+    type.startsWith('provider.connection.') ||
+    type.startsWith('provider.credential.')
+  ) {
+    if (required.some((key) => !Object.hasOwn(body, key)))
+      return 'Provider management requires every declared field, including explicit nulls';
+    return providerCredentialProblem(type, body);
   }
   if (type.startsWith('tool.scope.')) return problem(type, body);
   if (type === 'board.open' && 'swarm' in body && !swarmName(body['swarm']))
