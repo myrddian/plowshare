@@ -179,6 +179,37 @@ def decode_push(value: object) -> contracts.ServerPush:
 
 def deployment_matches(operation: str, request: object, result: object) -> bool:
     """A structural reply cannot certify a different project's retained receipt."""
+    if operation in {
+        "application.identity.status",
+        "application.token.issue",
+        "application.token.receipt",
+    }:
+        asked = _object(request)
+        if isinstance(result, contracts.ApplicationIdentityStatusDto):
+            identity = result.identity
+            return (
+                operation == "application.identity.status"
+                and result.project == asked.get("project")
+                and (
+                    identity is None
+                    or identity.project == result.project
+                    and identity.principal == "@service/" + identity.token_id
+                )
+            )
+        receipt = (
+            result.receipt
+            if isinstance(result, contracts.ApplicationCredentialDto)
+            else result
+        )
+        if not isinstance(receipt, contracts.ApplicationTokenReceiptDto):
+            return False
+        request_id = asked.get("requestId")
+        return (
+            receipt.project == asked.get("project")
+            and isinstance(request_id, str)
+            and receipt.request_id.lower() == request_id.lower()
+            and receipt.principal == "@service/" + receipt.token_id
+        )
     if operation not in {
         "application.deploy",
         "application.activate",

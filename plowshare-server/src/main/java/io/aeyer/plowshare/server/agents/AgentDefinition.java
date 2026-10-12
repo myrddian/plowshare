@@ -134,6 +134,14 @@ public record AgentDefinition(
     /** Opt-in to owner-assigned runtime tools; never authority by itself. */
     boolean dynamic) {
 
+  /**
+   * Only a validated native script conductor may omit its model and declare zero calls. Runtime
+   * enforcement is independent of any caller-supplied allowance.
+   */
+  public boolean nativeOnly() {
+    return model == null && maxModelCalls == 0;
+  }
+
   /** Compatibility: definitions predating provider scopes accept only named tools. */
   public AgentDefinition(
       String name,
@@ -1007,7 +1015,9 @@ public record AgentDefinition(
     AgentAliases.validateSelection(name, alias, guidance, bot);
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(description, "description");
-    Objects.requireNonNull(model, "model");
+    if (maxModelCalls != 0) Objects.requireNonNull(model, "model");
+    else if (model != null)
+      throw new IllegalArgumentException("Zero-call native execution has no model");
     Objects.requireNonNull(prompt, "prompt");
     // Named for the reason the four above are: a definition assembled by
     // hand with a null here would fail as a bare NullPointerException from

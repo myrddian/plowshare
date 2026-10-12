@@ -14,6 +14,8 @@ from plowshare.contracts import (
     OrchestrationListRequest,
     OrchestrationReceiptRequest,
     OrchestrationStartRequest,
+    ScheduleFilesRequest,
+    ScheduleListRequest,
 )
 
 from .contracts import Configuration, identifier, text, uuid
@@ -65,10 +67,33 @@ class SdkConsolePort:
         self.client, self.config = client, config
 
     async def schedule(self) -> ScheduleView | None:
-        # The public schedule listing has no project selection and service tokens
-        # cannot call it. Absence of this read is not evidence of no registration.
-        # Do not borrow the deployment administrator's credential for polling.
-        return None
+        files = (
+            await self.client.request(ScheduleFilesRequest(project=self.config.project))
+        ).require_payload()
+        source = [
+            row
+            for row in files
+            if row.project == self.config.project
+            and row.source == "server"
+            and row.name == "network_scan"
+            and row.status == "active"
+        ]
+        if not source:
+            return None  # No active source registration is different from a paused effective schedule.
+        if len(source) != 1:
+            raise ValueError("Ambiguous project schedule source")
+        if self.config.schedule != source[0].internal_name:
+            raise ValueError("Collector schedule differs from the project source")
+        schedules = (
+            await self.client.request(ScheduleListRequest(project=self.config.project))
+        ).require_payload()
+        selected = [row for row in schedules if row.name == self.config.schedule]
+        if not selected:
+            return None
+        if len(selected) != 1:
+            raise ValueError("Ambiguous effective project schedule")
+        row = selected[0]
+        return ScheduleView(row.name, row.cron, row.zone, row.paused, row.next_fire_at)
 
     async def agents(self) -> AgentHealth:
         from .native_tools import DECLARATIONS

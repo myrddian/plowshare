@@ -1,3 +1,4 @@
+import { identityProblem } from './application-identities.ts';
 import { deploymentProblem } from './application-deployments.ts';
 import { swarmName } from './swarm-types.ts';
 import { isList, isObject, displayText } from '../binding/values.ts';
@@ -490,7 +491,7 @@ export const SHAPES: Record<
   'document.ask': [['document', 'question'], ['maxModelCalls']],
   'document.retrieve': [['query'], ['document', 'limit']],
   'document.list': [[], ['q', 'offset', 'limit']],
-  'document.detail': [['document'], []],
+  'document.detail': [['document'], ['scope']],
   'document.chunk': [['chunk'], []],
   'document.rank': [['query'], ['limit']],
   'document.stance': [['document', 'claim'], []],
@@ -498,6 +499,12 @@ export const SHAPES: Record<
   'document.search': [['query'], ['limit', 'mode']],
   'web.search': [['query', 'pageSize', 'max', 'page'], []],
   'web.fetch': [['url'], ['offset']],
+  'application.identity.status': [['project'], []],
+  'application.token.issue': [
+    ['project', 'requestId', 'expiresInDays', 'rotate'],
+    [],
+  ],
+  'application.token.receipt': [['project', 'requestId'], []],
   'application.deploy': [
     [
       'project',
@@ -594,8 +601,8 @@ export const SHAPES: Record<
   ],
   'schedule.save': [['name', 'source', 'definition', 'overwrite'], ['project']],
   'schedule.sync': [['source'], ['project']],
-  'schedule.files': [[], []],
-  'schedule.list': [[], []],
+  'schedule.files': [[], ['project']],
+  'schedule.list': [[], ['project']],
   'schedule.define': [['schedule', 'cron', 'emits'], ['zone']],
   'schedule.read': [['text'], ['zone', 'project', 'conversation']],
   'schedule.pause': [['schedule'], ['paused']],
@@ -709,6 +716,14 @@ export function commandProblem(
     ].includes(type)
   )
     return deploymentProblem(type, body);
+  if (
+    [
+      'application.identity.status',
+      'application.token.issue',
+      'application.token.receipt',
+    ].includes(type)
+  )
+    return identityProblem(type, body);
   if (
     type.startsWith('application.') &&
     type !== 'application.storage.set' &&
@@ -894,6 +909,26 @@ export function commandProblem(
       }
     }
   }
+  if (type === 'document.detail' && 'scope' in body) {
+    const scopeProblem = informationPayloadProblem(
+      type,
+      { scope: body['scope'] },
+      [],
+    );
+    if (scopeProblem) return scopeProblem;
+  }
+  if (
+    (type === 'schedule.files' || type === 'schedule.list') &&
+    'project' in body &&
+    (typeof body['project'] !== 'string' ||
+      body['project'].length > 256 ||
+      body['project'] !== body['project'].trim() ||
+      Array.from(body['project']).some((character) => {
+        const point = character.codePointAt(0)!;
+        return point <= 31 || (point >= 127 && point <= 159);
+      }))
+  )
+    return 'Choose a bounded ordinary project name';
   if (type === 'admin.pricing.set') return pricingProblem(body);
   if (type === 'schedule.save' || type === 'schedule.sync')
     return schedulePayloadProblem(type, body);
@@ -929,6 +964,7 @@ export function commandProblem(
   ]) {
     if (!(key in body)) continue;
     const value = body[key];
+    if (type === 'document.detail' && key === 'scope') continue; // Validated structured Information scope above.
     if (key === 'choices') continue; // JSON value; the server owns the question's structure.
     if (key === 'data') {
       if (value !== null && (typeof value !== 'object' || isList(value)))

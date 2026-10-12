@@ -164,7 +164,7 @@ func (v *IncomingSourceDtoMetadata) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape114", data) {
+	if matches("shape123", data) {
 		var chosen IncomingSourceDtoMetadataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -218,7 +218,7 @@ func (v *IncomingSourceDtoPartsItemDtoMediaType) UnmarshalJSON(data []byte) erro
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape118", data) {
+	if matches("shape127", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -331,7 +331,7 @@ func (v Readonly4Entry) MarshalJSON() ([]byte, error) {
 }
 func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 	*v = Readonly4Entry{}
-	if matches("shape239", data) {
+	if matches("shape242", data) {
 		var chosen Readonly4EntryVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -339,7 +339,7 @@ func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape245", data) {
+	if matches("shape248", data) {
 		var chosen Readonly4EntryVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -347,7 +347,7 @@ func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape247", data) {
+	if matches("shape250", data) {
 		var chosen Readonly4EntryVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -355,7 +355,7 @@ func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape261", data) {
+	if matches("shape264", data) {
 		var chosen Readonly4EntryVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -363,7 +363,7 @@ func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape263", data) {
+	if matches("shape266", data) {
 		var chosen Readonly4EntryVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -449,7 +449,7 @@ func (v Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) MarshalJSON() ([]
 }
 func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(data []byte) error {
 	*v = Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows{}
-	if matches("shape250", data) {
+	if matches("shape253", data) {
 		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -457,7 +457,7 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(da
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape253", data) {
+	if matches("shape256", data) {
 		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -465,7 +465,7 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(da
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape255", data) {
+	if matches("shape258", data) {
 		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -473,7 +473,7 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(da
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape257", data) {
+	if matches("shape260", data) {
 		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -481,7 +481,7 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(da
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape259", data) {
+	if matches("shape262", data) {
 		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -696,7 +696,7 @@ func (v *AgentCardDtoCapabilities) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape224", data) {
+	if matches("shape227", data) {
 		var chosen AgentCardDtoCapabilitiesVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -748,7 +748,7 @@ func (v *AgentCardDtoCapabilitiesVariant2DtoExtensions) UnmarshalJSON(data []byt
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape227", data) {
+	if matches("shape230", data) {
 		var chosen []AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -798,7 +798,7 @@ func (v *AgentCardDtoProvider) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape230", data) {
+	if matches("shape233", data) {
 		var chosen AgentCardDtoProviderVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -847,7 +847,7 @@ func (v *AgentCardDtoSecurityRequirements) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape232", data) {
+	if matches("shape235", data) {
 		var chosen []AgentCardDtoSecurityRequirementsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -895,7 +895,7 @@ func (v *AgentCardDtoSecuritySchemes) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape237", data) {
+	if matches("shape240", data) {
 		var chosen map[string]Readonly4Entry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -950,7 +950,7 @@ func (v *AgentCardDtoSkillsItemDtoMetadata) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape268", data) {
+	if matches("shape271", data) {
 		var chosen AgentCardDtoSkillsItemDtoMetadataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -998,7 +998,7 @@ func (v *AgentCardDtoSupportedInterfaces) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape274", data) {
+	if matches("shape277", data) {
 		var chosen []AgentCardDtoSupportedInterfacesVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1137,7 +1137,7 @@ func (v *ExternalMessageDtoMetadata) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape285", data) {
+	if matches("shape288", data) {
 		var chosen ExternalMetadataDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1182,7 +1182,7 @@ func (v ExternalMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ExternalMessageDtoPartsItem{}
-	if matches("shape288", data) {
+	if matches("shape291", data) {
 		var chosen ExternalMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1190,7 +1190,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape289", data) {
+	if matches("shape292", data) {
 		var chosen ExternalMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1198,7 +1198,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape290", data) {
+	if matches("shape293", data) {
 		var chosen ExternalMessageDtoPartsItemVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1206,7 +1206,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape291", data) {
+	if matches("shape294", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1273,7 +1273,7 @@ func (v ExternalMessageDtoPartsItemVariant4DtoData) MarshalJSON() ([]byte, error
 }
 func (v *ExternalMessageDtoPartsItemVariant4DtoData) UnmarshalJSON(data []byte) error {
 	*v = ExternalMessageDtoPartsItemVariant4DtoData{}
-	if matches("shape293", data) {
+	if matches("shape296", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4DtoDataVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1281,7 +1281,7 @@ func (v *ExternalMessageDtoPartsItemVariant4DtoData) UnmarshalJSON(data []byte) 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape297", data) {
+	if matches("shape300", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4DtoDataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1356,7 +1356,7 @@ func (v *ExternalMessageDtoRole) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape119", data) {
+	if matches("shape128", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1364,7 +1364,7 @@ func (v *ExternalMessageDtoRole) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape306", data) {
+	if matches("shape309", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1417,7 +1417,7 @@ func (v *ExternalTaskDtoArtifacts) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape282", data) {
+	if matches("shape285", data) {
 		var chosen []ExternalTaskDtoArtifactsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1470,7 +1470,7 @@ func (v *ExternalTaskDtoHistory) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape303", data) {
+	if matches("shape306", data) {
 		var chosen []ExternalMessageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1520,7 +1520,7 @@ func (v *ExternalTaskDtoStatusDtoMessage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape304", data) {
+	if matches("shape307", data) {
 		var chosen ExternalMessageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1584,7 +1584,7 @@ func (v *IntegrationReadingDtoContext) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape331", data) {
+	if matches("shape334", data) {
 		var chosen ActionContextDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1712,7 +1712,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape383", data) {
+	if matches("shape388", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1720,7 +1720,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape384", data) {
+	if matches("shape389", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1728,7 +1728,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape385", data) {
+	if matches("shape390", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1736,7 +1736,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape386", data) {
+	if matches("shape391", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1926,7 +1926,7 @@ func (v *PricingCardDtoRates) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape461", data) {
+	if matches("shape466", data) {
 		var chosen PricingRatesDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1981,7 +1981,7 @@ func (v *PricingEntryDtoCard) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape458", data) {
+	if matches("shape463", data) {
 		var chosen PricingCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2310,6 +2310,94 @@ type ApplicationFileListingDto struct {
 	Project  string                         `json:"project"`
 }
 
+// ApplicationServiceDeclarationDto is the explicit ApplicationServiceDeclaration protocol shape.
+type ApplicationServiceDeclarationDto struct {
+	Handle string `json:"handle"`
+	Role   string `json:"role"`
+}
+
+// ApplicationIdentityBindingDto is the explicit ApplicationIdentityBinding protocol shape.
+type ApplicationIdentityBindingDto struct {
+	CredentialIssued    bool                             `json:"credentialIssued"`
+	CredentialRequestId TierDtoProject                   `json:"credentialRequestId"`
+	ExpiresAt           string                           `json:"expiresAt"`
+	Principal           string                           `json:"principal"`
+	Project             string                           `json:"project"`
+	RevokedAt           TierDtoProject                   `json:"revokedAt"`
+	Service             ApplicationServiceDeclarationDto `json:"service"`
+	State               string                           `json:"state"`
+	TokenId             string                           `json:"tokenId"`
+}
+
+// ApplicationIdentityStatusDto is the explicit ApplicationIdentityStatus protocol shape.
+type ApplicationIdentityStatusDto struct {
+	Identity ApplicationIdentityStatusDtoIdentity `json:"identity"`
+	Project  string                               `json:"project"`
+}
+
+// ApplicationIdentityStatusDtoIdentity is a closed union: exactly one variant must be selected.
+type ApplicationIdentityStatusDtoIdentity struct {
+	Variant1 *Unit
+	Variant2 *ApplicationIdentityBindingDto
+}
+
+func (v ApplicationIdentityStatusDtoIdentity) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *ApplicationIdentityStatusDtoIdentity) UnmarshalJSON(data []byte) error {
+	*v = ApplicationIdentityStatusDtoIdentity{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape502", data) {
+		var chosen ApplicationIdentityBindingDto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// ApplicationTokenReceiptDto is the explicit ApplicationTokenReceipt protocol shape.
+type ApplicationTokenReceiptDto struct {
+	ExpiresAt string `json:"expiresAt"`
+	Principal string `json:"principal"`
+	Project   string `json:"project"`
+	RequestId string `json:"requestId"`
+	TokenId   string `json:"tokenId"`
+}
+
+// ApplicationCredentialDto is the explicit ApplicationCredential protocol shape.
+type ApplicationCredentialDto struct {
+	Credential string                     `json:"credential"`
+	Receipt    ApplicationTokenReceiptDto `json:"receipt"`
+}
+
+func (value ApplicationCredentialDto) String() string {
+	return "ApplicationCredentialDto[credential=<redacted>]"
+}
+func (value ApplicationCredentialDto) GoString() string { return value.String() }
+
 // ApprovalAnsweredDto is the explicit ApprovalAnswered protocol shape.
 type ApprovalAnsweredDto struct {
 	Busy  bool           `json:"busy"`
@@ -2371,7 +2459,7 @@ func (v *ApprovalViewDtoCommands) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape500", data) {
+	if matches("shape515", data) {
 		var chosen [][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2483,7 +2571,7 @@ func (v *BoardTopicDtoSwarm) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape509", data) {
+	if matches("shape524", data) {
 		var chosen SwarmSelectionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2639,7 +2727,7 @@ func (v *AskedViewDtoOpened) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape530", data) {
+	if matches("shape545", data) {
 		var chosen OpenedViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2707,7 +2795,7 @@ func (v *EntryViewDtoSource) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape526", data) {
+	if matches("shape541", data) {
 		var chosen SourceViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2821,7 +2909,7 @@ func (v *ContextViewDtoMessageTokens) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape537", data) {
+	if matches("shape552", data) {
 		var chosen TokenCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2864,7 +2952,7 @@ func (v *ContextViewDtoPrefix) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape539", data) {
+	if matches("shape554", data) {
 		var chosen PrefixDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2921,7 +3009,7 @@ func (v ProjectionMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ProjectionMessageDtoPartsItem{}
-	if matches("shape558", data) {
+	if matches("shape573", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2929,7 +3017,7 @@ func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape560", data) {
+	if matches("shape575", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3049,7 +3137,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape573", data) {
+	if matches("shape588", data) {
 		var chosen []ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3057,7 +3145,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape574", data) {
+	if matches("shape589", data) {
 		var chosen map[string]ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3129,7 +3217,7 @@ func (v *ContextSnapshotDtoCount) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape553", data) {
+	if matches("shape568", data) {
 		var chosen ContextSnapshotDtoCountVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3272,7 +3360,7 @@ func (v *SearchRetrievalDtoCoverage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape592", data) {
+	if matches("shape607", data) {
 		var chosen PassageCoverageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3357,7 +3445,7 @@ func (v *ChunkDetailResponseDtoChapter) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape597", data) {
+	if matches("shape612", data) {
 		var chosen UnitViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3614,7 +3702,7 @@ func (v *IncomingTaskDtoSource) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape111", data) {
+	if matches("shape120", data) {
 		var chosen IncomingSourceDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3694,7 +3782,7 @@ func (v *InformationAcquisitionDtoPostGate) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape635", data) {
+	if matches("shape650", data) {
 		var chosen InformationGateDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3964,7 +4052,7 @@ func (v *MigrationEntryDtoToolCalls) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape710", data) {
+	if matches("shape725", data) {
 		var chosen []MigrationEntryDtoToolCallsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4116,7 +4204,7 @@ func (v InformationSearchPlacementDtoChapterTitle) MarshalJSON() ([]byte, error)
 }
 func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchPlacementDtoChapterTitle{}
-	if matches("shape740", data) {
+	if matches("shape755", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4124,7 +4212,7 @@ func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) e
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape741", data) {
+	if matches("shape756", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4188,7 +4276,7 @@ func (v InformationSearchChunkDtoPlacement) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchChunkDtoPlacement{}
-	if matches("shape738", data) {
+	if matches("shape753", data) {
 		var chosen InformationSearchPlacementDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4196,7 +4284,7 @@ func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape742", data) {
+	if matches("shape757", data) {
 		var chosen InformationUnplacedDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4307,7 +4395,7 @@ func (v *ObservedOutcomeDtoPace) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape754", data) {
+	if matches("shape769", data) {
 		var chosen PartialDto2
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4361,7 +4449,7 @@ func (v *ObservedJobDtoLimits) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape750", data) {
+	if matches("shape765", data) {
 		var chosen PartialDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4404,7 +4492,7 @@ func (v *ObservedJobDtoOutcome) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape752", data) {
+	if matches("shape767", data) {
 		var chosen ObservedOutcomeDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4491,7 +4579,7 @@ func (v *MemoryRecordDtoInvalidation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape762", data) {
+	if matches("shape777", data) {
 		var chosen MemoryInvalidationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4779,7 +4867,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape803", data) {
+	if matches("shape818", data) {
 		var chosen MessageViewDtoStructureVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4787,7 +4875,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape808", data) {
+	if matches("shape823", data) {
 		var chosen MessageViewDtoStructureVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4904,7 +4992,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape279", data) {
+	if matches("shape282", data) {
 		var chosen OutgoingWorkDtoResultVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4912,7 +5000,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape318", data) {
+	if matches("shape321", data) {
 		var chosen OutgoingWorkDtoResultVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4920,7 +5008,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape319", data) {
+	if matches("shape322", data) {
 		var chosen OutgoingWorkDtoResultVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4928,7 +5016,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape332", data) {
+	if matches("shape335", data) {
 		var chosen OutgoingWorkDtoResultVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4936,7 +5024,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape337", data) {
+	if matches("shape340", data) {
 		var chosen OutgoingWorkDtoResultVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5012,7 +5100,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape334", data) {
+	if matches("shape337", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5020,7 +5108,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape335", data) {
+	if matches("shape338", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5028,7 +5116,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape336", data) {
+	if matches("shape339", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5179,7 +5267,7 @@ func (v *RelayEventDtoCausation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape851", data) {
+	if matches("shape866", data) {
 		var chosen RelayCausationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5233,7 +5321,7 @@ func (v *RelayEventDtoPayloadDtoLifecycle) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape860", data) {
+	if matches("shape875", data) {
 		var chosen RelayEventDtoPayloadDtoLifecycleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5285,7 +5373,7 @@ func (v *RelayEventDtoPayloadDtoWake) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape862", data) {
+	if matches("shape877", data) {
 		var chosen RelayEventDtoPayloadDtoWakeVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5425,7 +5513,7 @@ func (v *ScheduleFileDtoDefinition) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape378", data) {
+	if matches("shape383", data) {
 		var chosen ScheduleDefinitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5719,7 +5807,7 @@ func (v *UsageCallDtoPreflightObservation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape545", data) {
+	if matches("shape560", data) {
 		var chosen ContextCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5806,6 +5894,62 @@ type JobDeltaDto struct {
 	Job  string `json:"job"`
 	Part string `json:"part"`
 	Text string `json:"text"`
+}
+
+// InformationAcquirePayloadDtoScope is a closed union: exactly one variant must be selected.
+type InformationAcquirePayloadDtoScope struct {
+	Variant1 *InformationAcquirePayloadDtoScopeVariant1Dto
+	Variant2 *InformationAcquirePayloadDtoScopeVariant2Dto
+}
+
+func (v InformationAcquirePayloadDtoScope) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *InformationAcquirePayloadDtoScope) UnmarshalJSON(data []byte) error {
+	*v = InformationAcquirePayloadDtoScope{}
+	if matches("shape100", data) {
+		var chosen InformationAcquirePayloadDtoScopeVariant1Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape104", data) {
+		var chosen InformationAcquirePayloadDtoScopeVariant2Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// InformationAcquirePayloadDtoScopeVariant1Dto is the explicit InformationAcquirePayloadDtoScopeVariant1Dto protocol shape.
+type InformationAcquirePayloadDtoScopeVariant1Dto struct {
+	IncludeShared *bool  `json:"includeShared,omitempty"`
+	Kind          string `json:"kind"`
+}
+
+// InformationAcquirePayloadDtoScopeVariant2Dto is the explicit InformationAcquirePayloadDtoScopeVariant2Dto protocol shape.
+type InformationAcquirePayloadDtoScopeVariant2Dto struct {
+	IncludeShared *bool  `json:"includeShared,omitempty"`
+	Kind          string `json:"kind"`
+	Project       string `json:"project"`
 }
 
 // AdminAccountCreatePayloadDto is the explicit AdminAccountCreatePayloadDto protocol shape.
@@ -6008,11 +6152,30 @@ type ApplicationFilesPayloadDto struct {
 	Project  string                 `json:"project"`
 }
 
+// ApplicationIdentityStatusPayloadDto is the explicit ApplicationIdentityStatusPayloadDto protocol shape.
+type ApplicationIdentityStatusPayloadDto struct {
+	Project string `json:"project"`
+}
+
 // ApplicationStorageSetPayloadDto is the explicit ApplicationStorageSetPayloadDto protocol shape.
 type ApplicationStorageSetPayloadDto struct {
 	ApplicationRoot FileStoreReferenceDto   `json:"applicationRoot"`
 	Project         string                  `json:"project"`
 	WritableAreas   []FileStoreReferenceDto `json:"writableAreas"`
+}
+
+// ApplicationTokenIssuePayloadDto is the explicit ApplicationTokenIssuePayloadDto protocol shape.
+type ApplicationTokenIssuePayloadDto struct {
+	ExpiresInDays float64 `json:"expiresInDays"`
+	Project       string  `json:"project"`
+	RequestId     string  `json:"requestId"`
+	Rotate        bool    `json:"rotate"`
+}
+
+// ApplicationTokenReceiptPayloadDto is the explicit ApplicationTokenReceiptPayloadDto protocol shape.
+type ApplicationTokenReceiptPayloadDto struct {
+	Project   string `json:"project"`
+	RequestId string `json:"requestId"`
 }
 
 // ApprovalAnswerPayloadDto is the explicit ApprovalAnswerPayloadDto protocol shape.
@@ -6133,7 +6296,7 @@ func (v ConversationFollowPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *ConversationFollowPayload) UnmarshalJSON(data []byte) error {
 	*v = ConversationFollowPayload{}
-	if matches("shape78", data) {
+	if matches("shape81", data) {
 		var chosen ConversationFollowPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6141,7 +6304,7 @@ func (v *ConversationFollowPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape79", data) {
+	if matches("shape82", data) {
 		var chosen ConversationFollowPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6200,7 +6363,7 @@ func (v *ConversationLatestResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape579", data) {
+	if matches("shape594", data) {
 		var chosen ConversationViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6292,7 +6455,8 @@ type DocumentCitationsPayloadDto struct {
 
 // DocumentDetailPayloadDto is the explicit DocumentDetailPayloadDto protocol shape.
 type DocumentDetailPayloadDto struct {
-	Document string `json:"document"`
+	Document string                             `json:"document"`
+	Scope    *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
 }
 
 // DocumentListPayloadDto is the explicit DocumentListPayloadDto protocol shape.
@@ -6366,7 +6530,7 @@ func (v *EventFirePayloadDtoData) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape103", data) {
+	if matches("shape112", data) {
 		var chosen EventFirePayloadDtoDataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6451,62 +6615,6 @@ type InformationAcquirePayloadDto struct {
 	Url       string                            `json:"url"`
 }
 
-// InformationAcquirePayloadDtoScope is a closed union: exactly one variant must be selected.
-type InformationAcquirePayloadDtoScope struct {
-	Variant1 *InformationAcquirePayloadDtoScopeVariant1Dto
-	Variant2 *InformationAcquirePayloadDtoScopeVariant2Dto
-}
-
-func (v InformationAcquirePayloadDtoScope) MarshalJSON() ([]byte, error) {
-	var chosen any
-	count := 0
-	if v.Variant1 != nil {
-		chosen = v.Variant1
-		count++
-	}
-	if v.Variant2 != nil {
-		chosen = v.Variant2
-		count++
-	}
-	if count != 1 {
-		return nil, errors.New("select exactly one union variant")
-	}
-	return json.Marshal(chosen)
-}
-func (v *InformationAcquirePayloadDtoScope) UnmarshalJSON(data []byte) error {
-	*v = InformationAcquirePayloadDtoScope{}
-	if matches("shape126", data) {
-		var chosen InformationAcquirePayloadDtoScopeVariant1Dto
-		if err := json.Unmarshal(data, &chosen); err != nil {
-			return err
-		}
-		v.Variant1 = &chosen
-		return nil
-	}
-	if matches("shape130", data) {
-		var chosen InformationAcquirePayloadDtoScopeVariant2Dto
-		if err := json.Unmarshal(data, &chosen); err != nil {
-			return err
-		}
-		v.Variant2 = &chosen
-		return nil
-	}
-	return errors.New("invalid union")
-}
-
-// InformationAcquirePayloadDtoScopeVariant1Dto is the explicit InformationAcquirePayloadDtoScopeVariant1Dto protocol shape.
-type InformationAcquirePayloadDtoScopeVariant1Dto struct {
-	IncludeShared *bool  `json:"includeShared,omitempty"`
-	Kind          string `json:"kind"`
-}
-
-// InformationAcquirePayloadDtoScopeVariant2Dto is the explicit InformationAcquirePayloadDtoScopeVariant2Dto protocol shape.
-type InformationAcquirePayloadDtoScopeVariant2Dto struct {
-	IncludeShared *bool  `json:"includeShared,omitempty"`
-	Kind          string `json:"kind"`
-	Project       string `json:"project"`
-}
-
 // InformationAcquisitionsPayloadDto is the explicit InformationAcquisitionsPayloadDto protocol shape.
 type InformationAcquisitionsPayloadDto struct {
 	Corpus *string                           `json:"corpus,omitempty"`
@@ -6565,7 +6673,7 @@ func (v InformationAwaitPayloadDtoSourcesItem) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationAwaitPayloadDtoSourcesItem) UnmarshalJSON(data []byte) error {
 	*v = InformationAwaitPayloadDtoSourcesItem{}
-	if matches("shape137", data) {
+	if matches("shape140", data) {
 		var chosen InformationAwaitPayloadDtoSourcesItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6573,7 +6681,7 @@ func (v *InformationAwaitPayloadDtoSourcesItem) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape138", data) {
+	if matches("shape141", data) {
 		var chosen InformationAwaitPayloadDtoSourcesItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6868,7 +6976,7 @@ func (v InformationStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 	*v = InformationStatusResult{}
-	if matches("shape632", data) {
+	if matches("shape647", data) {
 		var chosen InformationAcquisitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6876,7 +6984,7 @@ func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape668", data) {
+	if matches("shape683", data) {
 		var chosen InformationRevisionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6947,7 +7055,7 @@ func (v *InformationTagsGroupsPayloadDtoGroups) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape183", data) {
+	if matches("shape186", data) {
 		var chosen map[string][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7210,7 +7318,7 @@ func (v *OutgoingAdvertisePayloadDtoAgentCards) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape221", data) {
+	if matches("shape224", data) {
 		var chosen map[string]AgentCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7275,7 +7383,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape824", data) {
+	if matches("shape839", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7283,7 +7391,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape825", data) {
+	if matches("shape840", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7291,7 +7399,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape826", data) {
+	if matches("shape841", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7334,7 +7442,7 @@ func (v *OutgoingClaimResultDtoWork) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape811", data) {
+	if matches("shape826", data) {
 		var chosen OutgoingWorkDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7389,7 +7497,7 @@ func (v *OutgoingPeersResultDtoDetailsItemDtoAgentCard) UnmarshalJSON(data []byt
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape222", data) {
+	if matches("shape225", data) {
 		var chosen AgentCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7544,7 +7652,7 @@ func (v RelayLogPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayLogPayload{}
-	if matches("shape359", data) {
+	if matches("shape362", data) {
 		var chosen RelayLogPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7552,7 +7660,7 @@ func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape360", data) {
+	if matches("shape363", data) {
 		var chosen RelayLogPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7671,7 +7779,7 @@ func (v RelayTopicsPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayTopicsPayload{}
-	if matches("shape371", data) {
+	if matches("shape374", data) {
 		var chosen RelayTopicsPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7679,7 +7787,7 @@ func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape372", data) {
+	if matches("shape375", data) {
 		var chosen RelayTopicsPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7724,9 +7832,19 @@ type ScheduleDefinePayloadDto struct {
 	Zone     *string `json:"zone,omitempty"`
 }
 
+// ScheduleFilesPayloadDto is the explicit ScheduleFilesPayloadDto protocol shape.
+type ScheduleFilesPayloadDto struct {
+	Project *string `json:"project,omitempty"`
+}
+
 // ScheduleForgetPayloadDto is the explicit ScheduleForgetPayloadDto protocol shape.
 type ScheduleForgetPayloadDto struct {
 	Schedule string `json:"schedule"`
+}
+
+// ScheduleListPayloadDto is the explicit ScheduleListPayloadDto protocol shape.
+type ScheduleListPayloadDto struct {
+	Project *string `json:"project,omitempty"`
 }
 
 // SchedulePausePayloadDto is the explicit SchedulePausePayloadDto protocol shape.
@@ -7920,7 +8038,7 @@ func (v UnionStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 	*v = UnionStatusResult{}
-	if matches("shape931", data) {
+	if matches("shape946", data) {
 		var chosen IneligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7928,7 +8046,7 @@ func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape932", data) {
+	if matches("shape947", data) {
 		var chosen EligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8001,7 +8119,7 @@ func (v UsageCallsResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 	*v = UsageCallsResult{}
-	if matches("shape940", data) {
+	if matches("shape955", data) {
 		var chosen UsageAuditDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8009,7 +8127,7 @@ func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape948", data) {
+	if matches("shape963", data) {
 		var chosen UsageAttemptsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8199,7 +8317,7 @@ func (v Notification) MarshalJSON() ([]byte, error) {
 }
 func (v *Notification) UnmarshalJSON(data []byte) error {
 	*v = Notification{}
-	if matches("shape955", data) {
+	if matches("shape970", data) {
 		var chosen JobEventDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8207,7 +8325,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape956", data) {
+	if matches("shape971", data) {
 		var chosen JobDeltaDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8215,7 +8333,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape960", data) {
+	if matches("shape975", data) {
 		var chosen NotificationVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8223,7 +8341,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape962", data) {
+	if matches("shape977", data) {
 		var chosen NotificationVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8231,7 +8349,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape964", data) {
+	if matches("shape979", data) {
 		var chosen NotificationVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8239,7 +8357,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape971", data) {
+	if matches("shape986", data) {
 		var chosen NotificationVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8247,7 +8365,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape973", data) {
+	if matches("shape988", data) {
 		var chosen NotificationVariant7Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8255,7 +8373,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant7 = &chosen
 		return nil
 	}
-	if matches("shape975", data) {
+	if matches("shape990", data) {
 		var chosen NotificationVariant8Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8263,7 +8381,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant8 = &chosen
 		return nil
 	}
-	if matches("shape977", data) {
+	if matches("shape992", data) {
 		var chosen NotificationVariant9Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8271,7 +8389,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant9 = &chosen
 		return nil
 	}
-	if matches("shape979", data) {
+	if matches("shape994", data) {
 		var chosen NotificationVariant10Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8279,7 +8397,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant10 = &chosen
 		return nil
 	}
-	if matches("shape981", data) {
+	if matches("shape996", data) {
 		var chosen NotificationVariant11Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8692,6 +8810,16 @@ func (c *Client) ApplicationFiles(ctx context.Context, request ApplicationFilesR
 	return requestTyped[ApplicationFileListingDto](ctx, c, "application.files", request)
 }
 
+// ApplicationIdentityStatusRequest is the explicit ApplicationIdentityStatusRequest protocol shape.
+type ApplicationIdentityStatusRequest struct {
+	Project string `json:"project"`
+}
+
+// ApplicationIdentityStatus validates before submission and returns the paired result DTO.
+func (c *Client) ApplicationIdentityStatus(ctx context.Context, request ApplicationIdentityStatusRequest) (Reply[ApplicationIdentityStatusDto], error) {
+	return requestTyped[ApplicationIdentityStatusDto](ctx, c, "application.identity.status", request)
+}
+
 // ApplicationStorageSetRequest is the explicit ApplicationStorageSetRequest protocol shape.
 type ApplicationStorageSetRequest struct {
 	ApplicationRoot FileStoreReferenceDto   `json:"applicationRoot"`
@@ -8702,6 +8830,30 @@ type ApplicationStorageSetRequest struct {
 // ApplicationStorageSet validates before submission and returns the paired result DTO.
 func (c *Client) ApplicationStorageSet(ctx context.Context, request ApplicationStorageSetRequest) (Reply[ProjectViewDto], error) {
 	return requestTyped[ProjectViewDto](ctx, c, "application.storage.set", request)
+}
+
+// ApplicationTokenIssueRequest is the explicit ApplicationTokenIssueRequest protocol shape.
+type ApplicationTokenIssueRequest struct {
+	ExpiresInDays float64 `json:"expiresInDays"`
+	Project       string  `json:"project"`
+	RequestId     string  `json:"requestId"`
+	Rotate        bool    `json:"rotate"`
+}
+
+// ApplicationTokenIssue validates before submission and returns the paired result DTO.
+func (c *Client) ApplicationTokenIssue(ctx context.Context, request ApplicationTokenIssueRequest) (Reply[ApplicationCredentialDto], error) {
+	return requestTyped[ApplicationCredentialDto](ctx, c, "application.token.issue", request)
+}
+
+// ApplicationTokenReceiptRequest is the explicit ApplicationTokenReceiptRequest protocol shape.
+type ApplicationTokenReceiptRequest struct {
+	Project   string `json:"project"`
+	RequestId string `json:"requestId"`
+}
+
+// ApplicationTokenReceipt validates before submission and returns the paired result DTO.
+func (c *Client) ApplicationTokenReceipt(ctx context.Context, request ApplicationTokenReceiptRequest) (Reply[ApplicationTokenReceiptDto], error) {
+	return requestTyped[ApplicationTokenReceiptDto](ctx, c, "application.token.receipt", request)
 }
 
 // ApprovalAnswerRequest is the explicit ApprovalAnswerRequest protocol shape.
@@ -9038,7 +9190,8 @@ func (c *Client) DocumentCitations(ctx context.Context, request DocumentCitation
 
 // DocumentDetailRequest is the explicit DocumentDetailRequest protocol shape.
 type DocumentDetailRequest struct {
-	Document string `json:"document"`
+	Document string                             `json:"document"`
+	Scope    *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
 }
 
 // DocumentDetail validates before submission and returns the paired result DTO.
@@ -10523,8 +10676,9 @@ func (c *Client) ScheduleDefine(ctx context.Context, request ScheduleDefineReque
 	return requestTyped[ScheduleRecordDto](ctx, c, "schedule.define", request)
 }
 
-// ScheduleFilesRequest is the explicit Record protocol shape.
+// ScheduleFilesRequest is the explicit ScheduleFilesRequest protocol shape.
 type ScheduleFilesRequest struct {
+	Project *string `json:"project,omitempty"`
 }
 
 // ScheduleFiles validates before submission and returns the paired result DTO.
@@ -10542,8 +10696,9 @@ func (c *Client) ScheduleForget(ctx context.Context, request ScheduleForgetReque
 	return requestTyped[Unit](ctx, c, "schedule.forget", request)
 }
 
-// ScheduleListRequest is the explicit Record protocol shape.
+// ScheduleListRequest is the explicit ScheduleListRequest protocol shape.
 type ScheduleListRequest struct {
+	Project *string `json:"project,omitempty"`
 }
 
 // ScheduleList validates before submission and returns the paired result DTO.

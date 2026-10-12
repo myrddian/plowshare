@@ -138,6 +138,10 @@ def check(schema: dict[str, object], value: object) -> None:
                 datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 invalid = True
+        invalid |= any(
+            value.startswith(prefix)
+            for prefix in cast(list[str], schema.get("disallowPrefixes", []))
+        )
         invalid |= value in cast(list[str], schema.get("disallow", []))
         invalid |= bool(schema.get("safeRelativePath")) and (
             value.startswith("/") or "\\" in value or ".." in value.split("/")

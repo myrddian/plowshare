@@ -2,6 +2,7 @@ package plowshare
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -99,5 +100,34 @@ func TestRelayPublishRawUtf8Limit(t *testing.T) {
 		if _, err := project(catalog.Inputs["relay.publish"], data, true); err == nil {
 			t.Fatal("Oversized UTF-8 text accepted")
 		}
+	}
+}
+
+func TestApplicationCredentialsStayRedactedAndCorrelated(t *testing.T) {
+	secret := "pss_" + strings.Repeat("1", 48)
+	receipt := ApplicationTokenReceiptDto{Project: "app", RequestId: "11111111-1111-1111-1111-111111111111", TokenId: "22222222-2222-2222-2222-222222222222", Principal: "@service/22222222-2222-2222-2222-222222222222", ExpiresAt: "2026-11-01T00:00:00Z"}
+	value := ApplicationCredentialDto{Receipt: receipt, Credential: secret}
+	for _, diagnostic := range []string{fmt.Sprint(value), fmt.Sprintf("%+v", value), fmt.Sprintf("%#v", value)} {
+		if strings.Contains(diagnostic, secret) {
+			t.Fatal("Credential leaked in diagnostic")
+		}
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked, err := json.Marshal(map[string]string{"project": "app", "requestId": receipt.RequestId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deploymentMatches("application.token.issue", asked, data) {
+		t.Fatal("Own receipt refused")
+	}
+	asked, err = json.Marshal(map[string]string{"project": "foreign", "requestId": receipt.RequestId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deploymentMatches("application.token.issue", asked, data) {
+		t.Fatal("Foreign receipt accepted")
 	}
 }

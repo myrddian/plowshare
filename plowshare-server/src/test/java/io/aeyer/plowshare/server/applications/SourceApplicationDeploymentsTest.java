@@ -96,6 +96,28 @@ class SourceApplicationDeploymentsTest {
   }
 
   @Test
+  void malformed_service_is_a_caller_refusal_before_staging_or_reservation() {
+    for (String declaration :
+        List.of("null", "{\"handle\":\"worker\",\"role\":\"ADMIN\"}", "{\"handle\":\"worker\"}")) {
+      var request =
+          new Deploy(
+              "app",
+              UUID.randomUUID(),
+              null,
+              destination,
+              List.of(),
+              List.of(
+                  new File(
+                      "plowshare.json",
+                      "{\"version\":1,\"name\":\"app\",\"service\":" + declaration + "}")));
+      assertThrows(CallerFault.class, () -> service.deploy("owner", request));
+    }
+    assertFalse(Files.exists(directory.resolve("app")));
+    verifyNoInteractions(validator);
+    verify(store, never()).commit(any(), any());
+  }
+
+  @Test
   void refusal_does_not_activate_partial_source() {
     doThrow(new CallerFault("Invalid resources")).when(validator).validate(any(), any());
     assertThrows(CallerFault.class, () -> service.deploy("owner", deploy(UUID.randomUUID())));

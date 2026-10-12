@@ -3,6 +3,7 @@ import type { ApplicationSourceFile } from './application-deployments.ts';
 import type { RelayPayloads } from './relay.ts';
 import type { MessagingPayloads } from './messaging.ts';
 import type { UsagePayloads } from './usage.ts';
+import type { InformationScope } from './information.ts';
 import type { InformationPayloads } from './information-payloads.ts';
 import type { AdministrativePayloads } from './administration.ts';
 import type { FileStoreReference } from '../binding/filestores.ts';
@@ -75,7 +76,10 @@ export interface ExtendedPayloads
     readonly limit?: number;
   };
   'document.list': Page & { readonly q?: string };
-  'document.detail': { readonly document: string };
+  'document.detail': {
+    readonly document: string;
+    readonly scope?: InformationScope;
+  };
   'document.chunk': { readonly chunk: string };
   'document.rank': { readonly query: string; readonly limit?: number };
   'document.stance': { readonly document: string; readonly claim: string };
@@ -158,6 +162,17 @@ export interface ExtendedPayloads
   'admin.service.token.revoke': {
     readonly handle: string;
     readonly id: string;
+  };
+  'application.identity.status': { readonly project: string };
+  'application.token.issue': {
+    readonly project: string;
+    readonly requestId: string;
+    readonly expiresInDays: number;
+    readonly rotate: boolean;
+  };
+  'application.token.receipt': {
+    readonly project: string;
+    readonly requestId: string;
   };
   'application.deploy': {
     readonly project: string;
@@ -371,6 +386,9 @@ export const CLI_OPERATIONS = {
   'application files': 'application.files',
   'application read': 'application.file.read',
   'application save': 'application.file.save',
+  'application identity status': 'application.identity.status',
+  'application token issue': 'application.token.issue',
+  'application token receipt': 'application.token.receipt',
   'application deploy': 'application.deploy',
   'application activate': 'application.activate',
   'filestore list': 'filestore.list',

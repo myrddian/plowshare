@@ -26,6 +26,15 @@ public final class ProjectListingFilter {
   /** Unscoped listings must not retain access through a resource's earlier ownership. */
   public io.aeyer.plowshare.protocol.frames.Outcome filter(
       String operation, io.aeyer.plowshare.protocol.frames.Outcome outcome, String account) {
+    return filter(operation, outcome, account, null);
+  }
+
+  /** Explicit project listings have already enforced live membership at their owning service. */
+  public io.aeyer.plowshare.protocol.frames.Outcome filter(
+      String operation,
+      io.aeyer.plowshare.protocol.frames.Outcome outcome,
+      String account,
+      String selectedProject) {
     Object payload = outcome.payload();
     if (payload instanceof List<?> rows && operation.equals("trigger.list")) {
       payload =
@@ -37,7 +46,7 @@ public final class ProjectListingFilter {
       payload =
           rows.stream()
               .map(io.aeyer.plowshare.server.events.ScheduleRecord.class::cast)
-              .filter(row -> account.equals(row.definedBy()))
+              .filter(row -> selectedProject != null || account.equals(row.definedBy()))
               .toList();
     } else if (payload instanceof List<?> rows && operation.equals("firing.list")) {
       // FiringListHandler has already projected records into the v1 response shape.

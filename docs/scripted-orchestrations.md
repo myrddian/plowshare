@@ -134,7 +134,7 @@ at load time too, under the same sandbox deadline. Make module initialization pu
 | --- | --- |
 | `name` | Match the file stem. Use 1–64 lowercase letters, digits and underscores. The start tool is `orchestrate_<name>`. |
 | `description` | Explain the work to the calling agent. |
-| `model` | Existing configured model profile. Semantic delegates have their own definition's model; this field does not create a separate conductor model call. |
+| `model` | Omitted for native-only scripts; otherwise an existing configured model profile. Semantic delegates have their own definition's model; this field does not create a separate conductor model call. |
 | `tools` | Ordinary capabilities required by emitted commands. Unknown or unavailable tools are refused. |
 | `calls` | Allowed agent names. Nonempty calls make `agent_run` available without explicitly declaring it. The callee must satisfy normal delegation rules. |
 | `scopes` | Existing file capability scopes, if needed. Information scope is bound by the root account/home, not this list. |
@@ -161,6 +161,26 @@ Stage `check: 'required'` and `acceptance: 'written' | 'required'` use the exist
 service verification mechanisms and their prerequisites. `may-return-to` can only
 name earlier stages. The script must implement any corresponding state rollback;
 a manifest permission alone does not rewrite its JSON state.
+
+## Native-only scripts
+
+A deterministic script can declare `'native-only': true` and
+`'max-model-calls': 0`, omitting `model`. This is an immutable zero-call allowance,
+preserved across scheduling, journal recovery and human continuation. Ordinary
+agents and inference scripts still require a model and a positive allowance.
+
+Native-only manifests cannot request inference, delegate agents/orchestrations,
+enable checking/review/vision, board work, fallback or model sampling settings.
+The harness rejects inference/delegation commands again at dispatch and refuses
+model request construction. Caller limits and automatic grants cannot raise the
+zero-call allowance. Deterministic tools, stage transitions, waits and finish
+commands still run under the command cap, tool grants and normal journal lifecycle.
+Tools implemented by external providers retain their own behavior and authority;
+this allowance controls Plowshare model inference and delegation.
+
+Network Privacy Watch's `privacy_tick.js` uses this mode. Its scheduled Relay
+handoff needs no model binding and cannot spend model calls; investigation scripts
+continue to use the configured model when explicitly started.
 
 ## Step input and output
 

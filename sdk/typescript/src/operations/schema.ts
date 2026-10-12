@@ -1,3 +1,8 @@
+import {
+  identityStatusCheck,
+  tokenReceiptCheck,
+  applicationCredentialCheck,
+} from './application-identities.ts';
 import { fileStoreCatalogCheck } from './server-filestores.ts';
 import { validateDeploymentReply } from './application-deployments.ts';
 import { validateSwarmReply } from './swarm-types.ts';
@@ -248,6 +253,12 @@ export function decodeReply<K extends keyof Replies>(
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);
   validateDeploymentReply(type, decoded);
+  if (
+    (type === 'application.identity.status' && !identityStatusCheck(decoded)) ||
+    (type === 'application.token.receipt' && !tokenReceiptCheck(decoded)) ||
+    (type === 'application.token.issue' && !applicationCredentialCheck(decoded))
+  )
+    throw new Error('Invalid Application identity reply');
   validateEntryOrigins(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);

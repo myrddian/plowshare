@@ -222,6 +222,14 @@ public interface ServerClient {
 
   DocumentOutline describeDocument(String documentId) throws IOException;
 
+  /** Scoped metadata/outline read; access to the document covers its chapter hierarchy. */
+  default DocumentOutline describeDocument(
+      String documentId, io.aeyer.plowshare.protocol.InformationRequest.Scope scope)
+      throws IOException {
+    throw new IOException(
+        "Scoped document inspection is unavailable in this client implementation");
+  }
+
   record DocumentOutline(
       UUID documentId,
       String sourceName,

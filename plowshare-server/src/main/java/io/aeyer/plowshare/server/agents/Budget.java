@@ -127,6 +127,11 @@ public final class Budget {
     return new Budget(maxModelCalls);
   }
 
+  /** An immutable zero-call allowance for deterministic native execution; never unlimited. */
+  public static Budget noCalls() {
+    return new Budget(0);
+  }
+
   /**
    * A shared budget whose claims must be durably charged before a model request is sent. The charge
    * runs once per permitted call, never for an exhausted budget. A failed charge propagates without
@@ -195,8 +200,7 @@ public final class Budget {
    * may spend is a decision and an operator may take a different one.
    *
    * @param alreadySpent what has been spent against it, as the row records it
-   * @throws CallerFault if the limit is non-positive — {@link #of}'s own refusal, reached through
-   *     the call this method opens with
+   * @throws CallerFault if the limit is negative; zero rehydrates native execution only
    * @throws IllegalArgumentException if {@code alreadySpent} is negative, or if it exceeds the
    *     limit. The last is the invariant {@link #trySpend} holds and {@code
    *     conversations_spent_within_budget} holds in Postgres; a row that broke it would be a
@@ -204,7 +208,7 @@ public final class Budget {
    *     back in silence would launder that into a fresh allowance
    */
   public static Budget resumed(int maxModelCalls, int alreadySpent) {
-    Budget budget = of(maxModelCalls);
+    Budget budget = maxModelCalls == 0 ? noCalls() : of(maxModelCalls);
     if (alreadySpent < 0) {
       throw new IllegalArgumentException(
           "a budget cannot have spent " + alreadySpent + " model calls");
@@ -296,8 +300,11 @@ public final class Budget {
     try {
       Integer ceiling = limit;
       int used = spent.get();
-      if (charge != null || ceiling == null || used < ceiling || used == Integer.MAX_VALUE)
-        return false;
+      if (charge != null
+          || ceiling == null
+          || ceiling == 0
+          || used < ceiling
+          || used == Integer.MAX_VALUE) return false;
       int next = (int) Math.min(Integer.MAX_VALUE, (long) used + chunk);
       commit.accept(next);
       limit = next;
@@ -438,6 +445,8 @@ public final class Budget {
    * @throws IllegalStateException if this budget has no ceiling to raise
    */
   public void changeTo(int maxModelCalls) {
+    if (Integer.valueOf(0).equals(limit))
+      throw new CallerFault("Native execution cannot acquire a model-call allowance");
     if (maxModelCalls <= 0) {
       // The identical sentence of() gives, out of the one method that
       // holds it -- see tooSmall's own javadoc for why these two share

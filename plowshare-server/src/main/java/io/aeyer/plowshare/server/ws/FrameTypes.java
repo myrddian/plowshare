@@ -33,6 +33,9 @@ import java.util.regex.Pattern;
  * now, both readings ask through it, and the constant below names a handler that really exists.
  */
 public final class FrameTypes {
+  public static final String APPLICATION_IDENTITY_STATUS = "application.identity.status";
+  public static final String APPLICATION_TOKEN_ISSUE = "application.token.issue";
+  public static final String APPLICATION_TOKEN_RECEIPT = "application.token.receipt";
   public static final String APPLICATION_DEPLOY = "application.deploy";
   public static final String APPLICATION_ACTIVATE = "application.activate";
   public static final String APPLICATION_DEPLOYMENT_STATUS = "application.deployment.status";

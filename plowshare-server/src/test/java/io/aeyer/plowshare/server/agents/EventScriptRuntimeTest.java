@@ -159,4 +159,65 @@ class EventScriptRuntimeTest {
     verify(scripts, never()).prepareNext(anyString(), any(), anyBoolean());
     verify(tool, never()).run(anyString(), any());
   }
+
+  private AgentDefinition nativeAgent() {
+    return new AgentDefinition(
+        "native_worker",
+        "fixture",
+        null,
+        Sampling.Intent.DEFAULT,
+        Sampling.NONE,
+        List.of("probe"),
+        List.of(),
+        List.of(),
+        10,
+        0,
+        SOURCE,
+        true,
+        true,
+        false,
+        false,
+        false,
+        AgentDefinition.Fallback.NONE,
+        List.of(),
+        null,
+        false,
+        List.of());
+  }
+
+  private Outcome runNative(JobRuntime runtime, Budget budget) {
+    return runtime.run(
+        nativeAgent(),
+        "native input",
+        Home.global(),
+        budget,
+        () -> false,
+        null,
+        JobWatch.UNWATCHED,
+        transcript(Origin.EVENT),
+        TurnCap.of(10),
+        List.of(),
+        "operator");
+  }
+
+  @Test
+  void nativeScriptExecutesWithAnExhaustedZeroBudgetWithoutInference() {
+    var runtime = runtime(new ScriptStore.Finish("done"));
+    assertEquals(Outcome.Ending.ANSWERED, runNative(runtime, Budget.noCalls()).ending());
+    verify(scripts).prepareNext(anyString(), any(), eq(true));
+    verifyNoInteractions(models);
+  }
+
+  @Test
+  void nativeScriptCannotDelegateEvenWhenCallerSuppliesPositiveBudget() {
+    for (String command :
+        List.of("agent_run", "model_infer", "orchestrate_paid", "orchestration_check")) {
+      reset(scripts);
+      var runtime = runtime(new ScriptStore.Tool(command, "{}", false));
+      assertThrows(IllegalStateException.class, () -> runNative(runtime, Budget.of(100)));
+    }
+    verifyNoInteractions(models);
+    verify(tool, never()).run(anyString(), any());
+    verify(scripts, never()).started(anyString(), anyInt(), anyString());
+  }
 }

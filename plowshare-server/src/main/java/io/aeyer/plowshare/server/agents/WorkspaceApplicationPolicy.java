@@ -91,13 +91,16 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
     JsonNode body = JSON.readTree(text);
     io.aeyer.plowshare.server.applications.ApplicationToolScopes.parse(text);
     validateRouting(body.get("routing"));
+    var service =
+        io.aeyer.plowshare.server.applications.ApplicationServiceManifest.declaration(text);
+    Map<String, ProjectRole> grants = new HashMap<>();
+    service.ifPresent(value -> grants.put(value.handle(), ProjectRole.valueOf(value.role())));
     JsonNode access = body.get("access");
-    if (access == null) return new Boundary(Kind.APPLICATION, Map.of());
+    if (access == null) return new Boundary(Kind.APPLICATION, grants);
     fields(access, List.of("accounts"));
     JsonNode accounts = access.get("accounts");
     if (accounts == null || !accounts.isArray() || accounts.size() > 256)
       throw new IllegalArgumentException("Application access needs a bounded accounts list");
-    Map<String, ProjectRole> grants = new HashMap<>();
     for (JsonNode entry : accounts) {
       fields(entry, List.of("handle", "role"));
       JsonNode handle = entry.get("handle"), role = entry.get("role");

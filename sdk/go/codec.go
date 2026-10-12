@@ -274,6 +274,41 @@ func decodePush(data []byte) (ServerPush, error) {
 
 // Transport boundary correlation supplements schema validation for retained deployment receipts.
 func deploymentMatches(operation string, request, reply []byte) bool {
+	if slices.Contains([]string{"application.identity.status", "application.token.issue", "application.token.receipt"}, operation) {
+		type identityCoordinates struct {
+			Project   string `json:"project"`
+			RequestID string `json:"requestId"`
+			TokenID   string `json:"tokenId"`
+			Principal string `json:"principal"`
+		}
+		var asked identityCoordinates
+		if json.Unmarshal(request, &asked) != nil {
+			return false
+		}
+		if operation == "application.identity.status" {
+			var status struct {
+				Project  string               `json:"project"`
+				Identity *identityCoordinates `json:"identity"`
+			}
+			if json.Unmarshal(reply, &status) != nil || status.Project != asked.Project {
+				return false
+			}
+			return status.Identity == nil || status.Identity.Project == status.Project && status.Identity.Principal == "@service/"+status.Identity.TokenID
+		}
+		var answered identityCoordinates
+		if operation == "application.token.issue" {
+			var credential struct {
+				Receipt identityCoordinates `json:"receipt"`
+			}
+			if json.Unmarshal(reply, &credential) != nil {
+				return false
+			}
+			answered = credential.Receipt
+		} else if json.Unmarshal(reply, &answered) != nil {
+			return false
+		}
+		return answered.Project == asked.Project && strings.EqualFold(answered.RequestID, asked.RequestID) && answered.Principal == "@service/"+answered.TokenID
+	}
 	if !slices.Contains([]string{"application.deploy", "application.activate", "application.deployment.status", "application.deployment.receipt"}, operation) {
 		return true
 	}

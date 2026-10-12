@@ -70,6 +70,7 @@ internal static class Validation
                     || Flag(schema, "trimmed") && text != text.Trim()
                     || Flag(schema, "noNul") && text.Contains('\0')
                     || !Matches(schema, "pattern", text)
+                    || schema.TryGetProperty("disallowPrefixes", out var prefixes) && prefixes.EnumerateArray().Any(prefix => text.StartsWith(prefix.GetString()!, StringComparison.Ordinal))
                     || schema.TryGetProperty("disallow", out var disallowed) && disallowed.EnumerateArray().Any(v => v.GetString() == text)
                     || Flag(schema, "canonicalRelativePath") && !CanonicalRelativePath(text)
                     || Flag(schema, "safeRelativePath") && (text.StartsWith('/') || text.Contains('\\') || text.Split('/').Contains(".."));

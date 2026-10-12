@@ -334,6 +334,198 @@
   },
   {
     "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 30,
+      "rotate": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 0,
+      "rotate": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 366,
+      "rotate": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 30,
+      "rotate": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "bad",
+      "expiresInDays": 30,
+      "rotate": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "personal:operator",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 30,
+      "rotate": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.issue",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expiresInDays": 30,
+      "rotate": false,
+      "extra": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "application.token.receipt",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.identity.status",
+    "value": {
+      "project": "fixture",
+      "identity": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.token.receipt",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tokenId": "11111111-1111-1111-1111-111111111111",
+      "principal": "@service/11111111-1111-1111-1111-111111111111",
+      "expiresAt": "2026-11-01T00:00:00Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.token.receipt",
+    "value": {
+      "project": "fixture",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "tokenId": "11111111-1111-1111-1111-111111111111",
+      "principal": "forged",
+      "expiresAt": "2026-11-01T00:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "application.token.issue",
+    "value": {
+      "receipt": {
+        "project": "fixture",
+        "requestId": "11111111-1111-1111-1111-111111111111",
+        "tokenId": "11111111-1111-1111-1111-111111111111",
+        "principal": "@service/11111111-1111-1111-1111-111111111111",
+        "expiresAt": "2026-11-01T00:00:00Z"
+      },
+      "credential": "pss_111111111111111111111111111111111111111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "application.token.issue",
+    "value": {
+      "receipt": {
+        "project": "fixture",
+        "requestId": "11111111-1111-1111-1111-111111111111",
+        "tokenId": "11111111-1111-1111-1111-111111111111",
+        "principal": "@service/11111111-1111-1111-1111-111111111111",
+        "expiresAt": "2026-11-01T00:00:00Z"
+      },
+      "credential": "invalid"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.list",
+    "value": {
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "schedule.files",
+    "value": {
+      "project": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "document.detail",
+    "value": {
+      "document": "11111111-1111-1111-1111-111111111111",
+      "scope": {
+        "kind": "project",
+        "project": "fixture",
+        "includeShared": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "document.detail",
+    "value": {
+      "document": "11111111-1111-1111-1111-111111111111",
+      "scope": {
+        "kind": "project",
+        "project": "fixture",
+        "extra": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "project.list",
     "value": {},
     "valid": true

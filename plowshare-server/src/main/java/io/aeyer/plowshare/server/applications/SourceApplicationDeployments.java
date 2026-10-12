@@ -26,12 +26,25 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
   private final FileStores fileStores;
   private final ApplicationPackageValidator validator;
 
+  private final ApplicationIdentities identities;
+
   public SourceApplicationDeployments(
       ApplicationDeploymentStore store,
       ProjectMembers members,
       ProjectWorkspaces projects,
       FileStores fileStores,
       ApplicationPackageValidator validator) {
+    this(store, members, projects, fileStores, validator, null);
+  }
+
+  public SourceApplicationDeployments(
+      ApplicationDeploymentStore store,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      FileStores fileStores,
+      ApplicationPackageValidator validator,
+      ApplicationIdentities identities) {
+    this.identities = identities;
     this.store = store;
     this.members = members;
     this.projects = projects;
@@ -70,12 +83,29 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
         new ApplicationPlacement(
             new FileStoreReference(destination.store(), path), request.writableAreas());
     var resolved = resolve(account, request.project(), destination, placement);
+    var manifest =
+        request.files().stream()
+            .filter(f -> f.path().equals("plowshare.json"))
+            .findFirst()
+            .orElseThrow()
+            .text();
+    var service = serviceDeclaration(manifest);
+    List<File> files = request.files();
+    if (service != null) {
+      if (identities == null) throw new CallerFault("Application-owned identities are unavailable");
+      var retainedIdentity = identities.status(account, request.project()).identity();
+      String provisional =
+          retainedIdentity == null ? "@service/" + UUID.randomUUID() : retainedIdentity.principal();
+      // Validate all source before reserving authority. The provisional UUID is never persisted
+      // as an identity; inheritance needs a syntactically valid principal during dry admission.
+      files = withManifest(files, resolveServiceManifest(manifest, provisional));
+    }
     // A new, unpredictable revision directory is never overwritten, including after crashes.
     try {
       Files.createDirectories(resolved.root().getParent());
       resolve(account, request.project(), destination, placement);
       Files.createDirectory(resolved.root());
-      for (var file : request.files()) {
+      for (var file : files) {
         Path target = resolved.root().resolve(file.path());
         var fence = sourceFence(request.project(), resolved.root());
         if (!fence.permits(target)) throw new CallerFault("Application source escaped staging");
@@ -94,21 +124,46 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
             LinkOption.NOFOLLOW_LINKS);
       }
       WorkspaceApplicationPolicy.parse(
-          request.files().stream()
+          files.stream()
               .filter(f -> f.path().equals("plowshare.json"))
               .findFirst()
               .orElseThrow()
               .text(),
           request.project());
       validator.validate(request.project(), resolved.root());
+      if (service != null) {
+        var binding = identities.reserve(account, request.project(), service);
+        files =
+            withManifest(
+                request.files(), ApplicationServiceManifest.resolve(manifest, binding.principal()));
+        validateFiles(files);
+        Files.writeString(
+            resolved.root().resolve("plowshare.json"),
+            files.stream()
+                .filter(f -> f.path().equals("plowshare.json"))
+                .findFirst()
+                .orElseThrow()
+                .text(),
+            StandardCharsets.UTF_8,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            LinkOption.NOFOLLOW_LINKS);
+        WorkspaceApplicationPolicy.parse(
+            files.stream()
+                .filter(f -> f.path().equals("plowshare.json"))
+                .findFirst()
+                .orElseThrow()
+                .text(),
+            request.project());
+        validator.validate(request.project(), resolved.root());
+      }
       if (!resolve(account, request.project(), destination, placement).equals(resolved))
         throw new CallerFault("FileStore placement changed while staging the Application");
-    } catch (IOException invalid) {
+    } catch (IOException | IllegalArgumentException invalid) {
       throw new CallerFault("Application source could not be staged or its manifest is invalid");
     }
     var retained =
         new ApplicationDeploymentStore.Retained(
-            new Release(revision, digest, request.files().size()), destination, placement);
+            new Release(revision, digest(files), files.size()), destination, placement);
     return store.commit(
         account,
         new ApplicationDeploymentStore.Mutation(
@@ -118,7 +173,31 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
             fingerprint,
             retained,
             resolved.root(),
-            true));
+            true,
+            ApplicationIdentitySource.read(resolved.root())));
+  }
+
+  private static io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration serviceDeclaration(
+      String source) {
+    try {
+      return ApplicationServiceManifest.declaration(source).orElse(null);
+    } catch (IllegalArgumentException invalid) {
+      throw new CallerFault("Invalid Application service declaration");
+    }
+  }
+
+  private static String resolveServiceManifest(String source, String principal) {
+    try {
+      return ApplicationServiceManifest.resolve(source, principal);
+    } catch (IllegalArgumentException invalid) {
+      throw new CallerFault("Application executionAccount conflicts with its owned identity");
+    }
+  }
+
+  private static List<File> withManifest(List<File> files, String text) {
+    return files.stream()
+        .map(file -> file.path().equals("plowshare.json") ? new File(file.path(), text) : file)
+        .toList();
   }
 
   @Override
@@ -152,7 +231,7 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
               .orElseThrow()
               .text(),
           request.project());
-    } catch (IOException invalid) {
+    } catch (IOException | IllegalArgumentException invalid) {
       throw new CallerFault("Retained Application manifest is invalid");
     }
     validator.validate(request.project(), resolved.root());
@@ -165,7 +244,8 @@ public final class SourceApplicationDeployments implements ApplicationDeployment
             fingerprint,
             retained,
             resolved.root(),
-            false));
+            false,
+            ApplicationIdentitySource.read(resolved.root())));
   }
 
   @Override

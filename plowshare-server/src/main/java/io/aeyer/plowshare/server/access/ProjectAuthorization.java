@@ -160,6 +160,9 @@ public class ProjectAuthorization {
         || operation.startsWith("job.")
         || operation.startsWith("board.")
         || operation.equals("swarm.types")
+        || operation.equals("document.detail")
+        || operation.equals("schedule.list")
+        || operation.equals("schedule.files")
         || operation.startsWith("orchestration.")
         || operation.startsWith("message.")
         || operation.startsWith("union.")
@@ -253,6 +256,12 @@ public class ProjectAuthorization {
         && !operation.equals("admin.status")
         && (!serviceOperation(operation) || SERVER.contains(operation)))
       throw new CallerFault("This operation is outside service-token project scopes");
+    if (Set.of(
+            "application.identity.status", "application.token.issue", "application.token.receipt")
+        .contains(operation)) {
+      accounts.requireServerAdmin(account);
+      return;
+    }
     if (Set.of("application.create", "application.storage.set").contains(operation) && service)
       throw new CallerFault("Service tokens cannot admit Application storage");
     if (Set.of("application.create", "application.storage.set").contains(operation)

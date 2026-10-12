@@ -63,6 +63,23 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
         .toList();
   }
 
+  public List<ScheduledWork.File> list(String account, String project) {
+    if (project == null
+        || project.isBlank()
+        || !project.equals(project.strip())
+        || project.length() > 256
+        || project.codePoints().anyMatch(Character::isISOControl)
+        || project.startsWith("personal:")
+        || project.startsWith("Personal:")
+        || io.aeyer.plowshare.server.archive.ClientProjects.privateProject(project))
+      throw new CallerFault("Choose an ordinary project for schedule inspection");
+    members.requireRole(project, account, io.aeyer.plowshare.server.archive.ProjectRole.VIEWER);
+    return store.sources().stream()
+        .filter(s -> project.equals(s.project()))
+        .flatMap(s -> store.files(s).stream())
+        .toList();
+  }
+
   public void poll() {
     for (var source : store.sources()) reconcile(source);
   }

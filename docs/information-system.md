@@ -338,3 +338,17 @@ Their first Markdown heading uses the research question and supplies the display
 when text extraction completes. Feedback retains the same resource name and creates a
 new revision. Runs offers **Read retained report** for the main report revision, with
 the run's project scope; reading leaves the report as a draft until explicitly finalised.
+
+## Project document structure over WebSocket
+
+`document.detail` accepts an optional Information scope, for example
+`{document: "<revision UUID>", scope: {kind: "project", project: "mychatbot", includeShared: false}}`.
+It returns the authorized document's metadata and hierarchy/outline; it does not
+return document text. Accounts need live VIEWER access and the document must be
+visible in that scope. Service tokens must select an explicitly granted project;
+they cannot enumerate global or foreign documents. Scope omission preserves the
+existing human personal-space behavior. Unknown scope fields and malformed IDs
+are refused before corpus reads. There is no separate chapter permission boundary:
+access to the document permits its outline. All SDK request contracts expose this
+scope. Existing Information record Markdown content APIs remain the mechanism used
+by the privacy Application for per-device documents and linked issues.

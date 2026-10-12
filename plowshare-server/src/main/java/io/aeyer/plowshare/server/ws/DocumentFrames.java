@@ -115,6 +115,7 @@ public class DocumentFrames implements FrameArea {
         secured.put(
             type,
             (payload, asking) -> {
+              if (type.equals(FrameTypes.DOCUMENT_DETAIL)) DocumentDetailHandler.validate(payload);
               var context =
                   access.resolve(
                       asking.requireHandle(type),

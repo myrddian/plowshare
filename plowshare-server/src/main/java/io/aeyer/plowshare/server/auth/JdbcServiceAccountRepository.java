@@ -169,6 +169,13 @@ public class JdbcServiceAccountRepository implements ServiceAccountRepository {
   }
 
   @Override
+  public boolean applicationOwned(UUID id) {
+    return !jdbc.queryForList(
+            "SELECT 1 FROM application_identities WHERE token_id=?", Integer.class, id)
+        .isEmpty();
+  }
+
+  @Override
   public void rotate(UUID id, String digest, OffsetDateTime expires) {
     if (jdbc.update(
             "UPDATE service_tokens SET digest=?,expires_at=?,revoked_at=NULL WHERE id=?",

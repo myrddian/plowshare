@@ -309,6 +309,21 @@ public class WsServerClient implements ServerClient, AutoCloseable {
   }
 
   @Override
+  public DocumentOutline describeDocument(
+      String documentId, io.aeyer.plowshare.protocol.InformationRequest.Scope scope)
+      throws IOException {
+    Objects.requireNonNull(scope, "scope");
+    UUID document = UUID.fromString(ContractChecks.identity(documentId, "document"));
+    if (scope.project() != null
+        && (!scope.project().equals(scope.project().strip()) || scope.project().length() > 256))
+      throw new IllegalArgumentException("Invalid document project scope");
+    return ask(
+        "document.detail",
+        fields("document", document.toString(), "scope", scope),
+        DocumentOutline.class);
+  }
+
+  @Override
   public Citations citations(String conversationId, String documentId, Integer limit)
       throws IOException {
     conversationId = ContractChecks.optionalIdentity(conversationId, "conversation");

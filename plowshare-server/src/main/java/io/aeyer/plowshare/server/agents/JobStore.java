@@ -357,7 +357,8 @@ public final class JobStore implements AutoCloseable, EventRuns {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(home, "home");
-    Budget budget = Budget.of(definition.maxModelCalls());
+    Budget budget =
+        definition.nativeOnly() ? Budget.noCalls() : Budget.of(definition.maxModelCalls());
     // A conversation of its own, and this door is the one origin that OWNS
     // the allowance on its row: there is no parent to inherit from and no
     // pass sharing one, so the budget built two lines up is this
@@ -498,7 +499,10 @@ public final class JobStore implements AutoCloseable, EventRuns {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(ended, "ended");
-    Budget budget = Budget.of(maxModelCalls == null ? definition.maxModelCalls() : maxModelCalls);
+    Budget budget =
+        definition.nativeOnly()
+            ? Budget.noCalls()
+            : Budget.of(maxModelCalls == null ? definition.maxModelCalls() : maxModelCalls);
     Transcript log =
         logs == null
             ? Transcript.NONE

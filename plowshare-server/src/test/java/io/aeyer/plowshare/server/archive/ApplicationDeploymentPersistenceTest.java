@@ -243,4 +243,274 @@ class ApplicationDeploymentPersistenceTest {
             Integer.class,
             id));
   }
+
+  private io.aeyer.plowshare.server.applications.ApplicationIdentities ownedLifecycle() {
+    var identities =
+        new io.aeyer.plowshare.server.applications.OwnedApplicationIdentities(
+            new io.aeyer.plowshare.server.applications.JdbcApplicationIdentityRepository(jdbc),
+            new io.aeyer.plowshare.server.auth.JdbcServiceAccountRepository(jdbc),
+            new io.aeyer.plowshare.server.auth.AdminStore(jdbc),
+            new JdbcProjectMembers(jdbc),
+            projects,
+            work,
+            event -> {});
+    store = new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities);
+    deployments =
+        new SourceApplicationDeployments(
+            store,
+            new JdbcProjectMembers(jdbc),
+            projects,
+            files,
+            (project, root) -> {},
+            identities);
+    return identities;
+  }
+
+  private Deploy ownedRequest(UUID requestId, UUID expected, String handle) {
+    var original = request(requestId, expected, "native source");
+    String manifest = original.files().getFirst().text();
+    manifest =
+        manifest.substring(0, manifest.length() - 1)
+            + ",\"service\":{\"handle\":\""
+            + handle
+            + "\",\"role\":\"CONTRIBUTOR\"}}";
+    return new Deploy(
+        name,
+        requestId,
+        expected,
+        original.destination(),
+        original.writableAreas(),
+        List.of(new File("plowshare.json", manifest), original.files().get(1)));
+  }
+
+  @Test
+  void ownedDeploymentReservesDormantCredentialAndSchedulesUseTheStablePrincipal() {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    var request = ownedRequest(UUID.randomUUID(), null, handle);
+    var deployed = deployments.deploy("deployer", request);
+    var reserved = identities.status("deployer", name).identity();
+    assertEquals(io.aeyer.plowshare.protocol.ApplicationIdentity.State.ACTIVE, reserved.state());
+    assertFalse(reserved.credentialIssued());
+    assertFalse(
+        jdbc.queryForObject("SELECT account_active(?)", Boolean.class, reserved.principal()));
+    verify(schedules).register(reserved.principal(), projects.id(name), "server");
+    assertEquals(deployed, deployments.deploy("deployer", request));
+    var credentials =
+        new io.aeyer.plowshare.server.auth.JdbcServiceCredentialsRepository(
+            jdbc, java.time.Clock.systemUTC());
+    UUID issueId = UUID.randomUUID();
+    var issued =
+        identities.issue(
+            "deployer",
+            new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(name, issueId, 30, false));
+    assertEquals(reserved.tokenId(), issued.receipt().tokenId());
+    assertTrue(credentials.authentication(issued.credential()).isPresent());
+    assertEquals(issued.receipt(), identities.receipt("deployer", name, issueId));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            identities.issue(
+                "deployer",
+                new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                    name, issueId, 30, false)));
+    var rotated =
+        identities.issue(
+            "deployer",
+            new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                name, UUID.randomUUID(), 30, true));
+    assertEquals(reserved.tokenId(), rotated.receipt().tokenId());
+    assertTrue(credentials.authentication(issued.credential()).isEmpty());
+    assertTrue(credentials.authentication(rotated.credential()).isPresent());
+    var services =
+        new io.aeyer.plowshare.server.auth.ServiceAccounts(
+            new io.aeyer.plowshare.server.auth.JdbcServiceAccountRepository(jdbc),
+            work,
+            new io.aeyer.plowshare.server.auth.AdminStore(jdbc),
+            new JdbcProjectMembers(jdbc),
+            event -> {});
+    assertThrows(
+        CallerFault.class, () -> services.rotate("deployer", handle, reserved.tokenId(), 30));
+    services.revoke("deployer", handle, reserved.tokenId());
+    assertTrue(credentials.authentication(rotated.credential()).isEmpty());
+  }
+
+  @Test
+  void failedFirstActivationKeepsDormantReservationAndRollsBackSourceMembershipAndHead() {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    doThrow(new CallerFault("fixture enrollment failure"))
+        .when(schedules)
+        .register(anyString(), anyLong(), eq("server"));
+    assertThrows(
+        CallerFault.class,
+        () -> deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle)));
+    var reserved = identities.status("deployer", name).identity();
+    assertEquals(io.aeyer.plowshare.protocol.ApplicationIdentity.State.RESERVED, reserved.state());
+    assertFalse(
+        jdbc.queryForObject("SELECT account_active(?)", Boolean.class, reserved.principal()));
+    assertTrue(projects.find(name).isEmpty());
+    assertNull(deployments.status("deployer", name).activeRevision());
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM service_token_scopes WHERE token_id=?",
+            Integer.class,
+            reserved.tokenId()));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            identities.issue(
+                "deployer",
+                new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                    name, UUID.randomUUID(), 30, false)));
+    reset(schedules);
+    deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle));
+    assertEquals(reserved.tokenId(), identities.status("deployer", name).identity().tokenId());
+  }
+
+  @Test
+  void nativeZeroBudgetSurvivesAConversationRoundTripAndCannotRecordSpending() {
+    deployments.deploy("deployer", request(UUID.randomUUID(), null, "native"));
+    var conversations = new ConversationStore(jdbc);
+    var record = conversations.open(Home.of(name), Budget.noCalls());
+    assertEquals(0, new ConversationStore(jdbc).find(record.id()).orElseThrow().budget().limit());
+    assertThrows(ArchiveException.class, () -> conversations.increaseBudget(record.id(), 1, 0));
+    assertThrows(ArchiveException.class, () -> conversations.turnEnded(record.id(), Budget.of(1)));
+    assertThrows(ArchiveException.class, () -> conversations.turnEnded(record.id(), Budget.none()));
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () -> jdbc.update("UPDATE conversations SET budget_spent=1 WHERE id=?", record.id()));
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () -> jdbc.update("UPDATE conversations SET budget_total=-1 WHERE id=?", record.id()));
+  }
+
+  @Test
+  void concurrentReservationsRetainOneIdentityAndNeverAdoptAnExistingHandle() throws Exception {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    var declaration =
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration(handle, "CONTRIBUTOR");
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = executor.submit(() -> identities.reserve("deployer", name, declaration));
+      var second = executor.submit(() -> identities.reserve("deployer", name, declaration));
+      assertEquals(
+          first.get(20, TimeUnit.SECONDS).tokenId(), second.get(20, TimeUnit.SECONDS).tokenId());
+    }
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM service_tokens WHERE owner_handle=?", Integer.class, handle));
+    assertThrows(
+        CallerFault.class, () -> identities.reserve("deployer", name + "-foreign", declaration));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            identities.reserve(
+                "deployer",
+                name + "-human",
+                new io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration(
+                    "deployer", "VIEWER")));
+  }
+
+  @Test
+  void concurrentOwnedActivationCommitsOnlyOneHeadAndUsesTheRetainedReservation() throws Exception {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    var declaration =
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Declaration(handle, "CONTRIBUTOR");
+    var reserved = identities.reserve("deployer", name, declaration);
+    java.util.concurrent.Callable<Boolean> deploy =
+        () -> {
+          try {
+            deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle));
+            return true;
+          } catch (CallerFault stale) {
+            return false;
+          }
+        };
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = executor.submit(deploy);
+      var second = executor.submit(deploy);
+      assertNotEquals(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS));
+    }
+    assertEquals(reserved.tokenId(), identities.status("deployer", name).identity().tokenId());
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM application_deployment_receipts WHERE project_id=?",
+            Integer.class,
+            projects.id(name)));
+    verify(schedules, times(1)).register(reserved.principal(), projects.id(name), "server");
+  }
+
+  @Test
+  void concurrentIssuanceStoresOneReceiptAndUpdatesItsCurrentGeneration() throws Exception {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle));
+    UUID id = UUID.randomUUID();
+    var request = new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(name, id, 30, false);
+    java.util.concurrent.Callable<Boolean> issue =
+        () -> {
+          try {
+            identities.issue("deployer", request);
+            return true;
+          } catch (CallerFault retained) {
+            return false;
+          }
+        };
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = executor.submit(issue);
+      var second = executor.submit(issue);
+      assertNotEquals(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS));
+    }
+    assertEquals(id, identities.status("deployer", name).identity().credentialRequestId());
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM application_token_receipts WHERE request_id=?",
+            Integer.class,
+            id));
+    var rotated =
+        identities.issue(
+            "deployer",
+            new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                name, UUID.randomUUID(), 30, true));
+    assertEquals(
+        rotated.receipt().requestId(),
+        identities.status("deployer", name).identity().credentialRequestId());
+  }
+
+  @Test
+  void invalidSourceNeverReservesAuthorityAndRemovedSourceCannotDropIdentity() {
+    var identities = ownedLifecycle();
+    String handle = "worker-" + UUID.randomUUID();
+    deployments =
+        new SourceApplicationDeployments(
+            store,
+            new JdbcProjectMembers(jdbc),
+            projects,
+            files,
+            (project, root) -> {
+              throw new CallerFault("invalid package");
+            },
+            identities);
+    assertThrows(
+        CallerFault.class,
+        () -> deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle)));
+    assertNull(identities.status("deployer", name).identity());
+    identities = ownedLifecycle();
+    var deployed = deployments.deploy("deployer", ownedRequest(UUID.randomUUID(), null, handle));
+    var retained = identities.status("deployer", name).identity();
+    assertThrows(
+        CallerFault.class,
+        () ->
+            deployments.deploy(
+                "deployer", request(UUID.randomUUID(), deployed.release().revision(), "manual")));
+    assertEquals(
+        deployed.release().revision(), deployments.status("deployer", name).activeRevision());
+    assertEquals(retained, identities.status("deployer", name).identity());
+  }
 }

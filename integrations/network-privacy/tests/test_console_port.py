@@ -23,6 +23,10 @@ from plowshare.contracts import (
     OrchestrationReceiptResultDto,
     OrchestrationStartRequest,
     OrchestrationStartResultDto,
+    ScheduleFileDto,
+    ScheduleFilesRequest,
+    ScheduleListRequest,
+    ScheduleRecordDto,
 )
 from support import configuration
 
@@ -79,8 +83,11 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
     async def test_schedule_runtime_does_not_borrow_global_account_authority(
         self,
     ) -> None:
+        self.client.request.return_value = Reply("OK", None, ())
         self.assertIsNone(await self.port.schedule())
-        self.client.request.assert_not_awaited()
+        command = self.client.request.call_args.args[0]
+        self.assertIsInstance(command, ScheduleFilesRequest)
+        self.assertEqual(command.project, self.config.project)
 
     async def test_agent_visibility_uses_projected_registry_not_declared_grants(
         self,
@@ -215,3 +222,39 @@ class ConsolePortTest(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(ValueError):
             await self.port.investigation_receipt(identity)
+
+    async def test_scoped_schedule_reports_effective_pause_and_refuses_ambiguous_sources(
+        self,
+    ) -> None:
+        file = ScheduleFileDto(
+            project=self.config.project,
+            source="server",
+            name="network_scan",
+            internal_name=self.config.schedule,
+            status="active",
+            error=None,
+            definition=None,
+            path="schedules/network_scan.json",
+        )
+        row = ScheduleRecordDto(
+            name=self.config.schedule,
+            cron="0 */15 * * * *",
+            zone="UTC",
+            paused=True,
+            next_fire_at="2026-01-01T00:00:00Z",
+            defined_by="@service/fixture",
+            emits="event.network_scan",
+        )
+        self.client.request.side_effect = [
+            Reply("OK", None, (file,)),
+            Reply("OK", None, (row,)),
+        ]
+        result = await self.port.schedule()
+        assert result is not None
+        self.assertTrue(result.paused)
+        command = self.client.request.call_args.args[0]
+        self.assertIsInstance(command, ScheduleListRequest)
+        self.assertEqual(command.project, self.config.project)
+        self.client.request.side_effect = [Reply("OK", None, (file, file))]
+        with self.assertRaisesRegex(ValueError, "Ambiguous"):
+            await self.port.schedule()

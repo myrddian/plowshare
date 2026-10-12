@@ -34,6 +34,16 @@ foreach (var changed in new[] { """{"project":"other","requestId":"11111111-1111
     try { Codec.CorrelateDeployment("application.activate",foreign.RootElement,deploymentReceipt.RootElement); } catch (JsonException) { refused = true; }
     if (!refused) throw new Exception("Foreign deployment receipt accepted");
 }
+using var credentialRequest = JsonDocument.Parse("""{"project":"app","requestId":"11111111-1111-1111-1111-111111111111"}""");
+var credentialSecret="pss_"+new string('1',48);
+var ownedCredential=new ApplicationCredentialDto { Credential=credentialSecret,Receipt=new ApplicationTokenReceiptDto { Project="app",RequestId="11111111-1111-1111-1111-111111111111",TokenId="22222222-2222-2222-2222-222222222222",Principal="@service/22222222-2222-2222-2222-222222222222",ExpiresAt="2026-11-01T00:00:00Z" } };
+if(ownedCredential.ToString().Contains(credentialSecret))throw new Exception("Credential leaked in diagnostic");
+var credentialResult=JsonSerializer.SerializeToElement(ownedCredential);
+Codec.CorrelateDeployment("application.token.issue",credentialRequest.RootElement,credentialResult);
+using var foreignCredential=JsonDocument.Parse("""{"project":"foreign","requestId":"11111111-1111-1111-1111-111111111111"}""");
+bool foreignCredentialRefused=false;
+try {Codec.CorrelateDeployment("application.token.issue",foreignCredential.RootElement,credentialResult);}catch(JsonException){foreignCredentialRefused=true;}
+if(!foreignCredentialRefused)throw new Exception("Foreign credential receipt accepted");
 const int maximumRelayBytes = 50 * 1024 * 1024;
 foreach (var text in new[] { new string('x', maximumRelayBytes), new string('é', maximumRelayBytes / 2) })
 {
