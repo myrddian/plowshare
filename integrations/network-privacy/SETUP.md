@@ -375,9 +375,13 @@ changes investigation ownership and does not verify service-account processing.
 For a new Application-owned installation, the first deployment enrolls the
 packaged schedule under the retained service principal. Its `privacy_tick` action
 uses the native-only runtime, with no model binding and an immutable zero-call
-budget. A project manager controls schedule source and pause/resume; the service
-account can inspect its own project schedule. Existing manual installations retain
-their historical schedule owner; upgrading does not transfer that ownership.
+budget. A project manager can review and deploy schedule source; the service
+account can inspect its own project schedule. Operational pause/resume currently
+requires the registered owner with project management access. The dashboard offers
+these controls when that owner is the configured deployment account. Service-owned
+schedules have a separate [authorization gap](GAPS.md#schedule-control-for-service-owned-applications).
+Existing manual installations retain their historical schedule owner; upgrading
+does not transfer that ownership.
 
 ## 5. Start the separately operated Python service
 
@@ -408,7 +412,8 @@ Request one scan from the dashboard. Confirm its collection receipt, retained
 evidence and subsequent investigation/report through Plowshare. A tool's scan
 publication receipt confirms submission, not a finished scan or report. Once
 that path works, review the schedule's timing and resume it using the
-administrator's Schedule UI or `schedule.pause`. The helper deliberately leaves
+dashboard’s **Resume monitoring** control (using the displayed owner’s password),
+the owner’s Schedule UI, or `schedule.pause`. The helper deliberately leaves
 this operator-controlled activation step visible.
 
 ## Interrupted installation and updates

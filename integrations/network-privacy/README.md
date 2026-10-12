@@ -375,7 +375,7 @@ intent and reconcile it first. The script never reconnects or replays mutations.
 5. The package contains a paused server schedule named `network_scan`. After deployment
    and source reconciliation, inspect `schedule.files` for its actual internal name
    and set `config.schedule` to that name. Review timing and resume it through the
-   Schedule UI or `schedule.pause`. Change packaged timing through a new Application
+   app dashboard’s **Resume monitoring** control, the Schedule UI, or `schedule.pause`. Change packaged timing through a new Application
    deployment. The separate `install-schedule` SDK command remains useful for a
    manually managed source tier; deployment-managed source refuses direct edits.
    Server schedules retain the authenticated installer's project permissions.
@@ -731,3 +731,32 @@ reports effective pause/timing separately from source registration. Per-device
 Markdown documents continue to use the existing project Information record APIs;
 `document.detail` also supports project scope for an ingested document's outline.
 Document access covers its chapters; no granular chapter permissions are introduced.
+
+### Control monitoring from the dashboard
+
+**Monitoring schedule** shows the effective paused/running state and offers
+**Pause monitoring**, **Resume monitoring**, and **Check schedule state**.
+Enter the password for the displayed schedule owner. The app opens a temporary
+Plowshare session for that configured deployment account, sends the public SDK
+`schedule.pause` request, reads the project-scoped runtime state, then logs out.
+The password is cleared from the form and is never stored. The collector retains
+its separate service identity and permissions.
+
+Pause prevents future scheduled scans while existing work can finish. Resume
+selects the next future occurrence; missed ticks are not replayed. These controls
+create no Application revision and do not enable local collection, start a manual
+scan, or launch an investigation. Collection must also be enabled in monitoring
+settings. Frequency changes remain a separately reviewed Application deployment;
+a changed schedule source clears its operational pause override.
+
+If delivery is uncertain, controls are fenced by a private retained intent across
+collector restarts. **Check schedule state** only reads; it never resends a control.
+When the observed state matches the request, the fence clears. If it differs, the
+intent remains pending for later inspection. No automatic retry or opposite
+control is sent. A definitive server refusal retains a refused outcome.
+
+The current server contract requires the registered owner with project management
+access. This dashboard supports schedules registered to its configured deployment
+account, including historical manual installations. It disables mutation controls
+for a different owner; an Application manager cannot borrow an Application service
+principal’s ownership. See [the authorization gap](GAPS.md#schedule-control-for-service-owned-applications).

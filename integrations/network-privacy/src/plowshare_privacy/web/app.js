@@ -12,6 +12,8 @@ let monitorEditable = false;
 let overview = null;
 let preferencesLoaded = false;
 let scheduleDraft = null;
+let scheduleControlBusy = false;
+let scheduleControlUnknown = false;
 let notified = null;
 let deviceSignature = null;
 let findingSignature = null;
@@ -201,6 +203,8 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
+  byId('schedule-control-password').value = '';
+  renderScheduleControl(null, null, null);
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
   byId('dashboard').hidden = true; byId('connect').hidden = false;
@@ -324,6 +328,7 @@ setInterval(() => {
 
 function renderOverview(value) {
   const health = value.health;
+  renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
   const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
@@ -434,6 +439,47 @@ byId('check-moves').addEventListener('click', async () => {
     }
   } catch (error) {notice(error.message,true);} finally {byId('check-moves').disabled = false;}
 });
+function renderScheduleControl(schedule, control, pendingDeployment) {
+  byId('schedule-runtime').textContent = schedule ? (schedule.paused ? 'Paused' : 'Running') : 'Unavailable';
+  byId('schedule-control-account').textContent = control ? `Use the password for ${control.account}, the account that registered this schedule.` : 'Schedule controls require a guided installation.';
+  const pending = scheduleControlUnknown || Boolean(control && control.pending);
+  const owned = Boolean(control && schedule && schedule.owner === control.account);
+  if (control && schedule && !owned) byId('schedule-control-account').textContent = 'This schedule is registered to another account. Its owner must control it through Plowshare; no service-account privileges are changed.';
+  byId('pause-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !owned || schedule.paused;
+  byId('resume-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !owned || !schedule.paused;
+  byId('check-schedule').disabled = scheduleControlBusy || !control;
+  if (pending) byId('schedule-control-detail').textContent = 'A schedule change is unconfirmed. Check schedule state before another change; checking never resends the control.';
+}
+
+async function controlSchedule(paused) {
+  if (scheduleControlBusy || (paused === null ? byId('check-schedule').disabled : byId(paused ? 'pause-schedule' : 'resume-schedule').disabled)) return;
+  const password = byId('schedule-control-password').value;
+  if (!password) {notice('Enter the schedule owner password.', true); return;}
+  byId('schedule-control-password').value = '';
+  scheduleControlBusy = true;
+  renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
+  try {
+    const result = await api(paused === null ? '/api/schedule/check' : '/api/schedule/control', {method:'POST',body:JSON.stringify(paused === null ? {password} : {paused,password})});
+    scheduleControlUnknown = false;
+    if (overview) {overview.health.schedule = result.schedule; overview.schedule_control = result.control;}
+    byId('schedule-control-detail').textContent = result.control.pending ? 'The requested state is not confirmed yet. No control was resent; check again later.' : result.schedule.paused ? 'Monitoring schedule is paused. Existing work can finish.' : 'Monitoring schedule is running. It will fire at the next scheduled time; missed scans are not replayed.';
+    notice(byId('schedule-control-detail').textContent, result.control.pending);
+    // A subsequent display read must not turn a confirmed control into an
+    // ambiguous failure or enable a second mutation while the first is pending.
+    try {await refresh();} catch (error) {notice(`${byId('schedule-control-detail').textContent} Display refresh failed: ${error.message}`, true);}
+  } catch (error) {
+    if (paused !== null) scheduleControlUnknown = true;
+    byId('schedule-control-detail').textContent = `${error.message} Check schedule state before another change.`;
+    notice(byId('schedule-control-detail').textContent, true);
+  } finally {
+    scheduleControlBusy = false;
+    renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
+  }
+}
+byId('pause-schedule').addEventListener('click', () => controlSchedule(true));
+byId('resume-schedule').addEventListener('click', () => controlSchedule(false));
+byId('check-schedule').addEventListener('click', () => controlSchedule(null));
+
 byId('schedule-form').addEventListener('submit', async event => {
   event.preventDefault(); scheduleDraft = null; byId('schedule-draft').hidden = true;
   const password = byId('administrator-password').value; byId('administrator-password').value = '';

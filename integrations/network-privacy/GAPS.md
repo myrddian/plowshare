@@ -90,3 +90,20 @@ validation with agent definitions. Setting it to zero is refused; it is not a
 supported way to enforce a native-only definition today. A general native-only
 metadata contract would remove the unnecessary model binding/allowance. This
 Application does not request inference from its tick script.
+
+## Schedule control for service-owned Applications
+
+The current `schedule.pause` operation requires the registered owner, and a
+managed Application schedule also requires that account’s project-management
+permission. Historical schedules registered to the deployment administrator can
+be paused/resumed from this app using its temporary login. New guided installations
+may enroll under an Application service principal; a human manager’s login does
+not transfer that ownership. The dashboard shows this boundary and disables those
+controls. It never elevates the worker or retains human credentials.
+
+The general missing capability is project-manager control of an Application-owned
+operational schedule while preserving service ownership, source/action validation,
+and project fences. This is a separate platform authorization decision. Source
+revisions can still be reviewed and deployed through the existing public APIs;
+that does not substitute for operational pause/resume. Integration tests cover the
+existing public boundary; this integration adds no core authorization changes.

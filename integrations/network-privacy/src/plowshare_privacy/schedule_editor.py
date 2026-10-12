@@ -28,9 +28,11 @@ from plowshare.contracts import (
     FileStoreReferenceDto,
 )
 
+from .console_port import ScheduleView
 from .contracts import Configuration, integer, load_json, object_fields, text, uuid
 from .monitor import SettingsBusy
 from .private_files import replace_private
+from .schedule_control import ScheduleController, ScheduleControlStatus
 from .setup import Setup, administrator_login, private_write
 
 PRESETS = {"15m": "0 */15 * * * *", "hourly": "0 0 * * * *", "daily": "0 0 9 * * *"}
@@ -92,6 +94,9 @@ def source_text(value: object) -> str:
 
 class ScheduleManagement(Protocol):
     def pending_request(self) -> str | None: ...
+    def control_status(self) -> ScheduleControlStatus: ...
+    async def control(self, paused: bool, password: str) -> ScheduleView: ...
+    async def check_control(self, password: str) -> ScheduleView: ...
     async def reconcile(self, password: str) -> str | None: ...
     async def review(
         self, preset: str, zone: str, paused: bool, password: str
@@ -109,6 +114,7 @@ class ScheduleEditor:
         ):
             raise ValueError("Deployment setup does not belong to this collector")
         self.lock = asyncio.Lock()
+        self.controller = ScheduleController(root, self.setup, self.lock)
         self.draft: Draft | None = None
         self.pending = root / "deployment/schedule-update-intent.json"
         self.receipt = root / "deployment/schedule-update-receipt.json"
@@ -125,9 +131,9 @@ class ScheduleEditor:
         except ZoneInfoNotFoundError:
             raise ValueError("Choose an available IANA time zone") from None
         async with self.lock:
-            if self.pending.exists():
+            if self.pending.exists() or self.control_status().pending:
                 raise SettingsBusy(
-                    "A schedule deployment intent is retained. Inspect its receipt before preparing another revision."
+                    "A schedule change is retained. Check its deployment receipt or runtime state before preparing another revision."
                 )
             config = Configuration.read(self.setup.collector)
             async with administrator_login(
@@ -219,6 +225,7 @@ class ScheduleEditor:
                 or draft.review.id != review_id
                 or store not in draft.review.stores
                 or self.pending.exists()
+                or self.control_status().pending
             ):
                 raise ValueError(
                     "Review a fresh schedule draft and choose a listed FileStore"
@@ -303,6 +310,15 @@ class ScheduleEditor:
                     )
                     self.draft = None
                     return result.release.revision
+
+    def control_status(self) -> ScheduleControlStatus:
+        return self.controller.status()
+
+    async def control(self, paused: bool, password: str) -> ScheduleView:
+        return await self.controller.change(paused, password)
+
+    async def check_control(self, password: str) -> ScheduleView:
+        return await self.controller.check(password)
 
     def pending_request(self) -> str | None:
         if not self.pending.exists():
