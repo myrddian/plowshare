@@ -1,3 +1,4 @@
+import type { HostedToolPayloads } from './hosted-tool-scopes.ts';
 import type { ProviderCredentialPayloads } from './provider-credentials.ts';
 import type { ToolScopePayloads } from './tool-scopes.ts';
 import type { ApplicationSourceFile } from './application-deployments.ts';
@@ -17,6 +18,7 @@ type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
 export interface ExtendedPayloads
   extends
+    HostedToolPayloads,
     ProviderCredentialPayloads,
     MessagingPayloads,
     ToolScopePayloads,
@@ -272,6 +274,19 @@ export interface ExtendedPayloads
 
 /** Explicit operator verbs; no arbitrary frame forwarding or local filesystem claims. */
 export const CLI_OPERATIONS = {
+  'tool scope host save': 'tool.scope.host.save',
+  'tool scope host change': 'tool.scope.host.change',
+  'tool scope host list': 'tool.scope.host.list',
+  'tool scope host status': 'tool.scope.host.status',
+  'tool scope host receipt': 'tool.scope.host.receipt',
+  'tool scope worker register': 'tool.scope.worker.register',
+  'tool scope worker renew': 'tool.scope.worker.renew',
+  'tool scope worker status': 'tool.scope.worker.status',
+  'tool scope worker credential': 'tool.scope.worker.credential',
+  'tool scope worker publish': 'tool.scope.worker.publish',
+  'tool scope worker consume': 'tool.scope.worker.consume',
+  'tool scope worker read': 'tool.scope.worker.read',
+  'tool scope worker ack': 'tool.scope.worker.ack',
   'tool scope connect': 'tool.scope.connect',
   'tool scope list': 'tool.scope.list',
   'tool scope disconnect': 'tool.scope.disconnect',

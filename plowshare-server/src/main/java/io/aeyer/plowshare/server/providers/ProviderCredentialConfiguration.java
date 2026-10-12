@@ -42,4 +42,48 @@ public class ProviderCredentialConfiguration {
         work,
         clock);
   }
+
+  @Bean
+  public ProviderCredentialGrants providerCredentialGrants(
+      ProviderCredentialProperties properties,
+      JdbcTemplate jdbc,
+      ObjectMapper mapper,
+      AdminStore accounts,
+      ProjectMembers members,
+      @org.springframework.beans.factory.annotation.Value("${server.servlet.context-path:}")
+          String contextPath) {
+    if (!properties.isEnabled())
+      return new ProviderCredentialGrants() {
+        public io.aeyer.plowshare.protocol.ProviderCredentials.Connection connection(
+            String owner, io.aeyer.plowshare.protocol.ProviderCredentials.Target target) {
+          throw new io.aeyer.plowshare.server.faults.CallerFault(
+              "Server-held provider credentials are disabled");
+        }
+
+        public Reference inspect(
+            String owner, io.aeyer.plowshare.protocol.ProviderCredentials.Target target) {
+          throw new io.aeyer.plowshare.server.faults.CallerFault(
+              "Server-held provider credentials are disabled");
+        }
+
+        public Reference require(
+            String owner, io.aeyer.plowshare.protocol.ProviderCredentials.Target target) {
+          throw new io.aeyer.plowshare.server.faults.CallerFault(
+              "Server-held provider credentials are disabled");
+        }
+
+        public Header header(Reference reference) {
+          throw new io.aeyer.plowshare.server.faults.CallerFault(
+              "Server-held provider credentials are disabled");
+        }
+      };
+    return new CurrentProviderCredentialGrants(
+        new JdbcProviderCredentialRepository(jdbc, mapper),
+        new CurrentProviderCredentialAccess(accounts, members),
+        new ConfiguredProviderEndpoints(
+            properties.getAllowedOrigins(), properties.getCallback(), contextPath),
+        new AesCredentialCipher(properties.getActiveKey(), properties.getKeys()),
+        new JsonProviderSecrets(mapper),
+        Clock.systemUTC());
+  }
 }

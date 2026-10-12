@@ -1267,5 +1267,465 @@
         "keyId": "fixture"
       }
     }
+  },
+  "tool.scope.host.status": {
+    "code": "OK",
+    "payload": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 1,
+      "enabled": true,
+      "deleted": false,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "owner",
+      "route": {
+        "project": "personal:owner",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    }
+  },
+  "tool.scope.host.list": {
+    "code": "OK",
+    "payload": [
+      {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    ]
+  },
+  "tool.scope.host.save": {
+    "code": "OK",
+    "payload": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.save",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    }
+  },
+  "tool.scope.host.receipt": {
+    "code": "OK",
+    "payload": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.save",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    }
+  },
+  "tool.scope.host.change": {
+    "code": "OK",
+    "payload": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.change",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 2,
+        "enabled": false,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-9be03f85fbb299a19f77346888b90359",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    }
+  },
+  "tool.scope.worker.register": {
+    "code": "OK",
+    "payload": {
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      },
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "registeredAt": "2026-10-13T00:00:00Z",
+      "expiresAt": "2026-10-13T00:00:30Z"
+    }
+  },
+  "tool.scope.worker.renew": {
+    "code": "OK",
+    "payload": {
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      },
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "registeredAt": "2026-10-13T00:00:00Z",
+      "expiresAt": "2026-10-13T00:00:30Z"
+    }
+  },
+  "tool.scope.worker.status": {
+    "code": "OK",
+    "payload": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": {
+        "binding": {
+          "binding": "11111111-1111-1111-1111-111111111111",
+          "project": "personal:owner",
+          "owner": "owner",
+          "generation": 1,
+          "enabled": true,
+          "deleted": false,
+          "application": false,
+          "definition": {
+            "scope": "scans",
+            "provider": "scanner",
+            "prefix": "network_",
+            "grants": [
+              "*"
+            ],
+            "agents": [
+              "coordinator"
+            ],
+            "leaseSeconds": 30,
+            "credentialProject": "app",
+            "connection": "11111111-1111-1111-1111-111111111111",
+            "subject": null,
+            "executor": "@service/11111111-1111-1111-1111-111111111111"
+          },
+          "credentialSubject": "owner",
+          "route": {
+            "project": "personal:owner",
+            "scope": "scans",
+            "sourceProvider": "scanner",
+            "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+            "account": "@service/11111111-1111-1111-1111-111111111111",
+            "prefix": "network_",
+            "grants": [
+              "*"
+            ],
+            "agents": [
+              "coordinator"
+            ],
+            "leaseSeconds": 30
+          }
+        },
+        "registration": "11111111-1111-1111-1111-111111111111",
+        "registeredAt": "2026-10-13T00:00:00Z",
+        "expiresAt": "2026-10-13T00:00:30Z"
+      }
+    }
+  },
+  "tool.scope.worker.credential": {
+    "code": "OK",
+    "payload": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "EXECUTION",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "generation": 1,
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "subject": "owner",
+      "credentialGeneration": "11111111-1111-1111-1111-111111111111",
+      "header": "X-API-Key",
+      "value": "fixture-secret"
+    }
+  },
+  "tool.scope.worker.read": {
+    "code": "OK",
+    "payload": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "verified": true,
+      "state": "COMPLETED",
+      "text": "done"
+    }
+  },
+  "tool.scope.worker.publish": {
+    "code": "OK",
+    "payload": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.catalog",
+      "position": "1",
+      "publishedAt": "2026-10-13T00:00:00Z"
+    }
+  },
+  "tool.scope.worker.consume": {
+    "code": "OK",
+    "payload": {
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+      "group": "tool-provider",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "EMPTY",
+      "batchId": null,
+      "fence": null,
+      "through": "0",
+      "expiresAt": null,
+      "expiredThrough": null,
+      "events": []
+    }
+  },
+  "tool.scope.worker.ack": {
+    "code": "OK",
+    "payload": {
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+      "group": "tool-provider",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "through": "1",
+      "gap": false
+    }
   }
 }

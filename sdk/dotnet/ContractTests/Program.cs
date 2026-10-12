@@ -58,3 +58,15 @@ Console.WriteLine(".NET DTO contract checks passed");
 await ToolFacadeChecks.RunAsync();
 
 ToolSchemaChecks.Run();
+
+using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PLOWSHARE_SDK_DTO_FIXTURES"))!,"hosted-scope-correlations.json"))))
+{
+ foreach(var row in hosted.RootElement.EnumerateArray()){
+  bool accepted=true;try{Codec.CorrelateDeployment(row.GetProperty("operation").GetString()!,row.GetProperty("request"),row.GetProperty("reply"));}catch(JsonException){accepted=false;}
+  if(accepted!=row.GetProperty("valid").GetBoolean())throw new Exception("Hosted coordinates differ");
+  if(row.GetProperty("operation").GetString()=="tool.scope.worker.credential"){
+   var value=Codec.Result<HostedToolCredentialDto>("tool.scope.worker.credential",row.GetProperty("reply"));
+   if(value.ToString().Contains(value.Value,StringComparison.Ordinal))throw new Exception("Hosted secret leaked");
+  }
+ }
+}

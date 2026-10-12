@@ -193,13 +193,21 @@ public final class FrameRouter {
                   && !request.type().startsWith("project.member."))
               || request.type().equals("provider.deregister")))
         accounts.requireServerAdmin(asking.handle());
-      var scope = io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
-      for (String project : scope.clientProjects())
-        io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
-            project, asking.sessionId(), asking.handle());
-      for (String project : scope.projects())
-        io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(project, asking.handle());
-      if (personalAccess != null) personalAccess.check(scope, asking.handle(), asking.sessionId());
+      // A worker facade validates its binding and every nested project/topic before broker use.
+      // Running the ordinary Personal fence would require giving that worker the owner's
+      // membership.
+      if (!io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(
+          request.type())) {
+        var scope =
+            io.aeyer.plowshare.server.personal.PersonalScopeDecoder.decode(request.payload());
+        for (String project : scope.clientProjects())
+          io.aeyer.plowshare.server.archive.ClientProjects.requireOwn(
+              project, asking.sessionId(), asking.handle());
+        for (String project : scope.projects())
+          io.aeyer.plowshare.server.personal.PersonalSpaces.requireOwn(project, asking.handle());
+        if (personalAccess != null)
+          personalAccess.check(scope, asking.handle(), asking.sessionId());
+      }
       Outcome answer = handler.handle(request.payload(), asking);
       return authorization == null
           ? answer

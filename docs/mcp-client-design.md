@@ -11,9 +11,10 @@ MCP consumption uses the existing SDK tool provider mechanism demonstrated by
 authorization, jobs, accounting, invocation receipts and recovery. The MCP
 provider owns upstream discovery, authentication and protocol translation.
 
-The shared tool schema and SDK foundation is merged. MCP transport, server
-credential storage, service-account connection bindings and client hosting remain
-planned. [ADR 0019](decisions/0019-mcp-provider-hosting.md) traces current source,
+The shared tool schema, SDK, [provider credential foundation](provider-credentials.md)
+and [durable hosted binding authority](hosted-tool-scopes.md) are implemented. MCP
+transport, subject-scoped session caches, service-account accounting selection and
+instance-local MCP hosting remain planned. [ADR 0019](decisions/0019-mcp-provider-hosting.md) traces current source,
 records the precise platform gaps and defines the ownership decision. The
 [bounded MCP profile](mcp-provider-profile.md) pins protocol/SDK revisions, discovery,
 results and unsupported capabilities, with an independent reproducible design probe.
@@ -117,13 +118,12 @@ worker's Plowshare service credential does not authorize access to every user's
 upstream secrets. Discovery sessions and schema caches are also scoped by the
 upstream credential subject because different users may discover different tools.
 
-Persisting credentials alone does not make server tools follow users today:
-interactive scopes are tied to an event socket and session. Extend the existing
-provider scope contract with a durable server-hosted binding mode, while keeping
-instance-local bindings ephemeral. The durable mode records the owning caller,
-authorized executor, project and agent assignments and rechecks them at every
-call. It must support an owner's tools across their authenticated client sessions
-without widening project membership or another user's access. Personal scope
+Interactive scopes remain tied to an event socket and session. The implemented
+[durable hosted mode](hosted-tool-scopes.md) extends that same provider contract,
+records the owning caller, configured executor, project and agent assignments, and
+rechecks authority at admission and release. It supports an owner's tools across
+authenticated client sessions without widening project membership or another
+user's access. Personal scope
 retains its owner fence; using an unrelated service worker requires an explicit
 execution grant, never service-account membership in Personal space.
 

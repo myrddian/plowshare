@@ -1,3 +1,19 @@
+export type {
+  HostedToolDefinition,
+  HostedToolBinding,
+  HostedToolReceipt,
+  HostedToolRegistration,
+  HostedToolWorker,
+  HostedToolWorkerStatus,
+  HostedToolCredentialRequest,
+  HostedToolCredential,
+  HostedToolPublication,
+  HostedToolConsumption,
+  HostedToolAcknowledgement,
+  HostedToolPayloads,
+  HostedToolReplies,
+  HostedToolReconciliation,
+} from 'plowshare-client-ts';
 import WebSocket from 'ws';
 import { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
 import { legacySocket } from 'plowshare-client-ts/binding/packets';

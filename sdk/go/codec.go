@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -274,6 +275,9 @@ func decodePush(data []byte) (ServerPush, error) {
 
 // Transport boundary correlation supplements schema validation for retained deployment receipts.
 func deploymentMatches(operation string, request, reply []byte) bool {
+	if strings.HasPrefix(operation, "tool.scope.host.") || strings.HasPrefix(operation, "tool.scope.worker.") {
+		return hostedMatches(operation, request, reply)
+	}
 	if slices.Contains([]string{"application.identity.status", "application.token.issue", "application.token.receipt"}, operation) {
 		type identityCoordinates struct {
 			Project   string `json:"project"`
@@ -325,4 +329,109 @@ func deploymentMatches(operation string, request, reply []byte) bool {
 		return false
 	}
 	return operation == "application.deployment.status" || strings.EqualFold(asked.RequestID, answered.RequestID) && (operation != "application.activate" || strings.EqualFold(asked.Revision, answered.Release.Revision))
+}
+
+// Closed hosted reply correlation occurs at the JSON boundary before typed replies escape.
+func hostedMatches(operation string, request, reply []byte) bool {
+	var asked map[string]any
+	if json.Unmarshal(request, &asked) != nil {
+		return false
+	}
+	var value any
+	if json.Unmarshal(reply, &value) != nil {
+		return false
+	}
+	if operation == "tool.scope.host.list" {
+		rows, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, entry := range rows {
+			row, ok := entry.(map[string]any)
+			if !ok || row["project"] != asked["project"] {
+				return false
+			}
+		}
+		return true
+	}
+	row, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	if operation == "tool.scope.worker.credential" || operation == "tool.scope.worker.read" {
+		keys := []string{"binding", "registration", "invocation"}
+		if strings.HasSuffix(operation, "credential") {
+			keys = append(keys, "purpose")
+		}
+		for _, k := range keys {
+			if !reflect.DeepEqual(row[k], asked[k]) {
+				return false
+			}
+		}
+		return true
+	}
+	if operation == "tool.scope.worker.status" {
+		return reflect.DeepEqual(row["binding"], asked["binding"])
+	}
+	nested := map[string]string{"tool.scope.worker.publish": "publication", "tool.scope.worker.consume": "consumption", "tool.scope.worker.ack": "acknowledgement"}[operation]
+	if nested != "" {
+		port, ok := asked[nested].(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, k := range []string{"project", "topic", "group", "consumerId", "requestId", "batchId"} {
+			a, known := port[k]
+			b, returned := row[k]
+			if known && returned && !reflect.DeepEqual(a, b) {
+				return false
+			}
+		}
+		if operation == "tool.scope.worker.consume" {
+			events, ok := row["events"].([]any)
+			limit, bounded := port["limit"].(float64)
+			if !ok || !bounded || float64(len(events)) > limit {
+				return false
+			}
+		}
+		return true
+	}
+	binding := row
+	if operation != "tool.scope.host.status" {
+		binding, ok = row["binding"].(map[string]any)
+		if !ok {
+			return false
+		}
+	}
+	for _, k := range []string{"project", "binding"} {
+		if a, known := asked[k]; known && !reflect.DeepEqual(a, binding[k]) {
+			return false
+		}
+	}
+	if operation == "tool.scope.worker.renew" {
+		return reflect.DeepEqual(row["registration"], asked["registration"])
+	}
+	if operation == "tool.scope.worker.register" {
+		return reflect.DeepEqual(row["registration"], asked["requestId"]) && reflect.DeepEqual(binding["generation"], asked["expectedGeneration"])
+	}
+	if id, known := asked["requestId"]; known && !reflect.DeepEqual(id, row["requestId"]) {
+		return false
+	}
+	if operation == "tool.scope.host.receipt" || operation == "tool.scope.host.status" {
+		return true
+	}
+	generation := float64(1)
+	if asked["expectedGeneration"] != nil {
+		expected, ok := asked["expectedGeneration"].(float64)
+		if !ok {
+			return false
+		}
+		generation = expected + 1
+	}
+	if row["operation"] != operation || binding["generation"] != generation {
+		return false
+	}
+	if operation == "tool.scope.host.save" {
+		return reflect.DeepEqual(binding["definition"], asked["definition"])
+	}
+	return binding["enabled"] == (asked["action"] == "ENABLE") && binding["deleted"] == (asked["action"] == "DELETE")
 }

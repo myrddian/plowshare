@@ -14,8 +14,15 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
   private final Relay relay;
+  private final HostedInvocationAuthority hosting;
 
   public JdbcRelayToolRepository(JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
+    this(jdbc, transactions, relay, HostedInvocationAuthority.NONE);
+  }
+
+  public JdbcRelayToolRepository(
+      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, HostedInvocationAuthority hosting) {
+    this.hosting = Objects.requireNonNull(hosting);
     this.jdbc = Objects.requireNonNull(jdbc);
     this.transactions = Objects.requireNonNull(transactions);
     this.relay = Objects.requireNonNull(relay);
@@ -52,11 +59,28 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
     return transactions.inTransaction(
         () -> {
           var request = intent.request();
+          var supplied = intent;
+          if (io.aeyer.plowshare.protocol.HostedToolScopes.hosted(intent.binding().provider())) {
+            var existing = find(intent.projectId(), request.account(), intent.id(), false);
+            // An existing immutable intent never acquires a new credential selection or publishes.
+            if (existing.isPresent()) return locked(intent);
+            supplied =
+                new Intent(
+                    intent.id(),
+                    intent.projectId(),
+                    intent.fingerprint(),
+                    intent.binding(),
+                    request,
+                    intent.occurredAt(),
+                    intent.causation(),
+                    intent.agent(),
+                    hosting.pin(intent));
+          }
           boolean inserted =
               jdbc.update(
                       """
-          INSERT INTO relay_tool_invocations(id,project_id,account,run_id,call_id,fingerprint,binding,request,occurred_at,causation)
-          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb) ON CONFLICT(id) DO NOTHING
+          INSERT INTO relay_tool_invocations(id,project_id,account,run_id,call_id,fingerprint,binding,request,occurred_at,causation,agent,hosted)
+          VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?,?::jsonb) ON CONFLICT(id) DO NOTHING
           """,
                       intent.id(),
                       intent.projectId(),
@@ -67,7 +91,9 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
                       RelayToolCodec.write(intent.binding()),
                       RelayToolCodec.write(request),
                       Timestamp.from(intent.occurredAt()),
-                      RelayCausationCodec.write(intent.causation()))
+                      RelayCausationCodec.write(intent.causation()),
+                      intent.agent(),
+                      supplied.hosted() == null ? null : RelayToolCodec.write(supplied.hosted()))
                   == 1;
           var retained = locked(intent);
           if (inserted) {
@@ -121,7 +147,7 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
     return jdbc
         .query(
             """
-        SELECT project_id,account,fingerprint,binding,request,occurred_at,causation::text,result
+        SELECT project_id,account,fingerprint,binding,request,occurred_at,causation::text,agent,hosted::text,result
         FROM relay_tool_invocations WHERE id=? FOR UPDATE
         """,
             (row, ordinal) -> {
@@ -138,7 +164,9 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
                       RelayToolCodec.definition(row.getString("binding")),
                       RelayToolCodec.request(row.getString("request")),
                       row.getTimestamp("occurred_at").toInstant(),
-                      RelayCausationCodec.read(row.getString("causation")));
+                      RelayCausationCodec.read(row.getString("causation")),
+                      row.getString("agent"),
+                      RelayToolCodec.hosted(row.getString("hosted")));
               var result = row.getString("result");
               return new Stored(original, result == null ? null : RelayToolCodec.result(result));
             },
@@ -150,12 +178,19 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
 
   @Override
   public java.util.Optional<Stored> find(long projectId, String account, java.util.UUID id) {
+    return find(projectId, account, id, false);
+  }
+
+  @Override
+  public java.util.Optional<Stored> find(
+      long projectId, String account, java.util.UUID id, boolean lock) {
     return jdbc
         .query(
             """
-        SELECT fingerprint,binding,request,occurred_at,causation::text,result FROM relay_tool_invocations
+        SELECT fingerprint,binding,request,occurred_at,causation::text,agent,hosted::text,result FROM relay_tool_invocations
         WHERE id=? AND project_id=? AND account=?
-        """,
+        """
+                + (lock ? " FOR UPDATE" : ""),
             (row, ordinal) -> {
               var intent =
                   new Intent(
@@ -165,7 +200,9 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
                       RelayToolCodec.definition(row.getString("binding")),
                       RelayToolCodec.request(row.getString("request")),
                       row.getTimestamp("occurred_at").toInstant(),
-                      RelayCausationCodec.read(row.getString("causation")));
+                      RelayCausationCodec.read(row.getString("causation")),
+                      row.getString("agent"),
+                      RelayToolCodec.hosted(row.getString("hosted")));
               var result = row.getString("result");
               return new Stored(intent, result == null ? null : RelayToolCodec.result(result));
             },

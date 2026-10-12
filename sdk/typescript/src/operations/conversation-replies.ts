@@ -1,4 +1,14 @@
 import {
+  hostedReconciliationCheck,
+  hostedPortCheck,
+  hostedBindingCheck,
+  hostedReceiptCheck,
+  hostedRegistrationCheck,
+  hostedWorkerStatusCheck,
+  hostedCredentialCheck,
+  type HostedToolReplies,
+} from './hosted-tool-scopes.ts';
+import {
   providerConnectionCheck,
   providerCredentialCheck,
   providerReceiptCheck,
@@ -371,6 +381,20 @@ export interface ApplicationFileDocument {
 }
 
 export interface ConversationReplies {
+  'tool.scope.host.save': HostedToolReplies['tool.scope.host.save'];
+  'tool.scope.host.change': HostedToolReplies['tool.scope.host.change'];
+  'tool.scope.host.list': HostedToolReplies['tool.scope.host.list'];
+  'tool.scope.host.status': HostedToolReplies['tool.scope.host.status'];
+  'tool.scope.host.receipt': HostedToolReplies['tool.scope.host.receipt'];
+  'tool.scope.worker.register': HostedToolReplies['tool.scope.worker.register'];
+  'tool.scope.worker.renew': HostedToolReplies['tool.scope.worker.renew'];
+  'tool.scope.worker.status': HostedToolReplies['tool.scope.worker.status'];
+  'tool.scope.worker.credential': HostedToolReplies['tool.scope.worker.credential'];
+  'tool.scope.worker.publish': HostedToolReplies['tool.scope.worker.publish'];
+  'tool.scope.worker.consume': HostedToolReplies['tool.scope.worker.consume'];
+  'tool.scope.worker.read': HostedToolReplies['tool.scope.worker.read'];
+  'tool.scope.worker.ack': HostedToolReplies['tool.scope.worker.ack'];
+
   'conversation.open': ConversationView;
   'conversation.list': readonly ConversationView[];
   'conversation.latest': ConversationView | null;
@@ -861,6 +885,19 @@ const readers = {
       );
     },
   ),
+  'tool.scope.worker.read': hostedReconciliationCheck,
+  'tool.scope.worker.publish': hostedPortCheck('relay.publish'),
+  'tool.scope.worker.consume': hostedPortCheck('relay.consume'),
+  'tool.scope.worker.ack': hostedPortCheck('relay.ack'),
+  'tool.scope.host.save': hostedReceiptCheck,
+  'tool.scope.host.change': hostedReceiptCheck,
+  'tool.scope.host.list': list(hostedBindingCheck),
+  'tool.scope.host.status': hostedBindingCheck,
+  'tool.scope.host.receipt': hostedReceiptCheck,
+  'tool.scope.worker.register': hostedRegistrationCheck,
+  'tool.scope.worker.renew': hostedRegistrationCheck,
+  'tool.scope.worker.status': hostedWorkerStatusCheck,
+  'tool.scope.worker.credential': hostedCredentialCheck,
   'provider.connection.list': list(providerConnectionCheck),
   'provider.connection.status': providerConnectionCheck,
   'provider.connection.save': providerReceiptCheck,

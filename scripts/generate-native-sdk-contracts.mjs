@@ -144,7 +144,7 @@ const fields = (k) =>
   Object.entries(defs[k].properties ?? {}).filter(
     ([, r]) => !defs[id(r)].forbidden,
   );
-const secretField = (n, f) => (n === 'ApplicationCredentialDto' && f === 'credential') || (n.startsWith('ProviderCredentialPut') && f === 'secret') || (n.startsWith('ProviderAuthorization') && f === 'authorizationUrl');
+const secretField = (n, f) => (n === 'HostedToolCredentialDto' && f === 'value') || (n === 'ApplicationCredentialDto' && f === 'credential') || (n.startsWith('ProviderCredentialPut') && f === 'secret') || (n.startsWith('ProviderAuthorization') && f === 'authorizationUrl');
 const redacted = (n,k) => n + '[' + fields(k).filter(([f])=>secretField(n,f)).map(([f])=>f+'=<redacted>').join(', ') + ']';
 function pyClass(n, k, base = '') {
   const required = new Set(defs[k].required ?? []);

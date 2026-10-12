@@ -260,3 +260,9 @@ overload, and the other SDKs use their typed operation/request DTOs.
 
 See [server-held provider credentials](provider-credentials.md) for the implemented
 connection and grant management contract, SDK operations and OAuth callback boundary.
+
+Durable provider assignments and delegated workers use the thirteen public
+[hosted-scope operations](hosted-tool-scopes.md). All SDKs retain typed request/reply
+parity, coordinate validation and no automatic mutation replay. Java provides
+`HostedToolScopeClient`; TypeScript/Node reuse `ToolProvider` with a hosted
+registration, including its original journal fence for reconciliation.

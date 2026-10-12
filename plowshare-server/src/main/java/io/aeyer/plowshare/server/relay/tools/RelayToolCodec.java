@@ -160,6 +160,19 @@ public final class RelayToolCodec {
     }
   }
 
+  static String write(HostedInvocation value) {
+    return encode(value);
+  }
+
+  static HostedInvocation hosted(String source) {
+    if (source == null) return null;
+    try {
+      return JSON.readValue(source, HostedInvocation.class);
+    } catch (IOException invalid) {
+      throw new IllegalStateException("Invalid retained hosted invocation");
+    }
+  }
+
   public static RelayToolDefinition.Arguments arguments(String source) {
     try {
       if (source.length() > 32768)

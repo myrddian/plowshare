@@ -160,13 +160,14 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
   private boolean assigned(Entry entry, String account, String agent, String session) {
     try {
       Long id = projects.id(entry.binding().project());
-      if (id == null
-          || !projectAccess(entry.binding().project(), account, entry.binding().account()))
-        return false;
+      if (id == null) return false;
+      // A hosted scope checks explicit delegation; it never grants executor project membership.
       if (entry.scope().isPresent())
         return grants.acceptsDynamic(id, account, agent, session)
             && connections.permits(
                 entry.scope().get(), account, agent, session, entry.binding().name());
+      if (!projectAccess(entry.binding().project(), account, entry.binding().account()))
+        return false;
       var policy =
           resources
               .root(id)
@@ -227,7 +228,7 @@ public final class ApplicationToolRegistry implements ScopedTools, RelayToolAuth
                       new Entry(
                           t.bind(project, provider),
                           available,
-                          connections.connections(project, provider.account()).stream()
+                          connections.connections(project, null).stream()
                               .filter(c -> c.provider().equals(provider.provider()))
                               .findFirst())));
       revision.append(publication.event().eventId());

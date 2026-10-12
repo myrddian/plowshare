@@ -1,3 +1,5 @@
+import { decodeRequest } from './schema.ts';
+import { isHostedOperation } from './hosted-tool-scopes.ts';
 import { isList } from '../binding/values.ts';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -19,7 +21,41 @@ const fixtures = JSON.parse(
     'utf8',
   ),
 ) as Record<ConversationOperation, Outcome>;
+const hostedInputs: unknown = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../../test-support/contracts/sdk-dto-conformance.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+);
 const asked = (type: ConversationOperation): Request => {
+  if (type === 'tool.scope.worker.credential')
+    return request(type, {
+      binding: '11111111-1111-1111-1111-111111111111',
+      registration: '11111111-1111-1111-1111-111111111111',
+      purpose: 'EXECUTION',
+      invocation: '11111111-1111-1111-1111-111111111111',
+    });
+  if (isHostedOperation(type)) {
+    if (!isList(hostedInputs)) throw new Error('Invalid boundary fixtures');
+    const entry = hostedInputs.find(
+      (v: unknown) =>
+        typeof v === 'object' &&
+        v !== null &&
+        'boundary' in v &&
+        v.boundary === 'input' &&
+        'operation' in v &&
+        v.operation === type &&
+        'valid' in v &&
+        v.valid === true,
+    );
+    if (typeof entry !== 'object' || entry === null || !('value' in entry))
+      throw new Error('Missing hosted input');
+    return decodeRequest(type, entry.value);
+  }
+
   const requestId = '11111111-1111-1111-1111-111111111111',
     revision = '22222222-2222-2222-2222-222222222222';
   if (type === 'provider.connection.list')

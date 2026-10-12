@@ -17,7 +17,11 @@ public final class AccessRequestDecoder {
     if (payload.get("scope") != null) {
       // Usage uses scope for lineage selection, not a project authorization object. Validate
       // that operation-specific value without losing the explicit/resource project references.
-      if (operation.startsWith("usage.")) {
+      if (operation.startsWith("tool.scope.")) {
+        if (!(payload.get("scope") instanceof String scope)
+            || !scope.matches("[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*")
+            || scope.length() > 64) throw new CallerFault("Tool scope must be a bounded name");
+      } else if (operation.startsWith("usage.")) {
         if (!(payload.get("scope") instanceof String scope)
             || !Set.of("direct", "subtree").contains(scope))
           throw new CallerFault("usage scope must be direct or subtree");

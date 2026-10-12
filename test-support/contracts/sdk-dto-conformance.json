@@ -475,6 +475,1359 @@
   },
   {
     "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "bad",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "bad",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": 0,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": "1",
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "client:fixture",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "extra": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "owner"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": "other",
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 301,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*",
+          "network_read"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "personal:owner",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": null,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111",
+        "extra": 1
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.change",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": 1,
+      "action": "DISABLE"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.list",
+    "value": {
+      "project": "personal:owner"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "project": "personal:owner",
+      "binding": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.host.receipt",
+    "value": {
+      "project": "personal:owner",
+      "requestId": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.register",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedGeneration": 1
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.renew",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "DISCOVERY",
+      "invocation": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "EXECUTION",
+      "invocation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "DISCOVERY",
+      "invocation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "EXECUTION",
+      "invocation": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "DISCOVERY",
+      "invocation": null,
+      "owner": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "bad",
+      "purpose": "DISCOVERY",
+      "invocation": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.read",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "invocation": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.publish",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "publication": {
+        "requestId": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.catalog",
+        "text": "fixture",
+        "occurredAt": "2026-10-13T00:00:00Z",
+        "correlationId": null,
+        "parentTopic": null,
+        "parentEventId": null
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.publish",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "publication": {
+        "requestId": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.catalog",
+        "text": "fixture",
+        "occurredAt": "2026-10-13T00:00:00Z",
+        "correlationId": null,
+        "parentTopic": null,
+        "parentEventId": null,
+        "extra": 1
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.consume",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "consumption": {
+        "project": "personal:owner",
+        "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+        "group": "tool-provider",
+        "consumerId": "11111111-1111-1111-1111-111111111111",
+        "start": "OLDEST_RETAINED",
+        "limit": 1,
+        "waitMs": 0
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.consume",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "consumption": {
+        "project": "personal:owner",
+        "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+        "group": "tool-provider",
+        "consumerId": "11111111-1111-1111-1111-111111111111",
+        "start": "OLDEST_RETAINED",
+        "limit": 0,
+        "waitMs": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "tool.scope.worker.ack",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "acknowledgement": {
+        "project": "personal:owner",
+        "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+        "group": "tool-provider",
+        "consumerId": "11111111-1111-1111-1111-111111111111",
+        "batchId": "11111111-1111-1111-1111-111111111111",
+        "fence": "1",
+        "expiredThrough": null
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 1,
+      "enabled": true,
+      "deleted": false,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "owner",
+      "route": {
+        "project": "personal:owner",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 0,
+      "enabled": true,
+      "deleted": false,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "owner",
+      "route": {
+        "project": "personal:owner",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 1,
+      "enabled": true,
+      "deleted": true,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "owner",
+      "route": {
+        "project": "personal:owner",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 1,
+      "enabled": true,
+      "deleted": false,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "other",
+      "route": {
+        "project": "personal:owner",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "owner": "owner",
+      "generation": 1,
+      "enabled": true,
+      "deleted": false,
+      "application": false,
+      "definition": {
+        "scope": "scans",
+        "provider": "scanner",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30,
+        "credentialProject": "app",
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "subject": null,
+        "executor": "@service/11111111-1111-1111-1111-111111111111"
+      },
+      "credentialSubject": "owner",
+      "route": {
+        "project": "foreign",
+        "scope": "scans",
+        "sourceProvider": "scanner",
+        "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+        "account": "@service/11111111-1111-1111-1111-111111111111",
+        "prefix": "network_",
+        "grants": [
+          "*"
+        ],
+        "agents": [
+          "coordinator"
+        ],
+        "leaseSeconds": 30
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.list",
+    "value": [
+      {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    ],
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.save",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.save",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.save",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.host.change",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "operation": "tool.scope.host.change",
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 2,
+        "enabled": false,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-9be03f85fbb299a19f77346888b90359",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.register",
+    "value": {
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      },
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "registeredAt": "2026-10-13T00:00:00Z",
+      "expiresAt": "2026-10-13T00:00:30Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.renew",
+    "value": {
+      "binding": {
+        "binding": "11111111-1111-1111-1111-111111111111",
+        "project": "personal:owner",
+        "owner": "owner",
+        "generation": 1,
+        "enabled": true,
+        "deleted": false,
+        "application": false,
+        "definition": {
+          "scope": "scans",
+          "provider": "scanner",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30,
+          "credentialProject": "app",
+          "connection": "11111111-1111-1111-1111-111111111111",
+          "subject": null,
+          "executor": "@service/11111111-1111-1111-1111-111111111111"
+        },
+        "credentialSubject": "owner",
+        "route": {
+          "project": "personal:owner",
+          "scope": "scans",
+          "sourceProvider": "scanner",
+          "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+          "account": "@service/11111111-1111-1111-1111-111111111111",
+          "prefix": "network_",
+          "grants": [
+            "*"
+          ],
+          "agents": [
+            "coordinator"
+          ],
+          "leaseSeconds": 30
+        }
+      },
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "registeredAt": "2026-10-13T00:00:00Z",
+      "expiresAt": "2026-10-13T00:00:30Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": {
+        "binding": {
+          "binding": "11111111-1111-1111-1111-111111111111",
+          "project": "personal:owner",
+          "owner": "owner",
+          "generation": 1,
+          "enabled": true,
+          "deleted": false,
+          "application": false,
+          "definition": {
+            "scope": "scans",
+            "provider": "scanner",
+            "prefix": "network_",
+            "grants": [
+              "*"
+            ],
+            "agents": [
+              "coordinator"
+            ],
+            "leaseSeconds": 30,
+            "credentialProject": "app",
+            "connection": "11111111-1111-1111-1111-111111111111",
+            "subject": null,
+            "executor": "@service/11111111-1111-1111-1111-111111111111"
+          },
+          "credentialSubject": "owner",
+          "route": {
+            "project": "personal:owner",
+            "scope": "scans",
+            "sourceProvider": "scanner",
+            "provider": "host-7863ab857fa38ee5bf3c4d734adbd430",
+            "account": "@service/11111111-1111-1111-1111-111111111111",
+            "prefix": "network_",
+            "grants": [
+              "*"
+            ],
+            "agents": [
+              "coordinator"
+            ],
+            "leaseSeconds": 30
+          }
+        },
+        "registration": "11111111-1111-1111-1111-111111111111",
+        "registeredAt": "2026-10-13T00:00:00Z",
+        "expiresAt": "2026-10-13T00:00:30Z"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.status",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "EXECUTION",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "generation": 1,
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "subject": "owner",
+      "credentialGeneration": "11111111-1111-1111-1111-111111111111",
+      "header": "X-API-Key",
+      "value": "fixture-secret"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "EXECUTION",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "generation": 1,
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "subject": "owner",
+      "credentialGeneration": "11111111-1111-1111-1111-111111111111",
+      "header": "X-API-Key",
+      "value": "bad\nkey"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.credential",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "purpose": "DISCOVERY",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "generation": 1,
+      "connection": {
+        "connection": "11111111-1111-1111-1111-111111111111",
+        "project": "app",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "enabled": true,
+        "deleted": false,
+        "definition": {
+          "name": "Fixture",
+          "endpoint": "https://provider.example/mcp",
+          "authentication": "API_KEY",
+          "apiKeyHeader": "X-API-Key",
+          "oauth": null
+        }
+      },
+      "subject": "owner",
+      "credentialGeneration": "11111111-1111-1111-1111-111111111111",
+      "header": "X-API-Key",
+      "value": "fixture-secret"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.read",
+    "value": {
+      "binding": "11111111-1111-1111-1111-111111111111",
+      "registration": "11111111-1111-1111-1111-111111111111",
+      "invocation": "11111111-1111-1111-1111-111111111111",
+      "verified": true,
+      "state": "COMPLETED",
+      "text": "done"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.publish",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.catalog",
+      "position": "1",
+      "publishedAt": "2026-10-13T00:00:00Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.consume",
+    "value": {
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+      "group": "tool-provider",
+      "consumerId": "11111111-1111-1111-1111-111111111111",
+      "status": "EMPTY",
+      "batchId": null,
+      "fence": null,
+      "through": "0",
+      "expiresAt": null,
+      "expiredThrough": null,
+      "events": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "tool.scope.worker.ack",
+    "value": {
+      "project": "personal:owner",
+      "topic": "tool.host-7863ab857fa38ee5bf3c4d734adbd430.network_read.request",
+      "group": "tool-provider",
+      "batchId": "11111111-1111-1111-1111-111111111111",
+      "through": "1",
+      "gap": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
     "operation": "provider.connection.save",
     "value": {
       "project": "app",

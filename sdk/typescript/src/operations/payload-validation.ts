@@ -1,3 +1,4 @@
+import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
 import { providerCredentialProblem } from './provider-credentials.ts';
 import { identityProblem } from './application-identities.ts';
 import { deploymentProblem } from './application-deployments.ts';
@@ -29,6 +30,7 @@ export function problem(
   ) {
     return 'project must be a nonblank name or null for global';
   }
+  if (isHostedOperation(type)) return hostedProblem(type, payload);
   if (type.startsWith('tool.scope.')) {
     const identifier = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/;
     if (
@@ -147,6 +149,31 @@ export const SHAPES: Record<
   ExtendedOperation,
   readonly [readonly string[], readonly string[]]
 > = {
+  'tool.scope.host.save': [
+    ['project', 'binding', 'requestId', 'expectedGeneration', 'definition'],
+    [],
+  ],
+  'tool.scope.host.change': [
+    ['project', 'binding', 'requestId', 'expectedGeneration', 'action'],
+    [],
+  ],
+  'tool.scope.host.list': [['project'], []],
+  'tool.scope.host.status': [['project', 'binding'], []],
+  'tool.scope.host.receipt': [['project', 'requestId'], []],
+  'tool.scope.worker.register': [
+    ['binding', 'requestId', 'expectedGeneration'],
+    [],
+  ],
+  'tool.scope.worker.renew': [['binding', 'registration'], []],
+  'tool.scope.worker.status': [['binding'], []],
+  'tool.scope.worker.credential': [
+    ['binding', 'registration', 'purpose', 'invocation'],
+    [],
+  ],
+  'tool.scope.worker.publish': [['binding', 'registration', 'publication'], []],
+  'tool.scope.worker.consume': [['binding', 'registration', 'consumption'], []],
+  'tool.scope.worker.read': [['binding', 'registration', 'invocation'], []],
+  'tool.scope.worker.ack': [['binding', 'registration', 'acknowledgement'], []],
   'tool.scope.connect': [
     [
       'project',
@@ -836,6 +863,11 @@ export function commandProblem(
     if (required.some((key) => !Object.hasOwn(body, key)))
       return 'Provider management requires every declared field, including explicit nulls';
     return providerCredentialProblem(type, body);
+  }
+  if (isHostedOperation(type)) {
+    if (required.some((k) => !Object.hasOwn(body, k)))
+      return 'Hosted operations require every declared field, including nulls';
+    return hostedProblem(type, body);
   }
   if (type.startsWith('tool.scope.')) return problem(type, body);
   if (type === 'board.open' && 'swarm' in body && !swarmName(body['swarm']))

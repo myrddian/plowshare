@@ -1,3 +1,13 @@
+import {
+  hostedRegistrationCheck,
+  type HostedToolRegistration,
+  type HostedToolWorker,
+} from './hosted-tool-scopes.ts';
+import type {
+  RelayPublishRequest,
+  RelayConsumeRequest,
+  RelayAckRequest,
+} from './relay-ports.ts';
 import { ConnectionFault } from '../binding/connection.ts';
 import { fieldsOf } from './response.ts';
 import { requirePayload } from './sdk.ts';
@@ -49,6 +59,8 @@ export interface RegisteredTool {
   readonly handler: (call: ToolCall) => Promise<ToolResult>;
 }
 export interface ToolReceipt {
+  /** Original executor fence is retained across reconnects for result reconciliation. */
+  readonly hostedWorker?: HostedToolWorker;
   readonly invocationId: string;
   readonly request: string;
   readonly phase: 'executing' | 'ready' | 'publishing' | 'done';
@@ -401,6 +413,7 @@ export class ToolProvider {
   private readonly journal: ToolJournal;
   private readonly host: ToolHost;
   private readonly publisher: string;
+  private readonly hosted: HostedToolWorker | undefined;
   private constructor(
     connection: Pick<Plowshare, 'request'>,
     binding: ToolBinding,
@@ -408,7 +421,10 @@ export class ToolProvider {
     journal: ToolJournal,
     host: ToolHost,
     publisher: string,
+    hosted: HostedToolWorker | undefined,
   ) {
+    this.hosted =
+      hosted === undefined ? undefined : Object.freeze({ ...hosted });
     this.connection = connection;
     this.binding = Object.freeze({ ...binding });
     this.tools = Object.freeze(
@@ -440,7 +456,16 @@ export class ToolProvider {
     tools: readonly RegisteredTool[],
     journal: ToolJournal,
     host: ToolHost,
+    registration?: HostedToolRegistration,
   ): Promise<ToolProvider> {
+    if (
+      registration !== undefined &&
+      (!hostedRegistrationCheck(registration) ||
+        registration.binding.route.project !== binding.project ||
+        registration.binding.route.provider !== binding.provider ||
+        registration.binding.route.account !== binding.account)
+    )
+      throw new Error('Foreign hosted provider registration');
     const config = toolDeploymentConfig(
       binding,
       tools.map((t) => t.declaration),
@@ -454,7 +479,49 @@ export class ToolProvider {
       journal,
       host,
       'sdk:' + (await host.sha256(binding.account)),
+      registration === undefined
+        ? undefined
+        : {
+            binding: registration.binding.binding,
+            registration: registration.registration,
+          },
     );
+  }
+  private publishPort(publication: RelayPublishRequest, worker = this.hosted) {
+    return worker === undefined
+      ? this.connection.request('relay.publish', publication)
+      : this.connection.request('tool.scope.worker.publish', {
+          ...worker,
+          publication: {
+            ...publication,
+            correlationId: publication.correlationId ?? null,
+            parentTopic: publication.parentTopic ?? null,
+            parentEventId: publication.parentEventId ?? null,
+          },
+        });
+  }
+  private consumePort(consumption: RelayConsumeRequest) {
+    return this.hosted === undefined
+      ? this.connection.request('relay.consume', consumption)
+      : this.connection.request('tool.scope.worker.consume', {
+          ...this.hosted,
+          consumption: {
+            ...consumption,
+            limit: consumption.limit ?? 100,
+            waitMs: consumption.waitMs ?? 0,
+          },
+        });
+  }
+  private ackPort(acknowledgement: RelayAckRequest) {
+    return this.hosted === undefined
+      ? this.connection.request('relay.ack', acknowledgement)
+      : this.connection.request('tool.scope.worker.ack', {
+          ...this.hosted,
+          acknowledgement: {
+            ...acknowledgement,
+            expiredThrough: acknowledgement.expiredThrough ?? null,
+          },
+        });
   }
   private async validateCall(
     tool: ToolDeclaration,
@@ -501,7 +568,7 @@ export class ToolProvider {
     text(encoded, 65536);
     const topic = `tool.${this.binding.provider}.catalog`;
     const reply = requirePayload(
-      await this.connection.request('relay.publish', {
+      await this.publishPort({
         project: this.binding.project,
         topic,
         requestId,
@@ -543,7 +610,7 @@ export class ToolProvider {
         const name = registered.declaration.name;
         const topic = this.topic(name, 'request');
         const batch = requirePayload(
-          await this.connection.request('relay.consume', {
+          await this.consumePort({
             project: this.binding.project,
             topic,
             group: 'tool-provider',
@@ -586,6 +653,7 @@ export class ToolProvider {
           receipt = {
             invocationId: call.invocationId,
             request: event.payload.text,
+            ...(this.hosted === undefined ? {} : { hostedWorker: this.hosted }),
             phase: 'executing',
             result: null,
             occurredAt: null,
@@ -595,7 +663,7 @@ export class ToolProvider {
         if (batch.batchId === null || batch.fence === null)
           throw new Error('Missing tool acknowledgement authority');
         requirePayload(
-          await this.connection.request('relay.ack', {
+          await this.ackPort({
             project: this.binding.project,
             topic,
             group: 'tool-provider',
@@ -651,6 +719,27 @@ export class ToolProvider {
       for (const receipt of await this.receipts()) {
         if (receipt.phase !== 'publishing') continue;
         const call = decodeToolCall(receipt.request);
+        if (this.hosted !== undefined) {
+          if (receipt.hostedWorker === undefined)
+            throw new Error('Missing original hosted fence');
+          const result = requirePayload(
+            await this.connection.request('tool.scope.worker.read', {
+              ...receipt.hostedWorker,
+              invocation: call.invocationId,
+            }),
+          );
+          if (result.verified) {
+            if (
+              receipt.result === null ||
+              result.state !== receipt.result.state ||
+              result.text !== receipt.result.text
+            )
+              throw new Error('Conflicting retained provider result');
+            await this.journal.save({ ...receipt, phase: 'done' });
+            count++;
+          }
+          continue;
+        }
         const id = await toolResultRequestId(this.host, call.invocationId);
         let after = '0';
         let settled = false;
@@ -713,6 +802,15 @@ export class ToolProvider {
         !tool
       )
         throw new Error('Foreign tool receipt');
+      if (this.hosted !== undefined) {
+        if (
+          receipt.hostedWorker === undefined ||
+          receipt.hostedWorker.binding !== this.hosted.binding
+        )
+          throw new Error('Missing/foreign original hosted worker fence');
+        uuid(receipt.hostedWorker.registration);
+      } else if (receipt.hostedWorker !== undefined)
+        throw new Error('Hosted journal requires hosted provider transport');
       await this.validateCall(tool.declaration, call);
       if (
         !['executing', 'ready', 'publishing', 'done'].includes(receipt.phase) ||
@@ -736,16 +834,19 @@ export class ToolProvider {
     // Only proven non-submission restores READY. Uncertain delivery requires retained reads.
     try {
       requirePayload(
-        await this.connection.request('relay.publish', {
-          project: this.binding.project,
-          topic: this.topic(call.tool, 'result'),
-          requestId: id,
-          occurredAt,
-          correlationId: call.invocationId,
-          parentTopic: this.topic(call.tool, 'request'),
-          parentEventId: call.invocationId,
-          text: encoded,
-        }),
+        await this.publishPort(
+          {
+            project: this.binding.project,
+            topic: this.topic(call.tool, 'result'),
+            requestId: id,
+            occurredAt,
+            correlationId: call.invocationId,
+            parentTopic: this.topic(call.tool, 'request'),
+            parentEventId: call.invocationId,
+            text: encoded,
+          },
+          receipt.hostedWorker,
+        ),
       );
     } catch (error) {
       if (

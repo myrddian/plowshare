@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { hostedReplyMatches } from '../sdk/typescript/build/operations/hosted-tool-scopes.js';
 /** Shared boundary examples, checked against the canonical SDK before native tests. */
 import {
   decodePayload,
@@ -32,6 +34,51 @@ result('provider.credential.status',{...providerGrant,keyId:null},false);
 const providerReceipt={requestId:receipt,operation:'provider.credential.put',connection:providerConnection,credential:providerGrant};
 result('provider.credential.put',providerReceipt,true);
 result('provider.credential.put',{...providerReceipt,credential:{...providerGrant,project:'foreign'}},false);
+const hostDefinition={scope:'scans',provider:'scanner',prefix:'network_',grants:['*'],agents:['coordinator'],leaseSeconds:30,credentialProject:'app',connection:receipt,subject:null,executor:'@service/'+receipt};
+const hostBinding={binding:receipt,project:'personal:owner',owner:'owner',generation:1,enabled:true,deleted:false,application:false,definition:hostDefinition,credentialSubject:'owner',route:{project:'personal:owner',scope:'scans',sourceProvider:'scanner',provider:'host-'+createHash('sha256').update(receipt+'/1').digest('hex').slice(0,32),account:hostDefinition.executor,prefix:'network_',grants:['*'],agents:['coordinator'],leaseSeconds:30}};
+const hostSave={project:hostBinding.project,binding:receipt,requestId:receipt,expectedGeneration:null,definition:hostDefinition};
+const hostWorker={binding:receipt,registration:receipt};
+const hostRegistration={binding:hostBinding,registration:receipt,registeredAt:'2026-10-13T00:00:00Z',expiresAt:'2026-10-13T00:00:30Z'};
+input('tool.scope.host.save',hostSave,true);
+for(const changed of [{binding:'bad'},{requestId:'bad'},{expectedGeneration:0},{expectedGeneration:'1'},{project:'client:fixture'},{extra:1}])input('tool.scope.host.save',{...hostSave,...changed},false);
+for(const changed of [{executor:'owner'},{subject:'other'},{leaseSeconds:301},{agents:[]},{grants:['*','network_read']},{credentialProject:'personal:owner'},{extra:1}])input('tool.scope.host.save',{...hostSave,definition:{...hostDefinition,...changed}},false);
+input('tool.scope.host.change',{project:hostBinding.project,binding:receipt,requestId:receipt,expectedGeneration:1,action:'DISABLE'},true);
+input('tool.scope.host.list',{project:hostBinding.project},true);
+input('tool.scope.host.status',{project:hostBinding.project,binding:receipt},true);
+input('tool.scope.host.receipt',{project:hostBinding.project,requestId:receipt},true);
+input('tool.scope.worker.register',{binding:receipt,requestId:receipt,expectedGeneration:1},true);
+input('tool.scope.worker.renew',hostWorker,true);
+input('tool.scope.worker.status',{binding:receipt},true);
+input('tool.scope.worker.credential',{...hostWorker,purpose:'DISCOVERY',invocation:null},true);
+input('tool.scope.worker.credential',{...hostWorker,purpose:'EXECUTION',invocation:receipt},true);
+for(const changed of [{purpose:'DISCOVERY',invocation:receipt},{purpose:'EXECUTION',invocation:null},{owner:'other'},{registration:'bad'}])input('tool.scope.worker.credential',{...hostWorker,purpose:'DISCOVERY',invocation:null,...changed},false);
+input('tool.scope.worker.read',{...hostWorker,invocation:receipt},true);
+const hostPublication={requestId:receipt,project:hostBinding.project,topic:'tool.'+hostBinding.route.provider+'.catalog',text:'fixture',occurredAt:'2026-10-13T00:00:00Z',correlationId:null,parentTopic:null,parentEventId:null};
+input('tool.scope.worker.publish',{...hostWorker,publication:hostPublication},true);
+input('tool.scope.worker.publish',{...hostWorker,publication:{...hostPublication,extra:1}},false);
+const hostConsumption={project:hostBinding.project,topic:'tool.'+hostBinding.route.provider+'.network_read.request',group:'tool-provider',consumerId:receipt,start:'OLDEST_RETAINED',limit:1,waitMs:0};
+input('tool.scope.worker.consume',{...hostWorker,consumption:hostConsumption},true);
+input('tool.scope.worker.consume',{...hostWorker,consumption:{...hostConsumption,limit:0}},false);
+const hostAck={project:hostBinding.project,topic:hostConsumption.topic,group:'tool-provider',consumerId:receipt,batchId:receipt,fence:'1',expiredThrough:null};
+input('tool.scope.worker.ack',{...hostWorker,acknowledgement:hostAck},true);
+result('tool.scope.host.status',hostBinding,true);
+for(const changed of [{generation:0},{enabled:true,deleted:true},{credentialSubject:'other'}])result('tool.scope.host.status',{...hostBinding,...changed},false);
+result('tool.scope.host.status',{...hostBinding,route:{...hostBinding.route,project:'foreign'}},false);
+result('tool.scope.host.list',[hostBinding],true);
+const hostReceipt={requestId:receipt,operation:'tool.scope.host.save',binding:hostBinding};
+result('tool.scope.host.save',hostReceipt,true);result('tool.scope.host.receipt',hostReceipt,true);
+result('tool.scope.host.change',{...hostReceipt,operation:'tool.scope.host.change',binding:{...hostBinding,generation:2,enabled:false,route:{...hostBinding.route,provider:'host-'+createHash('sha256').update(receipt+'/2').digest('hex').slice(0,32)}}},true);
+result('tool.scope.worker.register',hostRegistration,true);result('tool.scope.worker.renew',hostRegistration,true);
+result('tool.scope.worker.status',{binding:receipt,registration:hostRegistration},true);
+result('tool.scope.worker.status',{binding:receipt,registration:null},true);
+const hostCredential={...hostWorker,purpose:'EXECUTION',invocation:receipt,generation:1,connection:providerConnection,subject:'owner',credentialGeneration:receipt,header:'X-API-Key',value:'fixture-secret'};
+result('tool.scope.worker.credential',hostCredential,true);
+result('tool.scope.worker.credential',{...hostCredential,value:'bad\nkey'},false);
+result('tool.scope.worker.credential',{...hostCredential,purpose:'DISCOVERY'},false);
+result('tool.scope.worker.read',{...hostWorker,invocation:receipt,verified:true,state:'COMPLETED',text:'done'},true);
+result('tool.scope.worker.publish',{requestId:receipt,project:hostBinding.project,topic:hostPublication.topic,position:'1',publishedAt:'2026-10-13T00:00:00Z'},true);
+result('tool.scope.worker.consume',{project:hostConsumption.project,topic:hostConsumption.topic,group:hostConsumption.group,consumerId:hostConsumption.consumerId,status:'EMPTY',batchId:null,fence:null,through:'0',expiresAt:null,expiredThrough:null,events:[]},true);
+result('tool.scope.worker.ack',{project:hostBinding.project,topic:hostConsumption.topic,group:'tool-provider',batchId:receipt,through:'1',gap:false},true);
 const providerOAuth={issuer:'https://issuer.example',resource:'https://provider.example/mcp',resourceMetadataUrl:'https://provider.example/.well-known/oauth-protected-resource/mcp',issuerMetadataUrl:'https://issuer.example/.well-known/oauth-authorization-server',authorizationEndpoint:'https://issuer.example/authorize',tokenEndpoint:'https://issuer.example/token',clientId:'fixture',redirectUri:'https://plowshare.example/provider-credentials/oauth/callback',scopes:['tools']};
 const providerOAuthDefinition={...providerDefinition,authentication:'OAUTH_PKCE',apiKeyHeader:null,oauth:providerOAuth};
 input('provider.connection.save',{...providerSave,definition:providerOAuthDefinition},true);
@@ -351,3 +398,24 @@ if (process.argv.includes('--check')) {
     throw new Error('Stale SDK DTO fixtures');
 } else writeFileSync(path, content);
 console.log('Canonical SDK DTO cases verified:', cases.length);
+
+// Coordinate fixtures supplement schema cases with structurally valid foreign replies.
+const correlations=[];
+for(const operation of [...new Set(cases.filter(c=>c.operation?.startsWith('tool.scope.host.')||c.operation?.startsWith('tool.scope.worker.')).map(c=>c.operation))]) {
+ const reply=cases.find(c=>c.operation===operation&&c.boundary==='result'&&c.valid)?.value;
+ const asked=cases.find(c=>c.operation===operation&&c.boundary==='input'&&c.valid&&(operation!=='tool.scope.worker.credential'||c.value.purpose===reply.purpose))?.value;
+ if(reply===undefined||asked===undefined)throw new Error('Missing hosted correlation fixture');
+ const changed=structuredClone(asked);
+ const nested=operation.endsWith('.publish')?'publication':operation.endsWith('.consume')?'consumption':operation.endsWith('.ack')?'acknowledgement':undefined;
+ if(nested)changed[nested].project='foreign';
+ else if('requestId' in changed)changed.requestId='99999999-9999-9999-9999-999999999999';
+ else if('binding' in changed)changed.binding='99999999-9999-9999-9999-999999999999';
+ else changed.project='foreign';
+ for(const [request,valid] of [[asked,true],[changed,false]]) {
+  decodePayload(operation,request);decodeReply(operation,reply);
+  if(hostedReplyMatches(operation,request,reply)!==valid)throw new Error('Invalid hosted correlation fixture');
+  correlations.push({operation,request,reply,valid});
+ }
+}
+const correlationPath=new URL('../test-support/contracts/hosted-scope-correlations.json',import.meta.url),correlationContent=JSON.stringify(correlations,null,2)+'\n';
+if(process.argv.includes('--check')){if(readFileSync(correlationPath,'utf8')!==correlationContent)throw new Error('Stale hosted correlation fixtures');}else writeFileSync(correlationPath,correlationContent);

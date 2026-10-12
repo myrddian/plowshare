@@ -1,3 +1,4 @@
+import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
   identityStatusCheck,
@@ -252,6 +253,7 @@ export function decodeReply<K extends keyof Replies>(
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
   validateProviderCredentialReply(type, decoded);
+  validateHostedReply(type, decoded);
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);
   validateDeploymentReply(type, decoded);

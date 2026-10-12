@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -129,5 +130,32 @@ func TestApplicationCredentialsStayRedactedAndCorrelated(t *testing.T) {
 	}
 	if deploymentMatches("application.token.issue", asked, data) {
 		t.Fatal("Foreign receipt accepted")
+	}
+}
+
+func TestHostedCoordinatesAndSecretDiagnostics(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(os.Getenv("PLOWSHARE_SDK_DTO_FIXTURES")), "hosted-scope-correlations.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Operation string          `json:"operation"`
+		Request   json.RawMessage `json:"request"`
+		Reply     json.RawMessage `json:"reply"`
+		Valid     bool            `json:"valid"`
+	}
+	if err = json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range cases {
+		if deploymentMatches(row.Operation, row.Request, row.Reply) != row.Valid {
+			t.Fatalf("Hosted coordinate mismatch: %s", row.Operation)
+		}
+	}
+	value := HostedToolCredentialDto{Value: "fixture-private-secret"}
+	for _, diagnostic := range []string{fmt.Sprint(value), fmt.Sprintf("%+v", value), fmt.Sprintf("%#v", value)} {
+		if strings.Contains(diagnostic, value.Value) {
+			t.Fatal("Hosted secret leaked")
+		}
 	}
 }
