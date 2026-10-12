@@ -1,3 +1,4 @@
+import type { ProviderCredentialPayloads } from './provider-credentials.ts';
 import type { ToolScopePayloads } from './tool-scopes.ts';
 import type { ApplicationSourceFile } from './application-deployments.ts';
 import type { RelayPayloads } from './relay.ts';
@@ -16,6 +17,7 @@ type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
 export interface ExtendedPayloads
   extends
+    ProviderCredentialPayloads,
     MessagingPayloads,
     ToolScopePayloads,
     RelayPayloads,
@@ -386,6 +388,17 @@ export const CLI_OPERATIONS = {
   'application files': 'application.files',
   'application read': 'application.file.read',
   'application save': 'application.file.save',
+  'provider connection list': 'provider.connection.list',
+  'provider connection status': 'provider.connection.status',
+  'provider connection save': 'provider.connection.save',
+  'provider connection change': 'provider.connection.change',
+  'provider connection receipt': 'provider.connection.receipt',
+  'provider credential status': 'provider.credential.status',
+  'provider credential put': 'provider.credential.put',
+  'provider credential revoke': 'provider.credential.revoke',
+  'provider credential rekey': 'provider.credential.rekey',
+  'provider credential authorize': 'provider.credential.authorize',
+  'provider credential refresh': 'provider.credential.refresh',
   'application identity status': 'application.identity.status',
   'application token issue': 'application.token.issue',
   'application token receipt': 'application.token.receipt',

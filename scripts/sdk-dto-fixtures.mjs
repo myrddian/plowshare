@@ -12,6 +12,31 @@ const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const receipt = '11111111-1111-1111-1111-111111111111';
+
+const providerDefinition={"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null};
+const providerConnection={"connection": "11111111-1111-1111-1111-111111111111", "project": "app", "revision": "11111111-1111-1111-1111-111111111111", "enabled": true, "deleted": false, "definition": {"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null}};
+const providerGrant={"connection": "11111111-1111-1111-1111-111111111111", "project": "app", "subject": "owner", "generation": "11111111-1111-1111-1111-111111111111", "connectionRevision": "11111111-1111-1111-1111-111111111111", "state": "READY", "expiresAt": null, "keyId": "fixture"};
+const providerSave={project:'app',connection:receipt,requestId:receipt,expectedRevision:null,definition:providerDefinition};
+input('provider.connection.save',providerSave,true);
+for(const change of [{connection:'bad'},{requestId:'bad'},{expectedRevision:'bad'},{project:'personal:owner'},{extra:1}]) input('provider.connection.save',{...providerSave,...change},false);
+for(const change of [{endpoint:'http://provider.example/mcp'},{endpoint:'https://evil@provider.example/mcp'},{endpoint:'https://provider.example:99999/mcp'},{endpoint:'https://provider.example/mcp?query=1'},{name:' '},{oauth:{issuer:'https://issuer.example'}}]) input('provider.connection.save',{...providerSave,definition:{...providerDefinition,...change}},false);
+const providerPut={project:'app',connection:receipt,subject:null,requestId:receipt,expectedGeneration:null,secret:'fixture-key'};
+input('provider.credential.put',providerPut,true);
+for(const change of [{subject:'someone'},{subject:'@service/bad'},{secret:'pss_'+'1'.repeat(48)},{secret:'bad\nkey'},{secret:1},{expectedGeneration:'bad'}]) input('provider.credential.put',{...providerPut,...change},false);
+result('provider.connection.status',providerConnection,true);
+result('provider.connection.status',{...providerConnection,deleted:true,enabled:true},false);
+result('provider.credential.status',providerGrant,true);
+result('provider.credential.status',{...providerGrant,state:'NONE'},false);
+result('provider.credential.status',{...providerGrant,generation:null},false);
+result('provider.credential.status',{...providerGrant,keyId:null},false);
+const providerReceipt={requestId:receipt,operation:'provider.credential.put',connection:providerConnection,credential:providerGrant};
+result('provider.credential.put',providerReceipt,true);
+result('provider.credential.put',{...providerReceipt,credential:{...providerGrant,project:'foreign'}},false);
+const providerOAuth={issuer:'https://issuer.example',resource:'https://provider.example/mcp',resourceMetadataUrl:'https://provider.example/.well-known/oauth-protected-resource/mcp',issuerMetadataUrl:'https://issuer.example/.well-known/oauth-authorization-server',authorizationEndpoint:'https://issuer.example/authorize',tokenEndpoint:'https://issuer.example/token',clientId:'fixture',redirectUri:'https://plowshare.example/provider-credentials/oauth/callback',scopes:['tools']};
+const providerOAuthDefinition={...providerDefinition,authentication:'OAUTH_PKCE',apiKeyHeader:null,oauth:providerOAuth};
+input('provider.connection.save',{...providerSave,definition:providerOAuthDefinition},true);
+for(const change of [{scopes:['tools','tools']},{scopes:['bad scope']},{clientId:1},{tokenEndpoint:'https://issuer.example/token#frag'},{redirectUri:'https://plowshare.example/callback%2f'}]) input('provider.connection.save',{...providerSave,definition:{...providerOAuthDefinition,oauth:{...providerOAuth,...change}}},false);
+
 const originEntry = {
   ordinal: 1, turnOrdinal: 1, kind: 'utterance', excerpt: 'message', length: 7,
   cut: false, ejectedAt: null, supersededBy: null, toolCallId: null, toolCalls: [],

@@ -43,6 +43,10 @@ function resolve(graph, s) {
   return s.$ref ? resolve(graph, graph.$defs[s.$ref.split('/').at(-1)]) : s;
 }
 export function constrain(graph) {
+  const providerProject = { maxLength:256, trimmed:true, pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$', disallowPrefixes:['personal:','Personal:','client:'] };
+  const providerUrl = { web:true, minLength:1, maxLength:2048, pattern:"^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~!$&'()*+,;=:@/-]*)?$" };
+  const providerService = { pattern:'^@service/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$', maxLength:45 };
+  const providerText = (maxLength) => ({minLength:1,maxLength,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
   const namedSwarm = { pattern: '^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$', minLength: 1, maxLength: 64 };
   const add = (s, c) => Object.assign(s, c);
   const rules = (s, ...values) => (s.rules = [...(s.rules ?? []), ...values]);
@@ -63,6 +67,13 @@ export function constrain(graph) {
     const s = resolve(graph, ref),
       extended = SHAPES[op];
     if (s.anyOf) continue;
+    if (op.startsWith('provider.connection.') || op.startsWith('provider.credential.')) {
+      field(s,'project',providerProject);
+      for(const key of ['connection','requestId','expectedRevision','expectedGeneration']) field(s,key,canonicalUuid);
+      field(s,'subject',providerService);
+      // RE2 bounds counted repetitions at 1000; portable length limits remain separate.
+      field(s,'secret',{pattern:'^[\\x20-\\x7e]+$',minLength:1,maxLength:8192,disallowPrefixes:['pss_','pst_']});
+    }
     if (op.startsWith('tool.scope.')) {
       field(s, 'scope', { ...namedSwarm, trimmed: true });
       field(s, 'provider', { pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$', maxLength: 48, trimmed: true });
@@ -356,6 +367,38 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if (['ProviderOAuthSettings','ProviderConnectionDefinition','ProviderConnection','ProviderCredentialStatus','ProviderMutationReceipt','ProviderAuthorization','ProviderCredentialTarget','ProviderCredentialMutation'].includes(title)) {
+      field(s,'project',providerProject);
+      for(const key of ['connection','revision','generation','connectionRevision','requestId']) {
+        // Receipt.connection is a nested DTO, not a UUID.
+        if(p[key] && stringShape(p[key])) field(s,key,canonicalUuid);
+      }
+    }
+    if(title==='ProviderOAuthSettings') {
+      for(const key of ['issuer','resource','resourceMetadataUrl','issuerMetadataUrl','authorizationEndpoint','tokenEndpoint','redirectUri']) field(s,key,providerUrl);
+      field(s,'clientId',providerText(256));
+      s.properties.scopes={type:'array',maxItems:64,uniqueItems:true,items:{type:'string',pattern:'^[\\x21\\x23-\\x5b\\x5d-\\x7e]{1,128}$',minLength:1,maxLength:128}};
+    }
+    if(title==='ProviderConnectionDefinition') {
+      field(s,'name',providerText(128));field(s,'endpoint',providerUrl);
+      rules(s, implies(eq('authentication','API_KEY'),and(eq('oauth',null),not(eq('apiKeyHeader',null)))),
+        implies(not(eq('authentication','API_KEY')),and(not(eq('oauth',null)),eq('apiKeyHeader',null))));
+    }
+    if(title==='ProviderConnection') rules(s,implies(eq('deleted',true),eq('enabled',false)));
+    if(title==='ProviderCredentialStatus') {
+      field(s,'subject',{pattern:'^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}|@service/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',maxLength:128});
+      field(s,'keyId',providerText(64));field(s,'expiresAt',instant);
+      rules(s,implies(eq('state','NONE'),eq('generation',null)),implies(not(eq('state','NONE')),not(eq('generation',null))),
+        implies(or(eq('state','READY'),eq('state','PENDING'),eq('state','REFRESHING')),not(eq('keyId',null))),
+        implies(or(eq('state','NONE'),eq('state','REVOKED'),eq('state','UNCERTAIN')),eq('keyId',null)),
+        implies(not(eq('state','READY')),eq('expiresAt',null)));
+    }
+    if(title==='ProviderMutationReceipt') {
+      rules(s,implies(not(eq('credential',null)),and({eq:[g('credential.project'),g('connection.project')]},{eq:[g('credential.connection'),g('connection.connection')]})));
+    }
+    if(title==='ProviderAuthorization') {
+      field(s,'authorizationUrl',{pattern:'^https://',minLength:1,maxLength:16384});field(s,'expiresAt',instant);
+    }
     if (title === 'ApplicationServiceDeclaration') {
       field(s,'handle',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$',maxLength:64});
     }

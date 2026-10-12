@@ -22,6 +22,62 @@ const fixtures = JSON.parse(
 const asked = (type: ConversationOperation): Request => {
   const requestId = '11111111-1111-1111-1111-111111111111',
     revision = '22222222-2222-2222-2222-222222222222';
+  if (type === 'provider.connection.list')
+    return request(type, { project: 'app' });
+  if (type === 'provider.connection.status')
+    return request(type, { project: 'app', connection: requestId });
+  if (type === 'provider.connection.receipt')
+    return request(type, { project: 'app', requestId });
+  if (type === 'provider.connection.save')
+    return request(type, {
+      project: 'app',
+      connection: requestId,
+      requestId,
+      expectedRevision: null,
+      definition: {
+        name: 'Fixture',
+        endpoint: 'https://provider.example/mcp',
+        authentication: 'API_KEY',
+        apiKeyHeader: 'X-API-Key',
+        oauth: null,
+      },
+    });
+  if (type === 'provider.connection.change')
+    return request(type, {
+      project: 'app',
+      connection: requestId,
+      requestId,
+      expectedRevision: requestId,
+      action: 'DISABLE',
+    });
+  if (type === 'provider.credential.status')
+    return request(type, {
+      project: 'app',
+      connection: requestId,
+      subject: null,
+    });
+  if (type === 'provider.credential.put')
+    return request(type, {
+      project: 'app',
+      connection: requestId,
+      subject: null,
+      requestId,
+      expectedGeneration: null,
+      secret: 'fixture-key',
+    });
+  if (
+    type === 'provider.credential.revoke' ||
+    type === 'provider.credential.rekey' ||
+    type === 'provider.credential.authorize' ||
+    type === 'provider.credential.refresh'
+  )
+    return request(type, {
+      project: 'app',
+      connection: requestId,
+      subject: null,
+      requestId,
+      expectedGeneration: requestId,
+    });
   if (type === 'application.identity.status')
     return request(type, { project: 'app' });
   if (type === 'application.token.receipt')

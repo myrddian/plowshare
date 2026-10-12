@@ -1,3 +1,13 @@
+export type {
+  ProviderOAuthSettings,
+  ProviderConnectionDefinition,
+  ProviderConnection,
+  ProviderCredentialStatus,
+  ProviderMutationReceipt,
+  ProviderAuthorization,
+  ProviderCredentialTarget,
+  ProviderCredentialMutation,
+} from './provider-credentials.ts';
 import { decodeServerPush, type ServerPush } from './push.ts';
 import { connect, ConnectionFault } from '../binding/connection.ts';
 import type {

@@ -1,3 +1,4 @@
+import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
   identityStatusCheck,
   tokenReceiptCheck,
@@ -250,6 +251,7 @@ export function decodeReply<K extends keyof Replies>(
   ) as unknown as Replies[K];
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
+  validateProviderCredentialReply(type, decoded);
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);
   validateDeploymentReply(type, decoded);
