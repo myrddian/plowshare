@@ -135,6 +135,8 @@ prevents a later admission, not an effect already admitted.
 
 This provides the permission plumbing for providers whose tool names are unknown
 until connection, including an MCP adapter. It does not implement an outbound MCP
-transport or arbitrary MCP JSON Schema. Existing Relay tools support the four
-scalar parameter types. External adapters translate supported catalogues through
-the public SDK and remain outside the server runtime.
+transport or arbitrary MCP JSON Schema. Relay tools support scalar convenience
+parameters and the [shared bounded nested schema profile](tool-schemas.md).
+External adapters translate supported catalogues through the public SDK and remain
+outside the server runtime. Server-owned credentials and durable delegated hosting
+are separate planned capabilities; see the [MCP client design](mcp-client-design.md).

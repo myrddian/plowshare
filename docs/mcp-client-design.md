@@ -1,6 +1,8 @@
 # MCP client design and implementation plan
 
-Status: proposed design. This plan covers nested provider schemas, server-held
+Status: proposed MCP design for review, audited against public main
+`e0886dd0b6472849dee1f4408a158f2556b02816` on 12 October 2026.
+This plan covers nested provider schemas, server-held
 per-user MCP credentials, service-account bindings, and native client hosting.
 It does not describe an implemented MCP client.
 
@@ -9,9 +11,12 @@ MCP consumption uses the existing SDK tool provider mechanism demonstrated by
 authorization, jobs, accounting, invocation receipts and recovery. The MCP
 provider owns upstream discovery, authentication and protocol translation.
 
-The first delivery is the shared tool schema and SDK extension as an independent
-platform change. MCP transport, server credential storage, service-account
-connection bindings and client hosting follow after that foundation is verified.
+The shared tool schema and SDK foundation is merged. MCP transport, server
+credential storage, service-account connection bindings and client hosting remain
+planned. [ADR 0019](decisions/0019-mcp-provider-hosting.md) traces current source,
+records the precise platform gaps and defines the ownership decision. The
+[bounded MCP profile](mcp-provider-profile.md) pins protocol/SDK revisions, discovery,
+results and unsupported capabilities, with an independent reproducible design probe.
 
 ## Existing provider mechanism
 
@@ -70,15 +75,19 @@ requires extending the shared profile and its cross-language fixtures first.
 | TUI, desktop GUI or CLI instance | Streamable HTTP and STDIO | That instance owns connection configuration, secrets, subprocesses and presence. |
 | Browser console | Server-hosted providers; explicitly connected native hosts where applicable | Browser does not launch STDIO processes. |
 
-Use an explicit protocol/version profile and configured endpoints. Server hosting
+Use the explicit `2026-07-28` profile or `2025-11-25` compatibility profile and
+configured endpoints. The former uses per-request metadata and discovery without
+an initialization/session assumption; the latter retains the legacy handshake.
+The initial upstream SDK pin is official TypeScript client/core 2.3.1, separately
+from the existing outward adapter. Server hosting
 never launches MCP subprocesses. Native hosts use configured executable and
 argument vectors, working directory and selected environment credentials, without
 shell interpolation. Closing an instance removes its local availability. A CLI
 provider needs a persistent hosting mode; a one-shot connection command cannot
 keep a provider alive. HTTP refers to
-[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports),
+[Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http),
 with HTTPS for authenticated remote deployment. Legacy HTTP+SSE requires an
-explicit compatibility profile rather than silent fallback.
+explicit separately tested compatibility profile and is outside the first release.
 
 An organization connection separates its shared endpoint configuration from each
 user's upstream authorization. Login to Plowshare establishes the caller; it does
@@ -96,7 +105,9 @@ credential mutations use typed authenticated public operations; OAuth redirects
 and callbacks are an explicit HTTP boundary. Use PKCE, single-use state bound to
 the initiating owner and connection, resource-bound tokens, bounded discovery,
 serialized refresh/rotation, revocation and an actionable reauthorization state.
-See the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).
+See the [MCP authorization specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+and [ADR 0019](decisions/0019-mcp-provider-hosting.md) for refresh exchange intent,
+uncertain rotating-token recovery and the executor trust boundary.
 
 The bound executor gets credential access only for the validated connection and
 invocation it is authorized to execute. The execution grant is checked against
@@ -146,42 +157,44 @@ distinct from accounting ownership.
 
 ## Platform scope and implementation sequence
 
-Recursive provider values and durable server credential/binding ownership are
-general platform capabilities. Existing SDK-only alternatives cover scalar tools
-and instance-local hosting, but cannot faithfully carry nested values or preserve
-server-owned credentials and availability across client sessions. Plan these as
-separate platform changes under
+Recursive provider values are now shared platform contracts. Existing SDK-only
+alternatives support nested tools and instance-local hosting, but cannot provide
+server-owned credentials and durable availability bindings across client sessions.
+Credential ownership and delegated hosting are general platform capabilities;
+plan these as separate platform changes under
 [ADR 0001](decisions/0001-integration-boundary.md), followed by the SDK-only MCP
 consumer. This request authorizes the design and implementation plan; runtime
 changes remain a subsequent implementation task.
 
-1. **Deliver the shared tool schema and SDK extension.** Complete the standalone
-   foundation below, including server integration, all SDK façades and existing
-   provider compatibility. This is a general tool capability that MCP and other
-   integrations consume. Verify it before starting the subsequent phases.
-2. **Add server credential ownership and durable binding support.** Define narrow
+1. **Shared tool schema and SDK extension: delivered.** The standalone foundation
+   includes server integration, all SDK façades and existing provider compatibility.
+   MCP and other integrations consume it. Its acceptance contract is below.
+2. **Review the MCP-specific decision and profile.** Resolve the precise credential,
+   delegated executor and accounting policy boundaries in ADR 0019. The probe is
+   design evidence; it does not assert shipped MCP support.
+3. **Add server credential ownership and durable binding support.** Define narrow
    credential service/repository contracts and typed public operations. Evolve
    existing provider scopes to distinguish durable server hosting from local
    presence. Add only required additive persistence migrations and retain existing
    invocation records as execution authority. Document secret/key rollback and
    revoked/uncertain refresh recovery without replaying credential mutations.
-3. **Build the MCP provider.** Implement bounded initialization, paginated discovery,
-   catalogue renewal/withdrawal, collision-safe name mapping and `tools/call`
+4. **Build the MCP provider.** Implement profile-specific discovery/initialization,
+   bounded pagination, catalogue renewal/withdrawal, collision-safe name mapping and `tools/call`
    handlers under `integrations/`. Pin original upstream names, schemas and
    credential subjects. Server hosting accepts HTTP only; native hosting adds
    STDIO. Reuse SDK journals and exact invocation identities. Reconnecting or
    refreshing metadata never resubmits an uncertain call.
-4. **Expose connection management in clients.** Provide server-held user
+5. **Expose connection management in clients.** Provide server-held user
    authorization, authorized service-account selection, agent assignments,
    compatibility diagnostics and instance-local hosting in CLI/TUI/desktop.
    Browser management operates through typed server capabilities. Reuse shared
    client operations and show which host executes a tool.
-5. **Verify interoperability and lifecycle.** Exercise an organization endpoint
+6. **Verify interoperability and lifecycle.** Exercise an organization endpoint
    with two users, a service-bound Application, and native HTTP/STDIO hosts.
    Validate cross-client use, instance isolation, revocation, expiry, restart,
    cancellation, schema changes and lost responses against retained receipts.
 
-## First delivery and acceptance
+## Delivered schema foundation and acceptance contract
 
 Establish one canonical schema vocabulary at the shared protocol/SDK boundary,
 starting from the existing typed model-facing representation. Move or extract
@@ -223,11 +236,13 @@ database test opt-in is needed unless the implementation introduces a specific
 PostgreSQL-dependent assertion. MCP transports, OAuth, credential persistence,
 durable hosting bindings and connection-management UI belong to the later phases.
 
-The first result profile accepts bounded text and structured MCP data rendered
-faithfully into the existing text result contract. Validate `structuredContent`
+The [MCP result profile](mcp-provider-profile.md#results-and-capabilities) accepts
+bounded text and structured MCP data rendered faithfully into the existing text
+result contract. Validate `structuredContent`
 against a supported `outputSchema` when supplied. Define `isError` mapping explicitly:
-a returned tool error is recorded as a received error result, while a transport
-loss after submission remains UNKNOWN. Unsupported media, task-required tools,
+a returned `isError` tool result is recorded as COMPLETED receipt delivery with its
+error flag preserved, while transport loss after submission remains UNKNOWN.
+Unsupported media, task-required tools,
 sampling, elicitation, prompts and resource operations receive explicit capability
 diagnostics; this tools-first scope does not imply those capabilities are enabled.
 
