@@ -11,6 +11,20 @@ import org.junit.jupiter.api.Test;
 
 class AccessRequestDecoderTest {
   @Test
+  void named_tool_scope_keeps_project_authorization_and_refuses_object_scope() {
+    for (String op : List.of("tool.scope.connect", "tool.scope.disconnect")) {
+      assertEquals(
+          Set.of("fixture"),
+          AccessRequestDecoder.decode(op, Map.of("project", "fixture", "scope", "scanner"))
+              .projects());
+      for (Object scope : List.of(1, "scanner.bad", Map.of("kind", "project", "project", "other")))
+        assertThrows(
+            CallerFault.class,
+            () -> AccessRequestDecoder.decode(op, Map.of("project", "fixture", "scope", scope)));
+    }
+  }
+
+  @Test
   void usage_lineage_scope_preserves_authorization_references() {
     for (String scope : List.of("direct", "subtree")) {
       var request =

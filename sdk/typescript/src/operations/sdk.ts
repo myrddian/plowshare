@@ -1,4 +1,20 @@
 export type {
+  HostedToolDefinition,
+  HostedToolBinding,
+  HostedToolReceipt,
+  HostedToolRegistration,
+  HostedToolWorker,
+  HostedToolWorkerStatus,
+  HostedToolCredentialRequest,
+  HostedToolCredential,
+  HostedToolPublication,
+  HostedToolConsumption,
+  HostedToolAcknowledgement,
+  HostedToolPayloads,
+  HostedToolReplies,
+  HostedToolReconciliation,
+} from './hosted-tool-scopes.ts';
+export type {
   ProviderOAuthSettings,
   ProviderConnectionDefinition,
   ProviderConnection,

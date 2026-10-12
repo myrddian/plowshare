@@ -1,3 +1,4 @@
+import { hostedReplyMatches } from './hosted-tool-scopes.ts';
 import { providerReplyMatches } from './provider-credentials.ts';
 import { decodeReply } from './schema.ts';
 import { problem } from './payload-validation.ts';
@@ -650,6 +651,8 @@ export function resultOf(asked: Request, outcome: Outcome): Result {
     isConversationOperation(asked.type) &&
     conversationReply(asked.type, outcome) === undefined
   )
+    return { kind: 'invalid-response', outcome };
+  if (!hostedReplyMatches(asked.type, asked.payload, outcome.payload))
     return { kind: 'invalid-response', outcome };
   if (!providerReplyMatches(asked.type, asked.payload, outcome.payload))
     return { kind: 'invalid-response', outcome };

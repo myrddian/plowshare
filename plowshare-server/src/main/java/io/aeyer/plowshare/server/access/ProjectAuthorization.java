@@ -35,6 +35,9 @@ public class ProjectAuthorization {
       Set.of(
           "project.list",
           "project.access",
+          "tool.scope.host.list",
+          "tool.scope.host.status",
+          "tool.scope.host.receipt",
           "tool.scope.list",
           "relay.topics",
           "relay.log",
@@ -156,7 +159,8 @@ public class ProjectAuthorization {
           "firing.list");
 
   private static boolean serviceOperation(String operation) {
-    return operation.startsWith("provider.credential.")
+    return operation.startsWith("tool.scope.host.")
+        || operation.startsWith("provider.credential.")
         || Set.of(
                 "provider.connection.list",
                 "provider.connection.status",
@@ -261,6 +265,12 @@ public class ProjectAuthorization {
 
   public void require(String operation, AccessRequest payload, String account) {
     if (account == null) throw new CallerFault("This operation needs an authenticated account");
+    // Only these closed worker frames delegate project authorization to their typed route service.
+    // They grant neither ordinary Relay access nor Personal/project membership.
+    if (io.aeyer.plowshare.protocol.HostedToolScopes.WORKER_OPERATIONS.contains(operation)) {
+      if (!accounts.isEnabled(account)) throw new CallerFault("Active executor required");
+      return;
+    }
     boolean service = io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account);
     if (service
         && !operation.equals("admin.status")

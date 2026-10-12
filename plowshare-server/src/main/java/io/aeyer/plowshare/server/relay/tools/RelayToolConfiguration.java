@@ -13,7 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Composes the narrow tool façade with the existing broker and membership authority. */
 @Configuration
-@EnableConfigurationProperties(RelayToolProperties.class)
+@EnableConfigurationProperties({RelayToolProperties.class, HostedToolProperties.class})
 public class RelayToolConfiguration {
   @Bean
   public ApplicationToolRegistry applicationToolRegistry(
@@ -77,7 +77,7 @@ public class RelayToolConfiguration {
   }
 
   @Bean
-  public ToolScopeConnections toolScopeConnections(
+  public ToolScopeConnections sessionToolScopeConnections(
       io.aeyer.plowshare.server.agents.ApplicationResources resources,
       ProjectWorkspaces projects,
       ProjectMembers members,
@@ -109,10 +109,86 @@ public class RelayToolConfiguration {
   }
 
   @Bean
+  @org.springframework.context.annotation.Primary
+  public ToolScopeConnections toolScopeConnections(
+      @org.springframework.beans.factory.annotation.Qualifier("sessionToolScopeConnections")
+          ToolScopeConnections local,
+      HostedToolScopes hosted) {
+    return new CombinedToolScopeConnections(local, hosted);
+  }
+
+  @Bean
+  @DependsOnDatabaseInitialization
+  public HostedToolScopeRepository hostedToolScopeRepository(
+      JdbcTemplate jdbc, com.fasterxml.jackson.databind.ObjectMapper mapper) {
+    return new JdbcHostedToolScopeRepository(jdbc, mapper);
+  }
+
+  @Bean
+  public HostedToolScopes hostedToolScopes(
+      HostedToolScopeRepository repository,
+      io.aeyer.plowshare.server.providers.ProviderCredentialGrants credentials,
+      ProjectWorkspaces projects,
+      ProjectMembers members,
+      io.aeyer.plowshare.server.auth.AdminStore accounts,
+      io.aeyer.plowshare.server.agents.ApplicationResources resources,
+      @org.springframework.beans.factory.annotation.Qualifier("sessionToolScopeConnections")
+          ToolScopeConnections local,
+      io.aeyer.plowshare.server.session.SessionRegistry sessions,
+      HostedToolProperties properties,
+      org.springframework.beans.factory.ObjectProvider<
+              io.aeyer.plowshare.server.agents.DefinitionResolver>
+          definitions,
+      org.springframework.beans.factory.ObjectProvider<io.aeyer.plowshare.server.agents.JobRuntime>
+          runtime,
+      Relay relay,
+      io.aeyer.plowshare.server.relay.RelayLogRepository logs,
+      io.aeyer.plowshare.server.relay.RelayPortRepository ports,
+      org.springframework.beans.factory.ObjectProvider<RelayToolRepository> invocations,
+      org.springframework.beans.factory.ObjectProvider<RelayToolInvocations> results,
+      UnitOfWork work,
+      io.aeyer.plowshare.server.relay.RelayProperties relayProperties) {
+    return new OwnedHostedToolScopes(
+        repository,
+        new io.aeyer.plowshare.server.providers.CurrentProviderCredentialAccess(accounts, members),
+        credentials,
+        projects,
+        members,
+        accounts,
+        resources,
+        toolGrants(definitions),
+        local,
+        (actor, session, socket) ->
+            sessions
+                .find(session)
+                .filter(s -> s.account().filter(actor::equals).isPresent())
+                .flatMap(
+                    s ->
+                        s.attached(
+                            io.aeyer.plowshare.server.session.Role.LISTENER,
+                            org.springframework.web.socket.WebSocketSession.class))
+                .filter(s -> s.isOpen() && s.getId().equals(socket))
+                .isPresent(),
+        properties.getExecutors(),
+        () ->
+            io.aeyer.plowshare.server.agents.ScopedTools.reservedNames(
+                runtime.getObject().knownTools()),
+        relay,
+        logs,
+        ports,
+        invocations::getObject,
+        results::getObject,
+        work,
+        java.time.Clock.systemUTC(),
+        java.util.UUID.randomUUID(),
+        relayProperties.getMaxForwardingHops());
+  }
+
+  @Bean
   @DependsOnDatabaseInitialization
   public RelayToolRepository relayToolRepository(
-      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay) {
-    return new JdbcRelayToolRepository(jdbc, transactions, relay);
+      JdbcTemplate jdbc, UnitOfWork transactions, Relay relay, HostedToolScopes hosting) {
+    return new JdbcRelayToolRepository(jdbc, transactions, relay, hosting);
   }
 
   @Bean
@@ -121,8 +197,15 @@ public class RelayToolConfiguration {
       Relay relay,
       ProjectMembers members,
       ProjectWorkspaces projects,
-      io.aeyer.plowshare.server.relay.RelayProperties properties) {
+      io.aeyer.plowshare.server.relay.RelayProperties properties,
+      HostedToolScopes hosting) {
     return new ProjectRelayToolInvocations(
-        repository, relay, members, projects, Instant::now, properties.getMaxForwardingHops());
+        repository,
+        relay,
+        members,
+        projects,
+        Instant::now,
+        properties.getMaxForwardingHops(),
+        hosting);
   }
 }

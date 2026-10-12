@@ -1,3 +1,4 @@
+import type { HostedToolRegistration } from './hosted-tool-scopes.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -83,6 +84,10 @@ class Wire implements Socket {
   listener: ((event: Arrival) => void) | undefined;
   closed: (() => void) | undefined;
   publications = 0;
+  readonly seen: {
+    type: string;
+    payload: Readonly<Record<string, unknown>>;
+  }[] = [];
   loseReply = false;
   published: Readonly<Record<string, unknown>> = {};
   readonly id = decodeToolCall(source()).invocationId;
@@ -97,8 +102,18 @@ class Wire implements Socket {
   }
   send(text: string): void {
     const frame: unknown = JSON.parse(text);
-    const envelope = fieldsOf(frame),
-      q = fieldsOf(envelope['payload']);
+    const envelope = fieldsOf(frame);
+    let q = fieldsOf(envelope['payload']);
+    this.seen.push({ type: String(envelope['type']), payload: q });
+    const portType = String(envelope['type']).startsWith('tool.scope.worker.')
+      ? 'relay.' + String(envelope['type']).split('.').at(-1)
+      : envelope['type'];
+    if (portType === 'relay.publish' && 'publication' in q)
+      q = fieldsOf(q['publication']);
+    if (portType === 'relay.consume' && 'consumption' in q)
+      q = fieldsOf(q['consumption']);
+    if (portType === 'relay.ack' && 'acknowledgement' in q)
+      q = fieldsOf(q['acknowledgement']);
     const topic = {
       name: q['topic'],
       kind: 'TEXT',
@@ -129,7 +144,7 @@ class Wire implements Socket {
       },
     });
     let payload: unknown;
-    if (envelope['type'] === 'relay.consume')
+    if (portType === 'relay.consume')
       payload = {
         project: q['project'],
         topic: q['topic'],
@@ -143,7 +158,7 @@ class Wire implements Socket {
         expiredThrough: null,
         events: [event()],
       };
-    else if (envelope['type'] === 'relay.ack')
+    else if (portType === 'relay.ack')
       payload = {
         project: q['project'],
         topic: q['topic'],
@@ -152,7 +167,7 @@ class Wire implements Socket {
         through: '1',
         gap: false,
       };
-    else if (envelope['type'] === 'relay.publish') {
+    else if (portType === 'relay.publish') {
       this.publications++;
       this.published = q;
       if (this.loseReply) {
@@ -166,7 +181,7 @@ class Wire implements Socket {
         position: '1',
         publishedAt: '2026-10-08T00:00:00Z',
       };
-    } else if (envelope['type'] === 'relay.log')
+    } else if (portType === 'relay.log')
       payload = {
         scope: { project: q['project'], system: false },
         topic,
@@ -177,7 +192,20 @@ class Wire implements Socket {
         subscribers: [],
         branches: [],
       };
-    else throw new Error('Unexpected operation');
+    else if (envelope['type'] === 'tool.scope.worker.read') {
+      const result =
+        typeof this.published['text'] === 'string'
+          ? fieldsOf(JSON.parse(this.published['text']))
+          : {};
+      payload = {
+        binding: q['binding'],
+        registration: q['registration'],
+        invocation: q['invocation'],
+        verified: 'state' in result,
+        state: result['state'] ?? 'UNKNOWN',
+        text: result['text'] ?? 'No verified result',
+      };
+    } else throw new Error('Unexpected operation');
     this.listener?.({
       data: JSON.stringify({
         id: envelope['id'],
@@ -189,6 +217,110 @@ class Wire implements Socket {
   }
 }
 describe('Relay tool façade', () => {
+  it('uses hosted worker ports and reconciles the original fence after reconnect without replay', async () => {
+    const id = '11111111-1111-1111-1111-111111111111',
+      oldFence = '33333333-3333-3333-3333-333333333333';
+    const route = {
+      project: 'fixture',
+      scope: 'scans',
+      sourceProvider: 'scanner',
+      provider: 'host-' + 'a'.repeat(32),
+      account: '@service/' + id,
+      prefix: 'network_',
+      grants: ['*'],
+      agents: ['coordinator'],
+      leaseSeconds: 30,
+    };
+    const registration: HostedToolRegistration = {
+      binding: {
+        binding: id,
+        project: 'fixture',
+        owner: 'owner',
+        generation: 1,
+        enabled: true,
+        deleted: false,
+        application: false,
+        definition: {
+          scope: 'scans',
+          provider: 'scanner',
+          prefix: 'network_',
+          grants: ['*'],
+          agents: ['coordinator'],
+          leaseSeconds: 30,
+          credentialProject: 'configuration',
+          connection: id,
+          subject: null,
+          executor: route.account,
+        },
+        credentialSubject: 'owner',
+        route,
+      },
+      registration: oldFence,
+      registeredAt: '2026-10-13T00:00:00Z',
+      expiresAt: '2099-01-01T00:00:00Z',
+    };
+    const tool = { ...declaration, name: 'network_read' };
+    const request = JSON.stringify({
+      ...fieldsOf(JSON.parse(source())),
+      provider: route.provider,
+      tool: tool.name,
+      deadline: '2099-01-01T00:00:00Z',
+    });
+    const rows = new Map<string, ToolReceipt>();
+    const journal: ToolJournal = {
+      identity: await host.sha256(toolDeploymentConfig(route, [tool])),
+      async all() {
+        return [...rows.values()];
+      },
+      async save(receipt) {
+        rows.set(receipt.invocationId, receipt);
+      },
+    };
+    const wire = new Wire(request),
+      client = new Plowshare({ socket: wire });
+    let calls = 0;
+    const tools = [
+      {
+        declaration: tool,
+        handler: async () => {
+          calls++;
+          return { state: 'COMPLETED' as const, text: 'hosted result' };
+        },
+      },
+    ];
+    const provider = await ToolProvider.create(
+      client,
+      route,
+      tools,
+      journal,
+      host,
+      registration,
+    );
+    wire.loseReply = true;
+    await expect(provider.poll()).rejects.toThrow();
+    expect(calls).toBe(1);
+    expect(wire.seen.map((v) => v.type)).toEqual([
+      'tool.scope.worker.consume',
+      'tool.scope.worker.ack',
+      'tool.scope.worker.publish',
+    ]);
+    const reconnect = new Wire(request);
+    reconnect.published = wire.published;
+    const recovered = await ToolProvider.create(
+      new Plowshare({ socket: reconnect }),
+      route,
+      tools,
+      journal,
+      host,
+      { ...registration, registration: '44444444-4444-4444-4444-444444444444' },
+    );
+    expect(await recovered.reconcile()).toBe(1);
+    expect(calls).toBe(1);
+    expect(reconnect.publications).toBe(0);
+    expect(reconnect.seen[0]?.type).toBe('tool.scope.worker.read');
+    expect(reconnect.seen[0]?.payload['registration']).toBe(oldFence);
+    expect((await journal.all())[0]?.phase).toBe('done');
+  });
   it('uses the common strict scalar contract and result identity', async () => {
     const samples = fixture()['cases'];
     if (!Array.isArray(samples)) throw new Error('Missing fixtures');

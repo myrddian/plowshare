@@ -179,6 +179,8 @@ def decode_push(value: object) -> contracts.ServerPush:
 
 def deployment_matches(operation: str, request: object, result: object) -> bool:
     """A structural reply cannot certify a different project's retained receipt."""
+    if operation.startswith(("tool.scope.host.", "tool.scope.worker.")):
+        return hosted_matches(operation, request, result)
     if operation in {
         "application.identity.status",
         "application.token.issue",
@@ -237,3 +239,69 @@ def deployment_matches(operation: str, request: object, result: object) -> bool:
             and result.release.revision.lower() == revision.lower()
         )
     )
+
+
+def hosted_matches(operation: str, request: object, result: object) -> bool:
+    """Correlate only closed hosted operations; IDs never establish server authority."""
+    asked = _object(_wire(request))
+    answered = _wire(result)
+    if operation == "tool.scope.host.list":
+        return isinstance(answered, list) and all(
+            _object(row).get("project") == asked.get("project") for row in answered
+        )
+    row = _object(answered)
+    if operation in {"tool.scope.worker.credential", "tool.scope.worker.read"}:
+        keys = ["binding", "registration", "invocation"]
+        if operation.endswith("credential"):
+            keys.append("purpose")
+        return all(row.get(k) == asked.get(k) for k in keys)
+    if operation == "tool.scope.worker.status":
+        return row.get("binding") == asked.get("binding")
+    nested = {
+        "tool.scope.worker.publish": "publication",
+        "tool.scope.worker.consume": "consumption",
+        "tool.scope.worker.ack": "acknowledgement",
+    }.get(operation)
+    if nested is not None:
+        port = _object(asked.get(nested))
+        if not all(
+            row.get(k) == port.get(k)
+            for k in ["project", "topic", "group", "consumerId", "requestId", "batchId"]
+            if k in port and k in row
+        ):
+            return False
+        if operation != "tool.scope.worker.consume":
+            return True
+        events, limit = row.get("events"), port.get("limit")
+        return (
+            isinstance(events, list)
+            and isinstance(limit, (int, float))
+            and len(events) <= limit
+        )
+    binding = (
+        row if operation == "tool.scope.host.status" else _object(row.get("binding"))
+    )
+    if any(binding.get(k) != asked[k] for k in ["project", "binding"] if k in asked):
+        return False
+    if operation == "tool.scope.worker.renew":
+        return row.get("registration") == asked.get("registration")
+    if operation == "tool.scope.worker.register":
+        return row.get("registration") == asked.get("requestId") and binding.get(
+            "generation"
+        ) == asked.get("expectedGeneration")
+    if "requestId" in asked and row.get("requestId") != asked["requestId"]:
+        return False
+    if operation in {"tool.scope.host.receipt", "tool.scope.host.status"}:
+        return True
+    expected = asked.get("expectedGeneration")
+    if not isinstance(expected, (int, float)) and expected is not None:
+        return False
+    if row.get("operation") != operation or binding.get("generation") != (
+        1 if expected is None else expected + 1
+    ):
+        return False
+    if operation == "tool.scope.host.save":
+        return binding.get("definition") == asked.get("definition")
+    return binding.get("enabled") == (asked.get("action") == "ENABLE") and binding.get(
+        "deleted"
+    ) == (asked.get("action") == "DELETE")

@@ -138,5 +138,6 @@ until connection, including an MCP adapter. It does not implement an outbound MC
 transport or arbitrary MCP JSON Schema. Relay tools support scalar convenience
 parameters and the [shared bounded nested schema profile](tool-schemas.md).
 External adapters translate supported catalogues through the public SDK and remain
-outside the server runtime. Server-owned credentials and durable delegated hosting
-are separate planned capabilities; see the [MCP client design](mcp-client-design.md).
+outside the server runtime. Server-owned credentials and [durable delegated hosting](hosted-tool-scopes.md)
+use this same mechanism. MCP HTTP/STDIO adapters remain external SDK consumers;
+see the [MCP client design](mcp-client-design.md).

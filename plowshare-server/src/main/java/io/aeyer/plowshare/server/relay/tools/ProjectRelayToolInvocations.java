@@ -23,6 +23,7 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
   private final ProjectWorkspaces projects;
   private final Supplier<Instant> clock;
   private final int maximum;
+  private final HostedInvocationAuthority hosting;
 
   public ProjectRelayToolInvocations(
       RelayToolRepository repository,
@@ -31,6 +32,18 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
       ProjectWorkspaces projects,
       Supplier<Instant> clock,
       int maximum) {
+    this(repository, relay, members, projects, clock, maximum, HostedInvocationAuthority.NONE);
+  }
+
+  public ProjectRelayToolInvocations(
+      RelayToolRepository repository,
+      Relay relay,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      Supplier<Instant> clock,
+      int maximum,
+      HostedInvocationAuthority hosting) {
+    this.hosting = Objects.requireNonNull(hosting);
     if (maximum < 1 || maximum > 32)
       throw new IllegalArgumentException("Tool effect limit must be 1 through 32");
     this.maximum = maximum;
@@ -112,7 +125,8 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
                         "Tool execution has no remaining verified Relay effect budget"));
     var causation = ancestry.next(owner.runs().id(), maximum);
     var intent =
-        new RelayToolRepository.Intent(id, project, fingerprint, binding, request, now, causation);
+        new RelayToolRepository.Intent(
+            id, project, fingerprint, binding, request, now, causation, owner.agentName(), null);
     var stored = repository.submit(intent);
     // The first request's deadline is authoritative, including after restart or changed wall time.
     var original = stored.intent();
@@ -122,6 +136,8 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
     long waitUntil =
         System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(binding.timeoutSeconds());
     while (true) {
+      if (original.hosted() != null && !hosting.permits(binding, owner.accountHandle()))
+        return unknown(id, "Hosted authority or availability ended after submission.");
       authorizeSame(binding, owner.accountHandle(), project);
       var publication =
           relay.retained(
@@ -165,6 +181,13 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
   }
 
   private long authorize(RelayToolDefinition binding, String caller) {
+    if (io.aeyer.plowshare.protocol.HostedToolScopes.hosted(binding.provider())) {
+      if (!hosting.permits(binding, caller))
+        throw new CallerFault("Hosted tool unavailable to this execution");
+      Long id = projects.id(binding.project());
+      if (id == null) throw new CallerFault("Hosted project unavailable");
+      return id;
+    }
     if (!members.mayWork(binding.project(), caller)
         || !members.mayWork(binding.project(), binding.account())
         || projects
@@ -190,7 +213,10 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
             .orElseThrow(() -> new CallerFault("Tool invocation is unavailable to this account"));
     var original = stored.intent();
     var binding = original.binding();
-    authorizeSame(binding, account, projectId);
+    if (original.hosted() == null) authorizeSame(binding, account, projectId);
+    else if (!original.hosted().owner().equals(account)
+        || !original.hosted().executor().equals(binding.account()))
+      throw new CallerFault("Retained hosted provenance invalid");
     if (stored.result() != null) return result(binding, account, projectId, stored.result());
     var retained =
         relay.retained(
@@ -226,7 +252,12 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
 
   private Outcome result(
       RelayToolDefinition binding, String caller, long project, RelayToolCodec.Result result) {
-    authorizeSame(binding, caller, project);
+    if (!io.aeyer.plowshare.protocol.HostedToolScopes.hosted(binding.provider()))
+      authorizeSame(binding, caller, project);
+    else if (!members.mayWork(binding.project(), caller)
+        || projects.personalOwner(binding.project()).filter(p -> !p.equals(caller)).isPresent()
+        || !Objects.equals(projects.id(binding.project()), project))
+      throw new CallerFault("Hosted result unavailable to this owner");
     return new Outcome(UUID.fromString(result.invocationId()), result.state(), result.text());
   }
 

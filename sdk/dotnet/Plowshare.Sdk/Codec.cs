@@ -73,6 +73,7 @@ internal static class Codec
     // Receipt ownership supplements structural decoding before the result escapes this boundary.
     public static void CorrelateDeployment(string operation, JsonElement request, JsonElement result)
     {
+        if(operation.StartsWith("tool.scope.host.",StringComparison.Ordinal)||operation.StartsWith("tool.scope.worker.",StringComparison.Ordinal)){if(!HostedMatches(operation,request,result))throw Invalid();return;}
         static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         if (operation is "application.identity.status" or "application.token.issue" or "application.token.receipt") {
             if(operation == "application.identity.status") {
@@ -89,6 +90,26 @@ internal static class Codec
         static string? TextAt(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         if (TextAt(request,"project") != TextAt(result,"project") || operation != "application.deployment.status" && !string.Equals(TextAt(request,"requestId"),TextAt(result,"requestId"),StringComparison.OrdinalIgnoreCase)) throw Invalid();
         if (operation == "application.activate" && (!result.TryGetProperty("release",out var release) || !string.Equals(TextAt(request,"revision"),TextAt(release,"revision"),StringComparison.OrdinalIgnoreCase))) throw Invalid();
+    }
+    // Validate original coordinates at the transport boundary; a result UUID is not authorization.
+    private static bool HostedMatches(string operation,JsonElement request,JsonElement result)
+    {
+        static bool Same(JsonElement a,JsonElement b,string key)=>a.TryGetProperty(key,out var av)&&b.TryGetProperty(key,out var bv)&&System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(av.GetRawText()),System.Text.Json.Nodes.JsonNode.Parse(bv.GetRawText()));
+        if(operation=="tool.scope.host.list")return result.ValueKind==JsonValueKind.Array&&result.EnumerateArray().All(b=>Same(request,b,"project"));
+        if(result.ValueKind!=JsonValueKind.Object)return false;
+        if(operation is "tool.scope.worker.credential" or "tool.scope.worker.read")return new[]{"binding","registration","invocation"}.All(k=>Same(request,result,k))&&(operation.EndsWith("read",StringComparison.Ordinal)||Same(request,result,"purpose"));
+        if(operation=="tool.scope.worker.status")return Same(request,result,"binding");
+        var nested=operation=="tool.scope.worker.publish"?"publication":operation=="tool.scope.worker.consume"?"consumption":operation=="tool.scope.worker.ack"?"acknowledgement":null;
+        if(nested is not null){var port=request.GetProperty(nested);if(!new[]{"project","topic","group","consumerId","requestId","batchId"}.All(k=>!port.TryGetProperty(k,out _)||!result.TryGetProperty(k,out _)||Same(port,result,k)))return false;return operation!="tool.scope.worker.consume"||result.GetProperty("events").GetArrayLength()<=port.GetProperty("limit").GetInt32();}
+        var binding=operation=="tool.scope.host.status"?result:result.GetProperty("binding");
+        if(!new[]{"project","binding"}.All(k=>!request.TryGetProperty(k,out _)||Same(request,binding,k)))return false;
+        if(operation=="tool.scope.worker.renew")return Same(request,result,"registration");
+        if(operation=="tool.scope.worker.register")return result.GetProperty("registration").GetString()==request.GetProperty("requestId").GetString()&&binding.GetProperty("generation").GetInt64()==request.GetProperty("expectedGeneration").GetInt64();
+        if(request.TryGetProperty("requestId",out _)&&!Same(request,result,"requestId"))return false;
+        if(operation is "tool.scope.host.receipt" or "tool.scope.host.status")return true;
+        var expected=request.GetProperty("expectedGeneration");if(result.GetProperty("operation").GetString()!=operation||binding.GetProperty("generation").GetInt64()!=(expected.ValueKind==JsonValueKind.Null?1:expected.GetInt64()+1))return false;
+        if(operation=="tool.scope.host.save")return Same(request,binding,"definition");
+        return binding.GetProperty("enabled").GetBoolean()==(request.GetProperty("action").GetString()=="ENABLE")&&binding.GetProperty("deleted").GetBoolean()==(request.GetProperty("action").GetString()=="DELETE");
     }
     public static ServerPush Push(JsonElement frame)
     {

@@ -2,9 +2,10 @@
 
 This platform capability stores upstream grants for configured HTTP providers. It
 is separate from Plowshare login, tool catalogues, Relay invocation receipts and
-provider scopes. It does not yet host an MCP transport or release credentials to
-external workers. The durable binding and invocation authority described in
-[ADR 0019](decisions/0019-mcp-provider-hosting.md) must gate that release.
+provider scopes. [Durable hosted scopes](hosted-tool-scopes.md) gate credential
+release to configured external executors using retained owner/invocation authority,
+as described in [ADR 0019](decisions/0019-mcp-provider-hosting.md). An external MCP
+transport and its session caches remain separate adapter work.
 
 Connections belong to an ordinary registered project. A server administrator who
 also has project manager access configures their endpoint and authentication
@@ -149,9 +150,9 @@ the connection, subject, connection revision and credential generation. The
 additive migration retains shared settings, sealed grants and redacted mutation
 receipts. Disabling hosting refuses management without deleting records; rollback
 must retain the migration, required keys and original uncertain-state evidence.
-MCP discovery/session caches and executor credential release remain gated by the
-future durable binding authority. No spending pool or external-effect ledger is
-created here.
+Executor credential release uses the durable binding authority documented in
+[hosted scopes](hosted-tool-scopes.md). MCP discovery/session caches remain adapter
+work. This credential foundation creates no spending pool or external-effect ledger.
 
 The OAuth profile follows [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700) and the
 [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)

@@ -74,6 +74,12 @@ export function constrain(graph) {
       // RE2 bounds counted repetitions at 1000; portable length limits remain separate.
       field(s,'secret',{pattern:'^[\\x20-\\x7e]+$',minLength:1,maxLength:8192,disallowPrefixes:['pss_','pst_']});
     }
+    if(op.startsWith('tool.scope.host.')||op.startsWith('tool.scope.worker.')) {
+      field(s,'project',{...identity,maxLength:256,disallowPrefixes:['client:']});
+      for(const k of ['binding','registration','requestId','invocation']) field(s,k,canonicalUuid);
+      field(s,'expectedGeneration',integer(1,9007199254740991));
+      if(op==='tool.scope.worker.credential')rules(s,{eq:[eq('purpose','EXECUTION'),present('invocation')]});
+    }
     if (op.startsWith('tool.scope.')) {
       field(s, 'scope', { ...namedSwarm, trimmed: true });
       field(s, 'provider', { pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$', maxLength: 48, trimmed: true });
@@ -325,8 +331,11 @@ export function constrain(graph) {
       );
     }
   }
-  for (const op of ['relay.publish','relay.consume','relay.ack']) {
-    const request=resolve(graph,graph.inputs[op]), reply=resolve(graph,graph.results[op]);
+  for (const operation of ['relay.publish','relay.consume','relay.ack','tool.scope.worker.publish','tool.scope.worker.consume','tool.scope.worker.ack']) {
+    const op='relay.'+operation.split('.').at(-1);
+    const wrapper=resolve(graph,graph.inputs[operation]);
+    const request=operation.startsWith('relay.')?wrapper:nested(wrapper,op==='relay.publish'?'publication':op==='relay.consume'?'consumption':'acknowledgement');
+    const reply=resolve(graph,graph.results[operation]);
     for(const shape of [request,reply]) {
       field(shape,'project',{...identity,maxLength:256});
       for(const k of ['topic','parentTopic']) field(shape,k,portName);
@@ -367,6 +376,34 @@ export function constrain(graph) {
     if (!s.properties) continue;
     const p = s.properties,
       title = s.title ?? '';
+    if(title.startsWith('HostedTool')) {
+      field(s,'project',{...identity,maxLength:256,disallowPrefixes:['client:']});
+      for(const k of ['binding','registration','connection','requestId','invocation','credentialGeneration']) if(p[k]&&stringShape(p[k]))field(s,k,canonicalUuid);
+      field(s,'generation',integer(1,9007199254740991));
+      for(const k of ['owner','credentialSubject','subject'])field(s,k,{pattern:'^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}|@service/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$',maxLength:128});
+    }
+    if(title==='HostedToolDefinition') {
+      field(s,'credentialProject',providerProject);field(s,'subject',providerService);field(s,'executor',providerService);
+      field(s,'scope',{...namedSwarm,trimmed:true});
+      field(s,'provider',{pattern:'^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',maxLength:48});
+      field(s,'prefix',{pattern:'^[a-z][a-z0-9_]*_$',maxLength:48});
+      field(s,'leaseSeconds',integer(1,300));
+      s.properties.grants={type:'array',minItems:1,maxItems:128,uniqueItems:true,items:{type:'string',pattern:'^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$',maxLength:64}};
+      s.properties.agents={type:'array',minItems:1,maxItems:128,uniqueItems:true,items:{type:'string',...namedSwarm}};
+      rules(s,implies({contains:[g('grants'),'*']},eq('grants',['*'])));
+    }
+    if(title==='HostedToolBinding') {
+      rules(s,implies(eq('deleted',true),eq('enabled',false)),
+        {eq:[g('project'),g('route.project')]},{eq:[g('definition.executor'),g('route.account')]},
+        {eq:[g('definition.provider'),g('route.sourceProvider')]},
+        ...['scope','prefix','grants','agents','leaseSeconds'].map(k=>({eq:[g('definition.'+k),g('route.'+k)]})),
+        implies(eq('definition.subject',null),{eq:[g('credentialSubject'),g('owner')]}),
+        implies(not(eq('definition.subject',null)),{eq:[g('credentialSubject'),g('definition.subject')]}));
+    }
+    if(title==='HostedToolRegistration') {field(s,'registeredAt',instant);field(s,'expiresAt',instant);}
+    if(title==='HostedToolWorkerStatus')rules(s,implies(not(eq('registration',null)),{eq:[g('binding'),g('registration.binding.binding')]}));
+    if(title==='HostedToolCredential'||title==='HostedToolCredentialRequest')rules(s,{eq:[eq('purpose','EXECUTION'),present('invocation')]});
+    if(title==='HostedToolCredential')field(s,'value',{pattern:'^[\\x20-\\x7e]+$',minLength:1,maxLength:8200});
     if (['ProviderOAuthSettings','ProviderConnectionDefinition','ProviderConnection','ProviderCredentialStatus','ProviderMutationReceipt','ProviderAuthorization','ProviderCredentialTarget','ProviderCredentialMutation'].includes(title)) {
       field(s,'project',providerProject);
       for(const key of ['connection','revision','generation','connectionRevision','requestId']) {

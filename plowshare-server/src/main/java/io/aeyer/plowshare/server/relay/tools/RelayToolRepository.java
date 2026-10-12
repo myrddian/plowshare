@@ -17,6 +17,11 @@ public interface RelayToolRepository {
 
   java.util.Optional<Stored> find(long projectId, String account, UUID id);
 
+  default java.util.Optional<Stored> find(long projectId, String account, UUID id, boolean lock) {
+    if (lock) throw new IllegalStateException("Invocation locking is unavailable");
+    return find(projectId, account, id);
+  }
+
   record Intent(
       UUID id,
       long projectId,
@@ -24,7 +29,20 @@ public interface RelayToolRepository {
       RelayToolDefinition binding,
       RelayToolCodec.Request request,
       Instant occurredAt,
-      io.aeyer.plowshare.protocol.RelayCausation causation) {
+      io.aeyer.plowshare.protocol.RelayCausation causation,
+      String agent,
+      HostedInvocation hosted) {
+    public Intent(
+        UUID id,
+        long projectId,
+        String fingerprint,
+        RelayToolDefinition binding,
+        RelayToolCodec.Request request,
+        Instant occurredAt,
+        io.aeyer.plowshare.protocol.RelayCausation causation) {
+      this(id, projectId, fingerprint, binding, request, occurredAt, causation, null, null);
+    }
+
     public Intent {
       java.util.Objects.requireNonNull(id);
       java.util.Objects.requireNonNull(binding);
@@ -41,6 +59,14 @@ public interface RelayToolRepository {
           || causation.depth() < 1
           || causation.depth() >= 32)
         throw new IllegalArgumentException("Invalid tool invocation intent");
+      if (hosted != null
+          && (!hosted.owner().equals(request.account())
+              || !hosted.executor().equals(binding.account())
+              || !hosted.agent().equals(agent)
+              || !io.aeyer.plowshare.protocol.HostedToolScopes.route(
+                      hosted.binding(), hosted.generation())
+                  .equals(binding.provider())))
+        throw new IllegalArgumentException("Foreign hosted invocation selection");
       binding.validate(new RelayToolDefinition.Arguments(request.arguments()));
       if (RelayToolCodec.write(request).length() > 32768)
         throw new IllegalArgumentException("Tool request exceeds portable envelope bound");
