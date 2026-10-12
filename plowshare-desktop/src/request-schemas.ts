@@ -7440,6 +7440,1065 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
+    "shape642": {
+      "const": "provider-management"
+    },
+    "shape643": {
+      "const": "provider.connection.list"
+    },
+    "shape644": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "shape641": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape643"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape644"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape646": {
+      "const": "provider.connection.status"
+    },
+    "shape647": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "connection",
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "shape645": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape646"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape647"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape649": {
+      "const": "provider.connection.receipt"
+    },
+    "shape650": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape648": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape649"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape650"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape652": {
+      "const": "provider.connection.save"
+    },
+    "shape656": {
+      "const": "Authorization"
+    },
+    "shape657": {
+      "const": "X-API-Key"
+    },
+    "shape658": {
+      "const": "Api-Key"
+    },
+    "shape655": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape8"
+        },
+        {
+          "$ref": "#/$defs/shape656"
+        },
+        {
+          "$ref": "#/$defs/shape657"
+        },
+        {
+          "$ref": "#/$defs/shape658"
+        }
+      ]
+    },
+    "shape660": {
+      "const": "API_KEY"
+    },
+    "shape661": {
+      "const": "OAUTH_PKCE"
+    },
+    "shape662": {
+      "const": "CLIENT_CREDENTIALS"
+    },
+    "shape659": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape660"
+        },
+        {
+          "$ref": "#/$defs/shape661"
+        },
+        {
+          "$ref": "#/$defs/shape662"
+        }
+      ]
+    },
+    "shape664": {
+      "type": "object",
+      "properties": {
+        "authorizationEndpoint": {
+          "$ref": "#/$defs/shape6"
+        },
+        "clientId": {
+          "$ref": "#/$defs/shape6"
+        },
+        "issuer": {
+          "$ref": "#/$defs/shape6"
+        },
+        "issuerMetadataUrl": {
+          "$ref": "#/$defs/shape6"
+        },
+        "redirectUri": {
+          "$ref": "#/$defs/shape6"
+        },
+        "resource": {
+          "$ref": "#/$defs/shape6"
+        },
+        "resourceMetadataUrl": {
+          "$ref": "#/$defs/shape6"
+        },
+        "scopes": {
+          "$ref": "#/$defs/shape202"
+        },
+        "tokenEndpoint": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "authorizationEndpoint",
+        "clientId",
+        "issuer",
+        "issuerMetadataUrl",
+        "redirectUri",
+        "resource",
+        "resourceMetadataUrl",
+        "scopes",
+        "tokenEndpoint"
+      ],
+      "additionalProperties": false
+    },
+    "shape663": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape8"
+        },
+        {
+          "$ref": "#/$defs/shape664"
+        }
+      ]
+    },
+    "shape654": {
+      "type": "object",
+      "properties": {
+        "apiKeyHeader": {
+          "$ref": "#/$defs/shape655"
+        },
+        "authentication": {
+          "$ref": "#/$defs/shape659"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/shape6"
+        },
+        "name": {
+          "$ref": "#/$defs/shape6"
+        },
+        "oauth": {
+          "$ref": "#/$defs/shape663"
+        }
+      },
+      "required": [
+        "apiKeyHeader",
+        "authentication",
+        "endpoint",
+        "name",
+        "oauth"
+      ],
+      "additionalProperties": false
+    },
+    "shape653": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "definition": {
+          "$ref": "#/$defs/shape654"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/shape7"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "connection",
+        "definition",
+        "expectedRevision",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape651": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape652"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape653"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape666": {
+      "const": "provider.connection.change"
+    },
+    "shape669": {
+      "const": "ENABLE"
+    },
+    "shape670": {
+      "const": "DISABLE"
+    },
+    "shape671": {
+      "const": "DELETE"
+    },
+    "shape668": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape669"
+        },
+        {
+          "$ref": "#/$defs/shape670"
+        },
+        {
+          "$ref": "#/$defs/shape671"
+        }
+      ]
+    },
+    "shape667": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape668"
+        },
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/shape6"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "action",
+        "connection",
+        "expectedRevision",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape665": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape666"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape667"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape673": {
+      "const": "provider.credential.status"
+    },
+    "shape674": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "subject": {
+          "$ref": "#/$defs/shape7"
+        }
+      },
+      "required": [
+        "connection",
+        "project",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "shape672": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape673"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape674"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape676": {
+      "const": "provider.credential.put"
+    },
+    "shape677": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape7"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        },
+        "secret": {
+          "$ref": "#/$defs/shape6"
+        },
+        "subject": {
+          "$ref": "#/$defs/shape7"
+        }
+      },
+      "required": [
+        "connection",
+        "expectedGeneration",
+        "project",
+        "requestId",
+        "secret",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "shape675": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape676"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape677"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape679": {
+      "const": "provider.credential.revoke"
+    },
+    "shape680": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape7"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        },
+        "subject": {
+          "$ref": "#/$defs/shape7"
+        }
+      },
+      "required": [
+        "connection",
+        "expectedGeneration",
+        "project",
+        "requestId",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "shape678": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape679"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape680"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape682": {
+      "const": "provider.credential.rekey"
+    },
+    "shape681": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape682"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape680"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape684": {
+      "const": "provider.credential.authorize"
+    },
+    "shape683": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape684"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape680"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape686": {
+      "const": "provider.credential.refresh"
+    },
+    "shape685": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape686"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape680"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape688": {
+      "const": "tool.scope.host.list"
+    },
+    "shape689": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "shape687": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape688"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape689"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape691": {
+      "const": "tool.scope.host.status"
+    },
+    "shape692": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/shape6"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "binding",
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "shape690": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape691"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape692"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape694": {
+      "const": "tool.scope.host.receipt"
+    },
+    "shape695": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape693": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape694"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape695"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape697": {
+      "const": "tool.scope.host.save"
+    },
+    "shape699": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "$ref": "#/$defs/shape202"
+        },
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "credentialProject": {
+          "$ref": "#/$defs/shape6"
+        },
+        "executor": {
+          "$ref": "#/$defs/shape6"
+        },
+        "grants": {
+          "$ref": "#/$defs/shape202"
+        },
+        "leaseSeconds": {
+          "$ref": "#/$defs/shape28"
+        },
+        "prefix": {
+          "$ref": "#/$defs/shape6"
+        },
+        "provider": {
+          "$ref": "#/$defs/shape6"
+        },
+        "scope": {
+          "$ref": "#/$defs/shape6"
+        },
+        "subject": {
+          "$ref": "#/$defs/shape7"
+        }
+      },
+      "required": [
+        "agents",
+        "connection",
+        "credentialProject",
+        "executor",
+        "grants",
+        "leaseSeconds",
+        "prefix",
+        "provider",
+        "scope",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "shape698": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/shape6"
+        },
+        "definition": {
+          "$ref": "#/$defs/shape699"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape571"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "binding",
+        "definition",
+        "expectedGeneration",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape696": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape697"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape698"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape701": {
+      "const": "tool.scope.host.change"
+    },
+    "shape702": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape668"
+        },
+        "binding": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape28"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "action",
+        "binding",
+        "expectedGeneration",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape700": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape701"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape702"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape704": {
+      "const": "tool.scope.list"
+    },
+    "shape705": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "shape703": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape642"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape704"
+        },
+        "payload": {
+          "$ref": "#/$defs/shape705"
+        }
+      },
+      "required": [
+        "action",
+        "operation",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "shape707": {
+      "const": "provider-management-pending"
+    },
+    "shape706": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape707"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "shape709": {
+      "const": "provider-management-recover"
+    },
+    "shape712": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape652"
+        },
+        {
+          "$ref": "#/$defs/shape666"
+        }
+      ]
+    },
+    "shape711": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/shape7"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape712"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "connection",
+        "expectedRevision",
+        "operation",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape714": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape676"
+        },
+        {
+          "$ref": "#/$defs/shape679"
+        },
+        {
+          "$ref": "#/$defs/shape682"
+        },
+        {
+          "$ref": "#/$defs/shape684"
+        },
+        {
+          "$ref": "#/$defs/shape686"
+        }
+      ]
+    },
+    "shape713": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape7"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape714"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        },
+        "subject": {
+          "$ref": "#/$defs/shape7"
+        }
+      },
+      "required": [
+        "connection",
+        "expectedGeneration",
+        "operation",
+        "project",
+        "requestId",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "shape716": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape697"
+        },
+        {
+          "$ref": "#/$defs/shape701"
+        }
+      ]
+    },
+    "shape715": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/shape6"
+        },
+        "expectedGeneration": {
+          "$ref": "#/$defs/shape571"
+        },
+        "operation": {
+          "$ref": "#/$defs/shape716"
+        },
+        "project": {
+          "$ref": "#/$defs/shape6"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        }
+      },
+      "required": [
+        "binding",
+        "expectedGeneration",
+        "operation",
+        "project",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "shape710": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/shape711"
+        },
+        {
+          "$ref": "#/$defs/shape713"
+        },
+        {
+          "$ref": "#/$defs/shape715"
+        }
+      ]
+    },
+    "shape708": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape709"
+        },
+        "intent": {
+          "$ref": "#/$defs/shape710"
+        }
+      },
+      "required": [
+        "action",
+        "intent"
+      ],
+      "additionalProperties": false
+    },
     "shape0": {
       "anyOf": [
         {
@@ -7963,6 +9022,63 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         },
         {
           "$ref": "#/$defs/shape638"
+        },
+        {
+          "$ref": "#/$defs/shape641"
+        },
+        {
+          "$ref": "#/$defs/shape645"
+        },
+        {
+          "$ref": "#/$defs/shape648"
+        },
+        {
+          "$ref": "#/$defs/shape651"
+        },
+        {
+          "$ref": "#/$defs/shape665"
+        },
+        {
+          "$ref": "#/$defs/shape672"
+        },
+        {
+          "$ref": "#/$defs/shape675"
+        },
+        {
+          "$ref": "#/$defs/shape678"
+        },
+        {
+          "$ref": "#/$defs/shape681"
+        },
+        {
+          "$ref": "#/$defs/shape683"
+        },
+        {
+          "$ref": "#/$defs/shape685"
+        },
+        {
+          "$ref": "#/$defs/shape687"
+        },
+        {
+          "$ref": "#/$defs/shape690"
+        },
+        {
+          "$ref": "#/$defs/shape693"
+        },
+        {
+          "$ref": "#/$defs/shape696"
+        },
+        {
+          "$ref": "#/$defs/shape700"
+        },
+        {
+          "$ref": "#/$defs/shape703"
+        },
+        {
+          "$ref": "#/$defs/shape706"
+        },
+        {
+          "$ref": "#/$defs/shape708"
         }
       ]
     }

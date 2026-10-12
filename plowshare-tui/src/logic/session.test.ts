@@ -5351,3 +5351,46 @@ it('builds Application file commands with the current scope and reviewed revisio
     },
   });
 });
+
+describe('provider owner management slash commands', () => {
+  it('exposes owner families but excludes worker secret authority and separates masked material', async () => {
+    const { serverCommand } = await import('./session.ts');
+    expect(
+      serverCommand('/provider connection list {"project":"fixture"}'),
+    ).toMatchObject({
+      kind: 'request',
+      request: { type: 'provider.connection.list' },
+    });
+    expect(
+      serverCommand('/tool scope host list {"project":"fixture"}'),
+    ).toMatchObject({
+      kind: 'request',
+      request: { type: 'tool.scope.host.list' },
+    });
+    expect(serverCommand('/tool scope worker credential {}')).toEqual({
+      kind: 'unhandled',
+    });
+    const coordinates = {
+      project: 'fixture',
+      connection: '11111111-1111-1111-1111-111111111111',
+      subject: null,
+      requestId: '11111111-1111-1111-1111-111111111111',
+      expectedGeneration: null,
+    };
+    expect(
+      serverCommand('/provider credential put ' + JSON.stringify(coordinates)),
+    ).toMatchObject({
+      kind: 'request',
+      request: {
+        type: 'provider.credential.put',
+        payload: { ...coordinates, secret: '[masked input]' },
+      },
+    });
+    const refused = serverCommand(
+      '/provider credential put ' +
+        JSON.stringify({ ...coordinates, secret: 'private-material' }),
+    );
+    expect(refused.kind).toBe('usage');
+    expect(JSON.stringify(refused)).not.toContain('private-material');
+  });
+});

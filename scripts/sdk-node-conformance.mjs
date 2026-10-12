@@ -53,6 +53,14 @@ const failed = assert.rejects(abandoned, error => error.delivery === 'UNKNOWN')
 assert.equal((await submitted).kind, 'fixture-submitted')
 cancelled.close()
 await failed
+const management = await connectPlowshare({ origin, token: 'sdk-fixture-token', session: 'typed-node/provider-owner-compat' });
+try {
+    for(const operation of ['provider.connection.list','tool.scope.host.list']) {
+        const reply=await management.request(operation,{project:'fixture'});
+        assert.throws(()=>requirePayload(reply),error=>error instanceof Refusal&&error.reply.outcome.code==='NOT_FOUND'&&error.reply.outcome.said===`no handler is registered for type "${operation}"`);
+        assert.equal(JSON.stringify(reply).includes('must-not-escape'),false);
+    }
+} finally { management.close(); }
 // Public SDK verification uses real project DTOs, explicit refusals and checked pushes.
 const typedPushes = [], faults = []
 const typed = await connectPlowshare({ origin, token: 'sdk-fixture-token', session: 'node-typed', onPush: push => typedPushes.push(push), onPushFault: fault => faults.push(fault) })

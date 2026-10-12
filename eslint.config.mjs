@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 const files = [
+  'clients/**/*.ts',
   'sdk/*/src/**/*.ts',
   'plowshare-*/src/**/*.ts',
   'plowshare-*/vite.config.ts',

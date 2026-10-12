@@ -5730,8 +5730,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5747,8 +5749,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5764,8 +5768,11 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/tool-connections.ts",
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5781,8 +5788,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5798,8 +5807,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5815,8 +5826,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5832,8 +5845,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5849,8 +5864,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5866,8 +5883,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5883,8 +5902,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5900,8 +5921,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6393,8 +6416,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6410,8 +6435,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6427,8 +6454,11 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/tool-connections.ts",
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6444,8 +6474,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6461,8 +6493,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -6478,8 +6512,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/request-schemas.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,

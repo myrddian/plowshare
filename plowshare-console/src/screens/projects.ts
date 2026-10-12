@@ -1,4 +1,5 @@
 import { applicationIdentityControls } from './application-identities.ts';
+import { consoleToolConnections } from './tool-connections.ts';
 import { applicationFiles } from './application-files';
 import { consoleTransport } from '../transport';
 import { background } from '../background.ts';
@@ -155,6 +156,7 @@ export interface ProjectsOptions {
 export function createProjects(options: ProjectsOptions): Screen {
   const transport: Transport = options.transport ?? consoleTransport;
   const identities: ReturnType<typeof applicationIdentityControls>[] = [];
+  const tools: ReturnType<typeof consoleToolConnections>[] = [];
 
   const shell = el('section', 'screen projects');
   const head = el('header', 'screen-head');
@@ -182,6 +184,14 @@ export function createProjects(options: ProjectsOptions): Screen {
     card.append(field('workspace', textOf(project.workspace)));
     card.append(lent(project));
     card.append(leash(project));
+    if (options.openStream !== undefined) {
+      const controls = consoleToolConnections(
+        () => stream,
+        textOf(project.name),
+      );
+      tools.push(controls);
+      card.append(controls.element);
+    }
     if (project.kind === 'application')
       card.append(
         applicationFiles(
@@ -467,6 +477,7 @@ export function createProjects(options: ProjectsOptions): Screen {
         // Built before the socket opened, a card says "connecting"; the
         // open is what fills it in.
         onStatus: (status) => {
+          for (const controls of tools) controls.update();
           if (status.state === 'open' && stream !== null) {
             for (const section of body.querySelectorAll<HTMLElement>(
               '[data-approved]',
@@ -488,9 +499,11 @@ export function createProjects(options: ProjectsOptions): Screen {
     }
     for (const identity of identities) identity.destroy();
     identities.length = 0;
+    for (const controls of tools) controls.destroy();
+    tools.length = 0;
     const personal = projects.filter((project) => project.kind === 'personal');
     const ordinary = projects.filter((project) => project.kind !== 'personal');
-    const personalRows = personal.map(() => {
+    const personalRows = personal.map((project) => {
       const element = document.createElement('section');
       element.className = 'project';
       const title = document.createElement('h2');
@@ -499,6 +512,14 @@ export function createProjects(options: ProjectsOptions): Screen {
       note.textContent =
         'Your account space: In, Out, Resources, Archive, Planning and Bots. Mounted at ~/.plowshare/personal by the desktop or TUI.';
       element.append(title, note);
+      if (options.openStream !== undefined) {
+        const controls = consoleToolConnections(
+          () => stream,
+          textOf(project.name),
+        );
+        tools.push(controls);
+        element.append(controls.element);
+      }
       return element;
     });
     const applications = ordinary.filter(
@@ -533,6 +554,8 @@ export function createProjects(options: ProjectsOptions): Screen {
       stopped = true;
       for (const identity of identities) identity.destroy();
       identities.length = 0;
+      for (const controls of tools) controls.destroy();
+      tools.length = 0;
       stream?.close();
       stream = null;
     },

@@ -266,3 +266,8 @@ Durable provider assignments and delegated workers use the thirteen public
 parity, coordinate validation and no automatic mutation replay. Java provides
 `HostedToolScopeClient`; TypeScript/Node reuse `ToolProvider` with a hosted
 registration, including its original journal fence for reconciliation.
+
+[Client management](provider-management-clients.md) documents the shared typed
+`ProviderManagementClient`, private redacted recovery bookmarks, safe credential
+entry and initial CLI/TUI/desktop/console controls. It uses the existing socket
+and owning receipts; native MCP transports and host lifetime remain separate work.

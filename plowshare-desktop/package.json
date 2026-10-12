@@ -25,6 +25,7 @@
     "test:applications": "node scripts/build.mjs && node --experimental-strip-types scripts/applications-smoke.mjs",
     "test:application-storage": "node scripts/build.mjs && node --experimental-strip-types scripts/application-storage-smoke.mjs",
     "test:projects": "node scripts/build.mjs && node --experimental-strip-types scripts/projects-smoke.mjs",
+    "test:tool-connections": "node scripts/build.mjs && node --experimental-strip-types scripts/tool-connections-smoke.mjs",
     "test:personal": "node scripts/build.mjs && node --experimental-strip-types scripts/personal-smoke.mjs",
     "test:bots": "node scripts/build.mjs && node --experimental-strip-types scripts/bots-smoke.mjs",
     "test:pricing": "node scripts/build.mjs && node --experimental-strip-types scripts/pricing-smoke.mjs",

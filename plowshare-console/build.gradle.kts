@@ -159,6 +159,7 @@ val pnpmInstall by tasks.registering(Exec::class) {
 
 /** Everything the TypeScript build and the Vitest run both read. */
 fun Exec.declareSources() {
+    inputs.dir(rootProject.file("clients")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("sdk/typescript/src/operations")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src")
         .withPropertyName("sources")

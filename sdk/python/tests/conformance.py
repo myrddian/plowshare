@@ -10,8 +10,10 @@ from plowshare import OPERATIONS, CancelledRequest, Client, Refusal, TransportEr
 from plowshare.contracts import (
     JobStatusRequest,
     ProjectListRequest,
+    ProviderConnectionListRequest,
     RelayConsumeRequest,
     RelayPublishRequest,
+    ToolScopeHostListRequest,
 )
 
 
@@ -97,6 +99,23 @@ async def main() -> None:
             raise AssertionError("invalid identifier submitted")
         except ValueError:
             pass
+    async with await Client.connect(
+        origin, "sdk-fixture-token", session="typed-python/provider-owner-compat"
+    ) as client:
+        for request in (
+            ProviderConnectionListRequest(project="fixture"),
+            ToolScopeHostListRequest(project="fixture"),
+        ):
+            management_reply = await client.request(request)
+            try:
+                management_reply.require_payload()
+                raise AssertionError("unsupported management became success")
+            except Refusal as error:
+                assert error.code == "NOT_FOUND"
+                assert (
+                    error.said
+                    == f'no handler is registered for type "{request.operation}"'
+                )
     async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/cancel"
     ) as client:

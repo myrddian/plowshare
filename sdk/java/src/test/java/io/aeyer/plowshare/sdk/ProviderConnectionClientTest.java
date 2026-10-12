@@ -27,6 +27,62 @@ class ProviderConnectionClientTest {
   }
 
   @Test
+  void older_server_refusals_remain_explicit_for_owner_management_without_secret_payloads()
+      throws Exception {
+    var received = new AtomicInteger();
+    var json = SdkJson.mapper();
+    try (var server = new MockWebServer()) {
+      server.enqueue(
+          new MockResponse()
+              .withWebSocketUpgrade(
+                  new WebSocketListener() {
+                    @Override
+                    public void onMessage(WebSocket socket, String text) {
+                      try {
+                        var input = json.readTree(text);
+                        received.incrementAndGet();
+                        var type = input.path("type").textValue();
+                        var body = json.createObjectNode();
+                        body.put("id", input.path("id").textValue());
+                        body.put("type", type);
+                        body.put("protocol_version", "plowshare-v1");
+                        var outcome = body.putObject("payload");
+                        outcome.put("code", "NOT_FOUND");
+                        outcome.put("said", "no handler is registered for type \"" + type + "\"");
+                        outcome.putObject("payload").put("accessToken", "must-not-escape");
+                        socket.send(json.writeValueAsString(body));
+                      } catch (IOException invalid) {
+                        throw new AssertionError(invalid);
+                      }
+                    }
+                  }));
+      try (var client =
+          Plowshare.connect(
+              server.url("/").toString(),
+              "fixture-bearer",
+              "fixture-session",
+              Duration.ofSeconds(5),
+              ignored -> {},
+              Plowshare.TransportMode.LEGACY)) {
+        var provider =
+            assertThrows(
+                IOException.class, () -> new ProviderConnectionClient(client).list("fixture"));
+        assertTrue(provider.getMessage().contains("NOT_FOUND"));
+        assertFalse(provider.getMessage().contains("must-not-escape"));
+        var hosted =
+            assertThrows(
+                IOException.class,
+                () ->
+                    new HostedToolScopeClient(client)
+                        .list(new io.aeyer.plowshare.protocol.HostedToolScopes.Query("fixture")));
+        assertTrue(hosted.getMessage().contains("NOT_FOUND"));
+        assertFalse(hosted.getMessage().contains("must-not-escape"));
+        assertEquals(2, received.get());
+      }
+    }
+  }
+
+  @Test
   void nullable_metadata_fields_are_required_and_uuid_text_cannot_be_coerced() throws Exception {
     var json = SdkJson.mapper();
     var wire = json.valueToTree(credential());

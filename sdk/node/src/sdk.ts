@@ -167,6 +167,24 @@ export type {
 } from './tools.ts';
 
 export { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
+export {
+  ProviderManagementClient,
+  ProviderManagementRefused,
+  MANAGEMENT_OPERATIONS,
+  managementRequest,
+  decodeManagementIntent,
+} from 'plowshare-client-ts';
+export type {
+  ManagementOperation,
+  ManagementRequest,
+  ManagementValue,
+  ManagementIntent,
+  ManagementIntentStore,
+} from 'plowshare-client-ts';
+export {
+  ProviderManagementIntents,
+  openProviderAuthorization,
+} from './provider-management.ts';
 
 export type {
   SchemaDefinition,
