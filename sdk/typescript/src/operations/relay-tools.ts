@@ -3,9 +3,16 @@ import { fieldsOf } from './response.ts';
 import { requirePayload } from './sdk.ts';
 import type { Plowshare } from './sdk.ts';
 
-/** The same closed scalar vocabulary is used by every language's tool façade. */
-export type ToolScalar = string | number | boolean;
-export type ToolArguments = Readonly<Record<string, ToolScalar>>;
+import {
+  canonicalToolSchema,
+  decodeToolValue,
+  validateSchemaArguments,
+  validateToolSchema,
+} from './tool-schemas.ts';
+import type { ToolObject, ToolValue } from './tool-schemas.ts';
+import type { SchemaDefinition } from './schema-definition.ts';
+export type { ToolScalar, ToolValue, ToolObject } from './tool-schemas.ts';
+export type ToolArguments = ToolObject;
 export type ToolState = 'COMPLETED' | 'REJECTED' | 'UNKNOWN';
 export interface ToolParameter {
   readonly name: string;
@@ -18,8 +25,11 @@ export interface ToolDeclaration {
   readonly description: string;
   readonly parameters: readonly ToolParameter[];
   readonly timeoutSeconds: number;
+  readonly inputSchema?: SchemaDefinition;
 }
 export interface ToolCall {
+  readonly schema?: string;
+  readonly schemaFingerprint?: string;
   readonly invocationId: string;
   readonly project: string;
   readonly provider: string;
@@ -124,6 +134,11 @@ function declaration(value: ToolDeclaration): void {
       value.parameters.length
   )
     throw new Error('Invalid tool declaration');
+  if (value.inputSchema !== undefined) {
+    if (value.parameters.length)
+      throw new Error('Use parameters or inputSchema');
+    validateToolSchema(value.inputSchema);
+  }
   for (const p of value.parameters) {
     if (
       !/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/.test(p.name) ||
@@ -166,6 +181,11 @@ export function validateToolArguments(
   args: ToolArguments,
 ): void {
   declaration(tool);
+  decodeToolValue(args);
+  if (tool.inputSchema !== undefined) {
+    validateSchemaArguments(tool.inputSchema, args);
+    return;
+  }
   if (
     Object.keys(args).some(
       (key) => !tool.parameters.some((p) => p.name === key),
@@ -208,13 +228,31 @@ export function toolDeploymentConfig(
     {
       plowshare: {
         relay: {
-          tools: { bindings: tools.map((t) => ({ ...binding, ...t })) },
+          tools: {
+            bindings: tools.map((t) => ({
+              ...binding,
+              ...t,
+              ...(t.inputSchema
+                ? {
+                    inputSchema: JSON.stringify(
+                      validateToolSchema(t.inputSchema),
+                    ),
+                  }
+                : {}),
+            })),
+          },
         },
       },
     },
     null,
     2,
   );
+}
+
+// The recursive decoder already validated every member; this guard distinguishes
+// readonly arrays from objects without casting the handler's public argument tree.
+function toolObject(value: ToolValue): value is ToolObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** Validate the entire envelope, including duplicate keys, before returning a typed call. */
@@ -258,10 +296,11 @@ export function decodeToolCall(source: string): ToolCall {
     'deadline',
     'arguments',
   ];
+  if (row['schema'] === 'plowshare-tool/2') keys.push('schemaFingerprint');
   if (
     Object.keys(row).length !== keys.length ||
     keys.some((key) => !(key in row)) ||
-    row['schema'] !== VERSION
+    (row['schema'] !== VERSION && row['schema'] !== 'plowshare-tool/2')
   )
     throw new Error('Invalid tool envelope');
   const read = (key: string): string => {
@@ -276,24 +315,24 @@ export function decodeToolCall(source: string): ToolCall {
     Array.isArray(row['arguments'])
   )
     throw new Error('Invalid tool arguments');
-  const values: Record<string, ToolScalar> = {};
-  for (const [key, value] of Object.entries(args)) {
+  const values = decodeToolValue(args);
+  if (!toolObject(values)) throw new Error('Invalid tool arguments');
+  if (row['schema'] === VERSION) {
     if (
-      !['string', 'number', 'boolean'].includes(typeof value) ||
-      (typeof value !== 'string' &&
-        typeof value !== 'number' &&
-        typeof value !== 'boolean')
+      Object.keys(values).length > 32 ||
+      Object.entries(values).some(
+        ([key, value]) =>
+          !/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/.test(key) ||
+          value === null ||
+          typeof value === 'object',
+      )
     )
-      throw new Error('Invalid tool scalar');
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/.test(key))
-      throw new Error('Invalid argument name');
-    if (typeof value === 'string') text(value, 4096);
-    if (typeof value === 'number' && !portableNumber(value))
-      throw new Error('Invalid tool number');
-    // Defining an own field preserves valid names such as __proto__ without invoking setters.
-    Object.defineProperty(values, key, { value, enumerable: true });
-  }
-  if (Object.keys(values).length > 32) throw new Error('Too many arguments');
+      throw new Error('Invalid v1 tool arguments');
+  } else if (
+    typeof row['schemaFingerprint'] !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(row['schemaFingerprint'])
+  )
+    throw new Error('Invalid tool schema fingerprint');
   const provider = read('provider');
   const tool = read('tool');
   if (
@@ -307,6 +346,10 @@ export function decodeToolCall(source: string): ToolCall {
   const deadline = read('deadline');
   instant(deadline);
   return Object.freeze({
+    schema: read('schema'),
+    ...(typeof row['schemaFingerprint'] === 'string'
+      ? { schemaFingerprint: row['schemaFingerprint'] }
+      : {}),
     invocationId: id,
     project: read('project'),
     provider,
@@ -315,7 +358,7 @@ export function decodeToolCall(source: string): ToolCall {
     run: read('run'),
     call: read('call'),
     deadline,
-    arguments: Object.freeze(values),
+    arguments: values,
   });
 }
 function resultText(call: ToolCall, result: ToolResult | null): string {
@@ -374,6 +417,11 @@ export class ToolProvider {
           handler: tool.handler,
           declaration: Object.freeze({
             ...tool.declaration,
+            ...(tool.declaration.inputSchema !== undefined
+              ? {
+                  inputSchema: validateToolSchema(tool.declaration.inputSchema),
+                }
+              : {}),
             parameters: Object.freeze(
               tool.declaration.parameters.map((p) => Object.freeze({ ...p })),
             ),
@@ -408,6 +456,21 @@ export class ToolProvider {
       'sdk:' + (await host.sha256(binding.account)),
     );
   }
+  private async validateCall(
+    tool: ToolDeclaration,
+    call: ToolCall,
+  ): Promise<void> {
+    if (tool.inputSchema === undefined) {
+      if (call.schema !== VERSION)
+        throw new Error('Offered tool schema changed');
+    } else if (
+      call.schema !== 'plowshare-tool/2' ||
+      call.schemaFingerprint !==
+        (await this.host.sha256(canonicalToolSchema(tool.inputSchema)))
+    )
+      throw new Error('Offered tool schema changed');
+    validateToolArguments(tool, call.arguments);
+  }
   private topic(tool: string, kind: 'request' | 'result'): string {
     return `tool.${this.binding.provider}.${tool}.${kind}`;
   }
@@ -430,7 +493,9 @@ export class ToolProvider {
     if (tools.length > 128)
       throw new Error('Tool catalogue exceeds 128 declarations');
     const encoded = JSON.stringify({
-      version: 'plowshare-tool-catalog/1',
+      version: tools.some((tool) => tool.inputSchema !== undefined)
+        ? 'plowshare-tool-catalog/2'
+        : 'plowshare-tool-catalog/1',
       tools,
     });
     text(encoded, 65536);
@@ -510,7 +575,7 @@ export class ToolProvider {
           call.invocationId !== event.correlationId
         )
           throw new Error('Foreign tool invocation');
-        validateToolArguments(registered.declaration, call.arguments);
+        await this.validateCall(registered.declaration, call);
         let receipt = (await this.receipts()).find(
           (r) => r.invocationId === call.invocationId,
         );
@@ -648,7 +713,7 @@ export class ToolProvider {
         !tool
       )
         throw new Error('Foreign tool receipt');
-      validateToolArguments(tool.declaration, call.arguments);
+      await this.validateCall(tool.declaration, call);
       if (
         !['executing', 'ready', 'publishing', 'done'].includes(receipt.phase) ||
         (receipt.phase === 'executing') !== (receipt.result === null) ||

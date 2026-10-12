@@ -46,3 +46,5 @@ foreach (var text in new[] { new string('x', maximumRelayBytes), new string('é'
 Console.WriteLine(".NET DTO contract checks passed");
 
 await ToolFacadeChecks.RunAsync();
+
+ToolSchemaChecks.Run();

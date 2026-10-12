@@ -86,8 +86,9 @@ permission and a live catalogue lease when a catalogue provider is declared.
 The SDK provider publishes its current declarations on the project-local
 `tool.<provider>.catalog` topic. Only the configured authenticated provider can
 publish. The server validates the entire snapshot before accepting it: version
-`plowshare-tool-catalog/1`, at most 128 distinct tools, 64 KiB total, allowed
-prefix and the existing parameter vocabulary. Newest retained broker position
+`plowshare-tool-catalog/1` for scalar declarations or `plowshare-tool-catalog/2`
+for snapshots with `inputSchema`, at most 128 distinct tools, 64 KiB total and
+allowed prefix. The [shared schema profile](tool-schemas.md) defines recursive inputs. Newest retained broker position
 wins; client timestamps cannot extend the lease. Empty catalogues withdraw tools.
 If the latest publication has expired from broker retention, bootstrap tools are
 not revived. Discovery does not grant permissions: a new name is available only
@@ -153,7 +154,8 @@ and authorization; discovery does not create grants for them.
 This supports providers whose catalogues change at runtime, including future MCP
 adapters. It does not itself implement an outbound MCP client or arbitrary MCP
 JSON Schema: the current Relay facade accepts STRING, NUMBER, INTEGER and BOOLEAN
-parameters. Providers must expose capabilities within that vocabulary.
+parameters, or the shared nested `inputSchema` profile. Providers must expose
+capabilities within their selected profile.
 
 ## Legacy server bindings
 
@@ -281,6 +283,14 @@ var provider = new ToolProvider(new SdkToolRelayPorts(client), binding, [
 ], journal);
 await provider.PollAsync();
 ```
+
+## Schema declarations
+
+Providers can supply a typed `inputSchema` for nested objects, arrays and explicit
+null. It uses the same vocabulary as model dispatch and is validated again before
+handler execution. Use an empty parameter list with it. See [Shared tool schemas](tool-schemas.md)
+for supported keywords, limits, versions and SDK migration. Existing scalar
+providers keep the following contract.
 
 ## Version-one values
 

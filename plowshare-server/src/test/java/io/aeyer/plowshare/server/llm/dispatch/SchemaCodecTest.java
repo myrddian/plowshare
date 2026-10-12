@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.llm.dispatch;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.SchemaCodec;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;

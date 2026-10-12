@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.llm.dispatch;
 
+import io.aeyer.plowshare.protocol.SchemaCodec;
+import io.aeyer.plowshare.protocol.SchemaDefinition;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;

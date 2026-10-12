@@ -142,11 +142,70 @@ class RelayToolsTest {
     assertEquals(3, wire.publications);
   }
 
+  @Test
+  void nested_handler_receives_exact_values_and_changed_schema_never_executes() throws Exception {
+    var json = SdkJson.mapper();
+    var fixture =
+        json.readTree(Files.readString(Path.of("../../test-support/contracts/tool-schemas.json")))
+            .path("cases")
+            .get(0);
+    var schema =
+        io.aeyer.plowshare.protocol.SchemaCodec.decode(
+            json.readValue(fixture.path("schemaSource").textValue(), Map.class));
+    var declaration = new RelayTools.Declaration("inspect", "Inspect nested fixture", schema, 30);
+    var request = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request());
+    request.put("schema", "plowshare-tool/2");
+    request.put("deadline", "2099-01-01T00:00:00Z");
+    request.put("schemaFingerprint", fixture.path("fingerprint").textValue());
+    request.set("arguments", json.readTree(fixture.path("argumentsSource").textValue()));
+    var executions = new AtomicInteger();
+    var tool =
+        new RelayTools.RegisteredTool(
+            declaration,
+            call -> {
+              executions.incrementAndGet();
+              assertEquals(
+                  json.readTree(fixture.path("argumentsSource").textValue()),
+                  json.readTree(json.writeValueAsString(call.arguments())));
+              return CompletableFuture.completedFuture(
+                  new RelayTools.Result(RelayTools.State.COMPLETED, "nested observed"));
+            });
+    var wire = new FixturePorts(json.writeValueAsString(request));
+    var journal = new MemoryJournal(declaration);
+    var provider = new RelayTools.Provider(wire, BINDING, List.of(tool), journal);
+    provider.publishCatalog(ID);
+    assertEquals(
+        "plowshare-tool-catalog/2",
+        json.readTree(wire.published.text()).path("version").textValue());
+    assertEquals(1, provider.poll());
+    assertEquals(1, provider.poll());
+    assertEquals(1, executions.get());
+    request.put("schemaFingerprint", "0".repeat(64));
+    var changed =
+        new RelayTools.Provider(
+            new FixturePorts(json.writeValueAsString(request)),
+            BINDING,
+            List.of(tool),
+            new MemoryJournal(declaration));
+    assertThrows(IllegalArgumentException.class, changed::poll);
+    assertEquals(1, executions.get());
+  }
+
   static final class MemoryJournal implements RelayTools.Journal {
+    final RelayTools.Declaration declaration;
+
+    MemoryJournal() {
+      this(DECLARATION);
+    }
+
+    MemoryJournal(RelayTools.Declaration declaration) {
+      this.declaration = declaration;
+    }
+
     final Map<String, RelayTools.Receipt> rows = new LinkedHashMap<>();
 
     public String identity() {
-      return RelayPort.hash(RelayTools.deploymentConfig(BINDING, List.of(DECLARATION)));
+      return RelayPort.hash(RelayTools.deploymentConfig(BINDING, List.of(declaration)));
     }
 
     public List<RelayTools.Receipt> all() {

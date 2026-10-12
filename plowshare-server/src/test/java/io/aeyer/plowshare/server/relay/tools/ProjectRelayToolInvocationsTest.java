@@ -240,4 +240,52 @@ class ProjectRelayToolInvocationsTest {
     }
     verify(repository, never()).submit(any());
   }
+
+  @Test
+  void nested_catalogue_schema_and_request_keep_the_offered_fingerprint_and_retained_identity()
+      throws Exception {
+    var json = new com.fasterxml.jackson.databind.ObjectMapper();
+    var row =
+        json.readTree(
+                java.nio.file.Files.readString(
+                    java.nio.file.Path.of("../test-support/contracts/tool-schemas.json")))
+            .path("cases")
+            .get(0);
+    var schema =
+        io.aeyer.plowshare.protocol.SchemaCodec.decode(
+            json.readValue(row.path("schemaSource").textValue(), java.util.Map.class));
+    var declaration =
+        new io.aeyer.plowshare.server.applications.ApplicationServerSettings.Declaration(
+            "network_scope", "Read nested scope", List.of(), 1, schema);
+    var catalogue =
+        new io.aeyer.plowshare.server.applications.ApplicationServerSettings.Catalogue(
+            "plowshare-tool-catalog/2", List.of(declaration));
+    var read =
+        io.aeyer.plowshare.server.applications.ApplicationServerSettings.catalogue(
+            json.writeValueAsString(catalogue));
+    var nested =
+        read.tools()
+            .getFirst()
+            .bind(
+                "fixture",
+                new io.aeyer.plowshare.server.applications.ApplicationServerSettings.Provider(
+                    "scanner", "provider", "network_", 30));
+    assertEquals(schema, nested.schema().parameters());
+    var input = RelayToolCodec.arguments(row.path("argumentsSource").textValue());
+    var outcome = service.invoke(nested, input, owner, "call", () -> stored.get() != null);
+    assertEquals(RelayToolCodec.State.UNKNOWN, outcome.state());
+    var request = stored.get().intent().request();
+    assertEquals("plowshare-tool/2", request.schema());
+    assertEquals(row.path("fingerprint").textValue(), request.schemaFingerprint());
+    assertEquals(input.values(), request.arguments());
+    assertEquals(request, RelayToolCodec.request(RelayToolCodec.write(request)));
+    assertEquals(nested, RelayToolCodec.definition(RelayToolCodec.write(nested)));
+    verify(repository, times(1)).submit(any());
+    verify(relay, never()).publish(any(), any());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new io.aeyer.plowshare.server.applications.ApplicationServerSettings.Catalogue(
+                "plowshare-tool-catalog/1", List.of(declaration)));
+  }
 }

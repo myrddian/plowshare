@@ -48,6 +48,10 @@ a mutation after negotiation or delivery failure. Neutral TypeScript consumers
 wrap their explicitly negotiated platform socket with `packetSocket`; the Node
 SDK and console/desktop compositions supply platform codecs and timers.
 
+Provider declarations also share the [typed schema vocabulary](tool-schemas.md)
+with model dispatch. All SDKs support recursive arguments and schema-pinned
+requests while retaining the scalar provider facade.
+
 ## Shared contract
 
 - Credentials travel in the WebSocket upgrade's bearer header; authenticated

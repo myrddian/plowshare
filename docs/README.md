@@ -7,6 +7,8 @@
 - [Shared login](client-login.md)
 - [CLI](../plowshare-cli/README.md)
 - [MCP server](../plowshare-mcp/README.md)
+- [Shared tool schemas](tool-schemas.md)
+- [MCP client design and implementation plan](mcp-client-design.md) (proposed)
 - [Desktop](../plowshare-desktop/README.md)
 - [TypeScript client](../sdk/typescript/README.md)
 - [Node client](../sdk/node/README.md)

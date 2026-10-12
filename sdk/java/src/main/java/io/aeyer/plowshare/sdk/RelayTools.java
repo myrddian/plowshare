@@ -5,6 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.IntegrationPayload;
 import io.aeyer.plowshare.protocol.RelayLog;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.SchemaCodec;
+import io.aeyer.plowshare.protocol.SchemaDefinition;
+import io.aeyer.plowshare.protocol.ToolSchemas;
+import io.aeyer.plowshare.protocol.ToolValue;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -29,6 +33,28 @@ public final class RelayTools {
       SdkJson.mapper()
           .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
           .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+
+  static {
+    var module = new com.fasterxml.jackson.databind.module.SimpleModule();
+    module.addDeserializer(
+        ToolValue.class,
+        new com.fasterxml.jackson.databind.JsonDeserializer<ToolValue>() {
+          @Override
+          public ToolValue deserialize(
+              com.fasterxml.jackson.core.JsonParser parser,
+              com.fasterxml.jackson.databind.DeserializationContext context)
+              throws IOException {
+            return ToolValue.fromWire(context.readValue(parser, Object.class));
+          }
+
+          @Override
+          public ToolValue getNullValue(
+              com.fasterxml.jackson.databind.DeserializationContext context) {
+            return new ToolValue.Null();
+          }
+        });
+    JSON.registerModule(module);
+  }
 
   public enum Type {
     STRING,
@@ -60,42 +86,75 @@ public final class RelayTools {
   }
 
   public record Declaration(
-      String name, String description, List<Parameter> parameters, int timeoutSeconds) {
+      String name,
+      String description,
+      List<Parameter> parameters,
+      int timeoutSeconds,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          SchemaDefinition inputSchema) {
+    public Declaration(
+        String name, String description, List<Parameter> parameters, int timeoutSeconds) {
+      this(name, description, parameters, timeoutSeconds, null);
+    }
+
+    public Declaration(
+        String name, String description, SchemaDefinition inputSchema, int timeoutSeconds) {
+      this(name, description, List.of(), timeoutSeconds, inputSchema);
+    }
+
     public Declaration {
       toolName(name);
       text(description, 4096, true);
       parameters = List.copyOf(parameters);
+      if (inputSchema != null) {
+        if (!parameters.isEmpty())
+          throw new IllegalArgumentException("Use parameters or inputSchema");
+        ToolSchemas.declaration(inputSchema);
+      }
       if (parameters.size() > 32
           || parameters.stream().map(Parameter::name).distinct().count() != parameters.size()
           || timeoutSeconds < 1
           || timeoutSeconds > 300) throw new IllegalArgumentException("Invalid tool declaration");
     }
 
-    public void validate(Map<String, IntegrationPayload.Parameter> arguments) {
-      Objects.requireNonNull(arguments);
-      for (var key : arguments.keySet())
-        if (parameters.stream().noneMatch(p -> p.name().equals(key)))
-          throw new IllegalArgumentException("Unknown tool argument");
+    public void validate(Map<String, ? extends ToolValue> arguments) {
+      ToolSchemas.validate(schema(), new ToolValue.ObjectValue(Map.copyOf(arguments)));
+    }
+
+    private void validate(Call call) {
+      if (inputSchema == null && !VERSION.equals(call.schema())
+          || inputSchema != null
+              && (!"plowshare-tool/2".equals(call.schema())
+                  || !SchemaCodec.fingerprint(inputSchema).equals(call.schemaFingerprint())))
+        throw new IllegalArgumentException("Offered tool schema changed");
+      validate(call.arguments());
+    }
+
+    public SchemaDefinition schema() {
+      if (inputSchema != null) return inputSchema;
+      Map<String, Object> properties = new java.util.LinkedHashMap<>();
       for (var parameter : parameters) {
-        var value = arguments.get(parameter.name());
-        if (value == null) {
-          if (parameter.required())
-            throw new IllegalArgumentException("Required tool argument missing");
-          continue;
+        Map<String, Object> field = new java.util.LinkedHashMap<>();
+        field.put("type", parameter.type().name().toLowerCase(java.util.Locale.ROOT));
+        field.put("description", parameter.description());
+        if (parameter.type() == Type.STRING) field.put("maxLength", 4096);
+        if (parameter.type() == Type.NUMBER || parameter.type() == Type.INTEGER) {
+          field.put("minimum", -9007199254740991L);
+          field.put("maximum", 9007199254740991L);
         }
-        if (value instanceof IntegrationPayload.NumberParameter number)
-          validateNumber(number.value());
-        boolean valid =
-            switch (parameter.type()) {
-              case STRING -> value instanceof IntegrationPayload.TextParameter;
-              case BOOLEAN -> value instanceof IntegrationPayload.BooleanParameter;
-              case NUMBER -> value instanceof IntegrationPayload.NumberParameter;
-              case INTEGER ->
-                  value instanceof IntegrationPayload.NumberParameter number
-                      && number.value().stripTrailingZeros().scale() <= 0;
-            };
-        if (!valid) throw new IllegalArgumentException("Tool argument type mismatch");
+        properties.put(parameter.name(), field);
       }
+      return SchemaCodec.decode(
+          Map.of(
+              "type",
+              "object",
+              "properties",
+              properties,
+              "required",
+              parameters.stream().filter(Parameter::required).map(Parameter::name).toList(),
+              "additionalProperties",
+              false));
     }
   }
 
@@ -118,9 +177,40 @@ public final class RelayTools {
       String run,
       String call,
       String deadline,
-      Map<String, IntegrationPayload.Parameter> arguments) {
+      Map<String, ToolValue> arguments,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String schemaFingerprint) {
+    public Call(
+        String schema,
+        String invocationId,
+        String project,
+        String provider,
+        String tool,
+        String account,
+        String run,
+        String call,
+        String deadline,
+        Map<String, ToolValue> arguments) {
+      this(
+          schema,
+          invocationId,
+          project,
+          provider,
+          tool,
+          account,
+          run,
+          call,
+          deadline,
+          arguments,
+          null);
+    }
+
     public Call {
-      if (!VERSION.equals(schema))
+      if (!VERSION.equals(schema) && !"plowshare-tool/2".equals(schema)
+          || "plowshare-tool/2".equals(schema)
+              && (schemaFingerprint == null || !schemaFingerprint.matches("[0-9a-f]{64}"))
+          || VERSION.equals(schema) && schemaFingerprint != null)
         throw new IllegalArgumentException("Invalid tool envelope version");
       RelayPort.uuid(invocationId);
       RelayPort.identity(project);
@@ -131,7 +221,13 @@ public final class RelayTools {
       RelayPort.identity(call);
       instant(deadline);
       arguments = Map.copyOf(arguments);
-      if (arguments.size() > 32) throw new IllegalArgumentException("Too many tool arguments");
+      ToolValue.validate(new ToolValue.ObjectValue(arguments));
+      if (VERSION.equals(schema)
+          && arguments.values().stream()
+              .anyMatch(value -> !(value instanceof IntegrationPayload.Parameter)))
+        throw new IllegalArgumentException("v1 arguments must be scalars");
+      if (VERSION.equals(schema) && arguments.size() > 32)
+        throw new IllegalArgumentException("Too many tool arguments");
       for (var entry : arguments.entrySet()) {
         if (!entry.getKey().matches("[a-zA-Z_][a-zA-Z0-9_]{0,63}"))
           throw new IllegalArgumentException("Invalid tool argument name");
@@ -228,7 +324,10 @@ public final class RelayTools {
       String name,
       String description,
       List<Parameter> parameters,
-      int timeoutSeconds) {}
+      int timeoutSeconds,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String inputSchema) {}
 
   private record Configuration(PlowshareConfiguration plowshare) {}
 
@@ -271,13 +370,20 @@ public final class RelayTools {
                                         tool.name(),
                                         tool.description(),
                                         tool.parameters(),
-                                        tool.timeoutSeconds()))
+                                        tool.timeoutSeconds(),
+                                        tool.inputSchema() == null
+                                            ? null
+                                            : write(tool.inputSchema())))
                             .toList())))));
   }
 
   public static Call decodeCall(String source) {
     text(source, 32768, true);
     try {
+      var shape = JSON.readTree(source);
+      if (!shape.isObject()
+          || shape.size() != ("plowshare-tool/2".equals(shape.path("schema").asText()) ? 11 : 10))
+        throw new IllegalArgumentException("Invalid tool request fields");
       return JSON.readValue(source, Call.class);
     } catch (IOException invalid) {
       throw new IllegalArgumentException("Invalid tool request envelope", invalid);
@@ -367,7 +473,7 @@ public final class RelayTools {
               || !event.eventId().equals(call.invocationId())
               || !Objects.equals(event.correlationId(), call.invocationId()))
             throw new IOException("Foreign tool request identity");
-          declaration.validate(call.arguments());
+          declaration.validate(call);
           Optional<Receipt> existing =
               receipts().stream()
                   .filter(r -> r.invocationId().equals(call.invocationId()))
@@ -513,7 +619,7 @@ public final class RelayTools {
             .findFirst()
             .orElseThrow()
             .declaration()
-            .validate(call.arguments());
+            .validate(call);
         if (!call.invocationId().equals(receipt.invocationId()))
           throw new IOException("Foreign tool receipt");
         if (receipt.result().isPresent()) resultText(call, receipt.result().orElseThrow());
@@ -535,7 +641,13 @@ public final class RelayTools {
       RelayPort.uuid(requestId);
       if (declarations.size() > 128)
         throw new IllegalArgumentException("Tool catalogue exceeds 128 declarations");
-      String text = write(new Catalogue("plowshare-tool-catalog/1", declarations));
+      String text =
+          write(
+              new Catalogue(
+                  declarations.stream().anyMatch(value -> value.inputSchema() != null)
+                      ? "plowshare-tool-catalog/2"
+                      : "plowshare-tool-catalog/1",
+                  declarations));
       text(text, 65536, false);
       String topic = "tool." + binding.provider() + ".catalog";
       var reply =

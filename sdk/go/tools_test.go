@@ -6,12 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
 
 var fixtureBinding = ToolBinding{"fixture", "scanner", "provider"}
-var fixtureDeclaration = ToolDeclaration{"inspect", "Inspect fixture", []ToolParameter{{"value", "NUMBER", "", true}}, 30}
+var fixtureDeclaration = ToolDeclaration{"inspect", "Inspect fixture", []ToolParameter{{"value", "NUMBER", "", true}}, 30, nil}
 
 const fixtureInvocation = "11111111-1111-1111-1111-111111111111"
 
@@ -58,10 +59,17 @@ func TestToolSharedBoundaries(t *testing.T) {
 	}
 }
 
-type fixtureJournal struct{ rows map[string]ToolReceipt }
+type fixtureJournal struct {
+	rows        map[string]ToolReceipt
+	declaration *ToolDeclaration
+}
 
 func (j *fixtureJournal) Identity() string {
-	config, _ := ToolDeploymentConfig(fixtureBinding, []ToolDeclaration{fixtureDeclaration})
+	declaration := fixtureDeclaration
+	if j.declaration != nil {
+		declaration = *j.declaration
+	}
+	config, _ := ToolDeploymentConfig(fixtureBinding, []ToolDeclaration{declaration})
 	return toolHash(config)
 }
 func (j *fixtureJournal) All() ([]ToolReceipt, error) {
@@ -189,5 +197,66 @@ func TestToolCataloguePublishWithdrawAndLostReplyDoNotExecuteOrReplay(t *testing
 	}
 	if calls != 0 || ports.publications != 3 {
 		t.Fatal("effect executed or catalogue replayed")
+	}
+}
+
+func TestNestedProviderPinsSchemaAndDoesNotRepeatHandler(t *testing.T) {
+	schema, err := DecodeToolSchema(`{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration := ToolDeclaration{Name: "inspect", Description: "Inspect fixture", TimeoutSeconds: 30, InputSchema: schema}
+	fingerprint, err := SchemaFingerprint(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, _, _ := toolFixture(t)
+	call, err := DecodeToolCall(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Schema = "plowshare-tool/2"
+	call.SchemaFingerprint = &fingerprint
+	call.Arguments = map[string]ToolValue{"data": ToolArray([]ToolValue{ToolText("nested"), ToolNull()})}
+	data, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports := &fixtureToolPorts{request: string(data)}
+	journal := &fixtureJournal{rows: map[string]ToolReceipt{}, declaration: &declaration}
+	executions := 0
+	tools := []RegisteredTool{{declaration, func(_ context.Context, actual ToolCall) (ToolResult, error) {
+		executions++
+		if !reflect.DeepEqual(actual.Arguments, call.Arguments) {
+			t.Fatal("nested values changed")
+		}
+		return ToolResult{"COMPLETED", "observed"}, nil
+	}}}
+	provider, err := NewToolProvider(ports, fixtureBinding, tools, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mutating a caller-owned declaration cannot change the provider's admitted schema.
+	changed := "changed"
+	schema.Description = &changed
+	if _, err = provider.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = provider.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if executions != 1 {
+		t.Fatal("handler repeated")
+	}
+	changedJournal := &fixtureJournal{rows: map[string]ToolReceipt{}, declaration: &declaration}
+	changedProvider, err := NewToolProvider(ports, fixtureBinding, tools, changedJournal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = changedProvider.Poll(context.Background()); err == nil {
+		t.Fatal("changed schema executed")
+	}
+	if executions != 1 {
+		t.Fatal("changed schema caused effect")
 	}
 }
