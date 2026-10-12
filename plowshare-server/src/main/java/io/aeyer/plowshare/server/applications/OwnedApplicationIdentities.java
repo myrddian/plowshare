@@ -4,8 +4,10 @@ import io.aeyer.plowshare.protocol.ApplicationIdentity.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.auth.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -18,6 +20,7 @@ public final class OwnedApplicationIdentities implements ApplicationIdentities {
   private final ProjectWorkspaces projects;
   private final UnitOfWork work;
   private final ApplicationEventPublisher events;
+  private final Clock clock;
 
   public OwnedApplicationIdentities(
       ApplicationIdentityRepository repository,
@@ -27,6 +30,20 @@ public final class OwnedApplicationIdentities implements ApplicationIdentities {
       ProjectWorkspaces projects,
       UnitOfWork work,
       ApplicationEventPublisher events) {
+    this(repository, services, accounts, members, projects, work, events, Clock.systemUTC());
+  }
+
+  /** Uses the supplied time source; issued receipts share PostgreSQL's microsecond precision. */
+  public OwnedApplicationIdentities(
+      ApplicationIdentityRepository repository,
+      ServiceAccountRepository services,
+      AdminStore accounts,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      UnitOfWork work,
+      ApplicationEventPublisher events,
+      Clock clock) {
+    this.clock = java.util.Objects.requireNonNull(clock);
     this.repository = repository;
     this.services = services;
     this.accounts = accounts;
@@ -159,13 +176,17 @@ public final class OwnedApplicationIdentities implements ApplicationIdentities {
                 identity.credentialIssued()
                     ? "Explicit rotation is required for an issued Application credential"
                     : "Issue the reserved credential before rotating it");
+          // TIMESTAMPTZ retains microseconds. Normalize before both persistence and the
+          // one-time response so recovery returns exactly the same receipt, including expiry.
           var receipt =
               new Receipt(
                   request.requestId(),
                   request.project(),
                   identity.tokenId(),
                   identity.principal(),
-                  OffsetDateTime.now(ZoneOffset.UTC).plusDays(request.expiresInDays()));
+                  OffsetDateTime.now(clock.withZone(ZoneOffset.UTC))
+                      .plusDays(request.expiresInDays())
+                      .truncatedTo(ChronoUnit.MICROS));
           String secret = ServiceCredentials.PREFIX + Tokens.mint();
           repository.issued(actor, request, receipt, Tokens.hash(secret));
           services.retirePrincipal(identity.principal());
