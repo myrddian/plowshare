@@ -207,9 +207,32 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first.connected)
         self.assertTrue(first.agents and first.agents.missing_tools)
         self.assertTrue(first.schedule and first.schedule.paused)
+        self.assertNotIn("administrator", first.detail)
+        self.assertNotIn("unavailable", first.detail.lower())
         self.assertEqual(await self.console.health(), first)
         self.assertEqual(self.remote.reads, 1)
         self.assertTrue(first.checklist)
+
+    async def test_missing_schedule_does_not_claim_a_permission_failure(self) -> None:
+        with patch.object(self.remote, "schedule", new=AsyncMock(return_value=None)):
+            health = await self.console.health()
+        self.assertTrue(health.connected)
+        self.assertIsNone(health.schedule)
+        self.assertIn("no active scan schedule", health.detail)
+        self.assertNotIn("administrator", health.detail)
+
+    async def test_failed_schedule_read_reports_a_real_connection_problem(self) -> None:
+        with patch.object(
+            self.remote,
+            "schedule",
+            new=AsyncMock(
+                side_effect=TransportError(Delivery.UNKNOWN, "fixture disconnected")
+            ),
+        ):
+            health = await self.console.health()
+        self.assertFalse(health.connected)
+        self.assertIn("Plowshare checks are unavailable", health.detail)
+        self.assertNotIn("Project read checks passed", health.detail)
 
     async def test_expected_findings_keep_original_evidence(self) -> None:
         evidence = self.scan.evidence

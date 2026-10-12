@@ -292,12 +292,17 @@ class OperatorConsole:
                 None,
                 (),
                 True,
-                "Project read checks passed; execution authorization is checked on each call. Schedule runtime status requires deployment-administrator inspection.",
+                "Project read checks passed; execution authorization is checked on each call.",
             )
             try:
                 schedule = await self.port.schedule()
                 agents = await self.port.agents()
                 runs = await self.port.runs()
+                if schedule is None:
+                    detail = (
+                        "Project read checks passed; no active scan schedule was found "
+                        "for this application. Execution authorization is checked on each call."
+                    )
             except (Refusal, TransportError, ValueError, TimeoutError):
                 connected, detail = (
                     False,
@@ -348,9 +353,7 @@ class OperatorConsole:
             if not latest:
                 checklist.append("Request a first scan and inspect its evidence")
             if not schedule:
-                checklist.append(
-                    "Inspect the scan schedule with the deployment administrator"
-                )
+                checklist.append("Review the project scan schedule in Plowshare")
             elif schedule.paused:
                 checklist.append("Review and enable the scan schedule below")
             if agents and (agents.unavailable or agents.missing_tools):

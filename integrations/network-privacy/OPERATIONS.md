@@ -13,10 +13,11 @@ and Pi-hole. Plowshare does not start or host this external process.
    addresses and eight TCP ports, add names and save monitoring.
 2. Optionally expand **Connect Pi-hole v6**. Supply its HTTP(S) origin and an
    application password. **Test connection** authenticates and reads device
-   records without querying DNS or saving the password. Enter the password again
-   for **Test and save connection**. A successful read can still report missing,
-   stale or ambiguous device associations. Saving requires an idle collector,
-   writes a new private password file and begins a new comparison baseline.
+   records without querying DNS or saving the password. **Save connection** stores
+   the connection and password independently of connectivity; testing is optional.
+   A successful read can still report missing, stale or ambiguous associations.
+   Saved changes wait for earlier scan work to settle before activation and a new
+   comparison baseline.
 3. **Request a scan**. Read its observation time, scope, coverage gaps and evidence.
    A completed collection does not mean an investigation has completed.
 4. Expand **Investigation and alert preferences** to choose automatic admission,
@@ -236,10 +237,13 @@ also works with the previous Application completion route, which already skips
 empty changes. Deploy the updated Application package through its normal reviewed
 workflow when updating its route; no core server or SDK change is required here.
 
-The service token cannot inspect global schedule runtime status; the dashboard
-labels that read unavailable without marking the project connection broken.
-Use administrator `schedule list` / `schedule files` or the explicit schedule
-editor to inspect/change it. Tool visibility comes from a current unmeasured
+The application service token reads its project-scoped schedule runtime status.
+A successful read shows the current pause state; a missing schedule is reported
+separately from failed connection or permission checks. Operational pause/resume
+uses a project manager's Plowshare CLI, TUI, desktop or web-console session;
+it does not redeploy the Application. The dashboard's schedule revision editor
+requires a deployment-administrator login because it changes Application source.
+Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.
 
