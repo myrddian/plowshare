@@ -1,10 +1,6 @@
-package io.aeyer.plowshare.server.llm.dispatch;
+package io.aeyer.plowshare.protocol;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.SerializerProvider;
-import io.aeyer.plowshare.server.llm.dispatch.SchemaDefinition.*;
-import java.io.IOException;
+import io.aeyer.plowshare.protocol.SchemaDefinition.*;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -68,6 +64,84 @@ public final class SchemaCodec {
    */
   public static SchemaDefinition decode(Map<?, ?> source) {
     return new Decoder().schema(source, "schema", 0);
+  }
+
+  /** JSON serialization boundary, shared by the canonical fingerprint and native codecs. */
+  public static Map<String, Object> wire(SchemaDefinition schema) {
+    Map<String, Object> result = new LinkedHashMap<>();
+    for (var component : SchemaDefinition.class.getRecordComponents()) {
+      try {
+        Object value = component.getAccessor().invoke(schema);
+        if (value == null) continue;
+        var annotation =
+            component
+                .getAccessor()
+                .getAnnotation(com.fasterxml.jackson.annotation.JsonProperty.class);
+        result.put(annotation == null ? component.getName() : annotation.value(), wireValue(value));
+      } catch (ReflectiveOperationException broken) {
+        throw new IllegalStateException("Schema serialization failed", broken);
+      }
+    }
+    return result;
+  }
+
+  private static Object wireValue(Object value) {
+    if (value instanceof SchemaDefinition schema) return wire(schema);
+    if (value instanceof Types types) return types.wireValue();
+    if (value instanceof Allowed allowed) return allowed.value();
+    if (value instanceof Constrained constrained) return wire(constrained.schema());
+    if (value instanceof Text text) return text.value();
+    if (value instanceof Decimal decimal) return decimal.value();
+    if (value instanceof Truth truth) return truth.value();
+    if (value instanceof NullValue) return null;
+    if (value instanceof List<?> list) return list.stream().map(SchemaCodec::wireValue).toList();
+    if (value instanceof Map<?, ?> map) {
+      Map<String, Object> output = new LinkedHashMap<>();
+      map.forEach((key, entry) -> output.put((String) key, wireValue(entry)));
+      return output;
+    }
+    return value;
+  }
+
+  /**
+   * Stable SHA-256 identity: sorted UTF-8 keys, exact decimal tokens, no JSON writer dependence.
+   */
+  public static String fingerprint(SchemaDefinition schema) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(
+              java.security.MessageDigest.getInstance("SHA-256")
+                  .digest(
+                      canonical(wire(schema)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException unavailable) {
+      throw new IllegalStateException(unavailable);
+    }
+  }
+
+  private static String canonical(Object value) {
+    if (value == null) return "z;";
+    if (value instanceof Boolean flag) return flag ? "b1;" : "b0;";
+    if (value instanceof Number number) {
+      var decimal = new BigDecimal(number.toString()).stripTrailingZeros();
+      return "n" + decimal.unscaledValue() + "e" + -decimal.scale() + ";";
+    }
+    if (value instanceof String text)
+      return "s"
+          + java.util.HexFormat.of()
+              .formatHex(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+          + ";";
+    if (value instanceof List<?> list)
+      return "["
+          + list.stream().map(SchemaCodec::canonical).collect(java.util.stream.Collectors.joining())
+          + "]";
+    if (value instanceof Map<?, ?> map)
+      return "{"
+          + map.entrySet().stream()
+              .sorted(java.util.Comparator.comparing(entry -> canonical(entry.getKey())))
+              .map(entry -> canonical(entry.getKey()) + canonical(entry.getValue()))
+              .collect(java.util.stream.Collectors.joining())
+          + "}";
+    throw new IllegalArgumentException("Invalid canonical schema value");
   }
 
   private static final class Decoder {
@@ -250,40 +324,5 @@ public final class SchemaCodec {
     List<Literal> result = new ArrayList<>();
     for (Object entry : array(value, path)) result.add(literal(entry, path));
     return result;
-  }
-
-  public static final class TypesSerializer extends JsonSerializer<Types> {
-    @Override
-    public void serialize(Types value, JsonGenerator out, SerializerProvider provider)
-        throws IOException {
-      if (!value.union()) out.writeString(value.values().getFirst());
-      else {
-        out.writeStartArray();
-        for (String type : value.values()) out.writeString(type);
-        out.writeEndArray();
-      }
-    }
-  }
-
-  public static final class RuleSerializer extends JsonSerializer<Rule> {
-    @Override
-    public void serialize(Rule value, JsonGenerator out, SerializerProvider provider)
-        throws IOException {
-      if (value instanceof Allowed allowed) out.writeBoolean(allowed.value());
-      else provider.defaultSerializeValue(((Constrained) value).schema(), out);
-    }
-  }
-
-  public static final class LiteralSerializer extends JsonSerializer<Literal> {
-    @Override
-    public void serialize(Literal value, JsonGenerator out, SerializerProvider provider)
-        throws IOException {
-      switch (value) {
-        case Text text -> out.writeString(text.value());
-        case Decimal number -> out.writeNumber(number.value());
-        case Truth truth -> out.writeBoolean(truth.value());
-        case NullValue ignored -> out.writeNull();
-      }
-    }
   }
 }

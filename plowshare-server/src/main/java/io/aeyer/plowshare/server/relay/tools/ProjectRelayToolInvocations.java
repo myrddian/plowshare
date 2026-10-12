@@ -89,7 +89,7 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
     Instant now = clock.get().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     var request =
         new RelayToolCodec.Request(
-            RelayToolCodec.VERSION,
+            binding.inputSchema() == null ? RelayToolCodec.VERSION : RelayToolCodec.NESTED_VERSION,
             id.toString(),
             binding.project(),
             binding.provider(),
@@ -98,7 +98,10 @@ public final class ProjectRelayToolInvocations implements RelayToolInvocations {
             owner.runs().id(),
             call,
             now.plusSeconds(binding.timeoutSeconds()).toString(),
-            arguments.values());
+            arguments.values(),
+            binding.inputSchema() == null
+                ? null
+                : io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(binding.inputSchema()));
     var ancestry =
         repository
             .ancestry(project, owner)

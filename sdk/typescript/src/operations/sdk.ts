@@ -73,6 +73,8 @@ export type {
   ToolReceipt,
   ToolResult,
   ToolScalar,
+  ToolValue,
+  ToolObject,
   ToolState,
   RegisteredTool,
 } from './relay-tools.ts';
@@ -231,3 +233,14 @@ export class Plowshare {
     this.connection.close();
   }
 }
+
+export type {
+  SchemaDefinition,
+  SchemaType,
+  SchemaLiteral,
+} from './schema-definition.ts';
+export {
+  decodeToolSchema,
+  validateToolSchema,
+  canonicalToolSchema,
+} from './tool-schemas.ts';

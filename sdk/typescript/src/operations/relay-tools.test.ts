@@ -5,6 +5,7 @@ import { Plowshare } from './sdk.ts';
 import { CURRENT_VERSION } from '../binding/envelope.ts';
 import type { Arrival, Socket } from '../binding/connection.ts';
 import { fieldsOf } from './response.ts';
+import { decodeToolSchema, canonicalToolSchema } from './tool-schemas.ts';
 import {
   decodeToolCall,
   toolResultRequestId,
@@ -14,6 +15,7 @@ import {
 } from './relay-tools.ts';
 import type {
   ToolDeclaration,
+  ToolCall,
   ToolHost,
   ToolJournal,
   ToolReceipt,
@@ -60,9 +62,12 @@ function source(): string {
 }
 class Journal implements ToolJournal {
   readonly rows = new Map<string, ToolReceipt>();
-  readonly identity = createHash('sha256')
-    .update(toolDeploymentConfig(binding, [declaration]))
-    .digest('hex');
+  readonly identity: string;
+  constructor(tool: ToolDeclaration = declaration) {
+    this.identity = createHash('sha256')
+      .update(toolDeploymentConfig(binding, [tool]))
+      .digest('hex');
+  }
   async all(): Promise<readonly ToolReceipt[]> {
     return [...this.rows.values()];
   }
@@ -71,6 +76,10 @@ class Journal implements ToolJournal {
   }
 }
 class Wire implements Socket {
+  readonly request: string;
+  constructor(request = source()) {
+    this.request = request;
+  }
   listener: ((event: Arrival) => void) | undefined;
   closed: (() => void) | undefined;
   publications = 0;
@@ -113,7 +122,7 @@ class Wire implements Socket {
       causation: null,
       payload: {
         kind: 'TEXT',
-        text: result ? this.published['text'] : source(),
+        text: result ? this.published['text'] : this.request,
         schedule: null,
         emits: null,
         fireAt: null,
@@ -339,4 +348,54 @@ describe('live tool catalogue', () => {
     expect(wire.publications).toBe(3);
     expect(calls).toBe(0);
   });
+});
+
+it('delivers nested values once and refuses a changed schema before execution', async () => {
+  const schema = decodeToolSchema(
+    JSON.parse(
+      '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}',
+    ),
+  );
+  const tool = { ...declaration, parameters: [], inputSchema: schema };
+  const request = JSON.stringify({
+    ...fieldsOf(JSON.parse(source())),
+    schema: 'plowshare-tool/2',
+    schemaFingerprint: await host.sha256(canonicalToolSchema(schema)),
+    arguments: { data: ['nested', null] },
+  });
+  const wire = new Wire(request),
+    journal = new Journal(tool);
+  let executions = 0;
+  const registered = {
+    declaration: tool,
+    handler: async (call: ToolCall) => {
+      executions++;
+      expect(call.arguments).toEqual({ data: ['nested', null] });
+      return { state: 'COMPLETED' as const, text: 'observed' };
+    },
+  };
+  const client = new Plowshare({ socket: wire });
+  const provider = await ToolProvider.create(
+    client,
+    binding,
+    [registered],
+    journal,
+    host,
+  );
+  await provider.poll();
+  await provider.poll();
+  expect(executions).toBe(1);
+  const changedTool = {
+    ...tool,
+    inputSchema: { ...schema, description: 'changed' },
+  };
+  const changed = await ToolProvider.create(
+    client,
+    binding,
+    [{ ...registered, declaration: changedTool }],
+    new Journal(changedTool),
+    host,
+  );
+  await expect(changed.poll()).rejects.toThrow();
+  expect(executions).toBe(1);
 });

@@ -49,6 +49,20 @@ internal static class ToolFacadeChecks
         await journal.SaveAsync(new ToolReceipt(Id, source, "executing", null, null));
         await new ToolProvider(wire, Binding, tools, journal).PollAsync();
         if (executions != 0 || wire.Publications != 1 || journal.Rows[Id].Result?.State != "UNKNOWN") throw new Exception("Interrupted work repeated");
+
+        var nestedSchema = ToolSchemas.Decode("""{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}""");
+        var nestedDeclaration = new ToolDeclaration("inspect", "Inspect fixture", [], 30, nestedSchema);
+        var nestedCall = RelayTools.DecodeCall(source) with { Schema = "plowshare-tool/2", SchemaFingerprint = ToolSchemas.Fingerprint(nestedSchema), Arguments = new Dictionary<string, ToolValue> { ["data"] = new ToolValue.Array([new ToolValue.Text("nested"),new ToolValue.Null()]) } };
+        var nestedSource = JsonSerializer.Serialize(nestedCall,new JsonSerializerOptions{PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
+        var nestedPorts = new Ports(nestedSource); executions=0;
+        RegisteredTool[] nestedTools = [new(nestedDeclaration,(call,token)=> { executions++; if(call.Arguments["data"] is not ToolValue.Array values || values.Values.Count!=2 || values.Values[0] is not ToolValue.Text {Value:"nested"} || values.Values[1] is not ToolValue.Null)throw new Exception("Nested values changed"); return Task.FromResult(new ToolResult("COMPLETED","observed")); })];
+        var nestedProvider = new ToolProvider(nestedPorts,Binding,nestedTools,new Journal(nestedDeclaration));
+        await nestedProvider.PollAsync(); await nestedProvider.PollAsync();
+        if(executions!=1)throw new Exception("Nested effect repeated");
+        var changedDeclaration=nestedDeclaration with{InputSchema=nestedSchema with{Description="changed"}};
+        var changedProvider=new ToolProvider(nestedPorts,Binding,[nestedTools[0] with{Declaration=changedDeclaration}],new Journal(changedDeclaration));
+        var refused=false;try{await changedProvider.PollAsync();}catch(ArgumentException){refused=true;}
+        if(!refused||executions!=1)throw new Exception("Changed schema executed");
         Console.WriteLine(".NET tool facade checks passed");
     }
     private static async Task MustFailAsync(Func<Task<int>> action)
@@ -57,10 +71,10 @@ internal static class ToolFacadeChecks
         catch (Exception error) when (error is IOException or InvalidOperationException) { return; }
         throw new Exception("Expected unresolved publication refusal");
     }
-    private sealed class Journal : IToolJournal
+    private sealed class Journal(ToolDeclaration? declaration = null) : IToolJournal
     {
         internal Dictionary<string, ToolReceipt> Rows { get; } = [];
-        public string Identity => Hash(RelayTools.DeploymentConfig(Binding, [Declaration]));
+        public string Identity => Hash(RelayTools.DeploymentConfig(Binding, [declaration ?? Declaration]));
         public Task<IReadOnlyList<ToolReceipt>> AllAsync(CancellationToken token = default) => Task.FromResult<IReadOnlyList<ToolReceipt>>(Rows.Values.ToArray());
         public Task SaveAsync(ToolReceipt receipt, CancellationToken token = default) { Rows[receipt.InvocationId] = receipt; return Task.CompletedTask; }
     }

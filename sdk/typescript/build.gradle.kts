@@ -33,6 +33,9 @@ val clientTest by tasks.registering(Exec::class) {
     group = "verification"
     clientSources()
     dependsOn(clientBuild)
+    inputs.files(rootProject.file("test-support/contracts/tool-schemas.json"),
+        rootProject.file("test-support/contracts/relay-tools.json"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     // Contract tests read these external authorities; a changed manifest/DTO
     // must invalidate the test task even when the TS sources are unchanged.
     inputs.file(rootProject.file("test-support/contracts/client-capabilities.json"))

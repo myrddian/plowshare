@@ -7,19 +7,31 @@ using System.Text.RegularExpressions;
 
 namespace Plowshare.Sdk;
 
-/// <summary>Closed scalar input vocabulary, shared by all SDK tool facades.</summary>
+/// <summary>Closed recursive input vocabulary, shared by all SDK tool facades.</summary>
+[JsonConverter(typeof(ToolValueConverter))]
 public abstract record ToolValue
 {
     private protected ToolValue() { }
     public sealed record Text(string Value) : ToolValue;
     public sealed record Number(double Value) : ToolValue;
     public sealed record Boolean(bool Value) : ToolValue;
+    public sealed record Null : ToolValue;
+    public sealed record Array : ToolValue
+    {
+        public IReadOnlyList<ToolValue> Values { get; }
+        public Array(IReadOnlyList<ToolValue> values) { Values = System.Array.AsReadOnly(values.ToArray()); }
+    }
+    public sealed record ObjectValue : ToolValue
+    {
+        public IReadOnlyDictionary<string, ToolValue> Values { get; }
+        public ObjectValue(IReadOnlyDictionary<string, ToolValue> values) { Values = new ReadOnlyDictionary<string, ToolValue>(values.ToDictionary(field => field.Key, field => field.Value)); }
+    }
 }
 public sealed record ToolParameter(string Name, string Type, string Description, bool Required);
-public sealed record ToolDeclaration(string Name, string Description, IReadOnlyList<ToolParameter> Parameters, int TimeoutSeconds);
+public sealed record ToolDeclaration(string Name, string Description, IReadOnlyList<ToolParameter> Parameters, int TimeoutSeconds, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SchemaDefinition? InputSchema = null);
 public sealed record ToolBinding(string Project, string Provider, string Account);
 public sealed record ToolCall(string InvocationId, string Project, string Provider, string Tool,
-    string Account, string Run, string Call, string Deadline, IReadOnlyDictionary<string, ToolValue> Arguments);
+    string Account, string Run, string Call, string Deadline, IReadOnlyDictionary<string, ToolValue> Arguments, string Schema = "plowshare-tool/1", [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SchemaFingerprint = null);
 public sealed record ToolResult(string State, string Text);
 public sealed record RegisteredTool(ToolDeclaration Declaration, Func<ToolCall, CancellationToken, Task<ToolResult>> Handler);
 public sealed record ToolReceipt(string InvocationId, string Request, string Phase, ToolResult? Result, string? OccurredAt);
@@ -50,7 +62,7 @@ public sealed class SdkToolRelayPorts(Client client) : IToolRelayPorts
 /// <summary>Owns tool declaration and TEXT envelope conversion; raw JSON remains private.</summary>
 public static class RelayTools
 {
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
     internal static string Identity(string value)
     {
@@ -71,6 +83,7 @@ public static class RelayTools
     {
         if (!Regex.IsMatch(tool.Name, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || tool.Name.Length > 64 || tool.TimeoutSeconds is < 1 or > 300 || tool.Parameters.Count > 32 || tool.Parameters.Select(p => p.Name).Distinct().Count() != tool.Parameters.Count) throw new ArgumentException("Invalid tool declaration");
         Text(tool.Description, 4096, true);
+        if (tool.InputSchema is not null) { if (tool.Parameters.Count != 0) throw new ArgumentException("Use parameters or inputSchema"); ToolSchemas.Validate(tool.InputSchema); }
         foreach (var parameter in tool.Parameters)
         {
             if (!Regex.IsMatch(parameter.Name, "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$") || parameter.Type is not ("STRING" or "NUMBER" or "INTEGER" or "BOOLEAN")) throw new ArgumentException("Invalid tool parameter");
@@ -89,7 +102,7 @@ public static class RelayTools
         return (negative ? "-" : "") + digits + "e" + (exponent - fraction + raw.Length - raw.TrimEnd('0').Length).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static bool PortableNumber(double value)
+    internal static bool PortableNumber(double value)
     {
         if (!double.IsFinite(value) || Math.Abs(value) > 9007199254740991) return false;
         var parts = value.ToString("R", System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant().Split('e');
@@ -101,6 +114,7 @@ public static class RelayTools
     public static void ValidateArguments(ToolDeclaration tool, IReadOnlyDictionary<string, ToolValue> arguments)
     {
         Declaration(tool);
+        if (tool.InputSchema is not null) { ToolSchemas.ValidateArguments(tool.InputSchema, new ToolValue.ObjectValue(arguments)); return; }
         if (arguments.Keys.Any(name => !tool.Parameters.Any(p => p.Name == name))) throw new ArgumentException("Unknown tool argument");
         foreach (var parameter in tool.Parameters)
         {
@@ -123,13 +137,14 @@ public static class RelayTools
         Identity(binding.Project); Identity(binding.Account);
         if (!Regex.IsMatch(binding.Provider, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$") || binding.Provider.Length > 48 || tools.Count is < 1 or > 256 || tools.Select(t => t.Name).Distinct().Count() != tools.Count) throw new ArgumentException("Invalid tool binding");
         foreach (var tool in tools) Declaration(tool);
-        var bindings = tools.Select(t => new { binding.Project, binding.Provider, binding.Account, t.Name, t.Description, t.Parameters, t.TimeoutSeconds }).ToArray();
+        var bindings = tools.Select(t => new { binding.Project, binding.Provider, binding.Account, t.Name, t.Description, t.Parameters, t.TimeoutSeconds, InputSchema = t.InputSchema is null ? null : JsonSerializer.Serialize(t.InputSchema, Json) }).ToArray();
         return JsonSerializer.Serialize(new { plowshare = new { relay = new { tools = new { bindings } } } }, Json);
     }
-    internal static string Catalogue(IReadOnlyList<ToolDeclaration> tools) {
+    internal static string Catalogue(IReadOnlyList<ToolDeclaration> tools)
+    {
         if (tools.Count > 128) throw new ArgumentException("Tool catalogue exceeds 128 declarations");
-        var text = JsonSerializer.Serialize(new { version = "plowshare-tool-catalog/1", tools }, Json);
-        Text(text,65536); return text;
+        var text = JsonSerializer.Serialize(new { version = tools.Any(tool => tool.InputSchema is not null) ? "plowshare-tool-catalog/2" : "plowshare-tool-catalog/1", tools }, Json);
+        Text(text, 65536); return text;
     }
     public static string ResultRequestId(string invocationId)
     {
@@ -139,7 +154,7 @@ public static class RelayTools
     }
     private static void Unique(JsonElement value, int depth)
     {
-        if (depth > 8) throw new ArgumentException("Tool envelope exceeds depth bound");
+        if (depth > 40) throw new ArgumentException("Tool envelope exceeds depth bound");
         if (value.ValueKind == JsonValueKind.Object)
         {
             var names = new HashSet<string>();
@@ -153,17 +168,20 @@ public static class RelayTools
         using var document = JsonDocument.Parse(source);
         var row = document.RootElement; Unique(row, 0);
         string[] fields = ["schema", "invocationId", "project", "provider", "tool", "account", "run", "call", "deadline", "arguments"];
-        if (row.ValueKind != JsonValueKind.Object || row.EnumerateObject().Count() != fields.Length || fields.Any(name => !row.TryGetProperty(name, out _)) || row.GetProperty("schema").GetString() != "plowshare-tool/1") throw new ArgumentException("Invalid tool envelope");
+        var schema = row.GetProperty("schema").GetString();
+        var nested = schema == "plowshare-tool/2";
+        if (nested) fields = [.. fields, "schemaFingerprint"];
+        if (row.ValueKind != JsonValueKind.Object || row.EnumerateObject().Count() != fields.Length || fields.Any(name => !row.TryGetProperty(name, out _)) || schema != "plowshare-tool/1" && !nested) throw new ArgumentException("Invalid tool envelope");
         string Read(string name) => Identity(row.GetProperty(name).GetString() ?? throw new ArgumentException("Invalid tool field"));
         var id = Read("invocationId"); ResultRequestId(id);
         var deadline = Read("deadline"); Instant(deadline);
         var args = row.GetProperty("arguments");
-        if (args.ValueKind != JsonValueKind.Object || args.EnumerateObject().Count() > 32) throw new ArgumentException("Invalid tool arguments");
+        if (args.ValueKind != JsonValueKind.Object || args.EnumerateObject().Count() > (nested ? 1024 : 32)) throw new ArgumentException("Invalid tool arguments");
         var values = new Dictionary<string, ToolValue>();
         foreach (var property in args.EnumerateObject())
         {
-            if (!Regex.IsMatch(property.Name, "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")) throw new ArgumentException("Invalid tool argument name");
-            values.Add(property.Name, property.Value.ValueKind switch
+            if (!nested && !Regex.IsMatch(property.Name, "^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")) throw new ArgumentException("Invalid tool argument name");
+            values.Add(property.Name, nested ? ToolSchemas.DecodeValue(property.Value) : property.Value.ValueKind switch
             {
                 JsonValueKind.String => new ToolValue.Text(Text(property.Value.GetString() ?? "", 4096)),
                 JsonValueKind.Number when property.Value.TryGetDouble(out var number) && PortableNumber(number) && NormalizedDecimal(property.Value.GetRawText()) == NormalizedDecimal(number.ToString("R", System.Globalization.CultureInfo.InvariantCulture)) => new ToolValue.Number(number),
@@ -174,7 +192,16 @@ public static class RelayTools
         }
         var provider = Read("provider"); var toolName = Read("tool");
         if (!Regex.IsMatch(provider, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$") || provider.Length > 48 || !Regex.IsMatch(toolName, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || toolName.Length > 64) throw new ArgumentException("Invalid tool binding");
-        return new ToolCall(id, Read("project"), provider, toolName, Read("account"), Read("run"), Read("call"), deadline, new ReadOnlyDictionary<string, ToolValue>(values));
+        var call = new ToolCall(id, Read("project"), provider, toolName, Read("account"), Read("run"), Read("call"), deadline, new ReadOnlyDictionary<string, ToolValue>(values), schema ?? throw new ArgumentException("Invalid schema"), nested ? row.GetProperty("schemaFingerprint").GetString() : null);
+        if (nested && (call.SchemaFingerprint is null || !Regex.IsMatch(call.SchemaFingerprint, "^[0-9a-f]{64}$"))) throw new ArgumentException("Invalid schema fingerprint");
+        ToolSchemas.CheckValue(new ToolValue.ObjectValue(call.Arguments));
+        return call;
+    }
+    internal static void ValidateCall(ToolDeclaration tool, ToolCall call)
+    {
+        if (tool.InputSchema is null) { if (call.Schema != "plowshare-tool/1") throw new ArgumentException("Offered schema changed"); }
+        else if (call.Schema != "plowshare-tool/2" || call.SchemaFingerprint != ToolSchemas.Fingerprint(tool.InputSchema)) throw new ArgumentException("Offered schema changed");
+        ValidateArguments(tool, call.Arguments);
     }
     internal static string ResultText(ToolCall call, ToolResult? result)
     {
@@ -198,18 +225,25 @@ public sealed class ToolProvider
     {
         var config = RelayTools.DeploymentConfig(binding, tools.Select(t => t.Declaration).ToArray());
         if (journal.Identity != RelayTools.Hash(config)) throw new ArgumentException("Foreign tool journal");
-        this.ports = ports; this.binding = binding; this.tools = tools.Select(t => t with { Declaration = t.Declaration with { Parameters = Array.AsReadOnly(t.Declaration.Parameters.ToArray()) } }).ToArray(); this.journal = journal;
+        this.ports = ports; this.binding = binding; this.tools = tools.Select(t => t with { Declaration = t.Declaration with { Parameters = Array.AsReadOnly(t.Declaration.Parameters.ToArray()), InputSchema = t.Declaration.InputSchema is null ? null : ToolSchemas.Decode(JsonSerializer.Serialize(t.Declaration.InputSchema)) } }).ToArray(); this.journal = journal;
     }
     /// <summary>Publish/renew declarations using a retained caller UUID; never auto-replay.</summary>
-    public Task PublishCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId,tools.Select(t => t.Declaration).ToArray(),token);
+    public Task PublishCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId, tools.Select(t => t.Declaration).ToArray(), token);
     /// <summary>Withdraw declarations without replaying or cancelling existing effects.</summary>
-    public Task WithdrawCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId,Array.Empty<ToolDeclaration>(),token);
-    private async Task CatalogAsync(string requestId,IReadOnlyList<ToolDeclaration> declarations,CancellationToken token) {
-        if (!Guid.TryParseExact(requestId,"D",out var id) || id.ToString()!=requestId) throw new ArgumentException("Tool identity must be a canonical UUID");
-        var topic = "tool."+binding.Provider+".catalog";
-        var reply = await ports.PublishAsync(new RelayPublishRequest { Project=binding.Project, Topic=topic, RequestId=requestId,
-            OccurredAt=DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'",System.Globalization.CultureInfo.InvariantCulture), Text=RelayTools.Catalogue(declarations) },token);
-        if(reply.RequestId!=requestId || reply.Project!=binding.Project || reply.Topic!=topic) throw new InvalidOperationException("Foreign tool catalogue publication receipt");
+    public Task WithdrawCatalogAsync(string requestId, CancellationToken token = default) => CatalogAsync(requestId, Array.Empty<ToolDeclaration>(), token);
+    private async Task CatalogAsync(string requestId, IReadOnlyList<ToolDeclaration> declarations, CancellationToken token)
+    {
+        if (!Guid.TryParseExact(requestId, "D", out var id) || id.ToString() != requestId) throw new ArgumentException("Tool identity must be a canonical UUID");
+        var topic = "tool." + binding.Provider + ".catalog";
+        var reply = await ports.PublishAsync(new RelayPublishRequest
+        {
+            Project = binding.Project,
+            Topic = topic,
+            RequestId = requestId,
+            OccurredAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", System.Globalization.CultureInfo.InvariantCulture),
+            Text = RelayTools.Catalogue(declarations)
+        }, token);
+        if (reply.RequestId != requestId || reply.Project != binding.Project || reply.Topic != topic) throw new InvalidOperationException("Foreign tool catalogue publication receipt");
     }
     private async Task<IReadOnlyList<ToolReceipt>> ReceiptsAsync(CancellationToken token)
     {
@@ -220,7 +254,7 @@ public sealed class ToolProvider
             var call = RelayTools.DecodeCall(row.Request);
             var declaration = tools.FirstOrDefault(t => t.Declaration.Name == call.Tool)?.Declaration;
             if (call.InvocationId != row.InvocationId || call.Project != binding.Project || call.Provider != binding.Provider || declaration is null) throw new ArgumentException("Foreign tool receipt");
-            RelayTools.ValidateArguments(declaration, call.Arguments);
+            RelayTools.ValidateCall(declaration, call);
             if (row.Phase is not ("executing" or "ready" or "publishing" or "done") || (row.Phase == "executing") != (row.Result is null) || (row.Phase is "publishing" or "done") != (row.OccurredAt is not null)) throw new ArgumentException("Invalid tool receipt phase");
             if (row.Result is not null) RelayTools.ResultText(call, row.Result);
             if (row.OccurredAt is not null) RelayTools.Instant(row.OccurredAt);
@@ -257,7 +291,7 @@ public sealed class ToolProvider
                 if (publication.Publisher != "tool-runtime" || publication.Payload.Kind != "TEXT") throw new ArgumentException("Invalid tool publisher or payload");
                 var source = Required(publication.Payload.Text); var call = RelayTools.DecodeCall(source);
                 if (call.Project != binding.Project || call.Provider != binding.Provider || call.Tool != name || call.InvocationId != publication.EventId || call.InvocationId != Required(publication.CorrelationId)) throw new ArgumentException("Foreign tool invocation");
-                RelayTools.ValidateArguments(registered.Declaration, call.Arguments);
+                RelayTools.ValidateCall(registered.Declaration, call);
                 var receipt = (await ReceiptsAsync(token)).FirstOrDefault(r => r.InvocationId == call.InvocationId);
                 var fresh = receipt is null;
                 if (receipt is not null && receipt.Request != source) throw new ArgumentException("Conflicting tool invocation identity");

@@ -19,13 +19,96 @@ import (
 	"unicode/utf16"
 )
 
-// ToolValue is a closed scalar, not an arbitrary JSON value. Null and nested values are refused.
+// ToolValue selects one immutable recursive variant; zero values are invalid.
 type ToolValue struct {
 	text   *string
 	number *float64
 	flag   *bool
+	null   bool
+	array  *[]ToolValue
+	object map[string]ToolValue
 }
 
+func ToolNull() ToolValue { return ToolValue{null: true} }
+func ToolArray(values []ToolValue) ToolValue {
+	items := make([]ToolValue, len(values))
+	for i, value := range values {
+		items[i] = cloneToolValue(value)
+	}
+	return ToolValue{array: &items}
+}
+func ToolObject(values ToolArguments) ToolValue {
+	fields := make(map[string]ToolValue, len(values))
+	for key, value := range values {
+		fields[key] = cloneToolValue(value)
+	}
+	return ToolValue{object: fields}
+}
+func cloneToolValue(value ToolValue) ToolValue {
+	if value.array != nil {
+		return ToolArray(*value.array)
+	}
+	if value.object != nil {
+		return ToolObject(value.object)
+	}
+	return value
+}
+func (v ToolValue) Array() ([]ToolValue, bool) {
+	if v.array == nil {
+		return nil, false
+	}
+	return *ToolArray(*v.array).array, true
+}
+func (v ToolValue) Object() (ToolArguments, bool) {
+	if v.object == nil {
+		return nil, false
+	}
+	return ToolObject(v.object).object, true
+}
+func (v ToolValue) IsNull() bool { return v.null }
+func validateToolValue(v ToolValue, depth int, budget *schemaBudget) error {
+	if err := budget.step(depth); err != nil {
+		return err
+	}
+	if depth > 32 {
+		return errors.New("tool value exceeds depth bound")
+	}
+	if v.array != nil {
+		if len(*v.array) > 1024 {
+			return errors.New("too many tool items")
+		}
+		for _, item := range *v.array {
+			if err := validateToolValue(item, depth+1, budget); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if v.object != nil {
+		if len(v.object) > 1024 {
+			return errors.New("too many tool fields")
+		}
+		for key, item := range v.object {
+			if err := schemaField(key); err != nil {
+				return err
+			}
+			if err := validateToolValue(item, depth+1, budget); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if v.text != nil {
+		return toolText(*v.text, 4096, false)
+	}
+	if v.number != nil && !toolNumber(*v.number) {
+		return errors.New("nonportable tool number")
+	}
+	if v.number == nil && v.flag == nil && !v.null {
+		return errors.New("missing tool value variant")
+	}
+	return nil
+}
 func ToolText(value string) ToolValue    { return ToolValue{text: &value} }
 func ToolNumber(value float64) ToolValue { return ToolValue{number: &value} }
 func ToolBoolean(value bool) ToolValue   { return ToolValue{flag: &value} }
@@ -48,6 +131,18 @@ func (v ToolValue) Boolean() (bool, bool) {
 	return *v.flag, true
 }
 func (v ToolValue) MarshalJSON() ([]byte, error) {
+	if err := validateToolValue(v, 0, &schemaBudget{10000}); err != nil {
+		return nil, err
+	}
+	if v.null {
+		return []byte("null"), nil
+	}
+	if v.array != nil {
+		return json.Marshal(*v.array)
+	}
+	if v.object != nil {
+		return json.Marshal(v.object)
+	}
 	if v.text != nil {
 		if err := toolText(*v.text, 4096, false); err != nil {
 			return nil, err
@@ -74,6 +169,34 @@ func (v *ToolValue) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch typed := value.(type) {
+	case nil:
+		*v = ToolNull()
+	case []any:
+		items := make([]ToolValue, len(typed))
+		for i, item := range typed {
+			data, err := json.Marshal(item)
+			if err != nil {
+				return err
+			}
+			if err = json.Unmarshal(data, &items[i]); err != nil {
+				return err
+			}
+		}
+		*v = ToolArray(items)
+	case map[string]any:
+		fields := ToolArguments{}
+		for key, item := range typed {
+			data, err := json.Marshal(item)
+			if err != nil {
+				return err
+			}
+			var value ToolValue
+			if err = json.Unmarshal(data, &value); err != nil {
+				return err
+			}
+			fields[key] = value
+		}
+		*v = ToolObject(fields)
 	case string:
 		*v = ToolText(typed)
 	case json.Number:
@@ -104,10 +227,11 @@ type ToolParameter struct {
 	Required    bool   `json:"required"`
 }
 type ToolDeclaration struct {
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	Parameters     []ToolParameter `json:"parameters"`
-	TimeoutSeconds int             `json:"timeoutSeconds"`
+	Name           string            `json:"name"`
+	Description    string            `json:"description"`
+	Parameters     []ToolParameter   `json:"parameters"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+	InputSchema    *SchemaDefinition `json:"inputSchema,omitempty"`
 }
 type ToolBinding struct {
 	Project  string `json:"project"`
@@ -115,16 +239,17 @@ type ToolBinding struct {
 	Account  string `json:"account"`
 }
 type ToolCall struct {
-	Schema       string        `json:"schema"`
-	InvocationID string        `json:"invocationId"`
-	Project      string        `json:"project"`
-	Provider     string        `json:"provider"`
-	Tool         string        `json:"tool"`
-	Account      string        `json:"account"`
-	Run          string        `json:"run"`
-	Call         string        `json:"call"`
-	Deadline     string        `json:"deadline"`
-	Arguments    ToolArguments `json:"arguments"`
+	Schema            string        `json:"schema"`
+	InvocationID      string        `json:"invocationId"`
+	Project           string        `json:"project"`
+	Provider          string        `json:"provider"`
+	Tool              string        `json:"tool"`
+	Account           string        `json:"account"`
+	Run               string        `json:"run"`
+	Call              string        `json:"call"`
+	Deadline          string        `json:"deadline"`
+	Arguments         ToolArguments `json:"arguments"`
+	SchemaFingerprint *string       `json:"schemaFingerprint,omitempty"`
 }
 type ToolResult struct {
 	State string `json:"state"`
@@ -201,6 +326,18 @@ func (t ToolDeclaration) Validate(args ToolArguments) error {
 	if err := toolText(t.Description, 4096, true); err != nil {
 		return err
 	}
+	if t.InputSchema != nil {
+		if len(t.Parameters) != 0 {
+			return errors.New("use parameters or inputSchema")
+		}
+		if err := ValidateToolSchema(t.InputSchema); err != nil {
+			return err
+		}
+		if args == nil {
+			return nil
+		}
+		return ValidateSchemaArguments(t.InputSchema, ToolObject(args))
+	}
 	names := map[string]bool{}
 	for _, p := range t.Parameters {
 		if !parameterName.MatchString(p.Name) || names[p.Name] {
@@ -249,6 +386,7 @@ func ToolDeploymentConfig(binding ToolBinding, tools []ToolDeclaration) (string,
 	type installed struct {
 		ToolBinding
 		ToolDeclaration
+		InputSchema *string `json:"inputSchema,omitempty"`
 	}
 	bindings := make([]installed, 0, len(tools))
 	names := map[string]bool{}
@@ -263,7 +401,16 @@ func ToolDeploymentConfig(binding ToolBinding, tools []ToolDeclaration) (string,
 		if t.Parameters == nil {
 			t.Parameters = []ToolParameter{}
 		}
-		bindings = append(bindings, installed{binding, t})
+		var schema *string
+		if t.InputSchema != nil {
+			encoded, err := json.Marshal(t.InputSchema)
+			if err != nil {
+				return "", err
+			}
+			text := string(encoded)
+			schema = &text
+		}
+		bindings = append(bindings, installed{binding, t, schema})
 	}
 	config := struct {
 		Plowshare struct {
@@ -292,7 +439,7 @@ func ToolResultRequestID(id string) (string, error) {
 
 // Validate duplicates and depth at the owning envelope boundary, before JSON deserialization.
 func toolJSONValue(d *json.Decoder, depth int) error {
-	if depth > 8 {
+	if depth > 64 {
 		return errors.New("tool JSON exceeds depth bound")
 	}
 	token, err := d.Token()
@@ -301,6 +448,12 @@ func toolJSONValue(d *json.Decoder, depth int) error {
 	}
 	delimiter, ok := token.(json.Delim)
 	if !ok {
+		if number, ok := token.(json.Number); ok {
+			var value ToolValue
+			if err := json.Unmarshal([]byte(number.String()), &value); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if delimiter == '{' {
@@ -331,24 +484,52 @@ func toolJSONValue(d *json.Decoder, depth int) error {
 	_, err = d.Token()
 	return err
 }
+func validateToolCall(t ToolDeclaration, call ToolCall) error {
+	if t.InputSchema == nil {
+		if call.Schema != "plowshare-tool/1" {
+			return errors.New("offered schema changed")
+		}
+	} else {
+		fingerprint, err := SchemaFingerprint(t.InputSchema)
+		if err != nil {
+			return err
+		}
+		if call.Schema != "plowshare-tool/2" || call.SchemaFingerprint == nil || *call.SchemaFingerprint != fingerprint {
+			return errors.New("offered schema changed")
+		}
+	}
+	return t.Validate(call.Arguments)
+}
 func DecodeToolCall(source string) (ToolCall, error) {
 	var call ToolCall
 	if toolText(source, 32768, true) != nil {
 		return call, errors.New("invalid tool envelope bound")
 	}
 	d := json.NewDecoder(strings.NewReader(source))
+	d.UseNumber()
 	if err := toolJSONValue(d, 0); err != nil {
 		return call, err
 	}
 	if _, err := d.Token(); err != io.EOF {
 		return call, errors.New("trailing tool JSON")
 	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(source), &shape); err != nil {
+		return call, err
+	}
+	expected := 10
+	if string(shape["schema"]) == "\"plowshare-tool/2\"" {
+		expected = 11
+	}
+	if len(shape) != expected {
+		return call, errors.New("invalid tool envelope fields")
+	}
 	d = json.NewDecoder(strings.NewReader(source))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&call); err != nil {
 		return call, err
 	}
-	if call.Schema != "plowshare-tool/1" || !toolUUID.MatchString(call.InvocationID) || call.Arguments == nil {
+	if call.Schema != "plowshare-tool/1" && call.Schema != "plowshare-tool/2" || !toolUUID.MatchString(call.InvocationID) || call.Arguments == nil {
 		return call, errors.New("invalid tool envelope")
 	}
 	for _, v := range []string{call.Project, call.Provider, call.Tool, call.Account, call.Run, call.Call} {
@@ -356,11 +537,11 @@ func DecodeToolCall(source string) (ToolCall, error) {
 			return call, err
 		}
 	}
-	if !providerName.MatchString(call.Provider) || len(call.Provider) > 48 || !toolName.MatchString(call.Tool) || len(call.Tool) > 64 || len(call.Arguments) > 32 {
+	if !providerName.MatchString(call.Provider) || len(call.Provider) > 48 || !toolName.MatchString(call.Tool) || len(call.Tool) > 64 || call.Schema == "plowshare-tool/1" && len(call.Arguments) > 32 {
 		return call, errors.New("invalid tool binding or arguments")
 	}
-	for name := range call.Arguments {
-		if !parameterName.MatchString(name) {
+	for name, value := range call.Arguments {
+		if call.Schema == "plowshare-tool/1" && (!parameterName.MatchString(name) || value.null || value.array != nil || value.object != nil) {
 			return call, errors.New("invalid tool argument name")
 		}
 	}
@@ -368,6 +549,12 @@ func DecodeToolCall(source string) (ToolCall, error) {
 		return call, errors.New("tool deadline must be UTC")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, call.Deadline); err != nil {
+		return call, err
+	}
+	if call.Schema == "plowshare-tool/2" && (call.SchemaFingerprint == nil || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(*call.SchemaFingerprint)) || call.Schema == "plowshare-tool/1" && call.SchemaFingerprint != nil {
+		return call, errors.New("invalid schema fingerprint")
+	}
+	if err := validateToolValue(ToolObject(call.Arguments), 0, &schemaBudget{10000}); err != nil {
 		return call, err
 	}
 	return call, nil
@@ -418,7 +605,11 @@ func NewToolProvider(ports ToolRelayPorts, binding ToolBinding, tools []Register
 	if journal == nil || ports == nil || journal.Identity() != toolHash(config) {
 		return nil, errors.New("foreign tool journal or missing ports")
 	}
-	return &ToolProvider{ports: ports, binding: binding, tools: cloneTools(tools), journal: journal, consumer: identity()}, nil
+	cloned, err := cloneTools(tools)
+	if err != nil {
+		return nil, err
+	}
+	return &ToolProvider{ports: ports, binding: binding, tools: cloned, journal: journal, consumer: identity()}, nil
 }
 
 // PublishCatalog publishes/renews declarations with a retained caller UUID; never auto-replays.
@@ -445,7 +636,7 @@ func (p *ToolProvider) catalog(ctx context.Context, requestID string, tools []To
 	data, err := json.Marshal(struct {
 		Version string            `json:"version"`
 		Tools   []ToolDeclaration `json:"tools"`
-	}{"plowshare-tool-catalog/1", tools})
+	}{catalogueVersion(tools), tools})
 	if err != nil {
 		return err
 	}
@@ -466,12 +657,23 @@ func (p *ToolProvider) catalog(ctx context.Context, requestID string, tools []To
 	}
 	return nil
 }
-func cloneTools(tools []RegisteredTool) []RegisteredTool {
+func cloneTools(tools []RegisteredTool) ([]RegisteredTool, error) {
 	result := append([]RegisteredTool(nil), tools...)
 	for i := range result {
 		result[i].Declaration.Parameters = append([]ToolParameter(nil), result[i].Declaration.Parameters...)
+		if result[i].Declaration.InputSchema != nil {
+			data, err := json.Marshal(result[i].Declaration.InputSchema)
+			if err != nil {
+				return nil, err
+			}
+			schema, err := DecodeToolSchema(string(data))
+			if err != nil {
+				return nil, err
+			}
+			result[i].Declaration.InputSchema = schema
+		}
 	}
-	return result
+	return result, nil
 }
 func (p *ToolProvider) topic(name, kind string) string {
 	return "tool." + p.binding.Provider + "." + name + "." + kind
@@ -497,7 +699,7 @@ func (p *ToolProvider) receipts() ([]ToolReceipt, error) {
 		matched := false
 		for _, tool := range p.tools {
 			if tool.Declaration.Name == call.Tool {
-				if err = tool.Declaration.Validate(call.Arguments); err != nil {
+				if err = validateToolCall(tool.Declaration, call); err != nil {
 					return nil, err
 				}
 				matched = true
@@ -625,7 +827,7 @@ func (p *ToolProvider) Poll(ctx context.Context) (int, error) {
 		if call.Project != p.binding.Project || call.Provider != p.binding.Provider || call.Tool != name || call.InvocationID != event.EventId || event.CorrelationId.Variant2 == nil || *event.CorrelationId.Variant2 != call.InvocationID {
 			return count, errors.New("foreign tool invocation")
 		}
-		if err = registered.Declaration.Validate(call.Arguments); err != nil {
+		if err = validateToolCall(registered.Declaration, call); err != nil {
 			return count, err
 		}
 		rows, err = p.receipts()
@@ -794,4 +996,13 @@ func (p *ToolProvider) Reconcile(ctx context.Context) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+func catalogueVersion(tools []ToolDeclaration) string {
+	for _, tool := range tools {
+		if tool.InputSchema != nil {
+			return "plowshare-tool-catalog/2"
+		}
+	}
+	return "plowshare-tool-catalog/1"
 }

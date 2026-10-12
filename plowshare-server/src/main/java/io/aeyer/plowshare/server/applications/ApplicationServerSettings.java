@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aeyer.plowshare.protocol.SchemaDefinition;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.RelayPortProperties;
 import io.aeyer.plowshare.server.relay.tools.RelayToolDefinition;
@@ -83,11 +84,29 @@ public record ApplicationServerSettings(
       String name,
       String description,
       List<RelayToolDefinition.Parameter> parameters,
-      int timeoutSeconds) {
+      int timeoutSeconds,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          SchemaDefinition inputSchema) {
+    public Declaration(
+        String name,
+        String description,
+        List<RelayToolDefinition.Parameter> parameters,
+        int timeoutSeconds) {
+      this(name, description, parameters, timeoutSeconds, null);
+    }
+
     public Declaration {
       new RelayToolDefinition(
-          "validation", "validation", "validation", name, description, parameters, timeoutSeconds);
-      parameters = List.copyOf(parameters);
+          "validation",
+          "validation",
+          "validation",
+          name,
+          description,
+          parameters,
+          timeoutSeconds,
+          inputSchema);
+      parameters = parameters == null && inputSchema != null ? List.of() : List.copyOf(parameters);
     }
 
     public RelayToolDefinition bind(String project, Provider provider) {
@@ -98,7 +117,8 @@ public record ApplicationServerSettings(
           name,
           description,
           parameters,
-          timeoutSeconds);
+          timeoutSeconds,
+          inputSchema);
     }
   }
 
@@ -108,16 +128,36 @@ public record ApplicationServerSettings(
       String name,
       String description,
       List<RelayToolDefinition.Parameter> parameters,
-      int timeoutSeconds) {
+      int timeoutSeconds,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          SchemaDefinition inputSchema) {
+    public Tool(
+        String provider,
+        String account,
+        String name,
+        String description,
+        List<RelayToolDefinition.Parameter> parameters,
+        int timeoutSeconds) {
+      this(provider, account, name, description, parameters, timeoutSeconds, null);
+    }
+
     public Tool {
       new RelayToolDefinition(
-          "validation", provider, account, name, description, parameters, timeoutSeconds);
-      parameters = List.copyOf(parameters);
+          "validation",
+          provider,
+          account,
+          name,
+          description,
+          parameters,
+          timeoutSeconds,
+          inputSchema);
+      parameters = parameters == null && inputSchema != null ? List.of() : List.copyOf(parameters);
     }
 
     public RelayToolDefinition bind(String project) {
       return new RelayToolDefinition(
-          project, provider, account, name, description, parameters, timeoutSeconds);
+          project, provider, account, name, description, parameters, timeoutSeconds, inputSchema);
     }
   }
 
@@ -151,9 +191,13 @@ public record ApplicationServerSettings(
 
   public record Catalogue(String version, List<Declaration> tools) {
     public Catalogue {
-      if (!"plowshare-tool-catalog/1".equals(version))
+      if (!"plowshare-tool-catalog/1".equals(version)
+          && !"plowshare-tool-catalog/2".equals(version))
         throw new IllegalArgumentException("Unsupported tool catalogue version");
       tools = List.copyOf(tools);
+      if ("plowshare-tool-catalog/1".equals(version)
+          && tools.stream().anyMatch(value -> value.inputSchema() != null))
+        throw new IllegalArgumentException("v1 catalogue cannot contain nested declarations");
       if (tools.size() > 128
           || tools.stream().map(Declaration::name).distinct().count() != tools.size())
         throw new IllegalArgumentException("Invalid tool catalogue");

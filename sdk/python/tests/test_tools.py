@@ -17,6 +17,7 @@ from websockets.asyncio.server import ServerConnection, serve
 from plowshare import PROTOCOL_VERSION, Client, TransportError
 from plowshare._codec import _object
 from plowshare.tool_journal import SqliteToolJournal
+from plowshare.tool_schemas import decode_tool_schema, schema_fingerprint
 from plowshare.tools import (
     Arguments,
     Parameter,
@@ -347,6 +348,78 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             await provider.publish_catalog(str(uuid4()))
                         self.assertEqual(fixture.operations.count("relay.publish"), 3)
                         self.assertEqual(executions, 0)
+
+    async def test_nested_handler_and_schema_change_refusal(self) -> None:
+        schema = decode_tool_schema(
+            json.loads(
+                '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}'
+            )
+        )
+        declaration = ToolDeclaration(
+            "network_scope", "Read configured scope", input_schema=schema
+        )
+
+        class NestedFixture(Fixture):
+            def request(self) -> str:
+                envelope = _object(json.loads(super().request()))
+                envelope.update(
+                    schema="plowshare-tool/2",
+                    schemaFingerprint=schema_fingerprint(schema),
+                    arguments={"data": ["nested", None]},
+                )
+                return json.dumps(envelope)
+
+        fixture = NestedFixture()
+        calls: list[ToolCall] = []
+
+        async def handler(call: ToolCall) -> ToolResult:
+            calls.append(call)
+            self.assertEqual(call.arguments["data"], ("nested", None))
+            return ToolResult("COMPLETED", "observed")
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = deployment_config("fixture", "scanner", "provider", (declaration,))
+            with SqliteToolJournal(Path(directory), configuration=config) as journal:
+                async with serve(fixture.handle, "127.0.0.1", 0) as server:
+                    port = server.sockets[0].getsockname()[1]
+                    async with await Client.connect(
+                        f"http://127.0.0.1:{port}",
+                        "fixture-token",
+                        timeout=1,
+                        legacy_transport=True,
+                    ) as client:
+                        provider = ToolProvider(
+                            client,
+                            project="fixture",
+                            provider="scanner",
+                            account="provider",
+                            tools=(RegisteredTool(declaration, handler),),
+                            journal=journal,
+                        )
+                        await provider.poll()
+                        await provider.poll()
+                        self.assertEqual(len(calls), 1)
+                        changed = replace(
+                            declaration,
+                            input_schema=replace(schema, description="changed"),
+                        )
+                        changed_config = deployment_config(
+                            "fixture", "scanner", "provider", (changed,)
+                        )
+                        with SqliteToolJournal(
+                            Path(directory) / "changed", configuration=changed_config
+                        ) as changed_journal:
+                            changed_provider = ToolProvider(
+                                client,
+                                project="fixture",
+                                provider="scanner",
+                                account="provider",
+                                tools=(RegisteredTool(changed, handler),),
+                                journal=changed_journal,
+                            )
+                            with self.assertRaises(ValueError):
+                                await changed_provider.poll()
+                        self.assertEqual(len(calls), 1)
 
     async def test_named_handler_and_duplicate_delivery(self) -> None:
         await self.exercise()

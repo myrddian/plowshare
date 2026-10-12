@@ -6,3 +6,4 @@ sdk/typescript/src/operations/operation-schemas.ts
 plowshare-desktop/src/request-schemas.ts
 
 plowshare-console/src/transport-schemas.ts
+sdk/typescript/src/operations/schema-definition.ts

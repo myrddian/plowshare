@@ -66,7 +66,8 @@ public final class IntegrationPayload {
   }
 
   /** A primitive action argument, independently bounded before binding-specific validation. */
-  public sealed interface Parameter permits TextParameter, NumberParameter, BooleanParameter {
+  public sealed interface Parameter extends ToolValue
+      permits TextParameter, NumberParameter, BooleanParameter {
     @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     static Parameter fromWire(Object value) {
       if (value instanceof String text) return new TextParameter(text);

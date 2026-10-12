@@ -5,9 +5,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.IntegrationPayload;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ToolValue;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -26,6 +26,25 @@ public final class RelayToolCodec {
           .build();
 
   static {
+    var module = new com.fasterxml.jackson.databind.module.SimpleModule();
+    module.addDeserializer(
+        ToolValue.class,
+        new com.fasterxml.jackson.databind.JsonDeserializer<ToolValue>() {
+          @Override
+          public ToolValue deserialize(
+              com.fasterxml.jackson.core.JsonParser parser,
+              com.fasterxml.jackson.databind.DeserializationContext context)
+              throws IOException {
+            return ToolValue.fromWire(context.readValue(parser, Object.class));
+          }
+
+          @Override
+          public ToolValue getNullValue(
+              com.fasterxml.jackson.databind.DeserializationContext context) {
+            return new ToolValue.Null();
+          }
+        });
+    JSON.registerModule(module);
     for (var shape :
         new com.fasterxml.jackson.databind.cfg.CoercionInputShape[] {
           com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer,
@@ -36,7 +55,21 @@ public final class RelayToolCodec {
           .setCoercion(shape, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
   }
 
+  /** Spring deployment properties carry schemas as JSON text, decoded before domain binding. */
+  static io.aeyer.plowshare.protocol.SchemaDefinition inputSchema(String source) {
+    if (source == null || source.length() > 65536)
+      throw new IllegalArgumentException("Tool schema exceeds configuration bound");
+    try {
+      var value = JSON.readValue(source, io.aeyer.plowshare.protocol.SchemaDefinition.class);
+      io.aeyer.plowshare.protocol.ToolSchemas.declaration(value);
+      return value;
+    } catch (IOException invalid) {
+      throw new IllegalArgumentException("Invalid tool schema configuration", invalid);
+    }
+  }
+
   public static final String VERSION = "plowshare-tool/1";
+  public static final String NESTED_VERSION = "plowshare-tool/2";
 
   public record Request(
       String schema,
@@ -48,9 +81,40 @@ public final class RelayToolCodec {
       String run,
       String call,
       String deadline,
-      Map<String, IntegrationPayload.Parameter> arguments) {
+      Map<String, ToolValue> arguments,
+      @com.fasterxml.jackson.annotation.JsonInclude(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+          String schemaFingerprint) {
+    public Request(
+        String schema,
+        String invocationId,
+        String project,
+        String provider,
+        String tool,
+        String account,
+        String run,
+        String call,
+        String deadline,
+        Map<String, ToolValue> arguments) {
+      this(
+          schema,
+          invocationId,
+          project,
+          provider,
+          tool,
+          account,
+          run,
+          call,
+          deadline,
+          arguments,
+          null);
+    }
+
     public Request {
-      if (!VERSION.equals(schema))
+      if (!VERSION.equals(schema) && !NESTED_VERSION.equals(schema)
+          || NESTED_VERSION.equals(schema)
+              && (schemaFingerprint == null || !schemaFingerprint.matches("[0-9a-f]{64}"))
+          || VERSION.equals(schema) && schemaFingerprint != null)
         throw new IllegalArgumentException("Invalid tool envelope version");
       RelayPort.uuid(invocationId);
       RelayPort.identity(project);
@@ -61,6 +125,11 @@ public final class RelayToolCodec {
       RelayPort.identity(call);
       Instant.parse(deadline);
       arguments = Map.copyOf(arguments);
+      ToolValue.validate(new ToolValue.ObjectValue(arguments));
+      if (VERSION.equals(schema)
+          && arguments.values().stream()
+              .anyMatch(value -> !(value instanceof IntegrationPayload.Parameter)))
+        throw new IllegalArgumentException("v1 tool arguments must be scalars");
     }
   }
 
@@ -95,24 +164,11 @@ public final class RelayToolCodec {
     try {
       if (source.length() > 32768)
         throw new IllegalArgumentException("Tool arguments exceed bound");
-      var node = JSON.readTree(source.isEmpty() ? "{}" : source);
-      if (node == null || !node.isObject())
+      var typed =
+          ToolValue.fromWire(JSON.readValue(source.isEmpty() ? "{}" : source, Object.class));
+      if (!(typed instanceof ToolValue.ObjectValue object))
         throw new IllegalArgumentException("Tool arguments must be an object");
-      Map<String, IntegrationPayload.Parameter> values = new LinkedHashMap<>();
-      var fields = node.fields();
-      while (fields.hasNext()) {
-        var field = fields.next();
-        var value = field.getValue();
-        IntegrationPayload.Parameter typed;
-        if (value.isTextual()) typed = new IntegrationPayload.TextParameter(value.textValue());
-        else if (value.isBoolean())
-          typed = new IntegrationPayload.BooleanParameter(value.booleanValue());
-        else if (value.isNumber())
-          typed = new IntegrationPayload.NumberParameter(value.decimalValue());
-        else throw new IllegalArgumentException("Tool arguments must be declared scalar values");
-        values.put(field.getKey(), typed);
-      }
-      return new RelayToolDefinition.Arguments(values);
+      return new RelayToolDefinition.Arguments(object.values());
     } catch (IOException malformed) {
       throw new IllegalArgumentException("Invalid tool argument JSON", malformed);
     }
@@ -128,6 +184,14 @@ public final class RelayToolCodec {
   }
 
   static Request request(String source) {
+    try {
+      var shape = JSON.readTree(source);
+      if (!shape.isObject()
+          || shape.size() != (NESTED_VERSION.equals(shape.path("schema").asText()) ? 11 : 10))
+        throw new IllegalArgumentException("Invalid retained tool request fields");
+    } catch (IOException invalid) {
+      throw new IllegalStateException("Invalid retained tool request", invalid);
+    }
     return read(source, Request.class);
   }
 

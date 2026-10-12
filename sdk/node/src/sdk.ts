@@ -144,8 +144,21 @@ export type {
   ToolReceipt,
   ToolResult,
   ToolScalar,
+  ToolValue,
+  ToolObject,
   ToolState,
   RegisteredTool,
 } from './tools.ts';
 
 export { nodePacketSocket, PACKET_PROTOCOL } from './packets.ts';
+
+export type {
+  SchemaDefinition,
+  SchemaType,
+  SchemaLiteral,
+} from 'plowshare-client-ts';
+export {
+  decodeToolSchema,
+  validateToolSchema,
+  canonicalToolSchema,
+} from 'plowshare-client-ts';

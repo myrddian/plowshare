@@ -18,6 +18,8 @@ export type {
   ToolReceipt,
   ToolResult,
   ToolScalar,
+  ToolValue,
+  ToolObject,
   ToolState,
   RegisteredTool,
 } from 'plowshare-client-ts';
@@ -55,3 +57,14 @@ export const nodeToolHost: ToolHost = {
     }
   },
 };
+
+export type {
+  SchemaDefinition,
+  SchemaType,
+  SchemaLiteral,
+} from 'plowshare-client-ts';
+export {
+  decodeToolSchema,
+  validateToolSchema,
+  canonicalToolSchema,
+} from 'plowshare-client-ts';

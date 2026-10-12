@@ -296,6 +296,8 @@ tasks.named("check") { dependsOn(invariants) }
 // And not run twice. Without this the class executes in both tasks, and every
 // XML tally of the suite counts its five assertions and its class twice.
 tasks.named<Test>("test") {
+    inputs.file(rootProject.file("test-support/contracts/tool-schemas.json"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     // Opt-in Relay SQL paging tests materialize a full 319 MiB prefix and its typed copies.
     // Ordinary mocked checks retain the default heap and never start the database fixtures.
     if (providers.gradleProperty("fullDb").map { it.isEmpty() || it == "true" }.getOrElse(false)) {

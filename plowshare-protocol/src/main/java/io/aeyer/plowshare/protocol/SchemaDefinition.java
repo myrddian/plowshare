@@ -1,8 +1,9 @@
-package io.aeyer.plowshare.server.llm.dispatch;
+package io.aeyer.plowshare.protocol;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -62,6 +63,12 @@ public record SchemaDefinition(
     Boolean readOnly,
     Boolean writeOnly,
     Boolean deprecated) {
+  /** Strict configuration/JSON boundary; raw maps never escape into consumers. */
+  @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+  public static SchemaDefinition fromWire(Map<?, ?> source) {
+    return SchemaCodec.decode(source);
+  }
+
   public SchemaDefinition {
     title = text(title, "title", 4096);
     description = text(description, "description", 32768);
@@ -147,8 +154,13 @@ public record SchemaDefinition(
   }
 
   /** A type constraint preserves scalar versus union spelling on the wire. */
-  @JsonSerialize(using = SchemaCodec.TypesSerializer.class)
   public record Types(List<String> values, boolean union) {
+    /** Serialization boundary preserves the original scalar/union spelling. */
+    @JsonValue
+    public Object wireValue() {
+      return union ? values : values.getFirst();
+    }
+
     public Types {
       values = Objects.requireNonNull(list(values, "type"), "type");
       if (values.isEmpty()
@@ -161,28 +173,26 @@ public record SchemaDefinition(
   }
 
   /** Additional properties are either permitted/refused or constrained by a schema. */
-  @JsonSerialize(using = SchemaCodec.RuleSerializer.class)
   public sealed interface Rule permits Allowed, Constrained {}
 
-  public record Allowed(boolean value) implements Rule {}
+  public record Allowed(@JsonValue boolean value) implements Rule {}
 
-  public record Constrained(SchemaDefinition schema) implements Rule {
+  public record Constrained(@JsonValue SchemaDefinition schema) implements Rule {
     public Constrained {
       Objects.requireNonNull(schema, "schema");
     }
   }
 
   /** Scalar constants have explicit types; they cannot contain an arbitrary property bag. */
-  @JsonSerialize(using = SchemaCodec.LiteralSerializer.class)
   public sealed interface Literal permits Text, Decimal, Truth, NullValue {}
 
-  public record Text(String value) implements Literal {
+  public record Text(@JsonValue String value) implements Literal {
     public Text {
       value = Objects.requireNonNull(text(value, "constant", 32768));
     }
   }
 
-  public record Decimal(BigDecimal value) implements Literal {
+  public record Decimal(@JsonValue BigDecimal value) implements Literal {
     public Decimal {
       Objects.requireNonNull(value);
       if (value.precision() > 1000 || Math.abs((long) value.scale()) > 1000)
@@ -190,9 +200,14 @@ public record SchemaDefinition(
     }
   }
 
-  public record Truth(boolean value) implements Literal {}
+  public record Truth(@JsonValue boolean value) implements Literal {}
 
-  public record NullValue() implements Literal {}
+  public record NullValue() implements Literal {
+    @JsonValue
+    public String wireValue() {
+      return null;
+    }
+  }
 
   private static String text(String value, String field, int limit) {
     if (value != null && (value.length() > limit || value.indexOf('\0') >= 0))

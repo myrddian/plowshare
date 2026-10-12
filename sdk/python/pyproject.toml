@@ -24,7 +24,7 @@ strict = true
 files = ["src/plowshare", "tests"]
 
 [tool.ruff]
-exclude = ["contracts.py", "_protocol.py"]
+exclude = ["contracts.py", "_protocol.py", "schema_definition.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]

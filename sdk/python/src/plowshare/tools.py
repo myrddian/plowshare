@@ -16,15 +16,23 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from types import MappingProxyType
 from typing import Awaitable, Callable, Literal, Mapping, Protocol
 from uuid import UUID, uuid4
 
 from . import contracts as dto
 from .client import Client, Delivery, TransportError
+from .schema_definition import SchemaDefinition
+from .tool_schemas import (
+    ToolValue,
+    decode_tool_value,
+    schema_fingerprint,
+    schema_wire,
+    validate_schema_arguments,
+    validate_tool_schema,
+)
 
 Scalar = str | int | float | bool
-Arguments = Mapping[str, Scalar]
+Arguments = Mapping[str, ToolValue]
 ParameterType = Literal["STRING", "NUMBER", "INTEGER", "BOOLEAN"]
 ResultState = Literal["COMPLETED", "REJECTED", "UNKNOWN"]
 Phase = Literal["executing", "ready", "publishing", "done"]
@@ -84,6 +92,7 @@ class ToolDeclaration:
     description: str
     parameters: tuple[Parameter, ...] = ()
     timeout_seconds: int = 30
+    input_schema: SchemaDefinition | None = None
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", self.name):
@@ -102,7 +111,18 @@ class ToolDeclaration:
         ):
             raise ValueError("Invalid tool declaration")
 
+        if self.input_schema is not None:
+            if self.parameters:
+                raise ValueError("Use scalar parameters or input_schema")
+            object.__setattr__(
+                self, "input_schema", validate_tool_schema(self.input_schema)
+            )
+
     def validate(self, arguments: Arguments) -> None:
+        decode_tool_value(arguments)
+        if self.input_schema is not None:
+            validate_schema_arguments(self.input_schema, arguments)
+            return
         if len(arguments) > 32 or set(arguments) - {p.name for p in self.parameters}:
             raise ValueError("Unknown tool argument")
         for p in self.parameters:
@@ -112,7 +132,7 @@ class ToolDeclaration:
                 continue
             value = arguments[p.name]
             numeric = type(value) in {int, float}
-            if numeric:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
                 if isinstance(value, float) and not math.isfinite(value):
                     raise ValueError("Invalid tool number")
                 decimal = Decimal(str(value))
@@ -152,6 +172,8 @@ class ToolCall:
     call: str
     deadline: str
     arguments: Arguments
+    schema: str = _VERSION
+    schema_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +242,11 @@ def deployment_config(
                 for p in t.parameters
             ],
             "timeoutSeconds": t.timeout_seconds,
+            **(
+                {"inputSchema": json.dumps(schema_wire(t.input_schema))}
+                if t.input_schema is not None
+                else {}
+            ),
         }
         for t in tools
     ]
@@ -297,10 +324,25 @@ def _decode(source: str) -> ToolCall:
         "deadline",
         "arguments",
     }
-    if set(row) != required or row["schema"] != _VERSION:
+    if row.get("schema") == "plowshare-tool/2":
+        required.add("schemaFingerprint")
+        offered_fingerprint = row.get("schemaFingerprint")
+        if not isinstance(offered_fingerprint, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", offered_fingerprint
+        ):
+            raise ValueError("Invalid offered schema fingerprint")
+    if set(row) != required or row["schema"] not in (_VERSION, "plowshare-tool/2"):
         raise ValueError("Invalid tool envelope fields or version")
+    version = row["schema"]
+    fingerprint = row.get("schemaFingerprint")
+    if (
+        not isinstance(version, str)
+        or fingerprint is not None
+        and not isinstance(fingerprint, str)
+    ):
+        raise ValueError("Invalid tool version fields")
     fields: dict[str, str] = {}
-    for key in required - {"arguments", "schema"}:
+    for key in required - {"arguments", "schema", "schemaFingerprint"}:
         value = row[key]
         if not isinstance(value, str):
             raise ValueError("Invalid tool envelope field type")
@@ -309,25 +351,18 @@ def _decode(source: str) -> ToolCall:
     ToolDeclaration(fields["tool"], "Envelope validation")
     _uuid(fields["invocationId"])
     _time(fields["deadline"])
-    args: dict[str, Scalar] = {}
-    for key, value in _object(row["arguments"]).items():
-        if not isinstance(value, (str, int, float, bool)):
-            raise ValueError("Tool arguments must be declared scalars")
-        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", key):
-            raise ValueError("Invalid tool argument name")
-        kind: ParameterType = (
-            "STRING"
-            if isinstance(value, str)
-            else "BOOLEAN"
-            if type(value) is bool
-            else "NUMBER"
-        )
-        ToolDeclaration(
-            "validate", "Validate scalar", (Parameter(key, kind),)
-        ).validate({key: value})
-        args[key] = value
-    if len(args) > 32:
-        raise ValueError("Too many tool arguments")
+    value = decode_tool_value(row["arguments"])
+    if not isinstance(value, Mapping):
+        raise ValueError("Tool arguments must be an object")
+    args: Arguments = value
+    if row["schema"] == _VERSION:
+        if len(args) > 32 or any(
+            not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", key)
+            or item is None
+            or isinstance(item, (tuple, Mapping))
+            for key, item in args.items()
+        ):
+            raise ValueError("v1 arguments must be scalars")
     return ToolCall(
         fields["invocationId"],
         fields["project"],
@@ -337,8 +372,22 @@ def _decode(source: str) -> ToolCall:
         fields["run"],
         fields["call"],
         fields["deadline"],
-        MappingProxyType(args),
+        args,
+        version,
+        fingerprint,
     )
+
+
+def _validate_call(tool: ToolDeclaration, call: ToolCall) -> None:
+    if tool.input_schema is None:
+        if call.schema != _VERSION:
+            raise ValueError("Offered tool schema changed")
+    elif (
+        call.schema != "plowshare-tool/2"
+        or call.schema_fingerprint != schema_fingerprint(tool.input_schema)
+    ):
+        raise ValueError("Offered tool schema changed")
+    tool.validate(call.arguments)
 
 
 class ToolProvider:
@@ -390,7 +439,9 @@ class ToolProvider:
             raise ValueError("Tool catalogue exceeds 128 declarations")
         text = json.dumps(
             {
-                "version": "plowshare-tool-catalog/1",
+                "version": "plowshare-tool-catalog/2"
+                if any(t.input_schema is not None for t in tools)
+                else "plowshare-tool-catalog/1",
                 "tools": [
                     {
                         "name": t.name,
@@ -405,6 +456,11 @@ class ToolProvider:
                             for p in t.parameters
                         ],
                         "timeoutSeconds": t.timeout_seconds,
+                        **(
+                            {"inputSchema": schema_wire(t.input_schema)}
+                            if t.input_schema is not None
+                            else {}
+                        ),
                     }
                     for t in tools
                 ],
@@ -501,7 +557,7 @@ class ToolProvider:
                     event.event_id,
                 ) or event.correlation_id != call.invocation_id:
                     raise ValueError("Tool request belongs to another binding")
-                registered.declaration.validate(call.arguments)
+                _validate_call(registered.declaration, call)
                 receipt = next(
                     (
                         r
@@ -659,7 +715,7 @@ class ToolProvider:
                 or registered is None
             ):
                 raise ValueError("Foreign tool receipt")
-            registered.declaration.validate(call.arguments)
+            _validate_call(registered.declaration, call)
             if (
                 receipt.phase not in {"executing", "ready", "publishing", "done"}
                 or (receipt.phase == "executing") != (receipt.result is None)

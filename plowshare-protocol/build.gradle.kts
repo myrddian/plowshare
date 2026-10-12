@@ -20,3 +20,10 @@ dependencies {
 
 java { withSourcesJar(); withJavadocJar() }
 publishing { publications { create<MavenPublication>("protocol") { from(components["java"]) } } }
+
+// Shared schema fixtures are test authority, including changes outside this source set.
+tasks.test {
+    inputs.files(rootProject.file("test-support/contracts/tool-schemas.json"),
+        rootProject.file("test-support/contracts/relay-tools.json"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
