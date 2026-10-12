@@ -409,7 +409,13 @@ async def execute(args: argparse.Namespace) -> None:
                         "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
                         flush=True,
                     )
-                task = asyncio.create_task(worker.run(stop, active_requests))
+                task = asyncio.create_task(
+                    worker.run(
+                        stop,
+                        active_requests,
+                        settings.apply_pending if settings else None,
+                    )
+                )
                 await stop.wait()
             finally:
                 stop.set()

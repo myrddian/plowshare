@@ -61,9 +61,16 @@ class DeviceMove:
 
 @dataclass(frozen=True)
 class PiHoleCheck:
-    connected: bool
+    """A saved configuration is independent of connection test and activation.
+
+    ``connected=None`` means no test was requested; ``pending`` only describes
+    applying saved settings, never whether they were durably saved.
+    """
+
+    connected: bool | None
     saved: bool
     issues: tuple[str, ...]
+    pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -438,34 +445,31 @@ class OperatorConsole:
     async def connect_pihole(
         self, origin: str, password: str, save: bool
     ) -> PiHoleCheck:
-        # Test first without writing a credential or changing the collector. The
-        # explicitly supplied application password is never included in a DTO reply.
+        # Saving configuration does not depend on either server's availability.
+        # Connection testing is a separate read-only operator action.
+        path = self.root / ("pihole-" + str(uuid4()) + ".password")
+        plan = PiHolePlan.decode({"origin": origin, "passwordFile": str(path)})
+        if save:
+            # Settings own their write lock. Recovery and optional connection tests
+            # can hold the console lock across network I/O without delaying a save.
+            replace_private(path, text(password, 4096) + "\n")
+            # Do not remove this secret after an uncertain filesystem failure:
+            # an atomically saved pending configuration may already refer to it.
+            view = await self.settings.save_pihole(plan)
+            self.cache_until = 0
+            return PiHoleCheck(None, True, (), view.pending)
         async with self.lock:
-            path = self.root / ("pihole-" + str(uuid4()) + ".password")
-            plan = PiHolePlan.decode({"origin": origin, "passwordFile": str(path)})
             source = PiHoleV6(plan, application_password=password)
             result = await source.identify(
                 self.worker.config.collection.targets, utc_now()
             )
-            if any(
+            connected = not any(
                 "authentication or connection failed" in issue
                 or "could not be read or validated" in issue
                 or "session" in issue
                 for issue in result.issues
-            ):
-                return PiHoleCheck(False, False, result.issues)
-            if save:
-                if not self.settings.view().editable:
-                    raise SettingsBusy(self.settings.view().detail)
-                replace_private(path, password + "\n")
-                try:
-                    await self.settings.save_pihole(plan)
-                except (ValueError, SettingsBusy):
-                    if self.worker.config.collection.pihole != plan:
-                        path.unlink(missing_ok=True)
-                    raise
-                self.cache_until = 0
-            return PiHoleCheck(True, save, result.issues)
+            )
+            return PiHoleCheck(connected, False, result.issues)
 
     async def moved_devices(self) -> tuple[DeviceMove, ...]:
         plan = self.worker.config.collection.pihole

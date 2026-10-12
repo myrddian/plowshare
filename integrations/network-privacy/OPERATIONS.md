@@ -46,6 +46,30 @@ collection. A newer Application deployed outside this setup is refused until an
 operator reviews and synchronizes the private prepared source and its receipt.
 The server may need a reconciliation pass before the new schedule is visible.
 
+## Save configuration independently of connections
+
+**Save monitoring** and **Save connection** store validated settings locally even
+when Plowshare or Pi-hole is disconnected, or earlier scan work needs attention.
+**Saved connection** reports whether a Pi-hole connection and password have been
+stored. **Test connection** is optional; it checks the supplied password without
+saving it. Saving never tests a connection, starts a scan or resumes a schedule.
+The password field clears after either action for privacy; an empty field does
+not mean that the saved password was lost.
+
+The dashboard separates **saved** settings from **active** settings. Changes are
+stored in a private pending configuration beside the collector configuration.
+They apply automatically before the next collection pass once the worker is idle
+and its earlier receipts are settled. Pending settings survive a restart; further
+saves update the desired configuration without losing other pending fields. Old
+scan work retains its original scope, evidence and receipt identities.
+
+If settings are waiting to apply, saving still works. Wait for an active scan,
+or use **Check and resume** under **System health** after resolving a connection
+failure. This checks existing work without resending uncertain effects. A failed
+optional connection test does not remove saved settings. A later dashboard
+refresh failure does not undo a confirmed save. Invalid input and local storage
+failures are reported separately from connection or activation problems.
+
 ## Read health, devices and findings
 
 **System health** shows collector state, last successful contact, last completed

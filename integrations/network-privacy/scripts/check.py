@@ -18,3 +18,10 @@ for arguments in (
     subprocess.run(
         [sys.executable, "-m", *arguments], cwd=root, env=environment, check=True
     )
+
+subprocess.run(
+    ["node", "--test", "tests/web_settings.test.cjs"],
+    cwd=root,
+    env=environment,
+    check=True,
+)

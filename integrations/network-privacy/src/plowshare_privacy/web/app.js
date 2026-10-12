@@ -7,6 +7,8 @@ let selected = null;
 let refreshPending = false;
 let settingsLoaded = false;
 let settingsPending = false;
+let piholePending = false;
+let monitorEditable = false;
 let overview = null;
 let preferencesLoaded = false;
 let scheduleDraft = null;
@@ -170,8 +172,7 @@ async function refresh() {
     if (status.settings_available && !settingsLoaded) await loadSettings();
     if (status.settings_available && !settingsPending) {
       const settings = await api('/api/monitoring');
-      byId('save-monitoring').disabled = !settings.editable;
-      byId('settings-detail').textContent = settings.detail;
+      renderMonitorSettings(settings);
     }
     try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message));}
     byId('dashboard').hidden = false;
@@ -258,6 +259,7 @@ async function loadSettings() {
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
+  renderMonitorSettings(settings);
   settingsLoaded = true;
 }
 byId('discover-form').addEventListener('submit', async event => {
@@ -285,8 +287,9 @@ byId('monitor-form').addEventListener('submit', async event => {
       labels[address] = name;
     }
     const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
-    await refresh();
-    notice(result.enabled ? 'Monitoring saved. Choose Request a scan to collect your first evidence.' : 'Collection is disabled. Your evidence is preserved.');
+    renderMonitorSettings(result);
+    notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
+    await refresh().catch(error => notice('Monitoring settings were saved, but dashboard refresh failed. ' + error.message, true));
   } catch (error) {notice(error.message, true);}
   finally {settingsPending = false; byId('save-monitoring').disabled = false;}
 });
@@ -384,13 +387,35 @@ byId('preferences-form').addEventListener('submit', async event => {
     await refresh(); notice('Preferences saved. Existing evidence and publication decisions are unchanged.' + notificationHint);
   } catch (error) {notice(error.message,true);}
 });
+function renderPiHoleSaved(configured, pending = false) {
+  byId('pihole-saved').textContent = configured ? 'Saved connection: Pi-hole connection and password are stored on this collector.' + (pending ? ' Waiting to apply saved settings.' : '') : 'Saved connection: no Pi-hole connection is configured yet.';
+}
+function renderMonitorSettings(settings) {
+  monitorEditable = settings.editable;
+  byId('save-monitoring').disabled = !monitorEditable;
+  byId('settings-detail').textContent = settings.detail;
+  renderPiHoleSaved(settings.pihole_configured, settings.pending);
+  byId('pihole-save').disabled = !monitorEditable || piholePending;
+  byId('pihole-blocker').textContent = settings.pending || !monitorEditable ? settings.detail : '';
+  if (settings.pending) byId('scan').disabled = true;
+}
 async function piholeConnection(save) {
+  if (piholePending) return;
+  piholePending = true;
+  byId('pihole-test').disabled = true; byId('pihole-save').disabled = true;
   const password = byId('pihole-password').value; byId('pihole-password').value = '';
+  byId('pihole-detail').textContent = save ? 'Saving connection and password…' : 'Testing connection; your password will not be saved…';
   try {
     const result = await api('/api/pihole', {method:'POST', body:JSON.stringify({origin:byId('pihole-origin').value.trim(),password,save})});
-    byId('pihole-detail').textContent = `${result.connected ? (result.saved ? 'Connection saved.' : 'Connection read succeeded. Enter the password again to save.') : 'Connection check failed.'} ${result.issues.join(' ')}`;
-    if (result.saved) {settingsLoaded = false; await refresh();}
-  } catch (error) {byId('pihole-detail').textContent = error.message;}
+    const message = result.saved ? 'Pi-hole connection and password saved on this collector. Connection was not tested.' + (result.pending ? ' Saved settings are waiting to apply; existing work keeps its original configuration.' : '') : result.connected ? 'Connection test passed. Your password was not saved; enter it again and choose Save connection to save it.' : 'Connection test failed. Your saved settings are unchanged.';
+    byId('pihole-detail').textContent = `${message} ${result.issues.join(' ')} The password field was cleared for privacy.`;
+    if (result.saved) {
+      renderPiHoleSaved(true, result.pending); settingsLoaded = false;
+      // A later health/read failure cannot undo the confirmed save response.
+      await refresh().catch(error => notice('Pi-hole was saved, but dashboard refresh failed. ' + error.message, true));
+    }
+  } catch (error) {byId('pihole-detail').textContent = `${save ? 'Save was not confirmed. ' : 'Connection test failed. '}${error.message} The password field was cleared; enter it again to retry.`;}
+  finally {piholePending = false; byId('pihole-test').disabled = false; byId('pihole-save').disabled = !monitorEditable;}
 }
 byId('pihole-test').addEventListener('click', () => piholeConnection(false));
 byId('pihole-form').addEventListener('submit', event => {event.preventDefault(); piholeConnection(true);});

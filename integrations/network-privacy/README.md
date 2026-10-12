@@ -37,6 +37,11 @@ collection and comparison. Plowshare retains evidence and coordinates the
 investigation. An LLM interprets observations and explains uncertainty. A local
 model pool can serve the same `reasoning` binding used by these definitions.
 
+Saving dashboard configuration does not require a working connection to Plowshare
+or Pi-hole. Settings are stored immediately and activate once earlier scan work
+is settled. Pi-hole connection testing is optional and separate from saving.
+See [saved and active configuration](OPERATIONS.md#save-configuration-independently-of-connections).
+
 ## What the collector observes
 
 `collection.enabled` defaults to `true` for existing TCP configurations. Set it
