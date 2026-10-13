@@ -69,7 +69,7 @@ exact account-owned receipt is read. Listing a similar run or matching creation
 time does not prove admission. The collector never resubmits the start, replaces
 its request UUID, borrows a human credential or confirms an intent from those
 hints. Receipt inspection recovers existing admission without launching or
-resuming work. Missing receipts keep Check and resume fenced.
+resuming work. Missing receipts keep Check retained work fenced.
 
 ## Single-pass Application service provisioning
 

@@ -7,10 +7,27 @@ manager must already exist; an existing model binding and managed FileStore are
 server prerequisites. Python runs on the host that can reach your selected devices
 and Pi-hole. Plowshare does not start or host this external process.
 
+## Dashboard views
+
+**Overview** shows collection status, the monitored-device count, findings and
+recent project investigations. Pause and resume are beside the status cards.
+Expand **System health** for connection, agent, tool and credential details;
+**Check retained work** reconciles existing receipts without replaying effects.
+
+**Devices** holds observed device cards, Markdown profiles and linked privacy
+issues. **Evidence** holds collections, their evidence and retained agent reports.
+Opening evidence from a device history or finding selects that view automatically.
+
+**Settings** holds device discovery, monitoring scope, Pi-hole, investigation
+preferences and schedule frequency. Switching views preserves unsaved form fields
+and pending operation state. It does not save, scan, submit work or reconnect.
+Use the arrow keys, Home and End to move between the dashboard tabs.
+
 ## Finish setup in the dashboard
 
-1. **Find devices** on an explicitly selected private subnet. Select up to 32
-   addresses and eight TCP ports, add names and save monitoring.
+1. Open **Settings**, then **Find devices** on an explicitly selected private
+   subnet. Select up to 32 addresses and eight TCP ports, add names and save
+   monitoring.
 2. Optionally expand **Connect Pi-hole v6**. Supply its HTTP(S) origin and an
    application password. **Test connection** authenticates and reads device
    records without querying DNS or saving the password. **Save connection** stores
@@ -25,8 +42,8 @@ and Pi-hole. Plowshare does not start or host this external process.
    per UTC day and a 60-minute cooldown. These count retained admission decisions,
    including baseline investigations; they do not limit model calls, tokens or
    monetary spend. Legacy changed completions count conservatively on upgrade.
-5. Expand **Scan schedule**. Choose a listed frequency, an IANA time zone and
-   whether to pause. Enter the configured deployment administrator's password
+5. In **Settings**, expand **Change schedule frequency**. Choose a listed
+   frequency, an IANA time zone and whether to pause. Enter the configured deployment administrator's password
    to **Review schedule revision**. Inspect the full prepared Application source,
    active revision and source digest. Choose a managed FileStore from the dropdown,
    enter the password again, then **Deploy reviewed revision**.
@@ -65,7 +82,7 @@ saves update the desired configuration without losing other pending fields. Old
 scan work retains its original scope, evidence and receipt identities.
 
 If settings are waiting to apply, saving still works. Wait for an active scan,
-or use **Check and resume** under **System health** after resolving a connection
+or use **Check retained work** under **System health** after resolving a connection
 failure. This checks existing work without resending uncertain effects. A failed
 optional connection test does not remove saved settings. A later dashboard
 refresh failure does not undo a confirmed save. Invalid input and local storage
@@ -108,7 +125,7 @@ unknown outcome, and a second intent for the same scan is blocked until the firs
 is positively refused. Automatically admitted and legacy completions cannot be
 manually duplicated through this control. Run IDs are opaque server identifiers
 (`orc_…`), separate from UUID request identities. If a start reply cannot be
-retained, keep the manual intent pending and use **Check and resume** to read its
+retained, keep the manual intent pending and use **Check retained work** to read its
 exact receipt. If the service-token receipt read is refused, follow the
 [project-scoped receipt gap](GAPS.md#project-scoped-orchestration-start-receipts);
 do not retry the investigation or confirm it from a similarly timed run.
@@ -180,7 +197,7 @@ proof that Plowshare checks or investigations are succeeding; inspect the dashbo
 
 Keep the dashboard open when collection stops. Its detail includes available
 refusal codes/reasons; local evidence stays readable. Fix credentials, connectivity
-or project/provider grants first, then choose **Check and resume**. For a stopped
+or project/provider grants first, then choose **Check retained work**. For a stopped
 worker this creates a fresh public SDK connection, keeps the existing provider
 journal and checks exact retained evidence, publications, tool results and explicit
 investigation receipts before allowing intake again. Missing receipts keep the
@@ -190,8 +207,9 @@ another investigation or resume an existing run. Catalogue leases may be publish
 with new metadata identities after recovery; old invocation and mutation identities
 are never replayed.
 
-For an uncertain schedule deployment, expand **Scan schedule**, enter the deployment
-administrator password and choose **Check retained deployment**. A positive receipt
+For an uncertain schedule deployment, open **Settings** and expand **Change
+schedule frequency**. Enter the deployment administrator password and choose
+**Check retained deployment**. A positive receipt
 for the exact retained request, matching the active revision, updates the private
 prepared schedule and archives the intent. No deployment is sent. If the receipt
 is absent, another revision is active or prepared source has changed, the fence
@@ -287,7 +305,7 @@ identities and exact submitted text only. If a write reply is lost, **Check reta
 writes** looks for one matching project document revision, including the retained
 write UUID and exact content. A missing, different or ambiguous revision keeps the
 write fenced; no upload/revision is resent. The same request UUID cannot be reused
-for changed content. **Check and resume** includes unsettled profile writes when
+for changed content. **Check retained work** includes unsettled profile writes when
 recovering a stopped collector.
 
 Reads are bounded to 32 profile resources and 400 visible revisions. Private intents
@@ -374,7 +392,7 @@ write identities and exact submitted text. It is limited to 128 receipts and 1 M
 with capacity reserved for settlement before transport. Like profile writes,
 unknown delivery blocks further issue writes; **Check retained writes** confirms
 one exact retained revision or keeps the write fenced. It never resends a mutation.
-**Check and resume** includes issue reconciliation. Reload issues explicitly;
+**Check retained work** includes issue reconciliation. Reload issues explicitly;
 the health poll does not repeatedly read every issue's text. Catalogue limits and
 unavailable extraction are explicit failures, not empty successful results.
 

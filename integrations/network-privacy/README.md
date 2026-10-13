@@ -734,7 +734,8 @@ Document access covers its chapters; no granular chapter permissions are introdu
 
 ### Control monitoring from the dashboard
 
-**Monitoring schedule** shows the effective paused/running state and offers
+On **Overview**, **Monitoring schedule** shows the effective paused/running state
+and offers
 **Pause monitoring**, **Resume monitoring**, and **Check schedule state**.
 The app uses its existing Application service connection and the public SDK
 `schedule.pause` request, then reads the project-scoped runtime state. No personal

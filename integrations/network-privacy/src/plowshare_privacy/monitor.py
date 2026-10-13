@@ -168,7 +168,8 @@ class FileMonitorSettings:
         else:
             return None
         return (
-            reason + " Use Check and resume under System health to check existing work "
+            reason
+            + " Use Check retained work under System health to check existing work "
             "before applying saved settings. You can still save configuration changes."
         )
 

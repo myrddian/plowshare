@@ -23,6 +23,43 @@ let issueEdit = null;
 let issueBlocked = false;
 let issuesAvailable = false;
 const byId = (name) => document.getElementById(name);
+
+const views = {
+  overview: ['Network overview', 'Monitoring status and changes that need your attention.'],
+  devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
+  evidence: ['Evidence & investigations', 'Retained collections and reports from your Plowshare project.'],
+  settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
+};
+
+// Switching a view changes presentation only. Keep forms and retained outcomes
+// mounted so navigation cannot clear a draft, resubmit work or reset a pending control.
+function showView(name, focusHeading = false) {
+  if (!Object.hasOwn(views, name)) throw new Error('Unknown dashboard view.');
+  for (const view of Object.keys(views)) {
+    const active = view === name;
+    byId(`view-${view}`).hidden = !active;
+    byId(`tab-${view}`).setAttribute('aria-selected', String(active));
+    byId(`tab-${view}`).tabIndex = active ? 0 : -1;
+  }
+  byId('page-title').textContent = views[name][0];
+  byId('page-description').textContent = views[name][1];
+  byId('page-title').scrollIntoView({block:'start'});
+  if (focusHeading) byId('page-title').focus({preventScroll:true});
+}
+for (const name of Object.keys(views)) {
+  const tab = byId(`tab-${name}`);
+  tab.addEventListener('click', () => showView(name));
+  tab.addEventListener('keydown', event => {
+    const names = Object.keys(views);
+    const index = names.indexOf(name);
+    const next = {ArrowRight:(index + 1) % names.length, ArrowLeft:(index + names.length - 1) % names.length, Home:0, End:names.length - 1}[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    showView(names[next]);
+    byId(`tab-${names[next]}`).focus();
+  });
+}
+byId('open-settings').addEventListener('click', () => showView('settings', true));
 const phases = {queued:'Queued',collected:'Collected',uploading:'Upload outcome pending',uploaded:'Evidence retained',publishing:'Publication outcome pending',done:'Evidence published'};
 
 function notice(message, error = false) {
@@ -56,6 +93,7 @@ function listItems(parent, title, values) {
 async function showEvidence(scanId) {
   const result = await api(`/api/scans/${encodeURIComponent(scanId)}`);
   selected = scanId;
+  showView('evidence', true);
   const evidence = result.evidence;
   const panel = byId('evidence');
   panel.replaceChildren();
@@ -117,6 +155,7 @@ async function showEvidence(scanId) {
 async function showReport(revision) {
   const result = await api(`/api/reports/${encodeURIComponent(revision)}`);
   selected = null;
+  showView('evidence', true);
   byId('selection').textContent = 'Retained agent report';
   byId('evidence').replaceChildren(element('pre', result.text));
   byId('evidence').scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -156,14 +195,14 @@ async function refresh() {
   try {
     const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
     if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
-    byId('mode').textContent = status.collection_enabled === false ? 'Collection not configured' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
+    byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     byId('device-profiles').hidden = !status.profiles_available;
     issuesAvailable = !!status.issues_available;
     byId('privacy-issues').hidden = !issuesAvailable;
     byId('project').textContent = status.project;
     byId('collector').textContent = status.collector;
-    byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.state.replaceAll('_', ' ');
-    byId('detail').textContent = status.detail;
+    byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.collection_enabled === false ? 'Disabled' : status.state.replaceAll('_', ' ');
+    byId('detail').textContent = status.state !== 'attention_required' && status.collection_enabled === false ? 'Enable collection in Settings when you are ready.' : status.detail;
     byId('change-count').textContent = scans.length ? scans[0].changes.filter(change => !change.startsWith('Baseline')).length : '—';
     byId('report-count').textContent = reportResult.error ? 'Unavailable' : reportResult.value.length;
     byId('scan').disabled = status.state === 'attention_required' || status.collection_enabled === false;
@@ -176,13 +215,13 @@ async function refresh() {
       const settings = await api('/api/monitoring');
       renderMonitorSettings(settings);
     }
-    try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message));}
+    try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message)); byId('health-summary').textContent = 'Status unavailable';}
     byId('dashboard').hidden = false;
     byId('connect').hidden = true;
     const unknown = status.requests.find(request => request.state === 'pending');
     if (unknown) notice(`Request ${unknown.request_id} needs reconciliation. It has not been resent.`, true);
     else if (reportResult.error) notice(reportResult.error.message, true);
-    else notice(status.state === 'attention_required' || status.collection_enabled === false ? status.detail : 'Evidence is retained before an investigation is requested.', status.state === 'attention_required');
+    else notice(status.state === 'attention_required' ? status.detail : '', status.state === 'attention_required');
   } finally {refreshPending = false; byId('refresh').disabled = false;}
 }
 byId('connect').addEventListener('submit', event => {
@@ -200,12 +239,13 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
-  for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
+  for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
   renderScheduleControl(null, null, null);
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
+  showView('overview');
   byId('dashboard').hidden = true; byId('connect').hidden = false;
   byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren();
   byId('mode').textContent = 'Not connected'; notice('Disconnected. Private evidence has been cleared from view.');
@@ -327,6 +367,9 @@ setInterval(() => {
 
 function renderOverview(value) {
   const health = value.health;
+  byId('device-count').textContent = value.devices.length;
+  byId('health-summary').textContent = !health.connected ? 'Connection needs attention' : health.recovery.length ? 'Retained work needs attention' : 'Connected to Plowshare';
+  byId('setup-checklist').hidden = health.checklist.length === 0;
   renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
@@ -335,13 +378,18 @@ function renderOverview(value) {
   grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
-  const runs = health.runs.map(run => `${run.state} · ${run.id}`);
-  if (runs.length) listItems(byId('recovery'), 'Recent project investigations', runs);
+  const runs = byId('recent-runs'); runs.replaceChildren();
+  if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
+  for (const run of health.runs) {
+    const row = element('div', undefined, 'activity-row');
+    row.append(element('span', run.state, 'badge'), element('code', run.id));
+    runs.append(row);
+  }
   const nextDeviceSignature = JSON.stringify(value.devices);
   if (nextDeviceSignature !== deviceSignature) {
   deviceSignature = nextDeviceSignature;
   const cards = byId('device-cards'); cards.replaceChildren();
-  if (!value.devices.length) cards.append(element('p', 'Choose your devices below to begin.'));
+  if (!value.devices.length) cards.append(element('p', 'Choose devices in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
     card.append(element('h3', device.name), element('p', device.address));
@@ -533,6 +581,7 @@ async function editProfile(view, address = null) {
   byId('profile-addresses').replaceChildren(...choices.map(value => {const option = element('option', value); option.value = value; option.selected = fields.addresses.includes(value); return option;}));
   await renderIssueLinks(fields.issues || [], view?.evidence || []);
   byId('profile-editor-title').textContent = view ? `Edit ${fields.name}` : 'Create a device profile';
+  showView('devices', true);
   byId('profile-form').hidden = false; byId('device-profiles').open = true;
   const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
   if (view) {
@@ -653,6 +702,7 @@ async function editIssue(view = null) {
       read.addEventListener('click', () => readIssue(view.issue.issue_id, version.revision).catch(error => notice(error.message,true))); byId('issue-history').append(read);
     }
   }
+  showView('devices', true);
   byId('issue-form').hidden = false; byId('privacy-issues').open = true; byId('privacy-issues').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 async function readIssue(identity, revision) {

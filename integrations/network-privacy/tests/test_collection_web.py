@@ -59,7 +59,7 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         response = await self.client.get("/")
         self.assertEqual(response.status, 200)
-        self.assertIn("Know what changed", await response.text())
+        self.assertIn("Connect your dashboard", await response.text())
         self.assertNotIn(WEB_TOKEN, await response.text())
         self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
         for route in ("/api/status", "/api/scans", "/api/reports", "/api/tools"):
