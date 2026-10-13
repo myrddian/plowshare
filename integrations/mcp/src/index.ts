@@ -1,0 +1,21 @@
+export { McpProvider, WorkerCredentials, publish } from './provider.ts';
+export type {
+  McpCredentials,
+  McpWorkerOptions,
+  ProviderConnection,
+} from './provider.ts';
+export { HttpMcpSessions } from './session.ts';
+export { FileToolJournal, CatalogueIntent } from './journal.ts';
+export { decodeConfig } from './config.ts';
+export type { IntegrationConfig, WorkerConfig } from './config.ts';
+export { runIntegration } from './runner.ts';
+export { FileRecoveryCatalogues, reconcileCatalogues } from './recovery.ts';
+export type { RecoveryCatalogues, RecoveryCatalogue } from './recovery.ts';
+export type {
+  McpSessions,
+  McpSession,
+  McpTool,
+  McpReply,
+  McpPage,
+  McpSessionOptions,
+} from './contracts.ts';

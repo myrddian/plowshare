@@ -2,7 +2,8 @@
 
 This standard applies to every active TypeScript module, including tests:
 `sdk/typescript`, `sdk/node`, `plowshare-cli`, `plowshare-mcp`,
-`plowshare-tui`, `plowshare-console` and `plowshare-desktop`. It supplements
+`plowshare-tui`, `plowshare-console`, `plowshare-desktop` and
+`integrations/mcp`. It supplements
 [coding standards](coding-standards.md); the architecture, authorization,
 configuration and lifecycle requirements there apply equally to TypeScript.
 

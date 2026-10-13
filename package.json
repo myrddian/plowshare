@@ -8,8 +8,8 @@
   },
   "scripts": {
     "lint": "eslint --max-warnings=0",
-    "format": "prettier --write \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\"",
-    "format:check": "prettier --check \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\""
+    "format": "prettier --write \"integrations/mcp/src/**/*.ts\" \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\"",
+    "format:check": "prettier --check \"integrations/mcp/src/**/*.ts\" \"sdk/*/src/**/*.ts\" \"plowshare-*/src/**/*.ts\" \"plowshare-*/vite.config.ts\""
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

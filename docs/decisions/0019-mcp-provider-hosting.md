@@ -1,7 +1,9 @@
 # ADR 0019: MCP providers with explicit credential and executor ownership
 
-Status: proposed for review. Design scope follows the requested MCP client plan;
-credential, delegated-provider and adapter implementations remain separate tasks.
+Status: accepted. The reusable [outbound HTTP adapter](../../integrations/mcp/README.md)
+implements the existing provider mechanism with separate connection and credential
+contexts. Native instance hosting and service-account accounting pools remain
+separate tasks. The source audit below records the original design baseline.
 Audited against main `e0886dd0b6472849dee1f4408a158f2556b02816` on 12 October 2026.
 
 ## Context and current source

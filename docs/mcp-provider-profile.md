@@ -1,7 +1,8 @@
 # Bounded MCP provider profile
 
-This is the proposed adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
-The shared schema foundation is implemented; MCP runtime support remains planned.
+This is the adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
+The [reusable outbound HTTP integration](../integrations/mcp/README.md) implements
+the shared-schema tools profile. Native STDIO hosting remains separate work.
 
 ## Protocol selection and transport
 

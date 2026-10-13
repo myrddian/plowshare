@@ -9,6 +9,7 @@ addresses explicitly and retain only adapter-owned state.
 | [runtime](runtime/README.md) | Shared integration lifecycle, policies and local journal | `:plowshare-integrations` |
 | [a2a](a2a/README.md) | External A2A protocol adapter | `:plowshare-a2a` |
 | [home-assistant](home-assistant/README.md) | Home Assistant binding | `:plowshare-integration-home-assistant` |
+| [MCP](mcp/README.md) | Reusable outbound HTTP MCP ToolProvider with separate connections and credential contexts | `:plowshare-mcp-integration` |
 | [Network Privacy Watch](network-privacy/README.md) | Network privacy Application with a Python collector and web interface | `:plowshare-network-privacy` (definition tests); explicit `pythonCheck` |
 
 Source locations are grouped here; Gradle commands and distribution executable
