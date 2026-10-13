@@ -170,3 +170,36 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 
   .connect { padding: 20px; }
   footer { flex-direction: column; }
 }
+
+.metric-link { background: none; color: var(--green); padding: 0; font-size: 11px; }
+.activity-grid { margin-bottom: 20px; }
+.findings-workspace { display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; align-items: start; }
+.report-reader, .document-reader { padding: 22px; min-width: 0; overflow-wrap: anywhere; }
+.document-reader { margin-top: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+.markdown-body { color: var(--ink); line-height: 1.75; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body p { color: var(--ink); margin: 12px 0; }
+.markdown-body h3 { font-size: 22px; margin: 26px 0 12px; }
+.markdown-body h4 { font-size: 17px; margin: 22px 0 10px; }
+.markdown-body h5, .markdown-body h6 { font-size: 14px; margin: 18px 0 8px; }
+.markdown-body a { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-body ul, .markdown-body ol { padding-left: 24px; margin: 12px 0; }
+.markdown-body li > p { margin: 4px 0; }
+.markdown-body blockquote { margin: 18px 0; padding: 2px 18px; border-left: 3px solid #91ae95; background: var(--mint); }
+.markdown-body code { font-family: ui-monospace, monospace; font-size: .9em; padding: 2px 5px; border-radius: 4px; background: var(--mint); }
+.markdown-body pre { margin: 18px 0; background: #edf1ed; }
+.markdown-body pre code { background: none; padding: 0; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.markdown-table { overflow-x: auto; margin: 18px 0; }
+.markdown-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.markdown-table td, .markdown-table th { padding: 10px 12px; border: 1px solid var(--line); vertical-align: top; }
+.markdown-table th { background: var(--mint); font-weight: 650; }
+.markdown-table .align-left { text-align: left; }
+.markdown-table .align-center { text-align: center; }
+.markdown-table .align-right { text-align: right; }
+.finding .markdown-body { font-size: 12px; }
+@media (max-width: 700px) {
+  .findings-workspace { grid-template-columns: 1fr; }
+  .report-reader, .document-reader { padding: 16px; }
+  .view-nav button { font-size: 11px; padding-left: 4px; padding-right: 4px; }
+}

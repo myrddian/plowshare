@@ -762,3 +762,17 @@ supply the scoped authority, including historical schedules registered under the
 installer; no account elevation, credential replacement or Application redeployment
 is needed when that binding is already present. Source/action authorization still
 applies to the registered execution owner.
+
+### Maintain the dashboard Markdown bundle
+
+The Python wheel includes a browser bundle built from the public TypeScript SDK
+Markdown grammar and a DOM renderer. Installed collectors need neither Node nor a
+CDN. Report, profile and privacy-issue text is rendered through fixed DOM elements;
+raw HTML is text and web links require an explicit user click. Images and embedded
+content are not loaded. The grammar matches the other Plowshare clients, including
+preserving tool identifiers such as `file_read` and unfinished Markdown.
+
+For source development, install the repository's existing pnpm dependencies, then
+run `node integrations/network-privacy/scripts/build_web.mjs` from the repository
+root after changing the renderer or SDK grammar. The integration gate checks the
+generated bundle and runs its formatting and injection tests.

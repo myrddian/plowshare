@@ -25,9 +25,10 @@ let issuesAvailable = false;
 const byId = (name) => document.getElementById(name);
 
 const views = {
-  overview: ['Network overview', 'Monitoring status and changes that need your attention.'],
+  overview: ['Network overview', 'Collection status, monitoring controls and recent activity.'],
   devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
-  evidence: ['Evidence & investigations', 'Retained collections and reports from your Plowshare project.'],
+  findings: ['Findings & investigations', 'Review observed changes and read investigation reports.'],
+  evidence: ['Collection evidence', 'Retained observations, comparisons and coverage gaps.'],
   settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
 };
 
@@ -60,6 +61,7 @@ for (const name of Object.keys(views)) {
   });
 }
 byId('open-settings').addEventListener('click', () => showView('settings', true));
+byId('open-findings').addEventListener('click', () => showView('findings', true));
 const phases = {queued:'Queued',collected:'Collected',uploading:'Upload outcome pending',uploaded:'Evidence retained',publishing:'Publication outcome pending',done:'Evidence published'};
 
 function notice(message, error = false) {
@@ -154,11 +156,12 @@ async function showEvidence(scanId) {
 }
 async function showReport(revision) {
   const result = await api(`/api/reports/${encodeURIComponent(revision)}`);
-  selected = null;
-  showView('evidence', true);
-  byId('selection').textContent = 'Retained agent report';
-  byId('evidence').replaceChildren(element('pre', result.text));
-  byId('evidence').scrollIntoView({behavior:'smooth', block:'nearest'});
+  const document = PrivacyMarkdown.render(result.text);
+  showView('findings', true);
+  const report = byId('reports').querySelector(`[data-revision="${CSS.escape(revision)}"]`);
+  byId('report-selection').textContent = report ? report.dataset.title : 'Retained report';
+  byId('report-content').replaceChildren(document);
+  byId('report-content').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 function renderCollections(scans) {
   const container = byId('collections');
@@ -181,6 +184,7 @@ function renderReports(reports) {
   if (!reports.length) {container.append(element('p', 'No retained investigations yet. Collection and agent completion are separate stages.', 'empty')); return;}
   reports.forEach(report => {
     const button = element('button', undefined, 'entry');
+    button.dataset.revision = report.revision; button.dataset.title = report.title;
     const row = element('span', undefined, 'row');
     row.append(element('span', report.title), element('span', report.status, 'badge'));
     button.append(row);
@@ -247,7 +251,7 @@ byId('disconnect').addEventListener('click', async () => {
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
   showView('overview');
   byId('dashboard').hidden = true; byId('connect').hidden = false;
-  byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren();
+  byId('collections').replaceChildren(); byId('reports').replaceChildren(); byId('evidence').replaceChildren(); byId('report-content').replaceChildren(); byId('report-selection').textContent = 'Select a report';
   byId('mode').textContent = 'Not connected'; notice('Disconnected. Private evidence has been cleared from view.');
 });
 byId('scan').addEventListener('click', async () => {
@@ -410,7 +414,7 @@ function renderOverview(value) {
   const findings = byId('findings'); findings.replaceChildren();
   if (!value.findings.length) findings.append(element('p', 'No comparison findings yet. A baseline establishes the first observations.', 'empty'));
   for (const finding of value.findings) {
-    const card = element('article', undefined, 'finding'); card.append(element('h3', finding.title), element('p', finding.explanation, 'hint'));
+    const card = element('article', undefined, 'finding'); card.append(element('h3', finding.title), PrivacyMarkdown.render(finding.explanation));
     const open = element('button', 'Read evidence', 'secondary'); open.addEventListener('click', () => showEvidence(finding.scan_id).catch(error => notice(error.message, true)));
     const acknowledge = element('button', finding.expected ? 'Expected · undo' : 'Mark expected', 'secondary');
     acknowledge.addEventListener('click', async () => {acknowledge.disabled = true; try {await api('/api/expected', {method:'POST', body:JSON.stringify({id:finding.id,expected:!finding.expected})}); await refresh();} catch (error) {notice(error.message,true); acknowledge.disabled = false;}});
@@ -589,7 +593,7 @@ async function editProfile(view, address = null) {
     for (const version of [...view.versions].sort((a,b) => b.ordinal - a.ordinal)) {
       const read = element('button', `Revision ${version.ordinal} · ${new Date(version.created_at).toLocaleString()}`, 'entry');
       read.title = version.revision;
-      read.addEventListener('click', async () => {try {const source = await api(`/api/profiles/${view.profile.profile_id}/${version.revision}`); byId('profile-markdown').textContent = source.text; byId('profile-markdown').hidden = false;} catch(error) {notice(error.message,true);}}); history.append(read);
+      read.addEventListener('click', async () => {try {const source = await api(`/api/profiles/${view.profile.profile_id}/${version.revision}`); byId('profile-markdown').replaceChildren(PrivacyMarkdown.render(source.text)); byId('profile-markdown').hidden = false;} catch(error) {notice(error.message,true);}}); history.append(read);
     }
     history.append(element('h3', 'Recent retained evidence at associated addresses'));
     if (!view.evidence.length) history.append(element('p', 'No matching evidence among the latest 50 local collections.'));
@@ -707,7 +711,7 @@ async function editIssue(view = null) {
 }
 async function readIssue(identity, revision) {
   const source = await api(`/api/issues/${identity}/${revision}`);
-  byId('issue-markdown').textContent = source.text; byId('issue-markdown').hidden = false; byId('privacy-issues').open = true;
+  byId('issue-markdown').replaceChildren(PrivacyMarkdown.render(source.text)); byId('issue-markdown').hidden = false; byId('privacy-issues').open = true;
   byId('issue-markdown').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 async function renderIssueLinks(links, evidence) {

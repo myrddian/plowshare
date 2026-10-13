@@ -20,7 +20,13 @@ for arguments in (
     )
 
 subprocess.run(
-    ["node", "--test", "tests/web_settings.test.cjs"],
+    ["node", "scripts/build_web.mjs", "--check"],
+    cwd=root,
+    env=environment,
+    check=True,
+)
+subprocess.run(
+    ["node", "--test", *map(str, sorted((root / "tests").glob("web_*.test.cjs")))],
     cwd=root,
     env=environment,
     check=True,

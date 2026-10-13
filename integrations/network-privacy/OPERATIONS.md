@@ -9,14 +9,19 @@ and Pi-hole. Plowshare does not start or host this external process.
 
 ## Dashboard views
 
-**Overview** shows collection status, the monitored-device count, findings and
-recent project investigations. Pause and resume are beside the status cards.
+**Overview** shows collection status, the monitored-device count and recent project
+investigations. **Review findings** opens the dedicated Findings view. Pause and resume are beside the status cards.
 Expand **System health** for connection, agent, tool and credential details;
 **Check retained work** reconciles existing receipts without replaying effects.
 
 **Devices** holds observed device cards, Markdown profiles and linked privacy
-issues. **Evidence** holds collections, their evidence and retained agent reports.
-Opening evidence from a device history or finding selects that view automatically.
+issues. **Findings** holds observed changes, acknowledgements and investigation
+reports beside a Markdown reader. **Evidence** holds the underlying collections,
+observations and coverage gaps.
+Opening evidence from a device history or finding selects Evidence automatically.
+Opening a report selects Findings; it does not replace selected collection evidence.
+Report and document readers format headings, lists, tables, quotations, code and
+web citations. Raw HTML is displayed as text; embedded content is not loaded.
 
 **Settings** holds device discovery, monitoring scope, Pi-hole, investigation
 preferences and schedule frequency. Switching views preserves unsaved form fields

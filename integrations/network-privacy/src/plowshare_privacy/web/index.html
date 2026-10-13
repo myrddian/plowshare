@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Network Privacy Watch · Plowshare</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/markdown.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -18,12 +19,13 @@
       <nav class="view-nav" role="tablist" aria-label="Dashboard views">
         <button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="view-overview" tabindex="0">Overview</button>
         <button id="tab-devices" type="button" role="tab" aria-selected="false" aria-controls="view-devices" tabindex="-1">Devices</button>
+        <button id="tab-findings" type="button" role="tab" aria-selected="false" aria-controls="view-findings" tabindex="-1">Findings</button>
         <button id="tab-evidence" type="button" role="tab" aria-selected="false" aria-controls="view-evidence" tabindex="-1">Evidence</button>
         <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="view-settings" tabindex="-1">Settings</button>
       </nav>
-      <div class="view-heading"><div><h1 id="page-title" tabindex="-1">Network overview</h1><p id="page-description">Monitoring status and changes that need your attention.</p></div></div>
+      <div class="view-heading"><div><h1 id="page-title" tabindex="-1">Network overview</h1><p id="page-description">Collection status, monitoring controls and recent activity.</p></div></div>
       <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
-      <div class="metrics"><article><span>Collection</span><strong id="state">Loading</strong><p id="detail">Reading collector status…</p></article><article><span>Monitored devices</span><strong id="device-count">—</strong><p>Addresses in the current scope</p></article><article><span>Latest comparison</span><strong id="change-count">—</strong><p>Changes in observed evidence</p></article><article><span>Investigation reports</span><strong id="report-count">—</strong><p>Retained in the Plowshare project</p></article></div>
+      <div class="metrics"><article><span>Collection</span><strong id="state">Loading</strong><p id="detail">Reading collector status…</p></article><article><span>Monitored devices</span><strong id="device-count">—</strong><p>Addresses in the current scope</p></article><article><span>Latest changes</span><strong id="change-count">—</strong><p><button id="open-findings" class="metric-link" type="button">Review findings →</button></p></article><article><span>Investigation reports</span><strong id="report-count">—</strong><p>Retained in the Plowshare project</p></article></div>
       <section class="panel schedule-panel">
         <div class="panel-heading"><h2>Monitoring schedule</h2><span id="schedule-runtime">Checking schedule…</span></div>
         <div class="setup-content">
@@ -33,8 +35,7 @@
         </div>
       </section>
         <aside id="setup-checklist" class="setup-callout" hidden><div><h2>Finish monitoring setup</h2><ul id="checklist"></ul></div><button id="open-settings" type="button" class="secondary">Open settings</button></aside>
-        <div class="overview-grid">
-      <section class="panel setup-panel"><div class="panel-heading"><h2>Findings to review</h2><span>Expected changes keep their evidence</span></div><div id="findings" class="entries"></div></section>
+        <div class="activity-grid">
           <section class="panel"><div class="panel-heading"><h2>Recent investigations</h2><span>Project activity</span></div><div id="recent-runs" class="entries"></div></section>
         </div>
       <details id="system-health" class="panel diagnostics"><summary class="panel-heading"><h2>System health</h2><span id="health-summary">Checking connection…</span></summary><div class="setup-content"><div class="recovery-toolbar"><p class="hint">Connection, permissions and retained work.</p><button id="recover" class="secondary">Check retained work</button></div><div id="health" class="health-grid"></div><div id="recovery"></div></div></details>
@@ -53,7 +54,7 @@
           <label>Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
           <fieldset><legend>Linked privacy issues and mitigation progress</legend><p class="hint">Choose up to four issues. Links retain the reviewed plan; progress is your report of actions performed separately.</p><div id="profile-issue-links"></div></fieldset>
           <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p><button id="save-profile" type="submit">Save project document</button><button id="cancel-profile" type="button">Close editor</button>
-        </form><div id="profile-history"></div><pre id="profile-markdown" hidden></pre>
+        </form><div id="profile-history"></div><div id="profile-markdown" class="document-reader" hidden></div>
       </div></details>
       <details id="privacy-issues" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Privacy issues &amp; mitigations</h2><span>Shared issue documents · proposed actions</span></summary><div class="panel-body">
         <p>Keep source-backed issues here, then link them to affected devices in their profiles. Firewall and Pi-hole plans are suggestions for you to review and apply separately.</p>
@@ -81,12 +82,17 @@
             <label>Rollback procedure<textarea id="issue-rollback" maxlength="768" rows="2" required></textarea></label>
           </fieldset><p class="hint">Save this shared issue first, then open a device profile to record applicability and progress. A listening-port scan cannot establish outbound traffic or that a mitigation works.</p>
           <button id="save-issue" type="submit">Save issue document</button><button id="cancel-issue" type="button">Close editor</button>
-        </form><div id="issue-history"></div><pre id="issue-markdown" hidden></pre>
+        </form><div id="issue-history"></div><div id="issue-markdown" class="document-reader" hidden></div>
       </div></details>
       </section>
-      <section id="view-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
-      <div class="workspace"><section class="panel"><div class="panel-heading"><h2>Collections</h2><span>Latest 50</span></div><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section><section class="panel"><div class="panel-heading"><h2>Evidence & findings</h2><span id="selection">Select a collection</span></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section></div>
+      <section id="view-findings" role="tabpanel" aria-labelledby="tab-findings" hidden>
+        <div class="findings-workspace"><div>
+      <section class="panel setup-panel"><div class="panel-heading"><h2>Findings to review</h2><span>Expected changes keep their evidence</span></div><div id="findings" class="entries"></div></section>
       <section class="panel reports"><div class="panel-heading"><h2>Agent investigations</h2><span>From Plowshare</span></div><div id="reports" class="entries"><p class="empty">Loading reports…</p></div></section>
+        </div><section class="panel"><div class="panel-heading"><h2>Investigation report</h2><span id="report-selection">Select a report</span></div><div id="report-content" class="report-reader"><p class="empty">Select an investigation to read its findings, sources and proposed mitigations.</p></div></section></div>
+      </section>
+      <section id="view-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
+      <div class="workspace"><section class="panel"><div class="panel-heading"><h2>Collections</h2><span>Latest 50</span></div><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section><section class="panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section></div>
       <p class="footnote">An observed DNS query does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
       </section>
       <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
