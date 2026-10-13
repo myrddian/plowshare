@@ -43,6 +43,7 @@ from .peer import IntegrationPeer, SdkOutgoingPort
 from .peer_journal import FilePeerReceipts
 from .ports import SdkPrivacyPort
 from .profile_port import SdkProfilePort
+from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tools import WorkerTools
 from .web import application
@@ -356,6 +357,18 @@ async def execute(args: argparse.Namespace) -> None:
                 if operator_store and settings and discovery
                 else None
             )
+
+            def schedule_runtime(current: Configuration) -> ScheduleRuntime:
+                if (
+                    current.origin != worker.config.origin
+                    or current.project != worker.config.project
+                ):
+                    raise ValueError(
+                        "Schedule configuration differs from the active service session"
+                    )
+                # Capture the connection cell: recovery replaces client without retaining a stale socket.
+                return SdkScheduleRuntime(client, current)
+
             runner = web.AppRunner(
                 application(
                     worker,
@@ -366,7 +379,9 @@ async def execute(args: argparse.Namespace) -> None:
                     console=console,
                     profiles=profiles,
                     issues=issues,
-                    schedule_editor=ScheduleEditor(Path(args.config).parent)
+                    schedule_editor=ScheduleEditor(
+                        Path(args.config).parent, schedule_runtime
+                    )
                     if getattr(args, "deployment_controls", False)
                     else None,
                 ),
@@ -409,7 +424,13 @@ async def execute(args: argparse.Namespace) -> None:
                         "Privacy dashboard listening; use the configured web bearer to unlock its APIs.",
                         flush=True,
                     )
-                task = asyncio.create_task(worker.run(stop, active_requests))
+                task = asyncio.create_task(
+                    worker.run(
+                        stop,
+                        active_requests,
+                        settings.apply_pending if settings else None,
+                    )
+                )
                 await stop.wait()
             finally:
                 stop.set()

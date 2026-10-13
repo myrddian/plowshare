@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Awaitable, Callable
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -82,7 +83,10 @@ class ConnectionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 return web.Application()
 
             async def run(
-                worker: Worker, stop: asyncio.Event, external: ExternalRequests | None
+                worker: Worker,
+                stop: asyncio.Event,
+                external: ExternalRequests | None,
+                apply_settings: Callable[[], Awaitable[None]] | None,
             ) -> None:
                 assert captured is not None
                 worker.state = "attention_required"

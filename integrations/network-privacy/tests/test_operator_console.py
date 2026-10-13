@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -29,7 +30,7 @@ from plowshare_privacy.discovery import (
     LocalDeviceDiscovery,
 )
 from plowshare_privacy.journal import FileReceipts, Receipt
-from plowshare_privacy.monitor import MonitorChoice, MonitorView, SettingsBusy
+from plowshare_privacy.monitor import MonitorChoice, MonitorView
 from plowshare_privacy.operator_state import (
     FileOperatorStore,
     InvestigationDecision,
@@ -206,9 +207,32 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first.connected)
         self.assertTrue(first.agents and first.agents.missing_tools)
         self.assertTrue(first.schedule and first.schedule.paused)
+        self.assertNotIn("administrator", first.detail)
+        self.assertNotIn("unavailable", first.detail.lower())
         self.assertEqual(await self.console.health(), first)
         self.assertEqual(self.remote.reads, 1)
         self.assertTrue(first.checklist)
+
+    async def test_missing_schedule_does_not_claim_a_permission_failure(self) -> None:
+        with patch.object(self.remote, "schedule", new=AsyncMock(return_value=None)):
+            health = await self.console.health()
+        self.assertTrue(health.connected)
+        self.assertIsNone(health.schedule)
+        self.assertIn("no active scan schedule", health.detail)
+        self.assertNotIn("administrator", health.detail)
+
+    async def test_failed_schedule_read_reports_a_real_connection_problem(self) -> None:
+        with patch.object(
+            self.remote,
+            "schedule",
+            new=AsyncMock(
+                side_effect=TransportError(Delivery.UNKNOWN, "fixture disconnected")
+            ),
+        ):
+            health = await self.console.health()
+        self.assertFalse(health.connected)
+        self.assertIn("Plowshare checks are unavailable", health.detail)
+        self.assertNotIn("Project read checks passed", health.detail)
 
     async def test_expected_findings_keep_original_evidence(self) -> None:
         evidence = self.scan.evidence
@@ -408,9 +432,82 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(settings.save.await_args.args[0].targets, (new,))
             self.assertEqual(identify.await_count, 4)
 
-    async def test_pihole_test_never_writes_and_busy_save_keeps_secret_out(
+    async def test_pihole_save_never_tests_connection_and_can_wait_for_activation(
         self,
     ) -> None:
+        settings = AsyncMock(spec=Settings)
+        settings.save_pihole.return_value = MonitorView(
+            True, (), (), True, "Settings saved", pending=True
+        )
+        self.console.settings = settings
+        with patch("plowshare_privacy.console.PiHoleV6") as source:
+            source.side_effect = AssertionError("Saving must not contact Pi-hole")
+            async with self.console.lock:
+                saved = await asyncio.wait_for(
+                    self.console.connect_pihole(
+                        "http://pihole.invalid", "fixture-secret", True
+                    ),
+                    1,
+                )
+        self.assertTrue(saved.saved)
+        self.assertTrue(saved.pending)
+        self.assertIsNone(saved.connected)
+        credential = next(self.root.glob("pihole-*.password"))
+        self.assertEqual(credential.read_text(), "fixture-secret\n")
+        self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("fixture-secret", json.dumps(asdict(saved)))
+        settings.save_pihole.assert_awaited_once()
+
+    async def test_failed_pihole_test_does_not_remove_saved_password(self) -> None:
+        await self.console.connect_pihole(
+            "http://pihole.invalid", "fixture-secret", True
+        )
+        credential = next(self.root.glob("pihole-*.password"))
+        before = credential.read_bytes()
+        with patch("plowshare_privacy.console.PiHoleV6") as source:
+            source.return_value.identify = AsyncMock(
+                return_value=DeviceData(
+                    (), (), None, ("Pi-hole authentication or connection failed",)
+                )
+            )
+            tested = await self.console.connect_pihole(
+                "http://pihole.invalid", "bad-secret", False
+            )
+        self.assertFalse(tested.connected)
+        self.assertFalse(tested.saved)
+        self.assertEqual(credential.read_bytes(), before)
+        self.assertEqual(tuple(self.root.glob("pihole-*.password")), (credential,))
+
+    async def test_pihole_save_api_succeeds_while_worker_disconnected(self) -> None:
+        self.worker.state = "attention_required"
+        settings = AsyncMock(spec=Settings)
+        settings.save_pihole.return_value = MonitorView(
+            True, (), (), True, "Settings saved", pending=True
+        )
+        self.console.settings = settings
+        client = TestClient(
+            TestServer(application(self.worker, TOKEN, console=self.console))
+        )
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        with patch("plowshare_privacy.console.PiHoleV6") as source:
+            response = await client.post(
+                "/api/pihole",
+                headers={"Authorization": "Bearer " + TOKEN},
+                json={
+                    "origin": "http://pihole.invalid",
+                    "password": "fixture-secret",
+                    "save": True,
+                },
+            )
+            self.assertEqual(response.status, 200)
+            result = await response.json()
+            self.assertTrue(result["saved"])
+            self.assertTrue(result["pending"])
+            self.assertIsNone(result["connected"])
+            source.assert_not_called()
+
+    async def test_pihole_test_never_writes_password(self) -> None:
         with patch("plowshare_privacy.console.PiHoleV6") as source:
             source.return_value.identify = AsyncMock(
                 return_value=DeviceData(
@@ -420,24 +517,6 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
             tested = await self.console.connect_pihole(
                 "http://pihole.invalid", "fixture-secret", False
             )
-            self.assertTrue(tested.connected)
-            self.assertFalse(tested.saved)
-            self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())
-            settings = AsyncMock(spec=Settings)
-            settings.view = lambda: MonitorView(True, (), (), False, "Pending receipt")
-            self.console.settings = settings
-            with self.assertRaises(SettingsBusy):
-                await self.console.connect_pihole(
-                    "http://pihole.invalid", "fixture-secret", True
-                )
-            self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())
-            settings.save_pihole.assert_not_awaited()
-            settings.view = lambda: MonitorView(True, (), (), True, "fixture")
-            saved = await self.console.connect_pihole(
-                "http://pihole.invalid", "fixture-secret", True
-            )
-            self.assertTrue(saved.saved)
-            credential = next(self.root.glob("pihole-*.password"))
-            self.assertEqual(credential.read_text(), "fixture-secret\n")
-            self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
-            self.assertNotIn("fixture-secret", json.dumps(asdict(saved)))
+        self.assertTrue(tested.connected)
+        self.assertFalse(tested.saved)
+        self.assertEqual(tuple(self.root.glob("pihole-*.password")), ())

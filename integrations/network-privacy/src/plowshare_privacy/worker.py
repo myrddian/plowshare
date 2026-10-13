@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict, replace
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from plowshare import Delivery, Refusal, TransportError
@@ -385,10 +385,18 @@ class Worker:
                     self.receipts.save(replace(receipt, phase="done"))
 
     async def run(
-        self, stop: asyncio.Event, external: ExternalRequests | None = None
+        self,
+        stop: asyncio.Event,
+        external: ExternalRequests | None = None,
+        apply_settings: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         while not stop.is_set():
             try:
+                # Apply desired configuration before new intake, retaining the old
+                # scope for unfinished work. Saving itself never uses this loop.
+                if apply_settings is not None:
+                    self.operation = "saved configuration activation"
+                    await apply_settings()
                 if external is not None:
                     self.operation = "external tool provider"
                     await external.poll()

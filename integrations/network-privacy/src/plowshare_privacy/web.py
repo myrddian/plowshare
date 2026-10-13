@@ -145,6 +145,9 @@ def application(
                 "findings": [asdict(item) for item in value.findings()],
                 "preferences": asdict(value.store.preferences),
                 "investigations": [asdict(item) for item in value.manual],
+                "schedule_control": asdict(schedule_editor.control_status())
+                if schedule_editor
+                else None,
                 "pending_deployment": schedule_editor.pending_request()
                 if schedule_editor
                 else None,
@@ -208,6 +211,36 @@ def application(
             text(row["old"], 64), text(row["new"], 64), text(row["device_id"], 128)
         )
         return web.json_response({"saved": True})
+
+    async def schedule_control(request: web.Request) -> web.Response:
+        row = object_fields(parse_json(await request.read()), {"paused"})
+        if schedule_editor is None or type(row["paused"]) is not bool:
+            raise ValueError("Schedule control is unavailable")
+        try:
+            schedule = await schedule_editor.control(row["paused"])
+        finally:
+            operator().cache_until = 0
+        return web.json_response(
+            {
+                "schedule": asdict(schedule),
+                "control": asdict(schedule_editor.control_status()),
+            }
+        )
+
+    async def schedule_check(request: web.Request) -> web.Response:
+        object_fields(parse_json(await request.read()), set())
+        if schedule_editor is None:
+            raise ValueError("Schedule control is unavailable")
+        try:
+            schedule = await schedule_editor.check_control()
+        finally:
+            operator().cache_until = 0
+        return web.json_response(
+            {
+                "schedule": asdict(schedule),
+                "control": asdict(schedule_editor.control_status()),
+            }
+        )
 
     async def schedule_review(request: web.Request) -> web.Response:
         row = object_fields(
@@ -560,6 +593,8 @@ def application(
         ("pihole", pihole),
         ("device-moves", moves),
         ("device-moves/accept", accept_move),
+        ("schedule/control", schedule_control),
+        ("schedule/check", schedule_check),
         ("schedule/review", schedule_review),
         ("schedule/deploy", schedule_deploy),
         ("schedule/reconcile", schedule_reconcile),

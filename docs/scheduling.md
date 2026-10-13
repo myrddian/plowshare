@@ -45,8 +45,14 @@ changed schedule definition or removal clears the override. `schedule.files`
 reports the effective pause state while the deployed JSON retains its source
 default. Resuming a paused Application schedule uses the next future occurrence;
 missed ticks are not replayed, and existing runs are neither resumed nor cancelled.
-Only the registered owner with current project management authority can control
-it. Source action/grant validation still applies.
+Current project Managers or the manifest `executionAccount` with effective
+CONTRIBUTOR access can control its Application schedules, including sources
+registered by a historical installer. A declared service handle admits its scoped
+token principals; a declared principal admits that exact principal. Other
+Contributors gain no control. Permissions are rechecked on every call; source
+action/grant validation remains under the registered owner. This grants no
+definition authoring, deletion, deployment or permission-management authority.
+Mutable and legacy schedules retain their owner boundary.
 
 Invalid JSON, lost execution authority or an offline/incomplete remote scan suspends
 that source's affected schedules and refuses queued firings. An incomplete scan

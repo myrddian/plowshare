@@ -37,6 +37,11 @@ collection and comparison. Plowshare retains evidence and coordinates the
 investigation. An LLM interprets observations and explains uncertainty. A local
 model pool can serve the same `reasoning` binding used by these definitions.
 
+Saving dashboard configuration does not require a working connection to Plowshare
+or Pi-hole. Settings are stored immediately and activate once earlier scan work
+is settled. Pi-hole connection testing is optional and separate from saving.
+See [saved and active configuration](OPERATIONS.md#save-configuration-independently-of-connections).
+
 ## What the collector observes
 
 `collection.enabled` defaults to `true` for existing TCP configurations. Set it
@@ -370,7 +375,7 @@ intent and reconcile it first. The script never reconnects or replays mutations.
 5. The package contains a paused server schedule named `network_scan`. After deployment
    and source reconciliation, inspect `schedule.files` for its actual internal name
    and set `config.schedule` to that name. Review timing and resume it through the
-   Schedule UI or `schedule.pause`. Change packaged timing through a new Application
+   app dashboard’s **Resume monitoring** control, the Schedule UI, or `schedule.pause`. Change packaged timing through a new Application
    deployment. The separate `install-schedule` SDK command remains useful for a
    manually managed source tier; deployment-managed source refuses direct edits.
    Server schedules retain the authenticated installer's project permissions.
@@ -726,3 +731,33 @@ reports effective pause/timing separately from source registration. Per-device
 Markdown documents continue to use the existing project Information record APIs;
 `document.detail` also supports project scope for an ingested document's outline.
 Document access covers its chapters; no granular chapter permissions are introduced.
+
+### Control monitoring from the dashboard
+
+**Monitoring schedule** shows the effective paused/running state and offers
+**Pause monitoring**, **Resume monitoring**, and **Check schedule state**.
+The app uses its existing Application service connection and the public SDK
+`schedule.pause` request, then reads the project-scoped runtime state. No personal
+password or human login is needed. The server checks the manifest execution-account
+binding and effective Contributor access on each call. The worker stays a Contributor.
+
+Pause prevents future scheduled scans while existing work can finish. Resume
+selects the next future occurrence; missed ticks are not replayed. These controls
+create no Application revision and do not enable local collection, start a manual
+scan, or launch an investigation. Collection must also be enabled in monitoring
+settings. Frequency changes remain a separately reviewed Application deployment;
+a changed schedule source clears its operational pause override. Deployment editing
+still uses its separate temporary administrator login.
+
+If delivery is uncertain, controls are fenced by a private retained intent across
+collector restarts. **Check schedule state** only reads; it never resends a control.
+When the observed state matches the request, the fence clears. If it differs, the
+intent remains pending for later inspection. No automatic retry or opposite
+control is sent. A definitive server refusal retains a refused outcome.
+
+Deploy the server with [Application operational authority](../../docs/decisions/0020-application-schedule-operational-authority.md)
+before updating this dashboard. Existing execution bindings and Contributor grants
+supply the scoped authority, including historical schedules registered under the
+installer; no account elevation, credential replacement or Application redeployment
+is needed when that binding is already present. Source/action authorization still
+applies to the registered execution owner.

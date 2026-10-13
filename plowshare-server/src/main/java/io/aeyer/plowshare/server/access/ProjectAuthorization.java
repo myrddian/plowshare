@@ -177,6 +177,7 @@ public class ProjectAuthorization {
         || operation.equals("document.detail")
         || operation.equals("schedule.list")
         || operation.equals("schedule.files")
+        || operation.equals("schedule.pause")
         || operation.startsWith("orchestration.")
         || operation.startsWith("message.")
         || operation.startsWith("union.")
@@ -305,15 +306,28 @@ public class ProjectAuthorization {
     // Administrative membership management does not grant ordinary Application use.
     if (operation.startsWith("project.member.") && members.isServerAdmin(account)) return;
     if (ACCOUNT_OWNED.contains(operation)) {
-      // Resuming a global emitter requires the same authority as defining one.
-      if (operation.equals("schedule.pause") && Boolean.FALSE.equals(payload.paused())) {
-        var registered = scopes(payload, account);
-        if (registered.isEmpty() || registered.contains(null)) accounts.requireServerAdmin(account);
-        else
-          for (String project : registered)
-            members.requireRole(project, account, ProjectRole.MANAGER);
+      if (operation.equals("schedule.pause")) {
+        // Only schedule provenance supplies this scope. An unrelated explicit project or
+        // conversation must not turn a global/unknown schedule into project work.
+        Set<String> registered = new LinkedHashSet<>();
+        for (var resource : payload.resources())
+          if (resource.kind() == ResourceScopeRepository.Kind.SCHEDULE)
+            registered.addAll(resources.projects(resource));
+        if (service && (registered.isEmpty() || registered.contains(null)))
+          throw new CallerFault("Service tokens cannot control global or unknown schedules");
+        if (service || Boolean.FALSE.equals(payload.paused())) {
+          if (registered.isEmpty() || registered.contains(null))
+            accounts.requireServerAdmin(account);
+          else
+            for (String project : registered) {
+              PersonalSpaces.requireOwn(project, account);
+              members.requireRole(project, account, ProjectRole.CONTRIBUTOR);
+            }
+        }
+        // Application identity/Manager authority and mutable-source Manager/owner authority
+        // are enforced by the scheduling service. This gate admits no authoring or deletion.
       }
-      return; // Services enforce account ownership of these controls.
+      return;
     }
     ProjectRole permission = required(operation);
     Set<String> projects = scopes(payload, account);

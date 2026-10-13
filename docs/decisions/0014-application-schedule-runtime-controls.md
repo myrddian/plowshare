@@ -1,6 +1,8 @@
 # Application schedule runtime controls
 
-Status: accepted for implementation
+Status: accepted for implementation. The Application control-actor boundary below
+is superseded by [ADR 0020](0020-application-schedule-operational-authority.md);
+the durable projection and lifecycle decisions remain in effect.
 
 ## Platform need
 

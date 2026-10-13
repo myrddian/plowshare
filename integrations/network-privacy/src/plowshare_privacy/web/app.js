@@ -7,9 +7,13 @@ let selected = null;
 let refreshPending = false;
 let settingsLoaded = false;
 let settingsPending = false;
+let piholePending = false;
+let monitorEditable = false;
 let overview = null;
 let preferencesLoaded = false;
 let scheduleDraft = null;
+let scheduleControlBusy = false;
+let scheduleControlUnknown = false;
 let notified = null;
 let deviceSignature = null;
 let findingSignature = null;
@@ -170,8 +174,7 @@ async function refresh() {
     if (status.settings_available && !settingsLoaded) await loadSettings();
     if (status.settings_available && !settingsPending) {
       const settings = await api('/api/monitoring');
-      byId('save-monitoring').disabled = !settings.editable;
-      byId('settings-detail').textContent = settings.detail;
+      renderMonitorSettings(settings);
     }
     try {overview = await api('/api/overview'); renderOverview(overview);} catch (error) {byId('health').replaceChildren(element('p', error.message));}
     byId('dashboard').hidden = false;
@@ -200,6 +203,7 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
+  renderScheduleControl(null, null, null);
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
   byId('dashboard').hidden = true; byId('connect').hidden = false;
@@ -258,6 +262,7 @@ async function loadSettings() {
   renderDevices(report);
   if (settings.ports.length) byId('ports').value = settings.ports.join(',');
   byId('monitoring').hidden = false;
+  renderMonitorSettings(settings);
   settingsLoaded = true;
 }
 byId('discover-form').addEventListener('submit', async event => {
@@ -285,8 +290,9 @@ byId('monitor-form').addEventListener('submit', async event => {
       labels[address] = name;
     }
     const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
-    await refresh();
-    notice(result.enabled ? 'Monitoring saved. Choose Request a scan to collect your first evidence.' : 'Collection is disabled. Your evidence is preserved.');
+    renderMonitorSettings(result);
+    notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
+    await refresh().catch(error => notice('Monitoring settings were saved, but dashboard refresh failed. ' + error.message, true));
   } catch (error) {notice(error.message, true);}
   finally {settingsPending = false; byId('save-monitoring').disabled = false;}
 });
@@ -321,9 +327,10 @@ setInterval(() => {
 
 function renderOverview(value) {
   const health = value.health;
+  renderScheduleControl(health.schedule, value.schedule_control, value.pending_deployment);
   byId('deployment-state').textContent = value.pending_deployment ? `Deployment ${value.pending_deployment} needs reconciliation. Enter the administrator password and choose Check retained deployment.` : 'No unsettled schedule deployment.';
   const grid = byId('health'); grid.replaceChildren();
-  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Unavailable to service token'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
+  const checks = [['Collector', byId('state').textContent], ['Plowshare', health.connected ? 'Read checks passed' : 'Needs attention'], ['Last contact', health.last_contact ? new Date(health.last_contact).toLocaleString() : 'Awaiting contact'], ['Last completed scan', health.last_scan ? new Date(health.last_scan).toLocaleString() : 'None yet'], ['Schedule runtime', health.schedule ? (health.schedule.paused ? 'Paused' : health.schedule.next_at || 'Awaiting next fire') : 'Not found or unavailable'], ['Pi-hole', health.pihole], ['Project agents', health.agents ? `${health.agents.served.length}/3 available${health.agents.unavailable.length ? ' · missing: ' + health.agents.unavailable.join(', ') : ''}` : 'Unavailable'], ['Dynamic tool visibility', health.agents ? (health.agents.tool_visibility === 'awaiting_context' ? 'Awaiting first project conversation' : `${health.agents.tools.length}/6 visible${health.agents.missing_tools.length ? ' · missing: ' + health.agents.missing_tools.join(', ') : ''}`) : 'Unavailable'], ['Service credential expiry', health.credential_expires_at || 'Not supplied']];
   for (const [name, detail] of checks) {const card = element('article'); card.append(element('strong', name), element('p', detail)); grid.append(card);}
   grid.append(element('p', `Checked ${new Date(health.checked_at).toLocaleString()}. ${health.detail}`, 'hint'));
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
@@ -384,13 +391,35 @@ byId('preferences-form').addEventListener('submit', async event => {
     await refresh(); notice('Preferences saved. Existing evidence and publication decisions are unchanged.' + notificationHint);
   } catch (error) {notice(error.message,true);}
 });
+function renderPiHoleSaved(configured, pending = false) {
+  byId('pihole-saved').textContent = configured ? 'Saved connection: Pi-hole connection and password are stored on this collector.' + (pending ? ' Waiting to apply saved settings.' : '') : 'Saved connection: no Pi-hole connection is configured yet.';
+}
+function renderMonitorSettings(settings) {
+  monitorEditable = settings.editable;
+  byId('save-monitoring').disabled = !monitorEditable;
+  byId('settings-detail').textContent = settings.detail;
+  renderPiHoleSaved(settings.pihole_configured, settings.pending);
+  byId('pihole-save').disabled = !monitorEditable || piholePending;
+  byId('pihole-blocker').textContent = settings.pending || !monitorEditable ? settings.detail : '';
+  if (settings.pending) byId('scan').disabled = true;
+}
 async function piholeConnection(save) {
+  if (piholePending) return;
+  piholePending = true;
+  byId('pihole-test').disabled = true; byId('pihole-save').disabled = true;
   const password = byId('pihole-password').value; byId('pihole-password').value = '';
+  byId('pihole-detail').textContent = save ? 'Saving connection and password…' : 'Testing connection; your password will not be saved…';
   try {
     const result = await api('/api/pihole', {method:'POST', body:JSON.stringify({origin:byId('pihole-origin').value.trim(),password,save})});
-    byId('pihole-detail').textContent = `${result.connected ? (result.saved ? 'Connection saved.' : 'Connection read succeeded. Enter the password again to save.') : 'Connection check failed.'} ${result.issues.join(' ')}`;
-    if (result.saved) {settingsLoaded = false; await refresh();}
-  } catch (error) {byId('pihole-detail').textContent = error.message;}
+    const message = result.saved ? 'Pi-hole connection and password saved on this collector. Connection was not tested.' + (result.pending ? ' Saved settings are waiting to apply; existing work keeps its original configuration.' : '') : result.connected ? 'Connection test passed. Your password was not saved; enter it again and choose Save connection to save it.' : 'Connection test failed. Your saved settings are unchanged.';
+    byId('pihole-detail').textContent = `${message} ${result.issues.join(' ')} The password field was cleared for privacy.`;
+    if (result.saved) {
+      renderPiHoleSaved(true, result.pending); settingsLoaded = false;
+      // A later health/read failure cannot undo the confirmed save response.
+      await refresh().catch(error => notice('Pi-hole was saved, but dashboard refresh failed. ' + error.message, true));
+    }
+  } catch (error) {byId('pihole-detail').textContent = `${save ? 'Save was not confirmed. ' : 'Connection test failed. '}${error.message} The password field was cleared; enter it again to retry.`;}
+  finally {piholePending = false; byId('pihole-test').disabled = false; byId('pihole-save').disabled = !monitorEditable;}
 }
 byId('pihole-test').addEventListener('click', () => piholeConnection(false));
 byId('pihole-form').addEventListener('submit', event => {event.preventDefault(); piholeConnection(true);});
@@ -409,6 +438,43 @@ byId('check-moves').addEventListener('click', async () => {
     }
   } catch (error) {notice(error.message,true);} finally {byId('check-moves').disabled = false;}
 });
+function renderScheduleControl(schedule, control, pendingDeployment) {
+  byId('schedule-runtime').textContent = schedule ? (schedule.paused ? 'Paused' : 'Running') : 'Unavailable';
+
+  const pending = scheduleControlUnknown || Boolean(control && control.pending);
+  const available = Boolean(control && control.available && schedule);
+  byId('pause-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || schedule.paused;
+  byId('resume-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || !schedule.paused;
+  byId('check-schedule').disabled = scheduleControlBusy || !control || !control.available;
+  if (pending) byId('schedule-control-detail').textContent = 'A schedule change is unconfirmed. Check schedule state before another change; checking never resends the control.';
+}
+
+async function controlSchedule(paused) {
+  if (scheduleControlBusy || (paused === null ? byId('check-schedule').disabled : byId(paused ? 'pause-schedule' : 'resume-schedule').disabled)) return;
+  scheduleControlBusy = true;
+  renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
+  try {
+    const result = await api(paused === null ? '/api/schedule/check' : '/api/schedule/control', {method:'POST',body:JSON.stringify(paused === null ? {} : {paused})});
+    scheduleControlUnknown = false;
+    if (overview) {overview.health.schedule = result.schedule; overview.schedule_control = result.control;}
+    byId('schedule-control-detail').textContent = result.control.pending ? 'The requested state is not confirmed yet. No control was resent; check again later.' : result.schedule.paused ? 'Monitoring schedule is paused. Existing work can finish.' : 'Monitoring schedule is running. It will fire at the next scheduled time; missed scans are not replayed.';
+    notice(byId('schedule-control-detail').textContent, result.control.pending);
+    // A subsequent display read must not turn a confirmed control into an
+    // ambiguous failure or enable a second mutation while the first is pending.
+    try {await refresh();} catch (error) {notice(`${byId('schedule-control-detail').textContent} Display refresh failed: ${error.message}`, true);}
+  } catch (error) {
+    if (paused !== null) scheduleControlUnknown = true;
+    byId('schedule-control-detail').textContent = `${error.message} Check schedule state before another change.`;
+    notice(byId('schedule-control-detail').textContent, true);
+  } finally {
+    scheduleControlBusy = false;
+    renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
+  }
+}
+byId('pause-schedule').addEventListener('click', () => controlSchedule(true));
+byId('resume-schedule').addEventListener('click', () => controlSchedule(false));
+byId('check-schedule').addEventListener('click', () => controlSchedule(null));
+
 byId('schedule-form').addEventListener('submit', async event => {
   event.preventDefault(); scheduleDraft = null; byId('schedule-draft').hidden = true;
   const password = byId('administrator-password').value; byId('administrator-password').value = '';

@@ -115,6 +115,16 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
         .findFirst();
   }
 
+  public Optional<Source> sourceOf(String name) {
+    return jdbc
+        .query(
+            SOURCE_QUERY + " JOIN schedule_files f ON f.source_id=s.id WHERE f.internal_name=?",
+            JdbcScheduleDefinitionStore::source,
+            name)
+        .stream()
+        .findFirst();
+  }
+
   public boolean requiresDefinition(String internalName, String account) {
     return Boolean.TRUE.equals(
         jdbc.queryForObject(

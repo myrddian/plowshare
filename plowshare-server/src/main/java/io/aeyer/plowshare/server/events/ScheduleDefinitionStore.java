@@ -39,6 +39,9 @@ public interface ScheduleDefinitionStore {
 
   Optional<Source> sourceOf(String internalName, String account);
 
+  /** Resolve runtime provenance only; callers must authorize before exposing or controlling it. */
+  Optional<Source> sourceOf(String internalName);
+
   ScheduledWork.File apply(Source source, String name, ScheduledWork definition, Instant now);
 
   /**

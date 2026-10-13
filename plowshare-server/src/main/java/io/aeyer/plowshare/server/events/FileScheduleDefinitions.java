@@ -14,18 +14,21 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   private final ProjectStore projects;
   private final ProjectMembers members;
   private final Authority authority;
+  private final ScheduleControlAuthority controls;
 
   public FileScheduleDefinitions(
       ScheduleDefinitionStore store,
       ScheduleFiles files,
       ProjectStore projects,
       ProjectMembers members,
-      Authority authority) {
+      Authority authority,
+      ScheduleControlAuthority controls) {
     this.store = store;
     this.files = files;
     this.projects = projects;
     this.members = members;
     this.authority = authority;
+    this.controls = controls;
   }
 
   public ScheduledWork.File save(String account, ScheduledWork.Save request) {
@@ -102,17 +105,24 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
 
   public boolean pause(String internal, boolean paused, String account) {
     var source = store.sourceOf(internal, account);
+    if (source.isEmpty()) source = store.sourceOf(internal);
     if (source.isEmpty()) return false;
+    boolean application = files.applicationOwned(source.get());
+    if (application) controls.requireApplicationControl(source.get(), account);
+    else if (!source.get().account().equals(account)) return false;
+    // Operational authority precedes IO/reconciliation so unauthorized control cannot suspend
+    // another account's projection. Registration and execution ownership are never transferred.
     requireComplete(reconcile(source.get()));
     var file =
         store
-            .managed(internal, account)
+            .managed(internal, source.get().account())
             .orElseThrow(() -> new CallerFault("The schedule file was removed"));
     if (file.definition() == null || !file.status().equals("active"))
       throw new CallerFault("Repair this schedule file before changing it");
     var old = file.definition();
-    if (files.applicationOwned(source.get())) {
-      manage(source.get());
+    if (application) {
+      // Re-read permissions after source IO; revocation also applies to an existing connection.
+      controls.requireApplicationControl(source.get(), account);
       authority.validate(source.get(), old);
       store.pause(source.get(), file.name(), old, paused, Instant.now());
       return true;

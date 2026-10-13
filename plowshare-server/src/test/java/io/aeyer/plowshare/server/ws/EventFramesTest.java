@@ -447,4 +447,55 @@ class EventFramesTest {
     verify(schedules, never()).define(any(), any(), any(), any(), any());
     verify(triggers, never()).define(any());
   }
+
+  @Test
+  void applicationOperationalControlUsesTheCurrentActorWithoutAnOwnerPrecheck() {
+    var definitions = mock(io.aeyer.plowshare.server.events.ScheduleDefinitions.class);
+    org.springframework.beans.factory.ObjectProvider<
+            io.aeyer.plowshare.server.events.ScheduleDefinitions>
+        provider = mockProvider(definitions);
+    var frames =
+        new EventFrames(schedules, triggers, firings, intake, callers, reader, () -> FIXED);
+    frames.useScheduleDefinitions(provider);
+    when(definitions.pause("application-schedule", true, "enzo")).thenReturn(true);
+    var outcome =
+        frames
+            .frames()
+            .get(FrameTypes.SCHEDULE_PAUSE)
+            .handle(Map.of("schedule", "application-schedule", "paused", true), SIGNED_IN);
+    assertEquals(Code.NO_CONTENT, outcome.code());
+    verify(definitions).pause("application-schedule", true, "enzo");
+    verify(definitions, never()).managed(any(), any());
+    verify(schedules, never()).pause(any(), anyBoolean(), any());
+  }
+
+  @Test
+  void refusedApplicationControlCannotFallThroughToLegacyPause() {
+    var definitions = mock(io.aeyer.plowshare.server.events.ScheduleDefinitions.class);
+    org.springframework.beans.factory.ObjectProvider<
+            io.aeyer.plowshare.server.events.ScheduleDefinitions>
+        provider = mockProvider(definitions);
+    var frames =
+        new EventFrames(schedules, triggers, firings, intake, callers, reader, () -> FIXED);
+    frames.useScheduleDefinitions(provider);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("revoked"))
+        .when(definitions)
+        .pause("application-schedule", false, "enzo");
+    org.junit.jupiter.api.Assertions.assertThrows(
+        RuntimeException.class,
+        () ->
+            frames
+                .frames()
+                .get(FrameTypes.SCHEDULE_PAUSE)
+                .handle(Map.of("schedule", "application-schedule", "paused", false), SIGNED_IN));
+    verify(schedules, never()).pause(any(), anyBoolean(), any());
+  }
+
+  private static org.springframework.beans.factory.ObjectProvider<
+          io.aeyer.plowshare.server.events.ScheduleDefinitions>
+      mockProvider(io.aeyer.plowshare.server.events.ScheduleDefinitions definitions) {
+    return new org.springframework.beans.factory.support.StaticListableBeanFactory(
+            Map.of("definitions", definitions))
+        .getBeanProvider(io.aeyer.plowshare.server.events.ScheduleDefinitions.class);
+  }
 }

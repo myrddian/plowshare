@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from support import EXAMPLES, CountingCollector, FixturePort, configuration
 
 from plowshare_privacy.collection import NetworkCollector
 from plowshare_privacy.collector_factory import configured_collector
-from plowshare_privacy.contracts import Configuration, DeviceLabel, utc_now
+from plowshare_privacy.contracts import Configuration, DeviceLabel, PiHolePlan, utc_now
 from plowshare_privacy.discovery import LocalDeviceDiscovery
 from plowshare_privacy.journal import FileReceipts, Publication, Receipt
 from plowshare_privacy.monitor import FileMonitorSettings, MonitorChoice, SettingsBusy
@@ -65,10 +66,14 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
     async def test_enable_and_change_scope_without_restart_preserves_history(
         self,
     ) -> None:
-        await self.settings.save(CHOICE)
+        saved = await self.settings.save(CHOICE)
+        self.assertTrue(saved.pending)
+        self.assertFalse(self.worker.config.collection.enabled)
+        await self.settings.apply_pending()
         self.assertTrue(self.worker.config.collection.enabled)
         self.assertEqual(Configuration.read(self.path), self.worker.config)
         await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
+        await self.settings.apply_pending()
         self.assertEqual(self.worker.config.collection.targets, ("192.168.0.13",))
         self.assertEqual(json.loads(self.receipts.path.read_text())["version"], 2)
         # A scope edited behind the operator boundary still fails the restart fence.
@@ -86,6 +91,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_completed_evidence_survives_scope_change_and_restart(self) -> None:
         await self.settings.save(CHOICE)
+        await self.settings.apply_pending()
         origin = str(uuid4())
         scan = str(uuid4())
         fixture = configuration(self.root)
@@ -102,6 +108,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         self.receipts.save(receipt)
         self.receipts.save_publication(Publication(origin, utc_now(), "published"))
         await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
+        await self.settings.apply_pending()
         self.assertEqual(self.receipts.all(), (receipt,))
         self.close_receipts()
         with FileReceipts(Configuration.read(self.path)) as reopened:
@@ -142,22 +149,134 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(iter(response.cookies.values()))["max-age"], "0")
         self.assertFalse(self.worker.config.collection.enabled)
 
-    async def test_queued_unknown_and_published_unconsumed_work_block_edits(
+    async def test_unsettled_publications_allow_saving_but_fence_activation(
         self,
     ) -> None:
         identity = str(uuid4())
         self.receipts.save_publication(Publication(identity, utc_now(), "pending"))
-        with self.assertRaises(SettingsBusy):
-            await self.settings.save(CHOICE)
+        journal = self.receipts.path.read_bytes()
+        saved = await self.settings.save(CHOICE)
+        self.assertTrue(saved.pending)
+        self.assertTrue(saved.editable)
+        self.assertIn("Settings saved", saved.detail)
+        self.assertIn("scan request", saved.detail)
+        await self.settings.apply_pending()
+        self.assertEqual(self.receipts.path.read_bytes(), journal)
         self.receipts.save_publication(
             Publication(
                 identity, self.receipts.publications()[0].occurred_at, "published"
             )
         )
-        with self.assertRaises(SettingsBusy):
-            await self.settings.save(CHOICE)
+        await self.settings.apply_pending()
         self.assertEqual(Configuration.read(self.path), self.config)
         self.assertEqual(self.worker.config, self.config)
+        self.assertTrue(self.settings.pending_path.exists())
+
+    async def test_disconnected_and_busy_save_survives_restart_and_merges_edits(
+        self,
+    ) -> None:
+        self.worker.state = "attention_required"
+        async with self.worker.lock, self.worker.request_lock:
+            saved = await asyncio.wait_for(self.settings.save(CHOICE), 1)
+        self.assertTrue(saved.editable)
+        self.assertTrue(saved.pending)
+        self.assertIn("stopped", saved.detail)
+        self.assertEqual(self.settings.pending_path.stat().st_mode & 0o777, 0o600)
+        await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
+        await self.settings.apply_pending()
+        self.assertEqual(self.worker.config, self.config)
+        self.close_receipts()
+        with FileReceipts(self.config) as reopened:
+            worker = Worker(
+                self.config,
+                FixturePort(self.config),
+                reopened,
+                NetworkCollector(self.config.collector, self.config.collection),
+            )
+            settings = FileMonitorSettings(self.path, worker, reopened)
+            self.assertEqual(settings.view().targets, ("192.168.0.13",))
+            await settings.apply_pending()
+            self.assertFalse(settings.view().pending)
+            self.assertFalse(settings.pending_path.exists())
+            self.assertEqual(worker.config.collection.targets, ("192.168.0.13",))
+            self.assertEqual(Configuration.read(self.path), worker.config)
+
+    async def test_unknown_scan_keeps_its_original_scope_after_save(self) -> None:
+        origin, scan = str(uuid4()), str(uuid4())
+        evidence = await CountingCollector(configuration(self.root)).collect(
+            scan, origin, None, None
+        )
+        receipt = Receipt(
+            scan, origin, self.config.request_topic, utc_now(), "uploading", evidence
+        )
+        self.receipts.save(receipt)
+        journal = self.receipts.path.read_bytes()
+        await self.settings.save(CHOICE)
+        await self.settings.apply_pending()
+        self.assertEqual(self.receipts.path.read_bytes(), journal)
+        self.assertEqual(self.worker.config, self.config)
+        self.assertIn("unfinished", self.settings.view().detail)
+
+    async def test_invalid_scope_does_not_overwrite_saved_configuration(self) -> None:
+        await self.settings.save(CHOICE)
+        pending = self.settings.pending_path.read_bytes()
+        row = json.loads(self.path.read_text())
+        row["project"] = "another-project"
+        self.path.write_text(json.dumps(row))
+        # The active file changed outside the dashboard, not the desired plan.
+        # Activation must refuse rather than silently overwrite that external edit.
+        with self.assertRaises(SettingsBusy):
+            await self.settings.apply_pending()
+        self.assertEqual(self.settings.pending_path.read_bytes(), pending)
+
+    async def test_pending_pihole_and_monitoring_saves_preserve_each_other(
+        self,
+    ) -> None:
+        secret = self.root / "fixture-pihole-password"
+        secret.write_text("fixture-secret")
+        secret.chmod(0o600)
+        pihole = PiHolePlan.decode(
+            {"origin": "https://pihole.example", "passwordFile": str(secret)}
+        )
+        await self.settings.save(CHOICE)
+        await self.settings.save_pihole(pihole)
+        self.assertEqual(self.settings.view().targets, CHOICE.targets)
+        self.assertTrue(self.settings.view().pihole_configured)
+        await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
+        self.assertEqual(
+            Configuration.read(self.settings.pending_path).collection.pihole, pihole
+        )
+        self.assertEqual(self.worker.config, self.config)
+        await self.settings.apply_pending()
+        self.assertEqual(self.worker.config.collection.targets, ("192.168.0.13",))
+        self.assertEqual(self.worker.config.collection.pihole, pihole)
+
+    async def test_worker_applies_saved_settings_before_new_intake(self) -> None:
+        await self.settings.save(CHOICE)
+        stop = asyncio.Event()
+
+        async def intake() -> None:
+            self.assertEqual(self.worker.config.collection.targets, CHOICE.targets)
+            self.assertFalse(self.settings.view().pending)
+            stop.set()
+
+        with patch.object(self.worker, "poll", side_effect=intake):
+            await self.worker.run(stop, apply_settings=self.settings.apply_pending)
+
+    async def test_activation_failure_keeps_durably_saved_settings(self) -> None:
+        await self.settings.save(CHOICE)
+        pending = self.settings.pending_path.read_bytes()
+        with patch(
+            "plowshare_privacy.monitor.replace_private",
+            side_effect=OSError("fixture disk failure"),
+        ):
+            with self.assertRaises(OSError):
+                await self.settings.apply_pending()
+        self.assertEqual(self.settings.pending_path.read_bytes(), pending)
+        self.assertTrue(self.settings.view().pending)
+        self.assertEqual(Configuration.read(self.path), self.config)
+        await self.settings.apply_pending()
+        self.assertFalse(self.settings.view().pending)
 
     async def test_config_failure_keeps_old_plan_and_readable_journal(self) -> None:
         with patch(
@@ -173,13 +292,14 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reopened.all(), ())
 
     async def test_crash_after_configuration_can_restart_new_scope(self) -> None:
+        await self.settings.save(CHOICE)
         with patch.object(
             self.receipts,
             "complete_scope_change",
             side_effect=OSError("fixture interruption"),
         ):
             with self.assertRaises(OSError):
-                await self.settings.save(CHOICE)
+                await self.settings.apply_pending()
         saved = Configuration.read(self.path)
         self.close_receipts()
         with FileReceipts(saved) as reopened:
@@ -222,6 +342,8 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(response.status, 200)
             scan.assert_not_called()
+        self.assertTrue((await self.settings.save(CHOICE)).pending)
+        await self.settings.apply_pending()
         self.assertTrue(self.worker.config.collection.enabled)
 
     def test_scope_validation_refuses_extra_fields_and_unbounded_probes(self) -> None:
@@ -278,6 +400,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.settings.view().labels, view.labels)
         await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
         self.assertEqual(self.settings.view().labels, ())
+        await self.settings.apply_pending()
         self.assertEqual(
             Configuration.read(self.path).collection.pihole,
             self.worker.config.collection.pihole,

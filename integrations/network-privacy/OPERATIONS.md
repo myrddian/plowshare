@@ -13,10 +13,11 @@ and Pi-hole. Plowshare does not start or host this external process.
    addresses and eight TCP ports, add names and save monitoring.
 2. Optionally expand **Connect Pi-hole v6**. Supply its HTTP(S) origin and an
    application password. **Test connection** authenticates and reads device
-   records without querying DNS or saving the password. Enter the password again
-   for **Test and save connection**. A successful read can still report missing,
-   stale or ambiguous device associations. Saving requires an idle collector,
-   writes a new private password file and begins a new comparison baseline.
+   records without querying DNS or saving the password. **Save connection** stores
+   the connection and password independently of connectivity; testing is optional.
+   A successful read can still report missing, stale or ambiguous associations.
+   Saved changes wait for earlier scan work to settle before activation and a new
+   comparison baseline.
 3. **Request a scan**. Read its observation time, scope, coverage gaps and evidence.
    A completed collection does not mean an investigation has completed.
 4. Expand **Investigation and alert preferences** to choose automatic admission,
@@ -45,6 +46,30 @@ deployment operations. Administrator credentials are never saved or used by
 collection. A newer Application deployed outside this setup is refused until an
 operator reviews and synchronizes the private prepared source and its receipt.
 The server may need a reconciliation pass before the new schedule is visible.
+
+## Save configuration independently of connections
+
+**Save monitoring** and **Save connection** store validated settings locally even
+when Plowshare or Pi-hole is disconnected, or earlier scan work needs attention.
+**Saved connection** reports whether a Pi-hole connection and password have been
+stored. **Test connection** is optional; it checks the supplied password without
+saving it. Saving never tests a connection, starts a scan or resumes a schedule.
+The password field clears after either action for privacy; an empty field does
+not mean that the saved password was lost.
+
+The dashboard separates **saved** settings from **active** settings. Changes are
+stored in a private pending configuration beside the collector configuration.
+They apply automatically before the next collection pass once the worker is idle
+and its earlier receipts are settled. Pending settings survive a restart; further
+saves update the desired configuration without losing other pending fields. Old
+scan work retains its original scope, evidence and receipt identities.
+
+If settings are waiting to apply, saving still works. Wait for an active scan,
+or use **Check and resume** under **System health** after resolving a connection
+failure. This checks existing work without resending uncertain effects. A failed
+optional connection test does not remove saved settings. A later dashboard
+refresh failure does not undo a confirmed save. Invalid input and local storage
+failures are reported separately from connection or activation problems.
 
 ## Read health, devices and findings
 
@@ -212,10 +237,13 @@ also works with the previous Application completion route, which already skips
 empty changes. Deploy the updated Application package through its normal reviewed
 workflow when updating its route; no core server or SDK change is required here.
 
-The service token cannot inspect global schedule runtime status; the dashboard
-labels that read unavailable without marking the project connection broken.
-Use administrator `schedule list` / `schedule files` or the explicit schedule
-editor to inspect/change it. Tool visibility comes from a current unmeasured
+The application service token reads its project-scoped schedule runtime status.
+A successful read shows the current pause state; a missing schedule is reported
+separately from failed connection or permission checks. Operational pause/resume
+uses a project manager's Plowshare CLI, TUI, desktop or web-console session;
+it does not redeploy the Application. The dashboard's schedule revision editor
+requires a deployment-administrator login because it changes Application source.
+Tool visibility comes from a current unmeasured
 context projection of an existing project conversation, not declared agent grants.
 Before a project conversation exists, visibility remains unknown.
 

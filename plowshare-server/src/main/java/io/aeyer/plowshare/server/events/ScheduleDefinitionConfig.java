@@ -60,7 +60,14 @@ public class ScheduleDefinitionConfig {
       ScheduleFiles files,
       ProjectStore projects,
       ProjectMembers members,
-      ScheduleDefinitions.Authority authority) {
-    return new FileScheduleDefinitions(store, files, projects, members, authority);
+      ScheduleDefinitions.Authority authority,
+      ApplicationResources resources) {
+    return new FileScheduleDefinitions(
+        store,
+        files,
+        projects,
+        members,
+        authority,
+        new ApplicationScheduleControlAuthority(resources, members));
   }
 }

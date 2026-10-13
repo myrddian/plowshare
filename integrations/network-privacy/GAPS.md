@@ -90,3 +90,14 @@ validation with agent definitions. Setting it to zero is refused; it is not a
 supported way to enforce a native-only definition today. A general native-only
 metadata contract would remove the unnecessary model binding/allowance. This
 Application does not request inference from its tick script.
+
+## Schedule control for service-owned Applications
+
+Resolved in source by [ADR 0020](../../docs/decisions/0020-application-schedule-operational-authority.md),
+a separately authorized general platform fix. The server now admits the explicit
+manifest execution account with current effective Contributor access, or a project
+Manager, for operational control of that Application's schedules. Historical
+registrar ownership is preserved. The worker gains no definition/deployment or
+permission-management authority. The dashboard uses its scoped service connection
+without requesting a human password. Deploy the server fix before updating it;
+older servers still apply the registered-owner/Manager restriction.

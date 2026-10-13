@@ -41,7 +41,9 @@ public interface ScheduleDefinitions {
 
   /**
    * Controls update both runtime projections. Mutable sources also rewrite desired files; deployed
-   * Applications retain an operational override without modifying the release.
+   * Applications retain an operational override without modifying the release. Current managers or
+   * the explicitly bound execution account with CONTRIBUTOR access may control an Application
+   * irrespective of its historical registrar. Mutable/legacy schedules retain owner boundaries.
    */
   boolean pause(String internal, boolean paused, String account);
 

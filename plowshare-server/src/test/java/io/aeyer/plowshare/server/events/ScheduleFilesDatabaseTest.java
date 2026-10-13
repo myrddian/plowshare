@@ -235,4 +235,16 @@ class ScheduleFilesDatabaseTest {
             source.id(),
             "daily"));
   }
+
+  @Test
+  void runtimeProvenanceLookupDoesNotTransferRegistrarOwnership() {
+    var file =
+        store.apply(
+            source, "daily", ScheduleDefinitionCodecTest.definition("agent", null, null), NOW);
+    assertEquals(source, store.sourceOf(file.internalName()).orElseThrow());
+    assertEquals(source, store.sourceOf(file.internalName(), "owner").orElseThrow());
+    assertTrue(store.sourceOf(file.internalName(), "other").isEmpty());
+    assertTrue(store.managed(file.internalName(), "other").isEmpty());
+    assertTrue(store.sourceOf("unregistered").isEmpty());
+  }
 }
