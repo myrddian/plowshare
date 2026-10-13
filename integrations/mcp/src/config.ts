@@ -36,6 +36,17 @@ function fields(
   if (Object.keys(raw).some((key) => !allowed.includes(key)))
     throw new Error('Unknown MCP configuration field');
 }
+/** Timeouts must come from the deployment file, never a hidden adapter or SDK fallback. */
+function timeout(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined)
+    throw new Error(`Missing required configuration timeout: ${name}`);
+  return integer(value, min, max);
+}
 function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean')
     throw new Error('Expected an explicit MCP network policy');
@@ -60,11 +71,6 @@ function limits(
   if (Object.values(raw).some((value) => value === null))
     throw new Error('Null MCP limit');
   return Object.freeze({
-    maxTools: integer(
-      raw.maxTools ?? inherited.maxTools,
-      1,
-      LIMIT_CEILINGS.maxTools,
-    ),
     maxPages: integer(
       raw.maxPages ?? inherited.maxPages,
       1,
@@ -173,11 +179,16 @@ export function decodeConfig(source: unknown): IntegrationConfig {
       options: Object.freeze({
         protocol,
         limits: budget,
-        timeoutSeconds: integer(effective.timeoutSeconds ?? 30, 1, 300),
+        timeoutSeconds: timeout(
+          effective.timeoutSeconds,
+          'timeoutSeconds',
+          1,
+          300,
+        ),
         policy: Object.freeze({
           allowHttp: boolean(effective.allowHttp),
           allowPrivateNetwork: boolean(effective.allowPrivateNetwork),
-          timeoutMs: integer(effective.timeoutMs ?? 10000, 100, 300000),
+          timeoutMs: timeout(effective.timeoutMs, 'timeoutMs', 100, 300000),
           maxWireBytes: budget.maxWireBytes,
         }),
       }),
@@ -190,7 +201,12 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     tokenEnvironment,
     journalDirectory,
     pollMs,
-    requestTimeoutMs: integer(raw.requestTimeoutMs ?? 30000, 100, 300000),
+    requestTimeoutMs: timeout(
+      raw.requestTimeoutMs,
+      'requestTimeoutMs',
+      100,
+      300000,
+    ),
     clientInfo,
     maxRecoveryCatalogues: integer(raw.maxRecoveryCatalogues ?? 128, 1, 4096),
     workers: Object.freeze(workers),

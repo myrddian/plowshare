@@ -8,6 +8,7 @@ const base = {
   origin: 'https://example.invalid',
   tokenEnvironment: 'TOKEN',
   journalDirectory: '/tmp/mcp-config-fixture',
+  requestTimeoutMs: 7000,
 };
 const policy = {
   protocol: '2026-07-28',
@@ -15,7 +16,7 @@ const policy = {
   allowPrivateNetwork: false,
 };
 
-await test('existing configurations retain defaults and shared policy merges independent binding overrides', () => {
+await test('configured timeout defaults and shared policy merge independent binding overrides', () => {
   const legacy = decodeConfig({
     ...base,
     pollMs: 50,
@@ -29,7 +30,7 @@ await test('existing configurations retain defaults and shared policy merges ind
       },
     ],
   });
-  assert.equal(legacy.requestTimeoutMs, 30000);
+  assert.equal(legacy.requestTimeoutMs, 7000);
   assert.equal(legacy.workers[0]?.pollMs, 50);
   assert.deepEqual(legacy.workers[0]?.options.limits, DEFAULT_LIMITS);
   const config = decodeConfig({
@@ -43,10 +44,15 @@ await test('existing configurations retain defaults and shared policy merges ind
       timeoutSeconds: 60,
       pollMs: 200,
       renewalFraction: 0.2,
-      limits: { maxPages: 80, maxWireBytes: 2000000, maxTools: 20 },
+      limits: { maxPages: 80, maxWireBytes: 2000000, maxContentBlocks: 20 },
     },
     workers: [
-      { binding: id, generation: 1, pollMs: 100, limits: { maxTools: 5 } },
+      {
+        binding: id,
+        generation: 1,
+        pollMs: 100,
+        limits: { maxContentBlocks: 5 },
+      },
       {
         binding: secondId,
         generation: 2,
@@ -60,8 +66,8 @@ await test('existing configurations retain defaults and shared policy merges ind
   assert.ok(first);
   assert.ok(second);
   assert.equal(first.options.limits?.maxPages, 80);
-  assert.equal(first.options.limits?.maxTools, 5);
-  assert.equal(second.options.limits?.maxTools, 20);
+  assert.equal(first.options.limits?.maxContentBlocks, 5);
+  assert.equal(second.options.limits?.maxContentBlocks, 20);
   assert.equal(first.options.policy.maxWireBytes, 2000000);
   assert.equal(first.options.policy.timeoutMs, 4000);
   assert.equal(second.options.policy.timeoutMs, 8000);
@@ -78,16 +84,22 @@ await test('existing configurations retain defaults and shared policy merges ind
 });
 
 await test('rejects invalid budgets, unknown settings and hidden policy defaults before startup', () => {
-  const worker = { ...policy, binding: id, generation: 1 };
+  const worker = {
+    ...policy,
+    binding: id,
+    generation: 1,
+    timeoutMs: 4000,
+    timeoutSeconds: 60,
+  };
   for (const limits of [
-    { maxTools: 129 },
+    { maxTools: 128 },
     { maxPages: 0 },
     { maxPages: 1.5 },
     { maxWireBytes: 16777217 },
     { maxCatalogueBytes: 60001 },
     { maxResultBytes: 16385 },
     { maxContentBlocks: 0 },
-    { maxTools: null },
+    { maxPages: null },
     { typo: 1 },
   ])
     assert.throws(() =>
@@ -109,7 +121,7 @@ await test('rejects invalid budgets, unknown settings and hidden policy defaults
     { maxWorkers: 0 },
     { maxRecoveryCatalogues: 4097 },
     { defaults: { timeoutMs: 0 } },
-    { defaults: { limits: { maxTools: 129 } } },
+    { defaults: { limits: { maxTools: 128 } } },
     { clientInfo: { name: 'client', version: '1', extra: true } },
   ])
     assert.throws(() =>
@@ -129,4 +141,50 @@ await test('rejects invalid budgets, unknown settings and hidden policy defaults
   assert.throws(() =>
     decodeConfig({ ...base, workers: [{ binding: id, generation: 1 }] }),
   );
+});
+
+await test('every timeout is configuration controlled and missing defaults cannot invoke SDK fallbacks', () => {
+  const worker = {
+    ...policy,
+    binding: id,
+    generation: 1,
+    timeoutMs: 4000,
+    timeoutSeconds: 60,
+  };
+  assert.throws(
+    () =>
+      decodeConfig({ ...base, requestTimeoutMs: undefined, workers: [worker] }),
+    /requestTimeoutMs/,
+  );
+  assert.throws(
+    () =>
+      decodeConfig({ ...base, workers: [{ ...worker, timeoutMs: undefined }] }),
+    /timeoutMs/,
+  );
+  assert.throws(
+    () =>
+      decodeConfig({
+        ...base,
+        workers: [{ ...worker, timeoutSeconds: undefined }],
+      }),
+    /timeoutSeconds/,
+  );
+  const config = decodeConfig({
+    ...base,
+    defaults: { timeoutMs: 9000, timeoutSeconds: 90 },
+    workers: [
+      { ...policy, binding: id, generation: 1 },
+      {
+        ...policy,
+        binding: secondId,
+        generation: 1,
+        timeoutMs: 4000,
+        timeoutSeconds: 60,
+      },
+    ],
+  });
+  assert.equal(config.workers[0]?.options.policy.timeoutMs, 9000);
+  assert.equal(config.workers[0]?.options.timeoutSeconds, 90);
+  assert.equal(config.workers[1]?.options.policy.timeoutMs, 4000);
+  assert.equal(config.workers[1]?.options.timeoutSeconds, 60);
 });

@@ -21,6 +21,7 @@ import {
 import { FileToolJournal, durablePrivateWrite } from './journal.ts';
 import { object, text } from './codec.ts';
 import { rejected } from './contracts.ts';
+import { PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { ProviderConnection } from './provider.ts';
 
 export interface RecoveryCatalogue {
@@ -107,7 +108,7 @@ export class FileRecoveryCatalogues implements RecoveryCatalogues {
       if (
         !Array.isArray(raw.declarations) ||
         !raw.declarations.length ||
-        raw.declarations.length > 128
+        raw.declarations.length > PROVIDER_CATALOGUE_TOOL_LIMIT
       )
         throw new Error('Invalid retained MCP catalogue');
       const sources: readonly unknown[] = raw.declarations;

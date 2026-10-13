@@ -26,7 +26,7 @@ import type {
   HttpPolicy,
 } from './contracts.ts';
 import { rejected, unknownResult, withinDeadline } from './contracts.ts';
-import { DEFAULT_LIMITS } from './settings.ts';
+import { DEFAULT_LIMITS, PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { McpLimits } from './settings.ts';
 import { contractHash, declaration, result } from './codec.ts';
 import type { CataloguePublicationIntent } from './journal.ts';
@@ -108,7 +108,7 @@ async function catalogue(
     const next = await session.page(cursor, signal);
     tools.push(...next.tools);
     if (
-      tools.length > limits.maxTools ||
+      tools.length > PROVIDER_CATALOGUE_TOOL_LIMIT ||
       new Set(tools.map((tool) => tool.name)).size !== tools.length
     )
       throw new Error('Duplicate or oversized MCP catalogue');

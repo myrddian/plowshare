@@ -27,6 +27,8 @@ await test('runner registers with a retained UUID, publishes, stops intake and w
     origin: 'https://example.invalid',
     tokenEnvironment: 'TOKEN',
     journalDirectory: directory,
+    requestTimeoutMs: 5000,
+    defaults: { timeoutMs: 2000, timeoutSeconds: 30 },
     pollMs: 50,
     workers: [
       {

@@ -78,8 +78,10 @@ remote references and other unsupported schema features. This is a bounded tools
 consumer, not complete MCP or JSON Schema conformance.
 See the [upstream tool contract](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
 
-Discovery defaults to 32 pages, 128 offered tools and 1 MiB per upstream HTTP
-request/response, with a configured finite total deadline. The HTTP integration
+Discovery defaults to 32 pages and 1 MiB per upstream HTTP request/response,
+with a configuration-supplied finite total deadline. The existing shared provider
+contract permits at most 128 tools per catalogue; this is not an MCP-specific
+configuration limit. The HTTP integration
 accepts shared defaults and per-binding overrides for discovery, payload and result
 budgets; see its [configuration reference](../integrations/mcp/README.md). Operator
 budgets remain within platform contract ceilings. Reject repeated cursors and

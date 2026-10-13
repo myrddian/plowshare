@@ -302,16 +302,10 @@ await test('existing ToolProvider publishes, polls, journals and reconciles by o
 
 await test('configured discovery budgets refuse whole catalogues and result budgets pin offered identity', async () => {
   for (const limits of [
-    { ...DEFAULT_LIMITS, maxTools: 1 },
     { ...DEFAULT_LIMITS, maxPages: 1 },
     { ...DEFAULT_LIMITS, maxCatalogueBytes: 1 },
   ]) {
     const sessions = new Sessions();
-    if (limits.maxTools === 1)
-      sessions.tools = [
-        decodeMcpTool(rawTool),
-        decodeMcpTool({ ...rawTool, name: 'another' }),
-      ];
     if (limits.maxPages === 1) sessions.nextCursor = 'next';
     await assert.rejects(
       McpProvider.discover(registration, new Credentials(), sessions, {
@@ -354,4 +348,17 @@ await test('configured discovery budgets refuse whole catalogues and result budg
     await normal.close();
     await restricted.close();
   }
+});
+
+await test('discovery respects the shared provider catalogue ceiling without an MCP maxTools setting', async () => {
+  const sessions = new Sessions();
+  sessions.tools = Array.from({ length: 129 }, (_, index) =>
+    decodeMcpTool({ ...rawTool, name: 'tool-' + index }),
+  );
+  await assert.rejects(
+    McpProvider.discover(registration, new Credentials(), sessions, options),
+    /oversized MCP catalogue/,
+  );
+  assert.equal(sessions.calls, 0);
+  assert.ok(sessions.closed);
 });

@@ -44,7 +44,6 @@ placeholders to replace with deployment configuration:
     "pollMs": 250,
     "renewalFraction": 0.3333333333333333,
     "limits": {
-      "maxTools": 128,
       "maxPages": 32,
       "maxWireBytes": 1048576,
       "maxCatalogueBytes": 60000,
@@ -65,14 +64,18 @@ placeholders to replace with deployment configuration:
 
 `defaults` applies to every binding. Worker fields override it; `limits` merges
 field by field, so overriding `maxPages` preserves the other budgets. Existing
-files with policy and timeout fields directly on each worker remain valid. Unknown
+policy and timeout fields directly on each worker remain supported. Each deployment
+must supply `requestTimeoutMs` at process level, and both `timeoutMs` and
+`timeoutSeconds` either in `defaults` or on every worker. There are no built-in
+timeout fallback values. When migrating an earlier file, add `requestTimeoutMs`
+and explicitly supply any MCP timeouts that were previously omitted. Unknown
 fields, null values, invalid types and out-of-range values fail before connection.
 Defaults are validated even when every worker overrides them. Resolved settings
 are immutable and never shared as mutable state between credential contexts.
 
 | Process setting | Default | Allowed value |
 | --- | --- | --- |
-| `requestTimeoutMs` | 30,000 | Integer 100–300,000; public Plowshare SDK request timeout |
+| `requestTimeoutMs` | Required explicitly | Integer 100–300,000; public Plowshare SDK request timeout |
 | `clientInfo` | Package name and version shown above | Explicit `name` and `version`, each 1–128 characters with no control characters |
 | `maxWorkers` | 32 | Integer 1–256; maximum configured bindings |
 | `maxRecoveryCatalogues` | 128 | Integer 1–4,096 per binding; bounds retained archive reads and new catalogue admission |
@@ -84,11 +87,10 @@ These settings belong in `defaults` or individual workers:
 | --- | --- | --- |
 | `protocol` | Required explicitly | `2026-07-28` or `2025-11-25` |
 | `allowHttp`, `allowPrivateNetwork` | Required explicitly | Boolean network permissions |
-| `timeoutMs` | 10,000 | Integer 100–300,000; total discovery/refresh deadline and individual MCP HTTP request timeout |
-| `timeoutSeconds` | 30 | Integer 1–300; offered invocation timeout, also bounded by the server invocation deadline |
+| `timeoutMs` | Configured shared default or required per worker | Integer 100–300,000; total discovery/refresh deadline and individual MCP HTTP request timeout |
+| `timeoutSeconds` | Configured shared default or required per worker | Integer 1–300; offered invocation timeout, also bounded by the server invocation deadline |
 | `pollMs` | Process value | Integer 50–10,000; idle intake interval |
 | `renewalFraction` | 1/3 | Number 0.05–0.5; renew after this fraction of the smaller of remaining lifetime and server lease |
-| `limits.maxTools` | 128 | Integer 1–128 across the complete catalogue |
 | `limits.maxPages` | 32 | Integer 1–1,024 per discovery/refresh |
 | `limits.maxWireBytes` | 1,048,576 | Integer 1–16,777,216 per HTTP request or response, including JSON/SSE framing |
 | `limits.maxCatalogueBytes` | 60,000 | Integer 1–60,000 of UTF-8 encoded declarations |
@@ -100,13 +102,17 @@ have their own finite deadlines; choose timeouts and renewal cadence to fit the
 server-owned lease. Very small budgets can deliberately refuse negotiation,
 discovery or results. Nothing is truncated or partially published to fit a budget.
 
+There is no adapter `maxTools` setting. The existing shared ToolProvider accepts
+at most 128 declarations per catalogue, so discovery fails early when an upstream
+catalogue cannot be published through that contract. MCP itself does not require
+this count limit. Lifting it requires a separate shared provider-contract change.
+
 The 128-tool, catalogue-envelope and result-text ceilings come from the public
 provider contracts; declarations retain headroom within the 64 KiB publication
 envelope. Schema/value limits, the 1,000-receipt SDK journal bound, 2 MiB private
 file bound, name/hash format and zero effect retries remain contract invariants.
 Operator settings cannot expand those contracts or enable redirects, automatic
 authentication retries, input continuation or disabled TLS verification.
-
 
 The environment variable contains the configured executor service account's
 Plowshare token. Upstream MCP credentials come exclusively from the server's

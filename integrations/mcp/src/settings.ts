@@ -1,6 +1,8 @@
+/** Mirrors the existing public ToolProvider catalogue contract; this is not an MCP tuning knob. */
+export const PROVIDER_CATALOGUE_TOOL_LIMIT = 128;
+
 /** Operator budgets may be tightened; platform-owned envelope ceilings remain enforced. */
 export interface McpLimits {
-  readonly maxTools: number;
   readonly maxPages: number;
   readonly maxWireBytes: number;
   readonly maxCatalogueBytes: number;
@@ -16,7 +18,6 @@ export const DEFAULT_CLIENT_INFO: McpClientInfo = Object.freeze({
   version: '0.1.0',
 });
 export const DEFAULT_LIMITS: McpLimits = Object.freeze({
-  maxTools: 128,
   maxPages: 32,
   maxWireBytes: 1_048_576,
   maxCatalogueBytes: 60000,
@@ -27,7 +28,6 @@ export const DEFAULT_LIMITS: McpLimits = Object.freeze({
  * The other ceilings bound operator-selected resource use rather than protocol semantics.
  */
 export const LIMIT_CEILINGS: McpLimits = Object.freeze({
-  maxTools: 128,
   maxPages: 1024,
   maxWireBytes: 16_777_216,
   maxCatalogueBytes: 60000,
