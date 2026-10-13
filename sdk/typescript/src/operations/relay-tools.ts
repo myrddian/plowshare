@@ -8,6 +8,7 @@ import type {
   RelayConsumeRequest,
   RelayAckRequest,
 } from './relay-ports.ts';
+import { validRelayText } from '../binding/relay-text.ts';
 import { ConnectionFault } from '../binding/connection.ts';
 import { fieldsOf } from './response.ts';
 import { requirePayload } from './sdk.ts';
@@ -567,7 +568,9 @@ export class ToolProvider {
         : 'plowshare-tool-catalog/1',
       tools,
     });
-    text(encoded, 65536);
+    // The complete catalogue may span transport chunks; Relay owns the payload ceiling.
+    if (!validRelayText(encoded))
+      throw new Error('Invalid Relay catalogue text');
     const topic = `tool.${this.binding.provider}.catalog`;
     const reply = requirePayload(
       await this.publishPort({

@@ -206,9 +206,9 @@ public record ApplicationServerSettings(
 
   public static Catalogue catalogue(String text) {
     try {
-      if (text.length() > 65536)
-        throw new IllegalArgumentException("Tool catalogue exceeds 64 KiB");
-      return JSON.readValue(text, Catalogue.class);
+      // Catalogue publication uses Relay TEXT; a transport chunk is not a declaration limit.
+      io.aeyer.plowshare.protocol.RelayPort.text(text);
+      return Objects.requireNonNull(JSON.readValue(text, Catalogue.class));
     } catch (IOException | IllegalArgumentException | NullPointerException invalid) {
       throw new CallerFault("Invalid tool catalogue declaration");
     }

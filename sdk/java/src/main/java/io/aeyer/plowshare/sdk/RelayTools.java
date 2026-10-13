@@ -648,7 +648,8 @@ public final class RelayTools {
                       ? "plowshare-tool-catalog/2"
                       : "plowshare-tool-catalog/1",
                   declarations));
-      text(text, 65536, false);
+      // Catalogues may span transport chunks; Relay owns the complete payload ceiling.
+      RelayPort.text(text);
       String topic = "tool." + binding.provider() + ".catalog";
       var reply =
           ports.publish(

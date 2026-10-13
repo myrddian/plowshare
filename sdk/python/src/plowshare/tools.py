@@ -468,7 +468,6 @@ class ToolProvider:
             ensure_ascii=True,
             separators=(",", ":"),
         )
-        _text(text, 65536)
         topic = f"tool.{self.provider}.catalog"
         reply = (
             await self._client.request(

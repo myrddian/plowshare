@@ -85,8 +85,10 @@ configuration limit. The HTTP integration
 accepts shared defaults and per-binding overrides for discovery, payload and result
 budgets; see its [configuration reference](../integrations/mcp/README.md). Operator
 budgets remain within platform contract ceilings. Reject repeated cursors and
-inconsistent pages. The existing 64 KiB catalogue, schema/value and invocation
-envelope limits also apply after conversion; these limits are cumulative.
+inconsistent pages. Complete catalogues follow Relay TEXT admission, independently
+of 64 KiB transport chunks. The adapter has an explicit publication-byte budget
+(1 MiB by default). Schema/value and invocation envelope limits also apply after
+conversion; these limits are cumulative.
 Use the retained execution deadline and configured timeout, at most 300 seconds.
 Progress does not extend that absolute limit.
 

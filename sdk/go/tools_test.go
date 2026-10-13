@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -162,10 +164,15 @@ func TestToolInterruptedIntentNeverExecutes(t *testing.T) {
 }
 
 func TestToolCataloguePublishWithdrawAndLostReplyDoNotExecuteOrReplay(t *testing.T) {
+	large := fixtureDeclaration
+	large.Parameters = nil
+	for i := 0; i < 24; i++ {
+		large.Parameters = append(large.Parameters, ToolParameter{Name: fmt.Sprintf("field_%d", i), Type: "STRING", Description: strings.Repeat("d", 4096)})
+	}
 	ports := &fixtureToolPorts{}
-	journal := &fixtureJournal{rows: map[string]ToolReceipt{}}
+	journal := &fixtureJournal{rows: map[string]ToolReceipt{}, declaration: &large}
 	calls := 0
-	provider, err := NewToolProvider(ports, fixtureBinding, []RegisteredTool{{fixtureDeclaration, func(context.Context, ToolCall) (ToolResult, error) {
+	provider, err := NewToolProvider(ports, fixtureBinding, []RegisteredTool{{large, func(context.Context, ToolCall) (ToolResult, error) {
 		calls++
 		return ToolResult{"COMPLETED", "unexpected"}, nil
 	}}}, journal)
@@ -174,6 +181,9 @@ func TestToolCataloguePublishWithdrawAndLostReplyDoNotExecuteOrReplay(t *testing
 	}
 	if err = provider.PublishCatalog(context.Background(), fixtureInvocation); err != nil {
 		t.Fatal(err)
+	}
+	if len(ports.published.Text) <= 65536 {
+		t.Fatal("catalogue did not span a transport chunk")
 	}
 	if ports.published.Topic != "tool.scanner.catalog" {
 		t.Fatal("wrong catalogue scope")

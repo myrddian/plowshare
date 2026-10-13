@@ -92,8 +92,10 @@ The SDK provider publishes its current declarations on the project-local
 `tool.<provider>.catalog` topic. Only the configured authenticated provider can
 publish. The server validates the entire snapshot before accepting it: version
 `plowshare-tool-catalog/1` for scalar declarations or `plowshare-tool-catalog/2`
-for snapshots with `inputSchema`, at most 128 distinct tools, 64 KiB total and
-allowed prefix. The [shared schema profile](tool-schemas.md) defines recursive inputs. Newest retained broker position
+for snapshots with `inputSchema`, at most 128 distinct tools and the allowed
+prefix. The complete publication follows Relay TEXT admission (5 MiB deployment
+default, configurable up to the 50 MiB portable ceiling), independently of the
+64 KiB transport chunks. The [shared schema profile](tool-schemas.md) defines recursive inputs. Newest retained broker position
 wins; client timestamps cannot extend the lease. Empty catalogues withdraw tools.
 If the latest publication has expired from broker retention, bootstrap tools are
 not revived. Discovery does not grant permissions: a new name is available only

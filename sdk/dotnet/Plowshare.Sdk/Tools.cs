@@ -144,7 +144,8 @@ public static class RelayTools
     {
         if (tools.Count > 128) throw new ArgumentException("Tool catalogue exceeds 128 declarations");
         var text = JsonSerializer.Serialize(new { version = tools.Any(tool => tool.InputSchema is not null) ? "plowshare-tool-catalog/2" : "plowshare-tool-catalog/1", tools }, Json);
-        Text(text, 65536); return text;
+        // RelayPublish validates the complete payload independently of transport chunks.
+        return text;
     }
     public static string ResultRequestId(string invocationId)
     {

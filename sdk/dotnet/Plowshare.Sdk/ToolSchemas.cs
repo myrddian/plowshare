@@ -120,7 +120,7 @@ public static class ToolSchemas
     /// <summary>Reject unknown keywords and null/absence ambiguity before returning typed declarations.</summary>
     public static SchemaDefinition Decode(string source)
     {
-        if (Encoding.UTF8.GetByteCount(source) > 65536) throw new ArgumentException("Schema exceeds byte bound");
+        if (Encoding.UTF8.GetByteCount(source) > 50 * 1024 * 1024) throw new ArgumentException("Schema exceeds byte bound");
         using var document = JsonDocument.Parse(source);
         Unique(document.RootElement);
         void Shape(JsonElement node, int depth)

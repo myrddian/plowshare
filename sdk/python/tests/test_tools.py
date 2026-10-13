@@ -301,6 +301,12 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
     async def test_catalogue_publish_withdraw_and_lost_reply_do_not_execute_or_replay(
         self,
     ) -> None:
+        large = replace(
+            DECLARATION,
+            parameters=tuple(
+                Parameter(f"field_{i}", "STRING", "d" * 4096, False) for i in range(24)
+            ),
+        )
         fixture = Fixture()
         executions = 0
 
@@ -313,7 +319,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
             port = server.sockets[0].getsockname()[1]
             with tempfile.TemporaryDirectory() as directory:
                 with SqliteToolJournal(
-                    Path(directory), configuration=CONFIG
+                    Path(directory),
+                    configuration=deployment_config(
+                        "fixture", "scanner", "provider", (large,)
+                    ),
                 ) as journal:
                     async with await Client.connect(
                         f"http://127.0.0.1:{port}",
@@ -326,12 +335,15 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             project="fixture",
                             provider="scanner",
                             account="provider",
-                            tools=(RegisteredTool(DECLARATION, handler),),
+                            tools=(RegisteredTool(large, handler),),
                             journal=journal,
                         )
                         await provider.publish_catalog(str(uuid4()))
                         publication = fixture.publication
                         assert publication is not None
+                        self.assertGreater(
+                            len(str(publication["text"]).encode()), 65536
+                        )
                         self.assertEqual(publication["topic"], "tool.scanner.catalog")
                         self.assertEqual(
                             json.loads(str(publication["text"]))["version"],

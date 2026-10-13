@@ -60,7 +60,9 @@ Schema structural/reference expansion and validation are limited to depth 64 and
 10,000 work steps. Schema collections have at most 10,000 entries; executable
 scalar constants/defaults/examples follow argument scalar bounds. Schema text
 annotations retain their vocabulary bounds: description 32,768 units, other text
-4,096. Catalogue snapshots retain the existing 64 KiB and 128-tool limits;
+4,096. Catalogue snapshots permit at most 128 tools and use the Relay TEXT payload
+contract (50 MiB portable UTF-8 ceiling; deployment admission defaults to 5 MiB).
+The 64 KiB transport chunk size does not limit the complete catalogue;
 requests retain their 32,768-unit envelope limit. These limits are cumulative:
 a structurally valid schema or argument may still exceed its enclosing envelope.
 No network reference loading or regular expression execution occurs.

@@ -392,3 +392,34 @@ await test('catalogue byte budgets include the complete public publication envel
     /publication budget/,
   );
 });
+
+await test('default catalogue budget admits metadata spanning multiple transport chunks', async () => {
+  const sessions = new Sessions();
+  sessions.tools = Array.from({ length: 80 }, (_, i) =>
+    decodeMcpTool({
+      ...rawTool,
+      name: `tool_${i}`,
+      description: 'd'.repeat(1024),
+    }),
+  );
+  const provider = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    sessions,
+    options,
+  );
+  try {
+    const bytes = Buffer.byteLength(
+      JSON.stringify({
+        version: 'plowshare-tool-catalog/2',
+        tools: provider.tools.map((tool) => tool.declaration),
+      }),
+    );
+    assert.ok(bytes > 65536);
+    assert.ok(bytes <= DEFAULT_LIMITS.maxCatalogueBytes);
+    assert.equal(provider.tools.length, 80);
+    assert.equal(sessions.calls, 0);
+  } finally {
+    await provider.close();
+  }
+});

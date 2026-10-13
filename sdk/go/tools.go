@@ -640,9 +640,6 @@ func (p *ToolProvider) catalog(ctx context.Context, requestID string, tools []To
 	if err != nil {
 		return err
 	}
-	if err := toolText(string(data), 65536, false); err != nil {
-		return err
-	}
 	topic := "tool." + p.binding.Provider + ".catalog"
 	reply, err := p.ports.RelayPublish(ctx, RelayPublishRequest{Project: p.binding.Project, Topic: topic, RequestId: requestID, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano), Text: string(data)})
 	if err != nil {

@@ -134,7 +134,7 @@ func (s *SchemaDefinition) UnmarshalJSON(data []byte) error {
 
 // DecodeToolSchema rejects duplicate/unknown fields before constructing a typed schema.
 func DecodeToolSchema(source string) (*SchemaDefinition, error) {
-	if len(source) > 65536 {
+	if len(source) > 50*1024*1024 {
 		return nil, errors.New("schema exceeds byte bound")
 	}
 	d := json.NewDecoder(strings.NewReader(source))

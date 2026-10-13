@@ -51,7 +51,7 @@ placeholders to replace with deployment configuration:
       "maxOfferedNameLength": 256,
       "maxPages": 32,
       "maxWireBytes": 1048576,
-      "maxCatalogueBytes": 60000,
+      "maxCatalogueBytes": 1048576,
       "maxResultBytes": 16384,
       "maxContentBlocks": 128
     }
@@ -103,7 +103,7 @@ These settings belong in `defaults` or individual workers:
 | `limits.maxOfferedNameLength` | 256 | Integer 36–256; full Plowshare name including prefix, slug and hash; actual prefix must leave room |
 | `limits.maxPages` | 32 | Positive safe integer per discovery/refresh |
 | `limits.maxWireBytes` | 1,048,576 | Positive safe integer per HTTP request or response, including JSON/SSE framing |
-| `limits.maxCatalogueBytes` | 60,000 | Integer 1–65,536 of UTF-8 encoded complete catalogue, including version and tools envelope |
+| `limits.maxCatalogueBytes` | 1,048,576 | Integer 1–52,428,800 of UTF-8 encoded complete catalogue, including version and tools envelope |
 | `limits.maxResultBytes` | 16,384 | Integer 1–16,384; encoded result must fit both character and UTF-8 byte budgets |
 | `limits.maxContentBlocks` | 128 | Positive safe integer of text blocks; aggregate result budget still applies |
 
@@ -117,9 +117,12 @@ at most 128 declarations per catalogue, so discovery fails early when an upstrea
 catalogue cannot be published through that contract. MCP itself does not require
 this count limit. Lifting it requires a separate shared provider-contract change.
 
-The 128-tool, catalogue-envelope and result-text ceilings come from the public
-provider contracts. The default 60,000-byte catalogue budget leaves headroom,
-but operators may use the full 65,536-byte envelope. The metadata profile bounds
+The 128-tool and result-text ceilings come from the public provider contracts.
+The catalogue budget defaults to 1 MiB and may be configured up to the Relay TEXT
+portable ceiling of 50 MiB. The server's deployment Relay admission defaults to
+5 MiB; publication must fit that policy and the adapter's private recovery-file
+budgets too. Transport uses 64 KiB chunks, with no one-chunk catalogue ceiling.
+The metadata profile bounds
 upstream names/descriptions at 4,096; offered names use the 256-character platform
 contract and provider prefixes use its 48-character limit. Larger-than-128 MCP
 names are accepted when configured; no recommendation is converted into a protocol

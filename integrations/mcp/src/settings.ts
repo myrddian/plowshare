@@ -1,3 +1,5 @@
+import { MAX_RELAY_TEXT_BYTES } from 'plowshare-client-ts/binding/relay-text';
+
 /** Mirrors the existing public ToolProvider catalogue contract; this is not an MCP tuning knob. */
 export const PROVIDER_CATALOGUE_TOOL_LIMIT = 128;
 
@@ -28,7 +30,7 @@ export const DEFAULT_LIMITS: McpLimits = Object.freeze({
   maxOfferedNameLength: 256,
   maxPages: 32,
   maxWireBytes: 1_048_576,
-  maxCatalogueBytes: 60000,
+  maxCatalogueBytes: 1_048_576,
   maxResultBytes: 16384,
   maxContentBlocks: 128,
 });
@@ -41,7 +43,7 @@ export const LIMIT_CEILINGS: McpLimits = Object.freeze({
   maxOfferedNameLength: 256,
   maxPages: Number.MAX_SAFE_INTEGER,
   maxWireBytes: Number.MAX_SAFE_INTEGER,
-  maxCatalogueBytes: 65536,
+  maxCatalogueBytes: MAX_RELAY_TEXT_BYTES,
   maxResultBytes: 16384,
   maxContentBlocks: Number.MAX_SAFE_INTEGER,
 });

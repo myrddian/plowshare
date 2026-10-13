@@ -67,6 +67,11 @@ public interface RelayToolRepository {
                       hosted.binding(), hosted.generation())
                   .equals(binding.provider())))
         throw new IllegalArgumentException("Foreign hosted invocation selection");
+      // Retained definitions include routing metadata and JSON escaping independently of wire
+      // chunks.
+      if (RelayToolCodec.write(binding).getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+          > io.aeyer.plowshare.protocol.RelayPort.MAX_ENCODED_PAYLOAD_BYTES)
+        throw new IllegalArgumentException("Tool definition exceeds retained payload bound");
       binding.validate(new RelayToolDefinition.Arguments(request.arguments()));
       if (RelayToolCodec.write(request).length() > 32768)
         throw new IllegalArgumentException("Tool request exceeds portable envelope bound");

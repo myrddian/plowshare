@@ -446,6 +446,15 @@ describe('Relay tool façade', () => {
 
 describe('live tool catalogue', () => {
   it('publishes and withdraws scoped metadata without executing or replaying handlers', async () => {
+    const large: ToolDeclaration = {
+      ...declaration,
+      parameters: Array.from({ length: 24 }, (_, i) => ({
+        name: `field_${i}`,
+        type: 'STRING',
+        description: 'd'.repeat(4096),
+        required: false,
+      })),
+    };
     const wire = new Wire();
     const client = new Plowshare({ socket: wire });
     let calls = 0;
@@ -454,22 +463,25 @@ describe('live tool catalogue', () => {
       binding,
       [
         {
-          declaration,
+          declaration: large,
           handler: async () => {
             calls++;
             return { state: 'COMPLETED', text: 'unexpected' };
           },
         },
       ],
-      new Journal(),
+      new Journal(large),
       host,
     );
     await provider.publishCatalog('11111111-1111-1111-1111-111111111111');
     expect(wire.published['topic']).toBe('tool.scanner.catalog');
     expect(wire.published['parentTopic']).toBeUndefined();
+    expect(Buffer.byteLength(String(wire.published['text']))).toBeGreaterThan(
+      65536,
+    );
     const first: unknown = JSON.parse(String(wire.published['text']));
     expect(fieldsOf(first)['version']).toBe('plowshare-tool-catalog/1');
-    expect(fieldsOf(first)['tools']).toEqual([declaration]);
+    expect(fieldsOf(first)['tools']).toEqual([large]);
     await provider.withdrawCatalog('22222222-2222-2222-2222-222222222222');
     const withdrawn: unknown = JSON.parse(String(wire.published['text']));
     expect(fieldsOf(withdrawn)['tools']).toEqual([]);

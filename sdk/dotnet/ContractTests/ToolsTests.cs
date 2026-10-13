@@ -21,9 +21,11 @@ internal static class ToolFacadeChecks
             catch (Exception error) when (error is ArgumentException or JsonException or InvalidOperationException or FormatException) { accepted = false; }
             if (accepted != sample.GetProperty("valid").GetBoolean()) throw new Exception("Tool boundary differs: " + sample.GetProperty("name").GetString());
         }
+        var large = Declaration with { Parameters = Enumerable.Range(0,24).Select(i => new ToolParameter($"field_{i}","STRING",new string('d',4096),false)).ToArray() };
         var catalogueWire = new Ports(""); var catalogueCalls = 0;
-        var catalogueProvider = new ToolProvider(catalogueWire,Binding,[new(Declaration,(call,token) => { catalogueCalls++; return Task.FromResult(new ToolResult("COMPLETED","unexpected")); })],new Journal());
+        var catalogueProvider = new ToolProvider(catalogueWire,Binding,[new(large,(call,token) => { catalogueCalls++; return Task.FromResult(new ToolResult("COMPLETED","unexpected")); })],new Journal(large));
         await catalogueProvider.PublishCatalogAsync(Id);
+        if(Encoding.UTF8.GetByteCount(catalogueWire.Published!.Text)<=65536)throw new Exception("Catalogue did not span a transport chunk");
         using (var catalogue = JsonDocument.Parse(catalogueWire.Published!.Text)) {
             if(catalogueWire.Published.Topic!="tool.scanner.catalog" || catalogue.RootElement.GetProperty("version").GetString()!="plowshare-tool-catalog/1" || catalogue.RootElement.GetProperty("tools").GetArrayLength()!=1)throw new Exception("Catalogue scope differs");
         }

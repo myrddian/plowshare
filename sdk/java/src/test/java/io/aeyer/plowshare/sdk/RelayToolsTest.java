@@ -109,6 +109,17 @@ class RelayToolsTest {
 
   @Test
   void catalogue_publish_withdraw_and_lost_reply_do_not_run_or_replay_handlers() throws Exception {
+    var large =
+        new RelayTools.Declaration(
+            DECLARATION.name(),
+            DECLARATION.description(),
+            java.util.stream.IntStream.range(0, 24)
+                .mapToObj(
+                    i ->
+                        new RelayTools.Parameter(
+                            "field_" + i, RelayTools.Type.STRING, "d".repeat(4096), false))
+                .toList(),
+            30);
     var wire = new FixturePorts(request());
     var calls = new AtomicInteger();
     var provider =
@@ -117,14 +128,15 @@ class RelayToolsTest {
             BINDING,
             List.of(
                 new RelayTools.RegisteredTool(
-                    DECLARATION,
+                    large,
                     call -> {
                       calls.incrementAndGet();
                       return CompletableFuture.completedFuture(
                           new RelayTools.Result(RelayTools.State.COMPLETED, "unexpected"));
                     })),
-            new MemoryJournal());
+            new MemoryJournal(large));
     provider.publishCatalog(ID);
+    assertTrue(wire.published.text().length() > 65536);
     assertEquals("tool.scanner.catalog", wire.published.topic());
     assertNull(wire.published.parentTopic());
     assertEquals(
