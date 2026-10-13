@@ -6,10 +6,8 @@ import asyncio
 import json
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 from plowshare import Client, Delivery, Refusal, Reply, TransportError
@@ -24,7 +22,7 @@ from support import EXAMPLES
 
 from plowshare_privacy.contracts import Configuration
 from plowshare_privacy.monitor import SettingsBusy
-from plowshare_privacy.schedule_control import ScheduleController
+from plowshare_privacy.schedule_control import ScheduleController, SdkScheduleRuntime
 from plowshare_privacy.schedule_editor import ScheduleEditor
 from plowshare_privacy.setup import Setup, prepare
 
@@ -50,7 +48,7 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
         )
         prepare(self.setup)
         self.config = Configuration.read(path)
-        self.controller = ScheduleController(self.root, self.setup, asyncio.Lock())
+
         self.source = ScheduleFileDto(
             project=self.config.project,
             source="server",
@@ -75,18 +73,6 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
         self.mode = "ok"
         self.sent: list[SchedulePauseRequest] = []
         self.commands: list[object] = []
-        self.logins: list[str] = []
-        self.logouts = 0
-
-        @asynccontextmanager
-        async def login(origin: str, handle: str, password: str) -> AsyncIterator[str]:
-            self.assertEqual(origin, self.config.origin)
-            self.assertEqual(password, "fixture-password")
-            self.logins.append(handle)
-            try:
-                yield "fixture-temporary-bearer"
-            finally:
-                self.logouts += 1
 
         async def request(command: object) -> Reply[object]:
             self.commands.append(command)
@@ -111,33 +97,22 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(command)
 
         self.client.request.side_effect = request
-        for target, value in (
-            ("plowshare_privacy.schedule_control.administrator_login", login),
-            (
-                "plowshare_privacy.schedule_control.Client.connect",
-                AsyncMock(return_value=self.client),
-            ),
-        ):
-            patcher = patch(target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.runtime = lambda config: SdkScheduleRuntime(self.client, config)
+        self.controller = ScheduleController(self.root, asyncio.Lock(), self.runtime)
 
     async def test_pause_and_resume_use_owner_and_project_reads_without_deployment(
         self,
     ) -> None:
-        self.assertTrue((await self.controller.change(True, "fixture-password")).paused)
-        self.assertFalse(
-            (await self.controller.change(False, "fixture-password")).paused
-        )
+        self.assertTrue((await self.controller.change(True)).paused)
+        self.assertFalse((await self.controller.change(False)).paused)
         self.assertEqual([r.paused for r in self.sent], [True, False])
-        self.assertEqual(self.logins, ["installer", "installer"])
-        self.assertEqual(self.logouts, 2)
+        self.assertTrue(self.controller.status().available)
         self.assertFalse(self.controller.status().pending)
-        self.assertNotIn("fixture-password", self.controller.path.read_text())
+        self.assertNotIn("password", self.controller.path.read_text())
         self.assertEqual(self.controller.path.stat().st_mode & 0o777, 0o600)
 
     async def test_already_requested_state_is_read_only(self) -> None:
-        result = await self.controller.change(False, "fixture-password")
+        result = await self.controller.change(False)
         self.assertFalse(result.paused)
         self.assertEqual(self.sent, [])
         self.assertFalse(self.controller.path.exists())
@@ -145,12 +120,12 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
     async def test_lost_reply_survives_restart_and_check_does_not_resend(self) -> None:
         self.mode = "lost-applied"
         with self.assertRaises(SettingsBusy):
-            await self.controller.change(True, "fixture-password")
-        restarted = ScheduleController(self.root, self.setup, asyncio.Lock())
+            await self.controller.change(True)
+        restarted = ScheduleController(self.root, asyncio.Lock(), self.runtime)
         self.assertTrue(restarted.status().pending)
         with self.assertRaises(SettingsBusy):
-            await restarted.change(False, "fixture-password")
-        observed = await restarted.check("fixture-password")
+            await restarted.change(False)
+        observed = await restarted.check()
         self.assertTrue(observed.paused)
         self.assertFalse(restarted.status().pending)
         self.assertEqual(len(self.sent), 1)
@@ -158,15 +133,15 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
     async def test_check_of_differing_state_keeps_unknown_fence(self) -> None:
         self.mode = "lost-unapplied"
         with self.assertRaises(SettingsBusy):
-            await self.controller.change(True, "fixture-password")
-        self.assertFalse((await self.controller.check("fixture-password")).paused)
+            await self.controller.change(True)
+        self.assertFalse((await self.controller.check()).paused)
         self.assertTrue(self.controller.status().pending)
         self.assertEqual(len(self.sent), 1)
 
     async def test_definitive_refusal_is_not_claimed_as_paused(self) -> None:
         self.mode = "refused"
         with self.assertRaises(Refusal):
-            await self.controller.change(True, "fixture-password")
+            await self.controller.change(True)
         self.assertFalse(self.schedule.paused)
         self.assertFalse(self.controller.status().pending)
         self.assertEqual(
@@ -176,51 +151,50 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
     async def test_acknowledged_mutation_with_failed_read_stays_pending(self) -> None:
         self.mode = "read-failed"
         with self.assertRaises(TransportError):
-            await self.controller.change(True, "fixture-password")
+            await self.controller.change(True)
         self.assertTrue(self.controller.status().pending)
         self.mode = "ok"
-        self.assertTrue((await self.controller.check("fixture-password")).paused)
+        self.assertTrue((await self.controller.check()).paused)
         self.assertEqual(len(self.sent), 1)
 
     async def test_foreign_source_is_refused_before_any_control(self) -> None:
         self.source = replace(self.source, project="foreign-project")
         with self.assertRaises(SettingsBusy):
-            await self.controller.change(True, "fixture-password")
+            await self.controller.change(True)
         self.assertEqual(self.sent, [])
 
-    async def test_foreign_owner_is_refused_even_when_state_already_matches(
-        self,
-    ) -> None:
-        self.schedule = replace(self.schedule, defined_by="another-owner")
-        with self.assertRaisesRegex(SettingsBusy, "another account"):
-            await self.controller.change(False, "fixture-password")
-        self.assertEqual(self.sent, [])
+    async def test_historical_registrar_does_not_require_a_personal_login(self) -> None:
+        self.schedule = replace(self.schedule, defined_by="historical-installer")
+        with patch("plowshare_privacy.schedule_editor.administrator_login") as login:
+            self.assertTrue((await self.controller.change(True)).paused)
+            login.assert_not_called()
+        self.assertEqual(len(self.sent), 1)
 
     async def test_changed_schedule_binding_is_refused(self) -> None:
         self.source = replace(self.source, internal_name="another-schedule")
         with self.assertRaises(ValueError):
-            await self.controller.change(True, "fixture-password")
+            await self.controller.change(True)
         self.assertEqual(self.sent, [])
 
     async def test_pending_source_deployment_blocks_control(self) -> None:
         self.controller.deployment.write_text("fixture")
         with self.assertRaises(SettingsBusy):
-            await self.controller.change(True, "fixture-password")
-        self.assertEqual(self.logins, [])
+            await self.controller.change(True)
+        self.assertEqual(self.commands, [])
 
     async def test_pending_control_blocks_source_review(self) -> None:
         self.mode = "lost-applied"
         with self.assertRaises(SettingsBusy):
-            await self.controller.change(True, "fixture-password")
+            await self.controller.change(True)
         with self.assertRaises(SettingsBusy):
             await ScheduleEditor(self.root).review(
                 "hourly", "UTC", True, "fixture-password"
             )
-        self.assertEqual(len(self.logins), 1)
+        self.assertEqual(len(self.sent), 1)
 
     async def test_invalid_boolean_or_foreign_intent_is_refused(self) -> None:
         with self.assertRaises(ValueError):
-            await self.controller.change(1, "fixture-password")  # type: ignore[arg-type]
+            await self.controller.change(1)  # type: ignore[arg-type]
         self.controller.path.write_text(
             json.dumps(
                 {
@@ -232,5 +206,5 @@ class ScheduleControlTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         with self.assertRaises(ValueError):
-            await self.controller.change(True, "fixture-password")
-        self.assertEqual(self.logins, [])
+            await self.controller.change(True)
+        self.assertEqual(self.commands, [])

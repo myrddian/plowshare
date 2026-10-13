@@ -213,13 +213,11 @@ def application(
         return web.json_response({"saved": True})
 
     async def schedule_control(request: web.Request) -> web.Response:
-        row = object_fields(parse_json(await request.read()), {"paused", "password"})
+        row = object_fields(parse_json(await request.read()), {"paused"})
         if schedule_editor is None or type(row["paused"]) is not bool:
             raise ValueError("Schedule control is unavailable")
         try:
-            schedule = await schedule_editor.control(
-                row["paused"], text(row["password"], 4096)
-            )
+            schedule = await schedule_editor.control(row["paused"])
         finally:
             operator().cache_until = 0
         return web.json_response(
@@ -230,11 +228,11 @@ def application(
         )
 
     async def schedule_check(request: web.Request) -> web.Response:
-        row = object_fields(parse_json(await request.read()), {"password"})
+        object_fields(parse_json(await request.read()), set())
         if schedule_editor is None:
             raise ValueError("Schedule control is unavailable")
         try:
-            schedule = await schedule_editor.check_control(text(row["password"], 4096))
+            schedule = await schedule_editor.check_control()
         finally:
             operator().cache_until = 0
         return web.json_response(

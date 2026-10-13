@@ -83,15 +83,21 @@ public class EventFrames implements FrameArea {
           Payloads.required(
               payload, kind, kind + "." + (pause ? "pause" : "forget"), "the displayed name");
       String account = asking.requireHandle(kind + "." + (pause ? "pause" : "forget"));
-      if (service != null && service.managed(name, account).isPresent()) {
+      if (service != null) {
         if (pause) {
           Object value = payload.get("paused");
           if (!(value instanceof Boolean paused))
             throw new io.aeyer.plowshare.server.faults.CallerFault("paused must be true or false");
-          service.pause(name, paused, account);
-        } else service.forget(name, account);
-        return new io.aeyer.plowshare.protocol.frames.Outcome(
-            io.aeyer.plowshare.protocol.frames.Code.NO_CONTENT, null, null);
+          // Application operational control may belong to its executor rather than its registrar.
+          // A managed refusal must propagate; it must never fall through to the legacy stores.
+          if (service.pause(name, paused, account))
+            return new io.aeyer.plowshare.protocol.frames.Outcome(
+                io.aeyer.plowshare.protocol.frames.Code.NO_CONTENT, null, null);
+        } else if (service.managed(name, account).isPresent()) {
+          service.forget(name, account);
+          return new io.aeyer.plowshare.protocol.frames.Outcome(
+              io.aeyer.plowshare.protocol.frames.Code.NO_CONTENT, null, null);
+        }
       }
       return legacy.handle(payload, asking);
     };

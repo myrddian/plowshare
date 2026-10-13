@@ -30,10 +30,10 @@ class ScheduleDashboardTest(unittest.IsolatedAsyncioTestCase):
         )
         self.editor = AsyncMock(spec=ScheduleManagement)
         self.editor.control_status.return_value = ScheduleControlStatus(
-            "installer", False, True
+            True, False, True
         )
         self.editor.control.return_value = ScheduleView(
-            config.schedule, "0 */15 * * * *", "UTC", True, None, "installer"
+            config.schedule, "0 */15 * * * *", "UTC", True, None
         )
         self.editor.check_control.return_value = self.editor.control.return_value
         self.client = TestClient(
@@ -54,33 +54,34 @@ class ScheduleDashboardTest(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(
             "/api/schedule/control",
             headers=self.headers,
-            json={"paused": True, "password": "fixture"},
+            json={"paused": True},
         )
         self.assertEqual(response.status, 200)
         self.assertTrue((await response.json())["schedule"]["paused"])
-        self.editor.control.assert_awaited_once_with(True, "fixture")
+        self.editor.control.assert_awaited_once_with(True)
         self.editor.deploy.assert_not_awaited()
 
     async def test_resume_and_read_only_check_use_separate_capabilities(self) -> None:
         response = await self.client.post(
             "/api/schedule/control",
             headers=self.headers,
-            json={"paused": False, "password": "fixture"},
+            json={"paused": False},
         )
         self.assertEqual(response.status, 200)
-        self.editor.control.assert_awaited_once_with(False, "fixture")
+        self.editor.control.assert_awaited_once_with(False)
         response = await self.client.post(
-            "/api/schedule/check", headers=self.headers, json={"password": "fixture"}
+            "/api/schedule/check", headers=self.headers, json={}
         )
         self.assertEqual(response.status, 200)
-        self.editor.check_control.assert_awaited_once_with("fixture")
+        self.editor.check_control.assert_awaited_once_with()
         self.assertEqual(self.editor.control.await_count, 1)
 
     async def test_invalid_boolean_and_injected_target_are_refused(self) -> None:
         for body in (
-            {"paused": "true", "password": "fixture"},
-            {"paused": True, "password": "fixture", "schedule": "other"},
-            {"paused": True, "password": "fixture", "account": "other"},
+            {"paused": "true"},
+            {"paused": True, "schedule": "other"},
+            {"paused": True, "account": "other"},
+            {"paused": True, "password": "personal-secret"},
         ):
             response = await self.client.post(
                 "/api/schedule/control", headers=self.headers, json=body
@@ -92,7 +93,7 @@ class ScheduleDashboardTest(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         response = await self.client.post(
-            "/api/schedule/control", json={"paused": True, "password": "fixture"}
+            "/api/schedule/control", json={"paused": True}
         )
         self.assertEqual(response.status, 401)
         response = await self.client.post("/api/session", headers=self.headers, json={})
@@ -100,7 +101,7 @@ class ScheduleDashboardTest(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(
             "/api/schedule/control",
             headers={"Origin": "https://foreign.invalid"},
-            json={"paused": True, "password": "fixture"},
+            json={"paused": True},
         )
         self.assertEqual(response.status, 403)
         self.editor.control.assert_not_awaited()

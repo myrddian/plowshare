@@ -93,17 +93,11 @@ Application does not request inference from its tick script.
 
 ## Schedule control for service-owned Applications
 
-The current `schedule.pause` operation requires the registered owner, and a
-managed Application schedule also requires that account’s project-management
-permission. Historical schedules registered to the deployment administrator can
-be paused/resumed from this app using its temporary login. New guided installations
-may enroll under an Application service principal; a human manager’s login does
-not transfer that ownership. The dashboard shows this boundary and disables those
-controls. It never elevates the worker or retains human credentials.
-
-The general missing capability is project-manager control of an Application-owned
-operational schedule while preserving service ownership, source/action validation,
-and project fences. This is a separate platform authorization decision. Source
-revisions can still be reviewed and deployed through the existing public APIs;
-that does not substitute for operational pause/resume. Integration tests cover the
-existing public boundary; this integration adds no core authorization changes.
+Resolved in source by [ADR 0020](../../docs/decisions/0020-application-schedule-operational-authority.md),
+a separately authorized general platform fix. The server now admits the explicit
+manifest execution account with current effective Contributor access, or a project
+Manager, for operational control of that Application's schedules. Historical
+registrar ownership is preserved. The worker gains no definition/deployment or
+permission-management authority. The dashboard uses its scoped service connection
+without requesting a human password. Deploy the server fix before updating it;
+older servers still apply the registered-owner/Manager restriction.

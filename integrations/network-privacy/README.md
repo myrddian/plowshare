@@ -736,18 +736,18 @@ Document access covers its chapters; no granular chapter permissions are introdu
 
 **Monitoring schedule** shows the effective paused/running state and offers
 **Pause monitoring**, **Resume monitoring**, and **Check schedule state**.
-Enter the password for the displayed schedule owner. The app opens a temporary
-Plowshare session for that configured deployment account, sends the public SDK
-`schedule.pause` request, reads the project-scoped runtime state, then logs out.
-The password is cleared from the form and is never stored. The collector retains
-its separate service identity and permissions.
+The app uses its existing Application service connection and the public SDK
+`schedule.pause` request, then reads the project-scoped runtime state. No personal
+password or human login is needed. The server checks the manifest execution-account
+binding and effective Contributor access on each call. The worker stays a Contributor.
 
 Pause prevents future scheduled scans while existing work can finish. Resume
 selects the next future occurrence; missed ticks are not replayed. These controls
 create no Application revision and do not enable local collection, start a manual
 scan, or launch an investigation. Collection must also be enabled in monitoring
 settings. Frequency changes remain a separately reviewed Application deployment;
-a changed schedule source clears its operational pause override.
+a changed schedule source clears its operational pause override. Deployment editing
+still uses its separate temporary administrator login.
 
 If delivery is uncertain, controls are fenced by a private retained intent across
 collector restarts. **Check schedule state** only reads; it never resends a control.
@@ -755,8 +755,9 @@ When the observed state matches the request, the fence clears. If it differs, th
 intent remains pending for later inspection. No automatic retry or opposite
 control is sent. A definitive server refusal retains a refused outcome.
 
-The current server contract requires the registered owner with project management
-access. This dashboard supports schedules registered to its configured deployment
-account, including historical manual installations. It disables mutation controls
-for a different owner; an Application manager cannot borrow an Application service
-principal’s ownership. See [the authorization gap](GAPS.md#schedule-control-for-service-owned-applications).
+Deploy the server with [Application operational authority](../../docs/decisions/0020-application-schedule-operational-authority.md)
+before updating this dashboard. Existing execution bindings and Contributor grants
+supply the scoped authority, including historical schedules registered under the
+installer; no account elevation, credential replacement or Application redeployment
+is needed when that binding is already present. Source/action authorization still
+applies to the registered execution owner.

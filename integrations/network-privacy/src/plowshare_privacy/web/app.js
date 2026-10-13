@@ -203,7 +203,6 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['health','checklist','recovery','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
   byId('schedule-draft').hidden = true;
-  byId('schedule-control-password').value = '';
   renderScheduleControl(null, null, null);
   byId('monitoring').hidden = true; byId('devices').replaceChildren();
   byId('network').value = ''; byId('targets').value = ''; byId('ports').value = ''; byId('device-labels').value = '';
@@ -441,25 +440,21 @@ byId('check-moves').addEventListener('click', async () => {
 });
 function renderScheduleControl(schedule, control, pendingDeployment) {
   byId('schedule-runtime').textContent = schedule ? (schedule.paused ? 'Paused' : 'Running') : 'Unavailable';
-  byId('schedule-control-account').textContent = control ? `Use the password for ${control.account}, the account that registered this schedule.` : 'Schedule controls require a guided installation.';
+
   const pending = scheduleControlUnknown || Boolean(control && control.pending);
-  const owned = Boolean(control && schedule && schedule.owner === control.account);
-  if (control && schedule && !owned) byId('schedule-control-account').textContent = 'This schedule is registered to another account. Its owner must control it through Plowshare; no service-account privileges are changed.';
-  byId('pause-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !owned || schedule.paused;
-  byId('resume-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !owned || !schedule.paused;
-  byId('check-schedule').disabled = scheduleControlBusy || !control;
+  const available = Boolean(control && control.available && schedule);
+  byId('pause-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || schedule.paused;
+  byId('resume-schedule').disabled = scheduleControlBusy || pending || Boolean(pendingDeployment) || !available || !schedule.paused;
+  byId('check-schedule').disabled = scheduleControlBusy || !control || !control.available;
   if (pending) byId('schedule-control-detail').textContent = 'A schedule change is unconfirmed. Check schedule state before another change; checking never resends the control.';
 }
 
 async function controlSchedule(paused) {
   if (scheduleControlBusy || (paused === null ? byId('check-schedule').disabled : byId(paused ? 'pause-schedule' : 'resume-schedule').disabled)) return;
-  const password = byId('schedule-control-password').value;
-  if (!password) {notice('Enter the schedule owner password.', true); return;}
-  byId('schedule-control-password').value = '';
   scheduleControlBusy = true;
   renderScheduleControl(overview && overview.health.schedule, overview && overview.schedule_control, overview && overview.pending_deployment);
   try {
-    const result = await api(paused === null ? '/api/schedule/check' : '/api/schedule/control', {method:'POST',body:JSON.stringify(paused === null ? {password} : {paused,password})});
+    const result = await api(paused === null ? '/api/schedule/check' : '/api/schedule/control', {method:'POST',body:JSON.stringify(paused === null ? {} : {paused})});
     scheduleControlUnknown = false;
     if (overview) {overview.health.schedule = result.schedule; overview.schedule_control = result.control;}
     byId('schedule-control-detail').textContent = result.control.pending ? 'The requested state is not confirmed yet. No control was resent; check again later.' : result.schedule.paused ? 'Monitoring schedule is paused. Existing work can finish.' : 'Monitoring schedule is running. It will fire at the next scheduled time; missed scans are not replayed.';

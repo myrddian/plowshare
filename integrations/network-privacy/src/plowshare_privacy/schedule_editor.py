@@ -13,7 +13,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -32,7 +32,7 @@ from .console_port import ScheduleView
 from .contracts import Configuration, integer, load_json, object_fields, text, uuid
 from .monitor import SettingsBusy
 from .private_files import replace_private
-from .schedule_control import ScheduleController, ScheduleControlStatus
+from .schedule_control import ScheduleController, ScheduleControlStatus, ScheduleRuntime
 from .setup import Setup, administrator_login, private_write
 
 PRESETS = {"15m": "0 */15 * * * *", "hourly": "0 0 * * * *", "daily": "0 0 9 * * *"}
@@ -95,8 +95,8 @@ def source_text(value: object) -> str:
 class ScheduleManagement(Protocol):
     def pending_request(self) -> str | None: ...
     def control_status(self) -> ScheduleControlStatus: ...
-    async def control(self, paused: bool, password: str) -> ScheduleView: ...
-    async def check_control(self, password: str) -> ScheduleView: ...
+    async def control(self, paused: bool) -> ScheduleView: ...
+    async def check_control(self) -> ScheduleView: ...
     async def reconcile(self, password: str) -> str | None: ...
     async def review(
         self, preset: str, zone: str, paused: bool, password: str
@@ -105,7 +105,11 @@ class ScheduleManagement(Protocol):
 
 
 class ScheduleEditor:
-    def __init__(self, root: Path):
+    def __init__(
+        self,
+        root: Path,
+        runtime: Callable[[Configuration], ScheduleRuntime] | None = None,
+    ):
         self.root = root
         self.setup = Setup.read(root / "deployment/setup.json")
         if (
@@ -114,7 +118,7 @@ class ScheduleEditor:
         ):
             raise ValueError("Deployment setup does not belong to this collector")
         self.lock = asyncio.Lock()
-        self.controller = ScheduleController(root, self.setup, self.lock)
+        self.controller = ScheduleController(root, self.lock, runtime)
         self.draft: Draft | None = None
         self.pending = root / "deployment/schedule-update-intent.json"
         self.receipt = root / "deployment/schedule-update-receipt.json"
@@ -314,11 +318,11 @@ class ScheduleEditor:
     def control_status(self) -> ScheduleControlStatus:
         return self.controller.status()
 
-    async def control(self, paused: bool, password: str) -> ScheduleView:
-        return await self.controller.change(paused, password)
+    async def control(self, paused: bool) -> ScheduleView:
+        return await self.controller.change(paused)
 
-    async def check_control(self, password: str) -> ScheduleView:
-        return await self.controller.check(password)
+    async def check_control(self) -> ScheduleView:
+        return await self.controller.check()
 
     def pending_request(self) -> str | None:
         if not self.pending.exists():

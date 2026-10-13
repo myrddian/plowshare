@@ -30,8 +30,9 @@ class ScheduleDefinitionsTest {
           definition,
           "active",
           null);
+  private final ScheduleControlAuthority controls = mock(ScheduleControlAuthority.class);
   private final ScheduleDefinitions service =
-      new FileScheduleDefinitions(store, files, projects, members, authority);
+      new FileScheduleDefinitions(store, files, projects, members, authority, controls);
 
   @BeforeEach
   void configure() {
@@ -157,13 +158,16 @@ class ScheduleDefinitionsTest {
   }
 
   @Test
-  void applicationControlRequiresCurrentManagerAuthority() {
+  void applicationControlRequiresCurrentOperationalAuthority() {
     when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
     when(store.managed(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(prior));
     when(files.read(source))
         .thenReturn(
             List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
     when(files.applicationOwned(source)).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("Operational access revoked"))
+        .when(controls)
+        .requireApplicationControl(source, "owner");
     assertThrows(RuntimeException.class, () -> service.pause(prior.internalName(), false, "owner"));
     verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
     verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
@@ -217,5 +221,77 @@ class ScheduleDefinitionsTest {
         new String[] {"", " project", "personal:owner", "Personal:owner", "client:owner"})
       assertThrows(RuntimeException.class, () -> service.list("owner", project));
     verify(store, never()).sources();
+  }
+
+  @Test
+  void executorControlsHistoricalRegistrarWithoutTransferringOwnership() {
+    when(store.sourceOf(prior.internalName())).thenReturn(java.util.Optional.of(source));
+    when(store.managed(prior.internalName(), source.account()))
+        .thenReturn(java.util.Optional.of(prior));
+    when(files.applicationOwned(source)).thenReturn(true);
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    assertTrue(service.pause(prior.internalName(), true, "executor"));
+    verify(controls, times(2)).requireApplicationControl(source, "executor");
+    verify(authority, atLeastOnce()).validate(source, definition);
+    verify(store).pause(eq(source), eq("daily"), eq(definition), eq(true), any());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
+  }
+
+  @Test
+  void foreignApplicationControlRefusesBeforeReconciliationAndNoLegacyFallback() {
+    when(store.sourceOf(prior.internalName())).thenReturn(java.util.Optional.of(source));
+    when(files.applicationOwned(source)).thenReturn(true);
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("foreign"))
+        .when(controls)
+        .requireApplicationControl(source, "foreign");
+    assertThrows(
+        RuntimeException.class, () -> service.pause(prior.internalName(), true, "foreign"));
+    verify(files, never()).read(any());
+    verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
+  }
+
+  @Test
+  void mutableForeignSourceRetainsOwnerBoundary() {
+    when(store.sourceOf(prior.internalName())).thenReturn(java.util.Optional.of(source));
+    assertFalse(service.pause(prior.internalName(), true, "foreign"));
+    verifyNoInteractions(controls);
+    verify(files, never()).read(any());
+  }
+
+  @Test
+  void revocationDuringReconciliationFencesOperationalMutation() {
+    when(store.sourceOf(prior.internalName())).thenReturn(java.util.Optional.of(source));
+    when(store.managed(prior.internalName(), source.account()))
+        .thenReturn(java.util.Optional.of(prior));
+    when(files.applicationOwned(source)).thenReturn(true);
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    doNothing()
+        .doThrow(new io.aeyer.plowshare.server.faults.CallerFault("revoked"))
+        .when(controls)
+        .requireApplicationControl(source, "executor");
+    assertThrows(
+        RuntimeException.class, () -> service.pause(prior.internalName(), true, "executor"));
+    verify(store, never()).pause(any(), anyString(), any(), anyBoolean(), any());
+  }
+
+  @Test
+  void operationalAuthorityDoesNotAuthorizeDefinitionAuthoringOrRemoval() {
+    when(store.sourceOf(prior.internalName(), "owner")).thenReturn(java.util.Optional.of(source));
+    assertThrows(RuntimeException.class, () -> service.forget(prior.internalName(), "owner"));
+    when(projects.id("project")).thenReturn(7L);
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            service.save(
+                "owner", new ScheduledWork.Save("daily", "project", "server", definition, true)));
+    verifyNoInteractions(controls);
+    verify(files, never()).delete(any(), anyString());
+    verify(files, never()).write(any(), anyString(), anyString(), anyBoolean());
+    verify(store, never()).register(anyString(), any(), anyString());
   }
 }

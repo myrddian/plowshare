@@ -29,7 +29,6 @@ class ScheduleView:
     zone: str
     paused: bool
     next_at: str | None
-    owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,9 +93,7 @@ class SdkConsolePort:
         if len(selected) != 1:
             raise ValueError("Ambiguous effective project schedule")
         row = selected[0]
-        return ScheduleView(
-            row.name, row.cron, row.zone, row.paused, row.next_fire_at, row.defined_by
-        )
+        return ScheduleView(row.name, row.cron, row.zone, row.paused, row.next_fire_at)
 
     async def agents(self) -> AgentHealth:
         from .native_tools import DECLARATIONS
