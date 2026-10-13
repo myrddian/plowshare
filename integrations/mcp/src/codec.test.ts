@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { declaration, decodeMcpTool, decodeMcpReply, result } from './codec.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
 import { decodeConfig } from './config.ts';
 import { allowedAddress, endpoint } from './http.ts';
 import { inputSchema, rawTool } from './wire.test-support.ts';
@@ -115,4 +116,29 @@ await test('configuration and network policy have no implicit origin, subject, t
     assert.equal(allowedAddress(value, false), false);
   assert.equal(allowedAddress('8.8.8.8', false), true);
   assert.equal(allowedAddress('127.0.0.1', true), true);
+});
+
+await test('configured content and UTF-8 result budgets are enforced without truncating output', () => {
+  assert.throws(() =>
+    decodeMcpReply(
+      {
+        content: [
+          { type: 'text', text: '' },
+          { type: 'text', text: '' },
+        ],
+      },
+      { ...DEFAULT_LIMITS, maxContentBlocks: 1 },
+    ),
+  );
+  const tool = decodeMcpTool(rawTool);
+  const reply = decodeMcpReply({
+    content: [{ type: 'text', text: 'é'.repeat(20) }],
+  });
+  const encoded = result(tool, reply).text;
+  assert.ok(encoded);
+  assert.throws(() => result(tool, reply, encoded.length));
+  assert.equal(
+    result(tool, reply, Buffer.byteLength(encoded)).state,
+    'COMPLETED',
+  );
 });

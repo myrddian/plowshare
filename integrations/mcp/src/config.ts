@@ -3,17 +3,30 @@ import { canonicalServer } from 'plowshare-client-node/connections';
 import { object, text } from './codec.ts';
 import { uuid } from './journal.ts';
 import type { McpWorkerOptions } from './provider.ts';
+import {
+  boundedInteger as integer,
+  renewalFraction,
+  DEFAULT_LIMITS,
+  LIMIT_CEILINGS,
+  DEFAULT_CLIENT_INFO,
+} from './settings.ts';
+import type { McpLimits, McpClientInfo } from './settings.ts';
 
 export interface WorkerConfig {
   readonly binding: string;
   readonly generation: number;
   readonly options: McpWorkerOptions;
+  readonly pollMs: number;
+  readonly renewalFraction: number;
 }
 export interface IntegrationConfig {
   readonly origin: string;
   readonly tokenEnvironment: string;
   readonly journalDirectory: string;
   readonly pollMs: number;
+  readonly requestTimeoutMs: number;
+  readonly clientInfo: McpClientInfo;
+  readonly maxRecoveryCatalogues: number;
   readonly workers: readonly WorkerConfig[];
 }
 function fields(
@@ -23,21 +36,63 @@ function fields(
   if (Object.keys(raw).some((key) => !allowed.includes(key)))
     throw new Error('Unknown MCP configuration field');
 }
-function integer(value: unknown, min: number, max: number): number {
-  if (
-    typeof value !== 'number' ||
-    !Number.isSafeInteger(value) ||
-    value < min ||
-    value > max
-  )
-    throw new Error('Invalid bounded MCP configuration number');
-  return value;
-}
 function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean')
     throw new Error('Expected an explicit MCP network policy');
   return value;
 }
+const WORKER_FIELDS = [
+  'protocol',
+  'allowHttp',
+  'allowPrivateNetwork',
+  'timeoutMs',
+  'timeoutSeconds',
+  'pollMs',
+  'renewalFraction',
+  'limits',
+] as const;
+function limits(
+  source: unknown,
+  inherited: McpLimits = DEFAULT_LIMITS,
+): McpLimits {
+  const raw = source === undefined ? {} : object(source);
+  fields(raw, Object.keys(DEFAULT_LIMITS));
+  if (Object.values(raw).some((value) => value === null))
+    throw new Error('Null MCP limit');
+  return Object.freeze({
+    maxTools: integer(
+      raw.maxTools ?? inherited.maxTools,
+      1,
+      LIMIT_CEILINGS.maxTools,
+    ),
+    maxPages: integer(
+      raw.maxPages ?? inherited.maxPages,
+      1,
+      LIMIT_CEILINGS.maxPages,
+    ),
+    maxWireBytes: integer(
+      raw.maxWireBytes ?? inherited.maxWireBytes,
+      1,
+      LIMIT_CEILINGS.maxWireBytes,
+    ),
+    maxCatalogueBytes: integer(
+      raw.maxCatalogueBytes ?? inherited.maxCatalogueBytes,
+      1,
+      LIMIT_CEILINGS.maxCatalogueBytes,
+    ),
+    maxResultBytes: integer(
+      raw.maxResultBytes ?? inherited.maxResultBytes,
+      1,
+      LIMIT_CEILINGS.maxResultBytes,
+    ),
+    maxContentBlocks: integer(
+      raw.maxContentBlocks ?? inherited.maxContentBlocks,
+      1,
+      LIMIT_CEILINGS.maxContentBlocks,
+    ),
+  });
+}
+/** Shared defaults are explicit operator policy; each binding can override them independently. */
 export function decodeConfig(source: unknown): IntegrationConfig {
   const raw = object(source);
   fields(raw, [
@@ -46,46 +101,86 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     'journalDirectory',
     'pollMs',
     'workers',
+    'requestTimeoutMs',
+    'clientInfo',
+    'maxWorkers',
+    'maxRecoveryCatalogues',
+    'defaults',
   ]);
+  if (Object.values(raw).some((value) => value === null))
+    throw new Error('Null MCP configuration field');
+  const defaults = raw.defaults === undefined ? {} : object(raw.defaults);
+  fields(defaults, WORKER_FIELDS);
+  if (Object.values(defaults).some((value) => value === null))
+    throw new Error('Null MCP default');
+  // Validate even unused defaults, so an overriding worker cannot hide invalid configuration.
+  if (
+    defaults.protocol !== undefined &&
+    defaults.protocol !== '2026-07-28' &&
+    defaults.protocol !== '2025-11-25'
+  )
+    throw new Error('Unsupported MCP protocol profile');
+  if (defaults.allowHttp !== undefined) boolean(defaults.allowHttp);
+  if (defaults.allowPrivateNetwork !== undefined)
+    boolean(defaults.allowPrivateNetwork);
+  if (defaults.timeoutMs !== undefined)
+    integer(defaults.timeoutMs, 100, 300000);
+  if (defaults.timeoutSeconds !== undefined)
+    integer(defaults.timeoutSeconds, 1, 300);
+  if (defaults.pollMs !== undefined) integer(defaults.pollMs, 50, 10000);
+  if (defaults.renewalFraction !== undefined)
+    renewalFraction(defaults.renewalFraction);
+  const sharedLimits = limits(defaults.limits);
+  const pollMs = integer(raw.pollMs ?? 250, 50, 10000);
+  const client =
+    raw.clientInfo === undefined
+      ? { ...DEFAULT_CLIENT_INFO }
+      : object(raw.clientInfo);
+  fields(client, ['name', 'version']);
+  const clientInfo = Object.freeze({
+    name: text(client.name, 128),
+    version: text(client.version, 128),
+  });
   const tokenEnvironment = text(raw.tokenEnvironment, 100);
   if (!/^[A-Z][A-Z0-9_]*$/.test(tokenEnvironment))
     throw new Error('Invalid executor token environment name');
   const journalDirectory = text(raw.journalDirectory, 4096);
   if (!isAbsolute(journalDirectory))
     throw new Error('MCP journal directory must be absolute');
+  const maxWorkers = integer(raw.maxWorkers ?? 32, 1, 256);
   if (
     !Array.isArray(raw.workers) ||
     !raw.workers.length ||
-    raw.workers.length > 32
+    raw.workers.length > maxWorkers
   )
-    throw new Error('Configure between one and 32 MCP bindings');
+    throw new Error('MCP bindings exceed configured worker count');
   const sources: readonly unknown[] = raw.workers;
   const workers = sources.map((source): WorkerConfig => {
     const worker = object(source);
-    fields(worker, [
-      'binding',
-      'generation',
-      'protocol',
-      'allowHttp',
-      'allowPrivateNetwork',
-      'timeoutMs',
-      'timeoutSeconds',
-    ]);
-    const protocol = worker.protocol;
+    fields(worker, ['binding', 'generation', ...WORKER_FIELDS]);
+    if (Object.values(worker).some((value) => value === null))
+      throw new Error('Null MCP worker field');
+    const effective = { ...defaults, ...worker };
+    const protocol = effective.protocol;
     if (protocol !== '2026-07-28' && protocol !== '2025-11-25')
       throw new Error('Unsupported MCP protocol profile');
+    const budget = limits(worker.limits, sharedLimits);
     return Object.freeze<WorkerConfig>({
       binding: uuid(worker.binding),
       generation: integer(worker.generation, 1, Number.MAX_SAFE_INTEGER),
-      options: {
+      pollMs: integer(effective.pollMs ?? pollMs, 50, 10000),
+      renewalFraction: renewalFraction(effective.renewalFraction ?? 1 / 3),
+      options: Object.freeze({
         protocol,
-        timeoutSeconds: integer(worker.timeoutSeconds, 1, 300),
-        policy: {
-          allowHttp: boolean(worker.allowHttp),
-          allowPrivateNetwork: boolean(worker.allowPrivateNetwork),
-          timeoutMs: integer(worker.timeoutMs, 100, 300000),
-        },
-      },
+        limits: budget,
+        timeoutSeconds: integer(effective.timeoutSeconds ?? 30, 1, 300),
+        policy: Object.freeze({
+          allowHttp: boolean(effective.allowHttp),
+          allowPrivateNetwork: boolean(effective.allowPrivateNetwork),
+          timeoutMs: integer(effective.timeoutMs ?? 10000, 100, 300000),
+          maxWireBytes: budget.maxWireBytes,
+        }),
+      }),
     });
   });
   if (new Set(workers.map((worker) => worker.binding)).size !== workers.length)
@@ -94,7 +189,10 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     origin: canonicalServer(text(raw.origin, 2048)),
     tokenEnvironment,
     journalDirectory,
-    pollMs: integer(raw.pollMs, 50, 10000),
+    pollMs,
+    requestTimeoutMs: integer(raw.requestTimeoutMs ?? 30000, 100, 300000),
+    clientInfo,
+    maxRecoveryCatalogues: integer(raw.maxRecoveryCatalogues ?? 128, 1, 4096),
     workers: Object.freeze(workers),
   });
 }

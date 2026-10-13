@@ -7,13 +7,12 @@ import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import type { Operation } from 'plowshare-client-ts/operations/direct';
 import type { Payloads, Reply } from 'plowshare-client-ts';
 import type { ProviderConnection } from './provider.ts';
-import type { IntegrationConfig } from './config.ts';
-import { runIntegration } from './runner.ts';
+import { decodeConfig } from './config.ts';
+import { runIntegration, renewalTime } from './runner.ts';
 import {
   Credentials,
   Sessions,
   registration,
-  options,
   id,
 } from './provider.test-support.ts';
 import { object } from './codec.ts';
@@ -24,13 +23,21 @@ await test('runner registers with a retained UUID, publishes, stops intake and w
   const credentials = new Credentials();
   const sessions = new Sessions();
   const seen: string[] = [];
-  const config: IntegrationConfig = {
+  const config = decodeConfig({
     origin: 'https://example.invalid',
     tokenEnvironment: 'TOKEN',
     journalDirectory: directory,
     pollMs: 50,
-    workers: [{ binding: id, generation: 1, options }],
-  };
+    workers: [
+      {
+        binding: id,
+        generation: 1,
+        protocol: '2026-07-28',
+        allowHttp: false,
+        allowPrivateNetwork: false,
+      },
+    ],
+  });
   let currentRegistration = registration;
   const connection: ProviderConnection = {
     async request<K extends Operation>(
@@ -107,4 +114,10 @@ await test('runner registers with a retained UUID, publishes, stops intake and w
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+await test('configured renewal uses actual expiry and server lease, including expired registrations', () => {
+  assert.equal(renewalTime(1000, 11000, 60, 0.2), 3000);
+  assert.equal(renewalTime(1000, 121000, 60, 0.5), 31000);
+  assert.equal(renewalTime(1000, 500, 60, 0.2), 1000);
 });

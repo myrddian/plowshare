@@ -19,3 +19,6 @@ export type {
   McpPage,
   McpSessionOptions,
 } from './contracts.ts';
+
+export { DEFAULT_LIMITS, DEFAULT_CLIENT_INFO } from './settings.ts';
+export type { McpLimits, McpClientInfo } from './settings.ts';

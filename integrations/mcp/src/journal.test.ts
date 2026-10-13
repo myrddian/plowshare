@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { FileToolJournal, CatalogueIntent } from './journal.ts';
 import { RegistrationIntent } from './journal.ts';
 import { FileRecoveryCatalogues } from './recovery.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
 import { McpProvider } from './provider.ts';
 import {
   Credentials,
@@ -88,6 +89,46 @@ await test('recovery retains immutable declarations and original registration ac
     await assert.rejects(new FileRecoveryCatalogues(directory, secondId).all());
   } finally {
     await adapter.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('configured recovery archive limit refuses new generations without losing retained catalogues', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mcp-recovery-limit-'));
+  const first = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    new Sessions(),
+    options,
+  );
+  const second = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    new Sessions(),
+    { ...options, limits: { ...DEFAULT_LIMITS, maxPages: 1 } },
+  );
+  const catalogue = (adapter: McpProvider) => ({
+    identity: adapter.journalIdentity,
+    registration,
+    declarations: adapter.tools.map((tool) => tool.declaration),
+  });
+  try {
+    const repository = new FileRecoveryCatalogues(directory, id, 1);
+    await repository.save(catalogue(first));
+    await repository.save(catalogue(first));
+    await assert.rejects(
+      repository.save(catalogue(second)),
+      /configured bound/,
+    );
+    assert.equal((await repository.all()).length, 1);
+    const expanded = new FileRecoveryCatalogues(directory, id, 2);
+    await expanded.save(catalogue(second));
+    assert.equal((await expanded.all()).length, 2);
+    await assert.rejects(repository.all(), /exceeds bound/);
+    assert.equal((await expanded.all()).length, 2);
+  } finally {
+    await first.close();
+    await second.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

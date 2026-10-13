@@ -11,7 +11,8 @@ import type {
   ToolValue,
 } from 'plowshare-client-ts';
 import type { McpPage, McpProtocol, McpReply, McpTool } from './contracts.ts';
-import { MAX_TOOLS } from './contracts.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
+import type { McpLimits } from './settings.ts';
 
 export function object(value: unknown): Record<string, unknown> {
   if (
@@ -75,9 +76,12 @@ export function decodeMcpTool(value: unknown): McpTool {
   const metadata = decodeToolValue(raw);
   return Object.freeze({ name, description, input, output, metadata });
 }
-export function decodeMcpPage(value: unknown): McpPage {
+export function decodeMcpPage(
+  value: unknown,
+  limits: McpLimits = DEFAULT_LIMITS,
+): McpPage {
   const raw = object(value);
-  if (!Array.isArray(raw.tools) || raw.tools.length > MAX_TOOLS)
+  if (!Array.isArray(raw.tools) || raw.tools.length > limits.maxTools)
     throw new Error('MCP catalogue exceeds tool bound');
   const source: readonly unknown[] = raw.tools;
   return Object.freeze({
@@ -85,13 +89,19 @@ export function decodeMcpPage(value: unknown): McpPage {
     cursor: raw.nextCursor === undefined ? null : text(raw.nextCursor, 1024),
   });
 }
-export function decodeMcpReply(value: unknown): McpReply {
+export function decodeMcpReply(
+  value: unknown,
+  limits: McpLimits = DEFAULT_LIMITS,
+): McpReply {
   const raw = object(value);
   if (raw.resultType !== undefined && raw.resultType !== 'complete')
     throw new Error('Unsupported MCP continuation');
   if (raw.isError !== undefined && typeof raw.isError !== 'boolean')
     throw new Error('Invalid MCP error marker');
-  if (!Array.isArray(raw.content) || raw.content.length > 128)
+  if (
+    !Array.isArray(raw.content) ||
+    raw.content.length > limits.maxContentBlocks
+  )
     throw new Error('Invalid MCP content');
   const source: readonly unknown[] = raw.content;
   const content = source.map((block) => {
@@ -99,7 +109,7 @@ export function decodeMcpReply(value: unknown): McpReply {
     if (
       item.type !== 'text' ||
       typeof item.text !== 'string' ||
-      item.text.length > 16384 ||
+      item.text.length > limits.maxResultBytes ||
       item.text.includes('\0')
     )
       throw new Error('Only bounded text MCP results are supported');
@@ -135,6 +145,7 @@ export function declaration(
   protocol: McpProtocol,
   context: string,
   timeoutSeconds: number,
+  limits: McpLimits = DEFAULT_LIMITS,
 ): ToolDeclaration {
   if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*_$/.test(prefix) || prefix.length > 24)
     throw new Error('Invalid MCP tool prefix');
@@ -142,6 +153,7 @@ export function declaration(
     protocol,
     context,
     timeoutSeconds,
+    limits: { ...limits },
     tool: tool.metadata,
   }).slice(0, 32);
   const available = 64 - prefix.length - hash.length - 1;
@@ -160,7 +172,11 @@ export function declaration(
     inputSchema: tool.input,
   });
 }
-export function result(tool: McpTool, reply: McpReply): ToolResult {
+export function result(
+  tool: McpTool,
+  reply: McpReply,
+  maxResultBytes: number = DEFAULT_LIMITS.maxResultBytes,
+): ToolResult {
   if (
     tool.output !== null &&
     (!reply.isError || reply.structured !== undefined)
@@ -176,7 +192,10 @@ export function result(tool: McpTool, reply: McpReply): ToolResult {
       ? {}
       : { structuredContent: reply.structured }),
   });
-  if (encoded.length > 16384 || Buffer.byteLength(encoded) > 16384)
+  if (
+    encoded.length > maxResultBytes ||
+    Buffer.byteLength(encoded) > maxResultBytes
+  )
     throw new Error('MCP result exceeds provider limit');
   return { state: 'COMPLETED', text: encoded };
 }

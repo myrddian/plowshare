@@ -26,13 +26,13 @@ async function main(): Promise<void> {
   const client = await connectPlowshare({
     origin: config.origin,
     token,
-    timeoutMs: 30000,
+    timeoutMs: config.requestTimeoutMs,
   });
   try {
     await runIntegration(
       client,
       config,
-      new HttpMcpSessions(),
+      new HttpMcpSessions(config.clientInfo),
       controller.signal,
     );
   } finally {

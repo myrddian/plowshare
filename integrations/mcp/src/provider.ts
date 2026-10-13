@@ -25,13 +25,9 @@ import type {
   McpProtocol,
   HttpPolicy,
 } from './contracts.ts';
-import {
-  MAX_PAGES,
-  MAX_TOOLS,
-  rejected,
-  unknownResult,
-  withinDeadline,
-} from './contracts.ts';
+import { rejected, unknownResult, withinDeadline } from './contracts.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
+import type { McpLimits } from './settings.ts';
 import { contractHash, declaration, result } from './codec.ts';
 import type { CataloguePublicationIntent } from './journal.ts';
 
@@ -40,6 +36,7 @@ export interface McpWorkerOptions {
   readonly protocol: McpProtocol;
   readonly policy: Omit<HttpPolicy, 'endpoint'>;
   readonly timeoutSeconds: number;
+  readonly limits?: McpLimits;
 }
 /** Public SDK credential release remains the authority for discovery and exact invocation execution. */
 export interface McpCredentials {
@@ -101,16 +98,17 @@ function identity(
 async function catalogue(
   session: McpSession,
   signal: AbortSignal,
+  limits: McpLimits,
 ): Promise<readonly McpTool[]> {
   const tools: McpTool[] = [];
   const cursors = new Set<string>();
   let cursor: string | null = null;
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < limits.maxPages; page++) {
     signal.throwIfAborted();
     const next = await session.page(cursor, signal);
     tools.push(...next.tools);
     if (
-      tools.length > MAX_TOOLS ||
+      tools.length > limits.maxTools ||
       new Set(tools.map((tool) => tool.name)).size !== tools.length
     )
       throw new Error('Duplicate or oversized MCP catalogue');
@@ -156,6 +154,7 @@ export class McpProvider {
     stop: AbortSignal = new AbortController().signal,
   ): Promise<McpProvider> {
     const binding = registration.binding;
+    const limits = options.limits ?? DEFAULT_LIMITS;
     if (
       !hostedRegistrationCheck(registration) ||
       !binding.enabled ||
@@ -179,8 +178,10 @@ export class McpProvider {
     const session = await sessions.open(
       {
         protocol: options.protocol,
+        limits,
         policy: {
           ...options.policy,
+          maxWireBytes: limits.maxWireBytes,
           endpoint: credential.connection.definition.endpoint,
         },
         header: credential.header,
@@ -189,7 +190,7 @@ export class McpProvider {
       signal,
     );
     try {
-      const snapshot = await catalogue(session, signal);
+      const snapshot = await catalogue(session, signal, limits);
       const tools = Object.freeze(
         snapshot.map((tool) => ({
           declaration: declaration(
@@ -198,6 +199,7 @@ export class McpProvider {
             options.protocol,
             context,
             options.timeoutSeconds,
+            limits,
           ),
           handler: (call: ToolCall) => provider.execute(tool, call),
         })),
@@ -218,7 +220,7 @@ export class McpProvider {
       if (
         Buffer.byteLength(
           JSON.stringify(tools.map((tool) => tool.declaration)),
-        ) > 60000
+        ) > limits.maxCatalogueBytes
       )
         throw new Error('MCP catalogue exceeds provider publication budget');
       const provider = new McpProvider(
@@ -255,7 +257,11 @@ export class McpProvider {
         'MCP credentials changed; withdraw and start a new context',
       );
     }
-    const fresh = await catalogue(this.session, signal);
+    const fresh = await catalogue(
+      this.session,
+      signal,
+      this.options.limits ?? DEFAULT_LIMITS,
+    );
     if (
       contractHash(fresh.map((tool) => tool.metadata)) !==
       contractHash(this.snapshot.map((tool) => tool.metadata))
@@ -318,6 +324,7 @@ export class McpProvider {
         return result(
           tool,
           await this.session.call(tool, call.arguments, signal),
+          (this.options.limits ?? DEFAULT_LIMITS).maxResultBytes,
         );
       } catch {
         this.active = false;

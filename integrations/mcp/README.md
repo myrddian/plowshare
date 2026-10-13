@@ -31,20 +31,82 @@ placeholders to replace with deployment configuration:
   "origin": "https://plowshare.example.invalid",
   "tokenEnvironment": "PLOWSHARE_MCP_EXECUTOR_TOKEN",
   "journalDirectory": "/absolute/private/mcp-journals",
-  "pollMs": 250,
+  "requestTimeoutMs": 30000,
+  "clientInfo": { "name": "plowshare-mcp-integration", "version": "0.1.0" },
+  "maxWorkers": 32,
+  "maxRecoveryCatalogues": 128,
+  "defaults": {
+    "protocol": "2026-07-28",
+    "allowHttp": false,
+    "allowPrivateNetwork": false,
+    "timeoutMs": 10000,
+    "timeoutSeconds": 30,
+    "pollMs": 250,
+    "renewalFraction": 0.3333333333333333,
+    "limits": {
+      "maxTools": 128,
+      "maxPages": 32,
+      "maxWireBytes": 1048576,
+      "maxCatalogueBytes": 60000,
+      "maxResultBytes": 16384,
+      "maxContentBlocks": 128
+    }
+  },
   "workers": [
     {
       "binding": "11111111-1111-1111-1111-111111111111",
       "generation": 1,
-      "protocol": "2026-07-28",
-      "allowHttp": false,
-      "allowPrivateNetwork": false,
-      "timeoutMs": 10000,
-      "timeoutSeconds": 30
+      "timeoutMs": 20000,
+      "limits": { "maxPages": 64 }
     }
   ]
 }
 ```
+
+`defaults` applies to every binding. Worker fields override it; `limits` merges
+field by field, so overriding `maxPages` preserves the other budgets. Existing
+files with policy and timeout fields directly on each worker remain valid. Unknown
+fields, null values, invalid types and out-of-range values fail before connection.
+Defaults are validated even when every worker overrides them. Resolved settings
+are immutable and never shared as mutable state between credential contexts.
+
+| Process setting | Default | Allowed value |
+| --- | --- | --- |
+| `requestTimeoutMs` | 30,000 | Integer 100–300,000; public Plowshare SDK request timeout |
+| `clientInfo` | Package name and version shown above | Explicit `name` and `version`, each 1–128 characters with no control characters |
+| `maxWorkers` | 32 | Integer 1–256; maximum configured bindings |
+| `maxRecoveryCatalogues` | 128 | Integer 1–4,096 per binding; bounds retained archive reads and new catalogue admission |
+| `pollMs` | 250 | Integer 50–10,000; compatibility fallback when no worker/default poll interval is supplied |
+
+These settings belong in `defaults` or individual workers:
+
+| Worker setting | Default | Allowed value |
+| --- | --- | --- |
+| `protocol` | Required explicitly | `2026-07-28` or `2025-11-25` |
+| `allowHttp`, `allowPrivateNetwork` | Required explicitly | Boolean network permissions |
+| `timeoutMs` | 10,000 | Integer 100–300,000; total discovery/refresh deadline and individual MCP HTTP request timeout |
+| `timeoutSeconds` | 30 | Integer 1–300; offered invocation timeout, also bounded by the server invocation deadline |
+| `pollMs` | Process value | Integer 50–10,000; idle intake interval |
+| `renewalFraction` | 1/3 | Number 0.05–0.5; renew after this fraction of the smaller of remaining lifetime and server lease |
+| `limits.maxTools` | 128 | Integer 1–128 across the complete catalogue |
+| `limits.maxPages` | 32 | Integer 1–1,024 per discovery/refresh |
+| `limits.maxWireBytes` | 1,048,576 | Integer 1–16,777,216 per HTTP request or response, including JSON/SSE framing |
+| `limits.maxCatalogueBytes` | 60,000 | Integer 1–60,000 of UTF-8 encoded declarations |
+| `limits.maxResultBytes` | 16,384 | Integer 1–16,384; encoded result must fit both character and UTF-8 byte budgets |
+| `limits.maxContentBlocks` | 128 | Integer 1–1,024 text blocks; aggregate result budget still applies |
+
+Polling waits are shortened for renewal and expiry. In-flight SDK operations still
+have their own finite deadlines; choose timeouts and renewal cadence to fit the
+server-owned lease. Very small budgets can deliberately refuse negotiation,
+discovery or results. Nothing is truncated or partially published to fit a budget.
+
+The 128-tool, catalogue-envelope and result-text ceilings come from the public
+provider contracts; declarations retain headroom within the 64 KiB publication
+envelope. Schema/value limits, the 1,000-receipt SDK journal bound, 2 MiB private
+file bound, name/hash format and zero effect retries remain contract invariants.
+Operator settings cannot expand those contracts or enable redirects, automatic
+authentication retries, input continuation or disabled TLS verification.
+
 
 The environment variable contains the configured executor service account's
 Plowshare token. Upstream MCP credentials come exclusively from the server's
@@ -87,8 +149,8 @@ task execution, resource/file bridge or native process launch.
 
 Discovery uses explicit pages through the SDK's typed protocol requests, bypassing
 automatic pagination and cache writes. It validates the complete catalogue before
-publication: at most 32 pages, 128 tools, 1 MiB per HTTP response and a configured
-total discovery deadline. Duplicate names/cursors, unsupported schema constraints,
+publication: by default 32 pages, 128 tools and 1 MiB per HTTP request/response,
+with configurable budgets and a finite total discovery deadline. Duplicate names/cursors, unsupported schema constraints,
 task-required tools, parameter header extensions or an oversized publication
 refuse the catalogue. Nothing is published partially.
 
@@ -96,7 +158,8 @@ Nested input schemas and arguments use the same shared SDK schema and value
 validators as native Plowshare tools. Constraints are preserved. Each offered name
 contains a readable upstream slug and 128 bits of a SHA-256 contract hash covering
 the protocol, binding generation, owner/subject, connection/revision, credential
-generation, timeout and complete tool metadata, including input/output schemas.
+generation, timeout, resolved discovery/result budgets and complete tool metadata,
+including input/output schemas.
 An immutable catalogue pins the original upstream name. Changed contracts produce
 different names; a collision refuses publication.
 
@@ -141,7 +204,11 @@ catalogue uses the SDK's existing executing/ready/publishing rules and never
 reexecutes a retained invocation. Retired executing/ready receipts remain retained
 for inspection; the adapter does not invent result authority for them. Archive
 settled state deliberately before the bounds of 1,000 receipts per catalogue,
-128 recovery catalogues or 2 MiB per private file are reached.
+the configured recovery archive bound (128 by default) or 2 MiB per private file
+are reached. A full archive refuses a new generation before saving it. Lowering
+the archive bound below existing retained state blocks startup; raise the bound
+or deliberately archive settled state. Configuration changes never delete old
+catalogues or receipts.
 
 The public API has no owning receipt read for catalogue publication or registration
 on a disconnected socket. Their pending intents block automatic restart after

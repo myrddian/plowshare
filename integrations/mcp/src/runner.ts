@@ -15,6 +15,17 @@ import {
 } from './journal.ts';
 import { FileRecoveryCatalogues, reconcileCatalogues } from './recovery.ts';
 
+/** Renewal uses the smaller of the server lease and actual remaining lifetime; polling cannot delay it. */
+export function renewalTime(
+  now: number,
+  expiresAt: number,
+  leaseSeconds: number,
+  fraction: number,
+): number {
+  return (
+    now + Math.max(0, Math.min(expiresAt - now, leaseSeconds * 1000)) * fraction
+  );
+}
 async function registration(
   connection: ProviderConnection,
   config: WorkerConfig,
@@ -60,7 +71,11 @@ async function runWorker(
     directory,
     'worker',
     async () => {
-      const recovery = new FileRecoveryCatalogues(directory, worker.binding);
+      const recovery = new FileRecoveryCatalogues(
+        directory,
+        worker.binding,
+        config.maxRecoveryCatalogues,
+      );
       await reconcileCatalogues(connection, recovery, directory);
       const intent = await CatalogueIntent.open(directory);
       const registrationIntent = await RegistrationIntent.open(directory);
@@ -91,12 +106,12 @@ async function runWorker(
         await publish(provider, intent, 'publish');
         let safeToWithdraw = true;
         let expiresAt = Date.parse(registered.expiresAt);
-        let renewAt =
-          Date.now() +
-          Math.min(
-            (expiresAt - Date.now()) / 3,
-            (registered.binding.definition.leaseSeconds * 1000) / 3,
-          );
+        let renewAt = renewalTime(
+          Date.now(),
+          expiresAt,
+          registered.binding.definition.leaseSeconds,
+          worker.renewalFraction,
+        );
         try {
           while (!signal.aborted) {
             if (Date.now() >= expiresAt)
@@ -118,16 +133,27 @@ async function runWorker(
               safeToWithdraw = false;
               await publish(provider, intent, 'publish');
               safeToWithdraw = true;
-              renewAt =
-                Date.now() +
-                (registered.binding.definition.leaseSeconds * 1000) / 3;
+              renewAt = renewalTime(
+                Date.now(),
+                expiresAt,
+                renewed.binding.definition.leaseSeconds,
+                worker.renewalFraction,
+              );
             }
             await provider.reconcile();
             await provider.poll();
             adapter.assertActive();
             if (!signal.aborted) {
               try {
-                await pause(config.pollMs, undefined, { signal });
+                await pause(
+                  Math.min(
+                    worker.pollMs,
+                    Math.max(1, renewAt - Date.now()),
+                    Math.max(1, expiresAt - Date.now()),
+                  ),
+                  undefined,
+                  { signal },
+                );
               } catch (error) {
                 if (!signal.aborted) throw error;
               }

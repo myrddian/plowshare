@@ -150,3 +150,60 @@ await test('explicit protocol pin refuses incompatible discovery without legacy 
     await wire.close();
   }
 });
+
+await test('configured client identity and wire budget apply to real HTTP requests without retries', async () => {
+  const wire = new McpWire('2025-11-25');
+  await wire.start();
+  const session = await new HttpMcpSessions({
+    name: 'configured-executor',
+    version: '2',
+  }).open(
+    {
+      protocol: wire.protocol,
+      policy: {
+        endpoint: wire.endpoint,
+        allowHttp: true,
+        allowPrivateNetwork: true,
+        timeoutMs: 1000,
+        maxWireBytes: 1024,
+      },
+      header: 'Authorization',
+      value: 'Bearer fixture',
+    },
+    AbortSignal.timeout(1000),
+  );
+  try {
+    assert.deepEqual(
+      wire.seen.find((entry) => entry.method === 'initialize')?.clientInfo,
+      { name: 'configured-executor', version: '2' },
+    );
+    const tool = (await session.page(null, AbortSignal.timeout(1000))).tools[0];
+    assert.ok(tool);
+    await assert.rejects(
+      session.call(
+        tool,
+        { values: [{ name: 'x'.repeat(2000) }] },
+        AbortSignal.timeout(1000),
+      ),
+    );
+    assert.equal(
+      wire.seen.filter((entry) => entry.method === 'tools/call').length,
+      0,
+    );
+    wire.tools = [
+      {
+        name: 'oversized',
+        description: 'x'.repeat(2000),
+        inputSchema: { type: 'object', properties: {} },
+      },
+    ];
+    await assert.rejects(session.page(null, AbortSignal.timeout(1000)));
+    assert.equal(
+      wire.seen.filter((entry) => entry.method === 'tools/list').length,
+      2,
+    );
+  } finally {
+    await session.close();
+    await wire.close();
+  }
+});

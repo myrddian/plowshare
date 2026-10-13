@@ -42,6 +42,7 @@ export class McpWire {
     authorization: string;
     session: string;
     arguments: unknown;
+    clientInfo: unknown;
     headers: IncomingMessage['headers'];
   }[] = [];
   readonly faults: unknown[] = [];
@@ -103,6 +104,7 @@ export class McpWire {
       authorization: token,
       session: typeof session === 'string' ? session : '',
       arguments: params.arguments,
+      clientInfo: params.clientInfo,
       headers: request.headers,
     });
     if (method === 'notifications/initialized' || message.id === undefined) {

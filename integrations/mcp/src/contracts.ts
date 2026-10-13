@@ -5,6 +5,8 @@ import type {
   ToolValue,
 } from 'plowshare-client-ts';
 
+import type { McpLimits } from './settings.ts';
+
 export type McpProtocol = '2026-07-28' | '2025-11-25';
 /** Immutable, validated discovery snapshot. Metadata participates in offered identity. */
 export interface McpTool {
@@ -38,9 +40,11 @@ export interface HttpPolicy {
   readonly allowHttp: boolean;
   readonly allowPrivateNetwork: boolean;
   readonly timeoutMs: number;
+  readonly maxWireBytes?: number;
 }
 export interface McpSessionOptions {
   readonly protocol: McpProtocol;
+  readonly limits?: McpLimits;
   readonly policy: HttpPolicy;
   readonly header: 'Authorization' | 'X-API-Key' | 'Api-Key';
   readonly value: string;
@@ -48,9 +52,6 @@ export interface McpSessionOptions {
 export interface McpSessions {
   open(options: McpSessionOptions, signal: AbortSignal): Promise<McpSession>;
 }
-export const MAX_TOOLS = 128;
-export const MAX_PAGES = 32;
-export const MAX_WIRE_BYTES = 1_048_576;
 export function rejected(text: string): ToolResult {
   return { state: 'REJECTED', text };
 }

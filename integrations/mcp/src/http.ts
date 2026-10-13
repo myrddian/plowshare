@@ -4,7 +4,7 @@ import ipaddr from 'ipaddr.js';
 import { Agent, fetch as httpFetch } from 'undici';
 import type { FetchLike } from '@modelcontextprotocol/client';
 import type { HttpPolicy } from './contracts.ts';
-import { MAX_WIRE_BYTES } from './contracts.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
 
 export function endpoint(value: string, allowHttp: boolean): URL {
   const url = new URL(value);
@@ -40,6 +40,7 @@ export async function boundedHttp(
   setSignal(signal: AbortSignal): void;
   close(): Promise<void>;
 }> {
+  const maxWireBytes = policy.maxWireBytes ?? DEFAULT_LIMITS.maxWireBytes;
   const url = endpoint(policy.endpoint, policy.allowHttp);
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = isIP(hostname)
@@ -96,7 +97,7 @@ export async function boundedHttp(
       throw new Error('Unsupported MCP HTTP request');
     if (
       typeof init?.body === 'string' &&
-      Buffer.byteLength(init.body) > MAX_WIRE_BYTES
+      Buffer.byteLength(init.body) > maxWireBytes
     )
       throw new Error('MCP request exceeds bound');
     const signals = [
@@ -144,7 +145,7 @@ export async function boundedHttp(
           if (!(chunk instanceof Uint8Array))
             throw new Error('Invalid MCP response bytes');
           bytes += chunk.byteLength;
-          if (bytes > MAX_WIRE_BYTES) {
+          if (bytes > maxWireBytes) {
             await reader.cancel();
             throw new Error('MCP response exceeds bound');
           }

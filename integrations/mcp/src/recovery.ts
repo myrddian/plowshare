@@ -89,13 +89,14 @@ export class FileRecoveryCatalogues implements RecoveryCatalogues {
   constructor(
     private readonly directory: string,
     private readonly binding: string,
+    private readonly maxCatalogues: number = 128,
   ) {}
   async all(): Promise<readonly RecoveryCatalogue[]> {
     await privateDirectory(this.directory);
     const files = (await readdir(this.directory)).filter((file) =>
       /^[0-9a-f]{64}\.deployment\.json$/.test(file),
     );
-    if (files.length > 128)
+    if (files.length > this.maxCatalogues)
       throw new Error('MCP recovery catalogue archive exceeds bound');
     const catalogues: RecoveryCatalogue[] = [];
     for (const file of files.sort()) {
@@ -144,6 +145,10 @@ export class FileRecoveryCatalogues implements RecoveryCatalogues {
       )
         throw error;
     }
+    if ((await this.all()).length >= this.maxCatalogues)
+      throw new Error(
+        'MCP recovery catalogue archive reached configured bound',
+      );
     await durablePrivateWrite(file, catalogue);
   }
 }

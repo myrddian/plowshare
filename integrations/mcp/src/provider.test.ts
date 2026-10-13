@@ -16,6 +16,7 @@ import {
   secondId,
 } from './provider.test-support.ts';
 import { decodeMcpTool, object } from './codec.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
 import { rawTool } from './wire.test-support.ts';
 import { setTimeout as pause } from 'node:timers/promises';
 
@@ -296,5 +297,61 @@ await test('existing ToolProvider publishes, polls, journals and reconciles by o
     assert.equal(journal.rows.get(id)?.hostedWorker?.registration, secondId);
   } finally {
     await adapter.close();
+  }
+});
+
+await test('configured discovery budgets refuse whole catalogues and result budgets pin offered identity', async () => {
+  for (const limits of [
+    { ...DEFAULT_LIMITS, maxTools: 1 },
+    { ...DEFAULT_LIMITS, maxPages: 1 },
+    { ...DEFAULT_LIMITS, maxCatalogueBytes: 1 },
+  ]) {
+    const sessions = new Sessions();
+    if (limits.maxTools === 1)
+      sessions.tools = [
+        decodeMcpTool(rawTool),
+        decodeMcpTool({ ...rawTool, name: 'another' }),
+      ];
+    if (limits.maxPages === 1) sessions.nextCursor = 'next';
+    await assert.rejects(
+      McpProvider.discover(registration, new Credentials(), sessions, {
+        ...options,
+        limits,
+      }),
+    );
+    assert.equal(sessions.pages, 1);
+    assert.ok(sessions.closed);
+    assert.equal(sessions.calls, 0);
+    assert.equal(sessions.opens[0]?.policy.maxWireBytes, limits.maxWireBytes);
+  }
+  const normal = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    new Sessions(),
+    options,
+  );
+  const sessions = new Sessions();
+  const restricted = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    sessions,
+    { ...options, limits: { ...DEFAULT_LIMITS, maxResultBytes: 10 } },
+  );
+  try {
+    const tool = restricted.tools[0];
+    assert.ok(tool);
+    assert.notEqual(tool.declaration.name, normal.tools[0]?.declaration.name);
+    assert.equal(
+      (await tool.handler(invocation(tool.declaration.name))).state,
+      'UNKNOWN',
+    );
+    assert.equal(
+      (await tool.handler(invocation(tool.declaration.name))).state,
+      'REJECTED',
+    );
+    assert.equal(sessions.calls, 1);
+  } finally {
+    await normal.close();
+    await restricted.close();
   }
 });
