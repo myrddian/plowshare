@@ -7,6 +7,44 @@ import test from 'node:test';
 import { options, Usage } from './options.js';
 import { exitFor, run } from './run.js';
 
+await test('provider validation redacts stdin material and online put refuses argv secrets before login', async () => {
+  const payload = {
+    project: 'fixture',
+    connection: '11111111-1111-1111-1111-111111111111',
+    subject: null,
+    requestId: '11111111-1111-1111-1111-111111111111',
+    expectedGeneration: null,
+    secret: 'private-material',
+  };
+  const output: string[] = [];
+  const io = {
+    env: {},
+    stdout: (value: string) => {
+      output.push(value);
+    },
+    stderr: (value: string) => {
+      output.push(value);
+    },
+    stdin: () => Promise.resolve(JSON.stringify(payload)),
+  };
+  assert.equal(
+    await run(
+      ['provider', 'credential', 'put', '--payload', '-', '--validate'],
+      io,
+    ),
+    0,
+  );
+  assert.equal(output.join('').includes(payload.secret), false);
+  assert.match(output.join(''), /redacted/);
+  output.length = 0;
+  assert.equal(
+    await run(['provider', 'credential', 'put', JSON.stringify(payload)], io),
+    2,
+  );
+  assert.match(output.join(''), /stdin/);
+  assert.equal(output.join('').includes(payload.secret), false);
+});
+
 await test('explicit scope overrides the environment and leaves payload scope to shared parsing', () => {
   const env = { PLOWSHARE_PROJECT: 'inherited' };
   assert.equal(

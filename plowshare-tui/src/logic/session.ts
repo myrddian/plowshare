@@ -1,3 +1,4 @@
+import { isObject } from 'plowshare-client-ts/binding/values';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { isList } from 'plowshare-client-ts/binding/values';
 export { savingSchedule } from 'plowshare-client-ts/operations/session';
@@ -1454,11 +1455,33 @@ export function serverCommand(line: string, project?: string) {
   const text = line.trim();
   if (text === '/admin') return { kind: 'usage' as const, said: ADMIN_USAGE };
   if (
-    !/^\/(?:admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|application\s+(?:files|read|save)|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
+    !/^\/(?:provider\s+(?:connection\s+(?:list|status|receipt|save|change)|credential\s+(?:status|put|revoke|rekey|authorize|refresh))|tool\s+scope\s+(?:list|host\s+(?:list|status|receipt|save|change))|admin\s+(?:status|accounts|sessions|audit|pricing\s+(?:list|set)|account\s+(?:create|update|reset)|session\s+revoke|service\s+(?:accounts|tokens|account\s+(?:create|update)|token\s+(?:create|rotate|revoke)))|application\s+(?:files|read|save)|project\s+(?:create|list|define|lend|unlend|workspace|move|forget|access|member-role|member-add|member-remove))(?:\s|$)/u.test(
       text,
     )
   )
     return { kind: 'unhandled' as const };
+  if (/^\/provider\s+credential\s+put(?:\s|$)/u.test(text)) {
+    try {
+      const json: unknown = JSON.parse(
+        text.replace(/^\/provider\s+credential\s+put\s*/u, ''),
+      );
+      if (!isObject(json) || 'secret' in json)
+        return {
+          kind: 'usage' as const,
+          said: 'Supply credential coordinates only; the TUI asks for material in a masked field.',
+        };
+      return parseCommand(
+        'provider credential put ' +
+          JSON.stringify({ ...json, secret: '[masked input]' }),
+        project,
+      );
+    } catch {
+      return {
+        kind: 'usage' as const,
+        said: 'Use /provider credential put with JSON project, connection, subject, requestId and expectedGeneration. Material is entered separately.',
+      };
+    }
+  }
   return parseCommand(text.slice(1), project);
 }
 

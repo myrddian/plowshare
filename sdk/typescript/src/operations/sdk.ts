@@ -63,6 +63,24 @@ export {
   ApplicationIdentityRefused,
 } from './application-identity-client.ts';
 export type { IdentityIntentStore } from './application-identity-client.ts';
+export {
+  ProviderManagementClient,
+  ProviderManagementRefused,
+  ProviderManagementPending,
+  SessionManagementIntents,
+  MANAGEMENT_OPERATIONS,
+  managementRequest,
+  decodeManagementIntent,
+} from './provider-management.ts';
+export type {
+  ManagementOperation,
+  ManagementRequest,
+  ManagementValue,
+  ManagementIntent,
+  ManagementIntentStore,
+  ManagementBookmarkStorage,
+  ProviderManagement,
+} from './provider-management.ts';
 export type {
   ApplicationServiceDeclaration,
   ApplicationIdentityBinding,

@@ -7,6 +7,9 @@ registration, a fresh catalogue and a current credential grant. This foundation
 supports external HTTP provider adapters; it does not start an MCP transport or
 allocate spending pools.
 
+Use the [client management controls](provider-management-clients.md) to inspect
+and configure owner assignments and credentials through these existing operations.
+
 ## Three identities
 
 The **owner** is the authenticated user or service principal saving the binding.

@@ -10,6 +10,7 @@ import { botDisplayName, botDetails } from './bot-details.ts';
 import { installPaneResize } from './pane-resize.ts';
 import { installApplication } from './application.ts';
 import { installProjectAccess } from './project-access.ts';
+import { installToolConnections } from './tool-connections.ts';
 import { installServerAdmin } from './server-admin.ts';
 import { installOperator } from './operator.ts';
 import { activeJob, stoppedJob, homeKey, contextKey } from '../shared.ts';
@@ -412,12 +413,28 @@ function openConnect() {
 const deploymentControls = installApplicationDeployment(() => state, request);
 const serverAdministration = installServerAdmin(request);
 const projectAccess = installProjectAccess(request);
+const toolConnections = installToolConnections(() => state, request);
+const toolConnectionsButton = document.createElement('button');
+toolConnectionsButton.type = 'button';
+toolConnectionsButton.textContent = 'Tool connections';
+toolConnectionsButton.addEventListener('click', () => {
+  const project = scope || state.personal?.project;
+  if (project) toolConnections.open(project);
+});
+$('#server-project-add').after(toolConnectionsButton);
 
 const localFileStores = installFileStores(request);
 function render() {
   localFileStores.update(state);
   serverAdministration.update(state);
   projectAccess.update(state);
+  toolConnections.update();
+  toolConnectionsButton.disabled =
+    !state.connected || !(scope || state.personal?.project);
+  toolConnectionsButton.title =
+    scope || state.personal?.project
+      ? 'Manage tools for the selected execution project'
+      : 'Choose an execution project first';
   if (!state) return;
   const recoveryWarning = $('#personal-recovery-warning');
   recoveryWarning.textContent = state.personal?.warning ?? '';

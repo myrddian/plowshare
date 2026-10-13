@@ -1,9 +1,11 @@
 # MCP connection management and native hosting workflows
 
-Status: client workflow design for review, audited against main
+Status: accepted client workflow design, audited against main
 `7443fea2981615846d2a21ea835d6b0841447e0e` on 13 October 2026.
-Credentials and durable provider bindings are implemented. The screens, friendly
-verbs and native MCP host described here are planned. This is not a live MCP or
+Credentials and durable provider bindings are implemented. The shared owner
+management lifecycle and initial CLI/TUI/desktop/console controls are documented
+in [client management](provider-management-clients.md). Friendly native host verbs,
+MCP transports and native host lifetime remain planned. This is not a live MCP or
 deployed-client acceptance claim.
 
 MCP consumes the existing SDK provider, scopes, catalogue leases, Relay invocation
@@ -16,10 +18,10 @@ continues to expose Plowshare operations, independently of consuming MCP tools.
 
 | Surface | Verified implementation | Remaining work |
 | --- | --- | --- |
-| CLI | [Parser](../sdk/typescript/src/operations/commands.ts), [catalogue](../sdk/typescript/src/operations/catalog.ts) and [runner](../plowshare-cli/src/run.ts) accept typed `provider connection …`, `provider credential …` and `tool scope host …` operations. `--payload -` accepts JSON from stdin. Ordinary commands close their socket after the result. | Safe credential entry, operation-specific recovery, friendly management and persistent MCP hosting. |
-| TUI | [Session commands](../plowshare-tui/src/logic/session.ts) and [view dispatch](../plowshare-tui/src/view/main.ts) reuse SDK contracts on a persistent socket. Their current allowlists do not expose the new provider management families. | A management panel and approved slash verbs; explicit native host ownership. SDK catalogue presence alone does not expose a TUI command. |
-| Desktop | [Client](../plowshare-desktop/src/client.ts) validates SDK operations; [preload](../plowshare-desktop/src/preload.ts) exposes typed IPC; [navigation](../plowshare-desktop/src/renderer/navigation.ts) preserves selected work. The current request union has no provider management action. | Typed management IPC, bounded display DTOs and panels; native hosting in the main process. |
-| Console | [Shell](../plowshare-console/src/screens/shell.ts), [transport](../plowshare-console/src/transport.ts) and [events](../plowshare-console/src/events.ts) retain screens and share the tab socket. Supported historical route keys map to WebSocket operations. The [view contract](../test-support/contracts/console-views.json) has no provider screen. | A checked management capability on that same socket and a project-scoped panel. No browser subprocess or browser-hosted provider. |
+| CLI | [Runner](../plowshare-cli/src/run.ts) uses shared owner management, stdin credential entry, redacted validation and exact receipt recovery. Ordinary commands close their socket after the result. | Friendly native profile verbs and persistent MCP hosting. |
+| TUI | [Session commands](../plowshare-tui/src/logic/session.ts) and [view dispatch](../plowshare-tui/src/view/main.ts) expose owner management slash families, masked credential entry and `/tools` snapshots on the persistent socket. | Native profile/host panel and explicit native host ownership. |
+| Desktop | [Client](../plowshare-desktop/src/client.ts) validates owner management behind typed IPC; [controls](../plowshare-desktop/src/renderer/tool-connections.ts) reuse bounded shared UI and private main-process bookmarks. | Native hosting in the main process and broader native profile UX. |
+| Console | [Projects controls](../plowshare-console/src/screens/tool-connections.ts) borrow the tab socket for owner management. The [view contract](../test-support/contracts/console-views.json) retains existing navigation; there is no separate provider rail. | Broader work/navigation increments remain separate; no browser subprocess or browser-hosted provider. |
 | SDKs | Java, TypeScript/Node, Python, Go and .NET expose typed management/worker operations. [TypeScript/Node ToolProvider](../sdk/typescript/src/operations/relay-tools.ts) supports delegated worker ports and original-fence recovery. | One reusable Node MCP consumer outside core; other SDKs need not duplicate MCP transports. |
 
 Comments describing old view counts, HTTP job reads or ephemeral login tokens are
@@ -71,7 +73,7 @@ operator configuration file in the client.
 
 ## Shared management capability and evidence
 
-Build a narrow typed management capability on the existing checked transport.
+The implemented [management capability](provider-management-clients.md) uses the existing checked transport.
 CLI/TUI use their current socket; desktop main owns it behind typed IPC; console
 adapts its tab socket with `checkedTransport`. Views consume typed results and
 explicit refusal/uncertainty, never wire property bags. Desktop renderer receives
@@ -272,10 +274,10 @@ even if status is now G+2. Never render the old receipt as current state or offe
 Before sending, persist only a redacted management intent: server/account, project,
 resource ID, operation, request UUID and expected revision/generation. This recovery
 bookmark is not another execution ledger. Persist no secret request body, secret
-hash or authorization URL. Existing CLI `--validate` prints the input payload;
-until dedicated redaction exists, never validate real secret-bearing input or paste
-it into terminal/composer history. Safe entry/output handling is required before
-friendly credential commands ship.
+hash or authorization URL. CLI `--validate` now redacts credential.put material.
+Online CLI entry uses stdin; TUI and GUI entry use a separate masked field. Never
+paste credentials into terminal/composer history. Safe entry/output handling remains
+required for future friendly native commands.
 
 ## Evidence limits and delivery order
 
@@ -306,5 +308,6 @@ or generic Relay-log queries to manufacture UI evidence.
    distribution acceptance is required before claiming shipped UX.
 
 This design changes no runtime API, persistence, schema, tool grants, dependency
-or navigation catalogue. Verification is source/contract review, documentation
-links and repository checks; implementation and live acceptance are later increments.
+or navigation catalogue. The initial owner controls have source and controlled
+client fixture coverage; MCP adapter/native-host and deployed acceptance remain
+later increments.

@@ -66,6 +66,15 @@ server.on('upgrade', (request, socket, head) => {
                         ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:{code:'OK',payload}}))
                         return
                     }
+                    if(session.endsWith('/provider-owner-compat')) {
+                        assert.ok(['provider.connection.list','tool.scope.host.list'].includes(sent.type));
+                        assert.deepEqual(sent.payload,{project:'fixture'});
+                        const key=session+'/'+sent.type;
+                        counts.set(key,(counts.get(key)??0)+1);
+                        ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,
+                            payload:{code:'NOT_FOUND',said:`no handler is registered for type "${sent.type}"`,payload:{accessToken:'must-not-escape'}}}));
+                        return;
+                    }
                     assert.equal(sent.type, 'project.list')
                     assert.equal(typeof sent.id, 'string')
                     if (session.startsWith('typed-')) {
@@ -161,6 +170,8 @@ try {
         assert.equal(counts.get('packet-large-'+language+'/relay.consume'),1,'large consume repeated')
         assert.ok(packetCounts.get('packet-large-'+language)>480,'large message was not segmented')
         assert.ok(packetMax.get('packet-large-'+language)<=128*1024,'packet exceeds wire allowance')
+        for(const operation of ['provider.connection.list','tool.scope.host.list'])
+            assert.equal(counts.get('typed-'+language+'/provider-owner-compat/'+operation),1,language+' replayed unsupported management');
         if(language==='node') assert.equal(counts.get('node-typed/undefined'),3,'public SDK replayed work or sent invalid input')
         assert.equal(upgrades.get(language + '-redirect'), 1, language + ' followed an authenticated upgrade redirect')
         for(const name of ['timeout','disconnect','cancel'])assert.equal(counts.get(language==='node'? language+(name==='cancel'?'-cancel':'')+'/'+name:'typed-'+language+'/'+name+'/'+name),1,language+' replayed '+name+' work')

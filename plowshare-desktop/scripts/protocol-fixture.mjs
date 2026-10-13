@@ -243,6 +243,11 @@ export async function protocolFixture(options = {}) {
       const frame = JSON.parse(bytes.toString()); frames.push(frame);
       const payload = frame.payload;
       let result = { code: 'OK' };
+      if (options.ownerProvider && (frame.type.startsWith('provider.') || frame.type.startsWith('tool.scope.'))) {
+        result = options.ownerProvider(frame.type, payload);
+        connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: 'plowshare-v1', payload: result }));
+        return;
+      }
       switch (frame.type) {
         case 'filestore.list':
           result = options.fileStores ? options.fileStores() : {code:'OK',payload:{stores:[{alias:'applications',role:'MANAGER'},{alias:'reports',role:'CONTRIBUTOR'},{alias:'archive',role:'VIEWER'}]}};
@@ -655,7 +660,7 @@ export async function protocolFixture(options = {}) {
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  return { loseRunReply() { dropRunReply = true; }, loseAuthoringReply() { dropAuthoringReply = true; }, setMalformedLibrary: value=>{malformedLibrary=value;}, fileClaims, loginCount: () => logins,
+  return { eventSessions: () => eventSockets.size, loseRunReply() { dropRunReply = true; }, loseAuthoringReply() { dropAuthoringReply = true; }, setMalformedLibrary: value=>{malformedLibrary=value;}, fileClaims, loginCount: () => logins,
     setManualChapters(value) { manualChapters = structuredClone(value); },
     setInformationExtraction(value) { informationExtraction=value; },
     setInformationReadError(value) { informationReadError=value; },

@@ -3,6 +3,20 @@ import {
   ApplicationSourceError,
 } from 'plowshare-client-node/applications';
 import { decodeRequest } from 'plowshare-client-ts/operations/schema';
+import { decodeReply } from 'plowshare-client-ts/operations/schema';
+import {
+  ProviderManagementClient,
+  ProviderManagementIntents,
+  openProviderAuthorization,
+} from 'plowshare-client-node';
+import {
+  ProviderManagementRefused,
+  ProviderManagementPending,
+  isManagementOperation,
+  managementRequest,
+  redactedManagementRequest,
+  redactedManagementValue,
+} from 'plowshare-client-ts/operations/provider-management';
 import {
   FileStores,
   manageFileStores,
@@ -49,6 +63,7 @@ import { syncer, type Syncer } from 'plowshare-client-node/sync/syncer';
 import { syncAction } from 'plowshare-client-ts/operations/union';
 import {
   dispatch,
+  resultOf,
   request,
   WAIT_OPERATIONS,
   waitForJob,
@@ -69,6 +84,8 @@ export interface IO {
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
   readonly stdin: (signal: AbortSignal) => Promise<string>;
+  /** Explicit credential.authorize opens once; the URL never reaches stdout or recovery state. */
+  readonly authorize?: (url: string) => Promise<void>;
   readonly fileStoreSetup?: (
     signal: AbortSignal,
   ) => Promise<FileStoreDefault | undefined>;
@@ -735,12 +752,20 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
           operation,
           scope,
           mutation,
-          payload: parsed.request.payload,
+          payload: isManagementOperation(parsed.request.type)
+            ? redactedManagementRequest(
+                managementRequest(parsed.request.type, parsed.request.payload),
+              ).payload
+            : parsed.request.payload,
           executed: false,
         }) + '\n',
       );
       return 0;
     }
+    if (parsed.request.type === 'provider.credential.put' && !opts.inputPayload)
+      throw new Usage(
+        'Supply provider credential material through --payload - (stdin), never an argv JSON body.',
+      );
     const base = requireServer(opts.base);
     observing =
       opts.watch || follow !== undefined || presence || sync?.kind === 'on';
@@ -966,10 +991,54 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
     )
       job = parsed.request.payload.job;
     submitted = true;
-    let result = await dispatch(
-      connection,
-      withSession(parsed.request, connection.session),
-    );
+    let result: Result;
+    if (isManagementOperation(parsed.request.type)) {
+      const management = new ProviderManagementClient(
+        checkedTransport(connection),
+        new ProviderManagementIntents(
+          base,
+          connection.handle,
+          userConfigDirectory(io.env),
+        ),
+      );
+      try {
+        const value = await management.execute(
+          managementRequest(parsed.request.type, parsed.request.payload),
+        );
+        let browserNotice: string | undefined;
+        if (parsed.request.type === 'provider.credential.authorize') {
+          const authorization = decodeReply(parsed.request.type, value);
+          try {
+            await (io.authorize ?? openProviderAuthorization)(
+              authorization.authorizationUrl,
+            );
+          } catch {
+            browserNotice =
+              'Authorization request confirmed; browser could not be opened. Inspect credential status before deliberately authorizing again.';
+          }
+        }
+        result = resultOf(parsed.request, { code: 'OK', payload: value });
+        // Correlate the actual reply before projecting terminal-safe output.
+        result = {
+          ...result,
+          outcome: {
+            ...result.outcome,
+            ...(browserNotice === undefined ? {} : { said: browserNotice }),
+            payload: redactedManagementValue(parsed.request.type, value),
+          },
+        };
+      } catch (error) {
+        if (!(error instanceof ProviderManagementRefused)) throw error;
+        result = resultOf(parsed.request, {
+          code: error.code,
+          said: error.message,
+        });
+      }
+    } else
+      result = await dispatch(
+        connection,
+        withSession(parsed.request, connection.session),
+      );
     reading = true;
     job = result.job ?? job;
     orchestration = result.orchestration ?? orchestration;
@@ -1079,6 +1148,13 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
     }
     return exitFor(result);
   } catch (error) {
+    if (error instanceof ProviderManagementPending) {
+      operation = error.intent.operation;
+      requestId = error.intent.requestId;
+      scope = { project: error.intent.project };
+      submitted = true;
+      return fail('unknown', error.message, 5, 'ORIGINAL_OUTCOME_UNCONFIRMED');
+    }
     if (error instanceof CredentialError)
       return fail('error', error.message, 2, 'AUTHENTICATION_REQUIRED');
     if (error instanceof PasswordRefused)

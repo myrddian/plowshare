@@ -27,5 +27,11 @@ val nodeBuild by tasks.registering(Exec::class) {
 }
 
 tasks.named("assemble") { dependsOn(nodeBuild) }
-tasks.named("check") { dependsOn(nodeBuild) }
+val nodeManagementTest by tasks.registering(Exec::class) {
+    group = "verification"
+    nodeSources()
+    dependsOn(nodeBuild)
+    commandLine("node", "--experimental-strip-types", "--test", "src/provider-management.test.ts")
+}
+tasks.named("check") { dependsOn(nodeBuild, nodeManagementTest) }
 tasks.named("jar") { dependsOn(nodeBuild) }

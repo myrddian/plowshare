@@ -12,6 +12,9 @@ import {
   approvalWire,
 } from './wire-fixtures.ts';
 import { test } from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { DesktopClient, validatedBase } from './client.ts';
 import type { Connector } from './client.ts';
@@ -82,6 +85,7 @@ function fixture() {
     payload: Record<string, unknown>,
   ) => Promise<Outcome> | Outcome = () => ({ code: 'OK' });
   let onRelay: typeof onUsage = () => ({ code: 'OK' });
+  let onProvider: typeof onUsage = () => ({ code: 'OK' });
   let onDeployment: typeof onUsage = () => ({ code: 'OK' });
   const connector: Connector = async (
     _base,
@@ -126,6 +130,8 @@ function fixture() {
           )
             return onDeployment(type, payload);
           if (type.startsWith('relay.')) return onRelay(type, payload);
+          if (type.startsWith('provider.') || type.startsWith('tool.scope.'))
+            return onProvider(type, payload);
           if (type.startsWith('information.'))
             return onInformation(type, payload);
           if (type === 'orchestration.start') return onWorkflow(payload);
@@ -171,6 +177,9 @@ function fixture() {
   return {
     client,
     calls,
+    provider: (value: typeof onProvider) => {
+      onProvider = value;
+    },
     administration: (value: typeof onAdmin) => {
       onAdmin = value;
     },
@@ -2157,4 +2166,143 @@ await test('Application issuance keeps its one-time secret outside desktop state
     code: 'BAD_REQUEST',
     said: 'Already issued; select rotation',
   });
+});
+
+await test('provider owner IPC works without administrator status, redacts metadata and retains lost writes across dialogs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-provider-'));
+  const previous = process.env['PLOWSHARE_CONFIG_DIR'];
+  process.env['PLOWSHARE_CONFIG_DIR'] = root;
+  const id = '11111111-1111-1111-1111-111111111111';
+  const next = '22222222-2222-2222-2222-222222222222';
+  const f = fixture();
+  try {
+    await f.client.dispatch({
+      action: 'connect',
+      base: 'https://server.example',
+      handle: 'fixture',
+      password: 'fixture',
+    });
+    const status = {
+      project: 'fixture',
+      connection: id,
+      subject: 'fixture',
+      generation: id,
+      connectionRevision: id,
+      state: 'READY',
+      expiresAt: null,
+      keyId: 'fixture',
+    };
+    const connection = {
+      project: 'fixture',
+      connection: id,
+      revision: id,
+      enabled: true,
+      deleted: false,
+      definition: {
+        name: 'Fixture',
+        endpoint: 'https://provider.example/mcp',
+        authentication: 'API_KEY',
+        apiKeyHeader: 'X-API-Key',
+        oauth: null,
+      },
+    };
+    const receipt = {
+      requestId: id,
+      operation: 'provider.credential.put',
+      connection,
+      credential: status,
+    };
+    f.provider(() => ({
+      code: 'OK',
+      payload: { ...status, accessToken: 'private-access' },
+    }));
+    const reply = await f.client.dispatch({
+      action: 'provider-management',
+      operation: 'provider.credential.status',
+      payload: { project: 'fixture', connection: id, subject: null },
+    });
+    assert.deepEqual(reply.providerManagement, status);
+    assert.equal(JSON.stringify(reply).includes('private-access'), false);
+    f.provider(() => ({
+      code: 'NOT_FOUND',
+      said: 'no handler is registered for type "provider.connection.list"',
+    }));
+    const older = await f.client.dispatch({
+      action: 'provider-management',
+      operation: 'provider.connection.list',
+      payload: { project: 'fixture' },
+    });
+    assert.equal(older.providerManagementRefusal?.unsupported, true);
+    f.provider(() => {
+      throw new Error('lost reply');
+    });
+    const put = {
+      project: 'fixture',
+      connection: id,
+      subject: null,
+      requestId: id,
+      expectedGeneration: id,
+      secret: 'private-material',
+    };
+    await assert.rejects(
+      f.client.dispatch({
+        action: 'provider-management',
+        operation: 'provider.credential.put',
+        payload: put,
+      }),
+      /lost reply/,
+    );
+    const pending = await f.client.dispatch({
+      action: 'provider-management-pending',
+    });
+    assert.equal(pending.providerManagementPending?.length, 1);
+    assert.equal(JSON.stringify(pending).includes('private-material'), false);
+    await assert.rejects(
+      f.client.dispatch({
+        action: 'provider-management',
+        operation: 'provider.credential.put',
+        payload: { ...put, requestId: next },
+      }),
+      /Outcome unknown/,
+    );
+    assert.equal(
+      f.calls.filter((call) => call.type === 'provider.credential.put').length,
+      1,
+    );
+    const intent = pending.providerManagementPending?.[0];
+    assert.ok(intent);
+    f.provider(() => ({ code: 'OK', payload: receipt }));
+    const recovered = await f.client.dispatch({
+      action: 'provider-management-recover',
+      intent,
+    });
+    assert.deepEqual(recovered.providerManagement, receipt);
+    assert.deepEqual(
+      (await f.client.dispatch({ action: 'provider-management-pending' }))
+        .providerManagementPending,
+      [],
+    );
+    assert.throws(() =>
+      decodeDesktopRequest({
+        action: 'provider-management',
+        operation: 'tool.scope.worker.credential',
+        payload: {},
+      }),
+    );
+    assert.throws(() =>
+      decodeDesktopRequest({
+        action: 'provider-management-recover',
+        intent: { ...intent, secret: 'injected' },
+      }),
+    );
+    assert.equal(
+      JSON.stringify(f.client.state).includes('private-material'),
+      false,
+    );
+  } finally {
+    f.client.dispose();
+    if (previous === undefined) delete process.env['PLOWSHARE_CONFIG_DIR'];
+    else process.env['PLOWSHARE_CONFIG_DIR'] = previous;
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -11,6 +11,19 @@ import {
   userConfigDirectory,
 } from 'plowshare-client-node/connections';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
+import {
+  ProviderManagementClient,
+  ProviderManagementIntents,
+  openProviderAuthorization,
+} from 'plowshare-client-node';
+import {
+  isManagementOperation,
+  ProviderManagementRefused,
+  ProviderManagementPending,
+  managementRequest,
+  redactedManagementValue,
+} from 'plowshare-client-ts/operations/provider-management';
+import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { background } from './background.ts';
 import { parseCommand as parseScheduleFileCommand } from 'plowshare-client-ts/operations/commands';
 import { UsageClient, runUsage } from '../logic/usage.ts';
@@ -1308,6 +1321,24 @@ export async function converse(talking: Talking): Promise<void> {
     },
   };
   let tokens = openedSocket.tokens;
+  const providerManagement = new ProviderManagementClient(
+    checkedTransport(connection),
+    new ProviderManagementIntents(
+      talking.door.base,
+      loginHandle,
+      userConfigDirectory(),
+    ),
+  );
+  // Owner refusals and uncertain delivery stay in the management surface; they do not
+  // terminate the conversation or enter its reconnect/submission paths. Never echo diagnostics.
+  const providerFailure = (failure: unknown): void =>
+    show(
+      'trouble',
+      failure instanceof ProviderManagementRefused ||
+        failure instanceof ProviderManagementPending
+        ? failure.message
+        : 'Tool connection action failed or its outcome is unknown. Inspect the original receipt before another action; no mutation was replayed.',
+    );
   // REFRESHED ONE AT A TIME. A refresh token is single use, and the file
   // channel and a union's git both refresh: two at once would each present
   // the same token and the second would find it already retired.
@@ -5017,7 +5048,12 @@ export async function converse(talking: Talking): Promise<void> {
         // Every line, commands included: `/help` is a thing a person did,
         // and a screen that showed the reply without the request would be
         // harder to read back than one that showed both.
-        show('person', text);
+        show(
+          'person',
+          /^\/provider\s+credential\s+put(?:\s|$)/u.test(text)
+            ? '/provider credential put [credential coordinates; masked entry]'
+            : text,
+        );
         // WHAT THE LINE IS, BEFORE IT IS TREATED AS AN UTTERANCE. The
         // reading is `session.ts`'s, so this file goes on writing no dotted
         // type and no payload key; the three arms below are the order and
@@ -5030,6 +5066,33 @@ export async function converse(talking: Talking): Promise<void> {
         const now = place;
         if (now === undefined) {
           return;
+        }
+        if (text === '/tools') {
+          try {
+            const bindings = await providerManagement.request(
+              'tool.scope.host.list',
+              { project: now.project ?? `personal:${loginHandle}` },
+            );
+            const active = await providerManagement.request('tool.scope.list', {
+              project: now.project ?? `personal:${loginHandle}`,
+            });
+            show(
+              'client',
+              'Tool connections — saved bindings and active routes are separate snapshots. Compatibility and worker health: not reported.\n' +
+                JSON.stringify(
+                  {
+                    bindings,
+                    active,
+                    pending: await providerManagement.pending(),
+                  },
+                  null,
+                  2,
+                ),
+            );
+          } catch (failure) {
+            providerFailure(failure);
+          }
+          continue;
         }
         // A stalled run's id is left out of what a bare `/answer` can reach: it takes a
         // look or a cancel, never an answer in words, and guessing it as the one thing
@@ -5049,6 +5112,46 @@ export async function converse(talking: Talking): Promise<void> {
           continue;
         }
         if (direct.kind === 'request') {
+          if (isManagementOperation(direct.request.type)) {
+            try {
+              let request = managementRequest(
+                direct.request.type,
+                direct.request.payload,
+              );
+              if (request.type === 'provider.credential.put') {
+                show(
+                  'client',
+                  'Enter provider credential material (masked); cancel submits nothing.',
+                );
+                const secret = await surface.asked(true);
+                if (secret === undefined) continue;
+                request = managementRequest(request.type, {
+                  ...request.payload,
+                  secret,
+                });
+              }
+              const value = await providerManagement.execute(request);
+              if (request.type === 'provider.credential.authorize') {
+                try {
+                  await openProviderAuthorization(
+                    decodeReply(request.type, value).authorizationUrl,
+                  );
+                } catch {
+                  show(
+                    'trouble',
+                    'Authorization request confirmed; browser could not be opened. Inspect current authorization before a new request.',
+                  );
+                }
+              }
+              show(
+                'client',
+                `${request.type}: completed\n${JSON.stringify(redactedManagementValue(request.type, value), null, 2)}`,
+              );
+            } catch (failure) {
+              providerFailure(failure);
+            }
+            continue;
+          }
           const result = await dispatch(connection, direct.request);
           if (result.kind === 'refused')
             show('trouble', refusal(result.outcome));
