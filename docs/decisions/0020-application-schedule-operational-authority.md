@@ -23,6 +23,14 @@ role ceilings, membership and manifest revocation apply on every call. Merely be
 a Contributor, a registrar or an administrator outside the manifest is insufficient.
 Global, workspace and other Applications' schedules receive no delegated access.
 
+WebSocket admission allows the existing `schedule.pause` operation for service
+tokens only when durable schedule provenance resolves to a granted ordinary
+project with effective Contributor access. Caller-supplied project/conversation
+references cannot supply that scope. Global and unknown schedules remain blocked
+for services; global human resume still requires server administration. The
+scheduling service supplies the stricter Application identity/Manager decision
+and retains Manager requirements for mutable source rewriting.
+
 Authorize before source IO and recheck after reconciliation, immediately before
 control. Reconciliation/action validation still runs under the source's registered
 execution owner; changing the control actor never transfers execution ownership.
