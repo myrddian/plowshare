@@ -145,7 +145,7 @@ public interface RelayDeliveries {
       name = RelayValues.name(name, "branch");
       receiver = RelayValues.name(receiver, "receiver");
       RelayWork.require(receiver, work, handler != null);
-      if (publishTo != null) publishTo = RelayValues.name(publishTo, "publication target");
+      if (publishTo != null) publishTo = RelayValues.topic(publishTo);
       if (receiver.equals("relay.publish") != (publishTo != null))
         throw new IllegalArgumentException(
             "only relay.publish requires a pinned publication target");

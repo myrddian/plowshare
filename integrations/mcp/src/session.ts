@@ -92,7 +92,7 @@ export class HttpMcpSessions implements McpSessions {
           { method: 'tools/list', params: cursor === null ? {} : { cursor } },
           { signal: pageSignal, timeout: options.policy.timeoutMs },
         );
-        return decodeMcpPage(reply);
+        return decodeMcpPage(reply, options.limits);
       },
       async call(tool: McpTool, arguments_: ToolObject, callSignal) {
         network.setSignal(callSignal);

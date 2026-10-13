@@ -52,11 +52,11 @@ public interface RelayRouting {
             throw new IllegalArgumentException("conflicting Relay topic payload families");
         }
       }
-      policies.forEach((name, policy) -> RelayValues.name(name, "policy topic"));
+      policies.forEach((name, policy) -> RelayValues.topic(name));
     }
 
     public Relay.Policy policy(String topic) {
-      return policies.getOrDefault(RelayValues.name(topic, "topic"), Relay.Policy.systemDefault());
+      return policies.getOrDefault(RelayValues.topic(topic), Relay.Policy.systemDefault());
     }
   }
 
@@ -93,7 +93,7 @@ public interface RelayRouting {
   record Subscription(String name, String topic, RelayPayload.Kind kind, Relay.Start start) {
     public Subscription {
       name = folder(name);
-      topic = RelayValues.name(topic, "topic");
+      topic = RelayValues.topic(topic);
       Objects.requireNonNull(kind, "kind");
       Objects.requireNonNull(start, "start");
       if (topic.equals("schedule.due") != (kind == RelayPayload.Kind.SCHEDULE_DUE))
@@ -115,7 +115,7 @@ public interface RelayRouting {
       name = RelayValues.name(name, "branch");
       receiver = RelayValues.name(receiver, "receiver");
       RelayWork.require(receiver, work, script != null);
-      if (publishTo != null) publishTo = RelayValues.name(publishTo, "publication target");
+      if (publishTo != null) publishTo = RelayValues.topic(publishTo);
       if (receiver.equals("relay.publish") != (publishTo != null))
         throw new IllegalArgumentException(
             "only relay.publish requires a pinned publication target");

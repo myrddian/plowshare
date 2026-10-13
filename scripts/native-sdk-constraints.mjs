@@ -66,6 +66,10 @@ export function constrain(graph) {
   for (const [op, ref] of Object.entries(graph.inputs)) {
     const s = resolve(graph, ref),
       extended = SHAPES[op];
+    // Project/system Relay requests are unions; constrain each concrete topic field.
+    if (op.startsWith('relay.'))
+      for (const variant of s.anyOf ?? [ref])
+        field(resolve(graph, variant), 'topic', { ...portName, maxLength: 1024 });
     if (s.anyOf) continue;
     if (op.startsWith('provider.connection.') || op.startsWith('provider.credential.')) {
       field(s,'project',providerProject);
@@ -87,7 +91,7 @@ export function constrain(graph) {
       field(s, 'leaseSeconds', integer(1, 300));
       if (s.properties?.grants) {
         s.properties.grants = { type: 'array', minItems: 1, maxItems: 128, uniqueItems: true,
-          items: { type: 'string', pattern: '^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$', maxLength: 64, trimmed: true } };
+          items: { type: 'string', pattern: '^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$', maxLength: 256, trimmed: true } };
         rules(s, implies({ contains: [g('grants'), '*'] }, eq('grants', ['*'])));
       }
       if (s.properties?.agents) s.properties.agents = { type: 'array', minItems: 1, maxItems: 128,
@@ -331,6 +335,16 @@ export function constrain(graph) {
       );
     }
   }
+  for (const shape of Object.values(graph.$defs)) {
+    const title = shape.title ?? '';
+    if (shape.properties?.source && shape.properties?.subject && shape.properties?.state)
+      field(shape, 'source', { ...portName, maxLength: 1024 });
+    if (title.startsWith('Relay')) {
+      field(shape, 'topic', { ...portName, maxLength: 1024 });
+      field(shape, 'parentTopic', { ...portName, maxLength: 1024 });
+      if (title === 'RelayTopic') field(shape, 'name', { ...portName, maxLength: 1024 });
+    }
+  }
   for (const operation of ['relay.publish','relay.consume','relay.ack','tool.scope.worker.publish','tool.scope.worker.consume','tool.scope.worker.ack']) {
     const op='relay.'+operation.split('.').at(-1);
     const wrapper=resolve(graph,graph.inputs[operation]);
@@ -338,7 +352,7 @@ export function constrain(graph) {
     const reply=resolve(graph,graph.results[operation]);
     for(const shape of [request,reply]) {
       field(shape,'project',{...identity,maxLength:256});
-      for(const k of ['topic','parentTopic']) field(shape,k,portName);
+      for(const k of ['topic','parentTopic']) field(shape,k,{...portName,maxLength:1024});
       field(shape,'group',{...portName,maxLength:140});
       for(const k of ['consumerId','requestId','batchId']) field(shape,k,canonicalUuid);
       for(const k of ['position','through','expiredThrough','fence']) field(shape,k,decimal);
@@ -388,7 +402,7 @@ export function constrain(graph) {
       field(s,'provider',{pattern:'^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',maxLength:48});
       field(s,'prefix',{pattern:'^[a-z][a-z0-9_]*_$',maxLength:48});
       field(s,'leaseSeconds',integer(1,300));
-      s.properties.grants={type:'array',minItems:1,maxItems:128,uniqueItems:true,items:{type:'string',pattern:'^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$',maxLength:64}};
+      s.properties.grants={type:'array',minItems:1,maxItems:128,uniqueItems:true,items:{type:'string',pattern:'^(?:\\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)*)$',maxLength:256}};
       s.properties.agents={type:'array',minItems:1,maxItems:128,uniqueItems:true,items:{type:'string',...namedSwarm}};
       rules(s,implies({contains:[g('grants'),'*']},eq('grants',['*'])));
     }

@@ -36,7 +36,7 @@ public final class RelayControl {
     public Request {
       uuid(requestId);
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       uuid(topicGeneration);
       Objects.requireNonNull(action);
       identity(reason);
@@ -75,7 +75,7 @@ public final class RelayControl {
     public Result {
       uuid(requestId);
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       Objects.requireNonNull(action);
       if (subscriber != null) name(subscriber);
       if (deliveryId != null) uuid(deliveryId);

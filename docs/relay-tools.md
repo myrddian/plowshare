@@ -78,6 +78,11 @@ user connections use their own default scope authority instead of an Application
 manifest; see [interactive policy](tool-scopes.md#interactive-policy).
 
 There are at most 128 optional bootstrap bindings and 32 catalogue providers.
+Tool names contain at most 256 characters using the existing lower-case letter,
+digit and underscore grammar. Exact grants retain the complete name; generated
+request/result topics carry it without truncation. Parameter names retain their
+separate 64-character limit.
+
 Provider prefixes end in `_`, cannot overlap each other or built-in names, and
 cannot claim another provider's bootstrap tools. Deployment does not require a
 known catalogue or a running provider. Calls require a current registry entry,

@@ -130,10 +130,12 @@ function instant(value: string): number {
     throw new Error('Invalid UTC tool timestamp');
   return Date.parse(value);
 }
+/** Shared platform identifier ceiling, independent of upstream protocol recommendations. */
+export const MAX_TOOL_NAME_LENGTH = 256;
 function declaration(value: ToolDeclaration): void {
   if (
     !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(value.name) ||
-    value.name.length > 64
+    value.name.length > MAX_TOOL_NAME_LENGTH
   )
     throw new Error('Invalid tool name');
   text(value.description, 4096, true);
@@ -351,7 +353,7 @@ export function decodeToolCall(source: string): ToolCall {
     !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(provider) ||
     provider.length > 48 ||
     !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(tool) ||
-    tool.length > 64
+    tool.length > MAX_TOOL_NAME_LENGTH
   )
     throw new Error('Invalid tool routing');
   const id = uuid(read('invocationId'));

@@ -362,3 +362,33 @@ await test('discovery respects the shared provider catalogue ceiling without an 
   assert.equal(sessions.calls, 0);
   assert.ok(sessions.closed);
 });
+
+await test('catalogue byte budgets include the complete public publication envelope', async () => {
+  const initial = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    new Sessions(),
+    options,
+  );
+  const bytes = Buffer.byteLength(
+    JSON.stringify({
+      version: 'plowshare-tool-catalog/2',
+      tools: initial.tools.map((tool) => tool.declaration),
+    }),
+  );
+  await initial.close();
+  const exact = await McpProvider.discover(
+    registration,
+    new Credentials(),
+    new Sessions(),
+    { ...options, limits: { ...DEFAULT_LIMITS, maxCatalogueBytes: bytes } },
+  );
+  await exact.close();
+  await assert.rejects(
+    McpProvider.discover(registration, new Credentials(), new Sessions(), {
+      ...options,
+      limits: { ...DEFAULT_LIMITS, maxCatalogueBytes: bytes - 1 },
+    }),
+    /publication budget/,
+  );
+});

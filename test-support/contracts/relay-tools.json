@@ -106,6 +106,16 @@
       "name": "null-arguments",
       "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"inspect\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":null}",
       "valid": false
+    },
+    {
+      "name": "tool-name-256",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": true
+    },
+    {
+      "name": "tool-name-257",
+      "source": "{\"schema\":\"plowshare-tool/1\",\"invocationId\":\"11111111-1111-1111-1111-111111111111\",\"project\":\"fixture\",\"provider\":\"scanner\",\"tool\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account\":\"caller\",\"run\":\"run\",\"call\":\"call\",\"deadline\":\"2099-01-01T00:00:00Z\",\"arguments\":{\"value\":0.5}}",
+      "valid": false
     }
   ]
 }

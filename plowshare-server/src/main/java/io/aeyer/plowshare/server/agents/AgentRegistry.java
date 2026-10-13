@@ -1158,7 +1158,7 @@ public final class AgentRegistry {
         continue;
       }
       if (knownTools.contains(tool)
-          || (dynamic && tool.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*") && tool.length() <= 64)) {
+          || (dynamic && tool.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*") && tool.length() <= 256)) {
         tools.add(tool);
         continue;
       }

@@ -32,8 +32,8 @@ public final class FilteringProperties {
     public External {
       RelayPort.identity(project);
       RelayPort.identity(account);
-      RelayPort.name(requestTopic);
-      RelayPort.name(responseTopic);
+      RelayPort.topic(requestTopic);
+      RelayPort.topic(responseTopic);
       RelayPort.identity(reviewer);
       if (account.equals(reviewer)
           || requestTopic.equals(responseTopic)

@@ -13,6 +13,7 @@ import type {
 import type { McpPage, McpProtocol, McpReply, McpTool } from './contracts.ts';
 import { DEFAULT_LIMITS, PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { McpLimits } from './settings.ts';
+import { MAX_TOOL_NAME_LENGTH } from 'plowshare-client-ts/operations/relay-tools';
 
 export function object(value: unknown): Record<string, unknown> {
   if (
@@ -38,11 +39,16 @@ export function text(value: unknown, max: number): string {
   return value;
 }
 /** Never discard unknown schema constraints. The shared SDK owns the executable profile. */
-export function decodeMcpTool(value: unknown): McpTool {
+export function decodeMcpTool(
+  value: unknown,
+  limits: McpLimits = DEFAULT_LIMITS,
+): McpTool {
   const raw = object(value);
-  const name = text(raw.name, 128);
+  const name = text(raw.name, limits.maxToolNameLength);
   const description =
-    raw.description === undefined ? name : text(raw.description, 1024);
+    raw.description === undefined
+      ? text(name, limits.maxDescriptionLength)
+      : text(raw.description, limits.maxDescriptionLength);
   const input = decodeToolSchema(raw.inputSchema);
   validateToolSchema(input);
   const output =
@@ -76,7 +82,10 @@ export function decodeMcpTool(value: unknown): McpTool {
   const metadata = decodeToolValue(raw);
   return Object.freeze({ name, description, input, output, metadata });
 }
-export function decodeMcpPage(value: unknown): McpPage {
+export function decodeMcpPage(
+  value: unknown,
+  limits: McpLimits = DEFAULT_LIMITS,
+): McpPage {
   const raw = object(value);
   if (
     !Array.isArray(raw.tools) ||
@@ -85,8 +94,11 @@ export function decodeMcpPage(value: unknown): McpPage {
     throw new Error('MCP catalogue exceeds tool bound');
   const source: readonly unknown[] = raw.tools;
   return Object.freeze({
-    tools: Object.freeze(source.map(decodeMcpTool)),
-    cursor: raw.nextCursor === undefined ? null : text(raw.nextCursor, 1024),
+    tools: Object.freeze(source.map((tool) => decodeMcpTool(tool, limits))),
+    cursor:
+      raw.nextCursor === undefined
+        ? null
+        : text(raw.nextCursor, limits.maxCursorLength),
   });
 }
 export function decodeMcpReply(
@@ -147,7 +159,7 @@ export function declaration(
   timeoutSeconds: number,
   limits: McpLimits = DEFAULT_LIMITS,
 ): ToolDeclaration {
-  if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*_$/.test(prefix) || prefix.length > 24)
+  if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*_$/.test(prefix) || prefix.length > 48)
     throw new Error('Invalid MCP tool prefix');
   const hash = contractHash({
     protocol,
@@ -156,7 +168,15 @@ export function declaration(
     limits: { ...limits },
     tool: tool.metadata,
   }).slice(0, 32);
-  const available = 64 - prefix.length - hash.length - 1;
+  const available =
+    Math.min(limits.maxOfferedNameLength, MAX_TOOL_NAME_LENGTH) -
+    prefix.length -
+    hash.length -
+    1;
+  if (available < 1)
+    throw new Error(
+      'Configured offered-name budget cannot fit the binding prefix and hash',
+    );
   const slug =
     tool.name
       .toLowerCase()

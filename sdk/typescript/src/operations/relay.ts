@@ -196,9 +196,9 @@ const hasControls = (value: string): boolean => {
 const uuid = (value: unknown): value is string =>
   typeof value === 'string' &&
   /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value);
-const validName = (value: unknown): value is string =>
+const validName = (value: unknown, max = 160): value is string =>
   typeof value === 'string' &&
-  value.length <= 160 &&
+  value.length <= max &&
   /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(value);
 const actions: readonly string[] = [
   'ACKNOWLEDGE_GAP',
@@ -224,7 +224,7 @@ export function relayPayloadProblem(
     if (
       !uuid(payload['requestId']) ||
       !uuid(payload['topicGeneration']) ||
-      !validName(payload['topic']) ||
+      !validName(payload['topic'], 1024) ||
       !requiredIdentity('project') ||
       !requiredIdentity('reason') ||
       typeof action !== 'string' ||
@@ -284,7 +284,7 @@ export function relayPayloadProblem(
     type === 'relay.log' &&
     (typeof payload['topic'] !== 'string' ||
       !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(payload['topic']) ||
-      payload['topic'].length > 160)
+      payload['topic'].length > 1024)
   )
     return 'Invalid Relay topic';
   const maximum = type === 'relay.process' ? 32 : 100;
@@ -327,10 +327,10 @@ export function validateRelayReply(type: string, value: unknown): void {
     )
       fail();
   };
-  const name = (value: unknown): void => {
+  const name = (value: unknown, max = 160): void => {
     if (
       typeof value !== 'string' ||
-      value.length > 160 ||
+      value.length > max ||
       !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(value)
     )
       fail();
@@ -347,7 +347,7 @@ export function validateRelayReply(type: string, value: unknown): void {
   };
   if (type === 'relay.operate') {
     identity(row['project']);
-    name(row['topic']);
+    name(row['topic'], 1024);
     instant(row['completedAt']);
     if (
       !uuid(row['requestId']) ||
@@ -403,7 +403,7 @@ export function validateRelayReply(type: string, value: unknown): void {
     for (const gap of gaps) {
       if (gap === null || typeof gap !== 'object' || Array.isArray(gap)) fail();
       const fields = gap as Record<string, unknown>;
-      name(fields['topic']);
+      name(fields['topic'], 1024);
       identity(fields['subscriber']);
       position(fields['expiredThrough']);
     }
@@ -419,7 +419,7 @@ export function validateRelayReply(type: string, value: unknown): void {
     if (value === null || typeof value !== 'object' || Array.isArray(value))
       fail();
     const fields = value as Record<string, unknown>;
-    name(fields['name']);
+    name(fields['name'], 1024);
     if (
       ![
         'EMPTY',
@@ -673,7 +673,7 @@ export function validateRelayEvent(value: unknown, kind: unknown): bigint {
       return fail();
     const details = data as Record<string, unknown>;
     if (part === 'lifecycle') {
-      if (!validName(details['source'])) fail();
+      if (!validName(details['source'], 1024)) fail();
       identity(details['subject'], 1024);
       identity(details['state']);
       for (const reference of ['context', 'related'])

@@ -219,7 +219,10 @@ export class McpProvider {
       );
       if (
         Buffer.byteLength(
-          JSON.stringify(tools.map((tool) => tool.declaration)),
+          JSON.stringify({
+            version: 'plowshare-tool-catalog/2',
+            tools: tools.map((tool) => tool.declaration),
+          }),
         ) > limits.maxCatalogueBytes
       )
         throw new Error('MCP catalogue exceeds provider publication budget');

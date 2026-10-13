@@ -90,10 +90,10 @@ envelope limits also apply after conversion; these limits are cumulative.
 Use the retained execution deadline and configured timeout, at most 300 seconds.
 Progress does not extend that absolute limit.
 
-Reserve the existing scope prefix; MCP hosting restricts it to at most 24 characters.
+Reserve the existing scope prefix, at most 48 characters.
 Map each case-sensitive upstream name to a
-valid lower-case platform name of at most 64 characters, using a bounded readable
-slug and the first 32 lower-case hexadecimal digits of SHA-256, leaving room for
+valid lower-case platform name of at most 256 characters (or the configured
+lower offered-name budget), using a bounded readable slug and the first 32 lower-case hexadecimal digits of SHA-256, leaving room for
 the prefix and a separator. Hash the original name and complete execution
 contract: selected protocol, input/output schemas, published description/title,
 supported annotations/execution metadata, binding generation and resolved

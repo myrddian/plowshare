@@ -52,7 +52,7 @@ final class RelayRouteCodec {
         .fields()
         .forEachRemaining(
             entry -> {
-              String name = RelayValues.name(entry.getKey(), "topic");
+              String name = RelayValues.topic(entry.getKey());
               JsonNode policy = entry.getValue();
               fields(policy, Set.of("retentionDays"), Set.of("maxRecords"));
               long days = positive(policy.get("retentionDays"));

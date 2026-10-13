@@ -9,6 +9,7 @@ import {
   DEFAULT_LIMITS,
   LIMIT_CEILINGS,
   DEFAULT_CLIENT_INFO,
+  MAX_TIMER_MS,
 } from './settings.ts';
 import type { McpLimits, McpClientInfo } from './settings.ts';
 
@@ -71,6 +72,28 @@ function limits(
   if (Object.values(raw).some((value) => value === null))
     throw new Error('Null MCP limit');
   return Object.freeze({
+    maxToolNameLength: integer(
+      raw.maxToolNameLength ?? inherited.maxToolNameLength,
+      1,
+      LIMIT_CEILINGS.maxToolNameLength,
+    ),
+    maxDescriptionLength: integer(
+      raw.maxDescriptionLength ?? inherited.maxDescriptionLength,
+      1,
+      LIMIT_CEILINGS.maxDescriptionLength,
+    ),
+    maxCursorLength: integer(
+      raw.maxCursorLength ?? inherited.maxCursorLength,
+      1,
+      LIMIT_CEILINGS.maxCursorLength,
+    ),
+    // The shortest prefix, one slug character and 128-bit hash require 36 characters.
+    // Discovery also validates the actual binding prefix against this budget.
+    maxOfferedNameLength: integer(
+      raw.maxOfferedNameLength ?? inherited.maxOfferedNameLength,
+      36,
+      LIMIT_CEILINGS.maxOfferedNameLength,
+    ),
     maxPages: integer(
       raw.maxPages ?? inherited.maxPages,
       1,
@@ -109,6 +132,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     'workers',
     'requestTimeoutMs',
     'clientInfo',
+    'maxClientInfoLength',
     'maxWorkers',
     'maxRecoveryCatalogues',
     'defaults',
@@ -130,22 +154,27 @@ export function decodeConfig(source: unknown): IntegrationConfig {
   if (defaults.allowPrivateNetwork !== undefined)
     boolean(defaults.allowPrivateNetwork);
   if (defaults.timeoutMs !== undefined)
-    integer(defaults.timeoutMs, 100, 300000);
+    integer(defaults.timeoutMs, 1, MAX_TIMER_MS);
   if (defaults.timeoutSeconds !== undefined)
     integer(defaults.timeoutSeconds, 1, 300);
-  if (defaults.pollMs !== undefined) integer(defaults.pollMs, 50, 10000);
+  if (defaults.pollMs !== undefined) integer(defaults.pollMs, 1, MAX_TIMER_MS);
   if (defaults.renewalFraction !== undefined)
     renewalFraction(defaults.renewalFraction);
   const sharedLimits = limits(defaults.limits);
-  const pollMs = integer(raw.pollMs ?? 250, 50, 10000);
+  const pollMs = integer(raw.pollMs ?? 250, 1, MAX_TIMER_MS);
   const client =
     raw.clientInfo === undefined
       ? { ...DEFAULT_CLIENT_INFO }
       : object(raw.clientInfo);
   fields(client, ['name', 'version']);
+  const maxClientInfoLength = integer(
+    raw.maxClientInfoLength ?? 128,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
   const clientInfo = Object.freeze({
-    name: text(client.name, 128),
-    version: text(client.version, 128),
+    name: text(client.name, maxClientInfoLength),
+    version: text(client.version, maxClientInfoLength),
   });
   const tokenEnvironment = text(raw.tokenEnvironment, 100);
   if (!/^[A-Z][A-Z0-9_]*$/.test(tokenEnvironment))
@@ -153,7 +182,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
   const journalDirectory = text(raw.journalDirectory, 4096);
   if (!isAbsolute(journalDirectory))
     throw new Error('MCP journal directory must be absolute');
-  const maxWorkers = integer(raw.maxWorkers ?? 32, 1, 256);
+  const maxWorkers = integer(raw.maxWorkers ?? 32, 1, Number.MAX_SAFE_INTEGER);
   if (
     !Array.isArray(raw.workers) ||
     !raw.workers.length ||
@@ -174,7 +203,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     return Object.freeze<WorkerConfig>({
       binding: uuid(worker.binding),
       generation: integer(worker.generation, 1, Number.MAX_SAFE_INTEGER),
-      pollMs: integer(effective.pollMs ?? pollMs, 50, 10000),
+      pollMs: integer(effective.pollMs ?? pollMs, 1, MAX_TIMER_MS),
       renewalFraction: renewalFraction(effective.renewalFraction ?? 1 / 3),
       options: Object.freeze({
         protocol,
@@ -188,7 +217,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
         policy: Object.freeze({
           allowHttp: boolean(effective.allowHttp),
           allowPrivateNetwork: boolean(effective.allowPrivateNetwork),
-          timeoutMs: timeout(effective.timeoutMs, 'timeoutMs', 100, 300000),
+          timeoutMs: timeout(effective.timeoutMs, 'timeoutMs', 1, MAX_TIMER_MS),
           maxWireBytes: budget.maxWireBytes,
         }),
       }),
@@ -204,11 +233,15 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     requestTimeoutMs: timeout(
       raw.requestTimeoutMs,
       'requestTimeoutMs',
-      100,
-      300000,
+      1,
+      MAX_TIMER_MS,
     ),
     clientInfo,
-    maxRecoveryCatalogues: integer(raw.maxRecoveryCatalogues ?? 128, 1, 4096),
+    maxRecoveryCatalogues: integer(
+      raw.maxRecoveryCatalogues ?? 128,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
     workers: Object.freeze(workers),
   });
 }

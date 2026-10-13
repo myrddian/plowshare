@@ -95,7 +95,7 @@ class ToolDeclaration:
     input_schema: SchemaDefinition | None = None
 
     def __post_init__(self) -> None:
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", self.name):
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,255}", self.name):
             raise ValueError("Invalid tool name")
         # Topic segments cannot contain consecutive or trailing separators.
         if not re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", self.name):

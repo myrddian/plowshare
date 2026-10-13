@@ -788,7 +788,7 @@ public final class RelayTools {
   }
 
   private static void toolName(String value) {
-    if (value == null || value.length() > 64 || !value.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*"))
+    if (value == null || value.length() > 256 || !value.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*"))
       throw new IllegalArgumentException("Invalid tool name");
   }
 

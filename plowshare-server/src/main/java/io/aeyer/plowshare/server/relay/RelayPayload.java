@@ -51,7 +51,7 @@ public sealed interface RelayPayload {
   record Lifecycle(String source, String subject, String state, String context, String related)
       implements RelayPayload {
     public Lifecycle {
-      source = RelayValues.name(source, "lifecycle source");
+      source = RelayValues.topic(source);
       subject = scheduledIdentity(subject);
       state = RelayValues.identity(state, "lifecycle state");
       if (context != null) context = scheduledIdentity(context);

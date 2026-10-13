@@ -531,3 +531,16 @@ it('delivers nested values once and refuses a changed schema before execution', 
   await expect(changed.poll()).rejects.toThrow();
   expect(executions).toBe(1);
 });
+
+it('retains full 256-character declarations and their topic names without aliases', () => {
+  const name = 'a'.repeat(256);
+  const long = { ...declaration, name };
+  expect(toolDeploymentConfig(binding, [long])).toContain(name);
+  expect(
+    decodeToolCall(JSON.stringify({ ...JSON.parse(source()), tool: name }))
+      .tool,
+  ).toBe(name);
+  expect(() =>
+    toolDeploymentConfig(binding, [{ ...long, name: name + 'a' }]),
+  ).toThrow();
+});

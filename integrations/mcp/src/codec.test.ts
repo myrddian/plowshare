@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { declaration, decodeMcpTool, decodeMcpReply, result } from './codec.ts';
+import {
+  declaration,
+  decodeMcpTool,
+  decodeMcpPage,
+  decodeMcpReply,
+  result,
+} from './codec.ts';
 import { DEFAULT_LIMITS } from './settings.ts';
 import { decodeConfig } from './config.ts';
 import { allowedAddress, endpoint } from './http.ts';
@@ -14,7 +20,7 @@ await test('preserves nested contracts and changes offered names for every seman
   ) => declaration(tool, 'mcp_', protocol, context, 30);
   assert.deepEqual(make().inputSchema, inputSchema);
   assert.match(make().name, /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/);
-  assert.ok(make().name.length <= 64);
+  assert.ok(make().name.length <= 256);
   assert.notEqual(make().name, make('account-b').name);
   assert.notEqual(make().name, make('account-a', '2025-11-25').name);
   assert.notEqual(
@@ -140,5 +146,70 @@ await test('configured content and UTF-8 result budgets are enforced without tru
   assert.equal(
     result(tool, reply, Buffer.byteLength(encoded)).state,
     'COMPLETED',
+  );
+});
+
+await test('MCP names, descriptions and cursors follow configurable admission budgets', () => {
+  const name = 'a'.repeat(200);
+  const description = 'd'.repeat(1500);
+  const limits = {
+    ...DEFAULT_LIMITS,
+    maxToolNameLength: 200,
+    maxDescriptionLength: 1500,
+    maxCursorLength: 1500,
+  };
+  assert.throws(() => decodeMcpTool({ ...rawTool, name }));
+  const tool = decodeMcpTool({ ...rawTool, name, description }, limits);
+  assert.equal(tool.name, name);
+  assert.equal(tool.description, description);
+  assert.throws(() => decodeMcpTool({ ...rawTool, name: name + 'a' }, limits));
+  assert.throws(() =>
+    decodeMcpTool({ ...rawTool, description: description + 'd' }, limits),
+  );
+  assert.equal(
+    decodeMcpTool({ ...rawTool, name: 'echo/値' }, limits).name,
+    'echo/値',
+  );
+  const nextCursor = 'c'.repeat(1500);
+  assert.equal(
+    decodeMcpPage({ tools: [], nextCursor }, limits).cursor,
+    nextCursor,
+  );
+  assert.throws(() => decodeMcpPage({ tools: [], nextCursor }));
+  assert.throws(() =>
+    decodeMcpPage({ tools: [], nextCursor: nextCursor + 'c' }, limits),
+  );
+  const offered = declaration(
+    tool,
+    'mcp_',
+    '2026-07-28',
+    'account-a',
+    30,
+    limits,
+  );
+  assert.equal(offered.name.length, 237);
+  const longTool = decodeMcpTool(
+    { ...rawTool, name: 'a'.repeat(500) },
+    { ...limits, maxToolNameLength: 500 },
+  );
+  assert.equal(
+    declaration(longTool, 'mcp_', '2026-07-28', 'account-a', 30, limits).name
+      .length,
+    256,
+  );
+  const short = declaration(tool, 'mcp_', '2026-07-28', 'account-a', 30, {
+    ...limits,
+    maxOfferedNameLength: 64,
+  });
+  assert.equal(short.name.length, 64);
+  assert.throws(() =>
+    declaration(
+      tool,
+      'mcp_' + 'a'.repeat(43) + '_',
+      '2026-07-28',
+      'account-a',
+      30,
+      { ...limits, maxOfferedNameLength: 64 },
+    ),
   );
 });

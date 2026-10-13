@@ -33,6 +33,7 @@ placeholders to replace with deployment configuration:
   "journalDirectory": "/absolute/private/mcp-journals",
   "requestTimeoutMs": 30000,
   "clientInfo": { "name": "plowshare-mcp-integration", "version": "0.1.0" },
+  "maxClientInfoLength": 128,
   "maxWorkers": 32,
   "maxRecoveryCatalogues": 128,
   "defaults": {
@@ -44,6 +45,10 @@ placeholders to replace with deployment configuration:
     "pollMs": 250,
     "renewalFraction": 0.3333333333333333,
     "limits": {
+      "maxToolNameLength": 128,
+      "maxDescriptionLength": 1024,
+      "maxCursorLength": 1024,
+      "maxOfferedNameLength": 256,
       "maxPages": 32,
       "maxWireBytes": 1048576,
       "maxCatalogueBytes": 60000,
@@ -75,11 +80,12 @@ are immutable and never shared as mutable state between credential contexts.
 
 | Process setting | Default | Allowed value |
 | --- | --- | --- |
-| `requestTimeoutMs` | Required explicitly | Integer 100–300,000; public Plowshare SDK request timeout |
-| `clientInfo` | Package name and version shown above | Explicit `name` and `version`, each 1–128 characters with no control characters |
-| `maxWorkers` | 32 | Integer 1–256; maximum configured bindings |
-| `maxRecoveryCatalogues` | 128 | Integer 1–4,096 per binding; bounds retained archive reads and new catalogue admission |
-| `pollMs` | 250 | Integer 50–10,000; compatibility fallback when no worker/default poll interval is supplied |
+| `requestTimeoutMs` | Required explicitly | Integer 1–2,147,483,647; public Plowshare SDK request timeout |
+| `clientInfo` | Package name and version shown above | Explicit `name` and `version`, each bounded by `maxClientInfoLength` (128 by default) with no control characters |
+| `maxClientInfoLength` | 128 | Positive safe integer; admission budget for client name/version |
+| `maxWorkers` | 32 | Positive safe integer; maximum configured bindings |
+| `maxRecoveryCatalogues` | 128 | Positive safe integer per binding; bounds retained archive reads and new catalogue admission |
+| `pollMs` | 250 | Integer 1–2,147,483,647; compatibility fallback when no worker/default poll interval is supplied |
 
 These settings belong in `defaults` or individual workers:
 
@@ -87,15 +93,19 @@ These settings belong in `defaults` or individual workers:
 | --- | --- | --- |
 | `protocol` | Required explicitly | `2026-07-28` or `2025-11-25` |
 | `allowHttp`, `allowPrivateNetwork` | Required explicitly | Boolean network permissions |
-| `timeoutMs` | Configured shared default or required per worker | Integer 100–300,000; total discovery/refresh deadline and individual MCP HTTP request timeout |
+| `timeoutMs` | Configured shared default or required per worker | Integer 1–2,147,483,647; total discovery/refresh deadline and individual MCP HTTP request timeout |
 | `timeoutSeconds` | Configured shared default or required per worker | Integer 1–300; offered invocation timeout, also bounded by the server invocation deadline |
-| `pollMs` | Process value | Integer 50–10,000; idle intake interval |
-| `renewalFraction` | 1/3 | Number 0.05–0.5; renew after this fraction of the smaller of remaining lifetime and server lease |
-| `limits.maxPages` | 32 | Integer 1–1,024 per discovery/refresh |
-| `limits.maxWireBytes` | 1,048,576 | Integer 1–16,777,216 per HTTP request or response, including JSON/SSE framing |
-| `limits.maxCatalogueBytes` | 60,000 | Integer 1–60,000 of UTF-8 encoded declarations |
+| `pollMs` | Process value | Integer 1–2,147,483,647; idle intake interval |
+| `renewalFraction` | 1/3 | Number strictly between 0 and 1; renew after this fraction of the smaller of remaining lifetime and server lease |
+| `limits.maxToolNameLength` | 128 | Integer 1–4,096; upstream tool-name admission policy, not an MCP requirement |
+| `limits.maxDescriptionLength` | 1,024 | Integer 1–4,096; preserved description admission policy |
+| `limits.maxCursorLength` | 1,024 | Positive safe integer; pagination cursor budget, also bounded by the wire envelope |
+| `limits.maxOfferedNameLength` | 256 | Integer 36–256; full Plowshare name including prefix, slug and hash; actual prefix must leave room |
+| `limits.maxPages` | 32 | Positive safe integer per discovery/refresh |
+| `limits.maxWireBytes` | 1,048,576 | Positive safe integer per HTTP request or response, including JSON/SSE framing |
+| `limits.maxCatalogueBytes` | 60,000 | Integer 1–65,536 of UTF-8 encoded complete catalogue, including version and tools envelope |
 | `limits.maxResultBytes` | 16,384 | Integer 1–16,384; encoded result must fit both character and UTF-8 byte budgets |
-| `limits.maxContentBlocks` | 128 | Integer 1–1,024 text blocks; aggregate result budget still applies |
+| `limits.maxContentBlocks` | 128 | Positive safe integer of text blocks; aggregate result budget still applies |
 
 Polling waits are shortened for renewal and expiry. In-flight SDK operations still
 have their own finite deadlines; choose timeouts and renewal cadence to fit the
@@ -108,8 +118,16 @@ catalogue cannot be published through that contract. MCP itself does not require
 this count limit. Lifting it requires a separate shared provider-contract change.
 
 The 128-tool, catalogue-envelope and result-text ceilings come from the public
-provider contracts; declarations retain headroom within the 64 KiB publication
-envelope. Schema/value limits, the 1,000-receipt SDK journal bound, 2 MiB private
+provider contracts. The default 60,000-byte catalogue budget leaves headroom,
+but operators may use the full 65,536-byte envelope. The metadata profile bounds
+upstream names/descriptions at 4,096; offered names use the 256-character platform
+contract and provider prefixes use its 48-character limit. Larger-than-128 MCP
+names are accepted when configured; no recommendation is converted into a protocol
+requirement. Millisecond deadlines cannot exceed Node's timer overflow threshold.
+Configuration admission retains a 64 KiB bootstrap file, 2,048-character server
+origin/credential endpoint, 100-character token environment name and 4,096-character
+absolute journal path. These are local/public-contract bounds rather than MCP name
+recommendations. Schema/value limits, the 1,000-receipt SDK journal bound, 2 MiB private
 file bound, name/hash format and zero effect retries remain contract invariants.
 Operator settings cannot expand those contracts or enable redirects, automatic
 authentication retries, input continuation or disabled TLS verification.

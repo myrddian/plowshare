@@ -3,6 +3,10 @@ export const PROVIDER_CATALOGUE_TOOL_LIMIT = 128;
 
 /** Operator budgets may be tightened; platform-owned envelope ceilings remain enforced. */
 export interface McpLimits {
+  readonly maxToolNameLength: number;
+  readonly maxDescriptionLength: number;
+  readonly maxCursorLength: number;
+  readonly maxOfferedNameLength: number;
   readonly maxPages: number;
   readonly maxWireBytes: number;
   readonly maxCatalogueBytes: number;
@@ -18,21 +22,28 @@ export const DEFAULT_CLIENT_INFO: McpClientInfo = Object.freeze({
   version: '0.1.0',
 });
 export const DEFAULT_LIMITS: McpLimits = Object.freeze({
+  maxToolNameLength: 128,
+  maxDescriptionLength: 1024,
+  maxCursorLength: 1024,
+  maxOfferedNameLength: 256,
   maxPages: 32,
   maxWireBytes: 1_048_576,
   maxCatalogueBytes: 60000,
   maxResultBytes: 16384,
   maxContentBlocks: 128,
 });
-/** Platform catalogue/text ceilings include publication envelope headroom.
- * The other ceilings bound operator-selected resource use rather than protocol semantics.
- */
+/** Platform-owned ceilings are independent of MCP recommendations and operator budgets. */
 export const LIMIT_CEILINGS: McpLimits = Object.freeze({
-  maxPages: 1024,
-  maxWireBytes: 16_777_216,
-  maxCatalogueBytes: 60000,
+  // Portable ToolValue metadata strings and provider descriptions have 4,096-unit ceilings.
+  maxToolNameLength: 4096,
+  maxDescriptionLength: 4096,
+  maxCursorLength: Number.MAX_SAFE_INTEGER,
+  maxOfferedNameLength: 256,
+  maxPages: Number.MAX_SAFE_INTEGER,
+  maxWireBytes: Number.MAX_SAFE_INTEGER,
+  maxCatalogueBytes: 65536,
   maxResultBytes: 16384,
-  maxContentBlocks: 1024,
+  maxContentBlocks: Number.MAX_SAFE_INTEGER,
 });
 export function boundedInteger(
   value: unknown,
@@ -52,9 +63,14 @@ export function renewalFraction(value: unknown): number {
   if (
     typeof value !== 'number' ||
     !Number.isFinite(value) ||
-    value < 0.05 ||
-    value > 0.5
+    value <= 0 ||
+    value >= 1
   )
-    throw new Error('MCP renewal fraction must be between 0.05 and 0.5');
+    throw new Error(
+      'MCP renewal fraction must be greater than zero and less than one',
+    );
   return value;
 }
+
+/** Node timers must remain below their overflow threshold; the operator chooses the actual deadline. */
+export const MAX_TIMER_MS = 2_147_483_647;

@@ -16,7 +16,7 @@ public final class RelayPortProperties {
       String project, String topic, String account, Direction direction, List<String> groups) {
     public Binding {
       RelayPort.identity(project);
-      RelayPort.name(topic);
+      RelayPort.topic(topic);
       RelayPort.identity(account);
       java.util.Objects.requireNonNull(direction);
       groups = groups == null ? List.of() : List.copyOf(groups);

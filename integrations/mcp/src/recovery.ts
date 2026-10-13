@@ -21,6 +21,7 @@ import {
 import { FileToolJournal, durablePrivateWrite } from './journal.ts';
 import { object, text } from './codec.ts';
 import { rejected } from './contracts.ts';
+import { MAX_TOOL_NAME_LENGTH } from 'plowshare-client-ts/operations/relay-tools';
 import { PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { ProviderConnection } from './provider.ts';
 
@@ -63,7 +64,7 @@ function declaration(source: unknown): ToolDeclaration {
   const inputSchema = decodeToolSchema(raw.inputSchema);
   validateToolSchema(inputSchema);
   return Object.freeze({
-    name: text(raw.name, 64),
+    name: text(raw.name, MAX_TOOL_NAME_LENGTH),
     description: text(raw.description, 1024),
     parameters: [],
     timeoutSeconds: raw.timeoutSeconds,

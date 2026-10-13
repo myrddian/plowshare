@@ -49,7 +49,7 @@ public final class RelayPort {
     public Publish {
       uuid(requestId);
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       RelayPort.text(text);
       Objects.requireNonNull(occurredAt);
       if (occurredAt.isBefore(Instant.parse("0001-01-01T00:00:00Z"))
@@ -57,7 +57,7 @@ public final class RelayPort {
       if (correlationId != null) identity(correlationId);
       if ((parentTopic == null) != (parentEventId == null)) throw invalid();
       if (parentTopic != null) {
-        name(parentTopic);
+        RelayPort.topic(parentTopic);
         identity(parentEventId);
       }
     }
@@ -68,7 +68,7 @@ public final class RelayPort {
     public Published {
       uuid(requestId);
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       decimal(position);
       if (position.equals("0")) throw invalid();
       Objects.requireNonNull(publishedAt);
@@ -98,7 +98,7 @@ public final class RelayPort {
       Integer waitMs) {
     public Consume {
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       RelayPort.group(group);
       uuid(consumerId);
       Objects.requireNonNull(start);
@@ -122,7 +122,7 @@ public final class RelayPort {
       List<RelayLog.Event> events) {
     public Batch {
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       RelayPort.group(group);
       uuid(consumerId);
       Objects.requireNonNull(status);
@@ -159,7 +159,7 @@ public final class RelayPort {
       String expiredThrough) {
     public Ack {
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       RelayPort.group(group);
       uuid(consumerId);
       uuid(batchId);
@@ -173,11 +173,21 @@ public final class RelayPort {
       String project, String topic, String group, String batchId, String through, boolean gap) {
     public Acknowledged {
       identity(project);
-      name(topic);
+      RelayPort.topic(topic);
       RelayPort.group(group);
       uuid(batchId);
       decimal(through);
     }
+  }
+
+  /** Topics support long hierarchical paths; subscriber and group names retain their own limits. */
+  public static final int MAX_TOPIC_LENGTH = 1024;
+
+  public static String topic(String value) {
+    if (value == null
+        || value.length() > MAX_TOPIC_LENGTH
+        || !value.matches("[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*")) throw invalid();
+    return value;
   }
 
   public static String name(String value) {

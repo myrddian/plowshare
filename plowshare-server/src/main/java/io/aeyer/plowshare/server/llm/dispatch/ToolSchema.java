@@ -13,7 +13,7 @@ import java.util.Objects;
  */
 public record ToolSchema(String name, String description, SchemaDefinition parameters) {
   public ToolSchema {
-    if (name == null || !name.matches("[A-Za-z0-9_-]{1,128}"))
+    if (name == null || !name.matches("[A-Za-z0-9_-]{1,256}"))
       throw new IllegalArgumentException("invalid tool name");
     if (description == null || description.length() > 32768 || description.indexOf('\0') >= 0)
       throw new IllegalArgumentException("invalid tool description");

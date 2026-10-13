@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { HttpMcpSessions } from './session.ts';
-import { McpWire } from './wire.test-support.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
+import { McpWire, rawTool } from './wire.test-support.ts';
 import type { McpProtocol } from './contracts.ts';
 
 for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
@@ -207,3 +208,43 @@ await test('configured client identity and wire budget apply to real HTTP reques
     await wire.close();
   }
 });
+
+for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
+  await test(`${protocol}: configured long upstream names and cursors survive HTTP decoding`, async () => {
+    const wire = new McpWire(protocol);
+    wire.tools = [
+      { ...rawTool, name: 'a'.repeat(200), description: 'd'.repeat(1500) },
+    ];
+    wire.cursor = 'c'.repeat(1500);
+    await wire.start();
+    const session = await new HttpMcpSessions().open(
+      {
+        protocol,
+        policy: {
+          endpoint: wire.endpoint,
+          allowHttp: true,
+          allowPrivateNetwork: true,
+          timeoutMs: 2000,
+        },
+        header: 'Authorization',
+        value: 'Bearer fixture',
+        limits: {
+          ...DEFAULT_LIMITS,
+          maxToolNameLength: 200,
+          maxDescriptionLength: 1500,
+          maxCursorLength: 1500,
+        },
+      },
+      AbortSignal.timeout(2000),
+    );
+    try {
+      const page = await session.page(null, AbortSignal.timeout(2000));
+      assert.equal(page.tools[0]?.name.length, 200);
+      assert.equal(page.cursor?.length, 1500);
+      assert.equal(page.tools[0]?.description.length, 1500);
+    } finally {
+      await session.close();
+      await wire.close();
+    }
+  });
+}

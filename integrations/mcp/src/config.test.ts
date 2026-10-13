@@ -94,9 +94,14 @@ await test('rejects invalid budgets, unknown settings and hidden policy defaults
   for (const limits of [
     { maxTools: 128 },
     { maxPages: 0 },
+    { maxToolNameLength: 4097 },
+    { maxDescriptionLength: 4097 },
+    { maxCursorLength: 0 },
+    { maxOfferedNameLength: 257 },
+    { maxOfferedNameLength: 35 },
     { maxPages: 1.5 },
-    { maxWireBytes: 16777217 },
-    { maxCatalogueBytes: 60001 },
+    { maxWireBytes: Number.MAX_SAFE_INTEGER + 1 },
+    { maxCatalogueBytes: 65537 },
     { maxResultBytes: 16385 },
     { maxContentBlocks: 0 },
     { maxPages: null },
@@ -106,7 +111,7 @@ await test('rejects invalid budgets, unknown settings and hidden policy defaults
       decodeConfig({ ...base, workers: [{ ...worker, limits }] }),
     );
   for (const extra of [
-    { renewalFraction: 0.9 },
+    { renewalFraction: 1 },
     { renewalFraction: NaN },
     { timeoutMs: 0 },
     { timeoutSeconds: 301 },
@@ -119,7 +124,7 @@ await test('rejects invalid budgets, unknown settings and hidden policy defaults
   for (const extra of [
     { requestTimeoutMs: 0 },
     { maxWorkers: 0 },
-    { maxRecoveryCatalogues: 4097 },
+    { maxRecoveryCatalogues: 0 },
     { defaults: { timeoutMs: 0 } },
     { defaults: { limits: { maxTools: 128 } } },
     { clientInfo: { name: 'client', version: '1', extra: true } },
@@ -187,4 +192,52 @@ await test('every timeout is configuration controlled and missing defaults canno
   assert.equal(config.workers[0]?.options.timeoutSeconds, 90);
   assert.equal(config.workers[1]?.options.policy.timeoutMs, 4000);
   assert.equal(config.workers[1]?.options.timeoutSeconds, 60);
+});
+
+await test('operator budgets override recommendations and former adapter-only ceilings', () => {
+  const config = decodeConfig({
+    ...base,
+    maxWorkers: 300,
+    maxRecoveryCatalogues: 5000,
+    maxClientInfoLength: 200,
+    clientInfo: { name: 'c'.repeat(200), version: '1' },
+    defaults: {
+      ...policy,
+      timeoutMs: 400000,
+      timeoutSeconds: 30,
+      pollMs: 20000,
+      renewalFraction: 0.9,
+      limits: {
+        maxToolNameLength: 4096,
+        maxDescriptionLength: 4096,
+        maxCursorLength: 5000,
+        maxOfferedNameLength: 64,
+        maxPages: 2000,
+        maxWireBytes: 20000000,
+        maxContentBlocks: 2000,
+        maxCatalogueBytes: 65536,
+      },
+    },
+    workers: [{ binding: id, generation: 1 }],
+  });
+  assert.equal(config.clientInfo.name.length, 200);
+  assert.equal(config.workers[0]?.options.limits?.maxToolNameLength, 4096);
+  assert.equal(config.workers[0]?.options.limits?.maxOfferedNameLength, 64);
+  assert.equal(config.workers[0]?.options.policy.timeoutMs, 400000);
+  assert.equal(config.workers[0]?.renewalFraction, 0.9);
+  assert.throws(() =>
+    decodeConfig({
+      ...base,
+      clientInfo: { name: 'c'.repeat(129), version: '1' },
+      workers: [
+        {
+          ...policy,
+          binding: id,
+          generation: 1,
+          timeoutMs: 1000,
+          timeoutSeconds: 30,
+        },
+      ],
+    }),
+  );
 });
