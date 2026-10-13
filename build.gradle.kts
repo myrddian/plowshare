@@ -189,19 +189,19 @@ fun Exec.typescriptSources() {
     inputs.files("package.json", "pnpm-lock.yaml", "eslint.config.mjs", ".prettierrc.json",
         ".prettierignore", "tsconfig.strict.json")
     inputs.files(fileTree(rootDir) {
-        include("sdk/*/src/**/*.ts", "sdk/*/**/tsconfig*.json", "plowshare-*/src/**/*.ts", "plowshare-*/**/tsconfig*.json", "plowshare-*/vite.config.ts")
+        include("clients/**/*.ts", "sdk/*/src/**/*.ts", "sdk/*/**/tsconfig*.json", "plowshare-*/src/**/*.ts", "plowshare-*/**/tsconfig*.json", "plowshare-*/vite.config.ts")
         exclude("**/node_modules/**", "**/build/**", "**/build-tests/**", "**/dist/**")
     }).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 val typescriptFormat by tasks.registering(Exec::class) {
     group = "formatting"
     typescriptSources()
-    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--write", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--write", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
 }
 val typescriptFormatCheck by tasks.registering(Exec::class) {
     group = "verification"
     typescriptSources()
-    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--check", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--check", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
 }
 val typescriptLint by tasks.registering(Exec::class) {
     group = "verification"

@@ -7,6 +7,9 @@ release to configured external executors using retained owner/invocation authori
 as described in [ADR 0019](decisions/0019-mcp-provider-hosting.md). An external MCP
 transport and its session caches remain separate adapter work.
 
+The [client management manual](provider-management-clients.md) covers safe entry,
+browser authorization and original-receipt recovery in CLI/TUI/desktop/console.
+
 Connections belong to an ordinary registered project. A server administrator who
 also has project manager access configures their endpoint and authentication
 profile. Project readers can inspect shared settings. Each credential belongs to

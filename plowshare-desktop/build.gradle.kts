@@ -12,6 +12,7 @@ val pnpmInstall by tasks.registering(Exec::class) {
 }
 
 fun Exec.desktopSources() {
+    inputs.dir(rootProject.file("clients")).withPathSensitivity(PathSensitivity.RELATIVE)
     workingDir = projectDir
     inputs.file(rootProject.file("plowshare-console/src/screens/usage-panel.ts"))
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)

@@ -64,6 +64,15 @@ await using (var client = await Open("cancel"))
     try { await task; throw new Exception("cancelled request succeeded"); }
     catch (RequestCancelledException e) { Check(e.Delivery == Delivery.Unknown && e.CancellationToken == cancel.Token, "cancellation lost delivery"); }
 }
+await using (var client = await Open("provider-owner-compat"))
+{
+    var provider = await client.ProviderConnectionListAsync(new ProviderConnectionListRequest { Project = "fixture" });
+    try { provider.RequirePayload(); throw new Exception("unsupported management became success"); }
+    catch (RefusalException e) { Check(e.Code == "NOT_FOUND" && e.Said == "no handler is registered for type \"provider.connection.list\"", "management refusal lost"); }
+    var hosted = await client.ToolScopeHostListAsync(new ToolScopeHostListRequest { Project = "fixture" });
+    try { hosted.RequirePayload(); throw new Exception("unsupported hosted management became success"); }
+    catch (RefusalException e) { Check(e.Code == "NOT_FOUND" && e.Said == "no handler is registered for type \"tool.scope.host.list\"", "hosted refusal lost"); }
+}
 await using (var client = await Client.ConnectAsync(origin, "sdk-fixture-token", "packet-large-dotnet",TimeSpan.FromSeconds(30)))
 {
     var text=new string('\u0001',5*1024*1024);

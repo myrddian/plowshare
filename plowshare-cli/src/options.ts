@@ -29,6 +29,13 @@ Approval: list, answer, revoke. Orchestration: definitions, list, status, answer
      start, receipt, wait, resume, cancel, caps, record. Inbox: list, read. Todos: read.
 Schedule: list, define, read, pause, forget. Trigger: list, define, pause, forget.
 Event: fire. Firing: list. Provider: list, deregister. Board: topup.
+Provider connection: list, status, save, change, receipt [JSON].
+Provider credential: status, put, authorize, refresh, revoke, rekey [JSON].
+     put reads secrets through --payload -; --validate redacts secret material.
+     authorize explicitly opens a browser once; its URL is never printed or saved.
+Tool scope host: list, status, save, change, receipt [JSON].
+     Lost replies retain a private server/account bookmark. Read the original project/requestId
+     with provider connection receipt or tool scope host receipt; never repeat an uncertain write.
 Buffer: purge. Retention: sweep. Union: status, conflicts (reads only).
 Web: search, fetch. Project: create, list, define, lend, unlend, workspace, move, forget,
      access, member-add, member-role, member-remove (paths refer to the server's disk).

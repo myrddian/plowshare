@@ -125,6 +125,17 @@ func main() {
 	err = <-abandoned
 	check(errors.As(err, &delivery) && delivery.Delivery == plowshare.Unknown && errors.Is(err, context.Canceled), "cancellation lost delivery")
 	client.Close()
+	client = open("provider-owner-compat")
+	providerReply, err := client.ProviderConnectionList(ctx, plowshare.ProviderConnectionListRequest{Project: "fixture"})
+	check(err == nil, "management refusal lost its envelope")
+	_, err = providerReply.RequirePayload()
+	var managementRefusal *plowshare.RefusalError
+	check(errors.As(err, &managementRefusal) && managementRefusal.Code == "NOT_FOUND" && managementRefusal.Said != nil && *managementRefusal.Said == `no handler is registered for type "provider.connection.list"`, "unsupported management became success")
+	hostedReply, err := client.ToolScopeHostList(ctx, plowshare.ToolScopeHostListRequest{Project: "fixture"})
+	check(err == nil, "hosted refusal lost its envelope")
+	_, err = hostedReply.RequirePayload()
+	check(errors.As(err, &managementRefusal) && managementRefusal.Code == "NOT_FOUND" && managementRefusal.Said != nil && *managementRefusal.Said == `no handler is registered for type "tool.scope.host.list"`, "unsupported hosted management became success")
+	client.Close()
 	large, err := plowshare.Connect(ctx, origin, "sdk-fixture-token", plowshare.Options{Session: "packet-large-go", Timeout: 30 * time.Second})
 	check(err == nil, "large packet upgrade failed")
 	text := strings.Repeat("\u0001", 5*1024*1024)

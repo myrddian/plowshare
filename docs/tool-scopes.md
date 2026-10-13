@@ -61,7 +61,10 @@ provider prefix; use one route for a provider.
 
 ## Interactive policy
 
-CLI, TUI and desktop share these commands:
+The shared SDK command catalogue defines these commands, currently accepted by
+the CLI. Dedicated TUI/desktop management remains part of the
+[client workflow design](mcp-client-workflows.md); SDK command presence alone
+does not expose a command in their current UI dispatchers.
 
 ```text
 tool scope connect {"project":"coding-project","scope":"linear","provider":"linear","prefix":"linear_","grants":["*"],"agents":["ticketer"],"leaseSeconds":300}
@@ -91,8 +94,9 @@ reserves model tool names and prevents built-in or same-owner provider collision
 Other accounts in a shared project have independent connections and routing names.
 
 Connections are bounded in-memory attachments. A one-shot CLI connect ends when
-its event socket closes; use a persistent SDK connection or the TUI/desktop's
-persistent command session for an active provider scope. CLI list remains useful
+its event socket closes; use a persistent SDK connection for an active provider
+scope. Planned native hosting owns the TUI/desktop session explicitly. CLI list
+remains useful
 for inspecting connections owned by this account. Scope connection does not start
 an external provider process. Socket loss or restart removes availability; reconnect explicitly and use
 the new routing name. Repeating an identical connect request on the same live
@@ -118,8 +122,8 @@ The same three operations and typed DTOs are available in every SDK:
 All use the same required fields: `project`, `scope`, `provider`, `prefix`,
 `grants`, `agents`, `leaseSeconds`. List and disconnect use the equivalent generated
 request/result types. These are authenticated WebSocket operations; they introduce
-no HTTP fallback or mutation replay. Shared client command surfaces expose them;
-this change does not add provider-specific OAuth screens or a dedicated connection UI.
+no HTTP fallback or mutation replay. The CLI exposes their shared command grammar;
+dedicated TUI/desktop flows and OAuth screens remain client management work.
 
 ## Calls and current limits
 

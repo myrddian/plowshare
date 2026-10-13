@@ -19,6 +19,11 @@ records the precise platform gaps and defines the ownership decision. The
 [bounded MCP profile](mcp-provider-profile.md) pins protocol/SDK revisions, discovery,
 results and unsupported capabilities, with an independent reproducible design probe.
 
+The [client workflow design](mcp-client-workflows.md), audited against the merged
+credential and hosted foundations, specifies roles/locations, current client gaps,
+management layouts, native process lifetime and receipt recovery. Its screens and
+hosting verbs are planned, not shipped.
+
 ## Existing provider mechanism
 
 The reference implementation is
@@ -59,7 +64,7 @@ SDK providers and carries immutable recursive values through the existing
 catalogue/invocation mechanism. See [Shared tool schemas](tool-schemas.md) and
 [the platform decision](decisions/0018-shared-tool-schemas.md) for the implemented
 bounded profile, unsupported keywords, canonical fingerprints and versioned
-compatibility. MCP connection and credential support remains planned work.
+compatibility. MCP transport and subject-scoped sessions remain planned work.
 
 An MCP adapter must validate discovered schemas against that profile before
 publishing them. Unsupported keywords or dialects produce visible compatibility
@@ -169,22 +174,21 @@ changes remain a subsequent implementation task.
 1. **Shared tool schema and SDK extension: delivered.** The standalone foundation
    includes server integration, all SDK façades and existing provider compatibility.
    MCP and other integrations consume it. Its acceptance contract is below.
-2. **Review the MCP-specific decision and profile.** Resolve the precise credential,
-   delegated executor and accounting policy boundaries in ADR 0019. The probe is
-   design evidence; it does not assert shipped MCP support.
-3. **Add server credential ownership and durable binding support.** Define narrow
-   credential service/repository contracts and typed public operations. Evolve
-   existing provider scopes to distinguish durable server hosting from local
-   presence. Add only required additive persistence migrations and retain existing
-   invocation records as execution authority. Document secret/key rollback and
-   revoked/uncertain refresh recovery without replaying credential mutations.
+2. **MCP-specific decision and profile: delivered as design.** ADR 0019 defines
+   credential and delegated-executor authority. The probe is design evidence;
+   it does not assert shipped MCP support. Enforced spending-pool policy is separate.
+3. **Server credentials and durable bindings: delivered.** Typed repositories,
+   services and shared SDK operations extend existing provider scopes while
+   retaining the owning invocation ledger. See the credential and hosted manuals
+   for configuration, migrations, key rollback, revocation and uncertainty.
 4. **Build the MCP provider.** Implement profile-specific discovery/initialization,
    bounded pagination, catalogue renewal/withdrawal, collision-safe name mapping and `tools/call`
    handlers under `integrations/`. Pin original upstream names, schemas and
    credential subjects. Server hosting accepts HTTP only; native hosting adds
    STDIO. Reuse SDK journals and exact invocation identities. Reconnecting or
    refreshing metadata never resubmits an uncertain call.
-5. **Expose connection management in clients.** Provide server-held user
+5. **Expose connection management in clients.** First review the
+   [workflow matrix and layouts](mcp-client-workflows.md), then provide server-held user
    authorization, authorized service-account selection, agent assignments,
    compatibility diagnostics and instance-local hosting in CLI/TUI/desktop.
    Browser management operates through typed server capabilities. Reuse shared

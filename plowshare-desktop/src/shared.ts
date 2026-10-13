@@ -1,3 +1,8 @@
+import type {
+  ManagementOperation,
+  ManagementValue,
+  ManagementIntent,
+} from 'plowshare-client-ts/operations/provider-management';
 import type { Code } from 'plowshare-client-ts/binding/codes';
 import type {
   ApplicationIdentityStatus,
@@ -350,6 +355,13 @@ export type ApplicationIdentityCall = {
   | 'application.identity.status'
   | 'application.token.issue'
   | 'application.token.receipt'];
+export type ProviderManagementCall = {
+  [K in ManagementOperation]: {
+    action: 'provider-management';
+    operation: K;
+    payload: Payloads[K];
+  };
+}[ManagementOperation];
 export type ApplicationDeploymentCall = {
   [
     K in
@@ -673,8 +685,18 @@ export type Request =
     }
   | { action: 'run'; conversation: string; agent: string; text: string }
   | { action: 'cancel'; job: string }
-  | { action: 'answer'; id: string; decision: 'once' | 'deny' };
+  | { action: 'answer'; id: string; decision: 'once' | 'deny' }
+  | ProviderManagementCall
+  | { action: 'provider-management-pending' }
+  | { action: 'provider-management-recover'; intent: ManagementIntent };
 export interface Reply {
+  providerManagement?: ManagementValue;
+  providerManagementPending?: readonly ManagementIntent[];
+  providerManagementRefusal?: {
+    operation: ManagementOperation;
+    code: Code;
+    unsupported: boolean;
+  };
   serverFileStores?: FileStoreCatalog;
   applicationPackage?: {
     folder: string;

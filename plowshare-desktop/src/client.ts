@@ -1,5 +1,14 @@
 import { nodePacketSocket, PACKET_PROTOCOL } from 'plowshare-client-node';
 import { connectionAccount } from 'plowshare-client-node/connections';
+import { userConfigDirectory } from 'plowshare-client-node/connections';
+import {
+  ProviderManagementClient,
+  ProviderManagementIntents,
+} from 'plowshare-client-node';
+import {
+  ProviderManagementRefused,
+  managementRequest,
+} from 'plowshare-client-ts/operations/provider-management';
 import { jobNotification } from 'plowshare-client-ts/operations/push';
 import {
   decodeReply,
@@ -1128,6 +1137,45 @@ export class DesktopClient {
           state: structuredClone(this.state),
           serverFileStores: decodeReply('filestore.list', result.payload),
         };
+      }
+      case 'provider-management':
+      case 'provider-management-pending':
+      case 'provider-management-recover': {
+        if (!this.state.connected)
+          throw new Error('Connect to manage tool connections.');
+        const management = new ProviderManagementClient(
+          { ask: this.ask.bind(this) },
+          new ProviderManagementIntents(
+            this.state.base,
+            this.state.handle,
+            userConfigDirectory(),
+          ),
+        );
+        try {
+          if (request.action === 'provider-management-pending')
+            return {
+              state: structuredClone(this.state),
+              providerManagementPending: await management.pending(),
+            };
+          const providerManagement =
+            request.action === 'provider-management-recover'
+              ? await management.recover(request.intent)
+              : await management.execute(
+                  managementRequest(request.operation, request.payload),
+                );
+          // Metadata/once-only OAuth URL belongs to this IPC reply, never DesktopState/events.
+          return { state: structuredClone(this.state), providerManagement };
+        } catch (error) {
+          if (!(error instanceof ProviderManagementRefused)) throw error;
+          return {
+            state: structuredClone(this.state),
+            providerManagementRefusal: {
+              operation: error.operation,
+              code: error.code,
+              unsupported: error.unsupported,
+            },
+          };
+        }
       }
       case 'application-identity': {
         if (!this.state.connected || !this.state.serverAdmin)
