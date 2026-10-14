@@ -63,7 +63,7 @@ const WORKER_FIELDS = [
   'renewalFraction',
   'limits',
 ] as const;
-function limits(
+export function decodeLimits(
   source: unknown,
   inherited: McpLimits = DEFAULT_LIMITS,
 ): McpLimits {
@@ -160,7 +160,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
   if (defaults.pollMs !== undefined) integer(defaults.pollMs, 1, MAX_TIMER_MS);
   if (defaults.renewalFraction !== undefined)
     renewalFraction(defaults.renewalFraction);
-  const sharedLimits = limits(defaults.limits);
+  const sharedLimits = decodeLimits(defaults.limits);
   const pollMs = integer(raw.pollMs ?? 250, 1, MAX_TIMER_MS);
   const client =
     raw.clientInfo === undefined
@@ -199,7 +199,7 @@ export function decodeConfig(source: unknown): IntegrationConfig {
     const protocol = effective.protocol;
     if (protocol !== '2026-07-28' && protocol !== '2025-11-25')
       throw new Error('Unsupported MCP protocol profile');
-    const budget = limits(worker.limits, sharedLimits);
+    const budget = decodeLimits(worker.limits, sharedLimits);
     return Object.freeze<WorkerConfig>({
       binding: uuid(worker.binding),
       generation: integer(worker.generation, 1, Number.MAX_SAFE_INTEGER),

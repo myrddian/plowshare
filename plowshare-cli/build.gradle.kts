@@ -7,7 +7,8 @@ val pnpmInstall by tasks.registering(Exec::class) {
 
 fun Exec.cliSources() {
     workingDir = projectDir
-    dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild")
+    dependsOn(pnpmInstall, ":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild", ":plowshare-mcp-integration:mcpIntegrationBuild")
+    inputs.dir(rootProject.file("integrations/mcp/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(rootProject.file("test-support/contracts/ws-retrieval-fixtures.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -29,7 +30,7 @@ fun Exec.cliSources() {
 val cliBuild by tasks.registering(Exec::class) {
     group = "build"
     cliSources()
-    for (name in listOf("main", "run", "platform", "options", "login")) {
+    for (name in listOf("main", "run", "platform", "options", "login", "native-mcp")) {
         outputs.files("build/$name.js", "build/$name.d.ts")
     }
     commandLine("node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.json")
@@ -45,7 +46,7 @@ val cliTest by tasks.registering(Exec::class) {
     group = "verification"
     cliSources()
     dependsOn(cliTestTypes)
-    commandLine("node", "--test", "build-tests/options.test.js", "build-tests/socket.test.js", "build-tests/presence.test.js", "build-tests/login.test.js")
+    commandLine("node", "--test", "build-tests/options.test.js", "build-tests/socket.test.js", "build-tests/presence.test.js", "build-tests/login.test.js", "build-tests/native-mcp.test.js")
 }
 tasks.named("assemble") { dependsOn(cliBuild) }
 tasks.named("check") { dependsOn(cliTest) }

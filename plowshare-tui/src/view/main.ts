@@ -1,4 +1,10 @@
 import {
+  NativeHostCommands,
+  NativeMcpSessions,
+  decodeNativeCommand,
+  nativeProviderConnection,
+} from 'plowshare-mcp-integration';
+import {
   FileStores,
   manageFileStores,
   promptFileStore,
@@ -1205,9 +1211,25 @@ export async function converse(talking: Talking): Promise<void> {
    * nobody awaiting it would be an unhandled rejection, which is a crash
    * rather than a message.
    */
+  let nativeMcp: NativeHostCommands | undefined;
+  let nativeClosing: Promise<void> = Promise.resolve();
+  const stopNative = (): void => {
+    const current = nativeMcp;
+    nativeMcp = undefined;
+    if (current !== undefined)
+      nativeClosing = Promise.all([nativeClosing, current.close()])
+        .then(() => undefined)
+        .catch(() =>
+          show(
+            'trouble',
+            'Native MCP stopped with retained uncertainty; inspect private receipts.',
+          ),
+        );
+  };
   let connectionLost = false;
   let reconnectNow: (() => Promise<void>) | undefined;
   function onClose(): void {
+    stopNative();
     connectionLost = true;
     jobs.reset(true);
     dropped?.(new Dropped());
@@ -5050,10 +5072,37 @@ export async function converse(talking: Talking): Promise<void> {
         // harder to read back than one that showed both.
         show(
           'person',
-          /^\/provider\s+credential\s+put(?:\s|$)/u.test(text)
-            ? '/provider credential put [credential coordinates; masked entry]'
-            : text,
+          text.startsWith('/mcp local ')
+            ? '/mcp local [instance command; private input]'
+            : /^\/provider\s+credential\s+put(?:\s|$)/u.test(text)
+              ? '/provider credential put [credential coordinates; masked entry]'
+              : text,
         );
+        if (text.startsWith('/mcp local ')) {
+          try {
+            if (connectionLost || !loginHandle)
+              throw new Error(
+                'Native MCP requires the current authenticated login',
+              );
+            const raw: unknown = JSON.parse(text.slice('/mcp local '.length));
+            const command = decodeNativeCommand(raw);
+            const owningSocket = wire;
+            nativeMcp ??= new NativeHostCommands(
+              { origin: talking.door.base, account: loginHandle },
+              new NativeMcpSessions(process.env),
+              nativeProviderConnection(checkedTransport(owningSocket), () =>
+                connection.close(),
+              ),
+            );
+            show('client', JSON.stringify(await nativeMcp.execute(command)));
+          } catch {
+            show(
+              'trouble',
+              'Native MCP request refused. Review consent, profile ownership and original private receipts.',
+            );
+          }
+          continue;
+        }
         // WHAT THE LINE IS, BEFORE IT IS TREATED AS AN UTTERANCE. The
         // reading is `session.ts`'s, so this file goes on writing no dotted
         // type and no payload key; the three arms below are the order and
@@ -5854,6 +5903,8 @@ export async function converse(talking: Talking): Promise<void> {
     // two failures caught above — a dropped socket, a second Ctrl-C — are
     // exactly the paths that leave one behind.
     surface.working(undefined);
+    stopNative();
+    await nativeClosing;
     recoveryClosing = true;
     clearInterval(recoveryTimer);
     reconnectNow = undefined;

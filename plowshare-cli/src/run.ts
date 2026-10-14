@@ -1,3 +1,4 @@
+import { nativeMcp } from './native-mcp.js';
 import {
   applicationFiles,
   ApplicationSourceError,
@@ -97,6 +98,8 @@ export interface IO {
     signal: AbortSignal,
   ) => Promise<{ handle: string; password: string }>;
   readonly signal?: AbortSignal;
+  /** Foreground native MCP NDJSON input; no server transport. */
+  readonly nativeInput?: (signal: AbortSignal) => AsyncIterable<string>;
 }
 
 function fields(value: unknown): Record<string, unknown> {
@@ -321,6 +324,26 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
       );
       return 0;
     }
+    if (
+      opts.help &&
+      opts.commandParts?.[0] === 'mcp' &&
+      opts.commandParts[1] === 'local'
+    ) {
+      const commands = [
+        'mcp local inspect FILE',
+        'mcp local start FILE',
+        'mcp local call FILE --payload -',
+        'mcp local share FILE --payload - --timeout-ms DURATION',
+      ];
+      io.stdout(
+        json
+          ? JSON.stringify({ status: 'help', platformCommands: commands }) +
+              '\n'
+          : commands.join('\n') +
+              '\nPrivate absolute profiles and explicit launch consent are required. Start serves direct NDJSON until EOF/signal; share adds server scopes.\n',
+      );
+      return 0;
+    }
     if (opts.help) {
       const help = discovery(opts.command);
       if (!help.commands.length && !help.platformCommands.length)
@@ -336,6 +359,27 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
               '\n',
       );
       return 0;
+    }
+    if (opts.commandParts?.[0] === 'mcp' && opts.commandParts[1] === 'local') {
+      if (opts.validate || opts.wait || opts.root)
+        throw new Usage(
+          'Native MCP uses explicit foreground configuration, not server --validate/--wait/--root',
+        );
+      try {
+        return await nativeMcp(
+          opts.commandParts,
+          io,
+          control.signal,
+          opts.timeoutMs,
+        );
+      } catch {
+        return fail(
+          'refused',
+          'Native MCP stopped. Review local configuration, consent, ownership and retained private receipts.',
+          1,
+          'NATIVE_MCP_REFUSED',
+        );
+      }
     }
     const fileStores = new FileStores(userConfigDirectory(io.env));
     // list discovers server grants; the remaining FileStore commands manage this host's registry.

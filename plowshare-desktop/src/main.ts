@@ -1049,7 +1049,11 @@ background(
           applicationPackage: { folder, files: await applicationFiles(folder) },
         };
       }
-      if (request.action.startsWith('provider-management') && !main)
+      if (
+        (request.action.startsWith('provider-management') ||
+          request.action === 'native-mcp') &&
+        !main
+      )
         throw new Error(
           'Manage tool connections from the main workspace window.',
         );

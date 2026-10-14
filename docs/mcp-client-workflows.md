@@ -8,7 +8,7 @@ in [client management](provider-management-clients.md). Friendly native host ver
 MCP transports and native host lifetime remain planned. This is not a live MCP or
 deployed-client acceptance claim.
 
-MCP consumes the existing SDK provider, scopes, catalogue leases, Relay invocation
+The server-facing MCP adapter consumes the existing SDK provider, scopes, catalogue leases, Relay invocation
 record and exclusive provider journal. See the [provider design](mcp-client-design.md),
 [bounded adapter profile](mcp-provider-profile.md), [credentials](provider-credentials.md)
 and [hosted authority](hosted-tool-scopes.md). The outward-facing `plowshare-mcp`
@@ -161,46 +161,27 @@ link, never a popup from background refresh.
 
 ## Native host configuration and lifetime
 
-Native hosting is opt-in. Configuration is separate from Plowshare named login
-connections and server endpoints. Partition by canonical origin/account and an
-explicit host-instance identity, then project/profile within that partition.
-Clients may share login without sharing host secrets/runtime ownership. Rename
-preserves identity; switching never adopts a foreign profile. Keep secrets and
-journals outside synced projects, Application exports, browser storage and source.
+Native HTTP/STDIO hosting is implemented through the shared direct MCP client,
+CLI foreground verbs, TUI native commands and desktop main IPC. Same-process calls
+perform no Relay operation. Explicit server sharing uses the existing authenticated
+scope/provider boundary. See [native configuration, commands and recovery](native-mcp-hosting.md)
+and [ADR 0024](decisions/0024-native-mcp-direct-execution.md).
 
-Validate location, explicit protocol profile, HTTP destination/authentication or
-STDIO executable/argument vector/working directory/selected environment, secret
-references, scope/prefix, agents/grants, finite timeouts and journal location at
-the adapter configuration boundary. Display a redacted launch summary. No shell
-command string, implicit working directory, inherited secrets, model-selected
-destination or silent profile/transport switch. Local OAuth and secure local
-storage are adapter/client work; server grant APIs never export a user's grant
-into a native profile. The bounded adapter profile owns limits/destination policy.
+The following layout guidance describes the friendly management controls planned
+for #108. Process ownership, explicit consent, private instance profiles and SDK
+receipt recovery remain the runtime contracts; the browser does not launch STDIO.
 
-Desktop main or the TUI process owns upstream clients/subprocesses. Views request
-typed start/stop actions. Validate and obtain explicit host consent before
-launch/discovery, since STDIO startup itself can have effects. Complete bounded
-discovery, then review supported tools/diagnostics before enabling chosen agents.
-Unsupported tools are visibly refused, without stripped constraints. Existing
-SDK catalogues/scopes carry them; host consent does not authorize an agent call.
+## Proposed native verbs and terminal layout
 
-Automatic start on login/restart is off initially. Polling and catalogue renewal
-belong to an explicitly started host lifetime. Socket loss stops intake/renewal
-and removes the old scope. Reconnect reconciles original receipts; deliberate
-Start creates a new scope/route and journal generation. Preserve old uncertain
-journals; a changed profile cannot reinterpret an admitted call. Another device
-never serves as fallback.
-
-### Proposed native verbs and terminal layout
-
-These friendly verbs are design names, not installed commands. Existing typed
-operation names remain available for scripts. Implementation must document accepted
-configuration DTOs/flags before publishing runnable host examples.
+CLI inspect/start/call/share and the raw native TUI/desktop command boundary are
+implemented as documented in [native hosting](native-mcp-hosting.md). The friendly
+reconcile panel and layouts below remain #108; read-only inspection must never
+launch STDIO merely to examine an original journal.
 
 | Proposed verb | Behavior |
 | --- | --- |
-| `mcp local inspect PROFILE` | Redacted configuration/journal summary; no launch. |
-| `mcp local start PROFILE` | Foreground CLI host until Stop, signal, deadline or connection loss. No one-shot background success. |
+| `mcp local inspect PROFILE` | Installed CLI profile summary; no launch. |
+| `mcp local start PROFILE` | Installed direct NDJSON foreground host until EOF/signal/host failure; `share` adds the server boundary. |
 | `mcp local reconcile PROFILE` | Original receipt reads; never run an uncertain handler or launch STDIO just to inspect a journal. |
 | `/tools` in TUI | Current-socket management panel with Server / This instance sections. |
 | Start / Stop in desktop or TUI | This process's host only, not a global stop based solely on scope name. |

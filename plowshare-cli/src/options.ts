@@ -61,6 +61,9 @@ project define registers an existing server workspace (administrator required).
 project access inspects your role and grants; project Managers may add/remove members
 and assign VIEWER, CONTRIBUTOR or MANAGER using project member-role.
 Personal remains private to its account; roles never widen writable workspace areas.
+Native MCP: mcp local inspect|start|call|share /absolute/private/profile.json
+start serves NDJSON calls until EOF or a signal; call/share read policy/input from stdin.
+
 --project selects that framework project for work; --root explicitly serves local files.
 Single-id reads and document queries accept text; other payloads are JSON.
 web search requires query, pageSize, max and page; fetch accepts a URL.

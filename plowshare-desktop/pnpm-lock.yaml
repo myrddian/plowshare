@@ -14,6 +14,9 @@ importers:
       plowshare-client-ts:
         specifier: link:../sdk/typescript
         version: link:../sdk/typescript
+      plowshare-mcp-integration:
+        specifier: link:../integrations/mcp
+        version: link:../integrations/mcp
     devDependencies:
       '@electron/packager':
         specifier: 20.0.4
