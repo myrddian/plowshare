@@ -15,11 +15,12 @@ fun Exec.desktopSources() {
     inputs.dir(rootProject.file("clients")).withPathSensitivity(PathSensitivity.RELATIVE)
     workingDir = projectDir
     inputs.file(rootProject.file("plowshare-console/src/screens/usage-panel.ts"))
+    inputs.dir(rootProject.file("integrations/mcp/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files("package.json", "pnpm-lock.yaml", "tsconfig.json")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     // All neutral request and response readers come from the shared package.
-    dependsOn(":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild")
+    dependsOn(":plowshare-client-ts:clientBuild", ":plowshare-client-node:nodeBuild", ":plowshare-mcp-integration:mcpIntegrationBuild")
     inputs.dir(rootProject.file("sdk/node/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(rootProject.file("sdk/node/package.json"))
     inputs.dir(rootProject.file("sdk/typescript/src"))

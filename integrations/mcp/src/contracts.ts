@@ -27,6 +27,8 @@ export interface McpReply {
 }
 /** A session belongs to exactly one released credential context; implementations never retry effects. */
 export interface McpSession {
+  /** Transport loss ends availability; optional for existing injected session implementations. */
+  readonly closedSignal?: AbortSignal;
   page(cursor: string | null, signal: AbortSignal): Promise<McpPage>;
   call(
     tool: McpTool,
@@ -46,8 +48,8 @@ export interface McpSessionOptions {
   readonly protocol: McpProtocol;
   readonly limits?: McpLimits;
   readonly policy: HttpPolicy;
-  readonly header: 'Authorization' | 'X-API-Key' | 'Api-Key';
-  readonly value: string;
+  readonly header?: 'Authorization' | 'X-API-Key' | 'Api-Key';
+  readonly value?: string;
 }
 export interface McpSessions {
   open(options: McpSessionOptions, signal: AbortSignal): Promise<McpSession>;

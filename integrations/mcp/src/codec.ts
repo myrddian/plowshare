@@ -11,7 +11,7 @@ import type {
   ToolValue,
 } from 'plowshare-client-ts';
 import type { McpPage, McpProtocol, McpReply, McpTool } from './contracts.ts';
-import { DEFAULT_LIMITS, PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
+import { DEFAULT_LIMITS } from './settings.ts';
 import type { McpLimits } from './settings.ts';
 import { MAX_TOOL_NAME_LENGTH } from 'plowshare-client-ts/operations/relay-tools';
 
@@ -87,10 +87,7 @@ export function decodeMcpPage(
   limits: McpLimits = DEFAULT_LIMITS,
 ): McpPage {
   const raw = object(value);
-  if (
-    !Array.isArray(raw.tools) ||
-    raw.tools.length > PROVIDER_CATALOGUE_TOOL_LIMIT
-  )
+  if (!Array.isArray(raw.tools))
     throw new Error('MCP catalogue exceeds tool bound');
   const source: readonly unknown[] = raw.tools;
   return Object.freeze({
