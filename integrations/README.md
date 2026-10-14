@@ -23,8 +23,11 @@ lives under `discord/application/`. [Network Privacy Watch](network-privacy/netw
 uses `network-privacy/network-privacy-watch/`. Each Application is identified
 by its root `plowshare.json`. Register
 these roots as Applications so authorized clients list them under **Applications**.
-The supplied manifests have empty `access.accounts` lists: add explicit deployment account
-grants and matching server membership before use. Adapter credentials, endpoints
+The supplied manifests have empty human `access.accounts` lists: add explicit human
+grants and matching server membership before ordinary use. Discord also declares
+its Application-owned Contributor identity through `service`; deployment provisions
+its initial membership and token scope, followed by explicit credential issuance.
+Adapter credentials, endpoints
 and journals stay in private deployment configuration. The adapter processes
 continue to use the public SDK; a repository directory name or an adapter binding's
 `project` field does not establish an Application boundary.

@@ -2,7 +2,8 @@
 
 One standalone Discord bot connects to Plowshare through the public Node/TypeScript
 SDK. Fixed Discord channel mappings select a server project and exported bot.
-The adapter uses a scoped service token; Discord participants do not need, acquire
+The Discord Application owns its scoped service identity and token. Discord
+participants do not need, acquire
 or impersonate human Plowshare accounts. The server owns execution, grants,
 accounting, approvals, contexts, tasks and cancellation. This module contains no
 server imports, database access, core API changes or inference loop.
@@ -14,15 +15,14 @@ server imports, database access, core API changes or inference loop.
    Send Messages, Read Message History and Send Messages in Threads for the selected
    channels. The adapter requests Guilds, Guild Messages and Message Content;
    it does not request Server Members or Presence. It does not register slash commands.
-2. Deploy the [Discord Application](#discord-application), or use
-   an existing authorized server Application. Create a
-   [Plowshare service account](../../docs/server-administration.md#service-accounts-and-scoped-tokens),
-   declare its owner handle in each Application's manifest, grant Contributor
-   project membership, and issue a `pss_` token with those project ceilings.
-   Grant your human operator manifest access and membership too, so the Application
-   appears in their Applications view. The configured bots must be exported
-   and present in the server/project definition catalogue. Credentials cannot
-   supply client-local bot definitions or a local workspace presence.
+2. Configure and deploy the [Discord Application](#discord-application) as a server
+   administrator. Its manifest declares an owned Contributor identity; deployment
+   provisions the account, initial membership and project token scope. Explicitly
+   issue its `pss_` credential through the Application controls or public
+   `application.token.issue` operation. Add your human operator's manifest grant
+   and matching membership so they can see/use the Application. Receiving bots
+   must be exported and present in its server/project definition catalogue.
+   Credentials cannot supply client-local bot definitions or local workspace presence.
 3. Copy [the configuration template](config.template.json) outside the checkout.
    Replace the reserved placeholder origin, placeholder absolute state path and fictitious
    Discord IDs. Select real project and concrete exported bot names. List immutable
@@ -120,43 +120,98 @@ still apply alongside account access. All Discord users execute under the same
 service identity, so capabilities exposed through a mapped bot are available to
 its allowlisted participants; server account permissions do not distinguish them.
 
-Copy the Application source outside this checkout and configure its
-`access.accounts` with the **existing service account owner's handle** and your
-human operator's handle:
+Copy the Application source outside this checkout. Its initial declaration is:
+
+```json
+{
+  "service": {"handle": "discord-worker", "role": "CONTRIBUTOR"}
+}
+```
+
+Choose an **unused** service handle before first deployment if `discord-worker`
+is already reserved. Do not pre-create the account or paste a token principal
+into `executionAccount`: the server provisions and resolves both during deployment.
+Keep this declaration on later updates and rollbacks; an owned identity cannot be
+removed, substituted or rebound to an existing account.
+
+Configure `access.accounts` with your human operator's real handle:
 
 ```json
 {
   "access": {
     "accounts": [
-      {"handle": "your-discord-service-account", "role": "CONTRIBUTOR"},
       {"handle": "your-operator-account", "role": "MANAGER"}
     ]
   }
 }
 ```
 
-Replace both illustrative handles with real accounts. Use the service account
-owner, not `@service/<token UUID>`. The shipped empty accounts list intentionally
-grants nobody access. Manifest grants cap existing project membership; they do
-not create it or override the token ceiling. Discord-only people are not entries
-in this list and acquire no Plowshare account. An operator also needs both grants
-to see/use the Application after deployment.
+The `service` declaration already supplies the service owner's manifest grant;
+repeating that handle in `access.accounts` is refused. The shipped empty accounts
+list grants no human access. Human grants cap existing membership and do not
+create it; add matching operator membership as needed. Discord-only people are
+not entries in this list and acquire no Plowshare account.
 
 Deploy that copied folder through **Applications → Deploy** or the public
 [Application deployment commands](../../docs/projects.md#deploy-update-and-activate-an-application).
-Select project `discord`, an explicitly configured FileStore destination and a
-fresh retained deployment request UUID; check deployment status before submitting,
-and read the receipt after uncertain delivery. Add the service and operator
-membership through normal project administration, then issue/configure the scoped
-token. For an already registered project, use its existing source-management
-workflow and root manifest rather than submitting a first deployment over it.
+Select new project `discord`, an explicitly configured FileStore destination and
+a fresh retained deployment request UUID. Check deployment status before submitting,
+and read the original receipt after uncertain delivery. Deployment activates source
+and initial service membership/token scope together. It returns identity metadata;
+the reserved token cannot authenticate until an administrator issues its credential.
+
+Use **Execution identity and credential** in the deployment/Application controls,
+or run the following under your signed-in administrator connection for the same
+server origin. Replace the request placeholder with a fresh UUID and retain it
+privately **before** submitting:
+
+```sh
+bin/plowshare-cli application identity status '{"project":"discord"}'
+bin/plowshare-cli application token issue '{"project":"discord","requestId":"<fresh-retained-UUID>","expiresInDays":30,"rotate":false}'
+```
+
+Save the one-time returned `credential` in the configured
+`PLOWSHARE_DISCORD_SERVICE_TOKEN` secret, and retain its receipt metadata privately.
+The status/receipt principal identifies the Application's stable execution owner.
+The adapter checks the authenticated service principal and binds private state to it;
+it does not request administrator-only identity management operations at runtime.
+No secret is embedded in the manifest, adapter configuration or receipt journal.
+
+If the issuance response is lost, read its receipt with the same server,
+submitting administrator, project and original request UUID:
+
+```sh
+bin/plowshare-cli application token receipt '{"project":"discord","requestId":"<original-retained-UUID>"}'
+```
+
+Never automatically repeat issuance. A missing receipt does not prove non-admission.
+If a receipt confirms issuance but the secret was lost, inspect identity status and
+explicitly rotate with a **new** retained UUID and `rotate:true`. Receipts contain
+metadata only. Use `application.token.issue` for all later owned-token rotations;
+generic service-token rotation refuses owned tokens. Rotation preserves the token
+UUID/principal, retained assistant contexts and task ownership. Source updates do
+not restore revoked service membership.
+
+This owned token's ceiling is the **Discord Application project only**. Multiple
+channels and exported bots may map within that project. Other projects require
+separately scoped credentials/deployments; adding membership or a manifest grant
+alone does not widen this token. The adapter retains its explicit route validation
+and lets the server enforce current membership, manifest grants and token ceilings.
+
+An existing manual-token project cannot be converted in place by adding `service`.
+Preserve its source, credential and private state to settle/inspect retained work.
+For a new owned deployment, choose a fresh project and unused service handle,
+update channel mappings to that project and configure a separate private state
+directory. A new principal cannot adopt the old tasks or conversation bindings;
+do not copy context IDs, delete uncertain receipts or replay old messages to migrate.
+Existing manual-token adapter deployments remain supported by the unchanged SDK path.
 
 The server deploys the manifest and bot definitions. Run the external Discord
-adapter process separately with the configured mapping targeting that project.
-Deployment does not launch the Node process. Giving the adapter checkout a
-manifest would not authorize other mapped projects: every receiving Application
-needs its own deployed manifest, membership and token scope. No core changes
-are required for this Application or the adapter.
+adapter process separately with its owned credential and configured mapping.
+Deployment does not launch the Node process. No core changes are required.
+Linked-user execution remains deferred until the public SDK exposes acting contexts
+and subject delegation; this Application declares no acting grants and continues
+to execute Discord-only requests under its own service principal.
 
 ## Optional proactive notifications
 
@@ -215,11 +270,14 @@ by resubmitting. It retains an unresolved record for inspection. The same policy
 holds an uncertain Relay acknowledgment; inspect broker positions and receipts
 before any operator repair. Deleting uncertain records or state is not recovery.
 
-Rotate the **same service token** to retain its principal and owning tasks; restart
-with the replacement environment credential. A newly issued token has a different
-principal and cannot adopt this state. Expired/revoked credentials require explicit
-renewal/rotation; there is no interactive login or automatic credential refresh.
-Socket reconnection verifies the same principal and performs fresh reads only.
+Rotate the **same Application-owned token** through `application.token.issue`
+with a fresh retained request UUID and `rotate:true`, then restart with the
+replacement environment credential. This retains its principal and owning tasks.
+For existing manual-token deployments, use their existing administrative rotation
+operation instead. A different token has a different principal and cannot adopt
+this state. Expiry/revocation requires explicit renewal/rotation; the adapter has
+no interactive login or automatic credential refresh. Socket reconnection verifies
+the same principal and performs fresh reads only.
 
 `pollMs` defaults to 2,000 (250–60,000); `requestTimeoutMs` defaults to 30,000
 (1,000–60,000). `maxRecords` defaults to 500 (1–1,000), including deduplication
@@ -243,7 +301,8 @@ Typed fakes test routing, input refusal, per-user/thread isolation, receipt
 ordering, duplicate admission, uncertainty, cancellation boundaries, notification
 fencing and restart behavior. Filesystem tests check exclusive/private state.
 Test-only Java dependencies exercise current manifest and bot loaders, including
-empty grants, role ceilings and the initial bot's absence of tool authority.
+owned service declarations, execution-principal resolution, explicit human grants,
+role ceilings and the initial bot's absence of tool authority.
 The consumer check compiles and tests against packed public SDK artifacts outside
 the checkout. These checks start no database and do not prove live Discord login,
 intents, channel permissions or a configured Plowshare service token. Live
