@@ -10,11 +10,12 @@ const vm = require('node:vm');
 async function dashboard() {
   const nodes = new Map();
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, addEventListener() {}, replaceChildren() {}, reset() {}});
+    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, reset() {}});
     return nodes.get(id);
   }
   const context = vm.createContext({
     document:{getElementById:node}, location:{hash:''}, URLSearchParams,
+    CSS:{escape:value=>value}, PrivacyMarkdown:{render:source=>({source})},
     setInterval() {}, fetch:async () => ({ok:false, status:401}),
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/plowshare_privacy/web/app.js'), 'utf8'), context);
@@ -134,4 +135,57 @@ test('confirmed resume survives failed display refresh without another send', as
   assert.equal(node('resume-schedule').disabled, true);
   assert.match(node('schedule-control-detail').textContent, /running/);
   assert.match(node('notice').textContent, /Display refresh failed/);
+});
+
+
+test('view navigation preserves settings drafts and unknown control fences without any requests', async () => {
+  const {context, node} = await dashboard();
+  let requests = 0;
+  context.fetch = async () => {requests++; throw new Error('Navigation must not send requests');};
+  node('targets').value = '192.0.2.8';
+  node('pihole-password').value = 'unsaved-fixture';
+  vm.runInContext("scheduleControlUnknown = true; showView('settings');", context);
+  node('tab-evidence').listeners.click();
+  node('tab-settings').listeners.click();
+  assert.equal(node('view-settings').hidden, false);
+  assert.equal(node('view-evidence').hidden, true);
+  assert.equal(node('tab-settings').attributes['aria-selected'], 'true');
+  assert.equal(node('targets').value, '192.0.2.8');
+  assert.equal(node('pihole-password').value, 'unsaved-fixture');
+  assert.equal(vm.runInContext('scheduleControlUnknown', context), true);
+  assert.equal(requests, 0);
+});
+
+test('tabs support keyboard selection, wraparound and a single tab stop', async () => {
+  const {node} = await dashboard();
+  let prevented = 0;
+  node('tab-overview').listeners.keydown({key:'ArrowLeft',preventDefault() {prevented++;}});
+  assert.equal(node('tab-settings').focused, true);
+  assert.equal(node('tab-settings').tabIndex, 0);
+  assert.equal(node('tab-overview').tabIndex, -1);
+  node('tab-settings').listeners.keydown({key:'Home',preventDefault() {prevented++;}});
+  assert.equal(node('view-overview').hidden, false);
+  assert.equal(node('view-settings').hidden, true);
+  node('tab-overview').listeners.keydown({key:'End',preventDefault() {prevented++;}});
+  assert.equal(node('view-settings').hidden, false);
+  assert.equal(prevented, 3);
+});
+
+
+test('reports open in Findings as Markdown without replacing selected collection evidence', async () => {
+  const {context, node} = await dashboard();
+  const requests = [];
+  const source = '# Review\n\n**Keep evidence**';
+  vm.runInContext("selected = 'retained-scan';", context);
+  node('evidence').children = [{source:'retained evidence'}];
+  context.fetch = async (url, options) => {requests.push({url,options}); return {ok:true,json:async()=>({text:source})};};
+  await vm.runInContext("showReport('fixture-report')", context);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/reports/fixture-report');
+  assert.equal(requests[0].options.method, undefined);
+  assert.equal(node('view-findings').hidden, false);
+  assert.equal(node('view-evidence').hidden, true);
+  assert.equal(node('report-content').children[0].source, source);
+  assert.equal(node('evidence').children[0].source, 'retained evidence');
+  assert.equal(vm.runInContext('selected',context), 'retained-scan');
 });

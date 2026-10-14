@@ -328,7 +328,7 @@ class OperatorConsole:
             recovery = []
             if self.worker.state == "attention_required":
                 recovery.append(
-                    "Inspect the pending receipts below. Fix connectivity or grants, then choose Check and resume. Unknown effects will not be resent."
+                    "Inspect the retained receipts. Fix connectivity or grants, then choose Check retained work. Unknown effects will not be resent."
                 )
             if any(
                 item.phase in {"uploading", "publishing"}
@@ -349,13 +349,17 @@ class OperatorConsole:
                     )
             checklist = []
             if not self.worker.config.collection.enabled:
-                checklist.append("Find devices, choose ports and save monitoring")
+                checklist.append(
+                    "Enable collection in Settings when ready"
+                    if self.worker.config.collection.targets
+                    else "Choose devices and ports in Settings, then save monitoring"
+                )
             if not latest:
                 checklist.append("Request a first scan and inspect its evidence")
             if not schedule:
                 checklist.append("Review the project scan schedule in Plowshare")
             elif schedule.paused:
-                checklist.append("Review and enable the scan schedule below")
+                checklist.append("Resume monitoring on Overview when ready")
             if agents and (agents.unavailable or agents.missing_tools):
                 checklist.append("Review project agents and provider-scope grants")
             self.cached = Health(

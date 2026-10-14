@@ -461,12 +461,16 @@ def application(
         return web.json_response(asdict(result), status=status)
 
     async def asset(request: web.Request) -> web.Response:
-        name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[
-            request.path
-        ]
+        name = {
+            "/": "index.html",
+            "/app.js": "app.js",
+            "/style.css": "style.css",
+            "/markdown.js": "markdown.js",
+        }[request.path]
         media = {
             "index.html": "text/html",
             "app.js": "text/javascript",
+            "markdown.js": "text/javascript",
             "style.css": "text/css",
         }[name]
         return web.Response(
@@ -600,7 +604,7 @@ def application(
         ("schedule/reconcile", schedule_reconcile),
     ):
         app.router.add_post("/api/" + path, handler)
-    for path in ("/", "/app.js", "/style.css"):
+    for path in ("/", "/app.js", "/style.css", "/markdown.js"):
         app.router.add_get(path, asset)
     app.router.add_get("/api/session/status", session_status)
     app.router.add_post("/api/session", connect_session)
