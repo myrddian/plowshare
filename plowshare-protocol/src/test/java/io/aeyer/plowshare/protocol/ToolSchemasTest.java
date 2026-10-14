@@ -40,6 +40,16 @@ class ToolSchemasTest {
           JSON.readTree(JSON.writeValueAsString(schema)),
           name);
       assertEquals(row.path("fingerprint").textValue(), SchemaCodec.fingerprint(schema), name);
+      assertTrue(SchemaCodec.matchesFingerprint(schema, row.path("fingerprint").textValue()), name);
+      assertFalse(SchemaCodec.matchesFingerprint(schema, "0".repeat(64)), name);
+      if (row.has("legacyFingerprint")) {
+        String legacy = row.path("legacyFingerprint").textValue();
+        assertNotEquals(legacy, SchemaCodec.fingerprint(schema), name);
+        assertTrue(SchemaCodec.matchesFingerprint(schema, legacy), name);
+        var changed = new java.util.LinkedHashMap<>(SchemaCodec.wire(schema));
+        changed.put("description", "changed");
+        assertFalse(SchemaCodec.matchesFingerprint(SchemaCodec.decode(changed), legacy), name);
+      }
       if (row.path("validArguments").booleanValue())
         ToolSchemas.validate(
             schema,

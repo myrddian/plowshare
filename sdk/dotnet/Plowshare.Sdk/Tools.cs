@@ -201,7 +201,7 @@ public static class RelayTools
     internal static void ValidateCall(ToolDeclaration tool, ToolCall call)
     {
         if (tool.InputSchema is null) { if (call.Schema != "plowshare-tool/1") throw new ArgumentException("Offered schema changed"); }
-        else if (call.Schema != "plowshare-tool/2" || call.SchemaFingerprint != ToolSchemas.Fingerprint(tool.InputSchema)) throw new ArgumentException("Offered schema changed");
+        else if (call.Schema != "plowshare-tool/2" || !ToolSchemas.MatchesFingerprint(tool.InputSchema, call.SchemaFingerprint)) throw new ArgumentException("Offered schema changed");
         ValidateArguments(tool, call.Arguments);
     }
     internal static string ResultText(ToolCall call, ToolResult? result)

@@ -494,55 +494,72 @@ describe('live tool catalogue', () => {
   });
 });
 
-it('delivers nested values once and refuses a changed schema before execution', async () => {
-  const schema = decodeToolSchema(
-    JSON.parse(
-      '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}',
-    ),
-  );
-  const tool = { ...declaration, parameters: [], inputSchema: schema };
-  const request = JSON.stringify({
-    ...fieldsOf(JSON.parse(source())),
-    schema: 'plowshare-tool/2',
-    schemaFingerprint: await host.sha256(canonicalToolSchema(schema)),
-    arguments: { data: ['nested', null] },
-  });
-  const wire = new Wire(request),
-    journal = new Journal(tool);
-  let executions = 0;
-  const registered = {
-    declaration: tool,
-    handler: async (call: ToolCall) => {
-      executions++;
-      expect(call.arguments).toEqual({ data: ['nested', null] });
-      return { state: 'COMPLETED' as const, text: 'observed' };
-    },
-  };
-  const client = new Plowshare({ socket: wire });
-  const provider = await ToolProvider.create(
-    client,
-    binding,
-    [registered],
-    journal,
-    host,
-  );
-  await provider.poll();
-  await provider.poll();
-  expect(executions).toBe(1);
-  const changedTool = {
-    ...tool,
-    inputSchema: { ...schema, description: 'changed' },
-  };
-  const changed = await ToolProvider.create(
-    client,
-    binding,
-    [{ ...registered, declaration: changedTool }],
-    new Journal(changedTool),
-    host,
-  );
-  await expect(changed.poll()).rejects.toThrow();
-  expect(executions).toBe(1);
-});
+it.each(['canonical', 'legacy', 'legacy-interrupted'])(
+  'validates %s nested requests without replay and refuses changed schemas',
+  async (variant) => {
+    const schema = decodeToolSchema(
+      JSON.parse(
+        '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}},"database":{"type":"integer"}},"required":["data"],"additionalProperties":false}',
+      ),
+    );
+    const tool = { ...declaration, parameters: [], inputSchema: schema };
+    const request = JSON.stringify({
+      ...fieldsOf(JSON.parse(source())),
+      schema: 'plowshare-tool/2',
+      schemaFingerprint:
+        variant === 'canonical'
+          ? await host.sha256(canonicalToolSchema(schema))
+          : '21b66e70592ec7b5b59ce9d3f830871cdd57b3aa42a57329680d578822de3527',
+      arguments: { data: ['nested', null] },
+    });
+    const wire = new Wire(request),
+      journal = new Journal(tool);
+    let executions = 0;
+    const registered = {
+      declaration: tool,
+      handler: async (call: ToolCall) => {
+        executions++;
+        expect(call.arguments).toEqual({ data: ['nested', null] });
+        return { state: 'COMPLETED' as const, text: 'observed' };
+      },
+    };
+    if (variant === 'legacy-interrupted')
+      journal.rows.set(wire.id, {
+        invocationId: wire.id,
+        request,
+        phase: 'executing',
+        result: null,
+        occurredAt: null,
+      });
+    const client = new Plowshare({ socket: wire });
+    const provider = await ToolProvider.create(
+      client,
+      binding,
+      [registered],
+      journal,
+      host,
+    );
+    await provider.poll();
+    await provider.poll();
+    expect(executions).toBe(variant === 'legacy-interrupted' ? 0 : 1);
+    expect(journal.rows.get(wire.id)?.request).toBe(request);
+    if (variant === 'legacy-interrupted')
+      expect(journal.rows.get(wire.id)?.result?.state).toBe('UNKNOWN');
+    const changedTool = {
+      ...tool,
+      inputSchema: { ...schema, description: 'changed' },
+    };
+    const changed = await ToolProvider.create(
+      client,
+      binding,
+      [{ ...registered, declaration: changedTool }],
+      new Journal(changedTool),
+      host,
+    );
+    await expect(changed.poll()).rejects.toThrow();
+    expect(executions).toBe(variant === 'legacy-interrupted' ? 0 : 1);
+  },
+);
 
 it('retains full 256-character declarations and their topic names without aliases', () => {
   const name = 'a'.repeat(256);

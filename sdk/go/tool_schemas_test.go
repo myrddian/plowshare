@@ -14,8 +14,8 @@ func TestSharedToolSchemaProfile(t *testing.T) {
 	}
 	var fixture struct {
 		Cases []struct {
-			Name, SchemaSource, ArgumentsSource, Fingerprint string
-			ValidSchema, ValidArguments                      bool
+			Name, SchemaSource, ArgumentsSource, Fingerprint, LegacyFingerprint string
+			ValidSchema, ValidArguments                                         bool
 		}
 	}
 	if err = json.Unmarshal(data, &fixture); err != nil {
@@ -36,6 +36,26 @@ func TestSharedToolSchemaProfile(t *testing.T) {
 			fingerprint, err := SchemaFingerprint(schema)
 			if err != nil || fingerprint != row.Fingerprint {
 				t.Fatalf("fingerprint %s != %s: %v", fingerprint, row.Fingerprint, err)
+			}
+			if matched, err := schemaFingerprintMatches(schema, row.Fingerprint); err != nil || !matched {
+				t.Fatal("canonical fingerprint refused", err)
+			}
+			if matched, err := schemaFingerprintMatches(schema, "0000000000000000000000000000000000000000000000000000000000000000"); err != nil || matched {
+				t.Fatal("unrelated fingerprint accepted", err)
+			}
+			if row.LegacyFingerprint != "" {
+				if row.LegacyFingerprint == fingerprint {
+					t.Fatal("legacy fixture does not distinguish ordering")
+				}
+				if matched, err := schemaFingerprintMatches(schema, row.LegacyFingerprint); err != nil || !matched {
+					t.Fatal("legacy fingerprint refused", err)
+				}
+				changed := *schema
+				description := "changed"
+				changed.Description = &description
+				if matched, err := schemaFingerprintMatches(&changed, row.LegacyFingerprint); err != nil || matched {
+					t.Fatal("changed schema accepted", err)
+				}
 			}
 			var value ToolValue
 			err = json.Unmarshal([]byte(row.ArgumentsSource), &value)

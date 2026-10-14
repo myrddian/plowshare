@@ -55,13 +55,11 @@ repository checks, native SDK conformance and installed-consumer verification.
 A focused PostgreSQL test verifies migration preservation, large retained schema
 row mapping, idempotent submission, completion/recovery and ownership fences.
 
-## Independent fingerprint compatibility follow-up
+## Schema fingerprint compatibility
 
-Capacity verification exposed a pre-existing Java canonical-key ordering mismatch
-introduced by `5a36835`: Java sorts complete string tokens including their trailing
-semicolon, while other SDKs sort UTF-8 key bytes. Keys such as `field_1` and
-`field_10` therefore produce different fingerprints. This change does not alter
-fingerprints or reinterpret retained work. The capacity fixture uses fixed-width
-field identifiers to isolate payload admission; resolving prefix-key ordering
-requires a separate compatibility decision covering historical Java invocations,
-SDK validation and uncertain receipt recovery.
+Capacity verification exposed the Java canonical-key ordering mismatch introduced
+by `5a36835`. The separately authorized [fingerprint correction](0023-schema-fingerprint-key-ordering.md)
+aligns new hashes with UTF-8 key ordering and validates historical Java hashes
+without rewriting retained requests or replaying uncertain work. The capacity
+fixture now uses ordinary field identifiers rather than the temporary fixed-width
+workaround, so it also covers the prefix-key regression.

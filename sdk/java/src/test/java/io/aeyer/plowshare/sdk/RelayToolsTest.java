@@ -156,11 +156,21 @@ class RelayToolsTest {
 
   @Test
   void nested_handler_receives_exact_values_and_changed_schema_never_executes() throws Exception {
+    for (String variant : List.of("canonical", "legacy", "legacy-interrupted")) {
+      nestedHandler(variant);
+    }
+  }
+
+  private void nestedHandler(String variant) throws Exception {
     var json = SdkJson.mapper();
-    var fixture =
+    var fixtures =
         json.readTree(Files.readString(Path.of("../../test-support/contracts/tool-schemas.json")))
-            .path("cases")
-            .get(0);
+            .path("cases");
+    var fixture =
+        java.util.stream.StreamSupport.stream(fixtures.spliterator(), false)
+            .filter(row -> "prefix-provider".equals(row.path("name").textValue()))
+            .findFirst()
+            .orElseThrow();
     var schema =
         io.aeyer.plowshare.protocol.SchemaCodec.decode(
             json.readValue(fixture.path("schemaSource").textValue(), Map.class));
@@ -168,7 +178,11 @@ class RelayToolsTest {
     var request = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(request());
     request.put("schema", "plowshare-tool/2");
     request.put("deadline", "2099-01-01T00:00:00Z");
-    request.put("schemaFingerprint", fixture.path("fingerprint").textValue());
+    request.put(
+        "schemaFingerprint",
+        fixture
+            .path(variant.equals("canonical") ? "fingerprint" : "legacyFingerprint")
+            .textValue());
     request.set("arguments", json.readTree(fixture.path("argumentsSource").textValue()));
     var executions = new AtomicInteger();
     var tool =
@@ -184,6 +198,15 @@ class RelayToolsTest {
             });
     var wire = new FixturePorts(json.writeValueAsString(request));
     var journal = new MemoryJournal(declaration);
+    if (variant.equals("legacy-interrupted"))
+      journal.save(
+          new RelayTools.Receipt(
+              ID,
+              json.writeValueAsString(request),
+              RelayTools.Phase.EXECUTING,
+              Optional.empty(),
+              Optional.empty()));
+    int expected = variant.equals("legacy-interrupted") ? 0 : 1;
     var provider = new RelayTools.Provider(wire, BINDING, List.of(tool), journal);
     provider.publishCatalog(ID);
     assertEquals(
@@ -191,16 +214,26 @@ class RelayToolsTest {
         json.readTree(wire.published.text()).path("version").textValue());
     assertEquals(1, provider.poll());
     assertEquals(1, provider.poll());
-    assertEquals(1, executions.get());
-    request.put("schemaFingerprint", "0".repeat(64));
+    assertEquals(expected, executions.get());
+    assertEquals(json.writeValueAsString(request), journal.all().getFirst().request());
+    if (variant.equals("legacy-interrupted"))
+      assertEquals(
+          RelayTools.State.UNKNOWN, journal.all().getFirst().result().orElseThrow().state());
+    // Changing any annotation must refuse even the historical hash.
+    var changedFields = new LinkedHashMap<>(io.aeyer.plowshare.protocol.SchemaCodec.wire(schema));
+    changedFields.put("description", "changed");
+    var changedSchema = io.aeyer.plowshare.protocol.SchemaCodec.decode(changedFields);
+    var changedDeclaration =
+        new RelayTools.Declaration("inspect", "Inspect nested fixture", changedSchema, 30);
+    var changedTool = new RelayTools.RegisteredTool(changedDeclaration, tool.handler());
     var changed =
         new RelayTools.Provider(
             new FixturePorts(json.writeValueAsString(request)),
             BINDING,
-            List.of(tool),
-            new MemoryJournal(declaration));
+            List.of(changedTool),
+            new MemoryJournal(changedDeclaration));
     assertThrows(IllegalArgumentException.class, changed::poll);
-    assertEquals(1, executions.get());
+    assertEquals(expected, executions.get());
   }
 
   static final class MemoryJournal implements RelayTools.Journal {

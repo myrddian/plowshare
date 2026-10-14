@@ -126,7 +126,7 @@ public final class RelayTools {
       if (inputSchema == null && !VERSION.equals(call.schema())
           || inputSchema != null
               && (!"plowshare-tool/2".equals(call.schema())
-                  || !SchemaCodec.fingerprint(inputSchema).equals(call.schemaFingerprint())))
+                  || !SchemaCodec.matchesFingerprint(inputSchema, call.schemaFingerprint())))
         throw new IllegalArgumentException("Offered tool schema changed");
       validate(call.arguments());
     }

@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping
 
@@ -10,6 +11,7 @@ from plowshare.tool_schemas import (
     decode_tool_schema,
     decode_tool_value,
     schema_fingerprint,
+    schema_fingerprint_matches,
     schema_wire,
     validate_schema_arguments,
     validate_tool_schema,
@@ -54,6 +56,16 @@ class SharedToolSchemaTest(unittest.TestCase):
                     json.loads(schema_source),
                 )
                 self.assertEqual(schema_fingerprint(schema), row["fingerprint"])
+                self.assertFalse(schema_fingerprint_matches(schema, "0" * 64))
+                legacy = row.get("legacyFingerprint")
+                if isinstance(legacy, str):
+                    self.assertNotEqual(schema_fingerprint(schema), legacy)
+                    self.assertTrue(schema_fingerprint_matches(schema, legacy))
+                    self.assertFalse(
+                        schema_fingerprint_matches(
+                            replace(schema, description="changed"), legacy
+                        )
+                    )
                 if row["validArguments"] is True:
                     validate_schema_arguments(
                         schema, decode_tool_value(json.loads(args_source))

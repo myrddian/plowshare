@@ -490,11 +490,14 @@ func validateToolCall(t ToolDeclaration, call ToolCall) error {
 			return errors.New("offered schema changed")
 		}
 	} else {
-		fingerprint, err := SchemaFingerprint(t.InputSchema)
+		if call.Schema != "plowshare-tool/2" || call.SchemaFingerprint == nil {
+			return errors.New("offered schema changed")
+		}
+		matches, err := schemaFingerprintMatches(t.InputSchema, *call.SchemaFingerprint)
 		if err != nil {
 			return err
 		}
-		if call.Schema != "plowshare-tool/2" || call.SchemaFingerprint == nil || *call.SchemaFingerprint != fingerprint {
+		if !matches {
 			return errors.New("offered schema changed")
 		}
 	}

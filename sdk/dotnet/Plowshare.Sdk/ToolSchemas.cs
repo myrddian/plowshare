@@ -360,10 +360,22 @@ public static class ToolSchemas
         return BigInteger.Parse(a[0], CultureInfo.InvariantCulture) * BigInteger.Pow(10, x - baseline) % (BigInteger.Parse(b[0], CultureInfo.InvariantCulture) * BigInteger.Pow(10, y - baseline)) == 0;
     }
     /// <summary>Canonical token hashing is independent of serializer formatting and numeric spelling.</summary>
-    public static string Fingerprint(SchemaDefinition schema)
+    public static string Fingerprint(SchemaDefinition schema) => Fingerprint(schema, false);
+
+    /// <summary>Validate the exact schema with canonical or historical Java ordering. Legacy hashes
+    /// are never emitted for new calls; retained requests and uncertain-effect fences stay intact.</summary>
+    public static bool MatchesFingerprint(SchemaDefinition schema, string? offered) =>
+        offered == Fingerprint(schema) || offered == Fingerprint(schema, true);
+
+    private static string Fingerprint(SchemaDefinition schema, bool legacyOrdering)
     {
         Validate(schema);
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(schema, Json));
+        string KeyOrder(string key)
+        {
+            var bytes = Convert.ToHexString(Encoding.UTF8.GetBytes(key)).ToLowerInvariant();
+            return legacyOrdering ? "s" + bytes + ";" : bytes;
+        }
         string Canonical(JsonElement v) => v.ValueKind switch
         {
             JsonValueKind.Null => "z;",
@@ -372,7 +384,7 @@ public static class ToolSchemas
             JsonValueKind.String => "s" + Convert.ToHexString(Encoding.UTF8.GetBytes(v.GetString() ?? throw new JsonException())).ToLowerInvariant() + ";",
             JsonValueKind.Number => "n" + Normalize(v.GetRawText()) + ";",
             JsonValueKind.Array => "[" + string.Concat(v.EnumerateArray().Select(Canonical)) + "]",
-            JsonValueKind.Object => "{" + string.Concat(v.EnumerateObject().OrderBy(field => Convert.ToHexString(Encoding.UTF8.GetBytes(field.Name)), StringComparer.Ordinal).Select(field => "s" + Convert.ToHexString(Encoding.UTF8.GetBytes(field.Name)).ToLowerInvariant() + ";" + Canonical(field.Value))) + "}",
+            JsonValueKind.Object => "{" + string.Concat(v.EnumerateObject().OrderBy(field => KeyOrder(field.Name), StringComparer.Ordinal).Select(field => "s" + Convert.ToHexString(Encoding.UTF8.GetBytes(field.Name)).ToLowerInvariant() + ";" + Canonical(field.Value))) + "}",
             _ => throw new JsonException()
         };
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Canonical(document.RootElement)))).ToLowerInvariant();

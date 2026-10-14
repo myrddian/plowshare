@@ -95,6 +95,14 @@ Canonical tokens are UTF-8: null `z;`, booleans `b0;`/`b1;`, strings
 UTF-8-key tokens followed by value tokens. Numeric `1` and `1.0` have the same
 fingerprint; scalar `type` and a type union preserve their distinct wire spelling.
 
+Object keys sort by their unsigned UTF-8 bytes, without including the string token
+terminator. Updated SDKs also validate the historical Java token-order hash against
+the exact offered schema. New fingerprints always use the corrected ordering.
+Upgrade Java provider SDKs before upgrading the server: older Java SDKs can refuse
+corrected hashes for prefix-related keys. Historical requests and receipt text are
+never rewritten, and accepting a historical hash does not authorize execution of
+uncertain work. See the [compatibility decision](decisions/0023-schema-fingerprint-key-ordering.md).
+
 Retained invocation records keep the exact declaration and request. Existing
 exclusive journals, acknowledgement fences, publication identities, recovery,
 leases, grants and Relay ancestry remain authoritative. Upgrading a provider does

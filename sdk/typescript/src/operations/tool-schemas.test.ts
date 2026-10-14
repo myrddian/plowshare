@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { fieldsOf } from './response.ts';
 import {
   canonicalToolSchema,
+  matchesToolSchemaFingerprint,
   decodeToolSchema,
   decodeToolValue,
   validateSchemaArguments,
@@ -28,7 +29,7 @@ if (!Array.isArray(cases)) throw new Error('Missing schema fixture cases');
 describe('shared executable tool schema profile', () => {
   for (const entry of cases) {
     const row = fieldsOf(entry);
-    it(String(row['name']), () => {
+    it(String(row['name']), async () => {
       const schemaSource = row['schemaSource'],
         argsSource = row['argumentsSource'];
       if (typeof schemaSource !== 'string' || typeof argsSource !== 'string')
@@ -44,6 +45,28 @@ describe('shared executable tool schema profile', () => {
         .update(canonicalToolSchema(schema))
         .digest('hex');
       expect(fingerprint).toBe(row['fingerprint']);
+      const sha256 = async (text: string) =>
+        createHash('sha256').update(text).digest('hex');
+      expect(
+        await matchesToolSchemaFingerprint(schema, fingerprint, sha256),
+      ).toBe(true);
+      expect(
+        await matchesToolSchemaFingerprint(schema, '0'.repeat(64), sha256),
+      ).toBe(false);
+      const legacy = row['legacyFingerprint'];
+      if (typeof legacy === 'string') {
+        expect(legacy).not.toBe(fingerprint);
+        expect(await matchesToolSchemaFingerprint(schema, legacy, sha256)).toBe(
+          true,
+        );
+        expect(
+          await matchesToolSchemaFingerprint(
+            { ...schema, description: 'changed' },
+            legacy,
+            sha256,
+          ),
+        ).toBe(false);
+      }
       const check = () => {
         const raw: unknown = JSON.parse(argsSource);
         validateSchemaArguments(schema, decodeToolValue(raw));

@@ -25,7 +25,7 @@ from .schema_definition import SchemaDefinition
 from .tool_schemas import (
     ToolValue,
     decode_tool_value,
-    schema_fingerprint,
+    schema_fingerprint_matches,
     schema_wire,
     validate_schema_arguments,
     validate_tool_schema,
@@ -382,9 +382,8 @@ def _validate_call(tool: ToolDeclaration, call: ToolCall) -> None:
     if tool.input_schema is None:
         if call.schema != _VERSION:
             raise ValueError("Offered tool schema changed")
-    elif (
-        call.schema != "plowshare-tool/2"
-        or call.schema_fingerprint != schema_fingerprint(tool.input_schema)
+    elif call.schema != "plowshare-tool/2" or not schema_fingerprint_matches(
+        tool.input_schema, call.schema_fingerprint
     ):
         raise ValueError("Offered tool schema changed")
     tool.validate(call.arguments)

@@ -417,7 +417,7 @@ function hex(text: string): string {
         ).join('');
   }).join('');
 }
-function canonical(value: unknown): string {
+function canonical(value: unknown, legacyOrdering = false): string {
   if (value === null) return 'z;';
   if (typeof value === 'boolean') return value ? 'b1;' : 'b0;';
   if (typeof value === 'string') return `s${hex(value)};`;
@@ -433,14 +433,39 @@ function canonical(value: unknown): string {
   }
   if (Array.isArray(value)) {
     const items: readonly unknown[] = value;
-    return `[${items.map(canonical).join('')}]`;
+    return `[${items.map((item) => canonical(item, legacyOrdering)).join('')}]`;
   }
   if (plain(value))
     return `{${Object.entries(value)
-      .sort(([a], [b]) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0))
-      .map(([key, v]) => canonical(key) + canonical(v))
+      .sort(([a], [b]) => {
+        const left = keyOrder(a, legacyOrdering),
+          right = keyOrder(b, legacyOrdering);
+        return left < right ? -1 : left > right ? 1 : 0;
+      })
+      .map(
+        ([key, v]) =>
+          canonical(key, legacyOrdering) + canonical(v, legacyOrdering),
+      )
       .join('')}}`;
   return fail();
+}
+function keyOrder(key: string, legacyOrdering: boolean): string {
+  return legacyOrdering ? `s${hex(key)};` : hex(key);
+}
+/**
+ * Validate the exact offered schema, including historical Java hashes. Never emit the legacy
+ * identity for new calls or rewrite retained requests; journal replay fences remain authoritative.
+ */
+export async function matchesToolSchemaFingerprint(
+  schema: SchemaDefinition,
+  offered: string | undefined,
+  sha256: (text: string) => Promise<string>,
+): Promise<boolean> {
+  const validated = validateToolSchema(schema);
+  return (
+    offered === (await sha256(canonical(validated))) ||
+    offered === (await sha256(canonical(validated, true)))
+  );
 }
 /** Hash with the configured host's SHA-256; canonical tokens are independent of JSON writers. */
 export function canonicalToolSchema(schema: SchemaDefinition): string {

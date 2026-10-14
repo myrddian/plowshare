@@ -15,7 +15,7 @@ import { requirePayload } from './sdk.ts';
 import type { Plowshare } from './sdk.ts';
 
 import {
-  canonicalToolSchema,
+  matchesToolSchemaFingerprint,
   decodeToolValue,
   validateSchemaArguments,
   validateToolSchema,
@@ -535,8 +535,11 @@ export class ToolProvider {
         throw new Error('Offered tool schema changed');
     } else if (
       call.schema !== 'plowshare-tool/2' ||
-      call.schemaFingerprint !==
-        (await this.host.sha256(canonicalToolSchema(tool.inputSchema)))
+      !(await matchesToolSchemaFingerprint(
+        tool.inputSchema,
+        call.schemaFingerprint,
+        (text) => this.host.sha256(text),
+      ))
     )
       throw new Error('Offered tool schema changed');
     validateToolArguments(tool, call.arguments);

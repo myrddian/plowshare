@@ -52,19 +52,51 @@ internal static class ToolFacadeChecks
         await new ToolProvider(wire, Binding, tools, journal).PollAsync();
         if (executions != 0 || wire.Publications != 1 || journal.Rows[Id].Result?.State != "UNKNOWN") throw new Exception("Interrupted work repeated");
 
-        var nestedSchema = ToolSchemas.Decode("""{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}""");
+        var nestedSchema = ToolSchemas.Decode("""{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}},"database":{"type":"integer"}},"required":["data"],"additionalProperties":false}""");
         var nestedDeclaration = new ToolDeclaration("inspect", "Inspect fixture", [], 30, nestedSchema);
-        var nestedCall = RelayTools.DecodeCall(source) with { Schema = "plowshare-tool/2", SchemaFingerprint = ToolSchemas.Fingerprint(nestedSchema), Arguments = new Dictionary<string, ToolValue> { ["data"] = new ToolValue.Array([new ToolValue.Text("nested"),new ToolValue.Null()]) } };
-        var nestedSource = JsonSerializer.Serialize(nestedCall,new JsonSerializerOptions{PropertyNamingPolicy=JsonNamingPolicy.CamelCase});
-        var nestedPorts = new Ports(nestedSource); executions=0;
-        RegisteredTool[] nestedTools = [new(nestedDeclaration,(call,token)=> { executions++; if(call.Arguments["data"] is not ToolValue.Array values || values.Values.Count!=2 || values.Values[0] is not ToolValue.Text {Value:"nested"} || values.Values[1] is not ToolValue.Null)throw new Exception("Nested values changed"); return Task.FromResult(new ToolResult("COMPLETED","observed")); })];
-        var nestedProvider = new ToolProvider(nestedPorts,Binding,nestedTools,new Journal(nestedDeclaration));
-        await nestedProvider.PollAsync(); await nestedProvider.PollAsync();
-        if(executions!=1)throw new Exception("Nested effect repeated");
-        var changedDeclaration=nestedDeclaration with{InputSchema=nestedSchema with{Description="changed"}};
-        var changedProvider=new ToolProvider(nestedPorts,Binding,[nestedTools[0] with{Declaration=changedDeclaration}],new Journal(changedDeclaration));
-        var refused=false;try{await changedProvider.PollAsync();}catch(ArgumentException){refused=true;}
-        if(!refused||executions!=1)throw new Exception("Changed schema executed");
+        foreach (var variant in new[] { "canonical", "legacy", "legacy-interrupted" })
+        {
+            var nestedCall = RelayTools.DecodeCall(source) with
+            {
+                Schema = "plowshare-tool/2",
+                SchemaFingerprint = variant == "canonical" ? ToolSchemas.Fingerprint(nestedSchema) :
+                    "21b66e70592ec7b5b59ce9d3f830871cdd57b3aa42a57329680d578822de3527",
+                Arguments = new Dictionary<string, ToolValue>
+                {
+                    ["data"] = new ToolValue.Array([new ToolValue.Text("nested"), new ToolValue.Null()])
+                }
+            };
+            var nestedSource = JsonSerializer.Serialize(nestedCall,
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            var nestedPorts = new Ports(nestedSource);
+            executions = 0;
+            RegisteredTool[] nestedTools = [new(nestedDeclaration, (call, token) =>
+            {
+                executions++;
+                if (call.Arguments["data"] is not ToolValue.Array values || values.Values.Count != 2 ||
+                    values.Values[0] is not ToolValue.Text { Value: "nested" } || values.Values[1] is not ToolValue.Null)
+                    throw new Exception("Nested values changed");
+                return Task.FromResult(new ToolResult("COMPLETED", "observed"));
+            })];
+            var nestedJournal = new Journal(nestedDeclaration);
+            if (variant == "legacy-interrupted")
+                await nestedJournal.SaveAsync(new ToolReceipt(Id, nestedSource, "executing", null, null));
+            var expected = variant == "legacy-interrupted" ? 0 : 1;
+            var nestedProvider = new ToolProvider(nestedPorts, Binding, nestedTools, nestedJournal);
+            await nestedProvider.PollAsync();
+            await nestedProvider.PollAsync();
+            if (executions != expected || nestedJournal.Rows[Id].Request != nestedSource)
+                throw new Exception("Nested effect repeated or request rewritten");
+            if (variant == "legacy-interrupted" && nestedJournal.Rows[Id].Result?.State != "UNKNOWN")
+                throw new Exception("Legacy unknown effect not fenced");
+            var changedDeclaration = nestedDeclaration with { InputSchema = nestedSchema with { Description = "changed" } };
+            var changedProvider = new ToolProvider(nestedPorts, Binding,
+                [nestedTools[0] with { Declaration = changedDeclaration }], new Journal(changedDeclaration));
+            var refused = false;
+            try { await changedProvider.PollAsync(); }
+            catch (ArgumentException) { refused = true; }
+            if (!refused || executions != expected) throw new Exception("Changed schema executed");
+        }
         Console.WriteLine(".NET tool facade checks passed");
     }
     private static async Task MustFailAsync(Func<Task<int>> action)
