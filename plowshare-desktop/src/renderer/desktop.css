@@ -807,3 +807,21 @@
 .filestore-placement input, .filestore-placement select { width: 100%; min-width: 0; }
 .filestore-area { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin: 12px 0; }
 @media (max-width: 760px) { .filestore-area { grid-template-columns: 1fr; } }
+
+/* Native drafts and server-owned records occupy distinct tabs on the main window. */
+.tool-connections-dialog { width:min(900px,calc(100vw - 36px)); max-height:calc(100dvh - 40px); overflow:auto; padding:24px; }
+.tool-connections-dialog .dialog-header { margin-bottom:16px; }
+.tool-connection-tabs { display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.tool-connections-dialog button { padding:8px 12px; margin:4px; border:1px solid var(--line); border-radius:6px; }
+.tool-connection-tabs [aria-selected=true] { color:var(--ink); background:var(--tint); border-color:var(--accent); }
+.tool-connections-dialog .tool-connections { max-width:none !important; }
+.tool-connections-dialog .tool-connections>summary { display:none; }
+.tool-connections-dialog fieldset { min-width:0; border:1px solid var(--line); border-radius:8px; padding:16px; margin:16px 0; }
+.tool-connections-dialog legend { padding:0 6px; color:var(--accent); }
+.tool-connections-dialog label:has(input[type=checkbox]) { display:flex; align-items:flex-start; gap:10px; margin:12px 0; }
+.tool-connections-dialog input[type=checkbox] { width:auto; margin-top:3px; flex-shrink:0; }
+.tool-connections-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.tool-connections-dialog [role=alert] { color:#f2c69a; }
+.tool-connections-dialog button:disabled { opacity:.5; }
+.tool-connections-dialog [hidden] { display:none !important; }
+@media(min-width:700px) { .tool-connections-dialog .native-profile-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:16px; } }
