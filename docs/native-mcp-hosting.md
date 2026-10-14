@@ -151,20 +151,63 @@ native session. Ambiguous scope/catalogue writes close the original owning socke
 no automatic metadata retry or host restart occurs. Original private intent and
 SDK receipts are preserved. This does not cancel a server job or prove rollback.
 
+## Client controls
+
+In desktop, select a project and open **Tool connections**. **This client** contains
+private profile forms for HTTP or STDIO, owner/instance/project identity, environment
+references and configurable deadlines/admission budgets. Enter an absolute profile
+file in a dedicated private directory. **Save profile** writes a mode-0600 file
+without connecting or launching; **Load profile** reads an existing owned profile.
+A stale revision cannot overwrite a newer profile. Stop a running host before editing
+its profile. Save/load and restart are explicit; opening a dialog never restores
+hosts automatically.
+
+**Review launch** shows the configured endpoint or executable basename, argument
+count and selected environment names. Review the full profile and check launch
+consent before **Start local host**. Discovered tools and their nested schemas are
+read-only inventory; inspecting them does not invoke a tool. **Refresh local hosts**
+reads only this process registry. Closing the dialog retains a running host; disconnect,
+account switch and app exit stop it. A changed file cannot be launched under an older
+loaded revision. Receipt directories and profile files remain private native state.
+
+**Share this profile with server-owned work** is a separate, explicit action with
+scope, provider, agents, grants, lease, polling interval and renewal fraction. Stop
+a local-only host before starting it with sharing. The host inventory distinguishes
+local-only availability from server sharing or unconfirmed sharing. Stop withdraws
+sharing and closes the upstream connection/process. Sharing does not bypass server
+grants, relabel accounting or prove readiness of a future invocation.
+
+The **Server** tab uses the existing server owner capabilities for HTTP endpoint
+forms, OAuth settings, masked credentials, authorized service subjects and assignments.
+These server credentials follow the authenticated account across clients. The web
+console's Projects **Server connections** panel exposes only those server operations.
+It cannot launch, edit or adopt a native host. Owner management replies do not include
+a remote tool catalogue or worker health; the UI reports these as unavailable rather
+than treating a saved assignment as proof of availability.
+
+In TUI, `/mcp` opens guided **This client (HTTP/STDIO)** and **Server (HTTP)** menus.
+The native menu supports profile create/edit, review/start, host/tool snapshots,
+stop and explicit sharing. The server menu supports endpoint forms, credential
+status/update/browser authorization, assignments and original unconfirmed receipt
+inspection. `/cancel` returns without another submission. Configurable native
+budgets use the same form defaults and validation as desktop.
+
 ## TUI and desktop process ownership
 
 TUI accepts `/mcp local COMMAND_JSON`. Supported commands are `inspect` with `file`,
 `start` with `file`/`consent`, `list`, `stop` with `instance`/`profile`, `call` with
 `instance`/`profile`/`invocation`, and `share` using the JSON above. Native command
 inputs are redacted in terminal history. Direct commands do not call Plowshare;
-share borrows the original authenticated socket and cannot migrate to a reconnect.
+`profile-read` and `profile-save` provide owned, revision-checked private authoring
+without launch. GUI/menu launch carries that reviewed revision. Share borrows the original authenticated socket and cannot migrate to a reconnect.
 
 Desktop main accepts the generated IPC action `{action:'native-mcp', command:JSON}`
 from the main workspace window. It uses the same commands and direct host registry.
 The renderer cannot launch STDIO; auxiliary project/report windows are refused.
 Account replacement, socket loss and app shutdown dispose the original registry.
-Friendly host controls and management screens are a separate increment. Live
-organization, additional platform and cross-client acceptance remain separate.
+The main window composes the controls above through this boundary; renderer views
+never own processes or server credentials. Live organization, additional platform
+and cross-client acceptance remain separate.
 
 ## Receipts and SDK composition
 

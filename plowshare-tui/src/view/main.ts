@@ -1,3 +1,4 @@
+import { mcpControls } from './mcp-controls.ts';
 import {
   NativeHostCommands,
   NativeMcpSessions,
@@ -4360,10 +4361,16 @@ export async function converse(talking: Talking): Promise<void> {
           .filter((row) => row.served)
           .map((row) => [row.name, row.description]),
       ),
-      (chosen.agent.commands ?? []).map((command) => ({
-        name: command.command,
-        detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-      })),
+      [
+        {
+          name: '/mcp',
+          detail: 'manage This client HTTP/STDIO and Server HTTP connections',
+        },
+        ...(chosen.agent.commands ?? []).map((command) => ({
+          name: command.command,
+          detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+        })),
+      ],
     );
     if (!starting) {
       const changed =
@@ -5116,6 +5123,38 @@ export async function converse(talking: Talking): Promise<void> {
         if (now === undefined) {
           return;
         }
+        if (text === '/mcp') {
+          if (connectionLost || !loginHandle) {
+            show('trouble', 'Connect before managing MCP connections.');
+            continue;
+          }
+          const owner = { origin: talking.door.base, account: loginHandle };
+          const owningSocket = wire;
+          nativeMcp ??= new NativeHostCommands(
+            owner,
+            new NativeMcpSessions(process.env),
+            nativeProviderConnection(checkedTransport(owningSocket), () =>
+              connection.close(),
+            ),
+          );
+          const nativeOwner = nativeMcp;
+          await mcpControls({
+            project: now.project ?? `personal:${loginHandle}`,
+            owner,
+            current: () =>
+              !connectionLost &&
+              nativeMcp === nativeOwner &&
+              loginHandle === owner.account,
+            prompt: {
+              show: (message) => show('client', message),
+              read: (masked) => surface.asked(masked),
+            },
+            native: (command) => nativeOwner.execute(command),
+            server: providerManagement,
+            authorize: openProviderAuthorization,
+          });
+          continue;
+        }
         if (text === '/tools') {
           try {
             const bindings = await providerManagement.request(
@@ -5254,10 +5293,17 @@ export async function converse(talking: Talking): Promise<void> {
                 .filter((row) => row.served)
                 .map((row) => [row.name, row.description]),
             ),
-            (selected?.commands ?? []).map((command) => ({
-              name: command.command,
-              detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-            })),
+            [
+              {
+                name: '/mcp',
+                detail:
+                  'manage This client HTTP/STDIO and Server HTTP connections',
+              },
+              ...(selected?.commands ?? []).map((command) => ({
+                name: command.command,
+                detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+              })),
+            ],
           );
           place = { ...now, who: selected ?? { ...now.who, commands: [] } };
           if (selected)
@@ -5702,6 +5748,7 @@ export async function converse(talking: Talking): Promise<void> {
             'client',
             toListing([
               ...describeHelp(),
+              '/mcp — guided This client HTTP/STDIO and Server HTTP connection controls',
               ...(now.who.commands ?? []).map(
                 (command) =>
                   `${command.command} ${command.argumentHint} — ${command.description}${command.kind === 'skill' && command.mode === null ? ' (DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate)' : ''}`,

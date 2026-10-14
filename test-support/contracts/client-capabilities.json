@@ -6382,8 +6382,10 @@
         }
       ],
       "typescriptConstants": [],
-      "desktopConsumer": false,
-      "desktopSourceReferences": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/native-mcp.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,

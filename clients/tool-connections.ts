@@ -1,3 +1,4 @@
+import { providerDefinitionEditor } from './provider-definition-editor.ts';
 import { ProviderManagementRefused } from '../sdk/typescript/src/operations/provider-management.ts';
 import type {
   ProviderManagement,
@@ -39,7 +40,8 @@ export function toolConnectionControls(options: {
     element.textContent = text;
     return element;
   };
-  root.append(node('summary', 'Tool connections'));
+  root.append(node('summary', 'Server connections'));
+  root.dataset['connectionLocation'] = 'server';
   const location = node('p'),
     status = node('p'),
     error = node('p'),
@@ -101,10 +103,8 @@ export function toolConnectionControls(options: {
   lease.type = 'number';
   lease.min = '1';
   root.append(assignmentActions);
-  const definition = node('textarea');
-  definition.rows = 8;
-  definition.dataset['toolField'] = 'Endpoint definition';
-  label('Shared HTTP endpoint definition (JSON; no credentials)', definition);
+  const definition = providerDefinitionEditor();
+  root.append(definition.element);
   root.append(endpointActions);
   root.append(
     node(
@@ -174,11 +174,11 @@ export function toolConnectionControls(options: {
     >('input, textarea, select, button:not([data-tool-review])');
   const drawLocation = () => {
     const context = options.context();
-    location.textContent = `${context.origin} · ${context.actor} · execution project ${options.project}${context.connected ? '' : ' · disconnected; snapshots stale'}`;
+    location.textContent = `Server · HTTP · ${context.origin} · ${context.actor} · execution project ${options.project}${context.connected ? '' : ' · disconnected; snapshots stale'}`;
     for (const control of controls())
       control.disabled = busy || !context.connected;
     subject.disabled = !context.serverAdmin || busy;
-    definition.readOnly = !context.serverAdmin;
+    definition.writable(context.serverAdmin && !busy && context.connected);
     for (const button of endpointActions.querySelectorAll('button'))
       button.disabled = busy || !context.serverAdmin || !context.connected;
   };
@@ -248,7 +248,7 @@ export function toolConnectionControls(options: {
       // or grant from the previously selected project before the next fresh read.
       connections = [];
       endpoints.replaceChildren();
-      definition.value = '';
+      definition.fill();
       status.textContent =
         'Assignment selected; refresh its credential project and endpoint before editing authorization.';
     }
@@ -642,7 +642,7 @@ export function toolConnectionControls(options: {
       clearSecret();
       const connection = currentConnection();
       const requestId = crypto.randomUUID();
-      const decoded: unknown = JSON.parse(definition.value);
+      const decoded = definition.read();
       const payload = decodePayload('provider.connection.save', {
         project: credentialProject.value,
         connection: connection?.connection ?? crypto.randomUUID(),
@@ -729,15 +729,13 @@ export function toolConnectionControls(options: {
       grantText.textContent =
         'Selection changed; inspect current authorization.';
       if (control === endpoints)
-        definition.value = currentConnection()
-          ? JSON.stringify(currentConnection()?.definition, null, 2)
-          : '';
+        definition.fill(currentConnection()?.definition);
       if (control === assignments) fillAssignment();
       if (control === credentialProject) {
         connections = [];
         endpoints.replaceChildren();
         savedEndpoint = '';
-        definition.value = '';
+        definition.fill();
       }
     });
   authorization.addEventListener('click', (event) => {
@@ -774,7 +772,7 @@ export function toolConnectionControls(options: {
         executor,
       ])
         input.value = '';
-      definition.value = '';
+      definition.fill();
       status.textContent =
         'Snapshots stale; refresh on the selected server/account.';
       identity = key();

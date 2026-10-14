@@ -3943,6 +3943,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     await converse(talkingTo(fake, prompt));
     expect(prompt.commandOffers).toEqual(
       Array.from({ length: 3 }, () => [
+        '/mcp',
         '/skill:review',
         '/orchestration:research',
       ]),
@@ -3997,7 +3998,10 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     }));
     const prompt = scripted(['/commands', '/help']);
     await converse(talkingTo(fake, prompt));
-    expect(prompt.commandOffers).toEqual([['/skill:before'], ['/skill:after']]);
+    expect(prompt.commandOffers).toEqual([
+      ['/mcp', '/skill:before'],
+      ['/mcp', '/skill:after'],
+    ]);
     const help = prompt.said.slice(prompt.said.indexOf('/help')).join('\n');
     expect(help).toContain('/skill:after');
     expect(help).not.toContain('/skill:before');
@@ -4045,10 +4049,10 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     ]);
     await converse({ ...talkingTo(fake, prompt), project: 'plowshare' });
     expect(prompt.commandOffers).toEqual([
-      ['/skill:plowshare'],
-      ['/skill:plowshare'],
-      ['/skill:notes'],
-      ['/skill:notes'],
+      ['/mcp', '/skill:plowshare'],
+      ['/mcp', '/skill:plowshare'],
+      ['/mcp', '/skill:notes'],
+      ['/mcp', '/skill:notes'],
     ]);
     const help = prompt.said.slice(prompt.said.indexOf('/help')).join('\n');
     expect(help).toContain('/skill:notes');
@@ -4094,7 +4098,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     }));
     const prompt = scripted(['/commands', '/help']);
     await converse(talkingTo(fake, prompt));
-    expect(prompt.commandOffers).toEqual([['/skill:review'], []]);
+    expect(prompt.commandOffers).toEqual([['/mcp', '/skill:review'], ['/mcp']]);
     expect(prompt.said.join('\n')).toContain(
       'selected agent close_reader is unavailable',
     );

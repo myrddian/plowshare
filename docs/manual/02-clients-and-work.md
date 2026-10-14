@@ -142,3 +142,13 @@ its pending submission across reload and provides **Read pending receipt**. It
 never automatically repeats the deployment. Deployment does not start an external
 Python service or grant access/tool permissions. See [Application deployment](../projects.md#deploy-update-and-activate-an-application)
 for package limits, commands, FileStore authorization and rollback semantics.
+
+### MCP tool connections
+
+Desktop's project **Tool connections** dialog separates **This client** HTTP/STDIO
+profiles from **Server** HTTP endpoints, per-account credentials and assignments.
+Saving a local profile does not start it; launch and sharing with server-owned work
+require separate consent. Closing the dialog retains hosts, while disconnect/account
+change/app exit stops them. TUI `/mcp` provides guided forms for the same choices.
+Console Projects exposes **Server connections** only. See [native MCP controls](../native-mcp-hosting.md#client-controls)
+and [server credential management](../provider-management-clients.md).

@@ -43,5 +43,10 @@ export {
   decodeNativeInvocation,
   nativeProviderConnection,
 } from './native-commands.ts';
-export type { NativeCommand, NativeCommandResult } from './native-commands.ts';
+export type {
+  NativeCommand,
+  NativeCommandResult,
+  NativeManagedStatus,
+} from './native-commands.ts';
+export type { NativeProfile, NativeProfileStore } from './native-profiles.ts';
 export type { NativeSharingConnection } from './native-bridge.ts';
