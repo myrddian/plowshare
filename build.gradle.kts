@@ -176,7 +176,7 @@ subprojects {
 // TypeScript tools live in a private root package so client runtime dependencies
 // and independent package installs remain separate from repository verification.
 val typescriptModules = listOf("plowshare-client-ts", "plowshare-client-node", "plowshare-cli",
-    "plowshare-mcp", "plowshare-tui", "plowshare-console", "plowshare-desktop", "plowshare-mcp-integration")
+    "plowshare-mcp", "plowshare-tui", "plowshare-console", "plowshare-desktop", "plowshare-mcp-integration", "plowshare-discord-integration")
 val typescriptTools by tasks.registering(Exec::class) {
     workingDir = rootDir
     inputs.files("package.json", "pnpm-lock.yaml")
@@ -189,19 +189,19 @@ fun Exec.typescriptSources() {
     inputs.files("package.json", "pnpm-lock.yaml", "eslint.config.mjs", ".prettierrc.json",
         ".prettierignore", "tsconfig.strict.json")
     inputs.files(fileTree(rootDir) {
-        include("integrations/mcp/src/**/*.ts", "integrations/mcp/tsconfig.json", "integrations/mcp/package.json", "integrations/mcp/pnpm-lock.yaml", "clients/**/*.ts", "sdk/*/src/**/*.ts", "sdk/*/**/tsconfig*.json", "plowshare-*/src/**/*.ts", "plowshare-*/**/tsconfig*.json", "plowshare-*/vite.config.ts")
+        include("integrations/*/src/**/*.ts", "integrations/*/tsconfig.json", "integrations/*/package.json", "integrations/*/pnpm-lock.yaml", "clients/**/*.ts", "sdk/*/src/**/*.ts", "sdk/*/**/tsconfig*.json", "plowshare-*/src/**/*.ts", "plowshare-*/**/tsconfig*.json", "plowshare-*/vite.config.ts")
         exclude("**/node_modules/**", "**/build/**", "**/build-tests/**", "**/dist/**")
     }).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 val typescriptFormat by tasks.registering(Exec::class) {
     group = "formatting"
     typescriptSources()
-    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--write", "integrations/mcp/src/**/*.ts", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--write", "integrations/*/src/**/*.ts", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
 }
 val typescriptFormatCheck by tasks.registering(Exec::class) {
     group = "verification"
     typescriptSources()
-    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--check", "integrations/mcp/src/**/*.ts", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
+    commandLine("node", "node_modules/prettier/bin/prettier.cjs", "--check", "integrations/*/src/**/*.ts", "clients/**/*.ts", "sdk/*/src/**/*.ts", "plowshare-*/src/**/*.ts", "plowshare-*/vite.config.ts")
 }
 val typescriptLint by tasks.registering(Exec::class) {
     group = "verification"

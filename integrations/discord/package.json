@@ -1,0 +1,24 @@
+{
+  "name": "plowshare-discord-integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test build/discord/*.test.js",
+    "start": "node build/discord/main.js"
+  },
+  "dependencies": {
+    "discord.js": "14.26.4",
+    "plowshare-client-node": "link:../../sdk/node",
+    "plowshare-client-ts": "link:../../sdk/typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "5.9.3"
+  }
+}

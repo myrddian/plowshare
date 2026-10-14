@@ -10,13 +10,14 @@ addresses explicitly and retain only adapter-owned state.
 | [a2a](a2a/README.md) | External A2A protocol adapter | `:plowshare-a2a` |
 | [home-assistant](home-assistant/README.md) | Home Assistant binding | `:plowshare-integration-home-assistant` |
 | [MCP](mcp/README.md) | Reusable outbound HTTP MCP ToolProvider with separate connections and credential contexts | `:plowshare-mcp-integration` |
+| [Discord](discord/README.md) | One service-authenticated Discord bot with fixed channel routing and optional Relay notifications | `:plowshare-discord-integration` |
 | [Network Privacy Watch](network-privacy/README.md) | Network privacy Application with a Python collector and web interface | `:plowshare-network-privacy` (definition tests); explicit `pythonCheck` |
 
 Source locations are grouped here; Gradle commands and distribution executable
 names remain stable. See the [coding standards](../docs/coding-standards.md) for
 the SDK boundary and [SDKs](../sdk/README.md) for the client libraries.
 
-A2A and Home Assistant include deployable Application templates under
+A2A, Home Assistant and Discord include deployable Application templates under
 `examples/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
 uses `network-privacy/network-privacy-watch/`. Each Application is identified
 by its root `plowshare.json`. Register

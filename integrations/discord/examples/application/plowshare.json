@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "name": "discord",
+  "access": {"accounts": []},
+  "caps": {"steps": 8, "budget": 32, "autoIncrease": false},
+  "commands": {"local": {"mode": "off"}, "server": {"mode": "off"}}
+}
