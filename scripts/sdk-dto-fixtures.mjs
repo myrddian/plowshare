@@ -202,6 +202,22 @@ input('relay.ack',ack,true);
 for(const change of [{fence:'0'},{fence:'01'},{batchId:'bad'},{expiredThrough:'9223372036854775808'}]) input('relay.ack',{...ack,...change},false);
 result('relay.publish',{requestId:receipt,project:'fixture',topic:'checks.requests',position:'1',publishedAt:publish.occurredAt},true);
 result('relay.ack',{project:'fixture',topic:'checks.requests',group:'detectors',batchId:receipt,through:'1',gap:false},true);
+// Topic capacity is independent of subscribers/groups, across plain and hosted ports.
+for (const [length, valid] of [[1024,true],[1025,false]]) {
+  const topic = 'a'.repeat(length);
+  input('relay.publish',{...publish,topic},valid);
+  input('relay.publish',{...publish,parentTopic:topic,parentEventId:'parent'},valid);
+  input('relay.consume',{...consume,topic},valid);
+  input('relay.ack',{...ack,topic},valid);
+  input('relay.log',{project:'fixture',topic},valid);
+  input('relay.operate',{requestId:receipt,project:'fixture',topic,topicGeneration:receipt,action:'REMOVE_TOPIC',reason:'fixture'},valid);
+  result('relay.log',{...relayPage,topic:{...relayPage.topic,name:topic}},valid);
+  result('relay.log',{...relayPage,events:[{...relayPage.events[0],payload:{...relayPage.events[0].payload,lifecycle:{...relayPage.events[0].payload.lifecycle,source:topic}}}]},valid);
+  result('relay.consume',{...batch,topic},valid);
+  input('tool.scope.worker.publish',{...hostWorker,publication:{...hostPublication,topic}},valid);
+  input('tool.scope.worker.consume',{...hostWorker,consumption:{...hostConsumption,topic}},valid);
+  input('tool.scope.worker.ack',{...hostWorker,acknowledgement:{...hostAck,topic}},valid);
+}
 const message = { parts: [{ text: 'hello' }] };
 input('outgoing.send', { requestId: receipt, peer: 'fixture', message }, true);
 for (const requestId of ['bad', ''])
@@ -368,6 +384,11 @@ for (const change of [
   { provider: 'Bad.Provider' }, { prefix: 'linear' }, { leaseSeconds: 0 },
   { leaseSeconds: 301 }, { leaseSeconds: 1.5 }, { account: 'intruder' },
 ]) input('tool.scope.connect', { ...scopeConnection, ...change }, false);
+for(const [length,valid] of [[256,true],[257,false]]) {
+  const grant = 'a'.repeat(length);
+  input('tool.scope.connect',{...scopeConnection,grants:[grant]},valid);
+  input('tool.scope.host.save',{...hostSave,definition:{...hostDefinition,grants:['network_'+'a'.repeat(length-8)]}},valid);
+}
 input('tool.scope.disconnect', { project: 'fixture', scope: 'linear' }, true);
 result('tool.scope.connect', { ...scopeConnection, sourceProvider: 'linear', provider: 'p-abc', account: 'alice' }, true);
 result('tool.scope.list', { connections: [] }, true);

@@ -8,13 +8,14 @@ import type {
   RelayConsumeRequest,
   RelayAckRequest,
 } from './relay-ports.ts';
+import { validRelayText } from '../binding/relay-text.ts';
 import { ConnectionFault } from '../binding/connection.ts';
 import { fieldsOf } from './response.ts';
 import { requirePayload } from './sdk.ts';
 import type { Plowshare } from './sdk.ts';
 
 import {
-  canonicalToolSchema,
+  matchesToolSchemaFingerprint,
   decodeToolValue,
   validateSchemaArguments,
   validateToolSchema,
@@ -130,10 +131,12 @@ function instant(value: string): number {
     throw new Error('Invalid UTC tool timestamp');
   return Date.parse(value);
 }
+/** Shared platform identifier ceiling, independent of upstream protocol recommendations. */
+export const MAX_TOOL_NAME_LENGTH = 256;
 function declaration(value: ToolDeclaration): void {
   if (
     !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(value.name) ||
-    value.name.length > 64
+    value.name.length > MAX_TOOL_NAME_LENGTH
   )
     throw new Error('Invalid tool name');
   text(value.description, 4096, true);
@@ -351,7 +354,7 @@ export function decodeToolCall(source: string): ToolCall {
     !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(provider) ||
     provider.length > 48 ||
     !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(tool) ||
-    tool.length > 64
+    tool.length > MAX_TOOL_NAME_LENGTH
   )
     throw new Error('Invalid tool routing');
   const id = uuid(read('invocationId'));
@@ -532,8 +535,11 @@ export class ToolProvider {
         throw new Error('Offered tool schema changed');
     } else if (
       call.schema !== 'plowshare-tool/2' ||
-      call.schemaFingerprint !==
-        (await this.host.sha256(canonicalToolSchema(tool.inputSchema)))
+      !(await matchesToolSchemaFingerprint(
+        tool.inputSchema,
+        call.schemaFingerprint,
+        (text) => this.host.sha256(text),
+      ))
     )
       throw new Error('Offered tool schema changed');
     validateToolArguments(tool, call.arguments);
@@ -565,7 +571,9 @@ export class ToolProvider {
         : 'plowshare-tool-catalog/1',
       tools,
     });
-    text(encoded, 65536);
+    // The complete catalogue may span transport chunks; Relay owns the payload ceiling.
+    if (!validRelayText(encoded))
+      throw new Error('Invalid Relay catalogue text');
     const topic = `tool.${this.binding.provider}.catalog`;
     const reply = requirePayload(
       await this.publishPort({

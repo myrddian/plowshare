@@ -20,7 +20,7 @@ public final class RelayLog {
   public record Query(String project, boolean system, String topic, String after, Integer limit) {
     public Query {
       scope(project, system);
-      name(topic);
+      RelayPort.topic(topic);
       decimal(after == null ? "0" : after);
       bound(limit);
     }
@@ -36,7 +36,7 @@ public final class RelayLog {
 
   public record Gap(String topic, String subscriber, String expiredThrough) {
     public Gap {
-      name(topic);
+      RelayPort.topic(topic);
       identity(subscriber);
       decimal(expiredThrough);
     }
@@ -78,7 +78,7 @@ public final class RelayLog {
     public Topic {
       if (generation != null && !UUID.fromString(generation).toString().equals(generation))
         throw new IllegalArgumentException("Invalid Relay generation");
-      RelayLog.name(name);
+      RelayPort.topic(name);
       RelayLog.kind(kind);
       positive(retentionSeconds);
       if (maxRecords != null) positive(maxRecords);
@@ -100,7 +100,7 @@ public final class RelayLog {
   public record Lifecycle(
       String source, String subject, String state, String context, String related) {
     public Lifecycle {
-      name(source);
+      RelayPort.topic(source);
       identity(subject, 1024);
       identity(state);
       if (context != null) identity(context, 1024);

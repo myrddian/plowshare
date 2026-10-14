@@ -320,7 +320,7 @@ func toolNumber(v float64) bool {
 	return fraction-exponent <= 18
 }
 func (t ToolDeclaration) Validate(args ToolArguments) error {
-	if !toolName.MatchString(t.Name) || len(t.Name) > 64 || t.TimeoutSeconds < 1 || t.TimeoutSeconds > 300 || len(t.Parameters) > 32 {
+	if !toolName.MatchString(t.Name) || len(t.Name) > 256 || t.TimeoutSeconds < 1 || t.TimeoutSeconds > 300 || len(t.Parameters) > 32 {
 		return errors.New("invalid tool declaration")
 	}
 	if err := toolText(t.Description, 4096, true); err != nil {
@@ -490,11 +490,14 @@ func validateToolCall(t ToolDeclaration, call ToolCall) error {
 			return errors.New("offered schema changed")
 		}
 	} else {
-		fingerprint, err := SchemaFingerprint(t.InputSchema)
+		if call.Schema != "plowshare-tool/2" || call.SchemaFingerprint == nil {
+			return errors.New("offered schema changed")
+		}
+		matches, err := schemaFingerprintMatches(t.InputSchema, *call.SchemaFingerprint)
 		if err != nil {
 			return err
 		}
-		if call.Schema != "plowshare-tool/2" || call.SchemaFingerprint == nil || *call.SchemaFingerprint != fingerprint {
+		if !matches {
 			return errors.New("offered schema changed")
 		}
 	}
@@ -537,7 +540,7 @@ func DecodeToolCall(source string) (ToolCall, error) {
 			return call, err
 		}
 	}
-	if !providerName.MatchString(call.Provider) || len(call.Provider) > 48 || !toolName.MatchString(call.Tool) || len(call.Tool) > 64 || call.Schema == "plowshare-tool/1" && len(call.Arguments) > 32 {
+	if !providerName.MatchString(call.Provider) || len(call.Provider) > 48 || !toolName.MatchString(call.Tool) || len(call.Tool) > 256 || call.Schema == "plowshare-tool/1" && len(call.Arguments) > 32 {
 		return call, errors.New("invalid tool binding or arguments")
 	}
 	for name, value := range call.Arguments {
@@ -638,9 +641,6 @@ func (p *ToolProvider) catalog(ctx context.Context, requestID string, tools []To
 		Tools   []ToolDeclaration `json:"tools"`
 	}{catalogueVersion(tools), tools})
 	if err != nil {
-		return err
-	}
-	if err := toolText(string(data), 65536, false); err != nil {
 		return err
 	}
 	topic := "tool." + p.binding.Provider + ".catalog"

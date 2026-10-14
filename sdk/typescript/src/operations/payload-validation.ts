@@ -79,7 +79,7 @@ export function problem(
           entries.some(
             (e: unknown) =>
               typeof e !== 'string' ||
-              e.length > 64 ||
+              e.length > (field === 'grants' ? 256 : 64) ||
               e !== e.trim() ||
               !(
                 field === 'grants'

@@ -126,7 +126,7 @@ public final class RelayTools {
       if (inputSchema == null && !VERSION.equals(call.schema())
           || inputSchema != null
               && (!"plowshare-tool/2".equals(call.schema())
-                  || !SchemaCodec.fingerprint(inputSchema).equals(call.schemaFingerprint())))
+                  || !SchemaCodec.matchesFingerprint(inputSchema, call.schemaFingerprint())))
         throw new IllegalArgumentException("Offered tool schema changed");
       validate(call.arguments());
     }
@@ -648,7 +648,8 @@ public final class RelayTools {
                       ? "plowshare-tool-catalog/2"
                       : "plowshare-tool-catalog/1",
                   declarations));
-      text(text, 65536, false);
+      // Catalogues may span transport chunks; Relay owns the complete payload ceiling.
+      RelayPort.text(text);
       String topic = "tool." + binding.provider() + ".catalog";
       var reply =
           ports.publish(
@@ -788,7 +789,7 @@ public final class RelayTools {
   }
 
   private static void toolName(String value) {
-    if (value == null || value.length() > 64 || !value.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*"))
+    if (value == null || value.length() > 256 || !value.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*"))
       throw new IllegalArgumentException("Invalid tool name");
   }
 

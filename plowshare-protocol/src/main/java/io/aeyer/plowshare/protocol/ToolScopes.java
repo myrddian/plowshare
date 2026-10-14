@@ -100,7 +100,7 @@ public final class ToolScopes {
       if (!"*".equals(value)
           && (value == null
               || !value.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
-              || value.length() > 64)) throw new IllegalArgumentException("Invalid scope tool");
+              || value.length() > 256)) throw new IllegalArgumentException("Invalid scope tool");
     if (values.contains("*") && values.size() != 1)
       throw new IllegalArgumentException("Mixed wildcard scope");
     return List.copyOf(values);

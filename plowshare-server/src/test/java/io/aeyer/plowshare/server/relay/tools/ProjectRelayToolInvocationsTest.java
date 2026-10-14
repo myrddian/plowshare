@@ -245,12 +245,16 @@ class ProjectRelayToolInvocationsTest {
   void nested_catalogue_schema_and_request_keep_the_offered_fingerprint_and_retained_identity()
       throws Exception {
     var json = new com.fasterxml.jackson.databind.ObjectMapper();
-    var row =
+    var rows =
         json.readTree(
                 java.nio.file.Files.readString(
                     java.nio.file.Path.of("../test-support/contracts/tool-schemas.json")))
-            .path("cases")
-            .get(0);
+            .path("cases");
+    var row =
+        java.util.stream.StreamSupport.stream(rows.spliterator(), false)
+            .filter(item -> "prefix-provider".equals(item.path("name").textValue()))
+            .findFirst()
+            .orElseThrow();
     var schema =
         io.aeyer.plowshare.protocol.SchemaCodec.decode(
             json.readValue(row.path("schemaSource").textValue(), java.util.Map.class));
@@ -280,7 +284,42 @@ class ProjectRelayToolInvocationsTest {
     assertEquals(input.values(), request.arguments());
     assertEquals(request, RelayToolCodec.request(RelayToolCodec.write(request)));
     assertEquals(nested, RelayToolCodec.definition(RelayToolCodec.write(nested)));
-    verify(repository, times(1)).submit(any());
+    var original = stored.get().intent();
+    var legacyRequest =
+        new RelayToolCodec.Request(
+            request.schema(),
+            request.invocationId(),
+            request.project(),
+            request.provider(),
+            request.tool(),
+            request.account(),
+            request.run(),
+            request.call(),
+            request.deadline(),
+            request.arguments(),
+            row.path("legacyFingerprint").textValue());
+    var retained =
+        new RelayToolRepository.Intent(
+            original.id(),
+            original.projectId(),
+            original.fingerprint(),
+            original.binding(),
+            legacyRequest,
+            original.occurredAt(),
+            original.causation(),
+            original.agent(),
+            original.hosted());
+    stored.set(new RelayToolRepository.Stored(retained, null));
+    var resubmission = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var recovered =
+        service.invoke(nested, input, owner, "call", () -> !resubmission.getAndSet(false));
+    assertEquals(RelayToolCodec.State.UNKNOWN, recovered.state());
+    assertSame(retained, stored.get().intent());
+    assertEquals(legacyRequest, stored.get().intent().request());
+    assertEquals(
+        RelayToolCodec.State.UNKNOWN, service.read("fixture", "caller", retained.id()).state());
+    assertSame(retained, stored.get().intent());
+    verify(repository, times(2)).submit(any());
     verify(relay, never()).publish(any(), any());
     assertThrows(
         IllegalArgumentException.class,

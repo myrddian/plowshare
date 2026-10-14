@@ -1,5 +1,10 @@
 # Relay
 
+Topic names support up to 1,024 ASCII characters, using the existing lower-case
+letter/digit segments separated by `.`, `_` or `-`. This supports long hierarchical
+paths without truncation. `/` remains outside the topic grammar. Subscriber names
+retain their 160-character limit; SDK consumer groups retain 140 characters.
+
 Relay is Plowshare's internal durable publication broker. Publishers append typed
 facts to scoped topics. Each subscriber has an independent position; admitting an
 input copies its payload and selected routes into durable fan-out branches before

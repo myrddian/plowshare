@@ -120,7 +120,7 @@ export function relayPortProblem(
   p: Record<string, unknown>,
 ): string | undefined {
   if (!isRelayPort(type)) return;
-  if (!identity(p['project']) || !name(p['topic']))
+  if (!identity(p['project']) || !name(p['topic'], 1024))
     return 'Invalid Relay port scope';
   if (type === 'relay.publish') {
     if (
@@ -134,7 +134,7 @@ export function relayPortProblem(
     if (
       (p['parentTopic'] != null) !== (p['parentEventId'] != null) ||
       (p['parentTopic'] != null &&
-        (!name(p['parentTopic']) || !identity(p['parentEventId'])))
+        (!name(p['parentTopic'], 1024) || !identity(p['parentEventId'])))
     )
       return 'Invalid Relay parent';
   } else {
@@ -175,7 +175,7 @@ export function validateRelayPortReply(type: string, value: unknown): void {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     fail();
   const p = value as Record<string, unknown>;
-  if (!identity(p['project']) || !name(p['topic'])) fail();
+  if (!identity(p['project']) || !name(p['topic'], 1024)) fail();
   if (type === 'relay.publish') {
     if (
       !uuid(p['requestId']) ||

@@ -60,7 +60,9 @@ Schema structural/reference expansion and validation are limited to depth 64 and
 10,000 work steps. Schema collections have at most 10,000 entries; executable
 scalar constants/defaults/examples follow argument scalar bounds. Schema text
 annotations retain their vocabulary bounds: description 32,768 units, other text
-4,096. Catalogue snapshots retain the existing 64 KiB and 128-tool limits;
+4,096. Catalogue snapshots permit at most 128 tools and use the Relay TEXT payload
+contract (50 MiB portable UTF-8 ceiling; deployment admission defaults to 5 MiB).
+The 64 KiB transport chunk size does not limit the complete catalogue;
 requests retain their 32,768-unit envelope limit. These limits are cumulative:
 a structurally valid schema or argument may still exceed its enclosing envelope.
 No network reference loading or regular expression execution occurs.
@@ -92,6 +94,14 @@ Canonical tokens are UTF-8: null `z;`, booleans `b0;`/`b1;`, strings
 `n0e0;`), arrays bracket their concatenated tokens, and objects brace sorted
 UTF-8-key tokens followed by value tokens. Numeric `1` and `1.0` have the same
 fingerprint; scalar `type` and a type union preserve their distinct wire spelling.
+
+Object keys sort by their unsigned UTF-8 bytes, without including the string token
+terminator. Updated SDKs also validate the historical Java token-order hash against
+the exact offered schema. New fingerprints always use the corrected ordering.
+Upgrade Java provider SDKs before upgrading the server: older Java SDKs can refuse
+corrected hashes for prefix-related keys. Historical requests and receipt text are
+never rewritten, and accepting a historical hash does not authorize execution of
+uncertain work. See the [compatibility decision](decisions/0023-schema-fingerprint-key-ordering.md).
 
 Retained invocation records keep the exact declaration and request. Existing
 exclusive journals, acknowledgement fences, publication identities, recovery,

@@ -6,6 +6,18 @@ import org.junit.jupiter.api.Test;
 
 class RelayPortTest {
   @Test
+  void topic_capacity_is_independent_of_subscriber_and_group_limits() {
+    String topic = "a".repeat(1024);
+    assertEquals(topic, RelayPort.topic(topic));
+    assertThrows(IllegalArgumentException.class, () -> RelayPort.topic(topic + "a"));
+    assertThrows(IllegalArgumentException.class, () -> RelayPort.topic("a/b"));
+    assertDoesNotThrow(() -> RelayPort.name("a".repeat(160)));
+    assertThrows(IllegalArgumentException.class, () -> RelayPort.name("a".repeat(161)));
+    assertDoesNotThrow(() -> RelayPort.group("a".repeat(140)));
+    assertThrows(IllegalArgumentException.class, () -> RelayPort.group("a".repeat(141)));
+  }
+
+  @Test
   void text_limit_counts_raw_utf8_bytes_and_preserves_content() {
     int max = RelayPort.MAX_TEXT_BYTES;
     for (String text :

@@ -16,8 +16,7 @@ public final class RelayToolProperties implements RelayToolAuthority {
   public void setBindings(List<RelayToolDefinition> value) {
     var checked = List.copyOf(value);
     for (var binding : checked)
-      if (RelayToolCodec.write(binding).length() > 65536)
-        throw new IllegalArgumentException("Tool declaration exceeds stored bound");
+      io.aeyer.plowshare.protocol.RelayPort.text(RelayToolCodec.write(binding));
     if (checked.size() > 256) throw new IllegalArgumentException("Too many Relay tools");
     for (int i = 0; i < checked.size(); i++)
       for (int j = 0; j < i; j++) {

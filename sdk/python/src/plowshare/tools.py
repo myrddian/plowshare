@@ -25,7 +25,7 @@ from .schema_definition import SchemaDefinition
 from .tool_schemas import (
     ToolValue,
     decode_tool_value,
-    schema_fingerprint,
+    schema_fingerprint_matches,
     schema_wire,
     validate_schema_arguments,
     validate_tool_schema,
@@ -95,7 +95,7 @@ class ToolDeclaration:
     input_schema: SchemaDefinition | None = None
 
     def __post_init__(self) -> None:
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", self.name):
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,255}", self.name):
             raise ValueError("Invalid tool name")
         # Topic segments cannot contain consecutive or trailing separators.
         if not re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", self.name):
@@ -382,9 +382,8 @@ def _validate_call(tool: ToolDeclaration, call: ToolCall) -> None:
     if tool.input_schema is None:
         if call.schema != _VERSION:
             raise ValueError("Offered tool schema changed")
-    elif (
-        call.schema != "plowshare-tool/2"
-        or call.schema_fingerprint != schema_fingerprint(tool.input_schema)
+    elif call.schema != "plowshare-tool/2" or not schema_fingerprint_matches(
+        tool.input_schema, call.schema_fingerprint
     ):
         raise ValueError("Offered tool schema changed")
     tool.validate(call.arguments)
@@ -468,7 +467,6 @@ class ToolProvider:
             ensure_ascii=True,
             separators=(",", ":"),
         )
-        _text(text, 65536)
         topic = f"tool.{self.provider}.catalog"
         reply = (
             await self._client.request(

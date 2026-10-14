@@ -85,7 +85,7 @@ public interface Relay {
 
     public TopicKey {
       Objects.requireNonNull(scope, "scope");
-      name = RelayValues.name(name, "topic");
+      name = RelayValues.topic(name);
     }
 
     /** For project-only adapters; system scope cannot be coerced to an ID. */

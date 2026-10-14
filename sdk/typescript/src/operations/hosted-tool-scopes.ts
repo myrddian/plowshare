@@ -196,7 +196,7 @@ const prefix: Check = (v) =>
   typeof v === 'string' && v.length <= 48 && /^[a-z][a-z0-9_]*_$/u.test(v);
 const tool: Check = (v) =>
   typeof v === 'string' &&
-  v.length <= 64 &&
+  v.length <= 256 &&
   /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u.test(v);
 const entries =
   (check: Check): Check =>

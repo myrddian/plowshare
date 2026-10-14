@@ -1,7 +1,8 @@
 # Bounded MCP provider profile
 
-This is the proposed adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
-The shared schema foundation is implemented; MCP runtime support remains planned.
+This is the adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
+The [reusable outbound HTTP integration](../integrations/mcp/README.md) implements
+the shared-schema tools profile. Native STDIO hosting remains separate work.
 
 ## Protocol selection and transport
 
@@ -77,20 +78,28 @@ remote references and other unsupported schema features. This is a bounded tools
 consumer, not complete MCP or JSON Schema conformance.
 See the [upstream tool contract](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
 
-Discovery is bounded to 32 pages, 128 offered tools and 1 MiB of decoded upstream
-data, with a configured finite total deadline. Reject repeated cursors and
-inconsistent pages. The existing 64 KiB catalogue, schema/value and invocation
-envelope limits also apply after conversion; these limits are cumulative.
+Discovery defaults to 32 pages and 1 MiB per upstream HTTP request/response,
+with a configuration-supplied finite total deadline. The existing shared provider
+contract permits at most 128 tools per catalogue; this is not an MCP-specific
+configuration limit. The HTTP integration
+accepts shared defaults and per-binding overrides for discovery, payload and result
+budgets; see its [configuration reference](../integrations/mcp/README.md). Operator
+budgets remain within platform contract ceilings. Reject repeated cursors and
+inconsistent pages. Complete catalogues follow Relay TEXT admission, independently
+of 64 KiB transport chunks. The adapter has an explicit publication-byte budget
+(1 MiB by default). Schema/value and invocation envelope limits also apply after
+conversion; these limits are cumulative.
 Use the retained execution deadline and configured timeout, at most 300 seconds.
 Progress does not extend that absolute limit.
 
-Reserve the existing scope prefix; MCP hosting restricts it to at most 24 characters.
+Reserve the existing scope prefix, at most 48 characters.
 Map each case-sensitive upstream name to a
-valid lower-case platform name of at most 64 characters, using a bounded readable
-slug and the first 32 lower-case hexadecimal digits of SHA-256, leaving room for
+valid lower-case platform name of at most 256 characters (or the configured
+lower offered-name budget), using a bounded readable slug and the first 32 lower-case hexadecimal digits of SHA-256, leaving room for
 the prefix and a separator. Hash the original name and complete execution
 contract: selected protocol, input/output schemas, published description/title,
-supported annotations/execution metadata and binding generation. Generate the
+supported annotations/execution metadata, binding generation and resolved
+discovery/result budgets. Generate the
 slug without adjacent/trailing underscores and validate the complete final name.
 Detect collisions rather than silently renaming or selecting another tool.
 

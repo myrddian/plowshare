@@ -27,7 +27,7 @@ public final class RelayProperties {
   /** Explicit deployment policy for a server-private topic; no project authority is inferred. */
   public record SystemTopic(String name, Duration retention, Long maxRecords) {
     public SystemTopic {
-      name = RelayValues.name(name, "system topic policy");
+      name = RelayValues.topic(name);
       retention = new Relay.Policy(retention, maxRecords).retention();
     }
 

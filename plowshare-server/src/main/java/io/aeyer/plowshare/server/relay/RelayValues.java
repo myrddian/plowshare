@@ -8,6 +8,10 @@ import java.util.Objects;
 final class RelayValues {
   private RelayValues() {}
 
+  static String topic(String value) {
+    return io.aeyer.plowshare.protocol.RelayPort.topic(value);
+  }
+
   static String name(String value, String field) {
     if (value == null
         || value.length() > 160

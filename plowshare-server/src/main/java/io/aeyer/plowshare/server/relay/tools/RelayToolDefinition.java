@@ -40,7 +40,7 @@ public record RelayToolDefinition(
     if (provider == null
         || !provider.matches("[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
         || provider.length() > 48) throw new IllegalArgumentException("Invalid tool provider");
-    if (name == null || !name.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*") || name.length() > 64)
+    if (name == null || !name.matches("[a-z][a-z0-9]*(?:_[a-z0-9]+)*") || name.length() > 256)
       throw new IllegalArgumentException("Invalid Relay tool name");
     if (description == null
         || description.isBlank()

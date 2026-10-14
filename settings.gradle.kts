@@ -71,3 +71,6 @@ project(":plowshare-integrations").projectDir = file("integrations/runtime")
 project(":plowshare-a2a").projectDir = file("integrations/a2a")
 project(":plowshare-integration-home-assistant").projectDir = file("integrations/home-assistant")
 project(":plowshare-network-privacy").projectDir = file("integrations/network-privacy")
+
+include("plowshare-mcp-integration")
+project(":plowshare-mcp-integration").projectDir = file("integrations/mcp")

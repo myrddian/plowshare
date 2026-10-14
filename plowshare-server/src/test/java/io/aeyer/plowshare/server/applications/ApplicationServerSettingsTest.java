@@ -11,6 +11,33 @@ class ApplicationServerSettingsTest {
   @TempDir Path root;
 
   @Test
+  void live_catalogues_can_span_chunks_and_still_reject_invalid_declarations() {
+    var tools =
+        java.util.stream.IntStream.range(0, 24)
+            .mapToObj(
+                i ->
+                    "{\"name\":\"tool_"
+                        + i
+                        + "\",\"description\":\""
+                        + "d".repeat(4096)
+                        + "\",\"parameters\":[],\"timeoutSeconds\":30}")
+            .toList();
+    String catalogue =
+        "{\"version\":\"plowshare-tool-catalog/1\",\"tools\":[" + String.join(",", tools) + "]}";
+    assertTrue(catalogue.length() > 65536);
+    assertThrows(CallerFault.class, () -> ApplicationServerSettings.catalogue("null"));
+    assertEquals(24, ApplicationServerSettings.catalogue(catalogue).tools().size());
+    assertThrows(
+        CallerFault.class,
+        () -> ApplicationServerSettings.catalogue(catalogue.replace("tool_23", "tool_22")));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            ApplicationServerSettings.catalogue(
+                catalogue.replace("\"timeoutSeconds\":30", "\"timeoutSeconds\":0")));
+  }
+
+  @Test
   void absence_adds_no_authority_and_unknown_server_configuration_is_refused() throws Exception {
     assertEquals(ApplicationServerSettings.EMPTY, ApplicationServerSettings.read("fixture", root));
     Files.createDirectory(root.resolve("server"));

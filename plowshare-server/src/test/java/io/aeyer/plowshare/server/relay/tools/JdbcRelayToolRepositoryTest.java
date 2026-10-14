@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -50,8 +51,42 @@ class JdbcRelayToolRepositoryTest {
     var source =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(source).load().migrate();
+    Flyway.configure().dataSource(source).target("141").load().migrate();
     jdbc = new JdbcTemplate(source);
+    Long project =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name,workspace) VALUES('tool-upgrade-fixture','fixture') RETURNING id",
+            Long.class);
+    UUID retained = UUID.randomUUID();
+    var oldBinding =
+        new RelayToolDefinition(
+            "tool-upgrade-fixture", "scanner", "provider", "old_tool", "Fixture", List.of(), 30);
+    var oldRequest =
+        new RelayToolCodec.Request(
+            RelayToolCodec.VERSION,
+            retained.toString(),
+            oldBinding.project(),
+            oldBinding.provider(),
+            oldBinding.name(),
+            "caller",
+            "run",
+            "call",
+            NOW.plusSeconds(30).toString(),
+            Map.of());
+    String oldText = RelayToolCodec.write(oldBinding);
+    jdbc.update(
+        "INSERT INTO relay_tool_invocations(id,project_id,account,run_id,call_id,fingerprint,binding,request,occurred_at,causation) VALUES(?,?,'caller','run','call',?,?,?,?,'{\"rootId\":\"root\",\"parentId\":\"run\",\"depth\":1}'::jsonb)",
+        retained,
+        project,
+        RelayPort.hash("legacy"),
+        oldText,
+        RelayToolCodec.write(oldRequest),
+        java.time.OffsetDateTime.ofInstant(NOW, java.time.ZoneOffset.UTC));
+    Flyway.configure().dataSource(source).load().migrate();
+    assertEquals(
+        oldText,
+        jdbc.queryForObject(
+            "SELECT binding FROM relay_tool_invocations WHERE id=?", String.class, retained));
     var template = new TransactionTemplate(new DataSourceTransactionManager(source));
     transactions =
         new UnitOfWork() {
@@ -97,6 +132,81 @@ class JdbcRelayToolRepositoryTest {
             request,
             NOW,
             new RelayCausation("root", "run", 1));
+  }
+
+  @Test
+  void large_schema_definitions_survive_storage_completion_and_recovery() {
+    var fields =
+        java.util.stream.IntStream.range(0, 40)
+            .mapToObj(
+                i ->
+                    "\"field_"
+                        + String.format("%02d", i)
+                        + "\":{\"type\":\"string\",\"description\":\""
+                        + "d".repeat(2048)
+                        + "\"}")
+            .toList();
+    var schema =
+        RelayToolCodec.inputSchema(
+            "{\"type\":\"object\",\"properties\":{" + String.join(",", fields) + "}}");
+    var binding =
+        new RelayToolDefinition(
+            "tool-fixture", "scanner", "provider", "large", "Fixture", List.of(), 30, schema);
+    var request =
+        new RelayToolCodec.Request(
+            RelayToolCodec.NESTED_VERSION,
+            intent.id().toString(),
+            binding.project(),
+            binding.provider(),
+            binding.name(),
+            "caller",
+            "run",
+            "call",
+            NOW.plusSeconds(30).toString(),
+            Map.of(),
+            io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(schema));
+    var large =
+        new RelayToolRepository.Intent(
+            intent.id(),
+            intent.projectId(),
+            intent.fingerprint(),
+            binding,
+            request,
+            NOW,
+            intent.causation());
+    assertTrue(RelayToolCodec.write(binding).length() > 65536);
+    assertEquals(large, repository.submit(large).intent());
+    assertEquals(large, repository.submit(large).intent());
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM relay_publications WHERE scope_key=?",
+            Long.class,
+            "project:" + large.projectId()));
+    var result =
+        new RelayToolCodec.Result(
+            RelayToolCodec.VERSION,
+            large.id().toString(),
+            binding.project(),
+            binding.provider(),
+            binding.name(),
+            RelayToolCodec.State.COMPLETED,
+            "done");
+    repository.finish(large, result);
+    var restarted =
+        new JdbcRelayToolRepository(jdbc, transactions, new DurableRelay(broker, () -> NOW));
+    var stored = restarted.find(large.projectId(), "caller", large.id()).orElseThrow();
+    assertEquals(large, stored.intent());
+    assertEquals(result, stored.result());
+    assertTrue(restarted.find(large.projectId(), "other", large.id()).isEmpty());
+    assertEquals(result, restarted.finish(large, result).result());
+    var empty =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update("UPDATE relay_tool_invocations SET binding='' WHERE id=?", large.id()));
+    assertTrue(
+        empty.getMostSpecificCause().getMessage().contains("relay_tool_invocations_binding_check"));
   }
 
   @Test

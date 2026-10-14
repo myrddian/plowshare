@@ -446,6 +446,15 @@ describe('Relay tool façade', () => {
 
 describe('live tool catalogue', () => {
   it('publishes and withdraws scoped metadata without executing or replaying handlers', async () => {
+    const large: ToolDeclaration = {
+      ...declaration,
+      parameters: Array.from({ length: 24 }, (_, i) => ({
+        name: `field_${i}`,
+        type: 'STRING',
+        description: 'd'.repeat(4096),
+        required: false,
+      })),
+    };
     const wire = new Wire();
     const client = new Plowshare({ socket: wire });
     let calls = 0;
@@ -454,22 +463,25 @@ describe('live tool catalogue', () => {
       binding,
       [
         {
-          declaration,
+          declaration: large,
           handler: async () => {
             calls++;
             return { state: 'COMPLETED', text: 'unexpected' };
           },
         },
       ],
-      new Journal(),
+      new Journal(large),
       host,
     );
     await provider.publishCatalog('11111111-1111-1111-1111-111111111111');
     expect(wire.published['topic']).toBe('tool.scanner.catalog');
     expect(wire.published['parentTopic']).toBeUndefined();
+    expect(Buffer.byteLength(String(wire.published['text']))).toBeGreaterThan(
+      65536,
+    );
     const first: unknown = JSON.parse(String(wire.published['text']));
     expect(fieldsOf(first)['version']).toBe('plowshare-tool-catalog/1');
-    expect(fieldsOf(first)['tools']).toEqual([declaration]);
+    expect(fieldsOf(first)['tools']).toEqual([large]);
     await provider.withdrawCatalog('22222222-2222-2222-2222-222222222222');
     const withdrawn: unknown = JSON.parse(String(wire.published['text']));
     expect(fieldsOf(withdrawn)['tools']).toEqual([]);
@@ -482,52 +494,82 @@ describe('live tool catalogue', () => {
   });
 });
 
-it('delivers nested values once and refuses a changed schema before execution', async () => {
-  const schema = decodeToolSchema(
-    JSON.parse(
-      '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}',
-    ),
-  );
-  const tool = { ...declaration, parameters: [], inputSchema: schema };
-  const request = JSON.stringify({
-    ...fieldsOf(JSON.parse(source())),
-    schema: 'plowshare-tool/2',
-    schemaFingerprint: await host.sha256(canonicalToolSchema(schema)),
-    arguments: { data: ['nested', null] },
-  });
-  const wire = new Wire(request),
-    journal = new Journal(tool);
-  let executions = 0;
-  const registered = {
-    declaration: tool,
-    handler: async (call: ToolCall) => {
-      executions++;
-      expect(call.arguments).toEqual({ data: ['nested', null] });
-      return { state: 'COMPLETED' as const, text: 'observed' };
-    },
-  };
-  const client = new Plowshare({ socket: wire });
-  const provider = await ToolProvider.create(
-    client,
-    binding,
-    [registered],
-    journal,
-    host,
-  );
-  await provider.poll();
-  await provider.poll();
-  expect(executions).toBe(1);
-  const changedTool = {
-    ...tool,
-    inputSchema: { ...schema, description: 'changed' },
-  };
-  const changed = await ToolProvider.create(
-    client,
-    binding,
-    [{ ...registered, declaration: changedTool }],
-    new Journal(changedTool),
-    host,
-  );
-  await expect(changed.poll()).rejects.toThrow();
-  expect(executions).toBe(1);
+it.each(['canonical', 'legacy', 'legacy-interrupted'])(
+  'validates %s nested requests without replay and refuses changed schemas',
+  async (variant) => {
+    const schema = decodeToolSchema(
+      JSON.parse(
+        '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}},"database":{"type":"integer"}},"required":["data"],"additionalProperties":false}',
+      ),
+    );
+    const tool = { ...declaration, parameters: [], inputSchema: schema };
+    const request = JSON.stringify({
+      ...fieldsOf(JSON.parse(source())),
+      schema: 'plowshare-tool/2',
+      schemaFingerprint:
+        variant === 'canonical'
+          ? await host.sha256(canonicalToolSchema(schema))
+          : '21b66e70592ec7b5b59ce9d3f830871cdd57b3aa42a57329680d578822de3527',
+      arguments: { data: ['nested', null] },
+    });
+    const wire = new Wire(request),
+      journal = new Journal(tool);
+    let executions = 0;
+    const registered = {
+      declaration: tool,
+      handler: async (call: ToolCall) => {
+        executions++;
+        expect(call.arguments).toEqual({ data: ['nested', null] });
+        return { state: 'COMPLETED' as const, text: 'observed' };
+      },
+    };
+    if (variant === 'legacy-interrupted')
+      journal.rows.set(wire.id, {
+        invocationId: wire.id,
+        request,
+        phase: 'executing',
+        result: null,
+        occurredAt: null,
+      });
+    const client = new Plowshare({ socket: wire });
+    const provider = await ToolProvider.create(
+      client,
+      binding,
+      [registered],
+      journal,
+      host,
+    );
+    await provider.poll();
+    await provider.poll();
+    expect(executions).toBe(variant === 'legacy-interrupted' ? 0 : 1);
+    expect(journal.rows.get(wire.id)?.request).toBe(request);
+    if (variant === 'legacy-interrupted')
+      expect(journal.rows.get(wire.id)?.result?.state).toBe('UNKNOWN');
+    const changedTool = {
+      ...tool,
+      inputSchema: { ...schema, description: 'changed' },
+    };
+    const changed = await ToolProvider.create(
+      client,
+      binding,
+      [{ ...registered, declaration: changedTool }],
+      new Journal(changedTool),
+      host,
+    );
+    await expect(changed.poll()).rejects.toThrow();
+    expect(executions).toBe(variant === 'legacy-interrupted' ? 0 : 1);
+  },
+);
+
+it('retains full 256-character declarations and their topic names without aliases', () => {
+  const name = 'a'.repeat(256);
+  const long = { ...declaration, name };
+  expect(toolDeploymentConfig(binding, [long])).toContain(name);
+  expect(
+    decodeToolCall(JSON.stringify({ ...JSON.parse(source()), tool: name }))
+      .tool,
+  ).toBe(name);
+  expect(() =>
+    toolDeploymentConfig(binding, [{ ...long, name: name + 'a' }]),
+  ).toThrow();
 });

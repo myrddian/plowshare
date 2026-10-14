@@ -33,7 +33,10 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
   @Override
   public List<Relay.TopicKey> pendingTopics(String after, int limit) {
     RelayValues.limit(limit, 256);
-    if (after != null && (after.length() > 256 || after.indexOf('\0') >= 0))
+    // A keyset cursor contains the complete topic plus a project: signed-long scope and '/'.
+    if (after != null
+        && (after.length() > io.aeyer.plowshare.protocol.RelayPort.MAX_TOPIC_LENGTH + 28
+            || after.indexOf('\0') >= 0))
       throw new IllegalArgumentException("invalid publisher cursor");
     return jdbc.query(
         """

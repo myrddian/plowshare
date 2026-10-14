@@ -57,8 +57,8 @@ public final class RelayToolCodec {
 
   /** Spring deployment properties carry schemas as JSON text, decoded before domain binding. */
   static io.aeyer.plowshare.protocol.SchemaDefinition inputSchema(String source) {
-    if (source == null || source.length() > 65536)
-      throw new IllegalArgumentException("Tool schema exceeds configuration bound");
+    // Shared schema/value work budgets still apply; one transport chunk is not a schema ceiling.
+    RelayPort.text(source);
     try {
       var value = JSON.readValue(source, io.aeyer.plowshare.protocol.SchemaDefinition.class);
       io.aeyer.plowshare.protocol.ToolSchemas.declaration(value);

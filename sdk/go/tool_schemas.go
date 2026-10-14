@@ -134,7 +134,7 @@ func (s *SchemaDefinition) UnmarshalJSON(data []byte) error {
 
 // DecodeToolSchema rejects duplicate/unknown fields before constructing a typed schema.
 func DecodeToolSchema(source string) (*SchemaDefinition, error) {
-	if len(source) > 65536 {
+	if len(source) > 50*1024*1024 {
 		return nil, errors.New("schema exceeds byte bound")
 	}
 	d := json.NewDecoder(strings.NewReader(source))
@@ -638,6 +638,21 @@ func ValidateSchemaArguments(root *SchemaDefinition, value ToolValue) error {
 
 // SchemaFingerprint uses canonical tokens, not language-dependent JSON number spelling.
 func SchemaFingerprint(schema *SchemaDefinition) (string, error) {
+	return schemaFingerprint(schema, false)
+}
+
+// Validation-only compatibility for historical Java requests. Never rewrite a retained request
+// or use the legacy identity for new calls; provider journals still fence uncertain effects.
+func schemaFingerprintMatches(schema *SchemaDefinition, offered string) (bool, error) {
+	current, err := SchemaFingerprint(schema)
+	if err != nil || current == offered {
+		return current == offered, err
+	}
+	legacy, err := schemaFingerprint(schema, true)
+	return legacy == offered, err
+}
+
+func schemaFingerprint(schema *SchemaDefinition, legacyOrdering bool) (string, error) {
 	if err := ValidateToolSchema(schema); err != nil {
 		return "", err
 	}
@@ -697,7 +712,13 @@ func SchemaFingerprint(schema *SchemaDefinition) (string, error) {
 			for key := range x {
 				keys = append(keys, key)
 			}
-			sort.Strings(keys)
+			if legacyOrdering {
+				sort.Slice(keys, func(i, j int) bool {
+					return "s"+hex.EncodeToString([]byte(keys[i]))+";" < "s"+hex.EncodeToString([]byte(keys[j]))+";"
+				})
+			} else {
+				sort.Strings(keys)
+			}
 			result := "{"
 			for _, key := range keys {
 				result += canonical(key) + canonical(x[key])

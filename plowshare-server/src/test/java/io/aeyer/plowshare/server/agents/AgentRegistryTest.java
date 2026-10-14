@@ -55,6 +55,25 @@ class AgentRegistryTest {
     assertThrows(IllegalStateException.class, () -> AgentRegistry.load(dir, TOOLS));
   }
 
+  @Test
+  void dynamic_tool_grants_preserve_full_platform_names(@TempDir Path dir) throws Exception {
+    String tool = "a".repeat(256);
+    write(
+        dir,
+        "dynamic_agent",
+        leaf("dynamic_agent")
+            .replace("tools: [memory_read]", "tools: [" + tool + "]\ndynamic: true"),
+        "Work.");
+    assertEquals(List.of(tool), AgentRegistry.load(dir, TOOLS).get("dynamic_agent").tools());
+    write(
+        dir,
+        "dynamic_agent",
+        leaf("dynamic_agent")
+            .replace("tools: [memory_read]", "tools: [" + tool + "a]\ndynamic: true"),
+        "Work.");
+    assertThrows(IllegalStateException.class, () -> AgentRegistry.load(dir, TOOLS));
+  }
+
   private static final Set<String> TOOLS =
       Set.of("memory_recall", "memory_read", "agent_run", "memory_write");
 

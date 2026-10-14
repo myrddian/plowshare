@@ -301,6 +301,12 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
     async def test_catalogue_publish_withdraw_and_lost_reply_do_not_execute_or_replay(
         self,
     ) -> None:
+        large = replace(
+            DECLARATION,
+            parameters=tuple(
+                Parameter(f"field_{i}", "STRING", "d" * 4096, False) for i in range(24)
+            ),
+        )
         fixture = Fixture()
         executions = 0
 
@@ -313,7 +319,10 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
             port = server.sockets[0].getsockname()[1]
             with tempfile.TemporaryDirectory() as directory:
                 with SqliteToolJournal(
-                    Path(directory), configuration=CONFIG
+                    Path(directory),
+                    configuration=deployment_config(
+                        "fixture", "scanner", "provider", (large,)
+                    ),
                 ) as journal:
                     async with await Client.connect(
                         f"http://127.0.0.1:{port}",
@@ -326,12 +335,15 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             project="fixture",
                             provider="scanner",
                             account="provider",
-                            tools=(RegisteredTool(DECLARATION, handler),),
+                            tools=(RegisteredTool(large, handler),),
                             journal=journal,
                         )
                         await provider.publish_catalog(str(uuid4()))
                         publication = fixture.publication
                         assert publication is not None
+                        self.assertGreater(
+                            len(str(publication["text"]).encode()), 65536
+                        )
                         self.assertEqual(publication["topic"], "tool.scanner.catalog")
                         self.assertEqual(
                             json.loads(str(publication["text"]))["version"],
@@ -350,9 +362,14 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(executions, 0)
 
     async def test_nested_handler_and_schema_change_refusal(self) -> None:
+        for variant in ("canonical", "legacy", "legacy-interrupted"):
+            with self.subTest(variant=variant):
+                await self._nested_handler_and_schema_change_refusal(variant)
+
+    async def _nested_handler_and_schema_change_refusal(self, variant: str) -> None:
         schema = decode_tool_schema(
             json.loads(
-                '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}}},"required":["data"],"additionalProperties":false}'
+                '{"type":"object","properties":{"data":{"type":"array","items":{"type":["string","null"]}},"database":{"type":"integer"}},"required":["data"],"additionalProperties":false}'
             )
         )
         declaration = ToolDeclaration(
@@ -364,7 +381,9 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                 envelope = _object(json.loads(super().request()))
                 envelope.update(
                     schema="plowshare-tool/2",
-                    schemaFingerprint=schema_fingerprint(schema),
+                    schemaFingerprint=schema_fingerprint(schema)
+                    if variant == "canonical"
+                    else "21b66e70592ec7b5b59ce9d3f830871cdd57b3aa42a57329680d578822de3527",
                     arguments={"data": ["nested", None]},
                 )
                 return json.dumps(envelope)
@@ -388,6 +407,17 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         timeout=1,
                         legacy_transport=True,
                     ) as client:
+                        if variant == "legacy-interrupted":
+                            journal.save(
+                                ToolReceipt(
+                                    fixture.identity,
+                                    fixture.request(),
+                                    "executing",
+                                    None,
+                                    None,
+                                )
+                            )
+                        expected = 0 if variant == "legacy-interrupted" else 1
                         provider = ToolProvider(
                             client,
                             project="fixture",
@@ -398,7 +428,13 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                         )
                         await provider.poll()
                         await provider.poll()
-                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(len(calls), expected)
+                        receipt = journal.all()[0]
+                        self.assertEqual(receipt.request, fixture.request())
+                        if variant == "legacy-interrupted":
+                            self.assertIsNotNone(receipt.result)
+                            if receipt.result is not None:
+                                self.assertEqual(receipt.result.state, "UNKNOWN")
                         changed = replace(
                             declaration,
                             input_schema=replace(schema, description="changed"),
@@ -419,7 +455,7 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                             )
                             with self.assertRaises(ValueError):
                                 await changed_provider.poll()
-                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(len(calls), expected)
 
     async def test_named_handler_and_duplicate_delivery(self) -> None:
         await self.exercise()

@@ -107,18 +107,32 @@ public final class SchemaCodec {
    * Stable SHA-256 identity: sorted UTF-8 keys, exact decimal tokens, no JSON writer dependence.
    */
   public static String fingerprint(SchemaDefinition schema) {
+    return fingerprint(schema, false);
+  }
+
+  /**
+   * Checks the exact offered schema against canonical or historical Java token ordering. The legacy
+   * hash is validation-only: retained requests are never rewritten and new calls use {@link
+   * #fingerprint(SchemaDefinition)}. This does not authorize replay of an unresolved invocation.
+   */
+  public static boolean matchesFingerprint(SchemaDefinition schema, String offered) {
+    return fingerprint(schema).equals(offered) || fingerprint(schema, true).equals(offered);
+  }
+
+  private static String fingerprint(SchemaDefinition schema, boolean legacyOrdering) {
     try {
       return java.util.HexFormat.of()
           .formatHex(
               java.security.MessageDigest.getInstance("SHA-256")
                   .digest(
-                      canonical(wire(schema)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                      canonical(wire(schema), legacyOrdering)
+                          .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     } catch (java.security.NoSuchAlgorithmException unavailable) {
       throw new IllegalStateException(unavailable);
     }
   }
 
-  private static String canonical(Object value) {
+  private static String canonical(Object value, boolean legacyOrdering) {
     if (value == null) return "z;";
     if (value instanceof Boolean flag) return flag ? "b1;" : "b0;";
     if (value instanceof Number number) {
@@ -132,16 +146,30 @@ public final class SchemaCodec {
           + ";";
     if (value instanceof List<?> list)
       return "["
-          + list.stream().map(SchemaCodec::canonical).collect(java.util.stream.Collectors.joining())
+          + list.stream()
+              .map(item -> canonical(item, legacyOrdering))
+              .collect(java.util.stream.Collectors.joining())
           + "]";
     if (value instanceof Map<?, ?> map)
       return "{"
           + map.entrySet().stream()
-              .sorted(java.util.Comparator.comparing(entry -> canonical(entry.getKey())))
-              .map(entry -> canonical(entry.getKey()) + canonical(entry.getValue()))
+              // Sort key bytes without the string token terminator; prefix keys must sort first.
+              .sorted(
+                  java.util.Comparator.comparing(
+                      entry -> keyOrder((String) entry.getKey(), legacyOrdering)))
+              .map(
+                  entry ->
+                      canonical(entry.getKey(), legacyOrdering)
+                          + canonical(entry.getValue(), legacyOrdering))
               .collect(java.util.stream.Collectors.joining())
           + "}";
     throw new IllegalArgumentException("Invalid canonical schema value");
+  }
+
+  private static String keyOrder(String key, boolean legacyOrdering) {
+    String bytes =
+        java.util.HexFormat.of().formatHex(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    return legacyOrdering ? "s" + bytes + ";" : bytes;
   }
 
   private static final class Decoder {

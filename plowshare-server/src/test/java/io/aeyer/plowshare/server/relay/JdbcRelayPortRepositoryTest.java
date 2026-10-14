@@ -36,6 +36,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -63,8 +64,24 @@ class JdbcRelayPortRepositoryTest {
     var data =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure().dataSource(data).load().migrate();
+    // Prove upgrade preservation with a retained topic under the previous 160-character check.
+    Flyway.configure().dataSource(data).target("140").load().migrate();
     jdbc = new JdbcTemplate(data);
+    Long upgradeProject =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name,workspace) VALUES('relay-topic-upgrade-fixture','fixture') RETURNING id",
+            Long.class);
+    String retained = "a".repeat(160);
+    jdbc.update(
+        "INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds) VALUES(?,?,?,'TEXT',3600)",
+        "project:" + upgradeProject,
+        upgradeProject,
+        retained);
+    Flyway.configure().dataSource(data).load().migrate();
+    assertEquals(
+        retained,
+        jdbc.queryForObject(
+            "SELECT name FROM relay_topics WHERE project_id=?", String.class, upgradeProject));
     var template = new TransactionTemplate(new DataSourceTransactionManager(data));
     transactions =
         new UnitOfWork() {
@@ -112,6 +129,68 @@ class JdbcRelayPortRepositoryTest {
     relay.publish(
         topic,
         new Relay.Draft(id, "fixture", Instant.now(), null, null, new RelayPayload.Text("hello")));
+  }
+
+  @Test
+  void long_topics_survive_publish_consume_ack_and_migration_constraints() {
+    String name = "a".repeat(1024);
+    topic = new Relay.TopicKey(topic.projectId(), name);
+    relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    publish("long-topic-event");
+    var request = consume("readers", UUID.randomUUID().toString(), 100);
+    var batch = ports.consume(topic, "reviewer", request);
+    assertEquals(name, batch.topic());
+    assertEquals(1, batch.events().size());
+    assertEquals(
+        1,
+        new JdbcRelayLogRepository(jdbc, transactions)
+            .read(topic, 0, 100, "reviewer")
+            .events()
+            .size());
+    assertEquals(name, ports.acknowledge(topic, "reviewer", ack(batch)).topic());
+    assertEquals(RelayPort.Status.EMPTY, ports.consume(topic, "reviewer", request).status());
+    // Bypass Java validation to prove the new SQL checks, rather than only DTO admission.
+    var topicOverflow =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds) VALUES(?,?,?,'TEXT',3600)",
+                    "project:" + topic.projectId(),
+                    topic.projectId(),
+                    name + "a"));
+    assertTrue(
+        topicOverflow.getMostSpecificCause().getMessage().contains("relay_topics_name_check"));
+    String sourceName = "b".repeat(1024);
+    jdbc.update(
+        "INSERT INTO relay_source_events(project_id,topic,family,subject,state,occurred_at) VALUES(?,?,'LIFECYCLE','fixture','done',now())",
+        topic.projectId(),
+        sourceName);
+    var sources =
+        new JdbcRelaySourceRepository(jdbc, transactions, relay, mock(RelayNativeRepository.class));
+    var sourceTopic = new Relay.TopicKey(topic.projectId(), sourceName);
+    assertTrue(sources.pendingTopics(null, 100).contains(sourceTopic));
+    assertTrue(sources.publishNext(sourceTopic));
+    assertDoesNotThrow(() -> sources.pendingTopics(RelaySourceRepository.cursor(sourceTopic), 100));
+    var event =
+        new JdbcRelayLogRepository(jdbc, transactions)
+            .read(sourceTopic, 0, 100, "reviewer")
+            .events()
+            .getFirst();
+    assertEquals(sourceName, ((RelayPayload.Lifecycle) event.event().payload()).source());
+    var sourceOverflow =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "INSERT INTO relay_source_events(project_id,topic,family,subject,state,occurred_at) VALUES(?,?,'LIFECYCLE','fixture','done',now())",
+                    topic.projectId(),
+                    name + "a"));
+    assertTrue(
+        sourceOverflow
+            .getMostSpecificCause()
+            .getMessage()
+            .contains("relay_source_events_topic_check"));
   }
 
   @Test

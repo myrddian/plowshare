@@ -101,10 +101,13 @@ class RelayContractTest {
   @Test
   void topic_names_and_subscription_names_cannot_escape_their_scope() {
     for (String name :
-        List.of("../other", "Release", "a/b", " a", "a\n", "a..b", "a".repeat(161))) {
+        List.of("../other", "Release", "a/b", " a", "a\n", "a..b", "a".repeat(1025))) {
       assertThrows(IllegalArgumentException.class, () -> new Relay.TopicKey(1, name));
     }
     var key = new Relay.TopicKey(1, "release.observed");
+    assertDoesNotThrow(() -> new Relay.TopicKey(1, "a".repeat(1024)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new Relay.SubscriptionKey(key, "a".repeat(161)));
     assertThrows(IllegalArgumentException.class, () -> new Relay.TopicKey(0, "release.observed"));
     assertThrows(IllegalArgumentException.class, () -> new Relay.SubscriptionKey(key, "../route"));
     assertEquals(

@@ -81,7 +81,7 @@ public static class RelayTools
     }
     private static void Declaration(ToolDeclaration tool)
     {
-        if (!Regex.IsMatch(tool.Name, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || tool.Name.Length > 64 || tool.TimeoutSeconds is < 1 or > 300 || tool.Parameters.Count > 32 || tool.Parameters.Select(p => p.Name).Distinct().Count() != tool.Parameters.Count) throw new ArgumentException("Invalid tool declaration");
+        if (!Regex.IsMatch(tool.Name, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || tool.Name.Length > 256 || tool.TimeoutSeconds is < 1 or > 300 || tool.Parameters.Count > 32 || tool.Parameters.Select(p => p.Name).Distinct().Count() != tool.Parameters.Count) throw new ArgumentException("Invalid tool declaration");
         Text(tool.Description, 4096, true);
         if (tool.InputSchema is not null) { if (tool.Parameters.Count != 0) throw new ArgumentException("Use parameters or inputSchema"); ToolSchemas.Validate(tool.InputSchema); }
         foreach (var parameter in tool.Parameters)
@@ -144,7 +144,8 @@ public static class RelayTools
     {
         if (tools.Count > 128) throw new ArgumentException("Tool catalogue exceeds 128 declarations");
         var text = JsonSerializer.Serialize(new { version = tools.Any(tool => tool.InputSchema is not null) ? "plowshare-tool-catalog/2" : "plowshare-tool-catalog/1", tools }, Json);
-        Text(text, 65536); return text;
+        // RelayPublish validates the complete payload independently of transport chunks.
+        return text;
     }
     public static string ResultRequestId(string invocationId)
     {
@@ -191,7 +192,7 @@ public static class RelayTools
             });
         }
         var provider = Read("provider"); var toolName = Read("tool");
-        if (!Regex.IsMatch(provider, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$") || provider.Length > 48 || !Regex.IsMatch(toolName, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || toolName.Length > 64) throw new ArgumentException("Invalid tool binding");
+        if (!Regex.IsMatch(provider, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$") || provider.Length > 48 || !Regex.IsMatch(toolName, "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$") || toolName.Length > 256) throw new ArgumentException("Invalid tool binding");
         var call = new ToolCall(id, Read("project"), provider, toolName, Read("account"), Read("run"), Read("call"), deadline, new ReadOnlyDictionary<string, ToolValue>(values), schema ?? throw new ArgumentException("Invalid schema"), nested ? row.GetProperty("schemaFingerprint").GetString() : null);
         if (nested && (call.SchemaFingerprint is null || !Regex.IsMatch(call.SchemaFingerprint, "^[0-9a-f]{64}$"))) throw new ArgumentException("Invalid schema fingerprint");
         ToolSchemas.CheckValue(new ToolValue.ObjectValue(call.Arguments));
@@ -200,7 +201,7 @@ public static class RelayTools
     internal static void ValidateCall(ToolDeclaration tool, ToolCall call)
     {
         if (tool.InputSchema is null) { if (call.Schema != "plowshare-tool/1") throw new ArgumentException("Offered schema changed"); }
-        else if (call.Schema != "plowshare-tool/2" || call.SchemaFingerprint != ToolSchemas.Fingerprint(tool.InputSchema)) throw new ArgumentException("Offered schema changed");
+        else if (call.Schema != "plowshare-tool/2" || !ToolSchemas.MatchesFingerprint(tool.InputSchema, call.SchemaFingerprint)) throw new ArgumentException("Offered schema changed");
         ValidateArguments(tool, call.Arguments);
     }
     internal static string ResultText(ToolCall call, ToolResult? result)

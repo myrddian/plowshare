@@ -106,6 +106,25 @@ class JdbcRelayDeliveryRepositoryTest {
   }
 
   @Test
+  void long_publication_targets_survive_admission_and_sql_bounds() {
+    String target = "a".repeat(1024);
+    var branch = new RelayDeliveries.Branch("forward", "relay.publish", null, target);
+    deliveries.admit(first, new RelayDeliveries.Decision(ROUTE, List.of(branch)), T0);
+    var delivery = deliveries.claim(subscription, "worker-a", LEASE, T0).orElseThrow();
+    assertEquals(target, delivery.branch().publishTo());
+    var overflow =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "UPDATE relay_deliveries SET publish_to=? WHERE id=?",
+                    target + "a",
+                    delivery.key().id()));
+    assertTrue(overflow.getMostSpecificCause().getMessage().contains("relay_publish_target_name"));
+    assertEquals(target, deliveries.delivery(delivery.key()).orElseThrow().branch().publishTo());
+  }
+
+  @Test
   void five_mib_raw_text_survives_publication_and_admission_and_database_refuses_overflow() {
     String text = "é".repeat(io.aeyer.plowshare.protocol.RelayPort.DEFAULT_TEXT_BYTES / 2);
     var large =

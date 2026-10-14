@@ -457,6 +457,18 @@ def validate_schema_arguments(source: SchemaDefinition, input_value: ToolValue) 
 
 
 def schema_fingerprint(source: SchemaDefinition) -> str:
+    """Emit only the canonical UTF-8-key identity for new calls."""
+    return _schema_fingerprint(source, legacy_ordering=False)
+
+
+def schema_fingerprint_matches(source: SchemaDefinition, offered: str | None) -> bool:
+    """Validate exact schemas with historical Java ordering, without rewriting retained requests."""
+    return offered == schema_fingerprint(source) or offered == _schema_fingerprint(
+        source, legacy_ordering=True
+    )
+
+
+def _schema_fingerprint(source: SchemaDefinition, *, legacy_ordering: bool) -> str:
     def canonical(v: object) -> str:
         if v is None:
             return "z;"
@@ -485,7 +497,14 @@ def schema_fingerprint(source: SchemaDefinition) -> str:
                 "{"
                 + "".join(
                     canonical(k) + canonical(entries[k])
-                    for k in sorted(entries, key=lambda x: x.encode().hex())
+                    for k in sorted(
+                        entries,
+                        key=lambda x: (
+                            "s" + x.encode().hex() + ";"
+                            if legacy_ordering
+                            else x.encode().hex()
+                        ),
+                    )
                 )
                 + "}"
             )
