@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createInterface } from 'node:readline';
 import { promptFileStore } from 'plowshare-client-node/filestores';
 import { promptLogin, promptNewPassword, promptSetup } from './login.js';
 import { run } from './run.js';
@@ -20,6 +21,20 @@ process.exitCode = await run(process.argv.slice(2), {
     process.stderr.write(text);
   },
   signal: interrupt.signal,
+  nativeInput: async function* (signal) {
+    const input = createInterface({ input: process.stdin, terminal: false });
+    const stopped = () => input.close();
+    signal.addEventListener('abort', stopped, { once: true });
+    try {
+      for await (const line of input) {
+        if (signal.aborted) break;
+        yield line;
+      }
+    } finally {
+      signal.removeEventListener('abort', stopped);
+      input.close();
+    }
+  },
   stdin: async (signal) => {
     signal.throwIfAborted();
     const stopped = (): void => {

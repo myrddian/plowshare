@@ -202,6 +202,7 @@ fun Exec.declareSources() {
     inputs.files(rootProject.file("sdk/node/package.json"),
         rootProject.file("sdk/node/tsconfig.json"),
         rootProject.file("sdk/node/pnpm-lock.yaml")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("integrations/mcp/src")).withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir("src")
         .withPropertyName("sources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -274,7 +275,7 @@ val pnpmTypecheck by tasks.registering(Exec::class) {
     group = "verification"
     description = "Type-checks the TUI's three projects and the edges between them."
 
-    dependsOn(pnpmInstall)
+    dependsOn(pnpmInstall, ":plowshare-mcp-integration:mcpIntegrationBuild")
     workingDir = projectDir
     declareSources()
     outputs.dir(layout.buildDirectory.dir("types")).withPropertyName("declarations")
@@ -303,7 +304,7 @@ val pnpmTest by tasks.registering(Exec::class) {
     group = "verification"
     description = "Runs the TUI's vitest suite."
 
-    dependsOn(pnpmInstall)
+    dependsOn(pnpmInstall, ":plowshare-mcp-integration:mcpIntegrationBuild")
     workingDir = projectDir
     declareSources()
     mirroredSources()

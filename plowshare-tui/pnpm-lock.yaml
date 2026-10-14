@@ -20,6 +20,9 @@ importers:
       plowshare-client-ts:
         specifier: link:../sdk/typescript
         version: link:../sdk/typescript
+      plowshare-mcp-integration:
+        specifier: link:../integrations/mcp
+        version: link:../integrations/mcp
       react:
         specifier: ^19.3.0
         version: 19.3.0

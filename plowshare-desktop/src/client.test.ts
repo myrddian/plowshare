@@ -1,3 +1,4 @@
+import type { NativeSessions, McpTool } from 'plowshare-mcp-integration';
 import { decodeDesktopRequest } from './request-boundary.ts';
 import { displayText } from 'plowshare-client-ts/binding/values';
 import { present } from './fixture.test-support.ts';
@@ -12,7 +13,7 @@ import {
   approvalWire,
 } from './wire-fixtures.ts';
 import { test } from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import { contextKey, stoppedJob } from './shared.ts';
 
-function fixture() {
+function fixture(nativeSessions?: NativeSessions) {
   let push: (value: unknown) => void = () => {};
   let closed: () => void = () => {};
   const calls: { type: string; payload: Record<string, unknown> }[] = [];
@@ -173,7 +174,11 @@ function fixture() {
       },
     };
   };
-  const client = new DesktopClient(() => {}, connector);
+  const client = new DesktopClient(
+    () => {},
+    connector,
+    nativeSessions === undefined ? {} : { nativeSessions },
+  );
   return {
     client,
     calls,
@@ -2304,5 +2309,118 @@ await test('provider owner IPC works without administrator status, redacts metad
     if (previous === undefined) delete process.env['PLOWSHARE_CONFIG_DIR'];
     else process.env['PLOWSHARE_CONFIG_DIR'] = previous;
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test('desktop native commands invoke directly and socket loss closes instance-owned sessions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'plowshare-desktop-native-'));
+  let opened = 0,
+    calls = 0,
+    closed = 0;
+  const tool: McpTool = {
+    name: 'echo',
+    description: 'Echo fixture',
+    input: {
+      type: 'object',
+      properties: { value: { type: 'integer' } },
+      required: ['value'],
+      additionalProperties: false,
+    },
+    output: null,
+    metadata: {
+      name: 'echo',
+      inputSchema: {
+        type: 'object',
+        properties: { value: { type: 'integer' } },
+        required: ['value'],
+        additionalProperties: false,
+      },
+    },
+  };
+  const f = fixture({
+    async open() {
+      opened++;
+      return {
+        async page() {
+          return { tools: [tool], cursor: null };
+        },
+        async call() {
+          calls++;
+          return {
+            content: ['observed'],
+            structured: undefined,
+            isError: false,
+          };
+        },
+        async close() {
+          closed++;
+        },
+      };
+    },
+  });
+  const file = join(directory, 'profile.json');
+  try {
+    await connect(f.client);
+    const before = f.calls.length;
+    await writeFile(
+      file,
+      JSON.stringify({
+        owner: { origin: f.client.state.base, account: f.client.state.handle },
+        instance: 'desktop-test',
+        profile: 'echo',
+        project: 'fixture',
+        prefix: 'local_',
+        protocol: '2026-07-28',
+        journalDirectory: join(directory, 'journals'),
+        timeoutMs: 1000,
+        timeoutSeconds: 1,
+        shutdownGraceMs: 30,
+        transport: {
+          kind: 'stdio',
+          executable: process.execPath,
+          args: [],
+          directory,
+          environment: {},
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const dispatch = (command: unknown) =>
+      f.client.dispatch(
+        decodeDesktopRequest({
+          action: 'native-mcp',
+          command: JSON.stringify(command),
+        }),
+      );
+    await assert.rejects(dispatch({ action: 'start', file, consent: false }));
+    assert.equal(opened, 0);
+    const reply = await dispatch({ action: 'start', file, consent: true });
+    const status = reply.nativeMcp;
+    assert.ok(status !== undefined && 'tools' in status);
+    const declaration = status.tools[0];
+    assert.ok(declaration);
+    const invocation = {
+      invocationId: '11111111-1111-1111-1111-111111111111',
+      tool: declaration.name,
+      arguments: { value: 1 },
+      deadline: new Date(Date.now() + 1000).toISOString(),
+    };
+    const command = {
+      action: 'call',
+      instance: 'desktop-test',
+      profile: 'echo',
+      invocation,
+    };
+    await dispatch(command);
+    await dispatch(command);
+    assert.equal(calls, 1);
+    assert.equal(f.calls.length, before);
+    f.closed();
+    await f.client.shutdown();
+    assert.equal(closed, 1);
+    await assert.rejects(dispatch(command));
+  } finally {
+    await f.client.shutdown();
+    await rm(directory, { recursive: true, force: true });
   }
 });

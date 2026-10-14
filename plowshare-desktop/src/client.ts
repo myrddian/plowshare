@@ -1,3 +1,11 @@
+import {
+  NativeHostCommands,
+  NativeMcpSessions,
+  decodeNativeCommand,
+  nativeProviderConnection,
+} from 'plowshare-mcp-integration';
+import type { NativeSessions } from 'plowshare-mcp-integration';
+import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { nodePacketSocket, PACKET_PROTOCOL } from 'plowshare-client-node';
 import { connectionAccount } from 'plowshare-client-node/connections';
 import { userConfigDirectory } from 'plowshare-client-node/connections';
@@ -357,6 +365,19 @@ export const serverConnector: Connector = async (
 };
 
 export class DesktopClient {
+  private nativeMcp: NativeHostCommands | undefined;
+  private nativeClosing: Promise<void> = Promise.resolve();
+  private nativeCloseFailed = false;
+  private stopNativeMcp(): void {
+    const native = this.nativeMcp;
+    this.nativeMcp = undefined;
+    if (native !== undefined)
+      this.nativeClosing = Promise.all([this.nativeClosing, native.close()])
+        .then(() => undefined)
+        .catch(() => {
+          this.nativeCloseFailed = true;
+        });
+  }
   private background(work: Promise<unknown>): void {
     void work.catch((reason: unknown) => {
       this.state.backgroundError = errorMessage(reason);
@@ -558,7 +579,11 @@ export class DesktopClient {
   }
   async shutdown() {
     this.dispose();
-    await this.fileClosing;
+    await Promise.all([this.fileClosing, this.nativeClosing]);
+    if (this.nativeCloseFailed)
+      throw new Error(
+        'Native MCP stopped with retained uncertainty; inspect private receipts',
+      );
   }
   async rootDirectory(directory: string, project?: string) {
     const files = this.files;
@@ -614,11 +639,19 @@ export class DesktopClient {
 
   private changed: (state: DesktopState) => void;
   private connector: Connector;
-  private options: { project?: string; accountActivity?: boolean };
+  private options: {
+    project?: string;
+    accountActivity?: boolean;
+    nativeSessions?: NativeSessions;
+  };
   constructor(
     changed: (state: DesktopState) => void,
     connector: Connector = serverConnector,
-    privateOptions: { project?: string; accountActivity?: boolean } = {},
+    privateOptions: {
+      project?: string;
+      accountActivity?: boolean;
+      nativeSessions?: NativeSessions;
+    } = {},
   ) {
     this.changed = changed;
     this.connector = connector;
@@ -791,6 +824,7 @@ export class DesktopClient {
     return this.ask(request.type, request.payload);
   }
   dispose() {
+    this.stopNativeMcp();
     this.retainedConversations.clear();
     this.state.answeringApprovals = [];
     this.usage.disconnected();
@@ -820,6 +854,7 @@ export class DesktopClient {
     this.dirtyHistories.clear();
   }
   private disconnected() {
+    this.stopNativeMcp();
     this.retainedConversations.clear();
     this.state.answeringApprovals = [];
     this.usage.disconnected();
@@ -1137,6 +1172,35 @@ export class DesktopClient {
           state: structuredClone(this.state),
           serverFileStores: decodeReply('filestore.list', result.payload),
         };
+      }
+      case 'native-mcp': {
+        if (!this.state.connected || !this.state.handle)
+          throw new Error('Connect before managing this instance’s MCP hosts');
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.command);
+        } catch {
+          throw new Error('Native MCP command is invalid JSON');
+        }
+        const owningSocket = this.connection;
+        if (owningSocket === undefined)
+          throw new Error(
+            'Native MCP sharing requires the original authenticated socket',
+          );
+        this.nativeMcp ??= new NativeHostCommands(
+          { origin: this.state.base, account: this.state.handle },
+          this.options.nativeSessions ?? new NativeMcpSessions(process.env),
+          nativeProviderConnection(checkedTransport(owningSocket), () =>
+            owningSocket.close(),
+          ),
+        );
+        const owner = this.nativeMcp;
+        const result = await owner.execute(decodeNativeCommand(raw));
+        if (this.nativeMcp !== owner)
+          throw new Error(
+            'The native MCP login changed while processing this request',
+          );
+        return { state: structuredClone(this.state), nativeMcp: result };
       }
       case 'provider-management':
       case 'provider-management-pending':

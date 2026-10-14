@@ -23,6 +23,8 @@ export class HttpMcpSessions implements McpSessions {
     options: McpSessionOptions,
     signal: AbortSignal,
   ): Promise<McpSession> {
+    if ((options.header === undefined) !== (options.value === undefined))
+      throw new Error('Incomplete MCP authorization');
     const controller = new AbortController();
     const opening = AbortSignal.any([signal, controller.signal]);
     const network = await boundedHttp(
@@ -49,13 +51,17 @@ export class HttpMcpSessions implements McpSessions {
       inputRequired: { autoFulfill: false },
       listMaxPages: (options.limits ?? DEFAULT_LIMITS).maxPages,
     });
+    client.onclose = () => controller.abort();
     const transport = new StreamableHTTPClientTransport(
       new URL(options.policy.endpoint),
       {
         fetch: network.fetch,
         requestInit: {
           redirect: 'error',
-          headers: { [options.header]: options.value },
+          headers:
+            options.header === undefined || options.value === undefined
+              ? {}
+              : { [options.header]: options.value },
         },
         reconnectionOptions: {
           initialReconnectionDelay: 1,
@@ -85,6 +91,7 @@ export class HttpMcpSessions implements McpSessions {
       throw new Error('MCP session negotiation failed');
     }
     return {
+      closedSignal: controller.signal,
       async page(cursor, pageSignal) {
         // Raw typed requests avoid SDK auto-pagination, header filtering and shared cache writes.
         network.setSignal(pageSignal);

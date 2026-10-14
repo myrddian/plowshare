@@ -269,7 +269,7 @@ val clientDistributions by tasks.registering(Exec::class) {
     workingDir = rootDir
     inputs.files("scripts/distributions.mjs", "scripts/distribution-archive.py", "scripts/distribution-talk.mjs", "scripts/distribution-native.mjs", "scripts/distribution-runtime.mjs", "scripts/distribution-runtime.json", "scripts/distribution-entitlements.plist", "docs/distributions.md")
     inputs.dir("plowshare-desktop/assets/icons").withPathSensitivity(PathSensitivity.RELATIVE)
-    for (module in listOf("plowshare-cli", "plowshare-mcp", "plowshare-tui", "plowshare-desktop", "plowshare-client-ts", "plowshare-client-node")) {
+    for (module in listOf("plowshare-cli", "plowshare-mcp", "plowshare-tui", "plowshare-desktop", "plowshare-client-ts", "plowshare-client-node", "plowshare-mcp-integration")) {
         inputs.dir(project(":$module").file("src"))
         inputs.files(project(":$module").file("package.json"), project(":$module").file("pnpm-lock.yaml"))
     }
@@ -278,6 +278,15 @@ val clientDistributions by tasks.registering(Exec::class) {
     outputs.files("build/distributions/plowshare-clients-0.1.0-darwin-arm64.tar.gz", "build/distributions/plowshare-0.1.0-darwin-arm64", "build/distributions/plowshare-desktop-0.1.0-darwin-arm64.tar.gz")
     commandLine("node", "scripts/distributions.mjs", "clients")
 }
+tasks.register<Exec>("nativeMcpDistributionCheck") {
+    group = "verification"
+    description = "Exercises direct HTTP/STDIO native hosts in a fresh standalone client with an empty PATH."
+    dependsOn(clientDistributions, ":plowshare-mcp-integration:mcpIntegrationBuild")
+    workingDir = rootDir
+    inputs.file("scripts/native-mcp-distribution.test.mjs")
+    commandLine("node", "--test", "scripts/native-mcp-distribution.test.mjs")
+}
+
 val serverDistribution by tasks.registering(Exec::class) {
     group = "distribution"
     description = "Packages the executable server jar with an external-config launcher."

@@ -44,17 +44,22 @@ function decodeReceipt(source: unknown): ToolReceipt {
     (occurredAt !== null && !Number.isFinite(Date.parse(occurredAt)))
   )
     throw new Error('Invalid journal lifecycle');
-  const worker = object(raw.hostedWorker);
+  const worker =
+    raw.hostedWorker === undefined ? undefined : object(raw.hostedWorker);
   return {
     invocationId,
     request,
     phase,
     result,
     occurredAt,
-    hostedWorker: {
-      binding: uuid(worker.binding),
-      registration: uuid(worker.registration),
-    },
+    ...(worker === undefined
+      ? {}
+      : {
+          hostedWorker: {
+            binding: uuid(worker.binding),
+            registration: uuid(worker.registration),
+          },
+        }),
   };
 }
 function textRequest(value: unknown): string {

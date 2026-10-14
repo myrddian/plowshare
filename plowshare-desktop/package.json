@@ -62,6 +62,7 @@
   },
   "dependencies": {
     "plowshare-client-node": "link:../sdk/node",
-    "plowshare-client-ts": "link:../sdk/typescript"
+    "plowshare-client-ts": "link:../sdk/typescript",
+    "plowshare-mcp-integration": "link:../integrations/mcp"
   }
 }

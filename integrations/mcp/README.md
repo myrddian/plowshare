@@ -10,9 +10,9 @@ even when the MCP server advertises a public cache scope.
 This is an external consumer of `plowshare-client-node` and
 `plowshare-client-ts`. It imports no server internals and adds no core API,
 database table, tool registry or execution ledger. `plowshare-mcp` remains the
-separate inbound MCP server. Native instance hosting and STDIO are separate work;
-the `McpSessions` capability can support that future transport without replacing
-the provider lifecycle.
+separate inbound MCP server. Native clients also compose the shared `McpToolClient` directly over HTTP/STDIO.
+In-process calls do not use Relay. An explicitly shared native host uses the separate
+`NativeProviderBridge` for server-owned work; see [native hosting](../../docs/native-mcp-hosting.md).
 
 ## Configure and start
 
