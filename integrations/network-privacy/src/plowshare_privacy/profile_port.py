@@ -35,7 +35,7 @@ class SdkProfilePort:
 
     async def versions(self) -> tuple[ProfileVersion, ...]:
         result = []
-        for page in range(4):
+        for page in range(41):
             rows = (
                 await self.client.request(
                     InformationListRequest(
@@ -79,7 +79,7 @@ class SdkProfilePort:
                     raise ValueError("Profile catalogue changed while paging; refresh")
                 return tuple(result)
         raise ValueError(
-            "Profile history exceeds the 400-revision read bound; inspect the project catalogue"
+            "Profile history exceeds the 4100-revision read bound; inspect the project catalogue"
         )
 
     async def read(self, revision: str) -> str:

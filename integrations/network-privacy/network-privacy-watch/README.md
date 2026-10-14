@@ -52,6 +52,8 @@ directory.
 The coordinator sets `dynamic: true`; its `tools` field lists built-in grants.
 The six external network tools are granted through the `network_scanning` provider
 scope in `plowshare.json`, without listing them again in the agent definition.
+Analyst and reviewer opt into dynamic tools and receive the separate
+`network_evidence_read` scope, which excludes scan submission.
 Those permissions control visibility and execution. Python publishes the schemas
 at runtime, and each call checks current registration, permission and availability.
 
@@ -158,3 +160,15 @@ project Information. Profiles pin reviewed issue revisions and retain per-device
 applicability, mitigation progress and supporting evidence. Existing read grants
 let agents use that context without adding model stages or enforcement privileges.
 Plans remain advisory. See [the mitigation guide](../OPERATIONS.md#privacy-issues-and-network-mitigations).
+
+## Subnet collection
+
+The external collector accepts up to 256 selected addresses, including all 254
+host addresses of a private IPv4 `/24`. It probes and enriches batches of 32 devices,
+then retains one combined scan revision and publishes one completion. It does not
+start an investigation for each batch. Agents inspect large scans through explicit
+bounded context projections and read-only pages with total counts and cursors.
+MAC identities depend on fresh Pi-hole associations; configured IPs and names
+remain available without Pi-hole. Use the device search for larger networks.
+Existing deployments need the [reviewed subnet upgrade](../SETUP.md#upgrade-for-subnet-monitoring)
+before widening their scope; Python is still started separately.

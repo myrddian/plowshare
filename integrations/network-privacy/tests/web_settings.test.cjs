@@ -10,7 +10,7 @@ const vm = require('node:vm');
 async function dashboard() {
   const nodes = new Map();
   function node(id) {
-    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, reset() {}});
+    if (!nodes.has(id)) nodes.set(id, {value:'', textContent:'', disabled:false, classList:{toggle() {}}, listeners:{}, attributes:{}, setAttribute(name,value) {this.attributes[name] = value;}, focus() {this.focused = true;}, scrollIntoView() {}, addEventListener(name,handler) {this.listeners[name] = handler;}, children:[], replaceChildren(...children) {this.children = children;}, querySelector() {return null;}, querySelectorAll() {return [];}, reset() {}});
     return nodes.get(id);
   }
   const context = vm.createContext({
@@ -188,4 +188,21 @@ test('reports open in Findings as Markdown without replacing selected collection
   assert.equal(node('report-content').children[0].source, source);
   assert.equal(node('evidence').children[0].source, 'retained evidence');
   assert.equal(vm.runInContext('selected',context), 'retained-scan');
+});
+
+
+test('whole-subnet selection prepares scope without saving, enabling or starting work', async () => {
+  const {context, node} = await dashboard();
+  let requests = 0;
+  context.fetch = async () => {requests++; throw new Error('Scope selection must not send requests');};
+  node('network').value = '192.168.0.0/24';
+  node('enabled').checked = false;
+  node('use-subnet').listeners.click();
+  assert.equal(node('targets').value, '192.168.0.0/24');
+  assert.equal(node('enabled').checked, false);
+  assert.match(node('settings-detail').textContent, /no scan has started/);
+  assert.equal(requests, 0);
+  vm.runInContext("renderMonitorSettings({editable:true,pending:false,pihole_configured:true,detail:'Saved settings are active.'})",context);
+  assert.match(node('settings-detail').textContent,/not saved/);
+  assert.equal(node('targets').value,'192.168.0.0/24');
 });

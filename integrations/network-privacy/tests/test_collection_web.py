@@ -75,6 +75,15 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/tools", headers=self.headers)
         self.assertEqual(response.status, 200)
         self.assertIn('"additionalProperties": false', await response.text())
+        catalogue = json.loads(await response.text())
+        evidence_schema = next(
+            item["input_schema"]
+            for item in catalogue
+            if item["name"] == "network.evidence"
+        )
+        self.assertEqual(evidence_schema["properties"]["limit"]["maximum"], 32)
+        self.assertIn("devices", evidence_schema["properties"]["section"]["enum"])
+        self.assertEqual(evidence_schema["required"], ["scan_id"])
         identity = str(uuid4())
 
         async def call(name: str, arguments: dict[str, str]) -> str:

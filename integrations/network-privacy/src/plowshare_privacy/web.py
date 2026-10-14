@@ -128,7 +128,7 @@ def application(
         )
         return response
 
-    app = web.Application(middlewares=[boundary], client_max_size=16384)
+    app = web.Application(middlewares=[boundary], client_max_size=131072)
     provider: PrivacyTools = tools if tools is not None else WorkerTools(worker)
 
     def operator() -> OperatorConsole:
@@ -435,6 +435,23 @@ def application(
             properties: dict[str, object] = {}
             if definition.parameter:
                 properties[definition.parameter] = {"type": "string", "format": "uuid"}
+            if definition.name in {
+                "network.scope",
+                "network.scan_list",
+                "network.evidence",
+                "network.destinations",
+            }:
+                properties["offset"] = {"type": "integer", "minimum": 0}
+                properties["limit"] = {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50 if definition.name == "network.scan_list" else 32,
+                }
+            if definition.name == "network.evidence":
+                properties["section"] = {
+                    "type": "string",
+                    "enum": ["summary", "tcp", "dns", "devices", "changes", "issues"],
+                }
             result.append(
                 {
                     "name": definition.name,
@@ -507,8 +524,15 @@ def application(
                     "mode": item.evidence.mode
                     if item.evidence
                     else worker.config.collection.mode,
-                    "changes": item.evidence.changes if item.evidence else (),
-                    "issues": item.evidence.issues if item.evidence else (),
+                    "changes": item.evidence.changes[:32] if item.evidence else (),
+                    "change_count": sum(
+                        not value.startswith("Baseline")
+                        for value in item.evidence.changes
+                    )
+                    if item.evidence
+                    else 0,
+                    "issues": item.evidence.issues[:16] if item.evidence else (),
+                    "issue_count": len(item.evidence.issues) if item.evidence else 0,
                     "investigation": asdict(item.investigation)
                     if item.investigation
                     else None,

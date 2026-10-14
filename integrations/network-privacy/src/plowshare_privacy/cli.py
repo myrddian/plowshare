@@ -45,6 +45,7 @@ from .ports import SdkPrivacyPort
 from .profile_port import SdkProfilePort
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
+from .tool_journal_upgrade import open_tool_journal
 from .tools import WorkerTools
 from .web import application
 from .worker import ActiveRequests, ExternalRequests, ReconciliationRequired, Worker
@@ -176,12 +177,12 @@ async def execute(args: argparse.Namespace) -> None:
                     raise ValueError(
                         "Choose either native tools or the outgoing compatibility peer"
                     )
-                exported = deployment_config(
-                    config.project, args.tool_provider, args.tool_account, DECLARATIONS
-                )
                 native_journal = stores.enter_context(
-                    SqliteToolJournal(
-                        config.state_directory / "relay-tools", configuration=exported
+                    open_tool_journal(
+                        config.state_directory / "relay-tools",
+                        config.project,
+                        args.tool_provider,
+                        args.tool_account,
                     )
                 )
                 native = ToolProvider(

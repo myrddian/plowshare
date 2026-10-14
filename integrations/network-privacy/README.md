@@ -53,8 +53,8 @@ without restarting. The independent `discover` command is also available.
 `tcp` performs bounded TCP connection probes against **explicit IP addresses and
 ports** in private deployment configuration. It sends no application payloads,
 requires no raw sockets or elevated scan privileges, and records open, refused,
-timed-out and unreachable responses separately. There are at most 256 probes,
-32 concurrent connections and a configured per-probe timeout. This is selected
+timed-out and unreachable responses separately. There are at most 256 selected addresses and 16 ports (4,096 probes),
+collected in batches of 32 devices, with at most 32 concurrent connections and a configured per-probe timeout. This is selected
 service observation, not complete device discovery or vulnerability detection.
 
 An optional `observationsFile` consumes a bounded, normalized export from another
@@ -91,10 +91,10 @@ Give devices your own names in the authenticated dashboard's **Device names**
 field, one selected `address=name` per line. These labels work without Pi-hole.
 The evidence view displays the name, address, identity and observation time.
 Configured labels never assert a discovered MAC or vendor. Each name is limited
-to 128 characters, and all names together must fit an 8 KiB escaped JSON budget
-for the scope tool.
+to 128 characters, and all names together must fit a 64 KiB escaped JSON budget.
+The scope tool pages names with their selected addresses.
 
-The connector opens one API session per collection, reads `/api/network/devices`
+The connector opens one API session per 32-device batch, reads `/api/network/devices`
 and `/api/queries`, then closes its own session. It does not change Pi-hole
 settings, blocklists or leases. Use a Pi-hole application password; the
 [official authentication guide](https://docs.pi-hole.net/api/auth/) describes
@@ -123,10 +123,13 @@ Pi-hole and `observationsFile` are alternative sources; configure one. Adding th
 source or changing labels starts a new comparison baseline while preserving settled
 receipts. New snapshots add optional `devices` and `dns_window` fields to the v1
 format. Legacy receipts keep their exact retained encoding for reconciliation.
-New evidence is capped at 16,000 bytes, leaving room for the native tool reply
-wrapper within its 16,384-character limit and fitting the investigation source
-budget. Oversized DNS samples are trimmed with a visible gap, while an oversized
-TCP/device selection must be reduced explicitly.
+Retained evidence is capped at 768 KiB, independently of the 16,000-byte tool
+reply budget. Each sweep retains every selected TCP observation and device identity
+in one document. DNS samples are capped at 4,096 rows and may be reduced further
+with an explicit coverage gap. Large investigations receive a bounded context
+projection and can page relevant evidence; omitted rows never prove absence.
+The local receipt file is bounded to 128 MiB and 1,000 scans; a full journal
+refuses new work rather than dropping history or uncertain receipts.
 
 ## Guided setup
 
@@ -140,7 +143,7 @@ and creates a private launcher for subsequent starts.
 In the dashboard, discover a private subnet, select devices, save monitoring and
 request a collection. Saved local discovery results are reused; selecting devices
 can be deferred. Browser authentication is automatic and survives reloads. Settings
-changes preserve evidence and are refused while admitted work remains unsettled.
+changes save independently; activation waits for admitted work to settle.
 The guide also explains each identity, provider scope, Relay processing and recovery.
 Lower-level preparation and provisioning commands remain available below.
 
@@ -487,12 +490,20 @@ properties and identifies read versus Relay submission effects. Invoke it with
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `network.scope` | `{}` | Configured targets, ports, limits and collection mode |
+| `network.scope` | Optional `offset`, `limit` | Configured scope page, full target count and scope fingerprint |
 | `network.scan` | `{"request_id":"<caller-retained UUID>"}` | Relay publication receipt; not collection completion |
 | `network.scan_status` | `{"request_id":"<same UUID>"}` | Local publication state and collection receipt, when available |
-| `network.scan_list` | `{}` | Latest 50 local collection summaries |
-| `network.evidence` | `{"scan_id":"<scan UUID>"}` | Observations, changes, gaps and retained revision, when available |
-| `network.destinations` | `{"scan_id":"<scan UUID>"}` | Observed DNS destinations, source time, fixture label and gaps |
+| `network.scan_list` | Optional `offset`, `limit` | Receipt page with bounded previews and full counts |
+| `network.evidence` | `scan_id`; optional `section`, `offset`, `limit` | Small complete evidence or a large-scan summary; explicit sections return pages |
+| `network.destinations` | `scan_id`; optional `offset`, `limit` | Small legacy observations or paged DNS destinations |
+
+Read pages default to 32 records (scan lists: 50); serialized size may produce
+smaller pages. Follow `next_offset` until null, using the same retained scan UUID
+and revision. Evidence sections are `summary`, `tcp`, `dns`, `devices`, `changes`
+and `issues`; provide a section when requesting evidence offsets. Summary counts
+cover the whole retained scan. `issues_complete` identifies a shortened gap
+preview; page the `issues` section for every gap. Scope pages include a fingerprint;
+restart that read if the configuration changes between pages. Reading never scans.
 
 All calls require the configured web bearer. Scan calls retain the caller's
 request identity before SDK publication and use the same Relay pipeline as the
@@ -517,7 +528,9 @@ and the configured execution principal. `relay_tool_read` retains its ordinary
 named built-in grant in `tools`. Loading validates the policy; discovery and
 per-call permission/availability checks happen at runtime.
 The SDK exposes a declaration and async Python handler for each capability; Plowshare installs the façade into its
-normal tool registry. The model never constructs a Relay envelope or selects a
+normal tool registry. Analyst and reviewer receive only the explicit
+`network_evidence_read` scope (scope, list, evidence and destinations); they have
+no scan tool grant. The model never constructs a Relay envelope or selects a
 provider or topic.
 
 For legacy server startup bindings, the SDK can still export matching declarations

@@ -348,9 +348,10 @@ class PiHoleTest(unittest.IsolatedAsyncioTestCase):
             data = DeviceData(
                 (), dns, DnsWindow("pihole-v6", observed, observed, 256, 256, True), ()
             )
-            evidence = await collector.collect(
-                str(uuid4()), "fixture:event", None, None
-            )
+            with patch("plowshare_privacy.collection.MAX_EVIDENCE_BYTES", 16000):
+                evidence = await collector.collect(
+                    str(uuid4()), "fixture:event", None, None
+                )
         self.assertLessEqual(len(evidence.encode().encode()), 16000)
         wrapped = json.dumps(
             {"revision": str(uuid4()), "evidence": asdict(evidence)},
@@ -543,8 +544,8 @@ class PiHoleConfigurationTest(unittest.TestCase):
                 Configuration.decode(payload, path)
 
     def test_unicode_label_metadata_cannot_overflow_native_scope_replies(self) -> None:
-        targets = tuple("192.0.2." + str(index) for index in range(1, 33))
-        with self.assertRaisesRegex(ValueError, "tool reply budget"):
+        targets = tuple("192.0.2." + str(index) for index in range(1, 255))
+        with self.assertRaisesRegex(ValueError, "scope budget"):
             device_labels({address: "😀" * 128 for address in targets}, targets)
 
     def test_mac_changes_do_not_attribute_new_dns_to_the_previous_device(self) -> None:

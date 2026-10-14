@@ -22,21 +22,54 @@ from .journal import Publication, ScanOrigin
 from .tools import DEFINITIONS, PrivacyTools, ScanCall, decode_call
 from .tools import ToolCall as PrivacyCall
 
+
+def parameters(name: str, parameter: str | None) -> tuple[Parameter, ...]:
+    values = []
+    if parameter is not None and name != "network.scan":
+        values.append(
+            Parameter(
+                parameter, "STRING", "Canonical UUID of the retained request or scan."
+            )
+        )
+    if name in {
+        "network.scope",
+        "network.scan_list",
+        "network.evidence",
+        "network.destinations",
+    }:
+        values.extend(
+            (
+                Parameter(
+                    "offset",
+                    "INTEGER",
+                    "Page offset; follow the returned next_offset.",
+                    required=False,
+                ),
+                Parameter(
+                    "limit",
+                    "INTEGER",
+                    "Maximum page records: 1-32 (scan list: 1-50).",
+                    required=False,
+                ),
+            )
+        )
+    if name == "network.evidence":
+        values.append(
+            Parameter(
+                "section",
+                "STRING",
+                "summary, tcp, dns, devices, changes or issues. Omit for small legacy evidence.",
+                required=False,
+            )
+        )
+    return tuple(values)
+
+
 DECLARATIONS = tuple(
     ToolDeclaration(
         definition.name.replace(".", "_"),
         definition.description,
-        (
-            (
-                Parameter(
-                    definition.parameter,
-                    "STRING",
-                    "Canonical UUID of the retained request or scan.",
-                ),
-            )
-            if definition.parameter is not None and definition.name != "network.scan"
-            else ()
-        ),
+        parameters(definition.name, definition.parameter),
         timeout_seconds=30,
     )
     for definition in DEFINITIONS

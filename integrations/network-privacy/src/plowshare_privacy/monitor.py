@@ -15,11 +15,11 @@ from .contracts import (
     DeviceLabel,
     PiHolePlan,
     device_labels,
+    expand_targets,
     integer,
     items,
     load_json,
     object_fields,
-    text,
 )
 from .journal import FileReceipts
 from .private_files import replace_private as replace_private
@@ -42,9 +42,7 @@ class MonitorChoice:
         row = object_fields(value, {"enabled", "targets", "ports"}, {"labels"})
         if type(row["enabled"]) is not bool:
             raise ValueError("Monitoring enabled must be a boolean")
-        targets = tuple(
-            str(ipaddress.IPv4Address(text(item))) for item in items(row["targets"], 32)
-        )
+        targets = expand_targets(row["targets"])
         ports = tuple(integer(item, 1, 65535) for item in items(row["ports"], 8))
         private = tuple(
             ipaddress.IPv4Network(block)
