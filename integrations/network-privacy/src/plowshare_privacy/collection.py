@@ -13,12 +13,15 @@ from typing import Protocol
 from .contracts import (
     CollectionPlan,
     DeviceIdentity,
+    DnsObservation,
+    DnsWindow,
     Evidence,
     Snapshot,
     TcpObservation,
     load_json,
     utc_now,
 )
+from .limits import BATCH_SIZE, MAX_DNS_ROWS, MAX_EVIDENCE_BYTES
 from .pihole import DeviceDataSource
 
 
@@ -169,13 +172,23 @@ class NetworkCollector:
                     return TcpObservation(address, port, "open")
 
             # The configured count, concurrency and per-probe deadlines bound the whole scan.
-            observations = await asyncio.gather(
-                *(
-                    probe(address, port)
-                    for address in self.plan.targets
-                    for port in self.plan.ports
-                )
+            observations: list[TcpObservation] = []
+            batches = tuple(
+                self.plan.targets[start : start + BATCH_SIZE]
+                for start in range(0, len(self.plan.targets), BATCH_SIZE)
             )
+            for batch in batches:
+                # At most 32 devices' tasks exist at once. All batches belong to
+                # this single scan identity, snapshot and subsequent publication.
+                observations.extend(
+                    await asyncio.gather(
+                        *(
+                            probe(address, port)
+                            for address in batch
+                            for port in self.plan.ports
+                        )
+                    )
+                )
             observed = utc_now()
             labels = {label.address: label.label for label in self.plan.labels}
             devices = {
@@ -195,24 +208,51 @@ class NetworkCollector:
             dns = imported.dns if imported else ()
             window = None
             if self.device_source is not None:
-                enriched = await self.device_source.read(self.plan.targets, observed)
-                if (
-                    len({device.address for device in enriched.devices})
-                    != len(enriched.devices)
-                    or not {device.address for device in enriched.devices}
-                    <= set(self.plan.targets)
-                    or not {query.device for query in enriched.dns}
-                    <= set(self.plan.targets)
-                ):
-                    raise ValueError(
-                        "Device source returned observations outside the configured scope"
+                dns_rows: list[DnsObservation] = []
+                windows: list[DnsWindow] = []
+                for batch in batches:
+                    enriched = await self.device_source.read(batch, observed)
+                    if (
+                        len({device.address for device in enriched.devices})
+                        != len(enriched.devices)
+                        or not {device.address for device in enriched.devices}
+                        <= set(batch)
+                        or not {query.device for query in enriched.dns} <= set(batch)
+                    ):
+                        raise ValueError(
+                            "Device source returned observations outside the configured scope for this batch"
+                        )
+                    for device in enriched.devices:
+                        devices[device.address] = replace(
+                            device, label=labels.get(device.address)
+                        )
+                    dns_rows.extend(enriched.dns)
+                    if enriched.window is not None:
+                        windows.append(enriched.window)
+                    issues.extend(enriched.issues)
+                if len(dns_rows) > MAX_DNS_ROWS:
+                    issues.append("dns_truncated: combined destination limit reached")
+                dns = tuple(dns_rows[:MAX_DNS_ROWS])
+                if windows:
+                    first = windows[0]
+                    if any(
+                        (item.from_at, item.until_at) != (first.from_at, first.until_at)
+                        for item in windows
+                    ):
+                        raise ValueError(
+                            "Device source returned inconsistent batch windows"
+                        )
+                    window = DnsWindow(
+                        first.source,
+                        first.from_at,
+                        first.until_at,
+                        sum(item.queries_read for item in windows),
+                        sum(item.queries_available for item in windows),
+                        len(windows) == len(batches)
+                        and all(item.complete for item in windows)
+                        and not any(issue.startswith("dns_") for issue in issues),
                     )
-                for device in enriched.devices:
-                    devices[device.address] = replace(
-                        device, label=labels.get(device.address)
-                    )
-                dns, window = enriched.dns, enriched.window
-                issues.extend(enriched.issues)
+                issues = list(dict.fromkeys(issues))
             snapshot = Snapshot(
                 imported.observed_at if imported else observed,
                 tuple(observations),
@@ -242,10 +282,14 @@ class NetworkCollector:
             baseline=previous is None or previous.scope != scope,
         )
 
-        # Native SDK replies allow 16,384 characters. Keep 384 bytes for the
-        # evidence/revision wrapper; ASCII JSON also fits the 32 KiB investigation
-        # source limit. Preserve TCP/identities and disclose any trimmed DNS sample.
-        while len(evidence.encode().encode("utf-8")) > 16000 and evidence.snapshot.dns:
+        # Retained artifacts and agent replies have different bounds. Preserve every
+        # TCP observation and identity; tools page these records, while the workflow
+        # projects a bounded assessment input. Disclose any trimmed DNS sample.
+        # Halving the sample avoids quadratic serialization of a large subnet.
+        while (
+            len(evidence.encode().encode("utf-8")) > MAX_EVIDENCE_BYTES
+            and evidence.snapshot.dns
+        ):
             truncated = tuple(
                 dict.fromkeys(
                     (
@@ -260,7 +304,9 @@ class NetworkCollector:
                 else None
             )
             snapshot = replace(
-                evidence.snapshot, dns=evidence.snapshot.dns[:-1], dns_window=window
+                evidence.snapshot,
+                dns=evidence.snapshot.dns[: len(evidence.snapshot.dns) // 2],
+                dns_window=window,
             )
             evidence = replace(
                 evidence,
@@ -268,8 +314,8 @@ class NetworkCollector:
                 issues=truncated,
                 changes=changes(previous, snapshot, scope, truncated),
             )
-        if len(evidence.encode().encode("utf-8")) > 16000:
+        if len(evidence.encode().encode("utf-8")) > MAX_EVIDENCE_BYTES:
             raise ValueError(
-                "Evidence exceeds the tool reply size limit; reduce selected devices or ports"
+                "Evidence exceeds the retained artifact size limit; reduce optional metadata or scope"
             )
         return evidence

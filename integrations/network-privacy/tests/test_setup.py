@@ -192,7 +192,11 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(worker, {"version": 1})
         self.assertEqual(
             manifest["toolGrants"],
-            [{"toolScope": "network_scanning", "agent": "privacy_coordinator"}],
+            [
+                {"toolScope": "network_scanning", "agent": "privacy_coordinator"},
+                {"toolScope": "network_evidence_read", "agent": "privacy_analyst"},
+                {"toolScope": "network_evidence_read", "agent": "privacy_reviewer"},
+            ],
         )
         for name in ("tools", "ports"):
             row = json.loads(

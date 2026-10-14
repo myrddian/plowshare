@@ -23,6 +23,7 @@ from .contracts import (
 )
 from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
+from .limits import MAX_EVIDENCE_BYTES
 from .operator_state import OperatorStore
 from .ports import PrivacyPort, evidence_name
 
@@ -182,7 +183,7 @@ class Worker:
                     previous.evidence if previous else None,
                     previous.revision if previous else None,
                 )
-                if len(evidence.encode().encode("utf-16-le")) // 2 > 60000:
+                if len(evidence.encode().encode("utf-16-le")) // 2 > MAX_EVIDENCE_BYTES:
                     raise ValueError("Evidence exceeds the direct-read bound")
                 receipt = replace(receipt, phase="collected", evidence=evidence)
                 self.receipts.save(receipt)
@@ -242,36 +243,59 @@ class Worker:
             correlation_id=receipt.scan_id,
             parent_topic=receipt.source_topic,
             parent_event_id=receipt.source_event,
-            text=json.dumps(
-                {
-                    "version": 1,
-                    "collector": self.config.collector,
-                    "scan_id": receipt.scan_id,
-                    "revision": receipt.revision,
-                    "mode": receipt.evidence.mode,
-                    "changes": receipt.evidence.changes
-                    if receipt.investigation is None or receipt.investigation.requested
-                    else (),
-                    **(
-                        {"observed_changes": receipt.evidence.changes}
-                        if receipt.investigation
-                        else {}
-                    ),
-                    "issues": receipt.evidence.issues,
-                    **(
-                        {"baseline": receipt.evidence.baseline}
-                        if receipt.evidence.baseline is not None
-                        else {}
-                    ),
-                    **(
-                        {"investigation": asdict(receipt.investigation)}
-                        if receipt.investigation
-                        else {}
-                    ),
-                },
-                allow_nan=False,
-            ),
+            text=self.completion_text(receipt),
         )
+
+    def completion_text(self, receipt: Receipt) -> str:
+        """Bound event previews independently of full retained evidence.
+
+        Historical small completion bytes remain identical for reconciliation.
+        New large sweeps expose total counts when previews must be shortened;
+        the owning evidence revision always retains the complete comparison.
+        """
+        evidence = receipt.evidence
+        if evidence is None or receipt.revision is None:
+            raise ValueError("Completion requires retained evidence")
+        row = {
+            "version": 1,
+            "collector": self.config.collector,
+            "scan_id": receipt.scan_id,
+            "revision": receipt.revision,
+            "mode": evidence.mode,
+            "changes": evidence.changes
+            if receipt.investigation is None or receipt.investigation.requested
+            else (),
+            **({"observed_changes": evidence.changes} if receipt.investigation else {}),
+            "issues": evidence.issues,
+            **(
+                {"baseline": evidence.baseline} if evidence.baseline is not None else {}
+            ),
+            **(
+                {"investigation": asdict(receipt.investigation)}
+                if receipt.investigation
+                else {}
+            ),
+        }
+        encoded = json.dumps(row, allow_nan=False)
+        if len(encoded) <= 24000:
+            return encoded
+        # The serializer remains this transport boundary; domain callers receive
+        # no raw mapping and do not infer completion from an event preview.
+        row["changes_count"] = len(evidence.changes) if row["changes"] else 0
+        if "observed_changes" in row:
+            row["observed_changes_count"] = len(evidence.changes)
+        for size in (32, 16, 8, 4, 1, 0):
+            row["changes"] = (
+                evidence.changes[:size]
+                if receipt.investigation is None or receipt.investigation.requested
+                else ()
+            )
+            if "observed_changes" in row:
+                row["observed_changes"] = evidence.changes[:size]
+            encoded = json.dumps(row, allow_nan=False)
+            if len(encoded) <= 24000:
+                return encoded
+        raise ValueError("Completion coverage metadata exceeds the event preview bound")
 
     def manual_request(self, publication: Publication) -> RelayPublishRequest:
         return RelayPublishRequest(

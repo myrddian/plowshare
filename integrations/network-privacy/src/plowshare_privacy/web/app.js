@@ -7,6 +7,7 @@ let selected = null;
 let refreshPending = false;
 let settingsLoaded = false;
 let settingsPending = false;
+let monitoringDraft = false;
 let piholePending = false;
 let monitorEditable = false;
 let overview = null;
@@ -172,7 +173,7 @@ function renderCollections(scans) {
     button.type = 'button';
     const row = element('span', undefined, 'row');
     row.append(element('span', new Date(scan.occurred_at).toLocaleString()), element('span', phases[scan.phase] || scan.phase, 'badge'));
-    button.append(row, element('small', `${scan.changes.length} comparison entries · ${scan.issues.length} coverage notes${scan.mode === 'fixture' ? ' · fixture' : ''}`));
+    button.append(row, element('small', `${scan.change_count ?? scan.changes.length} comparison entries · ${scan.issue_count ?? scan.issues.length} coverage notes${scan.mode === 'fixture' ? ' · fixture' : ''}`));
     button.disabled = scan.phase === 'queued';
     button.addEventListener('click', () => {showEvidence(scan.scan_id).then(() => renderCollections(scans)).catch(error => notice(error.message, true));});
     container.append(button);
@@ -207,7 +208,7 @@ async function refresh() {
     byId('collector').textContent = status.collector;
     byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.collection_enabled === false ? 'Disabled' : status.state.replaceAll('_', ' ');
     byId('detail').textContent = status.state !== 'attention_required' && status.collection_enabled === false ? 'Enable collection in Settings when you are ready.' : status.detail;
-    byId('change-count').textContent = scans.length ? scans[0].changes.filter(change => !change.startsWith('Baseline')).length : '—';
+    byId('change-count').textContent = scans.length ? scans[0].change_count ?? scans[0].changes.filter(change => !change.startsWith('Baseline')).length : '—';
     byId('report-count').textContent = reportResult.error ? 'Unavailable' : reportResult.value.length;
     byId('scan').disabled = status.state === 'attention_required' || status.collection_enabled === false;
     renderCollections(scans);
@@ -242,6 +243,7 @@ byId('disconnect').addEventListener('click', async () => {
   profileEdit = null; profileBlocked = false; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true;
   for (const id of ['profile-name','profile-owner','profile-model','profile-purpose','profile-expected','profile-notes']) byId(id).value = '';
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
+  monitoringDraft = false;
   bearer = ''; authenticated = false; selected = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; deviceSignature = null; findingSignature = null; notified = null;
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings']) byId(id).replaceChildren();
   for (const id of ['pihole-origin','pihole-password','administrator-password','zone']) byId(id).value = '';
@@ -284,7 +286,9 @@ function renderDevices(report) {
     const label = element('label', undefined, 'device');
     const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.value = device.address; checkbox.checked = targets.has(device.address);
     checkbox.addEventListener('change', () => {
-      const selectedTargets = new Set(byId('targets').value.split(',').map(value => value.trim()).filter(Boolean));
+      const draft = byId('targets').value;
+      const selectedTargets = new Set(draft.includes('/') ? [...container.querySelectorAll('input:checked')].map(input => input.value) : draft.split(',').map(value => value.trim()).filter(Boolean));
+      monitoringDraft = true;
       if (checkbox.checked) selectedTargets.add(device.address); else selectedTargets.delete(device.address);
       byId('targets').value = [...selectedTargets].join(', ');
       if (selectedTargets.size) byId('enabled').checked = true;
@@ -293,7 +297,7 @@ function renderDevices(report) {
     description.append(element('small', device.open_ports.length ? `Open ports: ${device.open_ports.join(', ')}` : 'Responded; selected ports closed'));
     label.append(checkbox, description); container.append(label);
   });
-  byId('discovery-detail').textContent = `${report.devices.length} responding addresses. Select up to 32 devices. ${report.coverage}`;
+  byId('discovery-detail').textContent = `${report.devices.length} responding addresses. Select up to 256 devices, or monitor the whole /24 subnet. ${report.coverage}`;
 }
 async function loadSettings() {
   const settings = await api('/api/monitoring');
@@ -309,6 +313,23 @@ async function loadSettings() {
   renderMonitorSettings(settings);
   settingsLoaded = true;
 }
+byId('use-subnet').addEventListener('click', () => {
+  const network = byId('network').value.trim();
+  if (!network) {notice('Enter your private subnet first.', true); return;}
+  byId('targets').value = network;
+  monitoringDraft = true;
+  for (const checkbox of byId('devices').querySelectorAll('input')) checkbox.checked = false;
+  byId('settings-detail').textContent = 'Subnet scope prepared. Save monitoring to validate and retain it; no scan has started.';
+});
+for (const id of ['targets','ports','device-labels','enabled']) byId(id).addEventListener('input', () => {
+  monitoringDraft = true;
+  byId('settings-detail').textContent = 'Monitoring changes are not saved. Choose Save monitoring to retain them.';
+});
+function filterDevices() {
+  const query = byId('device-search').value.trim().toLowerCase();
+  for (const card of byId('device-cards').querySelectorAll('.device-card')) card.hidden = !card.dataset.search.includes(query);
+}
+byId('device-search').addEventListener('input', filterDevices);
 byId('discover-form').addEventListener('submit', async event => {
   event.preventDefault();
   byId('discover').disabled = true;
@@ -330,10 +351,11 @@ byId('monitor-form').addEventListener('submit', async event => {
       const separator = line.indexOf('=');
       const address = line.slice(0, separator).trim();
       const name = line.slice(separator + 1).trim();
-      if (separator < 1 || !name || !targets.includes(address) || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
+      if (separator < 1 || !name  || Object.hasOwn(labels, address)) throw new Error('Use one selected address=name per line, without duplicate addresses.');
       labels[address] = name;
     }
     const result = await api('/api/monitoring', {method:'POST', body:JSON.stringify({enabled:byId('enabled').checked, targets, ports:portSelection(), labels})});
+    monitoringDraft = false;
     renderMonitorSettings(result);
     notice(result.pending ? 'Monitoring settings saved. They are waiting to apply; existing scan work keeps its original configuration.' : 'Monitoring settings saved.');
     await refresh().catch(error => notice('Monitoring settings were saved, but dashboard refresh failed. ' + error.message, true));
@@ -396,6 +418,7 @@ function renderOverview(value) {
   if (!value.devices.length) cards.append(element('p', 'Choose devices in Settings to begin monitoring.'));
   for (const device of value.devices) {
     const card = element('article', undefined, 'device-card');
+    card.dataset.search = [device.name, device.address, device.identity?.mac, device.identity?.hostname, device.identity?.vendor].filter(Boolean).join(' ').toLowerCase();
     card.append(element('h3', device.name), element('p', device.address));
     card.append(element('p', device.identity ? `${device.identity.mac || device.identity.device_id}${device.identity.vendor ? ' · ' + device.identity.vendor : ''}` : 'Address only; physical identity not observed', 'hint'));
     card.append(element('p', device.last_seen ? `Last evidence ${new Date(device.last_seen).toLocaleString()}` : 'Awaiting first evidence', 'hint'));
@@ -408,6 +431,7 @@ function renderOverview(value) {
     card.append(history, profile); cards.append(card);
   }
   }
+  filterDevices();
   const nextFindingSignature = JSON.stringify(value.findings);
   if (nextFindingSignature !== findingSignature) {
   findingSignature = nextFindingSignature;
@@ -449,7 +473,7 @@ function renderPiHoleSaved(configured, pending = false) {
 function renderMonitorSettings(settings) {
   monitorEditable = settings.editable;
   byId('save-monitoring').disabled = !monitorEditable;
-  byId('settings-detail').textContent = settings.detail;
+  byId('settings-detail').textContent = monitoringDraft ? 'Monitoring changes are not saved. Choose Save monitoring to retain them. ' + settings.detail : settings.detail;
   renderPiHoleSaved(settings.pihole_configured, settings.pending);
   byId('pihole-save').disabled = !monitorEditable || piholePending;
   byId('pihole-blocker').textContent = settings.pending || !monitorEditable ? settings.detail : '';

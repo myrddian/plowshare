@@ -364,4 +364,4 @@ class DeviceProfilesTest(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(ValueError):
             await port.versions()
-        self.assertEqual(client.request.call_args.args[0].offset, 300)
+        self.assertEqual(client.request.call_args.args[0].offset, 4000)

@@ -484,13 +484,15 @@ class OperatorConsole:
         if plan is None or discovered is None:
             raise ValueError("Configure Pi-hole and find devices first")
         candidates = tuple(item.address for item in discovered.devices)
-        if len(candidates) > 32:
-            raise ValueError(
-                "Use discovery with at most 32 responding addresses for identity checks"
-            )
-        current = await PiHoleV6(plan).identify(candidates, utc_now())
+        # Identity lookups share the collector batch boundary, not a global
+        # inventory ceiling. Confirmation still never retargets devices automatically.
+        source = PiHoleV6(plan)
+        identities: list[DeviceIdentity] = []
+        for start in range(0, len(candidates), 32):
+            current = await source.identify(candidates[start : start + 32], utc_now())
+            identities.extend(current.devices)
         addresses: dict[str, set[str]] = {}
-        for item in current.devices:
+        for item in identities:
             addresses.setdefault(item.device_id, set()).add(item.address)
         associations = {
             device: next(iter(values))

@@ -5,7 +5,7 @@
     "accounts": []
   },
   "caps": {
-    "steps": 60,
+    "steps": 256,
     "budget": 200,
     "autoIncrease": false
   },
@@ -30,12 +30,30 @@
         "network_evidence",
         "network_destinations"
       ]
+    },
+    {
+      "scope": "network_evidence_read",
+      "provider": "privacy-scanner",
+      "grants": [
+        "network_scope",
+        "network_scan_list",
+        "network_evidence",
+        "network_destinations"
+      ]
     }
   ],
   "toolGrants": [
     {
       "toolScope": "network_scanning",
       "agent": "privacy_coordinator"
+    },
+    {
+      "toolScope": "network_evidence_read",
+      "agent": "privacy_analyst"
+    },
+    {
+      "toolScope": "network_evidence_read",
+      "agent": "privacy_reviewer"
     }
   ]
 }
