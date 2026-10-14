@@ -1,3 +1,4 @@
+import type { NativeCommandResult } from 'plowshare-mcp-integration';
 import type {
   ManagementOperation,
   ManagementValue,
@@ -686,10 +687,12 @@ export type Request =
   | { action: 'run'; conversation: string; agent: string; text: string }
   | { action: 'cancel'; job: string }
   | { action: 'answer'; id: string; decision: 'once' | 'deny' }
+  | { action: 'native-mcp'; command: string }
   | ProviderManagementCall
   | { action: 'provider-management-pending' }
   | { action: 'provider-management-recover'; intent: ManagementIntent };
 export interface Reply {
+  nativeMcp?: NativeCommandResult;
   providerManagement?: ManagementValue;
   providerManagementPending?: readonly ManagementIntent[];
   providerManagementRefusal?: {

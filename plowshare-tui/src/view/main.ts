@@ -1,3 +1,10 @@
+import { mcpControls } from './mcp-controls.ts';
+import {
+  NativeHostCommands,
+  NativeMcpSessions,
+  decodeNativeCommand,
+  nativeProviderConnection,
+} from 'plowshare-mcp-integration';
 import {
   FileStores,
   manageFileStores,
@@ -1205,9 +1212,25 @@ export async function converse(talking: Talking): Promise<void> {
    * nobody awaiting it would be an unhandled rejection, which is a crash
    * rather than a message.
    */
+  let nativeMcp: NativeHostCommands | undefined;
+  let nativeClosing: Promise<void> = Promise.resolve();
+  const stopNative = (): void => {
+    const current = nativeMcp;
+    nativeMcp = undefined;
+    if (current !== undefined)
+      nativeClosing = Promise.all([nativeClosing, current.close()])
+        .then(() => undefined)
+        .catch(() =>
+          show(
+            'trouble',
+            'Native MCP stopped with retained uncertainty; inspect private receipts.',
+          ),
+        );
+  };
   let connectionLost = false;
   let reconnectNow: (() => Promise<void>) | undefined;
   function onClose(): void {
+    stopNative();
     connectionLost = true;
     jobs.reset(true);
     dropped?.(new Dropped());
@@ -4338,10 +4361,16 @@ export async function converse(talking: Talking): Promise<void> {
           .filter((row) => row.served)
           .map((row) => [row.name, row.description]),
       ),
-      (chosen.agent.commands ?? []).map((command) => ({
-        name: command.command,
-        detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-      })),
+      [
+        {
+          name: '/mcp',
+          detail: 'manage This client HTTP/STDIO and Server HTTP connections',
+        },
+        ...(chosen.agent.commands ?? []).map((command) => ({
+          name: command.command,
+          detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+        })),
+      ],
     );
     if (!starting) {
       const changed =
@@ -5050,10 +5079,37 @@ export async function converse(talking: Talking): Promise<void> {
         // harder to read back than one that showed both.
         show(
           'person',
-          /^\/provider\s+credential\s+put(?:\s|$)/u.test(text)
-            ? '/provider credential put [credential coordinates; masked entry]'
-            : text,
+          text.startsWith('/mcp local ')
+            ? '/mcp local [instance command; private input]'
+            : /^\/provider\s+credential\s+put(?:\s|$)/u.test(text)
+              ? '/provider credential put [credential coordinates; masked entry]'
+              : text,
         );
+        if (text.startsWith('/mcp local ')) {
+          try {
+            if (connectionLost || !loginHandle)
+              throw new Error(
+                'Native MCP requires the current authenticated login',
+              );
+            const raw: unknown = JSON.parse(text.slice('/mcp local '.length));
+            const command = decodeNativeCommand(raw);
+            const owningSocket = wire;
+            nativeMcp ??= new NativeHostCommands(
+              { origin: talking.door.base, account: loginHandle },
+              new NativeMcpSessions(process.env),
+              nativeProviderConnection(checkedTransport(owningSocket), () =>
+                connection.close(),
+              ),
+            );
+            show('client', JSON.stringify(await nativeMcp.execute(command)));
+          } catch {
+            show(
+              'trouble',
+              'Native MCP request refused. Review consent, profile ownership and original private receipts.',
+            );
+          }
+          continue;
+        }
         // WHAT THE LINE IS, BEFORE IT IS TREATED AS AN UTTERANCE. The
         // reading is `session.ts`'s, so this file goes on writing no dotted
         // type and no payload key; the three arms below are the order and
@@ -5066,6 +5122,38 @@ export async function converse(talking: Talking): Promise<void> {
         const now = place;
         if (now === undefined) {
           return;
+        }
+        if (text === '/mcp') {
+          if (connectionLost || !loginHandle) {
+            show('trouble', 'Connect before managing MCP connections.');
+            continue;
+          }
+          const owner = { origin: talking.door.base, account: loginHandle };
+          const owningSocket = wire;
+          nativeMcp ??= new NativeHostCommands(
+            owner,
+            new NativeMcpSessions(process.env),
+            nativeProviderConnection(checkedTransport(owningSocket), () =>
+              connection.close(),
+            ),
+          );
+          const nativeOwner = nativeMcp;
+          await mcpControls({
+            project: now.project ?? `personal:${loginHandle}`,
+            owner,
+            current: () =>
+              !connectionLost &&
+              nativeMcp === nativeOwner &&
+              loginHandle === owner.account,
+            prompt: {
+              show: (message) => show('client', message),
+              read: (masked) => surface.asked(masked),
+            },
+            native: (command) => nativeOwner.execute(command),
+            server: providerManagement,
+            authorize: openProviderAuthorization,
+          });
+          continue;
         }
         if (text === '/tools') {
           try {
@@ -5205,10 +5293,17 @@ export async function converse(talking: Talking): Promise<void> {
                 .filter((row) => row.served)
                 .map((row) => [row.name, row.description]),
             ),
-            (selected?.commands ?? []).map((command) => ({
-              name: command.command,
-              detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
-            })),
+            [
+              {
+                name: '/mcp',
+                detail:
+                  'manage This client HTTP/STDIO and Server HTTP connections',
+              },
+              ...(selected?.commands ?? []).map((command) => ({
+                name: command.command,
+                detail: `${command.description} · ${command.argumentHint} · ${command.mode ?? (command.kind === 'skill' ? 'DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate' : 'orchestration')} · ${command.executor}`,
+              })),
+            ],
           );
           place = { ...now, who: selected ?? { ...now.who, commands: [] } };
           if (selected)
@@ -5653,6 +5748,7 @@ export async function converse(talking: Talking): Promise<void> {
             'client',
             toListing([
               ...describeHelp(),
+              '/mcp — guided This client HTTP/STDIO and Server HTTP connection controls',
               ...(now.who.commands ?? []).map(
                 (command) =>
                   `${command.command} ${command.argumentHint} — ${command.description}${command.kind === 'skill' && command.mode === null ? ' (DIRECT by default; --mode=INHERITED|SUMMARISED|NEW to delegate)' : ''}`,
@@ -5854,6 +5950,8 @@ export async function converse(talking: Talking): Promise<void> {
     // two failures caught above — a dropped socket, a second Ctrl-C — are
     // exactly the paths that leave one behind.
     surface.working(undefined);
+    stopNative();
+    await nativeClosing;
     recoveryClosing = true;
     clearInterval(recoveryTimer);
     reconnectNow = undefined;

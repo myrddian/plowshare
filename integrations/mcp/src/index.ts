@@ -22,3 +22,31 @@ export type {
 
 export { DEFAULT_LIMITS, DEFAULT_CLIENT_INFO } from './settings.ts';
 export type { McpLimits, McpClientInfo } from './settings.ts';
+
+export { McpToolClient } from './tool-client.ts';
+export {
+  NativeMcpHost,
+  NativeMcpHosts,
+  NativeMcpSessions,
+} from './native-host.ts';
+export type {
+  NativeSessions,
+  NativeInvocation,
+  NativeHostStatus,
+} from './native-host.ts';
+export { decodeNativeConfig, readNativeConfig } from './native-config.ts';
+export type { NativeMcpConfig, NativeOwner } from './native-config.ts';
+export { NativeProviderBridge } from './native-bridge.ts';
+export {
+  NativeHostCommands,
+  decodeNativeCommand,
+  decodeNativeInvocation,
+  nativeProviderConnection,
+} from './native-commands.ts';
+export type {
+  NativeCommand,
+  NativeCommandResult,
+  NativeManagedStatus,
+} from './native-commands.ts';
+export type { NativeProfile, NativeProfileStore } from './native-profiles.ts';
+export type { NativeSharingConnection } from './native-bridge.ts';

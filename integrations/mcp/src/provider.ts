@@ -19,7 +19,6 @@ import {
   toolDeploymentConfig,
 } from 'plowshare-client-node/tools';
 import type {
-  McpSession,
   McpSessions,
   McpTool,
   McpProtocol,
@@ -28,7 +27,8 @@ import type {
 import { rejected, unknownResult, withinDeadline } from './contracts.ts';
 import { DEFAULT_LIMITS, PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { McpLimits } from './settings.ts';
-import { contractHash, declaration, result } from './codec.ts';
+import { contractHash, declaration } from './codec.ts';
+import { McpToolClient } from './tool-client.ts';
 import type { CataloguePublicationIntent } from './journal.ts';
 
 export type ProviderConnection = Pick<Plowshare, 'request'>;
@@ -95,37 +95,6 @@ function identity(
     endpoint: credential.connection.definition.endpoint,
   });
 }
-async function catalogue(
-  session: McpSession,
-  signal: AbortSignal,
-  limits: McpLimits,
-): Promise<readonly McpTool[]> {
-  const tools: McpTool[] = [];
-  const cursors = new Set<string>();
-  let cursor: string | null = null;
-  for (let page = 0; page < limits.maxPages; page++) {
-    signal.throwIfAborted();
-    const next = await session.page(cursor, signal);
-    tools.push(...next.tools);
-    if (
-      tools.length > PROVIDER_CATALOGUE_TOOL_LIMIT ||
-      new Set(tools.map((tool) => tool.name)).size !== tools.length
-    )
-      throw new Error('Duplicate or oversized MCP catalogue');
-    if (next.cursor === null) {
-      if (!tools.length)
-        throw new Error('MCP catalogue has no supported tools');
-      return Object.freeze(
-        tools.sort((a, b) => a.name.localeCompare(b.name, 'en')),
-      );
-    }
-    if (cursors.has(next.cursor))
-      throw new Error('MCP pagination repeated a cursor');
-    cursors.add(next.cursor);
-    cursor = next.cursor;
-  }
-  throw new Error('MCP discovery exceeded page bound');
-}
 /** One immutable catalogue and upstream session per credential context. A change requires a new worker. */
 export class McpProvider {
   readonly tools: readonly RegisteredTool[];
@@ -136,8 +105,7 @@ export class McpProvider {
     private readonly registration: HostedToolRegistration,
     private readonly credentials: McpCredentials,
     private readonly credential: HostedToolCredential,
-    private readonly session: McpSession,
-    private readonly snapshot: readonly McpTool[],
+    private readonly client: McpToolClient,
     private readonly options: McpWorkerOptions,
     private readonly stop: AbortSignal,
     tools: readonly RegisteredTool[],
@@ -190,7 +158,12 @@ export class McpProvider {
       signal,
     );
     try {
-      const snapshot = await catalogue(session, signal, limits);
+      const client = await McpToolClient.discover(session, signal, limits);
+      const snapshot = client.tools;
+      if (snapshot.length > PROVIDER_CATALOGUE_TOOL_LIMIT)
+        throw new Error(
+          'Duplicate or oversized MCP catalogue for server provider publication',
+        );
       const tools = Object.freeze(
         snapshot.map((tool) => ({
           declaration: declaration(
@@ -230,8 +203,7 @@ export class McpProvider {
         registration,
         credentials,
         credential,
-        session,
-        snapshot,
+        client,
         options,
         stop,
         tools,
@@ -260,21 +232,14 @@ export class McpProvider {
         'MCP credentials changed; withdraw and start a new context',
       );
     }
-    const fresh = await catalogue(
-      this.session,
-      signal,
-      this.options.limits ?? DEFAULT_LIMITS,
-    );
-    if (
-      contractHash(fresh.map((tool) => tool.metadata)) !==
-      contractHash(this.snapshot.map((tool) => tool.metadata))
-    ) {
+    try {
+      await this.client.refresh(signal);
+    } catch (error) {
       this.active = false;
-      throw new Error(
-        'MCP catalogue changed; withdraw before starting a new context',
-      );
+      throw error;
     }
   }
+
   assertActive(): void {
     if (!this.active) throw new Error('MCP context is no longer safe to offer');
   }
@@ -324,11 +289,13 @@ export class McpProvider {
       }
       // From this point any error is uncertain. Never refresh auth, fulfil input, or resend.
       try {
-        return result(
-          tool,
-          await this.session.call(tool, call.arguments, signal),
-          (this.options.limits ?? DEFAULT_LIMITS).maxResultBytes,
+        const outcome = await this.client.invoke(
+          tool.name,
+          call.arguments,
+          signal,
         );
+        if (outcome.state === 'UNKNOWN') this.active = false;
+        return outcome;
       } catch {
         this.active = false;
         return unknownResult();
@@ -357,7 +324,7 @@ export class McpProvider {
   }
   async close(): Promise<void> {
     this.active = false;
-    await this.session.close();
+    await this.client.close();
   }
 }
 /** Persist catalogue submission intent before the SDK mutation; ambiguity remains actionable on disk. */

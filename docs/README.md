@@ -17,6 +17,7 @@
 - [Conversation search](conversation-retrieval.md)
 - [Memory navigation](memory-digests.md)
 - [Information and evidence](information-system.md)
+- [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

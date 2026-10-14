@@ -8,7 +8,8 @@
     "node": ">=22.13"
   },
   "exports": {
-    ".": "./build/mcp/index.js"
+    ".": "./build/mcp/index.js",
+    "./native-editor": "./build/mcp/native-editor.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

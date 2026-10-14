@@ -187,13 +187,17 @@ changes remain a subsequent implementation task.
    credential subjects. Server hosting accepts HTTP only; native hosting adds
    STDIO. Reuse SDK journals and exact invocation identities. Reconnecting or
    refreshing metadata never resubmits an uncertain call.
-5. **Expose connection management in clients.** First review the
+5. **Native execution: delivered as runtime.** HTTP/STDIO sessions run directly
+   inside native client processes, with optional server sharing through existing
+   provider scopes. CLI foreground commands, TUI commands and desktop main IPC
+   own lifetime and receipts. See [native hosting](native-mcp-hosting.md).
+6. **Expose connection management in clients.** First review the
    [workflow matrix and layouts](mcp-client-workflows.md), then provide server-held user
    authorization, authorized service-account selection, agent assignments,
    compatibility diagnostics and instance-local hosting in CLI/TUI/desktop.
    Browser management operates through typed server capabilities. Reuse shared
    client operations and show which host executes a tool.
-6. **Verify interoperability and lifecycle.** Exercise an organization endpoint
+7. **Verify interoperability and lifecycle.** Exercise an organization endpoint
    with two users, a service-bound Application, and native HTTP/STDIO hosts.
    Validate cross-client use, instance isolation, revocation, expiry, restart,
    cancellation, schema changes and lost responses against retained receipts.
