@@ -101,6 +101,28 @@ await test('lost admission remains uncertain across restart and blocks new effec
   assert.equal(restarted.gateway.statuses.length, 0);
   assert.equal(restarted.repository.state.records[0]?.admission, 'UNKNOWN');
 });
+
+await test('completing work and restarting preserves the same context for the next message', async () => {
+  const f = fixture();
+  await f.adapter.accept(input());
+  const context = f.repository.state.records[0]?.contextId;
+  assert.ok(context);
+  f.gateway.result = {
+    ...f.gateway.result,
+    state: 'COMPLETED',
+    ending: 'ANSWERED',
+  };
+  await f.adapter.poll();
+  const raw: unknown = JSON.parse(f.repository.persisted);
+  const restarted = fixture(
+    f.config,
+    new MemoryState(decodeState(raw, f.config, PRINCIPAL, BOT)),
+  );
+  await restarted.adapter.accept(input({ messageId: '200000000000000002' }));
+  assert.equal(restarted.gateway.submissions.length, 1);
+  assert.equal(restarted.gateway.submissions[0]?.context, context);
+  assert.equal(restarted.repository.state.contexts.length, 1);
+});
 await test('known unsubmitted work is not retried, but a distinct user request may proceed', async () => {
   const f = fixture();
   f.gateway.failure = new ConnectionFault(

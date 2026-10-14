@@ -14,7 +14,7 @@ server imports, database access, core API changes or inference loop.
    Send Messages, Read Message History and Send Messages in Threads for the selected
    channels. The adapter requests Guilds, Guild Messages and Message Content;
    it does not request Server Members or Presence. It does not register slash commands.
-2. Deploy the [basic receiving Application](#basic-receiving-application), or use
+2. Deploy the [Discord Application](#discord-application), or use
    an existing authorized server Application. Create a
    [Plowshare service account](../../docs/server-administration.md#service-accounts-and-scoped-tokens),
    declare its owner handle in each Application's manifest, grant Contributor
@@ -23,8 +23,8 @@ server imports, database access, core API changes or inference loop.
    appears in their Applications view. The configured bots must be exported
    and present in the server/project definition catalogue. Credentials cannot
    supply client-local bot definitions or a local workspace presence.
-3. Copy [the illustrative configuration](examples/config.json) outside the checkout.
-   Replace the reserved example origin, placeholder absolute state path and fictitious
+3. Copy [the configuration template](config.template.json) outside the checkout.
+   Replace the reserved placeholder origin, placeholder absolute state path and fictitious
    Discord IDs. Select real project and concrete exported bot names. List immutable
    Discord user IDs explicitly; this version has no role-based or open-access mode.
 4. Supply the two credentials through the configured environment variable names,
@@ -60,13 +60,23 @@ Unmapped guilds/channels, unlisted users, DMs, other bots and webhook messages d
 not submit work. Only text is forwarded; attachment-only messages are ignored.
 
 Each `(guild, channel or thread, thread parent, Discord user, project, bot)` has
-its own retained incoming context. Sharing a Discord channel does not share model history. Replies
-stay in the original channel/thread and reference the triggering message. There
-is no automatic thread creation, linked-user mode, native conversation adoption,
-agent picker or arbitrary project/bot selection from message text.
+its own retained incoming context. The first accepted message asks the server to
+create that context, including a persistent receiving bot instance/conversation.
+The adapter saves its returned context ID; subsequent messages pass that ID to
+`incoming.receive`. Each message gets a fresh task in the retained conversation,
+with previous conversation history available under the server's context projection
+rules. Completing a task does not discard the context or create a new bot instance.
+
+Bindings survive adapter restarts when private state and the same service token
+principal are preserved. Another user, channel/thread, parent, project or bot gets
+a separate context. Sharing a Discord channel does not share model history.
+Replies stay in the original channel/thread and reference the triggering message.
+Actual Discord DMs are unsupported in this version. There is no automatic thread
+creation, linked-user mode, native conversation adoption, agent picker or arbitrary
+project/bot selection from message text.
 
 ```text
-@Plowshare Investigate this claim using the retained project evidence.
+@Plowshare Help me compare these two approaches: ...
 @Plowshare !plowshare status
 @Plowshare !plowshare cancel
 ```
@@ -91,18 +101,28 @@ be disclosed to that audience. Routing and sender separation do not create
 server-enforced permissions for individual Discord people. The shared token
 retains its project authority; per-bot exposure is adapter policy.
 
-## Basic receiving Application
+## Discord Application
 
-[examples/application](examples/application/plowshare.json) is a small deployable
-server Application named `discord`. Its root manifest and
-[exported `discord_assistant` bot](examples/application/bots/discord_assistant.md)
-match the example channel mapping. The bot has no tools, delegation or filesystem
+[application](application/plowshare.json) is the deployable server Application
+named `discord`. Its root manifest and
+[exported `discord_assistant` bot](application/bots/discord_assistant.md)
+match the initial channel mapping. The bot has no tools, delegation or filesystem
 scopes; it answers conversation text with a four-call limit. Its `reasoning` model
 specifier must be served by your server; choose a configured model specifier
 before deploying if needed. Local and server command execution are disabled.
 
-Copy the template outside this checkout and configure its `access.accounts` with
-the **existing service account owner's handle** and your human operator's handle:
+This is the initial conversation capability. The shared service account does not
+require the bot to stay minimal: additional exported bots, skills, tools and
+project resources can use existing public contracts as their declarations and
+server grants permit. Add those capabilities deliberately to the Application,
+and map approved channels to their concrete bot names. Tool grants and approvals
+still apply alongside account access. All Discord users execute under the same
+service identity, so capabilities exposed through a mapped bot are available to
+its allowlisted participants; server account permissions do not distinguish them.
+
+Copy the Application source outside this checkout and configure its
+`access.accounts` with the **existing service account owner's handle** and your
+human operator's handle:
 
 ```json
 {
@@ -132,11 +152,11 @@ token. For an already registered project, use its existing source-management
 workflow and root manifest rather than submitting a first deployment over it.
 
 The server deploys the manifest and bot definitions. Run the external Discord
-adapter process separately with the example mapping targeting that project.
+adapter process separately with the configured mapping targeting that project.
 Deployment does not launch the Node process. Giving the adapter checkout a
 manifest would not authorize other mapped projects: every receiving Application
 needs its own deployed manifest, membership and token scope. No core changes
-are required for this template or the adapter.
+are required for this Application or the adapter.
 
 ## Optional proactive notifications
 
@@ -223,7 +243,7 @@ Typed fakes test routing, input refusal, per-user/thread isolation, receipt
 ordering, duplicate admission, uncertainty, cancellation boundaries, notification
 fencing and restart behavior. Filesystem tests check exclusive/private state.
 Test-only Java dependencies exercise current manifest and bot loaders, including
-empty grants, role ceilings and the template's absence of tool authority.
+empty grants, role ceilings and the initial bot's absence of tool authority.
 The consumer check compiles and tests against packed public SDK artifacts outside
 the checkout. These checks start no database and do not prove live Discord login,
 intents, channel permissions or a configured Plowshare service token. Live

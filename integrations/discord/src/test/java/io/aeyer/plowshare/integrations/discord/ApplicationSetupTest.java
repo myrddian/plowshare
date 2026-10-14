@@ -14,13 +14,16 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** Validate receiving source through current loaders without a server, model or database. */
-class ApplicationExampleTest {
+class ApplicationSetupTest {
   @Test
   void receiving_application_matches_the_adapter_and_has_no_tool_authority() throws Exception {
-    Path examples = Path.of(System.getProperty("integration.examples"));
+    Path integration = Path.of(System.getProperty("integration.directory"));
     var route =
-        new ObjectMapper().readTree(examples.resolve("config.json").toFile()).get("routes").get(0);
-    Path root = examples.resolve("application");
+        new ObjectMapper()
+            .readTree(integration.resolve("config.template.json").toFile())
+            .get("routes")
+            .get(0);
+    Path root = integration.resolve("application");
     var boundary =
         WorkspaceApplicationPolicy.parse(
             Files.readString(root.resolve("plowshare.json")), route.get("project").asText());

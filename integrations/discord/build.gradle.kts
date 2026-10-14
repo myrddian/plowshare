@@ -7,8 +7,9 @@ dependencies {
     testImplementation(files(rootProject.project(":plowshare-server").configurations.named("runtimeClasspath")))
 }
 tasks.test {
-    inputs.dir("examples").withPathSensitivity(PathSensitivity.RELATIVE)
-    systemProperty("integration.examples", file("examples").absolutePath)
+    inputs.dir("application").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("config.template.json")
+    systemProperty("integration.directory", projectDir.absolutePath)
 }
 val pnpmInstall by tasks.registering(Exec::class) {
     workingDir = projectDir

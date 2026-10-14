@@ -17,8 +17,9 @@ Source locations are grouped here; Gradle commands and distribution executable
 names remain stable. See the [coding standards](../docs/coding-standards.md) for
 the SDK boundary and [SDKs](../sdk/README.md) for the client libraries.
 
-A2A, Home Assistant and Discord include deployable Application templates under
-`examples/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
+A2A and Home Assistant include deployable Application templates under
+`examples/application/`. The [Discord Application](discord/application/plowshare.json)
+lives under `discord/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
 uses `network-privacy/network-privacy-watch/`. Each Application is identified
 by its root `plowshare.json`. Register
 these roots as Applications so authorized clients list them under **Applications**.
