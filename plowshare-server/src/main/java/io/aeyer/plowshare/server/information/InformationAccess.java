@@ -28,10 +28,11 @@ public final class InformationAccess {
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
     return resolve(
-        account,
-        home.isGlobal()
-            ? InformationContext.Selection.personal()
-            : projectSelection(account, home.project()));
+            account,
+            home.isGlobal()
+                ? InformationContext.Selection.personal()
+                : projectSelection(account, home.project()))
+        .withView(true);
   }
 
   /** Internal project contexts must not accidentally include the server's shared catalogue. */

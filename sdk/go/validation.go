@@ -2,6 +2,7 @@ package plowshare
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/url"
 	"reflect"
@@ -16,6 +17,9 @@ import (
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
+	MaxJsonBytes          *int     `json:"maxJsonBytes"`
+	SchemaInstance        bool     `json:"schemaInstance"`
+	DocumentSchema        bool     `json:"documentSchema"`
 	ApplicationFiles      bool     `json:"applicationFiles"`
 	Web                   bool     `json:"web"`
 	SafePrecision         bool     `json:"safePrecision"`
@@ -164,6 +168,29 @@ func canonicalRelativePath(value string) bool {
 	return true
 }
 func check(s shape, value any) error {
+	if s.MaxJsonBytes != nil || s.SchemaInstance || s.DocumentSchema {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		if s.MaxJsonBytes != nil && len(data) > *s.MaxJsonBytes {
+			return errors.New("JSON value exceeds byte bound")
+		}
+		if s.SchemaInstance {
+			var decoded ToolValue
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				return err
+			}
+			if err := validateToolValue(decoded, 0, &schemaBudget{10000}); err != nil {
+				return err
+			}
+		}
+		if s.DocumentSchema {
+			if _, err := DecodeToolSchema(string(data)); err != nil {
+				return err
+			}
+		}
+	}
 	if value == nil {
 		return nil
 	}

@@ -55,6 +55,23 @@ public final class InformationFacetSql {
       String key = entry.getKey();
       Object value = entry.getValue();
       switch (key) {
+        case "contentType", "contentTypeVersion" -> {
+          sql.append(
+                  " AND EXISTS(SELECT 1 FROM information_revision_content content_facet JOIN information_content_type_versions type_facet ON type_facet.id=content_facet.type_version WHERE content_facet.revision_id=")
+              .append(revision)
+              .append(".id AND NOT content_facet.redacted AND ")
+              .append(
+                  key.equals("contentType") ? "type_facet.type_id" : "content_facet.type_version")
+              .append("=?)");
+          args.add(value);
+        }
+        case "untyped" -> {
+          sql.append(Boolean.TRUE.equals(value) ? " AND NOT EXISTS(" : " AND EXISTS(")
+              .append(
+                  "SELECT 1 FROM information_revision_content content_facet WHERE content_facet.revision_id=")
+              .append(revision)
+              .append(".id)");
+        }
         case "tags", "autoTag" -> {
           if (((List<?>) value).isEmpty()) continue;
           sql.append(" AND (")
@@ -114,6 +131,10 @@ public final class InformationFacetSql {
 
   private static Map<String, Object> values(InformationFacets facets) {
     var values = new LinkedHashMap<String, Object>();
+    if (facets.contentType() != null) values.put("contentType", facets.contentType());
+    if (facets.contentTypeVersion() != null)
+      values.put("contentTypeVersion", facets.contentTypeVersion());
+    if (facets.untyped() != null) values.put("untyped", facets.untyped());
     if (facets.kind() != null) values.put("kind", facets.kind());
     if (!facets.tags().isEmpty()) values.put("tags", facets.tags());
     if (!facets.autoTag().isEmpty()) values.put("autoTag", facets.autoTag());

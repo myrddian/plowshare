@@ -1,3 +1,9 @@
+import { utf8Length } from '../binding/files.ts';
+import {
+  decodeSchemaInstance,
+  decodeSchemaDefinition,
+  validateSchemaDefinition,
+} from './schema-instances.ts';
 import { isList, hasControlCharacters } from '../binding/values.ts';
 /** Validate dispatch structure; the server owns grants, UUID references and report semantics. */
 export function informationPayloadProblem(
@@ -23,10 +29,105 @@ export function informationPayloadProblem(
   }
   for (const key of required) if (!(key in body)) return `${type} needs ${key}`;
   for (const [key, value] of Object.entries(body)) {
-    if (key === 'filter') {
+    if (['typing', 'metadata', 'presentation', 'schema'].includes(key)) {
+      try {
+        if (key === 'schema') {
+          validateSchemaDefinition(decodeSchemaDefinition(value));
+          if (utf8Length(JSON.stringify(value)) > 65536)
+            return 'schema exceeds 64 KiB';
+        } else if (key === 'typing') {
+          if (!value || typeof value !== 'object' || isList(value))
+            return 'typing must be an object';
+          const typing = value as Record<string, unknown>;
+          if (
+            !['set', 'inherit', 'clear'].includes(String(typing['mode'])) ||
+            Object.keys(typing).some(
+              (field) => !['mode', 'version', 'metadata'].includes(field),
+            )
+          )
+            return 'invalid typing alternative';
+          if (
+            (typing['mode'] === 'set' &&
+              (typeof typing['version'] !== 'string' ||
+                !('metadata' in typing))) ||
+            (typing['mode'] === 'inherit' && 'version' in typing) ||
+            (typing['mode'] === 'clear' &&
+              ('version' in typing || 'metadata' in typing))
+          )
+            return 'invalid typing alternative';
+          if ('metadata' in typing) {
+            const instance = decodeSchemaInstance(typing['metadata']);
+            if (
+              !instance ||
+              typeof instance !== 'object' ||
+              isList(instance) ||
+              utf8Length(JSON.stringify(instance)) > 16384
+            )
+              return 'metadata must be an object within 16 KiB';
+          }
+          if (body['view'] !== 'content-types-v1')
+            return 'typing requires content-types-v1';
+        } else {
+          const instance = decodeSchemaInstance(value);
+          if (
+            !instance ||
+            typeof instance !== 'object' ||
+            isList(instance) ||
+            utf8Length(JSON.stringify(instance)) >
+              (key === 'metadata' ? 16384 : 8192)
+          )
+            return 'bounded metadata object required';
+        }
+      } catch {
+        return 'invalid bounded schema value';
+      }
+    } else if (key === 'description') {
+      if (
+        typeof value !== 'string' ||
+        value.length > 4096 ||
+        value.includes('\0')
+      )
+        return 'invalid bounded type description';
+    } else if (key === 'drafts' || key === 'publishedOnly') {
+      if (typeof value !== 'boolean') return 'drafts must be boolean';
+    } else if (key === 'view') {
+      if (value !== 'content-types-v1') return 'unsupported information view';
+    } else if (key === 'stages') {
+      if (
+        !isList(value) ||
+        !value.length ||
+        value.length > 7 ||
+        new Set(value).size !== value.length ||
+        value.some(
+          (stage) =>
+            ![
+              'extract',
+              'derive',
+              'embed',
+              'summarise',
+              'summary_embed',
+              'autoTag',
+              'tagGroups',
+            ].includes(String(stage)),
+        )
+      )
+        return 'invalid selected stages';
+    } else if (key === 'filter') {
       if (!value || typeof value !== 'object' || isList(value))
         return 'filter must be an object';
       const filter = value as Record<string, unknown>;
+      if (
+        ['contentType', 'contentTypeVersion', 'untyped'].some(
+          (key) => key in filter,
+        ) &&
+        body['view'] !== 'content-types-v1'
+      )
+        return 'type filters require supporting view';
+      if (
+        filter['untyped'] === true &&
+        ('contentType' in filter || 'contentTypeVersion' in filter)
+      )
+        return 'untyped conflicts with type filters';
       for (const [facet, selection] of Object.entries(filter)) {
         if (
           ![
@@ -39,10 +140,15 @@ export function informationPayloadProblem(
             'when',
             'subtype',
             'search',
+            'contentType',
+            'contentTypeVersion',
+            'untyped',
           ].includes(facet)
         )
           return 'unknown information facet: ' + facet;
-        if (facet === 'tags' || facet === 'autoTag') {
+        if (facet === 'untyped') {
+          if (typeof selection !== 'boolean') return 'untyped must be boolean';
+        } else if (facet === 'tags' || facet === 'autoTag') {
           if (
             !isList(selection) ||
             selection.length > 32 ||
@@ -143,9 +249,17 @@ export function informationPayloadProblem(
         'after',
         'maxModelCalls',
         'waitMs',
+        'expectedControlRevision',
       ].includes(key)
     ) {
-      const minimum = ['limit', 'maxModelCalls', 'end'].includes(key) ? 1 : 0;
+      const minimum = [
+        'limit',
+        'maxModelCalls',
+        'end',
+        'expectedControlRevision',
+      ].includes(key)
+        ? 1
+        : 0;
       if (
         typeof value !== 'number' ||
         !Number.isSafeInteger(value) ||

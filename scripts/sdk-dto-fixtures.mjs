@@ -14,6 +14,22 @@ const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const receipt = '11111111-1111-1111-1111-111111111111';
+const authored={scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,expectedRevision:receipt,typing:{mode:'inherit',metadata:{severity:null}}};
+input('information.content.revise',authored,true);
+for(const change of [{view:'foreign-profile'},{typing:{mode:'clear',metadata:{}}},{typing:{mode:'set',version:receipt}},{typing:{mode:'inherit',metadata:[]}},{typing:{mode:'inherit',metadata:{secret:'x'.repeat(4097)}}}])input('information.content.revise',{...authored,...change},false);
+input('information.retry',{scope:{kind:'personal'},view:'content-types-v1',revision:receipt,requestId:receipt,stages:['derive','embed']},true);
+input('information.retry',{scope:{kind:'personal'},view:'content-types-v1',revision:receipt,requestId:receipt,stages:['embed','embed']},false);
+input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',description:'',schema:{type:'object',properties:{severity:{type:'string'}},required:['severity'],additionalProperties:false}},true);
+input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',schema:{type:'object','$ref':'https://schemas.example/type'}},false);
+for (const key of ['__proto__','prototype','constructor']) {
+ input('information.content.revise',{...authored,typing:{mode:'inherit',metadata:{nested:{[key]:'value'}}}},false);
+ input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',schema:{type:'object',properties:{[key]:{type:'string'}}}},false);
+}
+let nested={leaf:'value'};
+for(let i=0;i<31;i++)nested={nested};
+input('information.types.validate',{scope:{kind:'personal'},view:'content-types-v1',version:receipt,metadata:nested},true);
+for(let i=0;i<2;i++)nested={nested};
+input('information.types.validate',{scope:{kind:'personal'},view:'content-types-v1',version:receipt,metadata:nested},false);
 
 const providerDefinition={"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null};
 const providerConnection={"connection": "11111111-1111-1111-1111-111111111111", "project": "app", "revision": "11111111-1111-1111-1111-111111111111", "enabled": true, "deleted": false, "definition": {"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null}};

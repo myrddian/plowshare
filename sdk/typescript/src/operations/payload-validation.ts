@@ -395,6 +395,43 @@ export const SHAPES: Record<
   ],
   'conversation.context.snapshot': [['conversation', 'agent'], ['measure']],
   'conversation.context.count': [['conversation', 'agent'], []],
+  'information.types.capabilities': [['scope'], ['view']],
+  'information.types.list': [
+    ['scope', 'view'],
+    ['drafts', 'limit', 'offset'],
+  ],
+  'information.types.get': [
+    ['scope', 'view', 'version'],
+    ['attachedRevision', 'publishedOnly'],
+  ],
+  'information.types.validate': [
+    ['scope', 'view', 'version', 'metadata'],
+    ['attachedRevision', 'publishedOnly'],
+  ],
+  'information.types.version.create': [
+    ['scope', 'view', 'requestId', 'schema'],
+    [
+      'type',
+      'expectedControlRevision',
+      'slug',
+      'label',
+      'description',
+      'presentation',
+    ],
+  ],
+  'information.types.activate': [
+    ['scope', 'view', 'requestId', 'version', 'expectedControlRevision'],
+    [],
+  ],
+  'information.types.deprecate': [
+    ['scope', 'view', 'requestId', 'version', 'expectedControlRevision'],
+    [],
+  ],
+  'information.content.get': [['scope', 'view', 'revision'], []],
+  'information.content.revise': [
+    ['scope', 'view', 'requestId', 'expectedRevision', 'typing'],
+    [],
+  ],
   'information.upload': [['scope', 'requestId', 'name', 'text'], []],
   'information.acquire': [['scope', 'requestId', 'url'], ['name']],
   'information.facets': [['scope'], ['kind', 'filter']],
@@ -775,7 +812,25 @@ export function commandProblem(
     allowed = [
       ...required,
       ...optional,
-      ...(type.startsWith('information.') ? ['corpus'] : []),
+      ...(type.startsWith('information.')
+        ? [
+            'corpus',
+            'view',
+            ...([
+              'information.upload',
+              'information.acquire',
+              'information.refresh',
+              'information.revise',
+              'information.replace',
+              'information.record.report',
+            ].includes(type)
+              ? ['expectedRevision', 'typing']
+              : []),
+            ...(['information.retry', 'information.rebuild'].includes(type)
+              ? ['stages']
+              : []),
+          ]
+        : []),
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;

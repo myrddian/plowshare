@@ -16,6 +16,64 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Configuration
 public class InformationConfig {
   @Bean
+  public InformationContentSettings informationContentSettings(
+      @org.springframework.beans.factory.annotation.Value(
+              "${plowshare.information.content-types-enabled:true}")
+          boolean enabled) {
+    return new InformationContentSettings(enabled);
+  }
+
+  @Bean
+  public InformationContentTypeRepository informationContentTypeRepository(JdbcTemplate jdbc) {
+    return new JdbcInformationContentTypeRepository(jdbc);
+  }
+
+  @Bean
+  public InformationContentRepository informationContentRepository(
+      JdbcTemplate jdbc, InformationContentTypeRepository types) {
+    return new JdbcInformationContentRepository(jdbc, types);
+  }
+
+  @Bean
+  public InformationProjectionRepository informationProjectionRepository(
+      JdbcTemplate jdbc, InformationContentRepository content) {
+    return new JdbcInformationProjectionRepository(jdbc, content);
+  }
+
+  @Bean
+  public InformationContentTypes informationContentTypes(
+      InformationContentTypeRepository types,
+      InformationAccess access,
+      io.aeyer.plowshare.server.archive.ProjectMembers members,
+      InformationCatalogueRepository catalogueRepository,
+      UnitOfWork work,
+      @Lazy InformationTransitions gates,
+      InformationContentSettings settings) {
+    return new InformationContentTypeService(
+        types,
+        access,
+        members,
+        (context, revision) -> {
+          access.requireSelection(context);
+          if (!catalogueRepository.readable(context, revision))
+            throw new io.aeyer.plowshare.server.faults.NotFoundFault(
+                "information is unavailable in this selection");
+        },
+        work,
+        gates,
+        settings);
+  }
+
+  @Bean
+  public InformationContentAuthority informationContentAuthority(
+      InformationContentRepository content,
+      InformationContentTypes types,
+      InformationAccess access,
+      InformationContentSettings settings) {
+    return new InformationContentAdmission(content, types, access, settings);
+  }
+
+  @Bean
   public DocumentPolicyAssignments documentPolicyAssignments(
       JdbcTemplate jdbc,
       UnitOfWork work,
@@ -33,14 +91,23 @@ public class InformationConfig {
   }
 
   @Bean
+  public InformationCatalogueRepository informationCatalogueRepository(JdbcTemplate jdbc) {
+    return new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC());
+  }
+
+  @Bean
   public InformationCatalogue informationCatalogue(
-      JdbcTemplate jdbc,
+      InformationCatalogueRepository repository,
       UnitOfWork work,
       InformationAccess access,
       InformationLogAccess logs,
-      DocumentsProperties properties) {
+      DocumentsProperties properties,
+      InformationContentAuthority authority,
+      InformationContentRepository content,
+      InformationProjectionRepository projections,
+      @Lazy InformationTransitions transitions) {
     return new InformationCatalogue(
-            new JdbcInformationCatalogueRepository(jdbc, Clock.systemUTC()), work, access, logs)
+            repository, work, access, logs, authority, content, projections, transitions)
         .withAllowance(properties::ingestBudgetNow);
   }
 
@@ -114,7 +181,6 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE));
-    catalogue.useWriteGates(gates);
     migration.useWriteGates(gates);
     return gates;
   }

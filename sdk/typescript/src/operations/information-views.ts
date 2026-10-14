@@ -1,8 +1,11 @@
+import type { InformationTypeIdentity } from './information-content.ts';
 import type { ReportFinding, ReportReview } from './information-payloads.ts';
 
 /** Public Information.Revision projection. Optional metadata is omitted for
  * unreadable revisions and older peers; present fields are always checked. */
 export interface InformationRevision {
+  readonly contentType?: InformationTypeIdentity;
+  readonly processingPolicy?: 'automatic' | 'explicit_only';
   readonly id: string;
   readonly resource_id?: string;
   readonly ordinal?: number;

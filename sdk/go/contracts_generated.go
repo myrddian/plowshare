@@ -229,17 +229,128 @@ func (v *IncomingSourceDtoPartsItemDtoMediaType) UnmarshalJSON(data []byte) erro
 	return errors.New("invalid union")
 }
 
+// SchemaObjectEntry is a closed union: exactly one variant must be selected.
+type SchemaObjectEntry struct {
+	Variant1 *Unit
+	Variant2 *string
+	Variant3 *float64
+	Variant4 *bool
+	Variant5 *bool
+	Variant6 *map[string]SchemaObjectEntry
+	Variant7 *[]SchemaObjectEntry
+}
+
+func (v SchemaObjectEntry) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if v.Variant4 != nil {
+		chosen = v.Variant4
+		count++
+	}
+	if v.Variant5 != nil {
+		chosen = v.Variant5
+		count++
+	}
+	if v.Variant6 != nil {
+		chosen = v.Variant6
+		count++
+	}
+	if v.Variant7 != nil {
+		chosen = v.Variant7
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *SchemaObjectEntry) UnmarshalJSON(data []byte) error {
+	*v = SchemaObjectEntry{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape1", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape10", data) {
+		var chosen float64
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	if matches("shape3", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant4 = &chosen
+		return nil
+	}
+	if matches("shape4", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant5 = &chosen
+		return nil
+	}
+	if matches("shape136", data) {
+		var chosen map[string]SchemaObjectEntry
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant6 = &chosen
+		return nil
+	}
+	if matches("shape138", data) {
+		var chosen []SchemaObjectEntry
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant7 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
 // InformationFilterDto is the explicit InformationFilter protocol shape.
 type InformationFilterDto struct {
-	Author         *string   `json:"author,omitempty"`
-	AutoTag        *[]string `json:"autoTag,omitempty"`
-	DocumentAuthor *string   `json:"documentAuthor,omitempty"`
-	Kind           *string   `json:"kind,omitempty"`
-	Search         *string   `json:"search,omitempty"`
-	Subtype        *string   `json:"subtype,omitempty"`
-	TagGroup       *string   `json:"tagGroup,omitempty"`
-	Tags           *[]string `json:"tags,omitempty"`
-	When           *string   `json:"when,omitempty"`
+	Author             *string   `json:"author,omitempty"`
+	AutoTag            *[]string `json:"autoTag,omitempty"`
+	ContentType        *string   `json:"contentType,omitempty"`
+	ContentTypeVersion *string   `json:"contentTypeVersion,omitempty"`
+	DocumentAuthor     *string   `json:"documentAuthor,omitempty"`
+	Kind               *string   `json:"kind,omitempty"`
+	Search             *string   `json:"search,omitempty"`
+	Subtype            *string   `json:"subtype,omitempty"`
+	TagGroup           *string   `json:"tagGroup,omitempty"`
+	Tags               *[]string `json:"tags,omitempty"`
+	Untyped            *bool     `json:"untyped,omitempty"`
+	When               *string   `json:"when,omitempty"`
 }
 
 // ReportFindingDto is the explicit ReportFinding protocol shape.
@@ -258,6 +369,312 @@ type ReportReviewDto struct {
 	Outcome string `json:"outcome"`
 	Stage   string `json:"stage"`
 	Text    string `json:"text"`
+}
+
+// SchemaDefinitionDto is the explicit SchemaDefinition protocol shape.
+type SchemaDefinitionDto struct {
+	Anchor               *string                                  `json:"$anchor,omitempty"`
+	Defs                 *map[string]SchemaDefinitionDto          `json:"$defs,omitempty"`
+	Id                   *string                                  `json:"$id,omitempty"`
+	Ref                  *string                                  `json:"$ref,omitempty"`
+	Schema               *string                                  `json:"$schema,omitempty"`
+	AdditionalProperties *SchemaDefinitionDtoAdditionalProperties `json:"additionalProperties,omitempty"`
+	AllOf                *[]SchemaDefinitionDto                   `json:"allOf,omitempty"`
+	AnyOf                *[]SchemaDefinitionDto                   `json:"anyOf,omitempty"`
+	Const                *SchemaDefinitionDtoConst                `json:"const,omitempty"`
+	Contains             *SchemaDefinitionDto                     `json:"contains,omitempty"`
+	Default              *SchemaDefinitionDtoConst                `json:"default,omitempty"`
+	Deprecated           *bool                                    `json:"deprecated,omitempty"`
+	Description          *string                                  `json:"description,omitempty"`
+	Else                 *SchemaDefinitionDto                     `json:"else,omitempty"`
+	Enum                 *[]SchemaDefinitionDtoConst              `json:"enum,omitempty"`
+	Examples             *[]SchemaDefinitionDtoConst              `json:"examples,omitempty"`
+	ExclusiveMaximum     *float64                                 `json:"exclusiveMaximum,omitempty"`
+	ExclusiveMinimum     *float64                                 `json:"exclusiveMinimum,omitempty"`
+	Format               *string                                  `json:"format,omitempty"`
+	If                   *SchemaDefinitionDto                     `json:"if,omitempty"`
+	Items                *SchemaDefinitionDto                     `json:"items,omitempty"`
+	Maximum              *float64                                 `json:"maximum,omitempty"`
+	MaxItems             *float64                                 `json:"maxItems,omitempty"`
+	MaxLength            *float64                                 `json:"maxLength,omitempty"`
+	MaxProperties        *float64                                 `json:"maxProperties,omitempty"`
+	Minimum              *float64                                 `json:"minimum,omitempty"`
+	MinItems             *float64                                 `json:"minItems,omitempty"`
+	MinLength            *float64                                 `json:"minLength,omitempty"`
+	MinProperties        *float64                                 `json:"minProperties,omitempty"`
+	MultipleOf           *float64                                 `json:"multipleOf,omitempty"`
+	Not                  *SchemaDefinitionDto                     `json:"not,omitempty"`
+	OneOf                *[]SchemaDefinitionDto                   `json:"oneOf,omitempty"`
+	Pattern              *string                                  `json:"pattern,omitempty"`
+	PatternProperties    *map[string]SchemaDefinitionDto          `json:"patternProperties,omitempty"`
+	PrefixItems          *[]SchemaDefinitionDto                   `json:"prefixItems,omitempty"`
+	Properties           *map[string]SchemaDefinitionDto          `json:"properties,omitempty"`
+	ReadOnly             *bool                                    `json:"readOnly,omitempty"`
+	Required             *[]string                                `json:"required,omitempty"`
+	Then                 *SchemaDefinitionDto                     `json:"then,omitempty"`
+	Title                *string                                  `json:"title,omitempty"`
+	Type                 *SchemaDefinitionDtoType                 `json:"type,omitempty"`
+	UniqueItems          *bool                                    `json:"uniqueItems,omitempty"`
+	WriteOnly            *bool                                    `json:"writeOnly,omitempty"`
+}
+
+// SchemaDefinitionDtoAdditionalProperties is a closed union: exactly one variant must be selected.
+type SchemaDefinitionDtoAdditionalProperties struct {
+	Variant1 *bool
+	Variant2 *bool
+	Variant3 *SchemaDefinitionDto
+}
+
+func (v SchemaDefinitionDtoAdditionalProperties) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *SchemaDefinitionDtoAdditionalProperties) UnmarshalJSON(data []byte) error {
+	*v = SchemaDefinitionDtoAdditionalProperties{}
+	if matches("shape3", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape4", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape216", data) {
+		var chosen SchemaDefinitionDto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// SchemaDefinitionDtoConst is a closed union: exactly one variant must be selected.
+type SchemaDefinitionDtoConst struct {
+	Variant1 *Unit
+	Variant2 *string
+	Variant3 *float64
+	Variant4 *bool
+	Variant5 *bool
+}
+
+func (v SchemaDefinitionDtoConst) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if v.Variant4 != nil {
+		chosen = v.Variant4
+		count++
+	}
+	if v.Variant5 != nil {
+		chosen = v.Variant5
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *SchemaDefinitionDtoConst) UnmarshalJSON(data []byte) error {
+	*v = SchemaDefinitionDtoConst{}
+	if matches("shape38", data) {
+		var chosen Unit
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape1", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape10", data) {
+		var chosen float64
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	if matches("shape3", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant4 = &chosen
+		return nil
+	}
+	if matches("shape4", data) {
+		var chosen bool
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant5 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// SchemaDefinitionDtoType is a closed union: exactly one variant must be selected.
+type SchemaDefinitionDtoType struct {
+	Variant1 *string
+	Variant2 *string
+	Variant3 *string
+	Variant4 *string
+	Variant5 *string
+	Variant6 *string
+	Variant7 *string
+	Variant8 *[]string
+}
+
+func (v SchemaDefinitionDtoType) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if v.Variant4 != nil {
+		chosen = v.Variant4
+		count++
+	}
+	if v.Variant5 != nil {
+		chosen = v.Variant5
+		count++
+	}
+	if v.Variant6 != nil {
+		chosen = v.Variant6
+		count++
+	}
+	if v.Variant7 != nil {
+		chosen = v.Variant7
+		count++
+	}
+	if v.Variant8 != nil {
+		chosen = v.Variant8
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *SchemaDefinitionDtoType) UnmarshalJSON(data []byte) error {
+	*v = SchemaDefinitionDtoType{}
+	if matches("shape223", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape224", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape225", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	if matches("shape226", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant4 = &chosen
+		return nil
+	}
+	if matches("shape227", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant5 = &chosen
+		return nil
+	}
+	if matches("shape228", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant6 = &chosen
+		return nil
+	}
+	if matches("shape229", data) {
+		var chosen string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant7 = &chosen
+		return nil
+	}
+	if matches("shape230", data) {
+		var chosen []string
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant8 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
 }
 
 // TierDto2 is the explicit Tier protocol shape.
@@ -287,21 +704,21 @@ type TierDto3 struct {
 	Project *TierDtoProject `json:"project,omitempty"`
 }
 
-// Readonly2EntryDto is the explicit Readonly2EntryDto protocol shape.
-type Readonly2EntryDto struct {
+// Readonly3EntryDto is the explicit Readonly3EntryDto protocol shape.
+type Readonly3EntryDto struct {
 	List []string `json:"list"`
 }
 
-// Readonly4Entry is a closed union: exactly one variant must be selected.
-type Readonly4Entry struct {
-	Variant1 *Readonly4EntryVariant1Dto
-	Variant2 *Readonly4EntryVariant2Dto
-	Variant3 *Readonly4EntryVariant3Dto
-	Variant4 *Readonly4EntryVariant4Dto
-	Variant5 *Readonly4EntryVariant5Dto
+// Readonly5Entry is a closed union: exactly one variant must be selected.
+type Readonly5Entry struct {
+	Variant1 *Readonly5EntryVariant1Dto
+	Variant2 *Readonly5EntryVariant2Dto
+	Variant3 *Readonly5EntryVariant3Dto
+	Variant4 *Readonly5EntryVariant4Dto
+	Variant5 *Readonly5EntryVariant5Dto
 }
 
-func (v Readonly4Entry) MarshalJSON() ([]byte, error) {
+func (v Readonly5Entry) MarshalJSON() ([]byte, error) {
 	var chosen any
 	count := 0
 	if v.Variant1 != nil {
@@ -329,42 +746,42 @@ func (v Readonly4Entry) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(chosen)
 }
-func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
-	*v = Readonly4Entry{}
-	if matches("shape242", data) {
-		var chosen Readonly4EntryVariant1Dto
+func (v *Readonly5Entry) UnmarshalJSON(data []byte) error {
+	*v = Readonly5Entry{}
+	if matches("shape287", data) {
+		var chosen Readonly5EntryVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape248", data) {
-		var chosen Readonly4EntryVariant2Dto
+	if matches("shape293", data) {
+		var chosen Readonly5EntryVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape250", data) {
-		var chosen Readonly4EntryVariant3Dto
+	if matches("shape295", data) {
+		var chosen Readonly5EntryVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape264", data) {
-		var chosen Readonly4EntryVariant4Dto
+	if matches("shape309", data) {
+		var chosen Readonly5EntryVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape266", data) {
-		var chosen Readonly4EntryVariant5Dto
+	if matches("shape311", data) {
+		var chosen Readonly5EntryVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
@@ -374,52 +791,52 @@ func (v *Readonly4Entry) UnmarshalJSON(data []byte) error {
 	return errors.New("invalid union")
 }
 
-// Readonly4EntryVariant1Dto is the explicit Readonly4EntryVariant1Dto protocol shape.
-type Readonly4EntryVariant1Dto struct {
-	ApiKeySecurityScheme Readonly4EntryVariant1DtoApiKeySecuritySchemeDto `json:"apiKeySecurityScheme"`
+// Readonly5EntryVariant1Dto is the explicit Readonly5EntryVariant1Dto protocol shape.
+type Readonly5EntryVariant1Dto struct {
+	ApiKeySecurityScheme Readonly5EntryVariant1DtoApiKeySecuritySchemeDto `json:"apiKeySecurityScheme"`
 }
 
-// Readonly4EntryVariant1DtoApiKeySecuritySchemeDto is the explicit Readonly4EntryVariant1DtoApiKeySecuritySchemeDto protocol shape.
-type Readonly4EntryVariant1DtoApiKeySecuritySchemeDto struct {
+// Readonly5EntryVariant1DtoApiKeySecuritySchemeDto is the explicit Readonly5EntryVariant1DtoApiKeySecuritySchemeDto protocol shape.
+type Readonly5EntryVariant1DtoApiKeySecuritySchemeDto struct {
 	Description *TierDtoProject `json:"description,omitempty"`
 	Location    string          `json:"location"`
 	Name        string          `json:"name"`
 }
 
-// Readonly4EntryVariant2Dto is the explicit Readonly4EntryVariant2Dto protocol shape.
-type Readonly4EntryVariant2Dto struct {
-	HttpAuthSecurityScheme Readonly4EntryVariant2DtoHttpAuthSecuritySchemeDto `json:"httpAuthSecurityScheme"`
+// Readonly5EntryVariant2Dto is the explicit Readonly5EntryVariant2Dto protocol shape.
+type Readonly5EntryVariant2Dto struct {
+	HttpAuthSecurityScheme Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto `json:"httpAuthSecurityScheme"`
 }
 
-// Readonly4EntryVariant2DtoHttpAuthSecuritySchemeDto is the explicit Readonly4EntryVariant2DtoHttpAuthSecuritySchemeDto protocol shape.
-type Readonly4EntryVariant2DtoHttpAuthSecuritySchemeDto struct {
+// Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto is the explicit Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto protocol shape.
+type Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto struct {
 	BearerFormat *TierDtoProject `json:"bearerFormat,omitempty"`
 	Description  *TierDtoProject `json:"description,omitempty"`
 	Scheme       string          `json:"scheme"`
 }
 
-// Readonly4EntryVariant3Dto is the explicit Readonly4EntryVariant3Dto protocol shape.
-type Readonly4EntryVariant3Dto struct {
-	Oauth2SecurityScheme Readonly4EntryVariant3DtoOauth2SecuritySchemeDto `json:"oauth2SecurityScheme"`
+// Readonly5EntryVariant3Dto is the explicit Readonly5EntryVariant3Dto protocol shape.
+type Readonly5EntryVariant3Dto struct {
+	Oauth2SecurityScheme Readonly5EntryVariant3DtoOauth2SecuritySchemeDto `json:"oauth2SecurityScheme"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDto struct {
 	Description       *TierDtoProject                                       `json:"description,omitempty"`
-	Flows             Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows `json:"flows"`
+	Flows             Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows `json:"flows"`
 	Oauth2MetadataUrl *TierDtoProject                                       `json:"oauth2MetadataUrl,omitempty"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows is a closed union: exactly one variant must be selected.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows struct {
-	Variant1 *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto
-	Variant2 *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto
-	Variant3 *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto
-	Variant4 *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto
-	Variant5 *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows is a closed union: exactly one variant must be selected.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows struct {
+	Variant1 *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto
+	Variant2 *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto
+	Variant3 *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto
+	Variant4 *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto
+	Variant5 *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto
 }
 
-func (v Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) MarshalJSON() ([]byte, error) {
+func (v Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows) MarshalJSON() ([]byte, error) {
 	var chosen any
 	count := 0
 	if v.Variant1 != nil {
@@ -447,42 +864,42 @@ func (v Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) MarshalJSON() ([]
 	}
 	return json.Marshal(chosen)
 }
-func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(data []byte) error {
-	*v = Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows{}
-	if matches("shape253", data) {
-		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto
+func (v *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(data []byte) error {
+	*v = Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlows{}
+	if matches("shape298", data) {
+		var chosen Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape256", data) {
-		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto
+	if matches("shape301", data) {
+		var chosen Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape258", data) {
-		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto
+	if matches("shape303", data) {
+		var chosen Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape260", data) {
-		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto
+	if matches("shape305", data) {
+		var chosen Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape262", data) {
-		var chosen Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto
+	if matches("shape307", data) {
+		var chosen Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
@@ -492,28 +909,28 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlows) UnmarshalJSON(da
 	return errors.New("invalid union")
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto struct {
-	AuthorizationCode Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto `json:"authorizationCode"`
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto struct {
+	AuthorizationCode Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto `json:"authorizationCode"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto struct {
 	AuthorizationUrl string                                                                                            `json:"authorizationUrl"`
-	PkceRequired     *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"pkceRequired,omitempty"`
+	PkceRequired     *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"pkceRequired,omitempty"`
 	RefreshUrl       *TierDtoProject                                                                                   `json:"refreshUrl,omitempty"`
 	Scopes           map[string]string                                                                                 `json:"scopes"`
 	TokenUrl         string                                                                                            `json:"tokenUrl"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired is a closed union: exactly one variant must be selected.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired is a closed union: exactly one variant must be selected.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired struct {
 	Variant1 *Unit
 	Variant2 *bool
 	Variant3 *bool
 }
 
-func (v Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired) MarshalJSON() ([]byte, error) {
+func (v Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired) MarshalJSON() ([]byte, error) {
 	var chosen any
 	count := 0
 	if v.Variant1 != nil {
@@ -533,8 +950,8 @@ func (v Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthoriz
 	}
 	return json.Marshal(chosen)
 }
-func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired) UnmarshalJSON(data []byte) error {
-	*v = Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired{}
+func (v *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired) UnmarshalJSON(data []byte) error {
+	*v = Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired{}
 	if matches("shape38", data) {
 		var chosen Unit
 		if err := json.Unmarshal(data, &chosen); err != nil {
@@ -562,73 +979,73 @@ func (v *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthori
 	return errors.New("invalid union")
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto struct {
-	ClientCredentials Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto `json:"clientCredentials"`
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto struct {
+	ClientCredentials Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto `json:"clientCredentials"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto struct {
 	RefreshUrl *TierDtoProject   `json:"refreshUrl,omitempty"`
 	Scopes     map[string]string `json:"scopes"`
 	TokenUrl   string            `json:"tokenUrl"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto struct {
-	Implicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto `json:"implicit"`
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto struct {
+	Implicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto `json:"implicit"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto struct {
 	AuthorizationUrl string            `json:"authorizationUrl"`
 	RefreshUrl       *TierDtoProject   `json:"refreshUrl,omitempty"`
 	Scopes           map[string]string `json:"scopes"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto struct {
-	Password Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto `json:"password"`
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto struct {
+	Password Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto `json:"password"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto struct {
 	RefreshUrl *TierDtoProject   `json:"refreshUrl,omitempty"`
 	Scopes     map[string]string `json:"scopes"`
 	TokenUrl   string            `json:"tokenUrl"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto struct {
-	DeviceCode Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto `json:"deviceCode"`
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto struct {
+	DeviceCode Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto `json:"deviceCode"`
 }
 
-// Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto is the explicit Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto protocol shape.
-type Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto struct {
+// Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto is the explicit Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto protocol shape.
+type Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto struct {
 	DeviceAuthorizationUrl string            `json:"deviceAuthorizationUrl"`
 	RefreshUrl             *TierDtoProject   `json:"refreshUrl,omitempty"`
 	Scopes                 map[string]string `json:"scopes"`
 	TokenUrl               string            `json:"tokenUrl"`
 }
 
-// Readonly4EntryVariant4Dto is the explicit Readonly4EntryVariant4Dto protocol shape.
-type Readonly4EntryVariant4Dto struct {
-	OpenIdConnectSecurityScheme Readonly4EntryVariant4DtoOpenIdConnectSecuritySchemeDto `json:"openIdConnectSecurityScheme"`
+// Readonly5EntryVariant4Dto is the explicit Readonly5EntryVariant4Dto protocol shape.
+type Readonly5EntryVariant4Dto struct {
+	OpenIdConnectSecurityScheme Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto `json:"openIdConnectSecurityScheme"`
 }
 
-// Readonly4EntryVariant4DtoOpenIdConnectSecuritySchemeDto is the explicit Readonly4EntryVariant4DtoOpenIdConnectSecuritySchemeDto protocol shape.
-type Readonly4EntryVariant4DtoOpenIdConnectSecuritySchemeDto struct {
+// Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto is the explicit Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto protocol shape.
+type Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto struct {
 	Description      *TierDtoProject `json:"description,omitempty"`
 	OpenIdConnectUrl string          `json:"openIdConnectUrl"`
 }
 
-// Readonly4EntryVariant5Dto is the explicit Readonly4EntryVariant5Dto protocol shape.
-type Readonly4EntryVariant5Dto struct {
-	MtlsSecurityScheme Readonly4EntryVariant5DtoMtlsSecuritySchemeDto `json:"mtlsSecurityScheme"`
+// Readonly5EntryVariant5Dto is the explicit Readonly5EntryVariant5Dto protocol shape.
+type Readonly5EntryVariant5Dto struct {
+	MtlsSecurityScheme Readonly5EntryVariant5DtoMtlsSecuritySchemeDto `json:"mtlsSecurityScheme"`
 }
 
-// Readonly4EntryVariant5DtoMtlsSecuritySchemeDto is the explicit Readonly4EntryVariant5DtoMtlsSecuritySchemeDto protocol shape.
-type Readonly4EntryVariant5DtoMtlsSecuritySchemeDto struct {
+// Readonly5EntryVariant5DtoMtlsSecuritySchemeDto is the explicit Readonly5EntryVariant5DtoMtlsSecuritySchemeDto protocol shape.
+type Readonly5EntryVariant5DtoMtlsSecuritySchemeDto struct {
 	Description *TierDtoProject `json:"description,omitempty"`
 }
 
@@ -696,7 +1113,7 @@ func (v *AgentCardDtoCapabilities) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape227", data) {
+	if matches("shape272", data) {
 		var chosen AgentCardDtoCapabilitiesVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -709,11 +1126,11 @@ func (v *AgentCardDtoCapabilities) UnmarshalJSON(data []byte) error {
 
 // AgentCardDtoCapabilitiesVariant2Dto is the explicit AgentCardDtoCapabilitiesVariant2Dto protocol shape.
 type AgentCardDtoCapabilitiesVariant2Dto struct {
-	ExtendedAgentCard      *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"extendedAgentCard,omitempty"`
+	ExtendedAgentCard      *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"extendedAgentCard,omitempty"`
 	Extensions             *AgentCardDtoCapabilitiesVariant2DtoExtensions                                                    `json:"extensions,omitempty"`
-	PushNotifications      *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"pushNotifications,omitempty"`
-	StateTransitionHistory *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"stateTransitionHistory,omitempty"`
-	Streaming              *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"streaming,omitempty"`
+	PushNotifications      *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"pushNotifications,omitempty"`
+	StateTransitionHistory *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"stateTransitionHistory,omitempty"`
+	Streaming              *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"streaming,omitempty"`
 }
 
 // AgentCardDtoCapabilitiesVariant2DtoExtensions is a closed union: exactly one variant must be selected.
@@ -748,7 +1165,7 @@ func (v *AgentCardDtoCapabilitiesVariant2DtoExtensions) UnmarshalJSON(data []byt
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape230", data) {
+	if matches("shape275", data) {
 		var chosen []AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -762,7 +1179,7 @@ func (v *AgentCardDtoCapabilitiesVariant2DtoExtensions) UnmarshalJSON(data []byt
 // AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto is the explicit AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto protocol shape.
 type AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto struct {
 	Description *TierDtoProject                                                                                   `json:"description,omitempty"`
-	Required    *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"required,omitempty"`
+	Required    *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"required,omitempty"`
 	Uri         string                                                                                            `json:"uri"`
 }
 
@@ -798,7 +1215,7 @@ func (v *AgentCardDtoProvider) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape233", data) {
+	if matches("shape278", data) {
 		var chosen AgentCardDtoProviderVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -847,7 +1264,7 @@ func (v *AgentCardDtoSecurityRequirements) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape235", data) {
+	if matches("shape280", data) {
 		var chosen []AgentCardDtoSecurityRequirementsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -860,13 +1277,13 @@ func (v *AgentCardDtoSecurityRequirements) UnmarshalJSON(data []byte) error {
 
 // AgentCardDtoSecurityRequirementsVariant2ItemDto is the explicit AgentCardDtoSecurityRequirementsVariant2ItemDto protocol shape.
 type AgentCardDtoSecurityRequirementsVariant2ItemDto struct {
-	Schemes map[string]Readonly2EntryDto `json:"schemes"`
+	Schemes map[string]Readonly3EntryDto `json:"schemes"`
 }
 
 // AgentCardDtoSecuritySchemes is a closed union: exactly one variant must be selected.
 type AgentCardDtoSecuritySchemes struct {
 	Variant1 *Unit
-	Variant2 *map[string]Readonly4Entry
+	Variant2 *map[string]Readonly5Entry
 }
 
 func (v AgentCardDtoSecuritySchemes) MarshalJSON() ([]byte, error) {
@@ -895,8 +1312,8 @@ func (v *AgentCardDtoSecuritySchemes) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape240", data) {
-		var chosen map[string]Readonly4Entry
+	if matches("shape285", data) {
+		var chosen map[string]Readonly5Entry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
 		}
@@ -950,7 +1367,7 @@ func (v *AgentCardDtoSkillsItemDtoMetadata) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape271", data) {
+	if matches("shape316", data) {
 		var chosen AgentCardDtoSkillsItemDtoMetadataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -998,7 +1415,7 @@ func (v *AgentCardDtoSupportedInterfaces) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape277", data) {
+	if matches("shape322", data) {
 		var chosen []AgentCardDtoSupportedInterfacesVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1021,19 +1438,19 @@ type AgentCardDtoSupportedInterfacesVariant2ItemDto struct {
 type ExternalMetadataDto struct {
 	PlowshareCommand   *TierDtoProject                                                                                   `json:"plowshareCommand,omitempty"`
 	PlowshareEnding    *TierDtoProject                                                                                   `json:"plowshareEnding,omitempty"`
-	PlowshareFinal     *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"plowshareFinal,omitempty"`
-	PlowshareGenerated *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"plowshareGenerated,omitempty"`
+	PlowshareFinal     *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"plowshareFinal,omitempty"`
+	PlowshareGenerated *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"plowshareGenerated,omitempty"`
 }
 
-// Readonly6Entry is a closed union: exactly one variant must be selected.
-type Readonly6Entry struct {
+// Readonly7Entry is a closed union: exactly one variant must be selected.
+type Readonly7Entry struct {
 	Variant1 *string
 	Variant2 *float64
 	Variant3 *bool
 	Variant4 *bool
 }
 
-func (v Readonly6Entry) MarshalJSON() ([]byte, error) {
+func (v Readonly7Entry) MarshalJSON() ([]byte, error) {
 	var chosen any
 	count := 0
 	if v.Variant1 != nil {
@@ -1057,8 +1474,8 @@ func (v Readonly6Entry) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(chosen)
 }
-func (v *Readonly6Entry) UnmarshalJSON(data []byte) error {
-	*v = Readonly6Entry{}
+func (v *Readonly7Entry) UnmarshalJSON(data []byte) error {
+	*v = Readonly7Entry{}
 	if matches("shape1", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
@@ -1137,7 +1554,7 @@ func (v *ExternalMessageDtoMetadata) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape288", data) {
+	if matches("shape333", data) {
 		var chosen ExternalMetadataDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1182,7 +1599,7 @@ func (v ExternalMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ExternalMessageDtoPartsItem{}
-	if matches("shape291", data) {
+	if matches("shape336", data) {
 		var chosen ExternalMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1190,7 +1607,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape292", data) {
+	if matches("shape337", data) {
 		var chosen ExternalMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1198,7 +1615,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape293", data) {
+	if matches("shape338", data) {
 		var chosen ExternalMessageDtoPartsItemVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1206,7 +1623,7 @@ func (v *ExternalMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape294", data) {
+	if matches("shape339", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1273,7 +1690,7 @@ func (v ExternalMessageDtoPartsItemVariant4DtoData) MarshalJSON() ([]byte, error
 }
 func (v *ExternalMessageDtoPartsItemVariant4DtoData) UnmarshalJSON(data []byte) error {
 	*v = ExternalMessageDtoPartsItemVariant4DtoData{}
-	if matches("shape296", data) {
+	if matches("shape341", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4DtoDataVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1281,7 +1698,7 @@ func (v *ExternalMessageDtoPartsItemVariant4DtoData) UnmarshalJSON(data []byte) 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape300", data) {
+	if matches("shape345", data) {
 		var chosen ExternalMessageDtoPartsItemVariant4DtoDataVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1316,7 +1733,7 @@ type ExternalMessageDtoPartsItemVariant4DtoDataVariant2Dto struct {
 // ExternalMessageDtoPartsItemVariant4DtoDataVariant2DtoArgumentsDto is the explicit ExternalMessageDtoPartsItemVariant4DtoDataVariant2DtoArgumentsDto protocol shape.
 type ExternalMessageDtoPartsItemVariant4DtoDataVariant2DtoArgumentsDto struct {
 	Action     string                    `json:"action"`
-	Parameters map[string]Readonly6Entry `json:"parameters"`
+	Parameters map[string]Readonly7Entry `json:"parameters"`
 }
 
 // ExternalMessageDtoRole is a closed union: exactly one variant must be selected.
@@ -1364,7 +1781,7 @@ func (v *ExternalMessageDtoRole) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape309", data) {
+	if matches("shape354", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1417,7 +1834,7 @@ func (v *ExternalTaskDtoArtifacts) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape285", data) {
+	if matches("shape330", data) {
 		var chosen []ExternalTaskDtoArtifactsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1470,7 +1887,7 @@ func (v *ExternalTaskDtoHistory) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape306", data) {
+	if matches("shape351", data) {
 		var chosen []ExternalMessageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1520,7 +1937,7 @@ func (v *ExternalTaskDtoStatusDtoMessage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape307", data) {
+	if matches("shape352", data) {
 		var chosen ExternalMessageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1540,14 +1957,14 @@ type ActionContextDto struct {
 // IntegrationReadingDto is the explicit IntegrationReading protocol shape.
 type IntegrationReadingDto struct {
 	Alias        string                                                                                           `json:"alias"`
-	Attributes   map[string]Readonly6Entry                                                                        `json:"attributes"`
+	Attributes   map[string]Readonly7Entry                                                                        `json:"attributes"`
 	Availability string                                                                                           `json:"availability"`
 	Context      IntegrationReadingDtoContext                                                                     `json:"context"`
 	Epoch        TierDtoProject                                                                                   `json:"epoch"`
 	LastChanged  TierDtoProject                                                                                   `json:"last_changed"`
 	LastUpdated  TierDtoProject                                                                                   `json:"last_updated"`
 	ObservedAt   TierDtoProject                                                                                   `json:"observed_at"`
-	Stale        Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"stale"`
+	Stale        Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"stale"`
 	State        TierDtoProject                                                                                   `json:"state"`
 	Unit         TierDtoProject                                                                                   `json:"unit"`
 }
@@ -1584,7 +2001,7 @@ func (v *IntegrationReadingDtoContext) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape334", data) {
+	if matches("shape379", data) {
 		var chosen ActionContextDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1659,7 +2076,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape365", data) {
+	if matches("shape410", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1667,7 +2084,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape366", data) {
+	if matches("shape411", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1675,7 +2092,7 @@ func (v *ProviderConnectionDefinitionDtoApiKeyHeader) UnmarshalJSON(data []byte)
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape367", data) {
+	if matches("shape412", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1718,7 +2135,7 @@ func (v *ProviderConnectionDefinitionDtoOauth) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape373", data) {
+	if matches("shape418", data) {
 		var chosen ProviderOAuthSettingsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1862,7 +2279,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape411", data) {
+	if matches("shape456", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1870,7 +2287,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape412", data) {
+	if matches("shape457", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1878,7 +2295,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape413", data) {
+	if matches("shape458", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -1886,7 +2303,7 @@ func (v *ScheduleDefinitionDtoActionDtoMode) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape414", data) {
+	if matches("shape459", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2066,10 +2483,10 @@ type AccountCredentialDto struct {
 type AdminAuditDto struct {
 	Action      string                                                                                           `json:"action"`
 	Actor       string                                                                                           `json:"actor"`
-	Enabled     Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"enabled"`
+	Enabled     Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"enabled"`
 	Id          float64                                                                                          `json:"id"`
 	OccurredAt  string                                                                                           `json:"occurredAt"`
-	ServerAdmin Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"serverAdmin"`
+	ServerAdmin Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"serverAdmin"`
 	Target      string                                                                                           `json:"target"`
 }
 
@@ -2138,7 +2555,7 @@ func (v *PricingCardDtoRates) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape509", data) {
+	if matches("shape554", data) {
 		var chosen PricingRatesDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2193,7 +2610,7 @@ func (v *PricingEntryDtoCard) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape506", data) {
+	if matches("shape551", data) {
 		var chosen PricingCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2579,7 +2996,7 @@ func (v *ApplicationIdentityStatusDtoIdentity) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape545", data) {
+	if matches("shape590", data) {
 		var chosen ApplicationIdentityBindingDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2671,7 +3088,7 @@ func (v *ApprovalViewDtoCommands) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape558", data) {
+	if matches("shape603", data) {
 		var chosen [][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2783,7 +3200,7 @@ func (v *BoardTopicDtoSwarm) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape567", data) {
+	if matches("shape612", data) {
 		var chosen SwarmSelectionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -2939,7 +3356,7 @@ func (v *AskedViewDtoOpened) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape588", data) {
+	if matches("shape633", data) {
 		var chosen OpenedViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3007,7 +3424,7 @@ func (v *EntryViewDtoSource) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape584", data) {
+	if matches("shape629", data) {
 		var chosen SourceViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3022,7 +3439,7 @@ func (v *EntryViewDtoSource) UnmarshalJSON(data []byte) error {
 type EntryPageViewDto struct {
 	Entries []EntryViewDto                                                                                   `json:"entries"`
 	Limit   float64                                                                                          `json:"limit"`
-	More    Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"more"`
+	More    Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"more"`
 	Offset  float64                                                                                          `json:"offset"`
 	Oldest  ScheduleDefinitionDtoLimitsDtoMaxModelCalls                                                      `json:"oldest"`
 	Through float64                                                                                          `json:"through"`
@@ -3121,7 +3538,7 @@ func (v *ContextViewDtoMessageTokens) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape595", data) {
+	if matches("shape640", data) {
 		var chosen TokenCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3164,7 +3581,7 @@ func (v *ContextViewDtoPrefix) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape597", data) {
+	if matches("shape642", data) {
 		var chosen PrefixDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3221,7 +3638,7 @@ func (v ProjectionMessageDtoPartsItem) MarshalJSON() ([]byte, error) {
 }
 func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 	*v = ProjectionMessageDtoPartsItem{}
-	if matches("shape616", data) {
+	if matches("shape661", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3229,7 +3646,7 @@ func (v *ProjectionMessageDtoPartsItem) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape618", data) {
+	if matches("shape663", data) {
 		var chosen ProjectionMessageDtoPartsItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3349,7 +3766,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape631", data) {
+	if matches("shape676", data) {
 		var chosen []ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3357,7 +3774,7 @@ func (v *ToolParameterSchemaEntry) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape632", data) {
+	if matches("shape677", data) {
 		var chosen map[string]ToolParameterSchemaEntry
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3429,7 +3846,7 @@ func (v *ContextSnapshotDtoCount) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape611", data) {
+	if matches("shape656", data) {
 		var chosen ContextSnapshotDtoCountVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3572,7 +3989,7 @@ func (v *SearchRetrievalDtoCoverage) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape650", data) {
+	if matches("shape695", data) {
 		var chosen PassageCoverageDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3657,7 +4074,7 @@ func (v *ChunkDetailResponseDtoChapter) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape655", data) {
+	if matches("shape700", data) {
 		var chosen UnitViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -3994,7 +4411,7 @@ func (v *InformationAcquisitionDtoPostGate) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape693", data) {
+	if matches("shape738", data) {
 		var chosen InformationGateDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4031,6 +4448,53 @@ type InformationFenceDto struct {
 	Pending  float64                      `json:"pending"`
 	Ready    float64                      `json:"ready"`
 	Settled  float64                      `json:"settled"`
+}
+
+// InformationTypeContractDto is the explicit InformationTypeContract protocol shape.
+type InformationTypeContractDto struct {
+	DefinitionHash string                       `json:"definitionHash"`
+	Description    string                       `json:"description"`
+	Label          string                       `json:"label"`
+	Ordinal        float64                      `json:"ordinal"`
+	Presentation   map[string]SchemaObjectEntry `json:"presentation"`
+	Profile        string                       `json:"profile"`
+	Schema         SchemaDefinitionDto          `json:"schema"`
+	Slug           string                       `json:"slug"`
+	Type           string                       `json:"type"`
+	Version        string                       `json:"version"`
+}
+
+// InformationContentBindingDto is the explicit InformationContentBinding protocol shape.
+type InformationContentBindingDto struct {
+	Contract     InformationTypeContractDto   `json:"contract"`
+	Metadata     map[string]SchemaObjectEntry `json:"metadata"`
+	MetadataHash string                       `json:"metadataHash"`
+}
+
+// InformationProjectionReuseDto is the explicit InformationProjectionReuse protocol shape.
+type InformationProjectionReuseDto struct {
+	Fingerprint string  `json:"fingerprint"`
+	Generation  float64 `json:"generation"`
+	Revision    string  `json:"revision"`
+	Stage       string  `json:"stage"`
+}
+
+// InformationContentViewDto is the explicit InformationContentView protocol shape.
+type InformationContentViewDto struct {
+	AuthorisedStages []string                        `json:"authorisedStages"`
+	ContentType      *InformationContentBindingDto   `json:"contentType,omitempty"`
+	ProcessingPolicy string                          `json:"processingPolicy"`
+	Reused           []InformationProjectionReuseDto `json:"reused"`
+	RevisedBy        *string                         `json:"revisedBy,omitempty"`
+	Revision         string                          `json:"revision"`
+	StartingRevision *string                         `json:"startingRevision,omitempty"`
+}
+
+// InformationAdmissionDto is the explicit InformationAdmission protocol shape.
+type InformationAdmissionDto struct {
+	Created  bool   `json:"created"`
+	Resource string `json:"resource"`
+	Revision string `json:"revision"`
 }
 
 // InformationAvailabilityDto is the explicit InformationAvailability protocol shape.
@@ -4082,26 +4546,30 @@ type InformationFacetValueDto struct {
 
 // InformationFacetValuesDto is the explicit InformationFacetValues protocol shape.
 type InformationFacetValuesDto struct {
-	Author         []InformationFacetValueDto `json:"author"`
-	AutoTag        []InformationFacetValueDto `json:"autoTag"`
-	DocumentAuthor []InformationFacetValueDto `json:"documentAuthor"`
-	Kind           []InformationFacetValueDto `json:"kind"`
-	Subtype        []InformationFacetValueDto `json:"subtype"`
-	TagGroup       []InformationFacetValueDto `json:"tagGroup"`
-	Tags           []InformationFacetValueDto `json:"tags"`
-	When           []InformationFacetValueDto `json:"when"`
+	Author             []InformationFacetValueDto  `json:"author"`
+	AutoTag            []InformationFacetValueDto  `json:"autoTag"`
+	ContentType        *[]InformationFacetValueDto `json:"contentType,omitempty"`
+	ContentTypeVersion *[]InformationFacetValueDto `json:"contentTypeVersion,omitempty"`
+	DocumentAuthor     []InformationFacetValueDto  `json:"documentAuthor"`
+	Kind               []InformationFacetValueDto  `json:"kind"`
+	Subtype            []InformationFacetValueDto  `json:"subtype"`
+	TagGroup           []InformationFacetValueDto  `json:"tagGroup"`
+	Tags               []InformationFacetValueDto  `json:"tags"`
+	When               []InformationFacetValueDto  `json:"when"`
 }
 
 // InformationFacetMoreDto is the explicit InformationFacetMore protocol shape.
 type InformationFacetMoreDto struct {
-	Author         bool `json:"author"`
-	AutoTag        bool `json:"autoTag"`
-	DocumentAuthor bool `json:"documentAuthor"`
-	Kind           bool `json:"kind"`
-	Subtype        bool `json:"subtype"`
-	TagGroup       bool `json:"tagGroup"`
-	Tags           bool `json:"tags"`
-	When           bool `json:"when"`
+	Author             bool  `json:"author"`
+	AutoTag            bool  `json:"autoTag"`
+	ContentType        *bool `json:"contentType,omitempty"`
+	ContentTypeVersion *bool `json:"contentTypeVersion,omitempty"`
+	DocumentAuthor     bool  `json:"documentAuthor"`
+	Kind               bool  `json:"kind"`
+	Subtype            bool  `json:"subtype"`
+	TagGroup           bool  `json:"tagGroup"`
+	Tags               bool  `json:"tags"`
+	When               bool  `json:"when"`
 }
 
 // InformationTagEdgeDto is the explicit InformationTagEdge protocol shape.
@@ -4128,6 +4596,16 @@ type InformationFacetCountsDto struct {
 // FinalisedInformationDto is the explicit FinalisedInformation protocol shape.
 type FinalisedInformationDto struct {
 	Finalised bool `json:"finalised"`
+}
+
+// InformationTypeIdentityDto is the explicit InformationTypeIdentity protocol shape.
+type InformationTypeIdentityDto struct {
+	DefinitionHash string  `json:"definitionHash"`
+	Label          string  `json:"label"`
+	Ordinal        float64 `json:"ordinal"`
+	Slug           string  `json:"slug"`
+	Type           string  `json:"type"`
+	Version        string  `json:"version"`
 }
 
 // InformationProgressDto is the explicit InformationProgress protocol shape.
@@ -4181,42 +4659,44 @@ type InformationStepDto struct {
 
 // InformationRevisionDto is the explicit InformationRevision protocol shape.
 type InformationRevisionDto struct {
-	AllowanceSpent       *float64                `json:"allowance_spent,omitempty"`
-	AllowanceTotal       *float64                `json:"allowance_total,omitempty"`
-	Author               *string                 `json:"author,omitempty"`
-	AutoTagGenerated     *bool                   `json:"auto_tag_generated,omitempty"`
-	AutoTag              *[]string               `json:"autoTag,omitempty"`
-	Availability         *string                 `json:"availability,omitempty"`
-	ByteSize             *float64                `json:"byte_size,omitempty"`
-	CanManage            *bool                   `json:"can_manage,omitempty"`
-	Citations            *[]string               `json:"citations,omitempty"`
-	ContentHash          *string                 `json:"content_hash,omitempty"`
-	Converter            *string                 `json:"converter,omitempty"`
-	CreatedAt            *string                 `json:"created_at,omitempty"`
-	DocumentSubtype      *string                 `json:"document_subtype,omitempty"`
-	DocumentType         *string                 `json:"document_type,omitempty"`
-	DocumentAuthor       *string                 `json:"documentAuthor,omitempty"`
-	DocumentAuthorSource *string                 `json:"documentAuthorSource,omitempty"`
-	Events               *[]InformationEventDto  `json:"events,omitempty"`
-	Excluded             *bool                   `json:"excluded,omitempty"`
-	Generation           *float64                `json:"generation,omitempty"`
-	Id                   string                  `json:"id"`
-	Inputs               *[]string               `json:"inputs,omitempty"`
-	Kind                 *string                 `json:"kind,omitempty"`
-	MediaType            *string                 `json:"media_type,omitempty"`
-	Ordinal              *float64                `json:"ordinal,omitempty"`
-	Progress             *InformationProgressDto `json:"progress,omitempty"`
-	Report               *InformationReportDto   `json:"report,omitempty"`
-	ReportStatus         *string                 `json:"report_status,omitempty"`
-	ResourceId           *string                 `json:"resource_id,omitempty"`
-	SourceName           *string                 `json:"source_name,omitempty"`
-	SourceUri            *string                 `json:"source_uri,omitempty"`
-	Steps                *[]InformationStepDto   `json:"steps,omitempty"`
-	TagGroups            *map[string][]string    `json:"tagGroups,omitempty"`
-	TagGroupsSource      *string                 `json:"tagGroupsSource,omitempty"`
-	Tags                 *[]string               `json:"tags,omitempty"`
-	TextHash             *string                 `json:"text_hash,omitempty"`
-	Title                *string                 `json:"title,omitempty"`
+	AllowanceSpent       *float64                    `json:"allowance_spent,omitempty"`
+	AllowanceTotal       *float64                    `json:"allowance_total,omitempty"`
+	Author               *string                     `json:"author,omitempty"`
+	AutoTagGenerated     *bool                       `json:"auto_tag_generated,omitempty"`
+	AutoTag              *[]string                   `json:"autoTag,omitempty"`
+	Availability         *string                     `json:"availability,omitempty"`
+	ByteSize             *float64                    `json:"byte_size,omitempty"`
+	CanManage            *bool                       `json:"can_manage,omitempty"`
+	Citations            *[]string                   `json:"citations,omitempty"`
+	ContentHash          *string                     `json:"content_hash,omitempty"`
+	ContentType          *InformationTypeIdentityDto `json:"contentType,omitempty"`
+	Converter            *string                     `json:"converter,omitempty"`
+	CreatedAt            *string                     `json:"created_at,omitempty"`
+	DocumentSubtype      *string                     `json:"document_subtype,omitempty"`
+	DocumentType         *string                     `json:"document_type,omitempty"`
+	DocumentAuthor       *string                     `json:"documentAuthor,omitempty"`
+	DocumentAuthorSource *string                     `json:"documentAuthorSource,omitempty"`
+	Events               *[]InformationEventDto      `json:"events,omitempty"`
+	Excluded             *bool                       `json:"excluded,omitempty"`
+	Generation           *float64                    `json:"generation,omitempty"`
+	Id                   string                      `json:"id"`
+	Inputs               *[]string                   `json:"inputs,omitempty"`
+	Kind                 *string                     `json:"kind,omitempty"`
+	MediaType            *string                     `json:"media_type,omitempty"`
+	Ordinal              *float64                    `json:"ordinal,omitempty"`
+	ProcessingPolicy     *string                     `json:"processingPolicy,omitempty"`
+	Progress             *InformationProgressDto     `json:"progress,omitempty"`
+	Report               *InformationReportDto       `json:"report,omitempty"`
+	ReportStatus         *string                     `json:"report_status,omitempty"`
+	ResourceId           *string                     `json:"resource_id,omitempty"`
+	SourceName           *string                     `json:"source_name,omitempty"`
+	SourceUri            *string                     `json:"source_uri,omitempty"`
+	Steps                *[]InformationStepDto       `json:"steps,omitempty"`
+	TagGroups            *map[string][]string        `json:"tagGroups,omitempty"`
+	TagGroupsSource      *string                     `json:"tagGroupsSource,omitempty"`
+	Tags                 *[]string                   `json:"tags,omitempty"`
+	TextHash             *string                     `json:"text_hash,omitempty"`
+	Title                *string                     `json:"title,omitempty"`
 }
 
 // AdoptedInformationDto is the explicit AdoptedInformation protocol shape.
@@ -4264,7 +4744,7 @@ func (v *MigrationEntryDtoToolCalls) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape768", data) {
+	if matches("shape816", data) {
 		var chosen []MigrationEntryDtoToolCallsVariant2ItemDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4375,13 +4855,6 @@ type QueuedInformationDto struct {
 	Queued bool `json:"queued"`
 }
 
-// InformationAdmissionDto is the explicit InformationAdmission protocol shape.
-type InformationAdmissionDto struct {
-	Created  bool   `json:"created"`
-	Resource string `json:"resource"`
-	Revision string `json:"revision"`
-}
-
 // InformationSearchPlacementDto is the explicit InformationSearchPlacement protocol shape.
 type InformationSearchPlacementDto struct {
 	ChapterId      string                                    `json:"chapterId"`
@@ -4416,7 +4889,7 @@ func (v InformationSearchPlacementDtoChapterTitle) MarshalJSON() ([]byte, error)
 }
 func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchPlacementDtoChapterTitle{}
-	if matches("shape798", data) {
+	if matches("shape845", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4424,7 +4897,7 @@ func (v *InformationSearchPlacementDtoChapterTitle) UnmarshalJSON(data []byte) e
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape799", data) {
+	if matches("shape846", data) {
 		var chosen InformationSearchPlacementDtoChapterTitleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4488,7 +4961,7 @@ func (v InformationSearchChunkDtoPlacement) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 	*v = InformationSearchChunkDtoPlacement{}
-	if matches("shape796", data) {
+	if matches("shape843", data) {
 		var chosen InformationSearchPlacementDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4496,7 +4969,7 @@ func (v *InformationSearchChunkDtoPlacement) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape800", data) {
+	if matches("shape847", data) {
 		var chosen InformationUnplacedDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4542,6 +5015,43 @@ type CodeSymbolMatchesDto struct {
 	Role       string               `json:"role"`
 	SourceKind string               `json:"source_kind"`
 	Symbols    []CodeSymbolMatchDto `json:"symbols"`
+}
+
+// InformationTypeVersionDto is the explicit InformationTypeVersion protocol shape.
+type InformationTypeVersionDto struct {
+	Contract        InformationTypeContractDto `json:"contract"`
+	ControlRevision float64                    `json:"controlRevision"`
+	CreatedAt       string                     `json:"createdAt"`
+	State           string                     `json:"state"`
+}
+
+// InformationContentCapabilitiesDto is the explicit InformationContentCapabilities protocol shape.
+type InformationContentCapabilitiesDto struct {
+	Capability  string `json:"capability"`
+	Profile     string `json:"profile"`
+	TypedWrites bool   `json:"typedWrites"`
+	View        string `json:"view"`
+}
+
+// InformationTypeVersionsDto is the explicit InformationTypeVersions protocol shape.
+type InformationTypeVersionsDto struct {
+	HasMore bool                        `json:"hasMore"`
+	Results []InformationTypeVersionDto `json:"results"`
+}
+
+// MetadataValidationIssueDto is the explicit MetadataValidationIssue protocol shape.
+type MetadataValidationIssueDto struct {
+	InstancePointer string `json:"instancePointer"`
+	Keyword         string `json:"keyword"`
+	Message         string `json:"message"`
+	SchemaPointer   string `json:"schemaPointer"`
+}
+
+// MetadataValidationResultDto is the explicit MetadataValidationResult protocol shape.
+type MetadataValidationResultDto struct {
+	Issues    []MetadataValidationIssueDto `json:"issues"`
+	Status    string                       `json:"status"`
+	Truncated bool                         `json:"truncated"`
 }
 
 // PartialDto is the explicit Partial protocol shape.
@@ -4607,7 +5117,7 @@ func (v *ObservedOutcomeDtoPace) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape812", data) {
+	if matches("shape873", data) {
 		var chosen PartialDto2
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4661,7 +5171,7 @@ func (v *ObservedJobDtoLimits) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape808", data) {
+	if matches("shape869", data) {
 		var chosen PartialDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4704,7 +5214,7 @@ func (v *ObservedJobDtoOutcome) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape810", data) {
+	if matches("shape871", data) {
 		var chosen ObservedOutcomeDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4791,7 +5301,7 @@ func (v *MemoryRecordDtoInvalidation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape820", data) {
+	if matches("shape881", data) {
 		var chosen MemoryInvalidationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -4917,7 +5427,7 @@ type SettingViewDto struct {
 // BooleanSettingViewDto is the explicit BooleanSettingView protocol shape.
 type BooleanSettingViewDto struct {
 	Source string                                                                                           `json:"source"`
-	Value  Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"value"`
+	Value  Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"value"`
 }
 
 // CapsViewDto is the explicit CapsView protocol shape.
@@ -5001,7 +5511,7 @@ type RecordViewDto struct {
 // RecordPageViewDto is the explicit RecordPageView protocol shape.
 type RecordPageViewDto struct {
 	Limit   float64                                                                                          `json:"limit"`
-	More    Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"more"`
+	More    Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"more"`
 	Oldest  ScheduleDefinitionDtoLimitsDtoMaxModelCalls                                                      `json:"oldest"`
 	Root    string                                                                                           `json:"root"`
 	Rows    []RecordViewDto                                                                                  `json:"rows"`
@@ -5079,7 +5589,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape861", data) {
+	if matches("shape922", data) {
 		var chosen MessageViewDtoStructureVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5087,7 +5597,7 @@ func (v *MessageViewDtoStructure) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape866", data) {
+	if matches("shape927", data) {
 		var chosen MessageViewDtoStructureVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5204,7 +5714,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape282", data) {
+	if matches("shape327", data) {
 		var chosen OutgoingWorkDtoResultVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5212,7 +5722,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape321", data) {
+	if matches("shape366", data) {
 		var chosen OutgoingWorkDtoResultVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5220,7 +5730,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape322", data) {
+	if matches("shape367", data) {
 		var chosen OutgoingWorkDtoResultVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5228,7 +5738,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape335", data) {
+	if matches("shape380", data) {
 		var chosen OutgoingWorkDtoResultVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5236,7 +5746,7 @@ func (v *OutgoingWorkDtoResult) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape340", data) {
+	if matches("shape385", data) {
 		var chosen OutgoingWorkDtoResultVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5312,7 +5822,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape337", data) {
+	if matches("shape382", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5320,7 +5830,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape338", data) {
+	if matches("shape383", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5328,7 +5838,7 @@ func (v *OutgoingWorkDtoResultVariant5DtoVerification) UnmarshalJSON(data []byte
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape339", data) {
+	if matches("shape384", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5465,7 +5975,7 @@ func (v *ProviderMutationReceiptDtoCredential) UnmarshalJSON(data []byte) error 
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape904", data) {
+	if matches("shape965", data) {
 		var chosen ProviderCredentialStatusDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5564,7 +6074,7 @@ func (v *RelayEventDtoCausation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape930", data) {
+	if matches("shape991", data) {
 		var chosen RelayCausationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5618,7 +6128,7 @@ func (v *RelayEventDtoPayloadDtoLifecycle) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape939", data) {
+	if matches("shape1000", data) {
 		var chosen RelayEventDtoPayloadDtoLifecycleVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5670,7 +6180,7 @@ func (v *RelayEventDtoPayloadDtoWake) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape941", data) {
+	if matches("shape1002", data) {
 		var chosen RelayEventDtoPayloadDtoWakeVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5810,7 +6320,7 @@ func (v *ScheduleFileDtoDefinition) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape406", data) {
+	if matches("shape451", data) {
 		var chosen ScheduleDefinitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -5993,7 +6503,7 @@ func (v *HostedToolWorkerStatusDtoRegistration) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1007", data) {
+	if matches("shape1068", data) {
 		var chosen HostedToolRegistrationDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6103,7 +6613,7 @@ type UsageHealthDto struct {
 	LostTerminalEvents     *TierDtoProject                                                                                   `json:"lost_terminal_events,omitempty"`
 	OldestPendingAt        *TierDtoProject                                                                                   `json:"oldest_pending_at,omitempty"`
 	PendingEvents          *TierDtoProject                                                                                   `json:"pending_events,omitempty"`
-	ProjectionConflict     *Readonly4EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"projection_conflict,omitempty"`
+	ProjectionConflict     *Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDtoPkceRequired `json:"projection_conflict,omitempty"`
 	ProjectionLagMillis    *TierDtoProject                                                                                   `json:"projection_lag_millis,omitempty"`
 	ProjectionProblem      *TierDtoProject                                                                                   `json:"projection_problem,omitempty"`
 	TrackingStartedAt      *TierDtoProject                                                                                   `json:"tracking_started_at,omitempty"`
@@ -6211,7 +6721,7 @@ func (v *UsageCallDtoPreflightObservation) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape603", data) {
+	if matches("shape648", data) {
 		var chosen ContextCountDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -6767,7 +7277,7 @@ func (v *ConversationLatestResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape637", data) {
+	if matches("shape682", data) {
 		var chosen ConversationViewDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7012,11 +7522,88 @@ type IncomingStatusPayloadDto struct {
 
 // InformationAcquirePayloadDto is the explicit InformationAcquirePayloadDto protocol shape.
 type InformationAcquirePayloadDto struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Url       string                            `json:"url"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	Url              string                              `json:"url"`
+	View             *string                             `json:"view,omitempty"`
+}
+
+// InformationAcquirePayloadDtoTyping is a closed union: exactly one variant must be selected.
+type InformationAcquirePayloadDtoTyping struct {
+	Variant1 *InformationAcquirePayloadDtoTypingVariant1Dto
+	Variant2 *InformationAcquirePayloadDtoTypingVariant2Dto
+	Variant3 *InformationAcquirePayloadDtoTypingVariant3Dto
+}
+
+func (v InformationAcquirePayloadDtoTyping) MarshalJSON() ([]byte, error) {
+	var chosen any
+	count := 0
+	if v.Variant1 != nil {
+		chosen = v.Variant1
+		count++
+	}
+	if v.Variant2 != nil {
+		chosen = v.Variant2
+		count++
+	}
+	if v.Variant3 != nil {
+		chosen = v.Variant3
+		count++
+	}
+	if count != 1 {
+		return nil, errors.New("select exactly one union variant")
+	}
+	return json.Marshal(chosen)
+}
+func (v *InformationAcquirePayloadDtoTyping) UnmarshalJSON(data []byte) error {
+	*v = InformationAcquirePayloadDtoTyping{}
+	if matches("shape135", data) {
+		var chosen InformationAcquirePayloadDtoTypingVariant1Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant1 = &chosen
+		return nil
+	}
+	if matches("shape140", data) {
+		var chosen InformationAcquirePayloadDtoTypingVariant2Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant2 = &chosen
+		return nil
+	}
+	if matches("shape142", data) {
+		var chosen InformationAcquirePayloadDtoTypingVariant3Dto
+		if err := json.Unmarshal(data, &chosen); err != nil {
+			return err
+		}
+		v.Variant3 = &chosen
+		return nil
+	}
+	return errors.New("invalid union")
+}
+
+// InformationAcquirePayloadDtoTypingVariant1Dto is the explicit InformationAcquirePayloadDtoTypingVariant1Dto protocol shape.
+type InformationAcquirePayloadDtoTypingVariant1Dto struct {
+	Metadata map[string]SchemaObjectEntry `json:"metadata"`
+	Mode     string                       `json:"mode"`
+	Version  string                       `json:"version"`
+}
+
+// InformationAcquirePayloadDtoTypingVariant2Dto is the explicit InformationAcquirePayloadDtoTypingVariant2Dto protocol shape.
+type InformationAcquirePayloadDtoTypingVariant2Dto struct {
+	Metadata *map[string]SchemaObjectEntry `json:"metadata,omitempty"`
+	Mode     string                        `json:"mode"`
+}
+
+// InformationAcquirePayloadDtoTypingVariant3Dto is the explicit InformationAcquirePayloadDtoTypingVariant3Dto protocol shape.
+type InformationAcquirePayloadDtoTypingVariant3Dto struct {
+	Mode string `json:"mode"`
 }
 
 // InformationAcquisitionsPayloadDto is the explicit InformationAcquisitionsPayloadDto protocol shape.
@@ -7025,6 +7612,7 @@ type InformationAcquisitionsPayloadDto struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationAllowancePayloadDto is the explicit InformationAllowancePayloadDto protocol shape.
@@ -7034,6 +7622,7 @@ type InformationAllowancePayloadDto struct {
 	RequestId     string                            `json:"requestId"`
 	Revision      string                            `json:"revision"`
 	Scope         InformationAcquirePayloadDtoScope `json:"scope"`
+	View          *string                           `json:"view,omitempty"`
 }
 
 // InformationAskPayloadDto is the explicit InformationAskPayloadDto protocol shape.
@@ -7043,6 +7632,7 @@ type InformationAskPayloadDto struct {
 	Question      string                            `json:"question"`
 	Revision      string                            `json:"revision"`
 	Scope         InformationAcquirePayloadDtoScope `json:"scope"`
+	View          *string                           `json:"view,omitempty"`
 }
 
 // InformationAwaitPayloadDto is the explicit InformationAwaitPayloadDto protocol shape.
@@ -7050,6 +7640,7 @@ type InformationAwaitPayloadDto struct {
 	Corpus  *string                                 `json:"corpus,omitempty"`
 	Scope   InformationAcquirePayloadDtoScope       `json:"scope"`
 	Sources []InformationAwaitPayloadDtoSourcesItem `json:"sources"`
+	View    *string                                 `json:"view,omitempty"`
 	WaitMs  *float64                                `json:"waitMs,omitempty"`
 }
 
@@ -7077,7 +7668,7 @@ func (v InformationAwaitPayloadDtoSourcesItem) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationAwaitPayloadDtoSourcesItem) UnmarshalJSON(data []byte) error {
 	*v = InformationAwaitPayloadDtoSourcesItem{}
-	if matches("shape140", data) {
+	if matches("shape151", data) {
 		var chosen InformationAwaitPayloadDtoSourcesItemVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7085,7 +7676,7 @@ func (v *InformationAwaitPayloadDtoSourcesItem) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape141", data) {
+	if matches("shape152", data) {
 		var chosen InformationAwaitPayloadDtoSourcesItemVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7106,12 +7697,31 @@ type InformationAwaitPayloadDtoSourcesItemVariant2Dto struct {
 	Acquisition string `json:"acquisition"`
 }
 
+// InformationContentGetPayloadDto is the explicit InformationContentGetPayloadDto protocol shape.
+type InformationContentGetPayloadDto struct {
+	Corpus   *string                           `json:"corpus,omitempty"`
+	Revision string                            `json:"revision"`
+	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     string                            `json:"view"`
+}
+
+// InformationContentRevisePayloadDto is the explicit InformationContentRevisePayloadDto protocol shape.
+type InformationContentRevisePayloadDto struct {
+	Corpus           *string                            `json:"corpus,omitempty"`
+	ExpectedRevision string                             `json:"expectedRevision"`
+	RequestId        string                             `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope  `json:"scope"`
+	Typing           InformationAcquirePayloadDtoTyping `json:"typing"`
+	View             string                             `json:"view"`
+}
+
 // InformationDeletePayloadDto is the explicit InformationDeletePayloadDto protocol shape.
 type InformationDeletePayloadDto struct {
 	Corpus    *string                           `json:"corpus,omitempty"`
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationEventsPayloadDto is the explicit InformationEventsPayloadDto protocol shape.
@@ -7120,6 +7730,7 @@ type InformationEventsPayloadDto struct {
 	Corpus *string                           `json:"corpus,omitempty"`
 	Limit  *float64                          `json:"limit,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationEvidenceReadPayloadDto is the explicit InformationEvidenceReadPayloadDto protocol shape.
@@ -7127,6 +7738,7 @@ type InformationEvidenceReadPayloadDto struct {
 	Corpus   *string                           `json:"corpus,omitempty"`
 	Evidence string                            `json:"evidence"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationEvidenceRecordPayloadDto is the explicit InformationEvidenceRecordPayloadDto protocol shape.
@@ -7139,6 +7751,7 @@ type InformationEvidenceRecordPayloadDto struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Start     float64                           `json:"start"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationExcludePayloadDto is the explicit InformationExcludePayloadDto protocol shape.
@@ -7147,6 +7760,7 @@ type InformationExcludePayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationFacetsPayloadDto is the explicit InformationFacetsPayloadDto protocol shape.
@@ -7155,6 +7769,7 @@ type InformationFacetsPayloadDto struct {
 	Filter *InformationFilterDto             `json:"filter,omitempty"`
 	Kind   *string                           `json:"kind,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationFinalisePayloadDto is the explicit InformationFinalisePayloadDto protocol shape.
@@ -7163,6 +7778,7 @@ type InformationFinalisePayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationInventoryPayloadDto is the explicit InformationInventoryPayloadDto protocol shape.
@@ -7171,6 +7787,7 @@ type InformationInventoryPayloadDto struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationLinkPayloadDto is the explicit InformationLinkPayloadDto protocol shape.
@@ -7180,6 +7797,7 @@ type InformationLinkPayloadDto struct {
 	RequestId         string                            `json:"requestId"`
 	Revision          string                            `json:"revision"`
 	Scope             InformationAcquirePayloadDtoScope `json:"scope"`
+	View              *string                           `json:"view,omitempty"`
 }
 
 // InformationListPayloadDto is the explicit InformationListPayloadDto protocol shape.
@@ -7190,6 +7808,7 @@ type InformationListPayloadDto struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationMigrationAdoptPayloadDto is the explicit InformationMigrationAdoptPayloadDto protocol shape.
@@ -7201,6 +7820,7 @@ type InformationMigrationAdoptPayloadDto struct {
 	RequestId         string                             `json:"requestId"`
 	Revision          string                             `json:"revision"`
 	Scope             *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View              *string                            `json:"view,omitempty"`
 	Visibility        string                             `json:"visibility"`
 }
 
@@ -7212,6 +7832,7 @@ type InformationMigrationInspectPayloadDto struct {
 	Payload string                             `json:"payload"`
 	Reason  string                             `json:"reason"`
 	Scope   *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View    *string                            `json:"view,omitempty"`
 }
 
 // InformationMigrationListPayloadDto is the explicit InformationMigrationListPayloadDto protocol shape.
@@ -7220,6 +7841,7 @@ type InformationMigrationListPayloadDto struct {
 	Limit  *float64                           `json:"limit,omitempty"`
 	Offset *float64                           `json:"offset,omitempty"`
 	Scope  *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View   *string                            `json:"view,omitempty"`
 }
 
 // InformationMigrationReleasePayloadDto is the explicit InformationMigrationReleasePayloadDto protocol shape.
@@ -7231,6 +7853,7 @@ type InformationMigrationReleasePayloadDto struct {
 	Reason    string                            `json:"reason"`
 	RequestId string                            `json:"requestId"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationOutlinePayloadDto is the explicit InformationOutlinePayloadDto protocol shape.
@@ -7249,6 +7872,7 @@ type InformationRankPayloadDto struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Query  string                            `json:"query"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationReadPayloadDto is the explicit InformationReadPayloadDto protocol shape.
@@ -7258,6 +7882,7 @@ type InformationReadPayloadDto struct {
 	Offset   *float64                          `json:"offset,omitempty"`
 	Revision string                            `json:"revision"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationRebuildPayloadDto is the explicit InformationRebuildPayloadDto protocol shape.
@@ -7267,40 +7892,51 @@ type InformationRebuildPayloadDto struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Stage     string                            `json:"stage"`
+	Stages    *[]string                         `json:"stages,omitempty"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationRecordReportPayloadDto is the explicit InformationRecordReportPayloadDto protocol shape.
 type InformationRecordReportPayloadDto struct {
-	Corpus       *string                           `json:"corpus,omitempty"`
-	Evidence     *[]string                         `json:"evidence,omitempty"`
-	Feedback     *string                           `json:"feedback,omitempty"`
-	Findings     *[]ReportFindingDto               `json:"findings,omitempty"`
-	Inputs       *[]string                         `json:"inputs,omitempty"`
-	Name         string                            `json:"name"`
-	Objectives   *[]string                         `json:"objectives,omitempty"`
-	RequestId    string                            `json:"requestId"`
-	Reviews      *[]ReportReviewDto                `json:"reviews,omitempty"`
-	Scope        InformationAcquirePayloadDtoScope `json:"scope"`
-	ScopeChanges *[]string                         `json:"scopeChanges,omitempty"`
-	Text         string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	Evidence         *[]string                           `json:"evidence,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Feedback         *string                             `json:"feedback,omitempty"`
+	Findings         *[]ReportFindingDto                 `json:"findings,omitempty"`
+	Inputs           *[]string                           `json:"inputs,omitempty"`
+	Name             string                              `json:"name"`
+	Objectives       *[]string                           `json:"objectives,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Reviews          *[]ReportReviewDto                  `json:"reviews,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	ScopeChanges     *[]string                           `json:"scopeChanges,omitempty"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationRefreshPayloadDto is the explicit InformationRefreshPayloadDto protocol shape.
 type InformationRefreshPayloadDto struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationReplacePayloadDto is the explicit InformationReplacePayloadDto protocol shape.
 type InformationReplacePayloadDto struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationRestorePayloadDto is the explicit InformationRestorePayloadDto protocol shape.
@@ -7309,6 +7945,7 @@ type InformationRestorePayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationRetryPayloadDto is the explicit InformationRetryPayloadDto protocol shape.
@@ -7318,16 +7955,21 @@ type InformationRetryPayloadDto struct {
 	RequestId   *string                           `json:"requestId,omitempty"`
 	Revision    *string                           `json:"revision,omitempty"`
 	Scope       InformationAcquirePayloadDtoScope `json:"scope"`
+	Stages      *[]string                         `json:"stages,omitempty"`
+	View        *string                           `json:"view,omitempty"`
 }
 
 // InformationRevisePayloadDto is the explicit InformationRevisePayloadDto protocol shape.
 type InformationRevisePayloadDto struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationSearchPayloadDto is the explicit InformationSearchPayloadDto protocol shape.
@@ -7338,6 +7980,7 @@ type InformationSearchPayloadDto struct {
 	Query    string                            `json:"query"`
 	Revision *string                           `json:"revision,omitempty"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationSharePayloadDto is the explicit InformationSharePayloadDto protocol shape.
@@ -7346,6 +7989,7 @@ type InformationSharePayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationStatusPayloadDto is the explicit InformationStatusPayloadDto protocol shape.
@@ -7354,6 +7998,7 @@ type InformationStatusPayloadDto struct {
 	Corpus      *string                           `json:"corpus,omitempty"`
 	Revision    *string                           `json:"revision,omitempty"`
 	Scope       InformationAcquirePayloadDtoScope `json:"scope"`
+	View        *string                           `json:"view,omitempty"`
 }
 
 // InformationStatusResult is a closed union: exactly one variant must be selected.
@@ -7380,7 +8025,7 @@ func (v InformationStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 	*v = InformationStatusResult{}
-	if matches("shape690", data) {
+	if matches("shape735", data) {
 		var chosen InformationAcquisitionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7388,7 +8033,7 @@ func (v *InformationStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape726", data) {
+	if matches("shape781", data) {
 		var chosen InformationRevisionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7416,6 +8061,7 @@ type InformationTagsPayloadDto struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Tags      []string                          `json:"tags"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationTagsGroupsPayloadDto is the explicit InformationTagsGroupsPayloadDto protocol shape.
@@ -7425,6 +8071,7 @@ type InformationTagsGroupsPayloadDto struct {
 	RequestId string                                `json:"requestId"`
 	Revision  string                                `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope     `json:"scope"`
+	View      *string                               `json:"view,omitempty"`
 }
 
 // InformationTagsGroupsPayloadDtoGroups is a closed union: exactly one variant must be selected.
@@ -7459,7 +8106,7 @@ func (v *InformationTagsGroupsPayloadDtoGroups) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape186", data) {
+	if matches("shape208", data) {
 		var chosen map[string][]string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7470,12 +8117,86 @@ func (v *InformationTagsGroupsPayloadDtoGroups) UnmarshalJSON(data []byte) error
 	return errors.New("invalid union")
 }
 
+// InformationTypesActivatePayloadDto is the explicit InformationTypesActivatePayloadDto protocol shape.
+type InformationTypesActivatePayloadDto struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	ExpectedControlRevision float64                           `json:"expectedControlRevision"`
+	RequestId               string                            `json:"requestId"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Version                 string                            `json:"version"`
+	View                    string                            `json:"view"`
+}
+
+// InformationTypesCapabilitiesPayloadDto is the explicit InformationTypesCapabilitiesPayloadDto protocol shape.
+type InformationTypesCapabilitiesPayloadDto struct {
+	Corpus *string                           `json:"corpus,omitempty"`
+	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
+}
+
+// InformationTypesDeprecatePayloadDto is the explicit InformationTypesDeprecatePayloadDto protocol shape.
+type InformationTypesDeprecatePayloadDto struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	ExpectedControlRevision float64                           `json:"expectedControlRevision"`
+	RequestId               string                            `json:"requestId"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Version                 string                            `json:"version"`
+	View                    string                            `json:"view"`
+}
+
+// InformationTypesGetPayloadDto is the explicit InformationTypesGetPayloadDto protocol shape.
+type InformationTypesGetPayloadDto struct {
+	AttachedRevision *string                           `json:"attachedRevision,omitempty"`
+	Corpus           *string                           `json:"corpus,omitempty"`
+	PublishedOnly    *bool                             `json:"publishedOnly,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope `json:"scope"`
+	Version          string                            `json:"version"`
+	View             string                            `json:"view"`
+}
+
+// InformationTypesListPayloadDto is the explicit InformationTypesListPayloadDto protocol shape.
+type InformationTypesListPayloadDto struct {
+	Corpus *string                           `json:"corpus,omitempty"`
+	Drafts *bool                             `json:"drafts,omitempty"`
+	Limit  *float64                          `json:"limit,omitempty"`
+	Offset *float64                          `json:"offset,omitempty"`
+	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   string                            `json:"view"`
+}
+
+// InformationTypesValidatePayloadDto is the explicit InformationTypesValidatePayloadDto protocol shape.
+type InformationTypesValidatePayloadDto struct {
+	AttachedRevision *string                           `json:"attachedRevision,omitempty"`
+	Corpus           *string                           `json:"corpus,omitempty"`
+	Metadata         map[string]SchemaObjectEntry      `json:"metadata"`
+	PublishedOnly    *bool                             `json:"publishedOnly,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope `json:"scope"`
+	Version          string                            `json:"version"`
+	View             string                            `json:"view"`
+}
+
+// InformationTypesVersionCreatePayloadDto is the explicit InformationTypesVersionCreatePayloadDto protocol shape.
+type InformationTypesVersionCreatePayloadDto struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	Description             *string                           `json:"description,omitempty"`
+	ExpectedControlRevision *float64                          `json:"expectedControlRevision,omitempty"`
+	Label                   *string                           `json:"label,omitempty"`
+	Presentation            *map[string]SchemaObjectEntry     `json:"presentation,omitempty"`
+	RequestId               string                            `json:"requestId"`
+	Schema                  SchemaDefinitionDto               `json:"schema"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Slug                    *string                           `json:"slug,omitempty"`
+	Type                    *string                           `json:"type,omitempty"`
+	View                    string                            `json:"view"`
+}
+
 // InformationUnexcludePayloadDto is the explicit InformationUnexcludePayloadDto protocol shape.
 type InformationUnexcludePayloadDto struct {
 	Corpus    *string                           `json:"corpus,omitempty"`
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationUnlinkPayloadDto is the explicit InformationUnlinkPayloadDto protocol shape.
@@ -7485,6 +8206,7 @@ type InformationUnlinkPayloadDto struct {
 	RequestId         string                            `json:"requestId"`
 	Revision          string                            `json:"revision"`
 	Scope             InformationAcquirePayloadDtoScope `json:"scope"`
+	View              *string                           `json:"view,omitempty"`
 }
 
 // InformationUnsharePayloadDto is the explicit InformationUnsharePayloadDto protocol shape.
@@ -7493,15 +8215,19 @@ type InformationUnsharePayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationUploadPayloadDto is the explicit InformationUploadPayloadDto protocol shape.
 type InformationUploadPayloadDto struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      string                            `json:"name"`
-	RequestId string                            `json:"requestId"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             string                              `json:"name"`
+	RequestId        string                              `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationWithdrawPayloadDto is the explicit InformationWithdrawPayloadDto protocol shape.
@@ -7510,6 +8236,7 @@ type InformationWithdrawPayloadDto struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // JobCancelPayloadDto is the explicit JobCancelPayloadDto protocol shape.
@@ -7722,7 +8449,7 @@ func (v *OutgoingAdvertisePayloadDtoAgentCards) UnmarshalJSON(data []byte) error
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape224", data) {
+	if matches("shape269", data) {
 		var chosen map[string]AgentCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7787,7 +8514,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape882", data) {
+	if matches("shape943", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7795,7 +8522,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape883", data) {
+	if matches("shape944", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7803,7 +8530,7 @@ func (v *OutgoingClaimResultDtoAction) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape884", data) {
+	if matches("shape945", data) {
 		var chosen string
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7846,7 +8573,7 @@ func (v *OutgoingClaimResultDtoWork) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape869", data) {
+	if matches("shape930", data) {
 		var chosen OutgoingWorkDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -7901,7 +8628,7 @@ func (v *OutgoingPeersResultDtoDetailsItemDtoAgentCard) UnmarshalJSON(data []byt
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape225", data) {
+	if matches("shape270", data) {
 		var chosen AgentCardDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8106,7 +8833,7 @@ func (v RelayLogPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayLogPayload{}
-	if matches("shape385", data) {
+	if matches("shape430", data) {
 		var chosen RelayLogPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8114,7 +8841,7 @@ func (v *RelayLogPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape386", data) {
+	if matches("shape431", data) {
 		var chosen RelayLogPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8233,7 +8960,7 @@ func (v RelayTopicsPayload) MarshalJSON() ([]byte, error) {
 }
 func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 	*v = RelayTopicsPayload{}
-	if matches("shape397", data) {
+	if matches("shape442", data) {
 		var chosen RelayTopicsPayloadVariant1Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8241,7 +8968,7 @@ func (v *RelayTopicsPayload) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape398", data) {
+	if matches("shape443", data) {
 		var chosen RelayTopicsPayloadVariant2Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8567,7 +9294,7 @@ func (v UnionStatusResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 	*v = UnionStatusResult{}
-	if matches("shape1021", data) {
+	if matches("shape1082", data) {
 		var chosen IneligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8575,7 +9302,7 @@ func (v *UnionStatusResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1022", data) {
+	if matches("shape1083", data) {
 		var chosen EligibleUnionDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8648,7 +9375,7 @@ func (v UsageCallsResult) MarshalJSON() ([]byte, error) {
 }
 func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 	*v = UsageCallsResult{}
-	if matches("shape1030", data) {
+	if matches("shape1091", data) {
 		var chosen UsageAuditDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8656,7 +9383,7 @@ func (v *UsageCallsResult) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1038", data) {
+	if matches("shape1099", data) {
 		var chosen UsageAttemptsDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8846,7 +9573,7 @@ func (v Notification) MarshalJSON() ([]byte, error) {
 }
 func (v *Notification) UnmarshalJSON(data []byte) error {
 	*v = Notification{}
-	if matches("shape1045", data) {
+	if matches("shape1106", data) {
 		var chosen JobEventDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8854,7 +9581,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant1 = &chosen
 		return nil
 	}
-	if matches("shape1046", data) {
+	if matches("shape1107", data) {
 		var chosen JobDeltaDto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8862,7 +9589,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant2 = &chosen
 		return nil
 	}
-	if matches("shape1050", data) {
+	if matches("shape1111", data) {
 		var chosen NotificationVariant3Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8870,7 +9597,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant3 = &chosen
 		return nil
 	}
-	if matches("shape1052", data) {
+	if matches("shape1113", data) {
 		var chosen NotificationVariant4Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8878,7 +9605,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant4 = &chosen
 		return nil
 	}
-	if matches("shape1054", data) {
+	if matches("shape1115", data) {
 		var chosen NotificationVariant5Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8886,7 +9613,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant5 = &chosen
 		return nil
 	}
-	if matches("shape1061", data) {
+	if matches("shape1122", data) {
 		var chosen NotificationVariant6Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8894,7 +9621,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant6 = &chosen
 		return nil
 	}
-	if matches("shape1063", data) {
+	if matches("shape1124", data) {
 		var chosen NotificationVariant7Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8902,7 +9629,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant7 = &chosen
 		return nil
 	}
-	if matches("shape1065", data) {
+	if matches("shape1126", data) {
 		var chosen NotificationVariant8Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8910,7 +9637,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant8 = &chosen
 		return nil
 	}
-	if matches("shape1067", data) {
+	if matches("shape1128", data) {
 		var chosen NotificationVariant9Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8918,7 +9645,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant9 = &chosen
 		return nil
 	}
-	if matches("shape1069", data) {
+	if matches("shape1130", data) {
 		var chosen NotificationVariant10Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -8926,7 +9653,7 @@ func (v *Notification) UnmarshalJSON(data []byte) error {
 		v.Variant10 = &chosen
 		return nil
 	}
-	if matches("shape1071", data) {
+	if matches("shape1132", data) {
 		var chosen NotificationVariant11Dto
 		if err := json.Unmarshal(data, &chosen); err != nil {
 			return err
@@ -9895,11 +10622,14 @@ func (c *Client) IncomingStatus(ctx context.Context, request IncomingStatusReque
 
 // InformationAcquireRequest is the explicit InformationAcquireRequest protocol shape.
 type InformationAcquireRequest struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Url       string                            `json:"url"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	Url              string                              `json:"url"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationAcquire validates before submission and returns the paired result DTO.
@@ -9913,6 +10643,7 @@ type InformationAcquisitionsRequest struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationAcquisitions validates before submission and returns the paired result DTO.
@@ -9927,6 +10658,7 @@ type InformationAllowanceRequest struct {
 	RequestId     string                            `json:"requestId"`
 	Revision      string                            `json:"revision"`
 	Scope         InformationAcquirePayloadDtoScope `json:"scope"`
+	View          *string                           `json:"view,omitempty"`
 }
 
 // InformationAllowance validates before submission and returns the paired result DTO.
@@ -9941,6 +10673,7 @@ type InformationAskRequest struct {
 	Question      string                            `json:"question"`
 	Revision      string                            `json:"revision"`
 	Scope         InformationAcquirePayloadDtoScope `json:"scope"`
+	View          *string                           `json:"view,omitempty"`
 }
 
 // InformationAsk validates before submission and returns the paired result DTO.
@@ -9953,6 +10686,7 @@ type InformationAwaitRequest struct {
 	Corpus  *string                                 `json:"corpus,omitempty"`
 	Scope   InformationAcquirePayloadDtoScope       `json:"scope"`
 	Sources []InformationAwaitPayloadDtoSourcesItem `json:"sources"`
+	View    *string                                 `json:"view,omitempty"`
 	WaitMs  *float64                                `json:"waitMs,omitempty"`
 }
 
@@ -9961,12 +10695,41 @@ func (c *Client) InformationAwait(ctx context.Context, request InformationAwaitR
 	return requestTyped[InformationFenceDto](ctx, c, "information.await", request)
 }
 
+// InformationContentGetRequest is the explicit InformationContentGetRequest protocol shape.
+type InformationContentGetRequest struct {
+	Corpus   *string                           `json:"corpus,omitempty"`
+	Revision string                            `json:"revision"`
+	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     string                            `json:"view"`
+}
+
+// InformationContentGet validates before submission and returns the paired result DTO.
+func (c *Client) InformationContentGet(ctx context.Context, request InformationContentGetRequest) (Reply[InformationContentViewDto], error) {
+	return requestTyped[InformationContentViewDto](ctx, c, "information.content.get", request)
+}
+
+// InformationContentReviseRequest is the explicit InformationContentReviseRequest protocol shape.
+type InformationContentReviseRequest struct {
+	Corpus           *string                            `json:"corpus,omitempty"`
+	ExpectedRevision string                             `json:"expectedRevision"`
+	RequestId        string                             `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope  `json:"scope"`
+	Typing           InformationAcquirePayloadDtoTyping `json:"typing"`
+	View             string                             `json:"view"`
+}
+
+// InformationContentRevise validates before submission and returns the paired result DTO.
+func (c *Client) InformationContentRevise(ctx context.Context, request InformationContentReviseRequest) (Reply[InformationAdmissionDto], error) {
+	return requestTyped[InformationAdmissionDto](ctx, c, "information.content.revise", request)
+}
+
 // InformationDeleteRequest is the explicit InformationDeleteRequest protocol shape.
 type InformationDeleteRequest struct {
 	Corpus    *string                           `json:"corpus,omitempty"`
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationDelete validates before submission and returns the paired result DTO.
@@ -9980,6 +10743,7 @@ type InformationEventsRequest struct {
 	Corpus *string                           `json:"corpus,omitempty"`
 	Limit  *float64                          `json:"limit,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationEvents validates before submission and returns the paired result DTO.
@@ -9992,6 +10756,7 @@ type InformationEvidenceReadRequest struct {
 	Corpus   *string                           `json:"corpus,omitempty"`
 	Evidence string                            `json:"evidence"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationEvidenceRead validates before submission and returns the paired result DTO.
@@ -10009,6 +10774,7 @@ type InformationEvidenceRecordRequest struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Start     float64                           `json:"start"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationEvidenceRecord validates before submission and returns the paired result DTO.
@@ -10022,6 +10788,7 @@ type InformationExcludeRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationExclude validates before submission and returns the paired result DTO.
@@ -10035,6 +10802,7 @@ type InformationFacetsRequest struct {
 	Filter *InformationFilterDto             `json:"filter,omitempty"`
 	Kind   *string                           `json:"kind,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationFacets validates before submission and returns the paired result DTO.
@@ -10048,6 +10816,7 @@ type InformationFinaliseRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationFinalise validates before submission and returns the paired result DTO.
@@ -10061,6 +10830,7 @@ type InformationInventoryRequest struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationInventory validates before submission and returns the paired result DTO.
@@ -10075,6 +10845,7 @@ type InformationLinkRequest struct {
 	RequestId         string                            `json:"requestId"`
 	Revision          string                            `json:"revision"`
 	Scope             InformationAcquirePayloadDtoScope `json:"scope"`
+	View              *string                           `json:"view,omitempty"`
 }
 
 // InformationLink validates before submission and returns the paired result DTO.
@@ -10090,6 +10861,7 @@ type InformationListRequest struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Offset *float64                          `json:"offset,omitempty"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationList validates before submission and returns the paired result DTO.
@@ -10106,6 +10878,7 @@ type InformationMigrationAdoptRequest struct {
 	RequestId         string                             `json:"requestId"`
 	Revision          string                             `json:"revision"`
 	Scope             *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View              *string                            `json:"view,omitempty"`
 	Visibility        string                             `json:"visibility"`
 }
 
@@ -10122,6 +10895,7 @@ type InformationMigrationInspectRequest struct {
 	Payload string                             `json:"payload"`
 	Reason  string                             `json:"reason"`
 	Scope   *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View    *string                            `json:"view,omitempty"`
 }
 
 // InformationMigrationInspect validates before submission and returns the paired result DTO.
@@ -10135,6 +10909,7 @@ type InformationMigrationListRequest struct {
 	Limit  *float64                           `json:"limit,omitempty"`
 	Offset *float64                           `json:"offset,omitempty"`
 	Scope  *InformationAcquirePayloadDtoScope `json:"scope,omitempty"`
+	View   *string                            `json:"view,omitempty"`
 }
 
 // InformationMigrationList validates before submission and returns the paired result DTO.
@@ -10151,6 +10926,7 @@ type InformationMigrationReleaseRequest struct {
 	Reason    string                            `json:"reason"`
 	RequestId string                            `json:"requestId"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationMigrationRelease validates before submission and returns the paired result DTO.
@@ -10179,6 +10955,7 @@ type InformationRankRequest struct {
 	Limit  *float64                          `json:"limit,omitempty"`
 	Query  string                            `json:"query"`
 	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
 }
 
 // InformationRank validates before submission and returns the paired result DTO.
@@ -10193,6 +10970,7 @@ type InformationReadRequest struct {
 	Offset   *float64                          `json:"offset,omitempty"`
 	Revision string                            `json:"revision"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationRead validates before submission and returns the paired result DTO.
@@ -10207,6 +10985,8 @@ type InformationRebuildRequest struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Stage     string                            `json:"stage"`
+	Stages    *[]string                         `json:"stages,omitempty"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationRebuild validates before submission and returns the paired result DTO.
@@ -10216,18 +10996,21 @@ func (c *Client) InformationRebuild(ctx context.Context, request InformationRebu
 
 // InformationRecordReportRequest is the explicit InformationRecordReportRequest protocol shape.
 type InformationRecordReportRequest struct {
-	Corpus       *string                           `json:"corpus,omitempty"`
-	Evidence     *[]string                         `json:"evidence,omitempty"`
-	Feedback     *string                           `json:"feedback,omitempty"`
-	Findings     *[]ReportFindingDto               `json:"findings,omitempty"`
-	Inputs       *[]string                         `json:"inputs,omitempty"`
-	Name         string                            `json:"name"`
-	Objectives   *[]string                         `json:"objectives,omitempty"`
-	RequestId    string                            `json:"requestId"`
-	Reviews      *[]ReportReviewDto                `json:"reviews,omitempty"`
-	Scope        InformationAcquirePayloadDtoScope `json:"scope"`
-	ScopeChanges *[]string                         `json:"scopeChanges,omitempty"`
-	Text         string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	Evidence         *[]string                           `json:"evidence,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Feedback         *string                             `json:"feedback,omitempty"`
+	Findings         *[]ReportFindingDto                 `json:"findings,omitempty"`
+	Inputs           *[]string                           `json:"inputs,omitempty"`
+	Name             string                              `json:"name"`
+	Objectives       *[]string                           `json:"objectives,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Reviews          *[]ReportReviewDto                  `json:"reviews,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	ScopeChanges     *[]string                           `json:"scopeChanges,omitempty"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationRecordReport validates before submission and returns the paired result DTO.
@@ -10237,10 +11020,13 @@ func (c *Client) InformationRecordReport(ctx context.Context, request Informatio
 
 // InformationRefreshRequest is the explicit InformationRefreshRequest protocol shape.
 type InformationRefreshRequest struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationRefresh validates before submission and returns the paired result DTO.
@@ -10250,12 +11036,15 @@ func (c *Client) InformationRefresh(ctx context.Context, request InformationRefr
 
 // InformationReplaceRequest is the explicit InformationReplaceRequest protocol shape.
 type InformationReplaceRequest struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationReplace validates before submission and returns the paired result DTO.
@@ -10269,6 +11058,7 @@ type InformationRestoreRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationRestore validates before submission and returns the paired result DTO.
@@ -10283,6 +11073,8 @@ type InformationRetryRequest struct {
 	RequestId   *string                           `json:"requestId,omitempty"`
 	Revision    *string                           `json:"revision,omitempty"`
 	Scope       InformationAcquirePayloadDtoScope `json:"scope"`
+	Stages      *[]string                         `json:"stages,omitempty"`
+	View        *string                           `json:"view,omitempty"`
 }
 
 // InformationRetry validates before submission and returns the paired result DTO.
@@ -10292,12 +11084,15 @@ func (c *Client) InformationRetry(ctx context.Context, request InformationRetryR
 
 // InformationReviseRequest is the explicit InformationReviseRequest protocol shape.
 type InformationReviseRequest struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      *string                           `json:"name,omitempty"`
-	RequestId string                            `json:"requestId"`
-	Revision  string                            `json:"revision"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             *string                             `json:"name,omitempty"`
+	RequestId        string                              `json:"requestId"`
+	Revision         string                              `json:"revision"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationRevise validates before submission and returns the paired result DTO.
@@ -10313,6 +11108,7 @@ type InformationSearchRequest struct {
 	Query    string                            `json:"query"`
 	Revision *string                           `json:"revision,omitempty"`
 	Scope    InformationAcquirePayloadDtoScope `json:"scope"`
+	View     *string                           `json:"view,omitempty"`
 }
 
 // InformationSearch validates before submission and returns the paired result DTO.
@@ -10326,6 +11122,7 @@ type InformationShareRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationShare validates before submission and returns the paired result DTO.
@@ -10339,6 +11136,7 @@ type InformationStatusRequest struct {
 	Corpus      *string                           `json:"corpus,omitempty"`
 	Revision    *string                           `json:"revision,omitempty"`
 	Scope       InformationAcquirePayloadDtoScope `json:"scope"`
+	View        *string                           `json:"view,omitempty"`
 }
 
 // InformationStatus validates before submission and returns the paired result DTO.
@@ -10368,6 +11166,7 @@ type InformationTagsRequest struct {
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
 	Tags      []string                          `json:"tags"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationTags validates before submission and returns the paired result DTO.
@@ -10382,11 +11181,120 @@ type InformationTagsGroupsRequest struct {
 	RequestId string                                `json:"requestId"`
 	Revision  string                                `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope     `json:"scope"`
+	View      *string                               `json:"view,omitempty"`
 }
 
 // InformationTagsGroups validates before submission and returns the paired result DTO.
 func (c *Client) InformationTagsGroups(ctx context.Context, request InformationTagsGroupsRequest) (Reply[ChangedInformationDto], error) {
 	return requestTyped[ChangedInformationDto](ctx, c, "information.tags.groups", request)
+}
+
+// InformationTypesActivateRequest is the explicit InformationTypesActivateRequest protocol shape.
+type InformationTypesActivateRequest struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	ExpectedControlRevision float64                           `json:"expectedControlRevision"`
+	RequestId               string                            `json:"requestId"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Version                 string                            `json:"version"`
+	View                    string                            `json:"view"`
+}
+
+// InformationTypesActivate validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesActivate(ctx context.Context, request InformationTypesActivateRequest) (Reply[InformationTypeVersionDto], error) {
+	return requestTyped[InformationTypeVersionDto](ctx, c, "information.types.activate", request)
+}
+
+// InformationTypesCapabilitiesRequest is the explicit InformationTypesCapabilitiesRequest protocol shape.
+type InformationTypesCapabilitiesRequest struct {
+	Corpus *string                           `json:"corpus,omitempty"`
+	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   *string                           `json:"view,omitempty"`
+}
+
+// InformationTypesCapabilities validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesCapabilities(ctx context.Context, request InformationTypesCapabilitiesRequest) (Reply[InformationContentCapabilitiesDto], error) {
+	return requestTyped[InformationContentCapabilitiesDto](ctx, c, "information.types.capabilities", request)
+}
+
+// InformationTypesDeprecateRequest is the explicit InformationTypesDeprecateRequest protocol shape.
+type InformationTypesDeprecateRequest struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	ExpectedControlRevision float64                           `json:"expectedControlRevision"`
+	RequestId               string                            `json:"requestId"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Version                 string                            `json:"version"`
+	View                    string                            `json:"view"`
+}
+
+// InformationTypesDeprecate validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesDeprecate(ctx context.Context, request InformationTypesDeprecateRequest) (Reply[InformationTypeVersionDto], error) {
+	return requestTyped[InformationTypeVersionDto](ctx, c, "information.types.deprecate", request)
+}
+
+// InformationTypesGetRequest is the explicit InformationTypesGetRequest protocol shape.
+type InformationTypesGetRequest struct {
+	AttachedRevision *string                           `json:"attachedRevision,omitempty"`
+	Corpus           *string                           `json:"corpus,omitempty"`
+	PublishedOnly    *bool                             `json:"publishedOnly,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope `json:"scope"`
+	Version          string                            `json:"version"`
+	View             string                            `json:"view"`
+}
+
+// InformationTypesGet validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesGet(ctx context.Context, request InformationTypesGetRequest) (Reply[InformationTypeContractDto], error) {
+	return requestTyped[InformationTypeContractDto](ctx, c, "information.types.get", request)
+}
+
+// InformationTypesListRequest is the explicit InformationTypesListRequest protocol shape.
+type InformationTypesListRequest struct {
+	Corpus *string                           `json:"corpus,omitempty"`
+	Drafts *bool                             `json:"drafts,omitempty"`
+	Limit  *float64                          `json:"limit,omitempty"`
+	Offset *float64                          `json:"offset,omitempty"`
+	Scope  InformationAcquirePayloadDtoScope `json:"scope"`
+	View   string                            `json:"view"`
+}
+
+// InformationTypesList validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesList(ctx context.Context, request InformationTypesListRequest) (Reply[InformationTypeVersionsDto], error) {
+	return requestTyped[InformationTypeVersionsDto](ctx, c, "information.types.list", request)
+}
+
+// InformationTypesValidateRequest is the explicit InformationTypesValidateRequest protocol shape.
+type InformationTypesValidateRequest struct {
+	AttachedRevision *string                           `json:"attachedRevision,omitempty"`
+	Corpus           *string                           `json:"corpus,omitempty"`
+	Metadata         map[string]SchemaObjectEntry      `json:"metadata"`
+	PublishedOnly    *bool                             `json:"publishedOnly,omitempty"`
+	Scope            InformationAcquirePayloadDtoScope `json:"scope"`
+	Version          string                            `json:"version"`
+	View             string                            `json:"view"`
+}
+
+// InformationTypesValidate validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesValidate(ctx context.Context, request InformationTypesValidateRequest) (Reply[MetadataValidationResultDto], error) {
+	return requestTyped[MetadataValidationResultDto](ctx, c, "information.types.validate", request)
+}
+
+// InformationTypesVersionCreateRequest is the explicit InformationTypesVersionCreateRequest protocol shape.
+type InformationTypesVersionCreateRequest struct {
+	Corpus                  *string                           `json:"corpus,omitempty"`
+	Description             *string                           `json:"description,omitempty"`
+	ExpectedControlRevision *float64                          `json:"expectedControlRevision,omitempty"`
+	Label                   *string                           `json:"label,omitempty"`
+	Presentation            *map[string]SchemaObjectEntry     `json:"presentation,omitempty"`
+	RequestId               string                            `json:"requestId"`
+	Schema                  SchemaDefinitionDto               `json:"schema"`
+	Scope                   InformationAcquirePayloadDtoScope `json:"scope"`
+	Slug                    *string                           `json:"slug,omitempty"`
+	Type                    *string                           `json:"type,omitempty"`
+	View                    string                            `json:"view"`
+}
+
+// InformationTypesVersionCreate validates before submission and returns the paired result DTO.
+func (c *Client) InformationTypesVersionCreate(ctx context.Context, request InformationTypesVersionCreateRequest) (Reply[InformationTypeVersionDto], error) {
+	return requestTyped[InformationTypeVersionDto](ctx, c, "information.types.version.create", request)
 }
 
 // InformationUnexcludeRequest is the explicit InformationUnexcludeRequest protocol shape.
@@ -10395,6 +11303,7 @@ type InformationUnexcludeRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationUnexclude validates before submission and returns the paired result DTO.
@@ -10409,6 +11318,7 @@ type InformationUnlinkRequest struct {
 	RequestId         string                            `json:"requestId"`
 	Revision          string                            `json:"revision"`
 	Scope             InformationAcquirePayloadDtoScope `json:"scope"`
+	View              *string                           `json:"view,omitempty"`
 }
 
 // InformationUnlink validates before submission and returns the paired result DTO.
@@ -10422,6 +11332,7 @@ type InformationUnshareRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationUnshare validates before submission and returns the paired result DTO.
@@ -10431,11 +11342,14 @@ func (c *Client) InformationUnshare(ctx context.Context, request InformationUnsh
 
 // InformationUploadRequest is the explicit InformationUploadRequest protocol shape.
 type InformationUploadRequest struct {
-	Corpus    *string                           `json:"corpus,omitempty"`
-	Name      string                            `json:"name"`
-	RequestId string                            `json:"requestId"`
-	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
-	Text      string                            `json:"text"`
+	Corpus           *string                             `json:"corpus,omitempty"`
+	ExpectedRevision *string                             `json:"expectedRevision,omitempty"`
+	Name             string                              `json:"name"`
+	RequestId        string                              `json:"requestId"`
+	Scope            InformationAcquirePayloadDtoScope   `json:"scope"`
+	Text             string                              `json:"text"`
+	Typing           *InformationAcquirePayloadDtoTyping `json:"typing,omitempty"`
+	View             *string                             `json:"view,omitempty"`
 }
 
 // InformationUpload validates before submission and returns the paired result DTO.
@@ -10449,6 +11363,7 @@ type InformationWithdrawRequest struct {
 	RequestId string                            `json:"requestId"`
 	Revision  string                            `json:"revision"`
 	Scope     InformationAcquirePayloadDtoScope `json:"scope"`
+	View      *string                           `json:"view,omitempty"`
 }
 
 // InformationWithdraw validates before submission and returns the paired result DTO.

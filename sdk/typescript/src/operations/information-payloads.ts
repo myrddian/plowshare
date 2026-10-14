@@ -1,3 +1,9 @@
+import type {
+  InformationTyping,
+  InformationProcessingStage,
+} from './information-content.ts';
+import type { SchemaDefinition } from './schema-definition.ts';
+import type { SchemaObject } from './schema-instances.ts';
 import type { InformationScope, InformationCorpus } from './information.ts';
 
 export interface ReportFinding {
@@ -27,31 +33,115 @@ export interface InformationFilter {
   readonly when?: string;
   readonly subtype?: string;
   readonly search?: string;
+  readonly contentType?: string;
+  readonly contentTypeVersion?: string;
+  readonly untyped?: boolean;
 }
 
 /** Authenticated information frame payloads; publication and migration remain operator controls. */
 export interface InformationPayloads {
+  'information.types.capabilities': {
+    readonly scope: InformationScope;
+    readonly view?: 'content-types-v1';
+    readonly corpus?: InformationCorpus;
+  };
+  'information.types.list': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly drafts?: boolean;
+    readonly limit?: number;
+    readonly offset?: number;
+  };
+  'information.types.get': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly version: string;
+    readonly attachedRevision?: string;
+    readonly publishedOnly?: boolean;
+  };
+  'information.types.validate': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly version: string;
+    readonly attachedRevision?: string;
+    readonly metadata: SchemaObject;
+    readonly publishedOnly?: boolean;
+  };
+  'information.types.version.create': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly requestId: string;
+    readonly type?: string;
+    readonly expectedControlRevision?: number;
+    readonly slug?: string;
+    readonly label?: string;
+    readonly description?: string;
+    readonly schema: SchemaDefinition;
+    readonly presentation?: SchemaObject;
+  };
+  'information.types.activate': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly requestId: string;
+    readonly version: string;
+    readonly expectedControlRevision: number;
+  };
+  'information.types.deprecate': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly requestId: string;
+    readonly version: string;
+    readonly expectedControlRevision: number;
+  };
+  'information.content.get': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly revision: string;
+  };
+  'information.content.revise': {
+    readonly corpus?: InformationCorpus;
+    readonly scope: InformationScope;
+    readonly view: 'content-types-v1';
+    readonly requestId: string;
+    readonly expectedRevision: string;
+    readonly typing: InformationTyping;
+  };
   'information.upload': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly requestId: string;
     readonly name: string;
     readonly text: string;
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.acquire': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly requestId: string;
     readonly url: string;
     readonly name?: string;
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.facets': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly kind?: 'source' | 'report';
     readonly filter?: InformationFilter;
   };
   'information.tags.groups': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -59,6 +149,7 @@ export interface InformationPayloads {
     readonly groups: Readonly<Record<string, readonly string[]>> | null;
   };
   'information.tags': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -66,6 +157,7 @@ export interface InformationPayloads {
     readonly tags: readonly string[];
   };
   'information.list': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly kind?: 'source' | 'report';
@@ -74,6 +166,7 @@ export interface InformationPayloads {
     readonly offset?: number;
   };
   'information.await': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly sources: readonly (
@@ -83,12 +176,14 @@ export interface InformationPayloads {
     readonly waitMs?: number;
   };
   'information.status': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision?: string;
     readonly acquisition?: string;
   };
   'information.read': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -111,6 +206,7 @@ export interface InformationPayloads {
     readonly offset?: number;
   };
   'information.search': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly query: string;
@@ -119,6 +215,7 @@ export interface InformationPayloads {
     readonly limit?: number;
   };
   'information.rank': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly query: string;
@@ -126,6 +223,7 @@ export interface InformationPayloads {
     readonly limit?: number;
   };
   'information.ask': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -133,6 +231,7 @@ export interface InformationPayloads {
     readonly maxModelCalls?: number;
   };
   'information.evidence.record': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -143,11 +242,13 @@ export interface InformationPayloads {
     readonly locator: string;
   };
   'information.evidence.read': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly evidence: string;
   };
   'information.record.report': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly requestId: string;
@@ -160,14 +261,18 @@ export interface InformationPayloads {
     readonly findings?: readonly ReportFinding[];
     readonly reviews?: readonly ReportReview[];
     readonly scopeChanges?: readonly string[];
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.finalise': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.link': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -175,6 +280,7 @@ export interface InformationPayloads {
     readonly collectionProject: string;
   };
   'information.unlink': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -182,84 +288,105 @@ export interface InformationPayloads {
     readonly collectionProject: string;
   };
   'information.share': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.unshare': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.withdraw': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.exclude': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.unexclude': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.restore': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.delete': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
   };
   'information.retry': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly acquisition?: string;
     readonly revision?: string;
     readonly requestId?: string;
+    readonly stages?: readonly InformationProcessingStage[];
   };
   'information.revise': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
     readonly text: string;
     readonly name?: string;
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.replace': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
     readonly text: string;
     readonly name?: string;
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.refresh': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
+    readonly expectedRevision?: string;
+    readonly typing?: InformationTyping;
   };
   'information.rebuild': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
     readonly requestId: string;
     readonly stage: string;
+    readonly stages?: readonly InformationProcessingStage[];
   };
   'information.allowance': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly revision: string;
@@ -267,18 +394,21 @@ export interface InformationPayloads {
     readonly maxModelCalls: number;
   };
   'information.events': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly after?: number;
     readonly limit?: number;
   };
   'information.migration.list': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope?: InformationScope;
     readonly limit?: number;
     readonly offset?: number;
   };
   'information.migration.adopt': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope?: InformationScope;
     readonly revision: string;
@@ -289,6 +419,7 @@ export interface InformationPayloads {
     readonly collectionProject?: string;
   };
   'information.migration.inspect': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope?: InformationScope;
     readonly payload: string;
@@ -297,6 +428,7 @@ export interface InformationPayloads {
     readonly offset?: number;
   };
   'information.migration.release': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly payload: string;
@@ -306,12 +438,14 @@ export interface InformationPayloads {
     readonly inputs?: readonly string[];
   };
   'information.inventory': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly limit?: number;
     readonly offset?: number;
   };
   'information.acquisitions': {
+    readonly view?: 'content-types-v1';
     readonly corpus?: InformationCorpus;
     readonly scope: InformationScope;
     readonly limit?: number;

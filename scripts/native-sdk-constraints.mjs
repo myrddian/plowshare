@@ -264,6 +264,24 @@ export function constrain(graph) {
       );
     if (op.startsWith('information.')) {
       field(s, 'waitMs', { maximum: 30000 });
+      for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
+      field(s, 'expectedControlRevision', integer(1,9007199254740991));
+      field(s, 'stages', {minItems:1,maxItems:7,uniqueItems:true});
+      field(s, 'metadata', {schemaInstance:true, maxJsonBytes:16384});
+      field(s, 'presentation', {schemaInstance:true, maxJsonBytes:8192});
+      field(s, 'schema', {documentSchema:true, maxJsonBytes:65536});
+      field(s, 'slug', {pattern:'^[a-z](?:[a-z0-9-]{0,62}[a-z0-9])?$', minLength:1,maxLength:64});
+      field(s, 'label', {minLength:1,maxLength:120,nonblank:true});
+      // Empty descriptions are valid; override the generic nonblank text constraint.
+      field(s, 'description', {...text(4096), nonblank:false});
+      if (s.properties.filter) rules(s, implies(or(present('filter.contentType'),present('filter.contentTypeVersion'),present('filter.untyped')),eq('view','content-types-v1')),implies(eq('filter.untyped',true),absent('filter.contentType','filter.contentTypeVersion')));
+      if (s.properties.typing) rules(s, implies(present('typing'),eq('view','content-types-v1')),implies(present('expectedRevision'),present('typing')));
+      if (op==='information.types.version.create') rules(s,
+        {eq:[present('type'),present('expectedControlRevision')]},
+        implies(present('type'),absent('slug','label','description')),
+        implies(not(present('type')),and(present('slug'),present('label'))));
+      if (op==='information.acquire') rules(s, absent('typing','expectedRevision'));
+      if (op==='information.refresh') rules(s, implies(present('typing'), {eq:[g('revision'),g('expectedRevision')]}));
       field(s, 'sources', { minItems: 1, maxItems: 100 });
       for (const k of [
         'tags',
@@ -337,6 +355,18 @@ export function constrain(graph) {
   }
   for (const shape of Object.values(graph.$defs)) {
     const title = shape.title ?? '';
+    if (shape.properties?.mode && shape.properties?.metadata && !shape.properties?.scope) field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});
+    if (title === 'InformationTypeContract') {
+      for(const key of ['type','version'])field(shape,key,canonicalUuid);
+      field(shape,'ordinal',integer(1)); field(shape,'label',text(120,1));field(shape,'description',text(4096));
+      field(shape,'definitionHash',{pattern:'^[a-f0-9]{64}$'});
+      field(shape,'schema',{documentSchema:true,maxJsonBytes:65536});field(shape,'presentation',{schemaInstance:true,maxJsonBytes:8192});
+    }
+    if (title === 'InformationContentBinding') {field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});field(shape,'metadataHash',{pattern:'^[a-f0-9]{64}$'});}
+    if (title === 'InformationTypeVersion') {field(shape,'controlRevision',integer(1,9007199254740991));field(shape,'createdAt',instant);}
+    if (title === 'InformationContentView') {field(shape,'revision',canonicalUuid);field(shape,'startingRevision',canonicalUuid);field(shape,'reused',{maxItems:7});field(shape,'authorisedStages',{maxItems:7,uniqueItems:true});}
+    if (title === 'MetadataValidationResult') field(shape,'issues',{maxItems:32});
+    if (title === 'SchemaObject') add(shape,{maxProperties:1024,keyPattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
     if (shape.properties?.source && shape.properties?.subject && shape.properties?.state)
       field(shape, 'source', { ...portName, maxLength: 1024 });
     if (title.startsWith('Relay')) {

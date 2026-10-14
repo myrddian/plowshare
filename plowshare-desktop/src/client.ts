@@ -1,3 +1,4 @@
+import { decodeMetadataValidation } from 'plowshare-client-ts/operations/information-content';
 import {
   NativeHostCommands,
   NativeMcpSessions,
@@ -794,6 +795,14 @@ export class DesktopClient {
           }
         : {
             code: answer.code,
+            ...(answer.code === 'VALIDATION_FAILED' &&
+            request.type.startsWith('information.') &&
+            [
+              'INFORMATION_METADATA_INVALID',
+              'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
+            ].includes(answer.said ?? '')
+              ? { metadataValidation: decodeMetadataValidation(answer.payload) }
+              : {}),
             ...(answer.said === undefined ? {} : { said: answer.said }),
           };
     });

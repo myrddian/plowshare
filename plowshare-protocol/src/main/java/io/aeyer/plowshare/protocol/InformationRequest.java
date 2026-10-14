@@ -28,9 +28,21 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Selection(Scope scope, String corpus, FacetFilter filter) {
+  record Selection(Scope scope, String corpus, FacetFilter filter, String view) {
+    public Selection(Scope scope, String corpus, FacetFilter filter) {
+      this(scope, corpus, filter, null);
+    }
+
     public Selection {
       Objects.requireNonNull(scope, "scope");
+      if (view != null && !InformationContent.VIEW.equals(view))
+        throw new IllegalArgumentException("unsupported information view");
+      if (filter != null
+          && (filter.contentType() != null
+              || filter.contentTypeVersion() != null
+              || filter.untyped() != null)
+          && !InformationContent.VIEW.equals(view))
+        throw new IllegalArgumentException("type filters require supporting view");
       if (corpus == null) corpus = "documents";
       if (!Set.of("code", "documents").contains(corpus))
         throw new IllegalArgumentException("unsupported information corpus");
@@ -50,8 +62,38 @@ public sealed interface InformationRequest {
       String documentAuthor,
       String when,
       String subtype,
-      String search) {
+      String search,
+      UUID contentType,
+      UUID contentTypeVersion,
+      Boolean untyped) {
+    public FacetFilter(
+        String kind,
+        List<String> tags,
+        List<String> autoTag,
+        String tagGroup,
+        String author,
+        String documentAuthor,
+        String when,
+        String subtype,
+        String search) {
+      this(
+          kind,
+          tags,
+          autoTag,
+          tagGroup,
+          author,
+          documentAuthor,
+          when,
+          subtype,
+          search,
+          null,
+          null,
+          null);
+    }
+
     public FacetFilter {
+      if (Boolean.TRUE.equals(untyped) && (contentType != null || contentTypeVersion != null))
+        throw new IllegalArgumentException("untyped conflicts with type filters");
       if (kind != null && !Set.of("source", "report").contains(kind))
         throw new IllegalArgumentException("kind must be source or report");
       tags = InformationRequest.tags(tags == null ? List.of() : tags);
@@ -118,9 +160,26 @@ public sealed interface InformationRequest {
       UUID requestId,
       String name,
       String text,
-      UUID revision)
+      UUID revision,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public Admission(
+        AdmissionAction action,
+        Selection selection,
+        UUID requestId,
+        String name,
+        String text,
+        UUID revision) {
+      this(action, selection, requestId, name, text, revision, null, null);
+    }
+
     public Admission {
+      authored(selection, expectedRevision, typing);
+      if (typing != null
+          && action != AdmissionAction.UPLOAD
+          && !Objects.equals(expectedRevision, revision))
+        throw new IllegalArgumentException("expectedRevision must match revised revision");
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(action, "action");
       Objects.requireNonNull(requestId, "requestId");
@@ -143,9 +202,26 @@ public sealed interface InformationRequest {
       UUID requestId,
       String url,
       String name,
-      UUID revision)
+      UUID revision,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public Acquisition(
+        AcquisitionAction action,
+        Selection selection,
+        UUID requestId,
+        String url,
+        String name,
+        UUID revision) {
+      this(action, selection, requestId, url, name, revision, null, null);
+    }
+
     public Acquisition {
+      authored(selection, expectedRevision, typing);
+      if (action == AcquisitionAction.ACQUIRE && typing != null
+          || typing != null && !Objects.equals(expectedRevision, revision))
+        throw new IllegalArgumentException(
+            "typed acquisition only refreshes its expected revision");
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(action, "action");
       Objects.requireNonNull(requestId, "requestId");
@@ -356,9 +432,24 @@ public sealed interface InformationRequest {
       List<UUID> inputs,
       List<UUID> evidence,
       UUID feedback,
-      InformationReportDetails details)
+      InformationReportDetails details,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public ReportRecord(
+        Selection selection,
+        UUID requestId,
+        String name,
+        String text,
+        List<UUID> inputs,
+        List<UUID> evidence,
+        UUID feedback,
+        InformationReportDetails details) {
+      this(selection, requestId, name, text, inputs, evidence, feedback, details, null, null);
+    }
+
     public ReportRecord {
+      authored(selection, expectedRevision, typing);
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(requestId, "requestId");
       name = ContractValues.text(name, "name", 1024, true);
@@ -371,6 +462,158 @@ public sealed interface InformationRequest {
     @Override
     public String operation() {
       return "record.report";
+    }
+  }
+
+  record ContentCapabilities(Selection selection) implements InformationRequest {
+    public ContentCapabilities {
+      Objects.requireNonNull(selection);
+    }
+
+    @Override
+    public String operation() {
+      return "types.capabilities";
+    }
+  }
+
+  record ContentRead(Selection selection, UUID revision) implements InformationRequest {
+    public ContentRead {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    @Override
+    public String operation() {
+      return "content.get";
+    }
+  }
+
+  record ContentRevise(
+      Selection selection, UUID requestId, UUID expectedRevision, InformationContent.Typing typing)
+      implements InformationRequest {
+    public ContentRevise {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(expectedRevision);
+      Objects.requireNonNull(typing);
+    }
+
+    @Override
+    public String operation() {
+      return "content.revise";
+    }
+  }
+
+  record TypeList(Selection selection, Boolean drafts, Integer limit, Integer offset)
+      implements InformationRequest {
+    public TypeList {
+      Objects.requireNonNull(selection);
+      page(limit, offset, 100);
+    }
+
+    @Override
+    public String operation() {
+      return "types.list";
+    }
+  }
+
+  record TypeRead(Selection selection, UUID version, UUID attachedRevision, Boolean publishedOnly)
+      implements InformationRequest {
+    public TypeRead(Selection selection, UUID version, UUID attachedRevision) {
+      this(selection, version, attachedRevision, null);
+    }
+
+    public TypeRead {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(version);
+    }
+
+    @Override
+    public String operation() {
+      return "types.get";
+    }
+  }
+
+  record TypeDraft(
+      Selection selection,
+      UUID requestId,
+      UUID type,
+      Long expectedControlRevision,
+      String slug,
+      String label,
+      String description,
+      SchemaDefinition schema,
+      SchemaValue.ObjectValue presentation)
+      implements InformationRequest {
+    public TypeDraft {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      if (type == null) {
+        InformationContent.slug(slug);
+        label = InformationContent.text(label, "label", 120, true);
+        description = InformationContent.text(description, "description", 4096, false);
+      } else if (slug != null || label != null || description != null)
+        throw new IllegalArgumentException("existing type identity is immutable");
+      DocumentMetadata.definition(schema);
+      presentation =
+          DocumentMetadata.presentation(
+              schema, presentation == null ? DocumentMetadata.empty() : presentation);
+      if ((type != null) != (expectedControlRevision != null)
+          || expectedControlRevision != null && expectedControlRevision < 1)
+        throw new IllegalArgumentException("existing type needs expected control revision");
+    }
+
+    @Override
+    public String operation() {
+      return "types.version.create";
+    }
+  }
+
+  record TypeTransition(
+      Selection selection,
+      UUID requestId,
+      UUID version,
+      long expectedControlRevision,
+      boolean activate)
+      implements InformationRequest {
+    public TypeTransition {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(version);
+      if (expectedControlRevision < 1)
+        throw new IllegalArgumentException("positive control revision required");
+    }
+
+    @Override
+    public String operation() {
+      return activate ? "types.activate" : "types.deprecate";
+    }
+  }
+
+  record TypeValidate(
+      Selection selection,
+      UUID version,
+      UUID attachedRevision,
+      SchemaValue.ObjectValue metadata,
+      Boolean publishedOnly)
+      implements InformationRequest {
+    public TypeValidate(
+        Selection selection,
+        UUID version,
+        UUID attachedRevision,
+        SchemaValue.ObjectValue metadata) {
+      this(selection, version, attachedRevision, metadata, null);
+    }
+
+    public TypeValidate {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(version);
+      metadata = DocumentMetadata.instance(metadata);
+    }
+
+    @Override
+    public String operation() {
+      return "types.validate";
     }
   }
 
@@ -451,9 +694,15 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Retry(Selection selection, UUID revision, UUID acquisition, UUID requestId)
+  record Retry(
+      Selection selection, UUID revision, UUID acquisition, UUID requestId, List<String> stages)
       implements InformationRequest {
+    public Retry(Selection selection, UUID revision, UUID acquisition, UUID requestId) {
+      this(selection, revision, acquisition, requestId, null);
+    }
+
     public Retry {
+      stages = processingStages(stages);
       Objects.requireNonNull(selection, "selection");
       new Reference(revision, acquisition);
       if (revision != null) Objects.requireNonNull(requestId, "requestId");
@@ -465,9 +714,15 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Rebuild(Selection selection, UUID revision, UUID requestId, String stage)
+  record Rebuild(
+      Selection selection, UUID revision, UUID requestId, String stage, List<String> stages)
       implements InformationRequest {
+    public Rebuild(Selection selection, UUID revision, UUID requestId, String stage) {
+      this(selection, revision, requestId, stage, null);
+    }
+
     public Rebuild {
+      stages = processingStages(stages);
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(revision, "revision");
       Objects.requireNonNull(requestId, "requestId");
@@ -577,6 +832,37 @@ public sealed interface InformationRequest {
     public String operation() {
       return "migration.adopt";
     }
+  }
+
+  private static void authored(
+      Selection selection, UUID expected, InformationContent.Typing typing) {
+    if (expected != null && typing == null)
+      throw new IllegalArgumentException("expectedRevision requires explicit typing");
+    if (typing != null
+        && (!InformationContent.VIEW.equals(selection.view())
+            || !"documents".equals(selection.corpus())))
+      throw new IllegalArgumentException("typed writes require the supporting document view");
+  }
+
+  private static List<String> processingStages(List<String> stages) {
+    if (stages == null) return null;
+    if (stages.isEmpty()
+        || stages.size() > 7
+        || stages.stream().distinct().count() != stages.size()
+        || stages.stream()
+            .anyMatch(
+                stage ->
+                    !Set.of(
+                            "extract",
+                            "derive",
+                            "embed",
+                            "summarise",
+                            "summary_embed",
+                            "autoTag",
+                            "tagGroups")
+                        .contains(stage)))
+      throw new IllegalArgumentException("invalid selected processing stages");
+    return List.copyOf(stages);
   }
 
   private static void page(Integer limit, Integer offset, int maximum) {

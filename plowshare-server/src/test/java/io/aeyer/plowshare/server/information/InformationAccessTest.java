@@ -48,7 +48,8 @@ class InformationAccessTest {
             access.admitted(access.resolve("alice' OR true --", null)), "d");
     assertFalse(filter.sql().contains("alice"));
     assertEquals(
-        java.util.Arrays.asList("alice' OR true --", "personal", null, true), filter.arguments());
+        java.util.Arrays.asList("alice' OR true --", "personal", null, true, false),
+        filter.arguments());
     assertThrows(
         IllegalArgumentException.class,
         () ->

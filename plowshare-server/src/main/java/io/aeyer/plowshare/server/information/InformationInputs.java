@@ -22,7 +22,8 @@ public final class InformationInputs {
     if (!(raw instanceof Map<?, ?> fields)) throw new CallerFault("filter must be an object");
     for (Object key : fields.keySet())
       if (!(key instanceof String name)
-          || !InformationFacets.NAMES.contains(name) && !name.equals("search"))
+          || !InformationFacets.NAMES.contains(name)
+              && !List.of("search", "contentType", "contentTypeVersion", "untyped").contains(name))
         throw new CallerFault("unknown information facet: " + key);
     return new InformationFacets(
         text(fields, "kind"),
@@ -33,7 +34,26 @@ public final class InformationInputs {
         text(fields, "documentAuthor"),
         text(fields, "when"),
         text(fields, "subtype"),
-        text(fields, "search"));
+        text(fields, "search"),
+        uuid(fields, "contentType"),
+        uuid(fields, "contentTypeVersion"),
+        flag(fields, "untyped"));
+  }
+
+  private static UUID uuid(Map<?, ?> fields, String name) {
+    if (!fields.containsKey(name)) return null;
+    try {
+      return UUID.fromString(text(fields, name));
+    } catch (IllegalArgumentException invalid) {
+      throw new CallerFault(name + " must be a UUID");
+    }
+  }
+
+  private static Boolean flag(Map<?, ?> fields, String name) {
+    if (!fields.containsKey(name)) return null;
+    if (!(fields.get(name) instanceof Boolean value))
+      throw new CallerFault(name + " must be boolean");
+    return value;
   }
 
   private static String text(Map<?, ?> fields, String name) {

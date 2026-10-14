@@ -50,6 +50,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
 
   private record SweepRow(Queued queued, Authority authority) {}
 
+  // A retained pending state is not itself authority to spend on an explicit-only revision.
+  private static final String PROCESSING_AUTHORIZED =
+      "(r.processing_policy='automatic' OR EXISTS(SELECT 1 FROM information_stage_authorizations granted"
+          + " WHERE granted.revision_id=r.id AND granted.generation=r.generation AND granted.stage=s.stage))";
+
   public List<Queued> sweepUntagged() {
 
     var candidates =
@@ -57,7 +62,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
             "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r"
                 + " JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='autoTag'"
-                + " WHERE r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL"
+                + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL"
                 + " AND jsonb_array_length(q.tags)=0 AND jsonb_array_length(r.auto_tag)=0 AND NOT r.auto_tag_generated"
                 + " AND r.allowance_spent<r.allowance_total AND r.extracted_text IS NOT NULL AND btrim(r.extracted_text)<>''"
                 + " AND s.state IN ('skipped','ready')"
@@ -87,7 +92,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
         sweepCandidates(
             "SELECT r.id,r.generation,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id) AS project_name FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id"
                 + " JOIN information_steps s ON s.revision_id=r.id AND s.generation=r.generation AND s.stage='tagGroups'"
-                + " WHERE r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL AND NOT q.tag_groups_manual"
+                + " WHERE r.processing_policy='automatic' AND r.availability='active' AND NOT r.excluded AND q.owner_handle IS NOT NULL AND NOT q.tag_groups_manual"
                 + " AND jsonb_array_length("
                 + tags
                 + ")>0 AND (s.state='skipped' OR NOT r.tag_groups_generated OR r.tag_groups_input_tags<>"
@@ -169,6 +174,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                   + " AND "
                   + OWNER_AUTHORIZED
+                  + " AND "
+                  + PROCESSING_AUTHORIZED
                   + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"
                   + " AND NOT EXISTS(SELECT 1 FROM information_steps prior WHERE prior.revision_id=s.revision_id AND prior.generation=s.generation"
                   + " AND ((s.stage='autoTag' AND prior.stage IN ('extract','derive') AND prior.state NOT IN ('ready','skipped'))"
@@ -181,7 +188,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                       : "")
                   + excluded
                   + " ORDER BY array_position(ARRAY['extract','derive','embed','summarise','summary_embed','autoTag','tagGroups'],s.stage),r.created_at,r.id"
-                  + " LIMIT 1 FOR UPDATE OF s SKIP LOCKED",
+                  + " LIMIT 1 FOR UPDATE OF r,s SKIP LOCKED",
               (row, index) ->
                   new CandidateRow(
                       new Candidate(
@@ -234,6 +241,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
             "UPDATE information_steps s SET lease_until=? FROM information_revisions r,information_resources q"
                 + " WHERE r.id=s.revision_id AND q.id=r.resource_id AND "
                 + OWNER_AUTHORIZED
+                + " AND "
+                + PROCESSING_AUTHORIZED
                 + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
                 + " AND NOT information_readable(i.input_revision,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
                 + " (SELECT name FROM projects WHERE id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
@@ -269,6 +278,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
             "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
                 + OWNER_AUTHORIZED
+                + " AND "
+                + PROCESSING_AUTHORIZED
                 + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
                 + " AND r.id=? AND r.availability='active' AND r.generation=? AND s.generation=r.generation AND s.stage=?"
                 + " AND s.lease_token=? AND s.state='running' AND s.lease_until>=? FOR UPDATE OF r,s",

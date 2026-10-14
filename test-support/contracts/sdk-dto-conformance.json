@@ -1,6 +1,480 @@
 [
   {
     "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "severity": null
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "foreign-profile",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "severity": null
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "clear",
+        "metadata": {}
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "set",
+        "version": "11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": []
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.retry",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "stages": [
+        "derive",
+        "embed"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.retry",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "revision": "11111111-1111-1111-1111-111111111111",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "stages": [
+        "embed",
+        "embed"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.version.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "slug": "incident",
+      "label": "Incident",
+      "description": "",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.version.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "slug": "incident",
+      "label": "Incident",
+      "schema": {
+        "type": "object",
+        "$ref": "https://schemas.example/type"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "nested": {
+            "__proto__": "value"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.version.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "slug": "incident",
+      "label": "Incident",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "__proto__": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "nested": {
+            "prototype": "value"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.version.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "slug": "incident",
+      "label": "Incident",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "prototype": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.content.revise",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "expectedRevision": "11111111-1111-1111-1111-111111111111",
+      "typing": {
+        "mode": "inherit",
+        "metadata": {
+          "nested": {
+            "constructor": "value"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.version.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "slug": "incident",
+      "label": "Incident",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "constructor": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.validate",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "version": "11111111-1111-1111-1111-111111111111",
+      "metadata": {
+        "nested": {
+          "nested": {
+            "nested": {
+              "nested": {
+                "nested": {
+                  "nested": {
+                    "nested": {
+                      "nested": {
+                        "nested": {
+                          "nested": {
+                            "nested": {
+                              "nested": {
+                                "nested": {
+                                  "nested": {
+                                    "nested": {
+                                      "nested": {
+                                        "nested": {
+                                          "nested": {
+                                            "nested": {
+                                              "nested": {
+                                                "nested": {
+                                                  "nested": {
+                                                    "nested": {
+                                                      "nested": {
+                                                        "nested": {
+                                                          "nested": {
+                                                            "nested": {
+                                                              "nested": {
+                                                                "nested": {
+                                                                  "nested": {
+                                                                    "nested": {
+                                                                      "leaf": "value"
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.types.validate",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "view": "content-types-v1",
+      "version": "11111111-1111-1111-1111-111111111111",
+      "metadata": {
+        "nested": {
+          "nested": {
+            "nested": {
+              "nested": {
+                "nested": {
+                  "nested": {
+                    "nested": {
+                      "nested": {
+                        "nested": {
+                          "nested": {
+                            "nested": {
+                              "nested": {
+                                "nested": {
+                                  "nested": {
+                                    "nested": {
+                                      "nested": {
+                                        "nested": {
+                                          "nested": {
+                                            "nested": {
+                                              "nested": {
+                                                "nested": {
+                                                  "nested": {
+                                                    "nested": {
+                                                      "nested": {
+                                                        "nested": {
+                                                          "nested": {
+                                                            "nested": {
+                                                              "nested": {
+                                                                "nested": {
+                                                                  "nested": {
+                                                                    "nested": {
+                                                                      "nested": {
+                                                                        "nested": {
+                                                                          "leaf": "value"
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "provider.connection.save",
     "value": {
       "project": "app",

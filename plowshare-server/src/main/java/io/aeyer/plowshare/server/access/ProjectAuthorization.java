@@ -24,6 +24,9 @@ public class ProjectAuthorization {
 
   private static final Set<String> MANAGE =
       Set.of(
+          "information.types.version.create",
+          "information.types.activate",
+          "information.types.deprecate",
           "agent.define",
           "orchestration.define",
           "relay.operate",
@@ -109,6 +112,11 @@ public class ProjectAuthorization {
           "usage.unsubscribe",
           "outgoing.status",
           "outgoing.peers",
+          "information.types.capabilities",
+          "information.types.list",
+          "information.types.get",
+          "information.types.validate",
+          "information.content.get",
           "information.inventory",
           "information.acquisitions",
           "information.events",

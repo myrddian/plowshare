@@ -47,6 +47,50 @@ export interface DocumentContext {
     readonly stage: string
     readonly attempt: number
     readonly sourceUri?: string | null
+    /** Validated proposed typing and exact reusable output snapshot; absent on legacy transitions. */
+    readonly candidate?: DocumentCandidate | null
+}
+
+/** Bounded JSON values in the document profile; explicit null remains a value. */
+export type DocumentMetadataValue = null | boolean | number | string | readonly DocumentMetadataValue[] | DocumentMetadataObject
+export interface DocumentMetadataObject {
+    readonly [key: string]: DocumentMetadataValue
+}
+
+export type DocumentProcessingStage = 'extract' | 'derive' | 'embed' | 'summarise' | 'summary_embed' | 'autoTag' | 'tagGroups'
+export type DocumentTyping =
+    | { readonly mode: 'set'; readonly version: string; readonly metadata: DocumentMetadataObject }
+    | { readonly mode: 'inherit'; readonly metadata?: DocumentMetadataObject }
+    | { readonly mode: 'clear' }
+
+/** Immutable, server-validated definition snapshot, not a grant to assign or read another document. */
+export interface DocumentTypeContract {
+    readonly type: string
+    readonly version: string
+    readonly ordinal: number
+    readonly slug: string
+    readonly label: string
+    readonly description: string
+    readonly profile: 'plowshare-document-metadata/1'
+    readonly definitionHash: string
+    readonly schema: DocumentMetadataObject
+    readonly presentation: DocumentMetadataObject
+}
+
+export interface DocumentContentBinding {
+    readonly contract: DocumentTypeContract
+    readonly metadataHash: string
+    readonly metadata: DocumentMetadataObject
+}
+
+/** Hooks approve this retained candidate; a conflict never substitutes newly selected outputs. */
+export interface DocumentCandidate {
+    readonly expectedRevision?: string
+    readonly typing: DocumentTyping
+    readonly contentType?: DocumentContentBinding
+    readonly processingPolicy: 'automatic' | 'explicit_only'
+    readonly manifestHash?: string
+    readonly reusedStages: readonly DocumentProcessingStage[]
 }
 
 export interface OrchestrationContext {

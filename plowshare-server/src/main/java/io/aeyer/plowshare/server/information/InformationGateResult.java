@@ -7,11 +7,20 @@ import java.util.*;
 public sealed interface InformationGateResult
     permits InformationCatalogue.Admission,
         InformationGateResult.Recorded,
+        InformationGateResult.ContentTypeVersion,
         InformationGateResult.Completed {
   record Recorded(@JsonValue UUID id) implements InformationGateResult {
     @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public Recorded {
       Objects.requireNonNull(id);
+    }
+  }
+
+  record ContentTypeVersion(@JsonValue io.aeyer.plowshare.protocol.InformationContent.Version value)
+      implements InformationGateResult {
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public ContentTypeVersion {
+      Objects.requireNonNull(value);
     }
   }
 

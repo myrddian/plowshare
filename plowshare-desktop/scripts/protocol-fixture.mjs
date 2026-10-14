@@ -248,6 +248,10 @@ export async function protocolFixture(options = {}) {
         connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: 'plowshare-v1', payload: result }));
         return;
       }
+      if (frame.type.startsWith('information.') && options.information) {
+        const overridden = options.information(frame.type, payload);
+        if (overridden) { connection.send(JSON.stringify({ id: frame.id, type: frame.type, protocol_version: frame.protocol_version, payload: overridden })); return; }
+      }
       switch (frame.type) {
         case 'filestore.list':
           result = options.fileStores ? options.fileStores() : {code:'OK',payload:{stores:[{alias:'applications',role:'MANAGER'},{alias:'reports',role:'CONTRIBUTOR'},{alias:'archive',role:'VIEWER'}]}};

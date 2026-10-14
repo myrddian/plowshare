@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 245,
+    "registeredRequestFrames": 254,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 236,
-    "headlessCliOneShotFrames": 226,
+    "headlessCliRequestFrames": 245,
+    "headlessCliOneShotFrames": 235,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 245,
+    "typedRequestFrames": 254,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -1446,6 +1446,15 @@
         "frame": "information.list",
         "serverSource": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
         "frames": [
+          "information.types.capabilities",
+          "information.types.list",
+          "information.types.get",
+          "information.types.validate",
+          "information.content.get",
+          "information.content.revise",
+          "information.types.version.create",
+          "information.types.activate",
+          "information.types.deprecate",
           "information.upload",
           "information.acquire",
           "information.list",
@@ -3868,6 +3877,44 @@
       ]
     },
     {
+      "frame": "information.content.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.content.revise",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
       "frame": "information.delete",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
@@ -4422,6 +4469,139 @@
     },
     {
       "frame": "information.tags.groups",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.activate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.capabilities",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.deprecate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.validate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.version.create",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -7687,9 +7867,28 @@
             "MigrationPayload",
             "MigrationLog",
             "MigrationEntry",
-            "MigrationJob"
+            "MigrationJob",
+            "InformationContentCapabilities",
+            "InformationTypeIdentity",
+            "InformationTypeContract",
+            "InformationTypeVersion",
+            "InformationTypeVersions",
+            "InformationContentBinding",
+            "InformationProjectionReuse",
+            "InformationContentView",
+            "MetadataValidationIssue",
+            "MetadataValidationResult"
           ],
           "operations": [
+            "information.types.capabilities",
+            "information.types.list",
+            "information.types.get",
+            "information.types.validate",
+            "information.types.version.create",
+            "information.types.activate",
+            "information.types.deprecate",
+            "information.content.get",
+            "information.content.revise",
             "information.await",
             "information.upload",
             "information.acquire",
@@ -7835,6 +8034,8 @@
           "information.allowance",
           "information.ask",
           "information.await",
+          "information.content.get",
+          "information.content.revise",
           "information.delete",
           "information.events",
           "information.evidence.read",
@@ -7865,6 +8066,13 @@
           "information.symbols",
           "information.tags",
           "information.tags.groups",
+          "information.types.activate",
+          "information.types.capabilities",
+          "information.types.deprecate",
+          "information.types.get",
+          "information.types.list",
+          "information.types.validate",
+          "information.types.version.create",
           "information.unexclude",
           "information.unlink",
           "information.unshare",
@@ -7986,7 +8194,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 226,
+        "count": 235,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -7998,9 +8206,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 245 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 254 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "236 WS operations: 226 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "245 WS operations: 235 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "incoming.catalog": "persistent inbound adapter",
         "incoming.receive": "persistent inbound adapter",
@@ -8133,6 +8341,15 @@
   "informationSystem": {
     "implementation": "docs/information-system.md",
     "operations": [
+      "information.types.capabilities",
+      "information.types.list",
+      "information.types.get",
+      "information.types.validate",
+      "information.content.get",
+      "information.content.revise",
+      "information.types.version.create",
+      "information.types.activate",
+      "information.types.deprecate",
       "information.upload",
       "information.acquire",
       "information.list",

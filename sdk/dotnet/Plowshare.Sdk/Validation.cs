@@ -58,6 +58,16 @@ internal static class Validation
     internal static void Check(JsonElement schema, JsonElement value)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
+        if (schema.TryGetProperty("maxJsonBytes", out var jsonByteLimit) && System.Text.Encoding.UTF8.GetByteCount(value.GetRawText()) > jsonByteLimit.GetInt32()) throw new JsonException("JSON value exceeds byte bound");
+        try
+        {
+            if (Flag(schema, "schemaInstance")) ToolSchemas.DecodeValue(value);
+            if (Flag(schema, "documentSchema")) ToolSchemas.Decode(value.GetRawText());
+        }
+        catch (ArgumentException invalidSchema)
+        {
+            throw new JsonException("Invalid bounded schema value", invalidSchema);
+        }
         bool invalid = false;
         switch (value.ValueKind)
         {

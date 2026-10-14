@@ -9,6 +9,15 @@ public final class InformationOperations {
 
   public static final List<String> ALL =
       List.of(
+          "types.capabilities",
+          "types.list",
+          "types.get",
+          "types.validate",
+          "content.get",
+          "content.revise",
+          "types.version.create",
+          "types.activate",
+          "types.deprecate",
           "upload",
           "acquire",
           "list",
@@ -51,6 +60,12 @@ public final class InformationOperations {
           "acquisitions");
   public static final Set<String> MODEL =
       Set.of(
+          "types.capabilities",
+          "types.list",
+          "types.get",
+          "types.validate",
+          "content.get",
+          "content.revise",
           "upload",
           "acquire",
           "list",

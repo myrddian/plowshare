@@ -232,3 +232,53 @@ await test('information facets forwards the requested project scope and filter e
   );
   assert.deepEqual(calls, [['information.facets', payload]]);
 });
+
+await test('model type reads force published versions and refuse management or draft discovery', async () => {
+  const calls: unknown[] = [];
+  const backend: Backend = {
+    invoke: async (type, payload) => {
+      calls.push([type, payload]);
+      throw new Error('fixture stop after dispatch');
+    },
+    runSession: () => null,
+    root: async () => {
+      throw new Error('unexpected root');
+    },
+  };
+  const scope = { kind: 'personal' };
+  const version = '00000000-0000-4000-8000-000000000001';
+  for (const operation of ['types.get', 'types.validate']) {
+    const payload = {
+      scope,
+      view: 'content-types-v1',
+      version,
+      publishedOnly: false,
+      ...(operation === 'types.validate' ? { metadata: {} } : {}),
+    };
+    await assert.rejects(
+      call(backend, 'information', { operation, payload }),
+      /fixture stop/,
+    );
+    assert.deepEqual(calls.at(-1), [
+      `information.${operation}`,
+      { ...payload, publishedOnly: true },
+    ]);
+  }
+  await assert.rejects(
+    call(backend, 'information', {
+      operation: 'types.list',
+      payload: { scope, view: 'content-types-v1', drafts: true },
+    }),
+    /published types only/,
+  );
+  for (const operation of [
+    'types.version.create',
+    'types.activate',
+    'types.deprecate',
+  ])
+    await assert.rejects(
+      call(backend, 'information', { operation, payload: { scope } }),
+      /unsupported model information operation/,
+    );
+  assert.equal(calls.length, 2);
+});

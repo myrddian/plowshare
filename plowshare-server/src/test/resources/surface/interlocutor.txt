@@ -845,6 +845,9 @@ parameters:
     "acquisition": {
       "type": "string"
     },
+    "attachedRevision": {
+      "type": "string"
+    },
     "citations": {
       "type": "array",
       "items": {
@@ -863,6 +866,9 @@ parameters:
       "type": "integer"
     },
     "evidence": {
+      "type": "string"
+    },
+    "expectedRevision": {
       "type": "string"
     },
     "feedback": {
@@ -884,6 +890,10 @@ parameters:
     "locator": {
       "type": "string"
     },
+    "metadata": {
+      "type": "object",
+      "description": "Bounded schema metadata; declared defaults are annotations, never inserted."
+    },
     "name": {
       "type": "string"
     },
@@ -893,6 +903,10 @@ parameters:
     "operation": {
       "type": "string",
       "enum": [
+        "types.list",
+        "types.get",
+        "types.validate",
+        "content.get",
         "list",
         "status",
         "acquisition",
@@ -938,7 +952,33 @@ parameters:
     "text": {
       "type": "string"
     },
+    "typing": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "type": "object"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "inherit",
+            "set",
+            "clear"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
     "url": {
+      "type": "string"
+    },
+    "version": {
       "type": "string"
     },
     "waitMs": {
@@ -962,6 +1002,9 @@ parameters:
     "acquisition": {
       "type": "string"
     },
+    "attachedRevision": {
+      "type": "string"
+    },
     "citations": {
       "type": "array",
       "items": {
@@ -980,6 +1023,9 @@ parameters:
       "type": "integer"
     },
     "evidence": {
+      "type": "string"
+    },
+    "expectedRevision": {
       "type": "string"
     },
     "feedback": {
@@ -1045,6 +1091,10 @@ parameters:
     "locator": {
       "type": "string"
     },
+    "metadata": {
+      "type": "object",
+      "description": "Bounded schema metadata; declared defaults are annotations, never inserted."
+    },
     "name": {
       "type": "string"
     },
@@ -1061,6 +1111,8 @@ parameters:
       "type": "string",
       "enum": [
         "acquire",
+        "upload",
+        "content.revise",
         "evidence",
         "report"
       ]
@@ -1111,7 +1163,33 @@ parameters:
     "text": {
       "type": "string"
     },
+    "typing": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "type": "object"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "inherit",
+            "set",
+            "clear"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
     "url": {
+      "type": "string"
+    },
+    "version": {
       "type": "string"
     }
   },

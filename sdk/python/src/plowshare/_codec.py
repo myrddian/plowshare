@@ -41,13 +41,14 @@ def _decode(
     check(schema, value)
     if depth > 64 or schema.get("forbidden"):
         raise ValueError("Contract depth or forbidden field")
+    # Count JSON nesting, not trusted generated graph indirections.
     if "$ref" in schema:
         key = cast(str, schema["$ref"]).split("/")[-1]
-        return _decode(_DEFS[key], value, input, depth + 1)
+        return _decode(_DEFS[key], value, input, depth)
     if "anyOf" in schema:
         for variant in cast(list[dict[str, object]], schema["anyOf"]):
             try:
-                return _decode(variant, value, input, depth + 1)
+                return _decode(variant, value, input, depth)
             except ValueError:
                 continue  # A union accepts a complete declared shape, never a partial match.
         raise ValueError("Invalid protocol variant")

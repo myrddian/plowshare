@@ -36,12 +36,32 @@ public final class InformationCodec {
       throw new IOException("use scope or project, not both");
     var selection = REQUESTS.createObjectNode();
     selection.set("scope", scope);
-    JsonNode corpus = body.remove("corpus"), filter = body.remove("filter");
+    JsonNode corpus = body.remove("corpus"),
+        filter = body.remove("filter"),
+        view = body.remove("view");
+    if (view != null) selection.set("view", view);
     if (corpus != null) selection.set("corpus", corpus);
     if (filter != null) selection.set("filter", filter);
     body.set("selection", selection);
+    JsonNode typing = body.get("typing");
+    if (typing != null
+        && typing.isObject()
+        && (typing.has("metadata") && typing.get("metadata").isNull()
+            || typing.has("version") && typing.get("version").isNull()))
+      throw new IOException("Typing members cannot be explicitly null");
     Class<? extends InformationRequest> shape =
         switch (operation) {
+          case "types.capabilities" -> InformationRequest.ContentCapabilities.class;
+          case "content.get" -> InformationRequest.ContentRead.class;
+          case "content.revise" -> InformationRequest.ContentRevise.class;
+          case "types.list" -> InformationRequest.TypeList.class;
+          case "types.get" -> InformationRequest.TypeRead.class;
+          case "types.validate" -> InformationRequest.TypeValidate.class;
+          case "types.version.create" -> InformationRequest.TypeDraft.class;
+          case "types.activate", "types.deprecate" -> {
+            body.put("activate", operation.equals("types.activate"));
+            yield InformationRequest.TypeTransition.class;
+          }
           case "upload", "revise", "replace" -> {
             action(body, operation);
             yield InformationRequest.Admission.class;
@@ -120,6 +140,7 @@ public final class InformationCodec {
   static Map<String, Object> fields(InformationRequest request) {
     ObjectNode body = JSON.valueToTree(request);
     body.remove("action");
+    if (request instanceof InformationRequest.TypeTransition) body.remove("activate");
     body.remove("selection");
     ObjectNode selection = JSON.valueToTree(request.selection());
     body.setAll(selection);
@@ -147,6 +168,23 @@ public final class InformationCodec {
       throws IOException {
     var result =
         switch (request) {
+          case InformationRequest.ContentCapabilities ignored ->
+              new InformationResponse.ContentCapabilities(
+                  read(node, InformationContent.Capabilities.class));
+          case InformationRequest.ContentRead ignored ->
+              new InformationResponse.Content(read(node, InformationContent.View.class));
+          case InformationRequest.ContentRevise ignored ->
+              read(node, InformationResponse.Admission.class);
+          case InformationRequest.TypeList ignored ->
+              new InformationResponse.Types(read(node, InformationContent.Versions.class));
+          case InformationRequest.TypeRead ignored ->
+              new InformationResponse.Type(read(node, InformationContent.Contract.class));
+          case InformationRequest.TypeDraft ignored ->
+              new InformationResponse.TypeVersion(read(node, InformationContent.Version.class));
+          case InformationRequest.TypeTransition ignored ->
+              new InformationResponse.TypeVersion(read(node, InformationContent.Version.class));
+          case InformationRequest.TypeValidate ignored ->
+              new InformationResponse.MetadataValidation(read(node, SchemaValidation.Result.class));
           case InformationRequest.Admission ignored ->
               read(node, InformationResponse.Admission.class);
           case InformationRequest.ReportRecord ignored ->
@@ -212,6 +250,7 @@ public final class InformationCodec {
         };
     UUID expected =
         switch (request) {
+          case InformationRequest.ContentRead read -> read.revision();
           case InformationRequest.Status status ->
               status.revision() == null ? status.acquisition() : status.revision();
           case InformationRequest.Read read -> read.revision();
@@ -222,6 +261,7 @@ public final class InformationCodec {
         };
     UUID actual =
         switch (result) {
+          case InformationResponse.Content content -> content.value().revision();
           case InformationResponse.Revision revision -> revision.value().id();
           case InformationResponse.Acquisition acquisition -> acquisition.value().id();
           case InformationResponse.Window window -> window.value().revision();

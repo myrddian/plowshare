@@ -72,12 +72,12 @@ function decode(
   if (schema.$ref !== undefined) {
     const target = definitions[schema.$ref.replace('#/$defs/', '')];
     if (target === undefined) return fail();
-    return decode(target, value, input, path, depth + 1, definitions);
+    return decode(target, value, input, path, depth, definitions);
   }
   if (schema.anyOf !== undefined) {
     for (const variant of schema.anyOf) {
       try {
-        return decode(variant, value, input, path, depth + 1, definitions);
+        return decode(variant, value, input, path, depth, definitions);
       } catch {
         /* A union accepts exactly one of its complete declared shapes. */
       }
@@ -229,6 +229,7 @@ export function decodeRequest(type: string, value: unknown): Request {
 }
 
 function acceptsNull(schema: Schema): boolean {
+  // Count JSON nesting, not trusted generated graph indirections.
   if (schema.$ref) {
     const target = OPERATION_SCHEMAS.$defs[schema.$ref.replace('#/$defs/', '')];
     if (!target) throw new Error('Missing generated reply definition.');

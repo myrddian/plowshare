@@ -70,6 +70,12 @@ export async function call(
     case 'information': {
       const operation = args['operation'];
       const model = [
+        'types.capabilities',
+        'types.list',
+        'types.get',
+        'types.validate',
+        'content.get',
+        'content.revise',
         'upload',
         'acquire',
         'list',
@@ -92,6 +98,18 @@ export async function call(
       if (!payload || typeof payload !== 'object' || isList(payload))
         throw new Error('payload must be an object');
       const checked = decodeRequest(`information.${operation}`, payload);
+      if (
+        checked.type === 'information.types.list' &&
+        checked.payload.drafts === true
+      )
+        throw new Error('Model information reads expose published types only');
+      if (
+        checked.type === 'information.types.get' ||
+        checked.type === 'information.types.validate'
+      )
+        return JSON.stringify(
+          await ask(checked.type, { ...checked.payload, publishedOnly: true }),
+        );
       const value = await ask(checked.type, checked.payload);
       return value == null
         ? ''

@@ -779,6 +779,17 @@ public final class FrameTypes {
   public static final String CONVERSATION_CONTEXT_SNAPSHOT = "conversation.context.snapshot";
 
   /** Authenticated information controls; no corresponding REST application routes. */
+  public static final String INFORMATION_TYPES_CAPABILITIES = "information.types.capabilities";
+
+  public static final String INFORMATION_TYPES_LIST = "information.types.list";
+  public static final String INFORMATION_TYPES_GET = "information.types.get";
+  public static final String INFORMATION_TYPES_VALIDATE = "information.types.validate";
+  public static final String INFORMATION_TYPES_VERSION_CREATE = "information.types.version.create";
+  public static final String INFORMATION_TYPES_ACTIVATE = "information.types.activate";
+  public static final String INFORMATION_TYPES_DEPRECATE = "information.types.deprecate";
+  public static final String INFORMATION_CONTENT_GET = "information.content.get";
+  public static final String INFORMATION_CONTENT_REVISE = "information.content.revise";
+
   public static final String INFORMATION_MIGRATION_LIST = "information.migration.list";
 
   public static final String INFORMATION_MIGRATION_ADOPT = "information.migration.adopt";

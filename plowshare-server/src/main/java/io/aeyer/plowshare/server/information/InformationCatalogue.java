@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.protocol.Information;
+import io.aeyer.plowshare.protocol.InformationContent;
 import io.aeyer.plowshare.protocol.InformationReportDetails;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -26,6 +27,10 @@ public final class InformationCatalogue implements InformationReadAccess {
   private final UnitOfWork transactions;
   private final InformationAccess access;
   private final InformationLogAccess logs;
+  private final InformationContentAuthority contentAuthority;
+  private final InformationContentRepository contentRepository;
+  private final InformationProjectionRepository projections;
+
   private InformationLifecycle.Gates gates = new InformationLifecycle.Gates() {};
 
   public InformationCatalogue withGates(InformationLifecycle.Gates gates) {
@@ -63,20 +68,44 @@ public final class InformationCatalogue implements InformationReadAccess {
     return this;
   }
 
+  /**
+   * Legacy composition keeps the original untyped service contract for existing isolated clients.
+   */
   public InformationCatalogue(
       InformationCatalogueRepository repository,
       UnitOfWork transactions,
       InformationAccess access,
       InformationLogAccess logs) {
+    this(repository, transactions, access, logs, null, null, null, null);
+  }
+
+  /** Production composition injects authored authority, persistence and transitions together. */
+  public InformationCatalogue(
+      InformationCatalogueRepository repository,
+      UnitOfWork transactions,
+      InformationAccess access,
+      InformationLogAccess logs,
+      InformationContentAuthority contentAuthority,
+      InformationContentRepository contentRepository,
+      InformationProjectionRepository projections,
+      InformationTransitions transitions) {
     this.repository = java.util.Objects.requireNonNull(repository);
     this.transactions = java.util.Objects.requireNonNull(transactions);
     this.access = java.util.Objects.requireNonNull(access);
     this.logs = java.util.Objects.requireNonNull(logs);
+    if ((contentAuthority == null) != (contentRepository == null)
+        || (contentAuthority == null) != (projections == null)
+        || contentAuthority != null && transitions == null)
+      throw new IllegalArgumentException("Authored capabilities must be composed together");
+    this.contentAuthority = contentAuthority;
+    this.contentRepository = contentRepository;
+    this.projections = projections;
+    this.writeGates = transitions;
   }
 
-  private InformationWriteGates writeGates;
+  private InformationTransitions writeGates;
 
-  public void useWriteGates(InformationWriteGates writeGates) {
+  public void useWriteGates(InformationTransitions writeGates) {
     this.writeGates = writeGates;
   }
 
@@ -166,6 +195,42 @@ public final class InformationCatalogue implements InformationReadAccess {
       String session,
       int capturedAllowance,
       boolean syntaxOnly) {
+    return admit(
+        context,
+        request,
+        name,
+        bytes,
+        mediaType,
+        sourceUri,
+        kind,
+        inputs,
+        citations,
+        feedback,
+        session,
+        capturedAllowance,
+        syntaxOnly,
+        null,
+        null,
+        null);
+  }
+
+  private Admission admit(
+      InformationContext context,
+      UUID request,
+      String name,
+      byte[] bytes,
+      String mediaType,
+      String sourceUri,
+      String kind,
+      List<UUID> inputs,
+      List<UUID> citations,
+      UUID feedback,
+      String session,
+      int capturedAllowance,
+      boolean syntaxOnly,
+      InformationContent.Binding binding,
+      UUID expectedRevision,
+      InformationContent.Typing typing) {
     access.requireWork(context);
     if (context.selection().scope() == InformationContext.Scope.SHARED)
       throw new CallerFault(
@@ -208,24 +273,44 @@ public final class InformationCatalogue implements InformationReadAccess {
             feedback,
             documentType,
             syntaxOnly);
+    final String identity =
+        typing == null
+            ? fingerprint
+            : sha256(
+                InformationJson.json(
+                        java.util.Arrays.asList(
+                            "typed-admission-v1",
+                            fingerprint,
+                            typing.mode(),
+                            expectedRevision,
+                            binding == null ? null : binding.contract().version(),
+                            binding == null ? null : binding.contract().profile(),
+                            binding == null ? null : binding.metadataHash()))
+                    .getBytes(StandardCharsets.UTF_8));
     return transactions.inTransaction(
-        () ->
-            repository.admit(
-                context,
-                request,
-                new InformationCatalogueRepository.AdmissionWrite(
-                    name,
-                    retained,
-                    mediaType,
-                    sourceUri,
-                    kind,
-                    inputs,
-                    session,
-                    modelAllowance,
-                    capturedAllowance,
-                    syntaxOnly,
-                    documentType,
-                    fingerprint)));
+        () -> {
+          if (binding != null)
+            contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
+          return repository.admit(
+              context,
+              request,
+              new InformationCatalogueRepository.AdmissionWrite(
+                  name,
+                  retained,
+                  mediaType,
+                  sourceUri,
+                  kind,
+                  inputs,
+                  session,
+                  modelAllowance,
+                  capturedAllowance,
+                  syntaxOnly,
+                  documentType,
+                  identity,
+                  binding,
+                  expectedRevision,
+                  typing != null));
+        });
   }
 
   public io.aeyer.plowshare.server.agents.Outcome awaitProcessing(
@@ -301,6 +386,25 @@ public final class InformationCatalogue implements InformationReadAccess {
       String mediaType,
       String sourceUri,
       String session) {
+    return admitForSession(
+        context, request, name, bytes, mediaType, sourceUri, session, null, null);
+  }
+
+  public Admission admitForSession(
+      InformationContext context,
+      UUID request,
+      String name,
+      byte[] bytes,
+      String mediaType,
+      String sourceUri,
+      String session,
+      UUID expectedRevision,
+      InformationContent.Typing typing) {
+    if (expectedRevision != null && typing == null)
+      throw new CallerFault("expectedRevision requires explicit typing");
+    if (typing != null)
+      return typedSource(
+          context, request, name, bytes, mediaType, sourceUri, session, expectedRevision, typing);
     if (bytes == null
         || bytes.length == 0
         || bytes.length > 32 * 1024 * 1024
@@ -311,6 +415,25 @@ public final class InformationCatalogue implements InformationReadAccess {
     var identity =
         new InformationGateIdentity.Intake(
             name, sha256(retained), mediaType, sourceUri, context.corpus());
+    if (contentAuthority != null && writeGates != null) {
+      return writeGates.executePrepared(
+          context,
+          request,
+          "intake",
+          identity,
+          List.of(),
+          session,
+          Admission.class,
+          () -> {
+            contentAuthority.resolve(context, name, null, null);
+            return new InformationTransitions.Prepared<>(
+                () ->
+                    admit(
+                        context, request, name, retained, mediaType, sourceUri, "source", List.of(),
+                        List.of(), null, session, 0),
+                null);
+          });
+    }
     return prepared(
         context,
         request,
@@ -323,6 +446,168 @@ public final class InformationCatalogue implements InformationReadAccess {
             admit(
                 context, request, name, retained, mediaType, sourceUri, "source", List.of(),
                 List.of(), null, session, 0));
+  }
+
+  private Admission typedSource(
+      InformationContext context,
+      UUID request,
+      String name,
+      byte[] bytes,
+      String mediaType,
+      String sourceUri,
+      String session,
+      UUID expected,
+      InformationContent.Typing typing) {
+    if (contentAuthority == null || writeGates == null)
+      throw new CallerFault("Typed information is unavailable");
+    if (bytes == null
+        || bytes.length == 0
+        || bytes.length > 32 * 1024 * 1024
+        || name == null
+        || name.isBlank())
+      throw new CallerFault("Information needs a bounded name and nonempty source bytes");
+    byte[] retained = bytes.clone();
+    if (context.corpus() == InformationContext.Corpus.CODE
+        || io.aeyer.plowshare.protocol.DocumentType.classify(name, mediaType).isCode())
+      throw new CallerFault("Content types are not supported on code revisions");
+    var identity =
+        new InformationGateIdentity.TypedIntake(
+            new InformationGateIdentity.Intake(
+                name, sha256(retained), mediaType, sourceUri, context.corpus()),
+            expected,
+            typing);
+    return writeGates.executePrepared(
+        context,
+        request,
+        "intake",
+        identity,
+        List.of(),
+        session,
+        Admission.class,
+        () -> {
+          var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
+          var candidate =
+              new InformationContent.Candidate(
+                  expected, typing, binding, "automatic", null, List.of());
+          return new InformationTransitions.Prepared<>(
+              () ->
+                  admit(
+                      context, request, name, retained, mediaType, sourceUri, "source", List.of(),
+                      List.of(), null, session, 0, false, binding, expected, typing),
+              candidate);
+        });
+  }
+
+  /**
+   * Copies immutable source/provenance and compatible committed outputs without scheduling models.
+   */
+  public Admission reviseMetadata(
+      InformationContext context,
+      UUID request,
+      UUID expected,
+      InformationContent.Typing typing,
+      String session) {
+    if (contentAuthority == null || projections == null || writeGates == null)
+      throw new CallerFault("Typed information is unavailable");
+    access.requireWork(context);
+    String name = revisionName(context, expected);
+    requireReadable(context, expected);
+    var sources = new ArrayList<>(repository.inputs(expected));
+    if (!sources.contains(expected)) sources.add(expected);
+    return writeGates.executePrepared(
+        context,
+        request,
+        "content.revise",
+        new InformationGateIdentity.MetadataRevision(expected, typing),
+        sources,
+        session,
+        Admission.class,
+        () -> {
+          var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
+          var prepared =
+              transactions.inTransaction(
+                  () ->
+                      projections.prepare(
+                          context, request, expected, binding, configuration.get()));
+          var candidate =
+              new InformationContent.Candidate(
+                  expected,
+                  typing,
+                  binding,
+                  "explicit_only",
+                  prepared.manifest().snapshotHash(),
+                  prepared.manifest().reusable());
+          return new InformationTransitions.Prepared<>(
+              () -> {
+                access.requireWork(context);
+                // Match ordinary typed admission: lock registry authority before the resource.
+                if (binding != null)
+                  contentAuthority.recheck(context, binding, typing.mode().equals("inherit"));
+                requireOwner(context, expected);
+                requireReadable(context, expected);
+                var admission = projections.copy(context, request, prepared, configuration.get());
+                repository.event(
+                    admission.revision(),
+                    1,
+                    context.account(),
+                    "metadata",
+                    "retained",
+                    "Metadata revision retained; processing requires explicit selection.");
+                return admission;
+              },
+              candidate);
+        });
+  }
+
+  public InformationContent.View content(InformationContext context, UUID revision) {
+    if (contentRepository == null) throw new CallerFault("Typed information is unavailable");
+    requireReadable(context, revision);
+    if (row(revision).availability().equals("deleted")) throw absent();
+    return contentRepository.view(revision);
+  }
+
+  AcquisitionRepository.Intent acquisitionIntent(
+      InformationContext context, String name, UUID expected, InformationContent.Typing typing) {
+    if (contentAuthority == null) {
+      if (typing != null) throw new CallerFault("Typed information is unavailable");
+      return null;
+    }
+    var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
+    return typing == null ? null : new AcquisitionRepository.Intent(expected, typing, binding);
+  }
+
+  Admission acquired(
+      InformationContext context,
+      UUID request,
+      String name,
+      byte[] bytes,
+      String mediaType,
+      String sourceUri,
+      String session,
+      int allowance,
+      AcquisitionRepository.Intent intent) {
+    if (intent == null)
+      return acquired(context, request, name, bytes, mediaType, sourceUri, session, allowance);
+    var current = acquisitionIntent(context, name, intent.expectedRevision(), intent.typing());
+    if (!java.util.Objects.equals(current, intent))
+      throw new CallerFault("Acquisition typing candidate changed");
+    return admit(
+        context,
+        request,
+        name,
+        bytes,
+        mediaType,
+        sourceUri,
+        "source",
+        List.of(),
+        List.of(),
+        null,
+        session,
+        allowance,
+        false,
+        intent.binding(),
+        intent.expectedRevision(),
+        intent.typing());
   }
 
   Admission acquired(
@@ -549,6 +834,9 @@ public final class InformationCatalogue implements InformationReadAccess {
       readable = false;
     }
     var metadata = repository.metadata(revision);
+    if (!context.typedView()
+        && (metadata.contentType() != null || "explicit_only".equals(metadata.processingPolicy())))
+      throw new CallerFault("unsupported-view");
     boolean owner = context.account().equals(row(revision).ownerHandle());
     boolean visible = readable;
     var steps =
@@ -702,16 +990,23 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   public void retry(InformationContext context, UUID revision, UUID request) {
+    retry(context, revision, request, null);
+  }
+
+  public void retry(InformationContext context, UUID revision, UUID request, List<String> stages) {
     managed(
         context,
         revision,
         "retry",
         request,
-        new InformationCommandParameters.None(),
+        stages == null
+            ? new InformationCommandParameters.None()
+            : new InformationCommandParameters.Processing(null, stages),
         () -> {
           transactions.inTransaction(
               () -> {
                 requireOwner(context, revision);
+                selectedProcessing(context, revision, request, stages);
                 repository.retry(context, revision);
                 return null;
               });
@@ -724,12 +1019,19 @@ public final class InformationCatalogue implements InformationReadAccess {
   }
 
   public void rebuild(InformationContext context, UUID revision, String from, UUID request) {
+    rebuild(context, revision, from, request, null);
+  }
+
+  public void rebuild(
+      InformationContext context, UUID revision, String from, UUID request, List<String> stages) {
     managed(
         context,
         revision,
         "rebuild",
         request,
-        new InformationCommandParameters.Rebuild(from),
+        stages == null
+            ? new InformationCommandParameters.Rebuild(from)
+            : new InformationCommandParameters.Processing(from, stages),
         () -> {
           int first = STAGES.indexOf(from);
           if (first < 2)
@@ -739,10 +1041,49 @@ public final class InformationCatalogue implements InformationReadAccess {
               () -> {
                 requireOwner(context, revision);
                 requireReadable(context, revision);
+                requireStageSelection(revision, stages);
                 repository.rebuild(context, revision, from);
+                selectedProcessing(context, revision, request, stages);
                 return null;
               });
         });
+  }
+
+  private void requireStageSelection(UUID revision, List<String> stages) {
+    if (contentRepository != null && contentRepository.explicitOnly(revision) && stages == null)
+      throw new CallerFault("stage-selection-required");
+  }
+
+  /** Only missing prerequisites are authorised; compatible ready projections create no work. */
+  private void selectedProcessing(
+      InformationContext context, UUID revision, UUID request, List<String> stages) {
+    requireStageSelection(revision, stages);
+    if (stages == null) return;
+    new InformationCommandParameters.Processing(null, stages);
+    var selected = new java.util.LinkedHashSet<>(stages);
+    var status = repository.steps(revision);
+    int furthestContent =
+        stages.stream().mapToInt(STAGES::indexOf).filter(index -> index < 5).max().orElse(-1);
+    // Compute the union of prerequisites for mixed content/enrichment selections.
+    int contentEnd =
+        Math.max(
+            furthestContent,
+            stages.stream().anyMatch(stage -> List.of("autoTag", "tagGroups").contains(stage))
+                ? 1
+                : -1);
+    for (int i = 0; i <= contentEnd; i++) {
+      String stage = STAGES.get(i);
+      if (status.stream()
+          .noneMatch(
+              step ->
+                  step.stage().equals(stage) && List.of("ready", "skipped").contains(step.state())))
+        selected.add(stage);
+    }
+    if (stages.contains("tagGroups")
+        && status.stream()
+            .noneMatch(step -> step.stage().equals("autoTag") && step.state().equals("ready")))
+      selected.add("autoTag");
+    contentRepository.authorise(revision, context.account(), request, List.copyOf(selected));
   }
 
   public void allowance(InformationContext context, UUID revision, int total) {
@@ -997,6 +1338,30 @@ public final class InformationCatalogue implements InformationReadAccess {
       String session,
       InformationReportDetails details,
       String producer) {
+    return reportDetailsForSession(
+        context, request, name, text, inputs, evidence, feedback, session, details, producer, null,
+        null);
+  }
+
+  public Admission reportDetailsForSession(
+      InformationContext context,
+      UUID request,
+      String name,
+      String text,
+      List<UUID> inputs,
+      List<UUID> evidence,
+      UUID feedback,
+      String session,
+      InformationReportDetails details,
+      String producer,
+      UUID expected,
+      InformationContent.Typing typing) {
+    if (expected != null && typing == null)
+      throw new CallerFault("expectedRevision requires explicit typing");
+    if (typing != null
+        && (context.corpus() == InformationContext.Corpus.CODE
+            || io.aeyer.plowshare.protocol.DocumentType.classify(name, "text/markdown").isCode()))
+      throw new CallerFault("Content types are not supported on code revisions");
     if (InformationJson.json(details).getBytes(StandardCharsets.UTF_8).length > 512 * 1024)
       throw new CallerFault("report findings and review metadata must fit within 512 KiB");
     var citations = new java.util.LinkedHashSet<>(evidence);
@@ -1016,6 +1381,55 @@ public final class InformationCatalogue implements InformationReadAccess {
     for (UUID id : citations)
       if (!dependencies.contains(evidence(context, id).revisionId()))
         throw new CallerFault("cited evidence must belong to a supplied input revision");
+    if (contentAuthority != null && writeGates != null) {
+      var source =
+          new InformationGateIdentity.Report(
+              name,
+              sha256(text.getBytes(StandardCharsets.UTF_8)),
+              List.copyOf(dependencies),
+              List.copyOf(citations),
+              feedback,
+              details,
+              producer);
+      InformationGateIdentity identity =
+          typing == null
+              ? source
+              : new InformationGateIdentity.TypedReport(source, expected, typing);
+      return writeGates.executePrepared(
+          context,
+          request,
+          "record.report",
+          identity,
+          List.copyOf(dependencies),
+          session,
+          Admission.class,
+          () -> {
+            var binding = contentAuthority.resolve(context, name, expected, typing).orElse(null);
+            var candidate =
+                typing == null
+                    ? null
+                    : new InformationContent.Candidate(
+                        expected, typing, binding, "automatic", null, List.of());
+            return new InformationTransitions.Prepared<>(
+                () ->
+                    reportUnchecked(
+                        context,
+                        request,
+                        name,
+                        text,
+                        List.copyOf(dependencies),
+                        List.copyOf(citations),
+                        feedback,
+                        session,
+                        details,
+                        producer,
+                        binding,
+                        expected,
+                        typing),
+                candidate);
+          });
+    }
+    if (typing != null) throw new CallerFault("Typed information is unavailable");
     return prepared(
         context,
         request,
@@ -1056,6 +1470,25 @@ public final class InformationCatalogue implements InformationReadAccess {
       String session,
       InformationReportDetails details,
       String producer) {
+    return reportUnchecked(
+        context, request, name, text, inputs, evidence, feedback, session, details, producer, null,
+        null, null);
+  }
+
+  private Admission reportUnchecked(
+      InformationContext context,
+      UUID request,
+      String name,
+      String text,
+      List<UUID> inputs,
+      List<UUID> evidence,
+      UUID feedback,
+      String session,
+      InformationReportDetails details,
+      String producer,
+      InformationContent.Binding binding,
+      UUID expected,
+      InformationContent.Typing typing) {
     if (text == null || text.isBlank() || inputs.isEmpty())
       throw new CallerFault("a research report needs text and input revisions");
     return transactions.inTransaction(
@@ -1080,7 +1513,11 @@ public final class InformationCatalogue implements InformationReadAccess {
                   evidence,
                   feedback,
                   session,
-                  0);
+                  0,
+                  false,
+                  binding,
+                  expected,
+                  typing);
           if (result.created()) {
             repository.recordReport(result, feedback, details, producer, evidence);
           }

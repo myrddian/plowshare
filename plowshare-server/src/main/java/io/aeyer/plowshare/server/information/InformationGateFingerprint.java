@@ -13,6 +13,33 @@ final class InformationGateFingerprint {
       String operation, InformationContext.Selection selection, InformationGateIdentity identity) {
     List<?> tuple =
         switch (identity) {
+          case InformationGateIdentity.TypedIntake i ->
+              List.of(
+                  "typed-intake-v1",
+                  of("intake", selection, i.source()),
+                  i.expectedRevision() == null ? "new" : i.expectedRevision(),
+                  typing(i.typing()));
+          case InformationGateIdentity.TypedReport i ->
+              List.of(
+                  "typed-report-v1",
+                  of("record.report", selection, i.source()),
+                  i.expectedRevision() == null ? "new" : i.expectedRevision(),
+                  typing(i.typing()));
+          case InformationGateIdentity.MetadataRevision i ->
+              List.of("metadata-revision-v1", i.expectedRevision(), typing(i.typing()));
+          case InformationGateIdentity.ContentTypeDraft i ->
+              Arrays.asList(
+                  i.type(),
+                  i.controlRevision(),
+                  i.slug(),
+                  i.label(),
+                  i.description(),
+                  io.aeyer.plowshare.protocol.SchemaCodec.documentFingerprint(
+                      i.schema(),
+                      io.aeyer.plowshare.protocol.DocumentMetadata.PROFILE,
+                      i.presentation()));
+          case InformationGateIdentity.ContentTypeLifecycle i ->
+              List.of(i.version(), i.controlRevision(), i.activate());
           case InformationGateIdentity.Intake i ->
               i.corpus() == InformationContext.Corpus.CODE
                   ? Arrays.asList(i.name(), i.hash(), i.mediaType(), i.sourceUri(), "code")
@@ -38,5 +65,14 @@ final class InformationGateFingerprint {
     return InformationCatalogue.sha256(
         InformationJson.json(Arrays.asList(operation, selection, tuple))
             .getBytes(StandardCharsets.UTF_8));
+  }
+
+  private static List<?> typing(io.aeyer.plowshare.protocol.InformationContent.Typing typing) {
+    return Arrays.asList(
+        typing.mode(),
+        typing.version(),
+        typing.metadata() == null
+            ? null
+            : io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(typing.metadata()));
   }
 }

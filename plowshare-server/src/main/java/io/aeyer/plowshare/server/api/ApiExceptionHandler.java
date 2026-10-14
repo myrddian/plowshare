@@ -161,6 +161,21 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     return toResponse(Faults.of(e));
   }
 
+  /** Same bounded, value-free diagnostics as the authored-information WebSocket boundary. */
+  public record MetadataRefusal(
+      String error,
+      String detail,
+      io.aeyer.plowshare.protocol.SchemaValidation.Result metadataValidation) {}
+
+  @ExceptionHandler(io.aeyer.plowshare.server.information.InformationMetadataFault.class)
+  public ResponseEntity<MetadataRefusal> metadataInvalid(
+      io.aeyer.plowshare.server.information.InformationMetadataFault invalid) {
+    return ResponseEntity.status(Code.VALIDATION_FAILED.httpStatus())
+        .body(
+            new MetadataRefusal(
+                Code.VALIDATION_FAILED.slug(), invalid.getMessage(), invalid.validation()));
+  }
+
   /**
    * A handle that does not resolve — a job id this process does not know.
    *

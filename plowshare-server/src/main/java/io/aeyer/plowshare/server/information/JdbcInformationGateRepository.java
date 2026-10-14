@@ -54,6 +54,10 @@ public final class JdbcInformationGateRepository implements InformationGateRepos
                 "evidence.record",
                 "record.report",
                 "migration.release",
+                "types.version.create",
+                "types.activate",
+                "types.deprecate",
+                "content.revise",
                 "migration.adopt")
             .contains(operation)) throw new IllegalArgumentException("invalid gate identity");
     jdbc.queryForObject(

@@ -428,5 +428,167 @@
     "payload": {
       "changed": true
     }
+  },
+  "information.types.capabilities": {
+    "code": "OK",
+    "payload": {
+      "capability": "information.contentTypes.v1",
+      "view": "content-types-v1",
+      "profile": "plowshare-document-metadata/1",
+      "typedWrites": true
+    }
+  },
+  "information.types.list": {
+    "code": "OK",
+    "payload": {
+      "results": [
+        {
+          "contract": {
+            "type": "00000000-0000-4000-8000-000000000001",
+            "version": "00000000-0000-4000-8000-000000000002",
+            "ordinal": 1,
+            "slug": "incident",
+            "label": "Incident",
+            "description": "",
+            "profile": "plowshare-document-metadata/1",
+            "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+            "schema": {
+              "type": "object"
+            },
+            "presentation": {}
+          },
+          "state": "active",
+          "controlRevision": 3,
+          "createdAt": "2026-10-15T00:00:00Z"
+        }
+      ],
+      "hasMore": false
+    }
+  },
+  "information.types.get": {
+    "code": "OK",
+    "payload": {
+      "type": "00000000-0000-4000-8000-000000000001",
+      "version": "00000000-0000-4000-8000-000000000002",
+      "ordinal": 1,
+      "slug": "incident",
+      "label": "Incident",
+      "description": "",
+      "profile": "plowshare-document-metadata/1",
+      "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+      "schema": {
+        "type": "object"
+      },
+      "presentation": {}
+    }
+  },
+  "information.types.validate": {
+    "code": "OK",
+    "payload": {
+      "status": "VALID",
+      "issues": [],
+      "truncated": false
+    }
+  },
+  "information.types.version.create": {
+    "code": "OK",
+    "payload": {
+      "contract": {
+        "type": "00000000-0000-4000-8000-000000000001",
+        "version": "00000000-0000-4000-8000-000000000002",
+        "ordinal": 1,
+        "slug": "incident",
+        "label": "Incident",
+        "description": "",
+        "profile": "plowshare-document-metadata/1",
+        "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+        "schema": {
+          "type": "object"
+        },
+        "presentation": {}
+      },
+      "state": "draft",
+      "controlRevision": 2,
+      "createdAt": "2026-10-15T00:00:00Z"
+    }
+  },
+  "information.types.activate": {
+    "code": "OK",
+    "payload": {
+      "contract": {
+        "type": "00000000-0000-4000-8000-000000000001",
+        "version": "00000000-0000-4000-8000-000000000002",
+        "ordinal": 1,
+        "slug": "incident",
+        "label": "Incident",
+        "description": "",
+        "profile": "plowshare-document-metadata/1",
+        "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+        "schema": {
+          "type": "object"
+        },
+        "presentation": {}
+      },
+      "state": "active",
+      "controlRevision": 3,
+      "createdAt": "2026-10-15T00:00:00Z"
+    }
+  },
+  "information.types.deprecate": {
+    "code": "OK",
+    "payload": {
+      "contract": {
+        "type": "00000000-0000-4000-8000-000000000001",
+        "version": "00000000-0000-4000-8000-000000000002",
+        "ordinal": 1,
+        "slug": "incident",
+        "label": "Incident",
+        "description": "",
+        "profile": "plowshare-document-metadata/1",
+        "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+        "schema": {
+          "type": "object"
+        },
+        "presentation": {}
+      },
+      "state": "deprecated",
+      "controlRevision": 4,
+      "createdAt": "2026-10-15T00:00:00Z"
+    }
+  },
+  "information.content.get": {
+    "code": "OK",
+    "payload": {
+      "revision": "00000000-0000-4000-8000-000000000003",
+      "contentType": {
+        "contract": {
+          "type": "00000000-0000-4000-8000-000000000001",
+          "version": "00000000-0000-4000-8000-000000000002",
+          "ordinal": 1,
+          "slug": "incident",
+          "label": "Incident",
+          "description": "",
+          "profile": "plowshare-document-metadata/1",
+          "definitionHash": "c4bf66fa660be6e95863e2922cec8e2748cba69bf5171b01c4ff10330f188b4b",
+          "schema": {
+            "type": "object"
+          },
+          "presentation": {}
+        },
+        "metadataHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "metadata": {}
+      },
+      "processingPolicy": "explicit_only",
+      "reused": [],
+      "authorisedStages": []
+    }
+  },
+  "information.content.revise": {
+    "code": "OK",
+    "payload": {
+      "revision": "00000000-0000-4000-8000-000000000004",
+      "resource": "00000000-0000-4000-8000-000000000005",
+      "created": true
+    }
   }
 }

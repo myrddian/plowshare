@@ -107,6 +107,18 @@ def _application_files(value: list[object] | tuple[object, ...]) -> bool:
 def check(schema: dict[str, object], value: object) -> None:
     if value is None:
         return
+    if "maxJsonBytes" in schema and len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ) > cast(int, schema["maxJsonBytes"]):
+        raise ValueError("JSON value exceeds byte bound")
+    if schema.get("schemaInstance"):
+        from .tool_schemas import decode_tool_value
+
+        decode_tool_value(value)
+    if schema.get("documentSchema"):
+        from .tool_schemas import decode_tool_schema, validate_tool_schema
+
+        validate_tool_schema(decode_tool_schema(value))
     invalid = False
     if isinstance(value, str):
         length = len(value.encode("utf-16-le", errors="surrogatepass")) // 2

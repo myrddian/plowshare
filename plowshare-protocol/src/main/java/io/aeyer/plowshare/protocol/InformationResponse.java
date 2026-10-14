@@ -6,6 +6,44 @@ import java.util.*;
 
 /** Complete result alternatives for information operations; no arbitrary JSON result is exposed. */
 public sealed interface InformationResponse {
+  record ContentCapabilities(@JsonValue InformationContent.Capabilities value)
+      implements InformationResponse {
+    public ContentCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Content(@JsonValue InformationContent.View value) implements InformationResponse {
+    public Content {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Types(@JsonValue InformationContent.Versions value) implements InformationResponse {
+    public Types {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Type(@JsonValue InformationContent.Contract value) implements InformationResponse {
+    public Type {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record TypeVersion(@JsonValue InformationContent.Version value) implements InformationResponse {
+    public TypeVersion {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record MetadataValidation(@JsonValue SchemaValidation.Result value)
+      implements InformationResponse {
+    public MetadataValidation {
+      Objects.requireNonNull(value);
+    }
+  }
+
   record Revision(@JsonValue Information.Revision value) implements InformationResponse {
     public Revision {
       Objects.requireNonNull(value, "value");

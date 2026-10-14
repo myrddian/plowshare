@@ -97,7 +97,41 @@ public interface InformationCatalogueRepository {
       int capturedAllowance,
       boolean syntaxOnly,
       io.aeyer.plowshare.protocol.DocumentType documentType,
-      String fingerprint) {
+      String fingerprint,
+      io.aeyer.plowshare.protocol.InformationContent.Binding binding,
+      UUID expectedRevision,
+      boolean typingExplicit) {
+    public AdmissionWrite(
+        String name,
+        byte[] bytes,
+        String mediaType,
+        String sourceUri,
+        String kind,
+        List<UUID> inputs,
+        String session,
+        int allowance,
+        int capturedAllowance,
+        boolean syntaxOnly,
+        io.aeyer.plowshare.protocol.DocumentType documentType,
+        String fingerprint) {
+      this(
+          name,
+          bytes,
+          mediaType,
+          sourceUri,
+          kind,
+          inputs,
+          session,
+          allowance,
+          capturedAllowance,
+          syntaxOnly,
+          documentType,
+          fingerprint,
+          null,
+          null,
+          false);
+    }
+
     public AdmissionWrite {
       if (name == null
           || name.isBlank()
@@ -116,6 +150,9 @@ public interface InformationCatalogueRepository {
       inputs = List.copyOf(inputs);
       if (inputs.size() > 10000) throw new IllegalArgumentException("too many source dependencies");
       Objects.requireNonNull(documentType);
+      if (binding != null && (!typingExplicit || documentType.isCode()))
+        throw new IllegalArgumentException(
+            "Code or implicit admissions cannot bind a content type");
     }
 
     @Override

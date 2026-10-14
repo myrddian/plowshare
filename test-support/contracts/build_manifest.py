@@ -283,7 +283,7 @@ def inventory():
         ("administrative", "AdministrativeReplies", 34, 35),
         ("conversation", "ConversationReplies", 42, 79),
         ("inspection", "InspectionReplies", 14, 8),
-        ("information", "InformationReplies", 33, 40),
+        ("information", "InformationReplies", 43, 49),
         ("messaging", "MessagingReplies", 5, 9),
     ]:
         source = f"sdk/typescript/src/operations/{family}-replies.ts" if family != "messaging" else "sdk/typescript/src/operations/messaging.ts"
@@ -292,6 +292,7 @@ def inventory():
         operations = re.findall(r"'([^']+)':", re.search(rf"export interface {name} \{{([^}}]+)\}}", text, re.S).group(1))
         if family == "information":
             types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/information-views.ts"), re.M))
+            types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/information-content.ts"), re.M))
         assert len(types) == expected_types and len(operations) == expected_operations, family
         response_families[family] = {"source": source, "wireDtos": types, "operations": operations,
                                      "fixtures": f"test-support/contracts/ws-{family}-fixtures.json"}

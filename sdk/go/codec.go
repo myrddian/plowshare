@@ -81,16 +81,17 @@ func decode(s shape, value any, input bool, depth int) (any, error) {
 	if depth > 64 || s.Forbidden {
 		return nil, contractError
 	}
+	// Count JSON nesting, not trusted generated graph indirections.
 	if s.Ref != "" {
 		target, ok := catalog.Definitions[strings.TrimPrefix(s.Ref, "#/$defs/")]
 		if !ok {
 			return nil, contractError
 		}
-		return decode(target, value, input, depth+1)
+		return decode(target, value, input, depth)
 	}
 	if len(s.AnyOf) > 0 {
 		for _, v := range s.AnyOf {
-			if result, err := decode(v, value, input, depth+1); err == nil {
+			if result, err := decode(v, value, input, depth); err == nil {
 				return result, nil
 			}
 		}

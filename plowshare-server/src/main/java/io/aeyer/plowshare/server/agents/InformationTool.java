@@ -19,6 +19,8 @@ public final class InformationTool implements AgentTool {
   private static final ObjectMapper JSON =
       new ObjectMapper()
           .findAndRegisterModules()
+          .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+          .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
   private final boolean writing;
   private final java.util.function.Supplier<InformationCatalogue> catalogue;
@@ -26,6 +28,8 @@ public final class InformationTool implements AgentTool {
   private final InformationJobs inputs;
   private final String owner, log;
   private String session;
+  private final java.util.function.Supplier<InformationContentTypes> contentTypes;
+
   private io.aeyer.plowshare.server.documents.RetrievalService retrieval;
 
   public InformationTool withRetrieval(
@@ -36,7 +40,14 @@ public final class InformationTool implements AgentTool {
 
   public InformationTool(
       boolean writing, java.util.function.Supplier<InformationCatalogue> catalogue) {
-    this(writing, catalogue, null, null, null, null);
+    this(writing, catalogue, null, null, null, null, null);
+  }
+
+  public InformationTool(
+      boolean writing,
+      java.util.function.Supplier<InformationCatalogue> catalogue,
+      java.util.function.Supplier<InformationContentTypes> contentTypes) {
+    this(writing, catalogue, null, null, null, null, contentTypes);
   }
 
   private InformationTool(
@@ -45,18 +56,20 @@ public final class InformationTool implements AgentTool {
       InformationAccess access,
       InformationJobs inputs,
       String owner,
-      String log) {
+      String log,
+      java.util.function.Supplier<InformationContentTypes> contentTypes) {
     this.writing = writing;
     this.catalogue = catalogue;
     this.access = access;
     this.inputs = inputs;
     this.owner = owner;
     this.log = log;
+    this.contentTypes = contentTypes;
   }
 
   public InformationTool forRun(
       InformationAccess access, InformationJobs inputs, String owner, String log) {
-    return new InformationTool(writing, catalogue, access, inputs, owner, log)
+    return new InformationTool(writing, catalogue, access, inputs, owner, log, contentTypes)
         .withRetrieval(retrieval);
   }
 
@@ -77,8 +90,12 @@ public final class InformationTool implements AgentTool {
             "string",
             "enum",
             writing
-                ? List.of("acquire", "evidence", "report")
+                ? List.of("acquire", "upload", "content.revise", "evidence", "report")
                 : List.of(
+                    "types.list",
+                    "types.get",
+                    "types.validate",
+                    "content.get",
                     "list",
                     "status",
                     "acquisition",
@@ -126,6 +143,9 @@ public final class InformationTool implements AgentTool {
     }
     for (String key :
         List.of(
+            "version",
+            "attachedRevision",
+            "expectedRevision",
             "revision",
             "acquisition",
             "url",
@@ -141,6 +161,30 @@ public final class InformationTool implements AgentTool {
       fields.put(key, Map.of("type", "integer"));
     for (String key : List.of("inputs", "citations"))
       fields.put(key, Map.of("type", "array", "items", Map.of("type", "string")));
+    fields.put(
+        "metadata",
+        Map.of(
+            "type",
+            "object",
+            "description",
+            "Bounded schema metadata; declared defaults are annotations, never inserted."));
+    fields.put(
+        "typing",
+        Map.of(
+            "type",
+            "object",
+            "properties",
+            Map.of(
+                "mode",
+                Map.of("type", "string", "enum", List.of("inherit", "set", "clear")),
+                "version",
+                Map.of("type", "string"),
+                "metadata",
+                Map.of("type", "object")),
+            "required",
+            List.of("mode"),
+            "additionalProperties",
+            false));
     if (writing) {
       for (String key : List.of("objectives", "scopeChanges"))
         fields.put(key, Map.of("type", "array", "items", Map.of("type", "string")));
@@ -234,6 +278,7 @@ public final class InformationTool implements AgentTool {
               .withCorpus(
                   io.aeyer.plowshare.server.information.InformationInputs.corpus(
                       args.get("corpus")));
+      args.put("view", io.aeyer.plowshare.protocol.InformationContent.VIEW);
       String operation = required(args, "operation");
       if (List.of("list", "facets", "search", "rank").contains(operation))
         context =
@@ -243,6 +288,31 @@ public final class InformationTool implements AgentTool {
       InformationCatalogue service = catalogue.get();
       if (writing) {
         switch (operation) {
+          case "upload" -> {
+            var admission =
+                service.admitForSession(
+                    context,
+                    id(args, "requestId"),
+                    required(args, "name"),
+                    required(args, "text").getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "text/plain; charset=utf-8",
+                    null,
+                    session,
+                    InformationContentInputs.expected(args),
+                    InformationContentInputs.typing(args));
+            inputs.reads(log, context).accept(admission.revision());
+            result = admission;
+          }
+          case "content.revise" -> {
+            UUID previous = id(args, "expectedRevision");
+            inputs.reads(log, context).accept(previous);
+            var typing = InformationContentInputs.typing(args);
+            if (typing == null) throw new CallerFault("typing is required");
+            var admission =
+                service.reviseMetadata(context, id(args, "requestId"), previous, typing, session);
+            inputs.reads(log, context).accept(admission.revision());
+            result = admission;
+          }
           case "acquire" ->
               result =
                   service.acquire(
@@ -282,7 +352,9 @@ public final class InformationTool implements AgentTool {
                     session,
                     io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(
                         args),
-                    log);
+                    log,
+                    InformationContentInputs.expected(args),
+                    InformationContentInputs.typing(args));
             inputs.reads(log, context).accept(admission.revision());
             result = admission;
           }
@@ -291,6 +363,27 @@ public final class InformationTool implements AgentTool {
         }
       } else {
         switch (operation) {
+          case "content.get" -> {
+            UUID revision = id(args, "revision");
+            result = service.content(context, revision);
+            inputs.reads(log, context).accept(revision);
+          }
+          case "types.list" ->
+              result =
+                  contentTypes
+                      .get()
+                      .list(context, false, number(args, "limit", 50), number(args, "offset", 0));
+          case "types.get", "types.validate" -> {
+            UUID attached =
+                args.containsKey("attachedRevision") ? id(args, "attachedRevision") : null;
+            var contract = contentTypes.get().published(context, id(args, "version"), attached);
+            if (attached != null) inputs.reads(log, context).accept(attached);
+            result =
+                operation.equals("types.get")
+                    ? contract
+                    : io.aeyer.plowshare.protocol.DocumentMetadata.validate(
+                        contract.schema(), InformationContentInputs.metadata(args.get("metadata")));
+          }
           case "outline" -> {
             UUID revision = id(args, "revision");
             result =
@@ -408,6 +501,8 @@ public final class InformationTool implements AgentTool {
       } catch (com.fasterxml.jackson.core.JsonProcessingException failed) {
         return "Information result serialization failed: " + failed.getMessage();
       }
+    } catch (InformationMetadataFault invalid) {
+      return InformationJson.json(invalid.validation());
     } catch (CallerFault | NotFoundFault invalid) {
       return "Information request refused: " + invalid.getMessage();
     } catch (java.io.IOException | IllegalArgumentException invalid) {

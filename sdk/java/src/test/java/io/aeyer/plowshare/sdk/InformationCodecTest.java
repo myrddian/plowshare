@@ -169,4 +169,34 @@ class InformationCodecTest {
         new InformationResponse.Finalised(true),
         InformationCodec.response(change, "{\"finalised\":true}"));
   }
+
+  @Test
+  void authored_commands_round_trip_closed_typing_and_exact_revision_identity() throws Exception {
+    var request =
+        InformationCodec.decode(
+            "content.revise",
+            """
+        {"scope":{"kind":"personal"},"view":"content-types-v1","requestId":"00000000-0000-0000-0000-000000000001","expectedRevision":"00000000-0000-0000-0000-000000000002","typing":{"mode":"inherit","metadata":{"severity":null}}}
+        """);
+    assertInstanceOf(InformationRequest.ContentRevise.class, request);
+    assertEquals(
+        request, InformationCodec.decode("content.revise", InformationCodec.encode(request)));
+    var draft =
+        InformationCodec.decode(
+            "types.version.create",
+            """
+        {"scope":{"kind":"personal"},"view":"content-types-v1","requestId":"00000000-0000-0000-0000-000000000001","slug":"incident","label":"Incident","schema":{"type":"object"}}
+        """);
+    assertInstanceOf(InformationRequest.TypeDraft.class, draft);
+    assertEquals(
+        draft, InformationCodec.decode("types.version.create", InformationCodec.encode(draft)));
+    assertThrows(
+        java.io.IOException.class,
+        () ->
+            InformationCodec.decode(
+                "content.revise",
+                """
+        {"scope":{"kind":"personal"},"view":"content-types-v1","requestId":"00000000-0000-0000-0000-000000000001","expectedRevision":"00000000-0000-0000-0000-000000000002","typing":{"mode":"clear","metadata":{}}}
+        """));
+  }
 }

@@ -2,6 +2,12 @@
 
 Status: proposed design. Date: 15 October 2026.
 
+[ADR 0025](decisions/0025-authored-information-contracts.md) records the accepted
+first-milestone contracts, and the [implementation plan](authored-knowledge-implementation.md)
+records its delivery and verification. The [usage guide](authored-information.md)
+describes the implemented content types and metadata-only workflow. The wider
+knowledge direction remains proposed; deployment is a separate action.
+
 Develop Plowshare's information system into a knowledge base that people and agents can author, connect, navigate and maintain together. The direction combines wiki-style documents and cross-references with intersecting metadata facets, building on the retained revisions, evidence, retrieval and processing that Plowshare already owns. Information is a first-class part of the platform, with useful reading, writing and navigation independent of a model run.
 
 Schema-defined content types are the first implementation milestone in that direction. A content type defines structured metadata, such as the severity and affected services of an incident report. Each typed information revision retains its exact type version and validated metadata. The document body, source bytes, evidence coordinates and processing lifecycle remain part of the existing information model.
@@ -14,7 +20,7 @@ Plowshare can retain and retrieve a runbook today, but its catalogue cannot requ
 
 Introduce a reusable content-type registry and typed revision metadata. People and authorised model tools may create documents conforming to published types. Schema validation establishes structural conformance; it does not establish factual accuracy, trustworthy authorship, evidence support or authority to execute instructions.
 
-Existing untyped documents remain supported. No AI call is required to publish a schema, validate metadata or retain a typed revision. New bodies continue through ordinary source processing under its existing allowance and readiness rules. Metadata-only revisions use the explicit processing policy below: their creation makes no model call and does not automatically schedule paid processing.
+Existing untyped documents remain supported. No AI call is required to publish a schema, validate metadata or retain a typed revision. New bodies continue through ordinary source processing under its existing allowance and readiness rules. Metadata-only revisions use the explicit processing policy below: their creation makes no document-processing model call and does not automatically schedule paid processing. Explicitly configured transition hooks retain their own separate policy and accounting.
 
 ## Wiki documents with faceted navigation
 
@@ -187,7 +193,7 @@ A body-edited report records the actor and actual run that produced the edited c
 
 ## Metadata-only processing policy
 
-Adopt the following behaviour for the first milestone. A metadata-only revision is a deterministic owner-authorised transition: it validates metadata, retains the unchanged body and commits its own revision without calling a model, fetching a source or automatically scheduling paid processing. It does not require a positive model-call allowance merely to save metadata. New bodies retain the ordinary admission lifecycle. This distinction is a server contract, not a client preference or an assumption that copied bytes already have ready projections.
+Adopt the following behaviour for the first milestone. A metadata-only revision is a deterministic owner-authorised transition: it validates metadata, retains the unchanged body and commits its own revision without invoking document-processing models, fetching a source or automatically scheduling paid document processing. It does not require a positive document model-call allowance merely to save metadata. New bodies retain the ordinary admission lifecycle. Existing configured transition hooks still apply and may independently invoke models under their own authority and accounting; clients must distinguish that configured hook usage from document processing. This distinction is a server contract, not a client preference or an assumption that copied bytes already have ready projections.
 
 Reuse is limited to completed, committed outputs from the starting revision that match the unchanged source and extraction hashes, each stage's input identity and the currently configured pipeline fingerprint. Reuse is evaluated per stage in dependency order. Copy eligible outputs into revision-owned snapshots through specialist repository operations, retaining the originating revision, generation and stage fingerprint as provenance. Never reuse a failed or running stage, a private paid-response checkpoint, an incompatible projection or an output that has not passed its completion gates. A stage is marked ready only when its required outputs and upstream dependencies have been retained and verified for the new revision. Content-type metadata remains outside body processing inputs in this release.
 
@@ -320,7 +326,7 @@ Required cases include:
 - Draft/active/deprecated transitions; inherited deprecated bindings; explicit upgrades; schema conflicts; concurrent writers; exact version retention.
 - Expected revision UUID belongs to the selected resource and names its highest committed revision; inheritance and source copying use that same UUID. Stale edits conflict without implicit merge, head substitution or private revision disclosure.
 - Same body with different metadata creates a distinct revision; old citations and hashes remain valid; metadata-only revisions preserve source/provenance and make reports draft. Original body producer and metadata reviser remain distinguishable; body-edited reports do not falsely attribute replacement prose to the original run.
-- Metadata-only saves need no positive model allowance and make no model or acquisition call. Compatible completed outputs are reused atomically with origin provenance and unchanged evidence offsets; failed, running, incompatible and gated/private outputs are never reused. Reuse races conflict without publishing a different plan after approval.
+- Metadata-only saves need no positive document model allowance and make no document-processing model or acquisition call. Configured hook gates and their independent accounting remain intact. Compatible completed outputs are reused atomically with origin provenance and unchanged evidence offsets; failed, running, incompatible and gated/private outputs are never reused. Reuse races conflict without publishing a different plan after approval.
 - Missing/stale outputs remain visibly unprepared; automatic workers and enrichment sweeps do not process explicit-only revisions, including after restart. Owner-requested repair respects stage selection, dependencies, access, allowance and gates. Reused outputs create no new usage charge or allowance transfer, and report finalisation still requires five compatible ready stages.
 - Deletion redacts each revision's copied projections and metadata atomically; reuse provenance cannot retrieve deleted origin content or bypass live access. Revision-specific sharing grants are not inherited, and original report input restrictions remain effective.
 - Every admission path refuses invalid metadata and silent stripping of typing, including URL refresh, legacy by-name upload and report recording.
