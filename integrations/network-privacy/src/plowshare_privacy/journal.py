@@ -25,6 +25,7 @@ from .contracts import (
     timestamp,
     uuid,
 )
+from .limits import MAX_JOURNAL_BYTES
 from .operator_state import InvestigationDecision
 
 Phase = Literal["queued", "collected", "uploading", "uploaded", "publishing", "done"]
@@ -205,7 +206,7 @@ class FileReceipts:
                 if self.path.is_symlink():
                     raise ValueError("Journal cannot be linked")
                 row = object_fields(
-                    load_json(self.path),
+                    load_json(self.path, maximum_bytes=MAX_JOURNAL_BYTES),
                     {"version", "identity", "receipts", "publications"},
                     {"collectionScope", "nextCollectionScope"},
                 )
@@ -375,7 +376,7 @@ class FileReceipts:
             allow_nan=False,
         ).encode()
         # Match the read bound. Refuse before replacing or acknowledging intake.
-        if len(encoded) > 1_048_576:
+        if len(encoded) > MAX_JOURNAL_BYTES:
             raise ValueError("Journal byte limit reached")
         temporary = self.directory / (str(uuid4()) + ".tmp")
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

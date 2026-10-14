@@ -47,8 +47,11 @@ In the dashboard:
 1. Enter your private network subnet and the TCP ports you want to check, then
    choose **Find devices**. Previous local discovery results are displayed when available.
 2. Select devices, check **Enable collection**, and choose **Save monitoring**.
-   You can also enter explicit private IPv4 addresses. The scope is limited to
-   32 devices and eight ports; discovery checks at most 256 addresses.
+   You can also enter explicit private IPv4 addresses or a private CIDR such as
+   `192.168.10.0/24`. **Monitor whole subnet** copies the subnet into the draft;
+   it does not save or enable collection. A `/24` expands to all 254 host addresses,
+   including devices that did not respond to discovery. The scope supports 256
+   addresses and eight dashboard ports, collected in 32-device batches.
 3. Choose **Request a scan**. Results refresh automatically as evidence is retained.
 4. Use the health checklist, optional Pi-hole connection, investigation preferences
    and reviewed schedule controls to [finish setup in the dashboard](OPERATIONS.md#finish-setup-in-the-dashboard).
@@ -254,8 +257,9 @@ The prompts ask for:
 | Token lifetime | 1–365 days; rotate the same token UUID before expiry |
 | Destination path | A relative directory within the FileStore you will select during installation |
 
-The collector supports up to 32 unique IPs, 16 unique ports and 256 address/port
-pairs. The Application project is `network-privacy-watch`. This helper installs
+The collector supports up to 256 unique IPs, 16 unique ports and 4,096 address/port
+pairs. A private IPv4 CIDR of /24 or smaller expands into a fixed host list.
+Overlapping or oversized selections are refused; no scan discovers new targets implicitly. The Application project is `network-privacy-watch`. This helper installs
 that Application; the lower-level setup helper supports separately authored
 configuration.
 
@@ -445,6 +449,34 @@ Keep this directory private. Do not delete intents to bypass an uncertain result
 Manual older packages retain their `provisioning-*` and `identity-*` receipts;
 follow [manual provisioning recovery](README.md#manual-rotation-and-interrupted-setup)
 instead of converting their identity automatically.
+
+## Upgrade for subnet monitoring
+
+Deploy the updated Application before installing this collector or enabling a
+large scope. It reads retained sources up to 768 KiB and passes bounded projections
+to agents. Its deterministic step limit is 256; its model-call limits and budget
+remain unchanged. No Plowshare server update is required.
+
+The upgrade helper deliberately preserves existing manifest grants and caps.
+Review the staged `plowshare.json`: adopt the packaged `caps.steps: 256`, add the
+`network_evidence_read` provider scope, and assign it to `privacy_analyst` and
+`privacy_reviewer`. Preserve your execution account, managers, provider identity,
+existing coordinator grant and other operator policy. The new read scope grants
+only `network_scope`, `network_scan_list`, `network_evidence` and
+`network_destinations`; it does not permit scanning. Mark both agent definitions
+`dynamic: true` as in the package. Record the reviewed candidate with
+`upgrade --review` before applying it. Existing private targets are never widened.
+
+At first start, the collector transitions its six tool descriptors to optional
+read pagination. Through public SDK journal APIs it copies the exact legacy
+`state/relay-tools` receipts into `state/relay-tools-paged`, retaining requests,
+results, publication times and uncertain phases. A durable `transition.json`
+records the source binding, target binding, count and history digest. Interrupted
+local copies resume without executing tools or publishing Relay messages. The
+collector process lock excludes the old binary during this transition. Keep both
+journals and the marker; foreign bindings, conflicting copies or changed legacy
+history refuse startup. Downgrades after new invocations need reviewed recovery;
+do not erase journals to force startup.
 
 ## Upgrade the Application and collector
 

@@ -31,7 +31,8 @@ Use the arrow keys, Home and End to move between the dashboard tabs.
 ## Finish setup in the dashboard
 
 1. Open **Settings**, then **Find devices** on an explicitly selected private
-   subnet. Select up to 32 addresses and eight TCP ports, add names and save
+   subnet. Select up to 256 addresses and eight TCP ports, or prepare the whole
+   subnet with **Monitor whole subnet**. Add names and save
    monitoring.
 2. Optionally expand **Connect Pi-hole v6**. Supply its HTTP(S) origin and an
    application password. **Test connection** authenticates and reads device
@@ -102,11 +103,12 @@ report projections are cached for 20 seconds. Visibility is an inspection result
 permissions and availability are still enforced by Plowshare on each tool call.
 A checklist highlights missing setup. The expiry notice warns within seven days.
 
+The **Devices** search filters names, addresses, MACs, hostnames and vendors locally.
 Device cards show configured names, observed MAC/vendor associations, TCP service
 responses, sampled DNS destinations and collection history. History is explicitly
 at an address; a DHCP change or randomized MAC does not prove physical identity.
 **Check moved devices** compares fresh Pi-hole associations with the last local
-LAN discovery, limited to 32 responding addresses. Confirm each suggested move
+LAN discovery, bounded to 256 addresses and read in 32-device batches. Confirm each suggested move
 explicitly. Confirmation rechecks the association and uses the normal idle/scope
 fence. No automatic retargeting, subnet discovery or scope expansion is available
 to an agent.
@@ -313,7 +315,7 @@ write fenced; no upload/revision is resent. The same request UUID cannot be reus
 for changed content. **Check retained work** includes unsettled profile writes when
 recovering a stopped collector.
 
-Reads are bounded to 32 profile resources and 400 visible revisions. Private intents
+Reads are bounded to 256 profile resources and 4,100 visible revisions. Private intents
 are bounded to 128 entries and 1 MiB; archive settled receipts deliberately without
 discarding uncertain identities. Document history remains in Plowshare. Reload
 profiles explicitly when needed; the dashboard does not repeatedly read all profile

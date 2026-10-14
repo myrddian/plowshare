@@ -29,6 +29,7 @@ from .contracts import (
     uuid,
 )
 from .journal import Receipts
+from .limits import MAX_TARGETS
 from .privacy_issues import IssueLink, PrivacyIssue
 from .private_files import replace_private
 from .worker import ReconciliationRequired
@@ -381,8 +382,8 @@ class DeviceProfiles:
                 raise ValueError("Ambiguous device profile resource")
             if previous is None or previous.ordinal < version.ordinal:
                 latest[version.profile_id] = version
-        if len(latest) > 32:
-            raise ValueError("Device profile listing exceeds 32 devices")
+        if len(latest) > MAX_TARGETS:
+            raise ValueError("Device profile listing exceeds 256 devices")
         result = []
         for identity, head in latest.items():
             profile = DeviceProfile.read(await self.port.read(head.revision))
@@ -462,7 +463,7 @@ class DeviceProfiles:
                 raise ValueError(
                     "Profile associations must be selected monitored addresses or its existing addresses"
                 )
-            if current is None and len(profiles) >= 32:
+            if current is None and len(profiles) >= MAX_TARGETS:
                 raise ValueError("Device profile capacity reached")
             if any(
                 set(fields.addresses) & set(v.profile.fields.addresses)

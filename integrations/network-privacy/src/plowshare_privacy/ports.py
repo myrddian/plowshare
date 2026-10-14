@@ -27,6 +27,7 @@ from plowshare.contracts import (
 )
 
 from .contracts import Configuration, Evidence
+from .limits import MAX_EVIDENCE_BYTES
 
 
 class PrivacyPort(Protocol):
@@ -200,7 +201,7 @@ class SdkPrivacyPort:
         offset = 0
         total: int | None = None
         parts: list[str] = []
-        for _ in range(64):
+        for _ in range(128):
             result = (
                 await self.client.request(
                     InformationReadRequest(
@@ -211,7 +212,7 @@ class SdkPrivacyPort:
             if (
                 result.revision != revision
                 or result.start != offset
-                or not offset <= result.end <= result.total <= 65536
+                or not offset <= result.end <= result.total <= MAX_EVIDENCE_BYTES
                 or any(value % 1 for value in (result.start, result.end, result.total))
                 or total is not None
                 and total != result.total

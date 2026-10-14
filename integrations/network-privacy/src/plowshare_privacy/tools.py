@@ -7,19 +7,24 @@ No caller can supply an address, port, executable, filesystem path or server ori
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass, replace
 from typing import Literal, Protocol
 
+from .collection import scope_fingerprint
 from .contracts import (
     DeviceIdentity,
     DeviceLabel,
     DnsObservation,
     DnsWindow,
     Evidence,
+    TcpObservation,
+    integer,
     object_fields,
     uuid,
 )
 from .journal import Publication, Receipt, ScanOrigin
+from .limits import BATCH_SIZE, MAX_CHANGES, MAX_TARGETS, TOOL_REPLY_BYTES
 from .worker import Worker
 
 
@@ -33,7 +38,9 @@ class ToolDefinition:
 
 DEFINITIONS = (
     ToolDefinition(
-        "network.scope", "Read the configured collector scope and probe limits.", "read"
+        "network.scope",
+        "Read configured scope in pages (offset/limit); follow next_offset and check the scope fingerprint.",
+        "read",
     ),
     ToolDefinition(
         "network.scan",
@@ -48,11 +55,13 @@ DEFINITIONS = (
         "request_id",
     ),
     ToolDefinition(
-        "network.scan_list", "List the latest 50 local collection receipts.", "read"
+        "network.scan_list",
+        "List paged local collection receipts (offset/limit), with bounded previews and full counts.",
+        "read",
     ),
     ToolDefinition(
         "network.evidence",
-        "Read a collection's observations, comparison, gaps and retained revision.",
+        "Read retained evidence. Large scans return counts; use section tcp/dns/devices/changes/issues with offset/limit and follow next_offset.",
         "read",
         "scan_id",
     ),
@@ -67,7 +76,12 @@ DEFINITIONS = (
 
 @dataclass(frozen=True)
 class ScopeCall:
-    pass
+    offset: int = 0
+    limit: int = BATCH_SIZE
+
+    def __post_init__(self) -> None:
+        integer(self.offset, 0, MAX_TARGETS)
+        integer(self.limit, 1, BATCH_SIZE)
 
 
 @dataclass(frozen=True)
@@ -83,17 +97,49 @@ class StatusCall:
 
 @dataclass(frozen=True)
 class ListCall:
-    pass
+    offset: int = 0
+    limit: int = 50
+
+    def __post_init__(self) -> None:
+        integer(self.offset, 0, 1000)
+        integer(self.limit, 1, 50)
 
 
 @dataclass(frozen=True)
 class EvidenceCall:
     scan_id: str
+    section: Literal["summary", "tcp", "dns", "devices", "changes", "issues"] | None = (
+        None
+    )
+    offset: int = 0
+    limit: int = BATCH_SIZE
+
+    def __post_init__(self) -> None:
+        integer(self.offset, 0, MAX_CHANGES)
+        integer(self.limit, 1, BATCH_SIZE)
+        if self.section is not None and self.section not in (
+            "summary",
+            "tcp",
+            "dns",
+            "devices",
+            "changes",
+            "issues",
+        ):
+            raise ValueError("Unknown evidence section")
 
 
 @dataclass(frozen=True)
 class DestinationsCall:
     scan_id: str
+    offset: int = 0
+    limit: int = BATCH_SIZE
+    paged: bool = False
+
+    def __post_init__(self) -> None:
+        integer(self.offset, 0, MAX_CHANGES)
+        integer(self.limit, 1, BATCH_SIZE)
+        if type(self.paged) is not bool:
+            raise ValueError("Invalid destination page intent")
 
 
 ToolCall = (
@@ -104,19 +150,67 @@ ToolCall = (
 def decode_call(name: str, arguments: object) -> ToolCall:
     """Reject unknown capabilities and all parameters outside the fixed contract."""
     if name in ("network.scope", "network.scan_list"):
-        object_fields(arguments, set())
-        return ScopeCall() if name == "network.scope" else ListCall()
+        row = object_fields(arguments, set(), {"offset", "limit"})
+        offset = integer(row.get("offset", 0), 0, 1000)
+        limit = integer(
+            row.get("limit", 32 if name == "network.scope" else 50),
+            1,
+            32 if name == "network.scope" else 50,
+        )
+        return (
+            ScopeCall(offset, limit)
+            if name == "network.scope"
+            else ListCall(offset, limit)
+        )
     if name in ("network.scan", "network.scan_status"):
         row = object_fields(arguments, {"request_id"})
         identity = uuid(row["request_id"])
         return ScanCall(identity) if name == "network.scan" else StatusCall(identity)
     if name in ("network.evidence", "network.destinations"):
-        row = object_fields(arguments, {"scan_id"})
-        identity = uuid(row["scan_id"])
-        return (
-            EvidenceCall(identity)
+        row = object_fields(
+            arguments,
+            {"scan_id"},
+            {"offset", "limit", "section"}
             if name == "network.evidence"
-            else DestinationsCall(identity)
+            else {"offset", "limit"},
+        )
+        identity = uuid(row["scan_id"])
+        offset, limit = (
+            integer(row.get("offset", 0), 0, MAX_CHANGES),
+            integer(row.get("limit", 32), 1, 32),
+        )
+        section = row.get("section")
+        if (
+            name == "network.evidence"
+            and section is None
+            and {"offset", "limit"} & set(row)
+        ):
+            raise ValueError("Choose an evidence section for paged reads")
+        if section is not None and section not in (
+            "summary",
+            "tcp",
+            "dns",
+            "devices",
+            "changes",
+            "issues",
+        ):
+            raise ValueError("Unknown evidence section")
+        if name == "network.destinations":
+            return DestinationsCall(
+                identity, offset, limit, bool({"offset", "limit"} & set(row))
+            )
+        if section == "tcp":
+            return EvidenceCall(identity, "tcp", offset, limit)
+        if section == "dns":
+            return EvidenceCall(identity, "dns", offset, limit)
+        if section == "devices":
+            return EvidenceCall(identity, "devices", offset, limit)
+        if section == "changes":
+            return EvidenceCall(identity, "changes", offset, limit)
+        if section == "issues":
+            return EvidenceCall(identity, "issues", offset, limit)
+        return EvidenceCall(
+            identity, "summary" if section == "summary" else None, offset, limit
         )
     raise ValueError("Unsupported network privacy tool")
 
@@ -133,6 +227,10 @@ class ScopeResult:
     enabled: bool
     device_labels: tuple[DeviceLabel, ...] = ()
     pihole_configured: bool = False
+    total_targets: int = 0
+    offset: int = 0
+    next_offset: int | None = None
+    scope: str = ""
 
 
 @dataclass(frozen=True)
@@ -144,11 +242,16 @@ class ScanSummary:
     mode: Literal["tcp", "fixture"]
     changes: tuple[str, ...]
     issues: tuple[str, ...]
+    total_changes: int = 0
+    total_issues: int = 0
 
 
 @dataclass(frozen=True)
 class ScanListResult:
     scans: tuple[ScanSummary, ...]
+    total: int = 0
+    offset: int = 0
+    next_offset: int | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +279,52 @@ class DestinationsResult:
     dns_window: DnsWindow | None = None
 
 
+@dataclass(frozen=True)
+class EvidenceCounts:
+    tcp: int
+    dns: int
+    devices: int
+    changes: int
+    issues: int
+
+
+EvidenceRecord = TcpObservation | DnsObservation | DeviceIdentity | str
+
+
+@dataclass(frozen=True)
+class EvidencePageResult:
+    """A stable window of an immutable retained scan, never a truncated full scan.
+
+    Page size is adaptive to serialized tool bytes. next_offset is authoritative;
+    callers must use it rather than assume every request returns limit records.
+    """
+
+    scan_id: str
+    revision: str | None
+    section: str
+    observed_at: str
+    counts: EvidenceCounts
+    offset: int
+    total: int
+    next_offset: int | None
+    records: tuple[EvidenceRecord, ...]
+    issues: tuple[str, ...]
+    issues_complete: bool
+    mode: Literal["tcp", "fixture"]
+    scope: str
+    previous_revision: str | None
+    baseline: bool
+    dns_window: DnsWindow | None
+
+
+def tool_fits(result: ToolResult) -> bool:
+    # Callers supply one of the explicit result records, not an arbitrary payload.
+    return (
+        len(json.dumps(asdict(result), allow_nan=False, separators=(",", ":")).encode())
+        <= TOOL_REPLY_BYTES
+    )
+
+
 ToolResult = (
     ScopeResult
     | Publication
@@ -183,6 +332,7 @@ ToolResult = (
     | StatusResult
     | EvidenceResult
     | DestinationsResult
+    | EvidencePageResult
 )
 
 
@@ -204,8 +354,10 @@ class WorkerTools:
             receipt.occurred_at,
             receipt.revision,
             evidence.mode if evidence else self.worker.config.collection.mode,
-            evidence.changes if evidence else (),
-            evidence.issues if evidence else (),
+            evidence.changes[:1] if evidence else (),
+            evidence.issues[:4] if evidence else (),
+            len(evidence.changes) if evidence else 0,
+            len(evidence.issues) if evidence else 0,
         )
 
     def evidence(self, identity: str) -> EvidenceResult:
@@ -220,26 +372,66 @@ class WorkerTools:
     async def execute(self, call: ToolCall) -> ToolResult:
         if isinstance(call, ScopeCall):
             plan = self.worker.config.collection
-            return ScopeResult(
+            if not 0 <= call.offset <= len(plan.targets):
+                raise ValueError("Scope page offset is unavailable")
+            targets = plan.targets[call.offset : call.offset + call.limit]
+            scope_result = ScopeResult(
                 self.worker.config.collector,
                 plan.mode,
-                plan.targets,
+                targets,
                 plan.ports,
                 plan.concurrency,
                 plan.timeout,
                 plan.observations_file is not None,
                 plan.enabled,
-                plan.labels,
+                tuple(label for label in plan.labels if label.address in targets),
                 plan.pihole is not None,
+                len(plan.targets),
+                call.offset,
+                call.offset + len(targets)
+                if call.offset + len(targets) < len(plan.targets)
+                else None,
+                scope_fingerprint(plan),
             )
+            while not tool_fits(scope_result) and len(scope_result.targets) > 1:
+                targets = scope_result.targets[:-1]
+                scope_result = replace(
+                    scope_result,
+                    targets=targets,
+                    device_labels=tuple(
+                        label for label in plan.labels if label.address in targets
+                    ),
+                    next_offset=call.offset + len(targets),
+                )
+            if not tool_fits(scope_result):
+                raise ValueError("Scope metadata exceeds the tool page budget")
+            return scope_result
         if isinstance(call, ScanCall):
             return await self.worker.request_scan(call.request_id, call.origin)
         if isinstance(call, ListCall):
-            return ScanListResult(
-                tuple(
-                    self.summary(item) for item in reversed(self.worker.receipts.all())
-                )[:50]
+            scans = tuple(
+                self.summary(item) for item in reversed(self.worker.receipts.all())
             )
+            if not 0 <= call.offset <= len(scans):
+                raise ValueError("Scan page offset is unavailable")
+            selected = scans[call.offset : call.offset + call.limit]
+            listing = ScanListResult(
+                selected,
+                len(scans),
+                call.offset,
+                call.offset + len(selected)
+                if call.offset + len(selected) < len(scans)
+                else None,
+            )
+            while not tool_fits(listing) and len(listing.scans) > 1:
+                listing = replace(
+                    listing,
+                    scans=listing.scans[:-1],
+                    next_offset=call.offset + len(listing.scans) - 1,
+                )
+            if not tool_fits(listing):
+                raise ValueError("Scan metadata exceeds the tool page budget")
+            return listing
         if isinstance(call, StatusCall):
             publication = next(
                 (
@@ -265,11 +457,13 @@ class WorkerTools:
                 publication.state if publication else "received",
                 self.summary(receipt) if receipt else None,
             )
-        if isinstance(call, EvidenceCall):
-            return self.evidence(call.scan_id)
         result = self.evidence(call.scan_id)
         evidence = result.evidence
-        return DestinationsResult(
+        if isinstance(call, EvidenceCall):
+            if call.section is None and call.offset == 0 and tool_fits(result):
+                return result
+            return self.page(result, call.section or "summary", call.offset, call.limit)
+        legacy = DestinationsResult(
             call.scan_id,
             result.revision,
             evidence.mode,
@@ -279,3 +473,69 @@ class WorkerTools:
             evidence.snapshot.devices,
             evidence.snapshot.dns_window,
         )
+        if (
+            not call.paged
+            and call.offset == 0
+            and call.limit == BATCH_SIZE
+            and tool_fits(legacy)
+        ):
+            return legacy
+        return self.page(result, "dns", call.offset, call.limit)
+
+    def page(
+        self, result: EvidenceResult, section: str, offset: int, limit: int
+    ) -> EvidencePageResult:
+        evidence = result.evidence
+        snapshot = evidence.snapshot
+        counts = EvidenceCounts(
+            len(snapshot.tcp),
+            len(snapshot.dns),
+            len(snapshot.devices),
+            len(evidence.changes),
+            len(evidence.issues),
+        )
+        records: tuple[EvidenceRecord, ...]
+        if section == "tcp":
+            records = snapshot.tcp
+        elif section == "dns":
+            records = snapshot.dns
+        elif section == "devices":
+            records = snapshot.devices
+        elif section == "changes":
+            records = evidence.changes
+        elif section == "issues":
+            records = evidence.issues
+        elif section == "summary":
+            records = ()
+        else:
+            raise ValueError("Unknown evidence section")
+        if not 0 <= offset <= len(records):
+            raise ValueError("Evidence page offset is unavailable")
+        selected = records[offset : offset + limit]
+        page = EvidencePageResult(
+            evidence.scan_id,
+            result.revision,
+            section,
+            snapshot.observed_at,
+            counts,
+            offset,
+            len(records),
+            offset + len(selected) if offset + len(selected) < len(records) else None,
+            selected,
+            evidence.issues[:4],
+            len(evidence.issues) <= 4,
+            evidence.mode,
+            evidence.scope,
+            evidence.previous_revision,
+            evidence.is_baseline,
+            snapshot.dns_window,
+        )
+        while not tool_fits(page) and len(page.records) > 1:
+            page = replace(
+                page,
+                records=page.records[:-1],
+                next_offset=offset + len(page.records) - 1,
+            )
+        if not tool_fits(page):
+            raise ValueError("Evidence record exceeds the tool page budget")
+        return page

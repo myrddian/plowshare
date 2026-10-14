@@ -203,3 +203,6 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 
   .report-reader, .document-reader { padding: 16px; }
   .view-nav button { font-size: 11px; padding-left: 4px; padding-right: 4px; }
 }
+
+.device-search { padding: 18px 22px 0; max-width: 600px; }
+.device-search label { margin-bottom: 6px; }

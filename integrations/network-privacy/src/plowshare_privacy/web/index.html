@@ -41,7 +41,7 @@
       <details id="system-health" class="panel diagnostics"><summary class="panel-heading"><h2>System health</h2><span id="health-summary">Checking connection…</span></summary><div class="setup-content"><div class="recovery-toolbar"><p class="hint">Connection, permissions and retained work.</p><button id="recover" class="secondary">Check retained work</button></div><div id="health" class="health-grid"></div><div id="recovery"></div></div></details>
       </section>
       <section id="view-devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
-      <section class="panel setup-panel"><div class="panel-heading"><h2>Monitored devices</h2><button id="check-moves" class="secondary">Check moved devices</button></div><div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div></section>
+      <section class="panel setup-panel"><div class="panel-heading"><h2>Monitored devices</h2><button id="check-moves" class="secondary">Check moved devices</button></div><div class="device-search"><label for="device-search">Find a device</label><input id="device-search" type="search" placeholder="Name, IP, MAC address or vendor"></div><div id="device-cards" class="card-grid setup-content"></div><div id="moves" class="setup-content"></div></section>
       <details id="device-profiles" class="panel setup-panel" hidden><summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary><div class="panel-body">
         <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
         <div class="row"><button id="load-profiles" type="button">Load profiles</button><button id="new-profile" type="button">Create device profile</button><button id="reconcile-profiles" type="button">Check retained writes</button></div>
@@ -104,12 +104,12 @@
           <form id="discover-form" class="discover-form">
             <div><label for="network">Network subnet</label><input id="network" placeholder="Private network CIDR, e.g. 192.168.0.0/24" required></div>
             <div><label for="ports">TCP ports to check</label><input id="ports" placeholder="Comma-separated ports, e.g. 80,443" required></div>
-            <button id="discover" type="submit">Find devices</button>
+            <div class="actions"><button id="discover" type="submit">Find devices</button><button id="use-subnet" type="button" class="secondary">Monitor whole subnet</button></div>
           </form>
           <p id="discovery-detail" class="hint">Checks only the chosen ports. No device settings are changed.</p>
           <div id="devices" class="devices"></div>
           <form id="monitor-form">
-            <label for="targets">Selected device addresses</label><input id="targets" placeholder="Select devices above or enter private IPv4 addresses, separated by commas">
+            <label for="targets">Selected device addresses</label><input id="targets" placeholder="Private IPv4 addresses or a subnet such as 192.168.0.0/24">
             <label for="device-labels">Device names</label><textarea id="device-labels" rows="3" placeholder="One selected address=name per line, e.g. 192.168.0.12=Living room TV"></textarea><p class="hint" id="identity-source">Names help identify devices. Pi-hole v6 can add observed hostnames, MAC addresses and DNS activity.</p>
             <div class="monitor-actions"><label class="check"><input id="enabled" type="checkbox">Enable collection</label><button id="save-monitoring" type="submit">Save monitoring</button><span id="settings-detail" class="hint"></span></div>
           </form>

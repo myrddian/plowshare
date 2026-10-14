@@ -13,6 +13,15 @@ from typing import AbstractSet, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from .limits import (
+    MAX_CHANGES,
+    MAX_DNS_QUERIES,
+    MAX_DNS_ROWS,
+    MAX_PORTS,
+    MAX_PROBES,
+    MAX_TARGETS,
+)
+
 MAX_FILE_BYTES = 1_048_576
 
 
@@ -84,17 +93,17 @@ def uuid(value: object) -> str:
     return result
 
 
-def load_json(path: Path) -> object:
+def load_json(path: Path, *, maximum_bytes: int = MAX_FILE_BYTES) -> object:
     with path.open("rb") as source:
-        content = source.read(MAX_FILE_BYTES + 1)
-    if len(content) > MAX_FILE_BYTES:
+        content = source.read(maximum_bytes + 1)
+    if len(content) > maximum_bytes:
         raise ValueError("JSON file exceeds the size limit")
 
-    return parse_json(content)
+    return parse_json(content, maximum_bytes=maximum_bytes)
 
 
-def parse_json(content: str | bytes) -> object:
-    if len(content.encode() if isinstance(content, str) else content) > MAX_FILE_BYTES:
+def parse_json(content: str | bytes, *, maximum_bytes: int = MAX_FILE_BYTES) -> object:
+    if len(content.encode() if isinstance(content, str) else content) > maximum_bytes:
         raise ValueError("JSON exceeds the size limit")
 
     def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -251,7 +260,7 @@ class DnsWindow:
             > datetime.fromisoformat(end.replace("Z", "+00:00"))
         ):
             raise ValueError("Invalid DNS window")
-        read = integer(row["queries_read"], 0, 8192)
+        read = integer(row["queries_read"], 0, MAX_DNS_QUERIES)
         available = integer(row["queries_available"], read, 2**53 - 1)
         if row["complete"] and read != available:
             raise ValueError("Incomplete query counts cannot claim complete coverage")
@@ -274,14 +283,19 @@ class Snapshot:
             value, {"version", "observed_at", "tcp", "dns"}, {"devices", "dns_window"}
         )
         integer(row["version"], 1, 1)
-        tcp = tuple(TcpObservation.decode(item) for item in items(row["tcp"], 256))
-        dns = tuple(DnsObservation.decode(item) for item in items(row["dns"], 256))
+        tcp = tuple(
+            TcpObservation.decode(item) for item in items(row["tcp"], MAX_PROBES)
+        )
+        dns = tuple(
+            DnsObservation.decode(item) for item in items(row["dns"], MAX_DNS_ROWS)
+        )
         if len({(item.address, item.port) for item in tcp}) != len(tcp) or len(
             {(item.device, item.domain) for item in dns}
         ) != len(dns):
             raise ValueError("Duplicate observation")
         devices = tuple(
-            DeviceIdentity.decode(item) for item in items(row.get("devices", []), 32)
+            DeviceIdentity.decode(item)
+            for item in items(row.get("devices", []), MAX_TARGETS)
         )
         if len({device.address for device in devices}) != len(devices):
             raise ValueError("Duplicate device address association")
@@ -293,6 +307,38 @@ class Snapshot:
         return cls(timestamp(row["observed_at"]), tcp, dns, devices, window)
 
 
+def expand_targets(value: object) -> tuple[str, ...]:
+    """Expand an explicit private IPv4 CIDR, preserving a bounded, frozen scope.
+
+    Saving a subnet does not depend on discovery responses: filtered or currently
+    silent hosts remain in scope. Reject overlap rather than silently changing
+    caller intent. Explicit historical address configurations remain supported.
+    """
+    result: list[str] = []
+    private = tuple(
+        ipaddress.IPv4Network(block)
+        for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    )
+    for entry in items(value, MAX_TARGETS):
+        address = text(entry, 64)
+        if "/" in address:
+            network = ipaddress.IPv4Network(address, strict=True)
+            if network.num_addresses > MAX_TARGETS or not any(
+                network.subnet_of(block) for block in private
+            ):
+                raise ValueError(
+                    "Choose a private IPv4 subnet of at most 256 addresses (/24 or smaller)"
+                )
+            result.extend(str(host) for host in network.hosts())
+        else:
+            result.append(str(ipaddress.ip_address(address)))
+        if len(result) > MAX_TARGETS:
+            raise ValueError("Monitoring scope exceeds 256 device addresses")
+    if len(set(result)) != len(result):
+        raise ValueError("Monitoring scope contains duplicate or overlapping addresses")
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class DeviceLabel:
     address: str
@@ -300,7 +346,7 @@ class DeviceLabel:
 
 
 def device_labels(value: object, targets: tuple[str, ...]) -> tuple[DeviceLabel, ...]:
-    if not isinstance(value, dict) or len(value) > 32:
+    if not isinstance(value, dict) or len(value) > MAX_TARGETS:
         raise ValueError("Device labels must map selected addresses to names")
     labels = tuple(
         DeviceLabel(str(ipaddress.ip_address(text(address))), text(label, 128))
@@ -314,9 +360,11 @@ def device_labels(value: object, targets: tuple[str, ...]) -> tuple[DeviceLabel,
     # Bound their escaped JSON separately so that metadata fits native tool limits.
     if (
         len(json.dumps([asdict(label) for label in labels], separators=(",", ":")))
-        > 8192
+        > 65536
     ):
-        raise ValueError("Device names exceed the tool reply budget; use shorter names")
+        raise ValueError(
+            "Device names exceed the retained scope budget; use shorter names"
+        )
     return tuple(sorted(labels, key=lambda label: label.address))
 
 
@@ -510,11 +558,10 @@ class Configuration:
                 raise ValueError(
                     "TCP collection requires explicit targets, ports and limits"
                 )
-            targets = tuple(
-                str(ipaddress.ip_address(text(item)))
-                for item in items(plan["targets"], 32)
+            targets = expand_targets(plan["targets"])
+            ports = tuple(
+                integer(item, 1, 65535) for item in items(plan["ports"], MAX_PORTS)
             )
-            ports = tuple(integer(item, 1, 65535) for item in items(plan["ports"], 16))
             timeout = plan["timeoutSeconds"]
             if (
                 isinstance(timeout, bool)
@@ -526,12 +573,12 @@ class Configuration:
             if (
                 enabled
                 and (not targets or not ports)
-                or len(targets) * len(ports) > 256
+                or len(targets) * len(ports) > MAX_PROBES
                 or len(set(targets)) != len(targets)
                 or len(set(ports)) != len(ports)
             ):
                 raise ValueError(
-                    "Configure unique nonempty targets/ports, at most 256 probes"
+                    "Configure unique nonempty targets/ports, at most 4096 probes"
                 )
             if observations is None and "maxObservationAgeSeconds" in plan:
                 raise ValueError("Observation age requires an observation file")
@@ -629,7 +676,7 @@ class Evidence:
     def encode(self) -> str:
         # Historical receipts are reconciled against exact retained text. Preserve
         # their original pretty encoding and omit absent v1 extensions. Enriched
-        # evidence uses compact JSON to fit the bundled investigation's 32-KiB fence.
+        # evidence uses compact JSON; retained artifacts and agent projections have separate bounds.
         row = asdict(self)
         if self.baseline is None:
             row.pop("baseline")
@@ -683,7 +730,7 @@ class Evidence:
             timestamp(row["finished_at"]),
             Snapshot.decode(snapshot),
             tuple(text(item) for item in items(row["issues"], 32)),
-            tuple(text(item, 1024) for item in items(row["changes"], 512)),
+            tuple(text(item, 1024) for item in items(row["changes"], MAX_CHANGES)),
             uuid(row["previous_revision"])
             if row["previous_revision"] is not None
             else None,
