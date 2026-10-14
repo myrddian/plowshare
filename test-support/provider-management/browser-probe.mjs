@@ -65,7 +65,7 @@ try {
   browser = await chromium.launch({headless:true,...(process.argv[2] ? {executablePath:process.argv[2]} : {})});
   const page = await browser.newPage({viewport:{width:900,height:900}});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.getByText('Tool connections',{exact:true}).click();
+  await page.getByText('Server connections',{exact:true}).click();
   const panel = page.locator('.tool-connections');
   await expect(panel).toContainText('owner · execution project fixture');
   await panel.getByRole('button',{name:'Refresh',exact:true}).click();

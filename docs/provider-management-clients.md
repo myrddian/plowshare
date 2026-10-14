@@ -69,7 +69,9 @@ authorization. The original receipt cannot recover the once-only URL.
 ## Desktop and console
 
 In desktop, select an execution project and choose **Tool connections** beside the
-existing project controls. Desktop main owns the socket and private bookmarks;
+existing project controls. The **This client** tab manages private HTTP/STDIO profiles
+and process-owned hosts; the **Server** tab manages shared HTTP endpoints, credentials
+and assignments. See [native controls](native-mcp-hosting.md#client-controls). Desktop main owns the socket and private bookmarks;
 renderer IPC exposes only owner management requests, metadata and an ephemeral
 authorization URL. Credentials and URLs never enter DesktopState or state events.
 Closing the dialog clears material and restores focus; identity/disconnection
@@ -78,7 +80,7 @@ Revoking authorization, disabling or deleting an assignment, and disabling or
 deleting a shared endpoint require a review dialog naming the affected identity
 and resource. Cancel or Escape submits nothing.
 
-In console, expand **Tool connections** in the existing Projects card. Personal
+In console, expand **Server connections** in the existing Projects card. Personal
 cards use an ordinary credential project entered separately. The panel borrows
 the tab socket and does not reorder navigation or create a separate runtime/socket.
 Browser authorization presents an explicit once-only link after the reply, avoiding
@@ -89,8 +91,8 @@ Refresh shared endpoints, select one, and inspect authorization before supplying
 material. Assignment fields name scope, provider, prefix, dynamic agents, exact
 grants (or deliberate `*`), lease and operator executor. Select an existing assignment
 to edit it; a blank selection creates a new UUID. Endpoint definitions are edited
-as strictly validated JSON, including the complete nested OAuth profile described
-in the credential manual. Endpoint writes are disabled for non-administrators;
+through HTTP endpoint and OAuth forms, including the complete profile described
+in the credential manual. Input is decoded by the shared SDK before submission. Endpoint writes are disabled for non-administrators;
 the server additionally requires project Manager authority.
 
 Refresh after opening/reconnecting or changing selection, after an upstream OAuth
@@ -99,6 +101,12 @@ metadata reads; a failed follow-up read does not erase a confirmed receipt. Read
 are bounded to the selected projects/subject, no polling timer is created, and
 late replies from closed/changed views are discarded. No provider management event
 subscription exists; ordinary events do not prove provider readiness.
+
+The native TUI `/mcp` menu offers the same location choice and guided forms. Native
+profile drafts reference selected environment variables; credentials for server
+connections are entered masked or authorized through the upstream browser. Local
+launch and server sharing each require deliberate consent. The CLI retains its
+existing typed management commands and foreground native host commands.
 
 ## Lost replies and compatibility
 

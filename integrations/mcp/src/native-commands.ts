@@ -15,7 +15,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { object, text } from './codec.ts';
 import { uuid } from './journal.ts';
 import { boundedInteger, renewalFraction, MAX_TIMER_MS } from './settings.ts';
-import { readNativeConfig } from './native-config.ts';
+import { decodeNativeConfig, readNativeConfig } from './native-config.ts';
+import type { NativeMcpConfig } from './native-config.ts';
+import { NativeProfiles } from './native-profiles.ts';
+import type { NativeProfile, NativeProfileStore } from './native-profiles.ts';
 import type { NativeOwner } from './native-config.ts';
 import { NativeMcpHosts, nativeLaunchReview } from './native-host.ts';
 import type {
@@ -27,16 +30,29 @@ import type { NativeSharingConnection } from './native-bridge.ts';
 import { NativeProviderBridge } from './native-bridge.ts';
 
 export type NativeCommand =
-  | { readonly action: 'inspect'; readonly file: string }
+  | { readonly action: 'profile-read'; readonly file: string }
+  | {
+      readonly action: 'profile-save';
+      readonly file: string;
+      readonly config: NativeMcpConfig;
+      readonly expectedRevision: string | null;
+    }
+  | {
+      readonly action: 'inspect';
+      readonly file: string;
+      readonly expectedRevision?: string;
+    }
   | {
       readonly action: 'start';
       readonly file: string;
       readonly consent: boolean;
+      readonly expectedRevision?: string;
     }
   | {
       readonly action: 'share';
       readonly file: string;
       readonly consent: boolean;
+      readonly expectedRevision?: string;
       readonly scope: ToolScopeConnect;
       readonly pollMs: number;
       readonly renewalFraction: number;
@@ -53,9 +69,13 @@ export type NativeCommand =
       readonly profile: string;
       readonly invocation: NativeInvocation;
     };
+export type NativeManagedStatus = NativeHostStatus & {
+  readonly sharing: 'local' | 'server' | 'uncertain';
+};
 export type NativeCommandResult =
-  | NativeHostStatus
-  | readonly NativeHostStatus[]
+  | NativeManagedStatus
+  | readonly NativeManagedStatus[]
+  | NativeProfile
   | ToolResult
   | { readonly stopped: true };
 function fields(
@@ -88,21 +108,62 @@ export function decodeNativeInvocation(source: unknown): NativeInvocation {
 }
 export function decodeNativeCommand(source: unknown): NativeCommand {
   const row = object(source);
+  if (row.action !== 'profile-save' && row.expectedRevision === null)
+    throw new Error('Native MCP launch revision must be a hash when supplied');
+  const revision =
+    row.expectedRevision === undefined || row.expectedRevision === null
+      ? {}
+      : { expectedRevision: text(row.expectedRevision, 64) };
+  if (
+    'expectedRevision' in revision &&
+    !/^[a-f0-9]{64}$/.test(revision.expectedRevision)
+  )
+    throw new Error('Invalid native MCP profile revision');
   switch (row.action) {
-    case 'inspect':
+    case 'profile-read':
       fields(row, ['action', 'file']);
-      return { action: 'inspect', file: text(row.file, 4096) };
+      return { action: 'profile-read', file: text(row.file, 4096) };
+    case 'profile-save': {
+      fields(row, ['action', 'file', 'config', 'expectedRevision']);
+      if (
+        row.expectedRevision !== null &&
+        (typeof row.expectedRevision !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(row.expectedRevision))
+      )
+        throw new Error('Invalid native MCP profile revision');
+      return {
+        action: 'profile-save',
+        file: text(row.file, 4096),
+        config: decodeNativeConfig(row.config),
+        expectedRevision: row.expectedRevision,
+      };
+    }
+    case 'inspect':
+      fields(row, ['action', 'file', 'expectedRevision']);
+      return { action: 'inspect', file: text(row.file, 4096), ...revision };
     case 'start':
     case 'share': {
       fields(
         row,
         row.action === 'start'
-          ? ['action', 'file', 'consent']
-          : ['action', 'file', 'consent', 'scope', 'pollMs', 'renewalFraction'],
+          ? ['action', 'file', 'consent', 'expectedRevision']
+          : [
+              'action',
+              'file',
+              'consent',
+              'scope',
+              'pollMs',
+              'renewalFraction',
+              'expectedRevision',
+            ],
       );
       if (typeof row.consent !== 'boolean')
         throw new Error('Native MCP launch requires explicit consent');
-      const base = { file: text(row.file, 4096), consent: row.consent };
+      const base = {
+        file: text(row.file, 4096),
+        consent: row.consent,
+        ...revision,
+      };
       return row.action === 'start'
         ? { action: 'start', ...base }
         : {
@@ -169,6 +230,8 @@ export function nativeProviderConnection(
  * remains the owning client's responsibility; views receive bounded status/results only.
  */
 export class NativeHostCommands {
+  private readonly profiles: NativeProfileStore;
+  private configurationWork: Promise<NativeCommandResult> | undefined;
   readonly hosts: NativeMcpHosts;
   private shares = new Map<
     string,
@@ -183,16 +246,70 @@ export class NativeHostCommands {
     private readonly owner: NativeOwner,
     sessions: NativeSessions,
     private readonly connection?: NativeSharingConnection,
+    profiles?: NativeProfileStore,
   ) {
     this.owner = {
       origin: canonicalServer(owner.origin),
       account: connectionAccount(owner.account),
     };
     this.hosts = new NativeMcpHosts(this.owner, sessions);
+    this.profiles = profiles ?? new NativeProfiles(this.owner);
   }
   async execute(source: NativeCommand): Promise<NativeCommandResult> {
     const command = decodeNativeCommand(source);
-    if (command.action === 'list') return this.hosts.list();
+    if (this.closing !== undefined)
+      throw new Error('Native MCP command owner is closed');
+    if (
+      command.action !== 'profile-save' &&
+      command.action !== 'start' &&
+      command.action !== 'share'
+    )
+      return this.perform(command);
+    // Authoring and launch share one configuration gate. Refuse overlapping requests
+    // rather than queueing a launch under stale consent. Stop/call/read remain independent.
+    if (this.configurationWork !== undefined)
+      throw new Error(
+        'Native MCP configuration is busy; finish the current action',
+      );
+    const work = this.perform(command);
+    this.configurationWork = work;
+    try {
+      return await work;
+    } finally {
+      this.configurationWork = undefined;
+    }
+  }
+  private async perform(command: NativeCommand): Promise<NativeCommandResult> {
+    if (command.action === 'profile-read')
+      return this.profiles.read(command.file);
+    if (command.action === 'profile-save') {
+      const original =
+        command.expectedRevision === null
+          ? undefined
+          : await this.profiles.read(command.file);
+      if (
+        this.hosts
+          .list()
+          .some(
+            (host) =>
+              (host.instance === command.config.instance &&
+                host.profile === command.config.profile) ||
+              (original !== undefined &&
+                host.instance === original.config.instance &&
+                host.profile === original.config.profile),
+          )
+      )
+        throw new Error(
+          'Stop and remove the running host before editing its profile',
+        );
+      return this.profiles.save(
+        command.file,
+        command.config,
+        command.expectedRevision,
+      );
+    }
+    if (command.action === 'list')
+      return this.hosts.list().map((host) => this.managed(host));
     if (command.action === 'call')
       return this.hosts.invoke(
         command.instance,
@@ -212,14 +329,22 @@ export class NativeHostCommands {
       await this.hosts.stopHost(command.instance, command.profile);
       return { stopped: true };
     }
-    const config = await readNativeConfig(command.file);
+    const profile =
+      command.expectedRevision === undefined
+        ? undefined
+        : await this.profiles.read(command.file);
+    if (profile !== undefined && profile.revision !== command.expectedRevision)
+      throw new Error(
+        'Native MCP profile changed after review; reload before launch',
+      );
+    const config = profile?.config ?? (await readNativeConfig(command.file));
     if (
       config.owner.origin !== this.owner.origin ||
       config.owner.account !== this.owner.account
     )
       throw new Error('Native MCP profile belongs to another login');
     if (command.action === 'inspect')
-      return {
+      return this.managed({
         instance: config.instance,
         profile: config.profile,
         project: config.project,
@@ -227,7 +352,7 @@ export class NativeHostCommands {
         review: nativeLaunchReview(config),
         active: false,
         tools: [],
-      };
+      });
     if (command.action === 'share' && this.connection === undefined)
       throw new Error('Server sharing requires an authenticated owning socket');
     const status = await this.hosts.start(config, command.consent);
@@ -293,7 +418,18 @@ export class NativeHostCommands {
         failed: () => failed,
       });
     }
-    return status;
+    return this.managed(status);
+  }
+  private managed(host: NativeHostStatus): NativeManagedStatus {
+    const share = this.shares.get(host.instance + '/' + host.profile);
+    return {
+      ...host,
+      sharing: share?.failed()
+        ? 'uncertain'
+        : share && host.active
+          ? 'server'
+          : 'local',
+    };
   }
   private closing: Promise<void> | undefined;
   close(): Promise<void> {
@@ -301,9 +437,13 @@ export class NativeHostCommands {
     return this.closing;
   }
   private async finish(): Promise<void> {
+    // Abort pending opens/effects now, then observe the in-progress editor/launch.
+    // A bridge completing during shutdown must enter this owner's cleanup snapshot;
+    // its returned failure is already owned by execute's caller, never replayed here.
+    const closing = Promise.allSettled([this.hosts.close()]);
+    if (this.configurationWork !== undefined)
+      await Promise.allSettled([this.configurationWork]);
     for (const share of this.shares.values()) share.stop.abort();
-    // Abort native handlers before waiting for a server provider poll to settle.
-    const closing = this.hosts.close();
     const results = await Promise.allSettled(
       [...this.shares.values()].map(async (share) => {
         try {
@@ -317,7 +457,11 @@ export class NativeHostCommands {
       share.failed(),
     );
     this.shares.clear();
-    await closing;
+    const [closed] = await closing;
+    if (closed?.status === 'rejected')
+      throw new Error('Native MCP host cleanup failed', {
+        cause: closed.reason,
+      });
     const failed = results.find((result) => result.status === 'rejected');
     if (sharingFailed || failed?.status === 'rejected')
       throw new Error('Native MCP sharing ended with retained uncertainty');

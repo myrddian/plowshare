@@ -6,6 +6,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NativeMcpHost, NativeMcpSessions } from './native-host.ts';
 import { NativeHostCommands } from './native-commands.ts';
+import type { NativeManagedStatus } from './native-commands.ts';
 import { decodeNativeConfig } from './native-config.ts';
 import { nativeFixture } from './native.test-support.ts';
 import { McpWire } from './wire.test-support.ts';
@@ -477,6 +478,247 @@ await test('direct native discovery is not restricted by the server provider cat
   } finally {
     await host.close();
     await wire.close();
+    await fixture.close();
+  }
+});
+
+await test('private profile forms save without launching, preserve revisions and refuse foreign/active edits', async () => {
+  const fixture = await nativeFixture();
+  const commands = new NativeHostCommands(
+    fixture.config.owner,
+    new NativeMcpSessions({ NATIVE_SELECTED: 'selected-value' }),
+  );
+  try {
+    const loaded = await commands.execute({
+      action: 'profile-read',
+      file: fixture.file,
+    });
+    assert.ok('config' in loaded);
+    assert.equal((await fixture.seen()).length, 0);
+    assert.equal(JSON.stringify(loaded).includes('selected-value'), false);
+    const config = decodeNativeConfig({ ...loaded.config, timeoutMs: 2500 });
+    const saved = await commands.execute({
+      action: 'profile-save',
+      file: fixture.file,
+      config,
+      expectedRevision: loaded.revision,
+    });
+    assert.ok('config' in saved);
+    assert.equal(saved.config.timeoutMs, 2500);
+    assert.notEqual(saved.revision, loaded.revision);
+    assert.equal((await fixture.seen()).length, 0);
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: fixture.file,
+        config,
+        expectedRevision: loaded.revision,
+      }),
+      /changed/,
+    );
+    await assert.rejects(
+      commands.execute({
+        action: 'start',
+        file: fixture.file,
+        consent: true,
+        expectedRevision: loaded.revision,
+      }),
+      /changed/,
+    );
+    assert.equal((await fixture.seen()).length, 0);
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: fixture.file,
+        config: { ...config, owner: { ...config.owner, account: 'other' } },
+        expectedRevision: saved.revision,
+      }),
+      /another login/,
+    );
+    const starting = commands.execute({
+      action: 'start',
+      file: fixture.file,
+      consent: true,
+      expectedRevision: saved.revision,
+    });
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: fixture.file,
+        config,
+        expectedRevision: saved.revision,
+      }),
+      /busy/,
+    );
+    await starting;
+    const snapshot = await commands.execute({ action: 'list' });
+    assert.ok(Array.isArray(snapshot));
+    const statuses = snapshot as readonly NativeManagedStatus[];
+    assert.equal(statuses[0]?.sharing, 'local');
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: fixture.file,
+        config,
+        expectedRevision: saved.revision,
+      }),
+      /Stop/,
+    );
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: fixture.file,
+        config: { ...config, profile: 'renamed' },
+        expectedRevision: saved.revision,
+      }),
+      /Stop/,
+    );
+    await commands.execute({
+      action: 'stop',
+      instance: config.instance,
+      profile: config.profile,
+    });
+    await commands.execute({
+      action: 'profile-save',
+      file: fixture.file,
+      config,
+      expectedRevision: saved.revision,
+    });
+  } finally {
+    await commands.close();
+    await fixture.close();
+  }
+});
+
+await test('profile saves never overwrite unrelated files or symlinks and create mode 0600 authoring files', async () => {
+  const fixture = await nativeFixture();
+  const commands = new NativeHostCommands(
+    fixture.config.owner,
+    new NativeMcpSessions({}),
+  );
+  try {
+    const { lstat, symlink } = await import('node:fs/promises');
+    const file = join(fixture.directory, 'new-profile.json');
+    const saved = await commands.execute({
+      action: 'profile-save',
+      file,
+      config: fixture.config,
+      expectedRevision: null,
+    });
+    assert.ok('config' in saved);
+    assert.equal((await lstat(file)).mode & 0o777, 0o600);
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file,
+        config: fixture.config,
+        expectedRevision: null,
+      }),
+      /changed/,
+    );
+    const unrelated = join(fixture.directory, 'unrelated.txt');
+    await writeFile(unrelated, 'preserve this');
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: unrelated,
+        config: fixture.config,
+        expectedRevision: null,
+      }),
+    );
+    assert.equal(await readFile(unrelated, 'utf8'), 'preserve this');
+    const link = join(fixture.directory, 'linked.json');
+    await symlink(file, link);
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: link,
+        config: fixture.config,
+        expectedRevision: saved.revision,
+      }),
+    );
+    await assert.rejects(
+      commands.execute({
+        action: 'profile-save',
+        file: join(fixture.directory, 'oversized.json'),
+        config: {
+          ...fixture.config,
+          transport: {
+            kind: 'stdio',
+            executable: process.execPath,
+            directory: fixture.directory,
+            args: ['x'.repeat(65536)],
+            environment: {},
+            treeTerminationExecutable: null,
+          },
+        },
+        expectedRevision: null,
+      }),
+      /capacity/,
+    );
+    assert.equal((await fixture.seen()).length, 0);
+  } finally {
+    await commands.close();
+    await fixture.close();
+  }
+});
+
+await test('closing the command owner observes an admitted private save and refuses subsequent work', async () => {
+  const fixture = await nativeFixture();
+  const { NativeProfiles } = await import('./native-profiles.ts');
+  const store = new NativeProfiles(fixture.config.owner);
+  let release: () => void = () => {
+    throw new Error('Save not admitted');
+  };
+  let entered: () => void = () => {
+    throw new Error('Missing admission observer');
+  };
+  const admitted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const commands = new NativeHostCommands(
+    fixture.config.owner,
+    new NativeMcpSessions({}),
+    undefined,
+    {
+      read: (file) => store.read(file),
+      async save(file, config, expected) {
+        entered();
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return store.save(file, config, expected);
+      },
+    },
+  );
+  try {
+    const original = await store.read(fixture.file);
+    const save = commands.execute({
+      action: 'profile-save',
+      file: fixture.file,
+      config: { ...fixture.config, timeoutMs: 2400 },
+      expectedRevision: original.revision,
+    });
+    await admitted;
+    let closed = false;
+    const closing = commands.close().then(() => {
+      closed = true;
+    });
+    await delay(0);
+    assert.equal(
+      closed,
+      false,
+      'Command ownership ended before its admitted private save settled',
+    );
+    await assert.rejects(commands.execute({ action: 'list' }), /closed/);
+    release();
+    await save;
+    await closing;
+    assert.equal((await store.read(fixture.file)).config.timeoutMs, 2400);
+    assert.equal((await fixture.seen()).length, 0);
+  } finally {
+    release();
+    await commands.close();
     await fixture.close();
   }
 });
