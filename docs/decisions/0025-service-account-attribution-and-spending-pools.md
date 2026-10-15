@@ -24,7 +24,7 @@ This decision completes the accounting boundary left by
 [ADR 0019](0019-mcp-provider-hosting.md). It retains the existing provider mechanism,
 server-held per-subject credentials, invocation receipts and instance-local native
 hosts. It neither introduces an MCP billing ledger nor implements the separate
-[service execution proposal](0024-service-execution-on-behalf-of-an-account.md).
+[service execution proposal](0026-service-execution-on-behalf-of-an-account.md).
 
 ## Current contracts verified in source
 
