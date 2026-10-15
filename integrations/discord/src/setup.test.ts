@@ -111,6 +111,25 @@ await test('a different/non-administrator cannot submit setup mutations', async 
     assert.equal(f.server.issuances.length, 0);
   }
 });
+await test('recovery and rotation recheck administrator authority before touching an installed credential', async () => {
+  for (const operation of ['recover', 'rotate'] as const) {
+    for (const change of ['account', 'role']) {
+      const f = fixture();
+      await f.engine.install(setupSource());
+      const persisted = f.repository.persisted;
+      const verifications = f.server.verifications.length;
+      f.repository.published = null;
+      if (change === 'account') f.server.handle = 'another-admin';
+      else f.server.admin = false;
+      await assert.rejects(f.engine[operation](), /administrator/);
+      assert.equal(f.server.deployments.length, 1);
+      assert.equal(f.server.issuances.length, 1);
+      assert.equal(f.server.verifications.length, verifications);
+      assert.equal(f.repository.persisted, persisted);
+      assert.equal(f.repository.published, null);
+    }
+  }
+});
 await test('failed durable intent prevents deployment, and an existing Application cannot be adopted', async () => {
   const f = fixture();
   f.repository.failSave = true;
@@ -188,6 +207,18 @@ await test('an unsaved one-time secret cannot be invented during recovery', asyn
   f.repository.failSecret = false;
   await assert.rejects(f.engine.recover(), /secret was lost/);
   assert.equal(f.server.issuances.length, 1);
+});
+await test('a durable secret is recovered when recording its issuance receipt was interrupted', async () => {
+  const f = fixture();
+  f.repository.failOnSave = 4;
+  await assert.rejects(f.engine.install(setupSource()));
+  assert.equal(f.repository.secrets.size, 1);
+  const saved: unknown = JSON.parse(f.repository.persisted);
+  f.repository.state = decodeSetupState(saved, f.config);
+  assert.equal(latest(f.repository).receipt, null);
+  await f.engine.recover();
+  assert.equal(f.server.issuances.length, 1);
+  assert.ok(f.repository.published);
 });
 await test('superseded, expired or revoked credentials are never republished automatically', async () => {
   for (const mode of ['superseded', 'expired', 'revoked']) {
@@ -332,6 +363,52 @@ await test('setup refuses a symlink ancestor that aliases output into Applicatio
       /disjoint/,
     );
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test('interrupted rotation fences old published credentials across reopen until explicit repair', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'discord-rotation-fixture-'));
+  const base = setupConfiguration();
+  const config = {
+    ...base,
+    sourceDirectory: join(root, 'source'),
+    outputDirectory: join(root, 'installation'),
+    adapter: { ...base.adapter, stateDirectory: join(root, 'runtime') },
+  };
+  let repository: FileSetup | undefined;
+  try {
+    repository = await FileSetup.open(config);
+    const server = new SetupServer(config);
+    let engine = new DiscordSetup(config, repository, server);
+    await engine.install(setupSource());
+    const original = await repository.published();
+    server.failIssue = true;
+    await assert.rejects(engine.rotate());
+    // The previous publication still exists on disk, but the pending intent must fence start.
+    assert.equal(
+      await readFile(
+        join(config.outputDirectory, 'service-credential.json'),
+        'utf8',
+      ),
+      JSON.stringify(original) + '\n',
+    );
+    await repository.close();
+    repository = undefined;
+    repository = await FileSetup.open(config);
+    await assert.rejects(repository.published(), /incomplete/);
+    engine = new DiscordSetup(config, repository, server);
+    server.failIssue = false;
+    await assert.rejects(engine.recover(), /secret was lost/);
+    assert.equal(server.issuances.length, 2);
+    await assert.rejects(repository.published(), /stale/);
+    await engine.rotate();
+    const replacement = await repository.published();
+    assert.equal(server.issuances.length, 3);
+    assert.equal(replacement.receipt.tokenId, original.receipt.tokenId);
+    assert.notEqual(replacement.receipt.requestId, original.receipt.requestId);
+  } finally {
+    await repository?.close();
     await rm(root, { recursive: true, force: true });
   }
 });
