@@ -78,6 +78,9 @@ async function markerText(
     }
     const file = join(directory, relativeFile),
       info = await lstat(file);
+    // The legacy root filename also occurs as an ordinary checkout directory.
+    // Upward discovery must pass it; explicit markers and links still fail closed.
+    if (relativeFile === 'plowshare' && info.isDirectory()) return undefined;
     if (info.isSymbolicLink() || !info.isFile())
       throw new Error('The project marker must be a regular file');
     if (info.size > 65536) throw new Error('The project marker is too large');
