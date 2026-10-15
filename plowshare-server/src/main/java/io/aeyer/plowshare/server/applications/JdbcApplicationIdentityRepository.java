@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
  * transaction.
  */
 @Repository
-public final class JdbcApplicationIdentityRepository implements ApplicationIdentityRepository {
+public class JdbcApplicationIdentityRepository implements ApplicationIdentityRepository {
   private final JdbcTemplate jdbc;
 
   public JdbcApplicationIdentityRepository(JdbcTemplate jdbc) {
