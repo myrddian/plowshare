@@ -378,7 +378,10 @@ home-assistant
 
 Unknown versions, malformed JSON, linked or unreadable manifests are refused.
 Neither format is automatically rewritten. A CLI executable with a shebang
-is not a project manifest.
+is not a project manifest. An ordinary directory named `plowshare` is also
+ignored during discovery, including in parent directories. Directories at
+`plowshare.json`, `.plowshare/plowshare` or `.plowshare/project` are still invalid
+markers, and linked markers remain refused.
 
 Before interpreting a root manifest as `DISJOINT`, clients check whether it
 already identifies a registered project. Application manifests can resolve a

@@ -70,6 +70,30 @@ describe('discovery walks up, and the nearest marker wins', () => {
     await marked(top, '   \n');
     expect(await markedName(top)).toBeUndefined();
   });
+
+  it('walks past ordinary plowshare directories to the nearest project marker', async () => {
+    await marked(top, 'accounts');
+    const checkout = join(top, 'projects', 'checkout');
+    await mkdir(checkout, { recursive: true });
+    await mkdir(join(top, 'projects', 'plowshare'));
+    await mkdir(join(checkout, 'plowshare'));
+    expect(await discover(checkout)).toEqual({
+      root: top,
+      project: 'accounts',
+    });
+  });
+
+  it('still rejects directories at explicit marker and application manifest paths', async () => {
+    for (const path of [
+      '.plowshare/project',
+      '.plowshare/plowshare',
+      'plowshare.json',
+    ]) {
+      const checkout = join(top, path.replaceAll('/', '-'));
+      await mkdir(join(checkout, path), { recursive: true });
+      await expect(discover(checkout)).rejects.toThrow('regular file');
+    }
+  });
 });
 
 describe('marking', () => {
