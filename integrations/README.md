@@ -10,6 +10,7 @@ addresses explicitly and retain only adapter-owned state.
 | [a2a](a2a/README.md) | External A2A protocol adapter | `:plowshare-a2a` |
 | [home-assistant](home-assistant/README.md) | Home Assistant binding | `:plowshare-integration-home-assistant` |
 | [MCP](mcp/README.md) | Reusable outbound HTTP MCP ToolProvider with separate connections and credential contexts | `:plowshare-mcp-integration` |
+| [Discord](discord/README.md) | One service-authenticated Discord bot with fixed channel routing and optional Relay notifications | `:plowshare-discord-integration` |
 | [Network Privacy Watch](network-privacy/README.md) | Network privacy Application with a Python collector and web interface | `:plowshare-network-privacy` (definition tests); explicit `pythonCheck` |
 
 Source locations are grouped here; Gradle commands and distribution executable
@@ -17,12 +18,16 @@ names remain stable. See the [coding standards](../docs/coding-standards.md) for
 the SDK boundary and [SDKs](../sdk/README.md) for the client libraries.
 
 A2A and Home Assistant include deployable Application templates under
-`examples/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
+`examples/application/`. The [Discord Application](discord/application/plowshare.json)
+lives under `discord/application/`. [Network Privacy Watch](network-privacy/network-privacy-watch/README.md)
 uses `network-privacy/network-privacy-watch/`. Each Application is identified
 by its root `plowshare.json`. Register
 these roots as Applications so authorized clients list them under **Applications**.
-The supplied manifests have empty `access.accounts` lists: add explicit deployment account
-grants and matching server membership before use. Adapter credentials, endpoints
+The supplied manifests have empty human `access.accounts` lists: add explicit human
+grants and matching server membership before ordinary use. Discord also declares
+its Application-owned Contributor identity through `service`; deployment provisions
+its initial membership and token scope, followed by explicit credential issuance.
+Adapter credentials, endpoints
 and journals stay in private deployment configuration. The adapter processes
 continue to use the public SDK; a repository directory name or an adapter binding's
 `project` field does not establish an Application boundary.
