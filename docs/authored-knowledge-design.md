@@ -1,6 +1,6 @@
 # Authored knowledge and schema defined document types in Plowshare
 
-Status: proposed design. Date: 15 October 2026.
+Status: proposed design. Updated: 16 October 2026.
 
 [ADR 0025](decisions/0025-authored-information-contracts.md) records the accepted
 first-milestone contracts, and the [implementation plan](authored-knowledge-implementation.md)
@@ -9,17 +9,17 @@ describes the implemented content types and metadata-only workflow. The wider
 knowledge direction remains proposed; deployment is a separate action.
 
 [ADR 0026](decisions/0026-document-navigation-and-reference-policy.md) and the
-[navigation implementation plan](authored-navigation-implementation.md) define the
-next milestone: document resolution, relationships, paths and configurable
+[navigation implementation plan](authored-navigation-implementation.md) record
+the locally implemented navigation milestone: document resolution, relationships, paths and configurable
 reference policy. The [navigation guide](authored-navigation.md) describes the local
 implementation and its explicit write activation. Review, integration and deployment
 remain separate actions.
 
-Develop Plowshare's information system into a knowledge base that people and agents can author, connect, navigate and maintain together. The direction combines wiki-style documents and cross-references with intersecting metadata facets, building on the retained revisions, evidence, retrieval and processing that Plowshare already owns. Information is a first-class part of the platform, with useful reading, writing and navigation independent of a model run.
+Develop Plowshare's information system into a knowledge base for agents, with people supplying content and maintaining its metadata, relationships and policy. The direction combines retained documents and cross-references with intersecting metadata facets, building on the revisions, evidence, retrieval and processing that Plowshare already owns. Content may originate in external editors, repositories or agent outputs. Information remains useful to people for reading and navigation independently of a model run.
 
 Schema-defined content types are the first implementation milestone in that direction. A content type defines structured metadata, such as the severity and affected services of an incident report. Each typed information revision retains its exact type version and validated metadata. The document body, source bytes, evidence coordinates and processing lifecycle remain part of the existing information model.
 
-The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare capability with its own ownership and lifecycle. Collaborative editor grants require a subsequent authority design. The first milestone implements schemas; ADR 0026 defines the locally implemented relationships and policy-aware backlinks. Real-time editing and VOIDcore integration remain outside this proposal.
+The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare information capability with its own ownership and lifecycle. The first milestone implements schemas; ADR 0026 defines the locally implemented relationships and policy-aware backlinks. Collaborative editing, editor-grant expansion and real-time coauthoring are outside this roadmap. VOIDcore integration remains a separate decision.
 
 ## Purpose and boundaries
 
@@ -29,7 +29,33 @@ Introduce a reusable content-type registry and typed revision metadata. People a
 
 Existing untyped documents remain supported. No AI call is required to publish a schema, validate metadata or retain a typed revision. New bodies continue through ordinary source processing under its existing allowance and readiness rules. Metadata-only revisions use the explicit processing policy below: their creation makes no document-processing model call and does not automatically schedule paid processing. Explicitly configured transition hooks retain their own separate policy and accounting.
 
-## Wiki documents with faceted navigation
+### Content replacement and metadata maintenance
+
+Plowshare retains and processes submitted information. The content-authoring
+workflow can live in an external editor, a repository or an agent. A minimal
+user-facing **EDIT** action means preparing replacement content and submitting it
+through the existing revision admission or re-upload path. It creates another
+immutable revision of the continuing resource, with an expected starting revision,
+current ownership/access checks and authenticated provenance. It does not mutate
+previously retained bytes or merge concurrent changes. Reports continue to use
+their owning admission rules for prose, inputs and citations. **EDIT** describes
+that workflow; it is not a proposal for an additional wire operation.
+
+Metadata is the primary direct maintenance surface. The implemented workflow
+already supports type binding, validation and metadata-only revisions that retain
+the body and reuse compatible processing outputs. Tags, explicit relationships
+and policy remain separate controls with their existing authority and lifecycle;
+they do not require a collaborative body editor or new editor grants. Content
+replacement retains ordinary processing rules; metadata-only maintenance retains
+its explicit-only document-processing policy and separate configured hook rules.
+
+A Git-backed authoring workflow could separately provide branches, diffs, merges
+and collaboration, then submit selected content to Plowshare. That workflow is
+optional and outside this proposal. The knowledge system does not need to solve
+collaborative editing to ingest, classify, discover and supply retained information
+to agents.
+
+## Retained information with faceted navigation
 
 The intended knowledge model brings these capabilities together:
 
@@ -40,10 +66,10 @@ The intended knowledge model brings these capabilities together:
 | Authored cross-references and backlinks | Express relationships between documents and help readers discover the surrounding knowledge |
 | Tags and intersecting facets | Form aggregate views from sets of documents, combining type, tag, author and time selections without assigning one canonical folder |
 | Internal navigation paths | Record a journey through scopes, relationships and facet selections while keeping document identity independent of the route |
-| Editing and explicit permissions | Let authorised people and agents maintain knowledge with attribution and conflict detection |
+| Revision admission and explicit permissions | Accept replacement content and metadata-only revisions under existing authority, preserving attribution and rejecting stale updates |
 | Retained evidence and AI processing | Connect maintained knowledge to its sources, investigations and derived outputs |
 
-Schemas supply the structured meaning; relationships connect documents; facets narrow selections; internal paths describe navigation through both. Revision and permission rules support maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
+Schemas supply the structured meaning; relationships connect documents; facets narrow selections; internal paths describe navigation through both. Revision admission and permission rules support information maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
 
 For example, a billing incident report can reference the runbook used during response and the architectural decision that explains the affected service. A reader can reach it through `content type = incident report`, `tag = billing` and a date range, then follow those relationships. The runbook can independently appear in operations and onboarding views.
 
@@ -164,7 +190,7 @@ PostgreSQL is Plowshare's authoritative information store. It gives retained bod
 
 Plowshare already reads Markdown and other supported UTF-8 text, retains sources and produces Markdown reports. It also supports ordinary editable workspace Markdown. Workspace files remain useful for repositories, external editors and file-based workflows. A workspace file and an admitted information revision have distinct identities: indexing or publishing a file creates an explicit retained snapshot, and later file edits do not silently rewrite that snapshot. This design does not require every Markdown file to become a database document.
 
-The broader direction must support portable exchange as well as native authoring. Define two export purposes:
+The broader direction supports portable exchange with external authoring workflows. Define two export purposes:
 
 - **Readable export:** an authorised document body as ordinary Markdown when that is its retained format; converted material is labelled as an extraction, with original bytes offered separately when available. Related metadata can use a JSON sidecar so Markdown editors can read the prose without a Plowshare plugin.
 - **Structured bundle:** selected authorised revisions, their original bytes, content hashes, metadata, exact schema definitions and a versioned manifest. As relationship features arrive, the manifest records link targets, revision pinning and provenance. A Markdown file alone does not encode all of those semantics.
@@ -408,17 +434,17 @@ An older server must not continue writing typed resources without validation. De
 
 ## Delivery direction
 
-The broader destination is an authored knowledge system with wiki relationships, facets and portable Markdown workflows. Deliver it through bounded platform changes that extend the existing retained information lifecycle:
+The broader destination is an information and knowledge system for agents, with metadata maintenance, explicit relationships, facets and optional portable Markdown exchange. Deliver it through bounded platform changes that extend the existing retained information lifecycle:
 
 | Stage | Result | Scope |
 | --- | --- | --- |
-| Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and a minimal human authoring/read/revise flow | Detailed implementation milestone below, including safe metadata-only processing |
-| Authoring and navigation | Expand Library into a coherent knowledge experience with internal navigation paths, facet steps, breadcrumbs and saved views | Local implementation under ADR 0026; internal paths and account-owned saved views; publication remains separate |
+| Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and admission, reading and metadata maintenance | Detailed implementation milestone below, including safe metadata-only processing |
+| Information navigation | Browse retained knowledge through internal navigation paths, facet steps, breadcrumbs and saved views | Local implementation under ADR 0026; internal paths and account-owned saved views; publication remains separate |
 | Authored relationships | Add explicit relationship traversal to internal paths, with cross-references, project/document policy-controlled visibility and propagation, and permission-aware backlinks distinct from evidence citations | Local implementation under ADR 0026, including project defaults/constraints, document overrides, live/pinned targets and retained cross-project obligations; authorised release remains deferred |
-| Collaborative maintenance | Explicit editor grants, attribution and conflict handling support shared upkeep | Follow-on authority design preserving owner-only management controls |
-| Portable interchange | Readable Markdown exports and structured bundles support external editing and authorised reimport | Follow-on public export/import contracts; the current schema design preserves the necessary data |
+| Agent workflow validation and release | Verify ingestion, metadata classification, discovery, relationship traversal, agent consumption and retained provenance together | Next step: validate the implemented journey, integrate/review and release the existing capabilities without adding a collaborative editor |
+| Portable interchange | Readable Markdown exports and structured bundles support external authoring and authorised revision admission | Optional follow-on public export/import contracts; the current schema design preserves the necessary data |
 
-These stages describe a direction, not an instruction to implement all of them in the schema change. Portable representation and stable identities are requirements from the first stage, even where the export user flow arrives later. AI retrieval and research continue to use the same knowledge and evidence records rather than a parallel wiki store.
+These stages describe a direction, not an instruction to implement all of them in the schema change. The immediate next step is to validate the complete agent information workflow and integrate/release the implemented capabilities. Collaborative editing and editor grants are not prerequisites or later stages of this roadmap. Portable representation and stable identities remain requirements from the first stage, even where optional export/import arrives later. AI retrieval and research continue to use the same knowledge and evidence records.
 
 ## Schema milestone implementation sequence
 
@@ -459,7 +485,7 @@ Before merging implementation, run formatter/check gates, operation/schema/manif
 
 Tags alone cannot validate required fields. YAML parsing alone cannot give source revisions an authoritative typed metadata contract. An Application-owned JSON validator cannot enforce cross-client admission and discovery. Extending `kind` or format classification would collapse independent concepts. A second document store would duplicate retained revision and access lifecycles. These alternatives do not address the platform need.
 
-Adopt authored knowledge with wiki relationships and faceted navigation as the broader direction. Implement optional content types on existing information revisions first, using scoped definitions, exact version pinning and the shared bounded validation profile. Include safe projection reuse and durable explicit-only processing for metadata-only revisions, with a minimal human authoring/read/revise workflow. This increases the first milestone's lifecycle and verification work but keeps ordinary metadata maintenance independent of paid inference. PostgreSQL owns authoritative state; Markdown remains an authoring and exchange format, with portable interchange developed through explicit public contracts.
+Adopt an agent information and knowledge system with explicit relationships and faceted navigation as the broader direction. Keep content authoring external or as minimal replacement-content admission, and make metadata the primary direct maintenance surface. Implement optional content types on existing information revisions first, using scoped definitions, exact version pinning and the shared bounded validation profile. Include safe projection reuse and durable explicit-only processing for metadata-only revisions, with a minimal human authoring/read/revise workflow. This increases the first milestone's lifecycle and verification work but keeps ordinary metadata maintenance independent of paid inference. PostgreSQL owns authoritative state; Markdown remains an authoring and exchange format, with portable interchange developed through explicit public contracts.
 
 Keep default insertion, date/URI assertion, arbitrary field queries, model-generated metadata, Application-distributed type packages, editor grants, relationship APIs and export/import tooling out of the first schema release. Those boundaries preserve an achievable first milestone without reducing the knowledge model to a metadata add-on. VOIDcore integration remains a separate decision.
 
