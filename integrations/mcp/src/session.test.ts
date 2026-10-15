@@ -61,7 +61,9 @@ for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
         await withinDeadline(() => submitted, AbortSignal.timeout(1000));
         if (stop === 'abort') effect.abort();
         else await client.close();
-        assert.equal((await pending).state, 'UNKNOWN');
+        const outcome = await pending;
+        assert.equal(outcome.state, 'UNKNOWN');
+        assert.match(outcome.text, /Cancellation requested/);
         assert.equal(
           (
             await client.invoke(

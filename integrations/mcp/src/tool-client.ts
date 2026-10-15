@@ -128,9 +128,11 @@ export class McpToolClient {
         this.limits.maxResultBytes,
       );
     } catch {
+      const cancellationRequested =
+        signal.aborted || this.lifetime.signal.aborted;
       this.active = false;
       this.lifetime.abort();
-      return unknownResult();
+      return unknownResult(cancellationRequested ? 'cancelled' : 'unverified');
     } finally {
       this.busy = false;
     }

@@ -21,7 +21,7 @@ export async function recoverInterrupted(journal: ToolJournal): Promise<void> {
       await journal.save({
         ...receipt,
         phase: 'ready',
-        result: unknownResult(),
+        result: unknownResult('interrupted'),
         occurredAt: null,
       });
   }

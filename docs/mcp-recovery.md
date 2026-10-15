@@ -3,6 +3,8 @@
 MCP uses the existing server invocation and SDK provider journal. A protocol request
 ID is correlation, not proof of idempotency. Cancellation, timeout, reconnect or a
 new credential must never turn an uncertain effect into another `tools/call`.
+Known local cancellation and process interruption are distinguished in safe receipt
+text while retaining the existing `UNKNOWN` state and original invocation identity.
 
 ## Outcomes and cancellation
 

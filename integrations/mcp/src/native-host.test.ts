@@ -47,7 +47,9 @@ for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
         );
         if (stop === 'abort') controller.abort();
         else await host.close();
-        assert.equal((await pending).state, 'UNKNOWN');
+        const outcome = await pending;
+        assert.equal(outcome.state, 'UNKNOWN');
+        assert.match(outcome.text, /Cancellation requested/);
         await host.close();
         const seen = await fixture.seen();
         const call = seen.find((row) => row.method === 'tools/call');

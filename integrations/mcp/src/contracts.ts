@@ -60,10 +60,21 @@ export interface McpSessions {
 export function rejected(text: string): ToolResult {
   return { state: 'REJECTED', text };
 }
-export function unknownResult(): ToolResult {
+/** Keep the existing UNKNOWN state while retaining a known local cause in safe receipt text.
+ * These causes describe observation/cancellation, never upstream termination or rollback.
+ */
+export function unknownResult(
+  reason: 'unverified' | 'cancelled' | 'interrupted' = 'unverified',
+): ToolResult {
+  const observation =
+    reason === 'cancelled'
+      ? 'Cancellation requested; upstream termination or rollback was not verified.'
+      : reason === 'interrupted'
+        ? 'Execution was interrupted after durable intent; no verified outcome was retained.'
+        : 'MCP response was not verifiable; external effects may have occurred.';
   return {
     state: 'UNKNOWN',
-    text: 'MCP response was not verifiable; external effects may have occurred. Do not replay this invocation.',
+    text: observation + ' Do not replay this invocation.',
   };
 }
 

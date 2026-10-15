@@ -308,7 +308,9 @@ await test('retired interrupted execution is durably UNKNOWN before any new MCP 
     const receipt = (await reopened.all())[0];
     assert.ok(receipt);
     assert.equal(receipt.phase, 'ready');
-    assert.equal(receipt.result?.state, 'UNKNOWN');
+    assert.ok(receipt.result);
+    assert.equal(receipt.result.state, 'UNKNOWN');
+    assert.match(receipt.result.text, /Execution was interrupted/);
     assert.equal(receipt.request, request);
     assert.deepEqual(receipt.hostedWorker, {
       binding: id,
