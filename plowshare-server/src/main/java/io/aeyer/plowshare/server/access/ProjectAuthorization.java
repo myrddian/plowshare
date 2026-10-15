@@ -24,6 +24,7 @@ public class ProjectAuthorization {
 
   private static final Set<String> MANAGE =
       Set.of(
+          "information.policy.set",
           "information.types.version.create",
           "information.types.activate",
           "information.types.deprecate",
@@ -112,6 +113,16 @@ public class ProjectAuthorization {
           "usage.unsubscribe",
           "outgoing.status",
           "outgoing.peers",
+          "information.navigation.capabilities",
+          "information.documents.list",
+          "information.documents.facets",
+          "information.documents.get",
+          "information.relationships.list",
+          "information.policy.get",
+          "information.views.list",
+          "information.views.get",
+          "information.views.save",
+          "information.views.delete",
           "information.types.capabilities",
           "information.types.list",
           "information.types.get",
@@ -281,6 +292,12 @@ public class ProjectAuthorization {
       return;
     }
     boolean service = io.aeyer.plowshare.server.auth.ServiceCredentials.principal(account);
+    if (operation.equals("information.policy.set") || operation.equals("information.policy.get")) {
+      // Typed navigation service resolves the durable target; payload scope is not policy
+      // authority.
+      if (service) throw new CallerFault("Service tokens cannot administer reference policy");
+      return;
+    }
     if (service
         && !operation.equals("admin.status")
         && (!serviceOperation(operation) || SERVER.contains(operation)))

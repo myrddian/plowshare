@@ -17,6 +17,7 @@ import (
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
+	NavigationSteps       bool     `json:"navigationSteps"`
 	MaxJsonBytes          *int     `json:"maxJsonBytes"`
 	SchemaInstance        bool     `json:"schemaInstance"`
 	DocumentSchema        bool     `json:"documentSchema"`
@@ -168,6 +169,18 @@ func canonicalRelativePath(value string) bool {
 	return true
 }
 func check(s shape, value any) error {
+	if s.NavigationSteps {
+		steps, ok := value.([]any)
+		if !ok || len(steps) == 0 || len(steps) > 32 {
+			return contractError
+		}
+		for index, item := range steps {
+			step, valid := item.(map[string]any)
+			if !valid || (step["kind"] == "scope") != (index == 0) {
+				return contractError
+			}
+		}
+	}
 	if s.MaxJsonBytes != nil || s.SchemaInstance || s.DocumentSchema {
 		data, err := json.Marshal(value)
 		if err != nil {

@@ -28,12 +28,83 @@ class InformationToolTest {
   private final List<UUID> read = new ArrayList<>();
 
   private InformationTool reader() {
+    return reader(mock(InformationNavigationService.class));
+  }
+
+  private InformationTool reader(InformationNavigationService navigation) {
     when(access.forRun("alice", Home.global())).thenReturn(context);
     when(inputs.reads("cnv_reader", context)).thenReturn(read::add);
     when(retrieval.scoped(access, context)).thenReturn(retrieval);
-    return new InformationTool(false, () -> catalogue)
+    return new InformationTool(false, () -> catalogue, null, () -> navigation)
         .withRetrieval(retrieval)
         .forRun(access, inputs, "alice", "cnv_reader");
+  }
+
+  @Test
+  void navigationMetadataIsTrackedButLockedReferencesAreNotBodyInputs() throws Exception {
+    var navigation = mock(InformationNavigationService.class);
+    var root = UUID.randomUUID();
+    var locked = UUID.randomUUID();
+    var doc =
+        new io.aeyer.plowshare.protocol.InformationNavigation.Document(
+            root,
+            REVISION,
+            "Service",
+            "service.md",
+            List.of(),
+            io.aeyer.plowshare.protocol.InformationRequest.Scope.personal(),
+            "alice");
+    var edge =
+        new io.aeyer.plowshare.protocol.InformationNavigation.Relationship(
+            UUID.randomUUID(), root, locked, null, "runbook", 1, false);
+    when(navigation.execute(
+            eq("alice"),
+            isA(io.aeyer.plowshare.protocol.InformationRequest.RelationshipList.class)))
+        .thenReturn(
+            new io.aeyer.plowshare.protocol.InformationResponse.NavigationConnections(
+                new io.aeyer.plowshare.protocol.InformationNavigation.Connections(
+                    List.of(
+                        new io.aeyer.plowshare.protocol.InformationNavigation.Connection(
+                            edge,
+                            new io.aeyer.plowshare.protocol.InformationNavigation.Locked(
+                                locked, "Approved label"))),
+                    50,
+                    0)));
+    when(navigation.execute(
+            eq("alice"), isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class)))
+        .thenReturn(
+            new io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection(
+                new io.aeyer.plowshare.protocol.InformationNavigation.Readable(doc)));
+    when(access.resolve(eq("alice"), any())).thenReturn(context);
+    when(inputs.reads(eq("cnv_reader"), any())).thenReturn(read::add);
+    var tool = reader(navigation);
+    var result =
+        json.readTree(
+            tool.run(
+                "{\"operation\":\"relationships.list\",\"resource\":\""
+                    + root
+                    + "\",\"direction\":\"outgoing\"}",
+                Home.global()));
+    assertEquals(
+        "locked", result.path("connections").get(0).path("selection").path("kind").asText());
+    assertEquals(List.of(REVISION), read);
+    assertFalse(read.contains(locked));
+
+    // The source can be revoked after the graph snapshot but before its input ledger is bound.
+    when(navigation.execute(
+            eq("alice"), isA(io.aeyer.plowshare.protocol.InformationRequest.DocumentGet.class)))
+        .thenReturn(
+            new io.aeyer.plowshare.protocol.InformationResponse.NavigationSelection(
+                new io.aeyer.plowshare.protocol.InformationNavigation.Unavailable()));
+    String denied =
+        tool.run(
+            "{\"operation\":\"relationships.list\",\"resource\":\""
+                + root
+                + "\",\"direction\":\"outgoing\"}",
+            Home.global());
+    assertTrue(denied.startsWith("Information request refused:"));
+    assertFalse(denied.contains("Approved label"));
+    assertEquals(List.of(REVISION), read);
   }
 
   @Test

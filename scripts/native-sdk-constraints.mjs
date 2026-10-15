@@ -262,6 +262,18 @@ export function constrain(graph) {
           absent('project', 'maxModelCalls', 'maxTurns'),
         ),
       );
+    if (['information.navigation.capabilities','information.documents.list','information.documents.facets','information.documents.get','information.relationships.list','information.relationships.create','information.relationships.remove','information.policy.get','information.policy.set','information.views.list','information.views.get','information.views.save','information.views.delete'].includes(op)) {
+      if(s.properties?.target) {
+        const target=resolve(graph,s.properties.target);
+        for(const variant of target.anyOf??[s.properties.target]) field(resolve(graph,variant),'resource',{pattern:uuid});
+      }
+      field(s,'expectedVersion',integer(['information.relationships.remove','information.views.delete'].includes(op)?1:0,9007199254740990));
+      field(s,'limit',integer(1,100));
+      for(const key of ['resource','source','id','relationship','relatedTo','otherResource','expectedSourceRevision']) field(s,key,{pattern:uuid});
+      field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+      field(s,'reason',{...text(4096),nonblank:true});
+      if(['information.documents.list','information.documents.facets'].includes(op)) rules(s,implies(or(present('relation'),present('direction')),present('relatedTo')));
+    }
     if (op.startsWith('information.')) {
       field(s, 'waitMs', { maximum: 30000 });
       for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
@@ -590,6 +602,13 @@ export function constrain(graph) {
           '^(?:ANSWERED|TURN_CAP|CALL_BUDGET|CANCELLED|STUCK|UNAVAILABLE|SUB_AGENT_FAILED|SESSION_GONE|AWAITING)?$',
       });
     }
+    if (title === 'NavigationPath') field(s,'steps',{minItems:1,maxItems:32,navigationSteps:true});
+    if (title === 'ReferencePolicySettings') field(s,'referenceLabel',{...identity,maxLength:120});
+    if (['CurrentDocument','DocumentTarget','DocumentRelationship','NavigationChanged','SavedNavigationView'].includes(title)) {
+      for(const key of ['resource','revision','source','target','pinnedRevision','id']) if(p[key] && stringShape(p[key])) field(s,key,{pattern:uuid});
+    }
+    if(title==='DocumentRelationship' || p.kind && p.relation) field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+    if(title==='SavedNavigationView') field(s,'label',{...identity,maxLength:120});
     if (title === 'IncomingSource') {
       const parts = resolve(graph, s.properties.parts);
       const part = resolve(graph, parts.items);

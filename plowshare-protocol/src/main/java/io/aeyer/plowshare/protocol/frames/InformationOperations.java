@@ -9,6 +9,19 @@ public final class InformationOperations {
 
   public static final List<String> ALL =
       List.of(
+          "navigation.capabilities",
+          "documents.list",
+          "documents.facets",
+          "documents.get",
+          "relationships.list",
+          "relationships.create",
+          "relationships.remove",
+          "policy.get",
+          "policy.set",
+          "views.list",
+          "views.get",
+          "views.save",
+          "views.delete",
           "types.capabilities",
           "types.list",
           "types.get",
@@ -60,6 +73,11 @@ public final class InformationOperations {
           "acquisitions");
   public static final Set<String> MODEL =
       Set.of(
+          "documents.list",
+          "documents.get",
+          "relationships.list",
+          "relationships.create",
+          "relationships.remove",
           "types.capabilities",
           "types.list",
           "types.get",

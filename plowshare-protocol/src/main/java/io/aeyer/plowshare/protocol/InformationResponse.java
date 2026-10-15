@@ -6,6 +6,69 @@ import java.util.*;
 
 /** Complete result alternatives for information operations; no arbitrary JSON result is exposed. */
 public sealed interface InformationResponse {
+  record NavigationCapabilities(@JsonValue InformationNavigation.Capabilities value)
+      implements InformationResponse {
+    public NavigationCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationDocuments(@JsonValue InformationNavigation.Documents value)
+      implements InformationResponse {
+    public NavigationDocuments {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationSelection(@JsonValue InformationNavigation.Selection value)
+      implements InformationResponse {
+    public NavigationSelection {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationConnections(@JsonValue InformationNavigation.Connections value)
+      implements InformationResponse {
+    public NavigationConnections {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationRelationship(@JsonValue InformationNavigation.Relationship value)
+      implements InformationResponse {
+    public NavigationRelationship {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationPolicy(@JsonValue InformationNavigation.PolicyView value)
+      implements InformationResponse {
+    public NavigationPolicy {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationViews(@JsonValue InformationNavigation.Views value)
+      implements InformationResponse {
+    public NavigationViews {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationView(@JsonValue InformationNavigation.SavedView value)
+      implements InformationResponse {
+    public NavigationView {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationChanged(@JsonValue InformationNavigation.Changed value)
+      implements InformationResponse {
+    public NavigationChanged {
+      Objects.requireNonNull(value);
+    }
+  }
+
   record ContentCapabilities(@JsonValue InformationContent.Capabilities value)
       implements InformationResponse {
     public ContentCapabilities {

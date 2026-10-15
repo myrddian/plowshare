@@ -1,6 +1,759 @@
 [
   {
     "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": -1,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 1.5,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "short",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": []
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "traverse",
+            "relation": "../private",
+            "direction": "outgoing"
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.views.save",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0,
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          },
+          {
+            "kind": "document",
+            "target": {
+              "resource": "11111111-1111-1111-1111-111111111111"
+            }
+          }
+        ]
+      },
+      "extra": true
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.list",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.list",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "relation": "runbook"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.list",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "limit": 101
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.get",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "target": {
+        "resource": "11111111-1111-1111-1111-111111111111",
+        "revision": "11111111-1111-1111-1111-111111111111"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.get",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "target": {
+        "resource": "11111111-1111-1111-1111-111111111111",
+        "revision": null
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.documents.get",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "target": {
+        "resource": "short"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.policy.set",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "target": {
+        "kind": "platform"
+      },
+      "expectedVersion": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false,
+          "referenceHidden": true,
+          "propagate": true
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "Restricted document"
+      },
+      "reason": "Initial policy"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.policy.set",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "target": {
+        "kind": "project"
+      },
+      "expectedVersion": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false,
+          "referenceHidden": true,
+          "propagate": true
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "Restricted document"
+      },
+      "reason": "Initial policy"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.policy.set",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "target": {
+        "kind": "platform"
+      },
+      "expectedVersion": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "Restricted document"
+      },
+      "reason": "Initial policy"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.policy.set",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "target": {
+        "kind": "platform"
+      },
+      "expectedVersion": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false,
+          "referenceHidden": true,
+          "propagate": true
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "reason": "Initial policy"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.relationships.create",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "source": "11111111-1111-1111-1111-111111111111",
+      "target": {
+        "resource": "11111111-1111-1111-1111-111111111111"
+      },
+      "relation": "runbook",
+      "expectedSourceRevision": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.relationships.remove",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "relationship": "11111111-1111-1111-1111-111111111111",
+      "expectedVersion": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.documents.get",
+    "value": {
+      "kind": "locked",
+      "resource": "11111111-1111-1111-1111-111111111111",
+      "label": "Approved label"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "information.documents.get",
+    "value": {
+      "kind": "unavailable"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "information.documents.get",
+    "value": {
+      "kind": "locked",
+      "resource": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "information.documents.get",
+    "value": {
+      "kind": "readable"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "information.content.revise",
     "value": {
       "scope": {

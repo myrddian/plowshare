@@ -1,3 +1,4 @@
+import { NAVIGATION_OPERATIONS } from './information-navigation.ts';
 import {
   decodeMetadataValidation,
   type MetadataValidationResult,
@@ -13,6 +14,7 @@ export type InformationScope =
   | { kind: 'personal' | 'shared'; includeShared?: boolean }
   | { kind: 'project'; project: string; includeShared?: boolean };
 export const INFORMATION_OPERATIONS = [
+  ...NAVIGATION_OPERATIONS,
   'types.capabilities',
   'types.list',
   'types.get',

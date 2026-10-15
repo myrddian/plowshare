@@ -21,7 +21,8 @@ public final class JdbcInformationProcessingRepository implements InformationPro
           + " OR (q.project_id IS NOT NULL AND ((q.owner_handle LIKE '@service/%' AND"
           + " service_project_role((SELECT name FROM projects WHERE id=q.project_id),q.owner_handle) IS NOT NULL)"
           + " OR (q.owner_handle NOT LIKE '@service/%' AND EXISTS(SELECT 1 FROM project_members m"
-          + " WHERE m.project_id=q.project_id AND m.handle=q.owner_handle)))))";
+          + " WHERE m.project_id=q.project_id AND m.handle=q.owner_handle)))))"
+          + " AND information_reference_readable(r.id,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id))";
 
   private record Authority(String owner, String project) {}
 

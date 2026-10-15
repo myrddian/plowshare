@@ -1,3 +1,4 @@
+import type { NavigationPayloads } from './information-navigation.ts';
 import type {
   InformationTyping,
   InformationProcessingStage,
@@ -39,7 +40,7 @@ export interface InformationFilter {
 }
 
 /** Authenticated information frame payloads; publication and migration remain operator controls. */
-export interface InformationPayloads {
+export interface InformationPayloads extends NavigationPayloads {
   'information.types.capabilities': {
     readonly scope: InformationScope;
     readonly view?: 'content-types-v1';

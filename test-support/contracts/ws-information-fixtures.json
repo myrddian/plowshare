@@ -590,5 +590,243 @@
       "resource": "00000000-0000-4000-8000-000000000005",
       "created": true
     }
+  },
+  "information.navigation.capabilities": {
+    "code": "OK",
+    "payload": {
+      "capability": "document-navigation-v1",
+      "writesEnabled": true,
+      "maxSteps": 32,
+      "maxClosure": 1024
+    }
+  },
+  "information.documents.list": {
+    "code": "OK",
+    "payload": {
+      "documents": [],
+      "limit": 50,
+      "offset": 0
+    }
+  },
+  "information.documents.facets": {
+    "code": "OK",
+    "payload": {
+      "total": 1,
+      "facets": {
+        "kind": [
+          {
+            "value": "source",
+            "count": 1
+          }
+        ],
+        "tags": [
+          {
+            "value": "my project",
+            "count": 1
+          }
+        ],
+        "autoTag": [
+          {
+            "value": "postgresql",
+            "count": 1
+          }
+        ],
+        "author": [
+          {
+            "value": "reader",
+            "count": 1
+          }
+        ],
+        "when": [
+          {
+            "value": "2024-10",
+            "count": 1
+          }
+        ],
+        "subtype": [
+          {
+            "value": "text",
+            "count": 1
+          }
+        ],
+        "documentAuthor": [
+          {
+            "value": "Ada Lovelace",
+            "count": 1
+          }
+        ],
+        "tagGroup": [
+          {
+            "value": "databases",
+            "count": 1
+          }
+        ]
+      },
+      "hasMore": {
+        "kind": false,
+        "tags": false,
+        "autoTag": false,
+        "author": false,
+        "when": false,
+        "subtype": false,
+        "documentAuthor": false,
+        "tagGroup": false
+      },
+      "tagGraph": {
+        "edges": [
+          {
+            "group": "databases",
+            "tag": "postgresql",
+            "count": 1
+          }
+        ],
+        "hasMore": false
+      }
+    }
+  },
+  "information.documents.get": {
+    "code": "OK",
+    "payload": {
+      "kind": "unavailable"
+    }
+  },
+  "information.relationships.list": {
+    "code": "OK",
+    "payload": {
+      "connections": [],
+      "limit": 50,
+      "offset": 0
+    }
+  },
+  "information.relationships.create": {
+    "code": "OK",
+    "payload": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "source": "11111111-1111-1111-1111-111111111111",
+      "target": "11111111-1111-1111-1111-111111111111",
+      "relation": "runbook",
+      "version": 1,
+      "removed": false
+    }
+  },
+  "information.relationships.remove": {
+    "code": "OK",
+    "payload": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "version": 2,
+      "retainedObligations": true
+    }
+  },
+  "information.policy.get": {
+    "code": "OK",
+    "payload": {
+      "target": {
+        "kind": "platform"
+      },
+      "version": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false,
+          "referenceHidden": true,
+          "propagate": true
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "Restricted document"
+      },
+      "effective": {
+        "ownerOnly": false,
+        "referenceHidden": true,
+        "propagate": true
+      },
+      "canManage": true,
+      "retainedObligations": 0
+    }
+  },
+  "information.policy.set": {
+    "code": "OK",
+    "payload": {
+      "target": {
+        "kind": "platform"
+      },
+      "version": 0,
+      "settings": {
+        "defaults": {
+          "ownerOnly": false,
+          "referenceHidden": true,
+          "propagate": true
+        },
+        "mandatory": {
+          "ownerOnly": false,
+          "referenceHidden": false,
+          "propagate": false
+        },
+        "allowOverrides": true,
+        "referenceLabel": "Restricted document"
+      },
+      "effective": {
+        "ownerOnly": false,
+        "referenceHidden": true,
+        "propagate": true
+      },
+      "canManage": true,
+      "retainedObligations": 0
+    }
+  },
+  "information.views.list": {
+    "code": "OK",
+    "payload": {
+      "views": []
+    }
+  },
+  "information.views.get": {
+    "code": "OK",
+    "payload": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          }
+        ]
+      },
+      "version": 1,
+      "deleted": false
+    }
+  },
+  "information.views.save": {
+    "code": "OK",
+    "payload": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "label": "Billing",
+      "path": {
+        "steps": [
+          {
+            "kind": "scope",
+            "scope": {
+              "kind": "personal"
+            }
+          }
+        ]
+      },
+      "version": 1,
+      "deleted": false
+    }
+  },
+  "information.views.delete": {
+    "code": "OK",
+    "payload": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "version": 2,
+      "retainedObligations": false
+    }
   }
 }

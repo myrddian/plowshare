@@ -68,6 +68,16 @@ internal static class Validation
         {
             throw new JsonException("Invalid bounded schema value", invalidSchema);
         }
+        if (Flag(schema, "navigationSteps"))
+        {
+            if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() < 1 || value.GetArrayLength() > 32) throw new JsonException("Path needs 1..32 steps");
+            var index = 0;
+            foreach (var step in value.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object || !step.TryGetProperty("kind", out var kind) || (kind.GetString() == "scope") != (index == 0)) throw new JsonException("Path starts with its only scope");
+                index++;
+            }
+        }
         bool invalid = false;
         switch (value.ValueKind)
         {

@@ -11,6 +11,8 @@ public sealed interface InformationRequest {
 
   String operation();
 
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record Scope(String kind, String project, Boolean includeShared) {
     public Scope {
       if (!Set.of("personal", "project", "shared").contains(kind))
@@ -28,6 +30,8 @@ public sealed interface InformationRequest {
     }
   }
 
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record Selection(Scope scope, String corpus, FacetFilter filter, String view) {
     public Selection(Scope scope, String corpus, FacetFilter filter) {
       this(scope, corpus, filter, null);
@@ -53,6 +57,8 @@ public sealed interface InformationRequest {
     }
   }
 
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record FacetFilter(
       String kind,
       List<String> tags,
@@ -832,6 +838,232 @@ public sealed interface InformationRequest {
     public String operation() {
       return "migration.adopt";
     }
+  }
+
+  record NavigationCapabilities(Selection selection) implements InformationRequest {
+    public NavigationCapabilities {
+      navigation(selection);
+    }
+
+    public String operation() {
+      return "navigation.capabilities";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record DocumentList(
+      Selection selection,
+      UUID relatedTo,
+      String relation,
+      String direction,
+      Integer limit,
+      Integer offset)
+      implements InformationRequest {
+    public DocumentList {
+      navigation(selection);
+      page(limit, offset, 100);
+      if (relatedTo == null && (relation != null || direction != null))
+        throw new IllegalArgumentException("traversal needs a source");
+      if (relation != null) InformationNavigation.relation(relation);
+      if (direction != null) InformationNavigation.direction(direction);
+    }
+
+    public String operation() {
+      return "documents.list";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record DocumentFacets(Selection selection, UUID relatedTo, String relation, String direction)
+      implements InformationRequest {
+    public DocumentFacets {
+      navigation(selection);
+      if (relatedTo == null && (relation != null || direction != null))
+        throw new IllegalArgumentException("traversal needs a source");
+      if (relation != null) InformationNavigation.relation(relation);
+      if (direction != null) InformationNavigation.direction(direction);
+    }
+
+    public String operation() {
+      return "documents.facets";
+    }
+  }
+
+  record DocumentGet(Selection selection, InformationNavigation.Target target)
+      implements InformationRequest {
+    public DocumentGet {
+      navigation(selection);
+      Objects.requireNonNull(target);
+    }
+
+    public String operation() {
+      return "documents.get";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record RelationshipList(
+      Selection selection,
+      UUID resource,
+      String direction,
+      String relation,
+      UUID otherResource,
+      Integer limit,
+      Integer offset)
+      implements InformationRequest {
+    public RelationshipList {
+      navigation(selection);
+      Objects.requireNonNull(resource);
+      InformationNavigation.direction(direction);
+      if (relation != null) InformationNavigation.relation(relation);
+      page(limit, offset, 100);
+    }
+
+    public String operation() {
+      return "relationships.list";
+    }
+  }
+
+  record RelationshipCreate(
+      Selection selection,
+      UUID requestId,
+      UUID source,
+      InformationNavigation.Target target,
+      String relation,
+      UUID expectedSourceRevision)
+      implements InformationRequest {
+    public RelationshipCreate {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(source);
+      Objects.requireNonNull(target);
+      Objects.requireNonNull(expectedSourceRevision);
+      InformationNavigation.relation(relation);
+    }
+
+    public String operation() {
+      return "relationships.create";
+    }
+  }
+
+  record RelationshipRemove(
+      Selection selection, UUID requestId, UUID relationship, Long expectedVersion)
+      implements InformationRequest {
+    public RelationshipRemove {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(relationship);
+      control(expectedVersion, false);
+    }
+
+    public String operation() {
+      return "relationships.remove";
+    }
+  }
+
+  record NavigationPolicyGet(Selection selection, InformationNavigation.PolicyTarget target)
+      implements InformationRequest {
+    public NavigationPolicyGet {
+      navigation(selection);
+      Objects.requireNonNull(target);
+    }
+
+    public String operation() {
+      return "policy.get";
+    }
+  }
+
+  record NavigationPolicySet(
+      Selection selection,
+      UUID requestId,
+      InformationNavigation.PolicyTarget target,
+      Long expectedVersion,
+      InformationNavigation.PolicySettings settings,
+      String reason)
+      implements InformationRequest {
+    public NavigationPolicySet {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(target);
+      control(expectedVersion, true);
+      Objects.requireNonNull(settings);
+      reason = ContractValues.text(reason, "reason", 4096, true);
+    }
+
+    public String operation() {
+      return "policy.set";
+    }
+  }
+
+  record NavigationViews(Selection selection) implements InformationRequest {
+    public NavigationViews {
+      navigation(selection);
+    }
+
+    public String operation() {
+      return "views.list";
+    }
+  }
+
+  record NavigationViewGet(Selection selection, UUID id) implements InformationRequest {
+    public NavigationViewGet {
+      navigation(selection);
+      Objects.requireNonNull(id);
+    }
+
+    public String operation() {
+      return "views.get";
+    }
+  }
+
+  record NavigationViewSave(
+      Selection selection,
+      UUID requestId,
+      UUID id,
+      Long expectedVersion,
+      String label,
+      InformationNavigation.Path path)
+      implements InformationRequest {
+    public NavigationViewSave {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(id);
+      control(expectedVersion, true);
+      label = ContractValues.identity(label, "label", 120);
+      Objects.requireNonNull(path);
+    }
+
+    public String operation() {
+      return "views.save";
+    }
+  }
+
+  record NavigationViewDelete(Selection selection, UUID requestId, UUID id, Long expectedVersion)
+      implements InformationRequest {
+    public NavigationViewDelete {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(id);
+      control(expectedVersion, false);
+    }
+
+    public String operation() {
+      return "views.delete";
+    }
+  }
+
+  private static void navigation(Selection selection) {
+    Objects.requireNonNull(selection);
+    if (!"documents".equals(selection.corpus()))
+      throw new IllegalArgumentException("document navigation requires documents corpus");
+  }
+
+  private static void control(Long version, boolean create) {
+    if (version == null || version < (create ? 0 : 1) || version > 9007199254740990L)
+      throw new IllegalArgumentException("invalid expected version");
   }
 
   private static void authored(

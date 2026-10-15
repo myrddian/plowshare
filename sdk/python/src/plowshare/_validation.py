@@ -119,6 +119,14 @@ def check(schema: dict[str, object], value: object) -> None:
         from .tool_schemas import decode_tool_schema, validate_tool_schema
 
         validate_tool_schema(decode_tool_schema(value))
+    if schema.get("navigationSteps"):
+        if not isinstance(value, list) or not value or len(value) > 32:
+            raise ValueError("Path needs 1..32 steps")
+        for index, step in enumerate(value):
+            if not isinstance(step, dict) or (step.get("kind") == "scope") != (
+                index == 0
+            ):
+                raise ValueError("Path starts with its only scope")
     invalid = False
     if isinstance(value, str):
         length = len(value.encode("utf-16-le", errors="surrogatepass")) // 2

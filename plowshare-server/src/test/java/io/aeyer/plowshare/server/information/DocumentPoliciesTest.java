@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -2305,7 +2306,8 @@ class DocumentPoliciesTest {
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
                 fetcher,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
-                new InformationContentSettings(true))
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2442,7 +2444,8 @@ class DocumentPoliciesTest {
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.fetch.PageFetcher.class),
                 org.mockito.Mockito.mock(InformationContentTypes.class),
-                new InformationContentSettings(true))
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2737,7 +2740,8 @@ class DocumentPoliciesTest {
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
                 null,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
-                new InformationContentSettings(true))
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class))
             .frames();
     var rows =
         (List<?>)
@@ -2927,7 +2931,8 @@ class DocumentPoliciesTest {
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
                 null,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
-                new InformationContentSettings(true))
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class))
             .frames();
     var payload =
         Map.<String, Object>of(

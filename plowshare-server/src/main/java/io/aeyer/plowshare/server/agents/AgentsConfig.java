@@ -748,6 +748,8 @@ public class AgentsConfig {
       ObjectProvider<io.aeyer.plowshare.server.information.InformationCatalogue> information,
       ObjectProvider<io.aeyer.plowshare.server.information.InformationContentTypes>
           informationTypes,
+      ObjectProvider<io.aeyer.plowshare.server.information.InformationNavigationService>
+          informationNavigation,
       DocumentStore documents,
       io.aeyer.plowshare.server.documents.CitationStore citations,
       io.aeyer.plowshare.server.archive.TurnStore turns,
@@ -822,9 +824,17 @@ public class AgentsConfig {
                     new RetrievalTools.Outline(documents),
                     new RetrievalTools.Citations(citations, conversations),
                     new DocumentTools.Search(corpus),
-                    new InformationTool(false, information::getObject, informationTypes::getObject)
+                    new InformationTool(
+                            false,
+                            information::getObject,
+                            informationTypes::getObject,
+                            informationNavigation::getObject)
                         .withRetrieval(corpus),
-                    new InformationTool(true, information::getObject, informationTypes::getObject),
+                    new InformationTool(
+                        true,
+                        information::getObject,
+                        informationTypes::getObject,
+                        informationNavigation::getObject),
                     new MemoryNavigateTool(
                         navigator::getObject,
                         () -> memoryProperties.getObject().getNavigationBudget()),

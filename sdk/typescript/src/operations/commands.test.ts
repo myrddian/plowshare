@@ -115,8 +115,17 @@ describe('operator WS boundaries', () => {
       ),
       'utf8',
     );
+    const information = readFileSync(
+      new URL(
+        '../../../../plowshare-protocol/src/main/java/io/aeyer/plowshare/protocol/frames/InformationOperations.java',
+        import.meta.url,
+      ),
+      'utf8',
+    );
     for (const [command, type] of Object.entries(CLI_OPERATIONS)) {
-      expect(java).toContain(`"${type}"`);
+      expect(type.startsWith('information.') ? information : java).toContain(
+        `"${type.startsWith('information.') ? type.slice('information.'.length) : type}"`,
+      );
       expect(isPayloadCommand(command)).toBe(true);
       expect(isPayloadCommand(command + ' argument')).toBe(false);
     }

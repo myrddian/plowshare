@@ -1,9 +1,9 @@
 # ADR 0026: Document navigation and configurable reference policy
 
-Status: proposed contract for the next authored-knowledge milestone. The product
-decisions below record the agreed direction; operational recommendations and
-review gates are identified separately. No navigation, relationship or new policy
-operation is implemented or advertised by this decision.
+Status: accepted implementation contract, 15 October 2026. The next-milestone
+recommendations were adopted for local implementation. See the
+[usage guide](../authored-navigation.md) for the exact controls and activation.
+This status records source work; it does not establish deployment.
 
 The [proposal](../authored-knowledge-design.md) describes the experience. The
 [implementation plan](../authored-navigation-implementation.md) identifies owners,
@@ -46,7 +46,7 @@ sharing or permission to execute an instruction.
   steps. Breadcrumbs restore earlier selections. There is no HTTP URL requirement,
   directory hierarchy, canonical parent or identity derived from a displayed path.
 
-Recommended head rule: choose the highest committed ordinal of the resource,
+Adopted head rule: choose the highest committed ordinal of the resource,
 then evaluate its lifecycle and policy. Do not choose an older readable revision
 as a fallback. A withdrawn/deleted/hidden latest target is unavailable. Explicit
 history selection remains possible under its own current checks. This is a new
@@ -85,10 +85,10 @@ override. Mandatory platform/project constraints cannot be weakened by an
 override. Personal resources require an explicit platform baseline. A source
 project cannot select a permissive setting to override a protected target.
 
-Recommended initial default: no additional disclosure and restrictive reference
+Adopted initial default: no additional disclosure and restrictive reference
 handling until an administrator/manager explicitly configures a project. Preserve
 legacy data and APIs; create no inferred relationships or public reference labels.
-The exact profile/constraint matrix is a review gate, not a runtime fallback.
+The adopted policy fields and combination rules below define the profile matrix.
 
 ## Explicit relationship contract
 
@@ -109,12 +109,12 @@ not independent authored edges. If A references B, A may depend on B; generating
 B's backlink to A does not make B depend on A. Removing a navigation edge has a
 retained audit and cannot erase actual evidence/input dependencies.
 
-For the first implementation, prefer reference-visible representations reached
+The first implementation uses reference-visible representations reached
 through an authorised source relationship, rather than a new global directory of
 otherwise private documents. A caller-supplied path or edge ID is a lookup hint,
 not a capability: recheck the source and target policy on every disclosure.
-The approved audience and fields require a closed DTO/fixture matrix before
-implementation. Do not assume a private title is a safe label.
+The closed DTO/fixture matrix permits only the resource UUID and explicitly
+approved label. A private title is never copied as a locked-reference label.
 
 ## Effective access and consistent disclosure
 
@@ -161,11 +161,12 @@ edge changes navigation but does not automatically release a source that acquire
 a required restriction. Switching a target back to a non-propagating policy must
 not silently erase previously incurred obligations or historical input dependencies.
 
-Recommended first release: allow policy initialisation and tightening; reject a
+Adopted first release: allow policy initialisation and tightening; reject a
 change that could widen an affected retained audience until an explicit authorised
 release path is designed and implemented. A reference removal may succeed while
 the access obligation remains. Report that state clearly to authorised managers.
-This is a recommendation requiring review, not an already agreed product limit.
+The authorised implementation adopts this limit; a release workflow remains
+separate work.
 
 The obligation lifecycle is a hard implementation gate. In particular, changing a
 widely referenced target to restrictive and back cannot rely on whichever sources
@@ -186,12 +187,12 @@ existing facets/search. Store UUIDs and typed criteria, not route strings, rende
 captions, SQL, scripts or fetched result lists. Validate limits and reject unknown
 steps. Breadth beyond existing facets is a separate querying capability.
 
-Recommended saved-view scope: account-owned durable records first, each with UUID,
+Adopted saved-view scope: account-owned durable records first, each with UUID,
 label, typed path, control version and stable mutation receipt. Project-wide shared
 view editing is deferred; a saved project's selection is still useful to its owner.
 Reopening reevaluates access and current heads. Saving a view does not read all
-target bodies, freeze results or grant access. These recommendations need approval
-with the implementation plan's contract gate.
+target bodies, freeze results or grant access. The implementation plan records
+these adopted choices and their verification.
 
 ## Public boundary, persistence and rollout
 
@@ -219,6 +220,43 @@ rollback to an unaware binary requires a write stop/compatibility release, not
 removing policy tables. Neither new capabilities nor proposed operation names
 belong in generated catalogues before implementation.
 
+## Adopted implementation choices
+
+The highest committed ordinal defines the current document. Initial reference
+handling is hidden and propagating. Locked references disclose a resource UUID and
+an explicitly approved label only through authorised source relationships. Saved
+views are account-owned, with one initial scope and complete facet-selection
+snapshots. No cross-request allow cache is used. Paths contain at most 32 steps;
+policy evaluation denies beyond 1,024 revisions in a required-reference closure.
+Policy transitions refuse more than 10,000 affected documents; the retained
+relationship graph is capped at 10,000 records, including removed edges.
+
+Policy booleans are `ownerOnly`, `referenceHidden` and `propagate`; settings have
+`defaults`, `mandatory`, `allowOverrides` and `referenceLabel`. Mandatory controls
+combine with OR. Initialisation may widen an unreferenced baseline; subsequent
+widening requires a release workflow and is refused in this version. Project
+managers administer their projects; server administrators also manage platform
+and personal-document policy.
+
+Durable obligations persist after unlink. A transactional fixed-point admission
+also records incoming dependencies through an intermediary that already carries
+an obligation, even when its own defaults are non-propagating. An intermediary
+cannot waive inherited restrictions. Counts and existing revision reads use the
+central SQL enforcement predicate; navigation reads use one repeatable snapshot.
+
+Navigation control mutations use independent typed commands, optimistic versions,
+atomic audit and request receipts. They are not body-revision transitions and do
+not invoke revision-transition/model hooks or create target-body input records.
+Actual readable metadata returned to a model still enters its retained input
+ledger; approved locked references do not imply body consumption. Policy and
+saved-view controls remain outside model tools. Configured revision hooks keep
+their existing authority and accounting.
+
+Writes require `plowshare.information.navigation-writes-enabled=true`; the default
+is false. Disabling writes retains read enforcement. Existing schema writes and
+legacy revision/collection operations retain their contracts. The implementation
+adds V147 without changing earlier migrations.
+
 ## Consequences and review gate
 
 The model permits visible references to locked content without ordinary-link
@@ -226,8 +264,6 @@ virality, while projects can require confidential references and propagated
 restrictions. It also requires central, consistent read enforcement, a durable
 obligation lifecycle, independent document-set projections and new SDK variants.
 
-Before implementation, close the profile/default/override matrix, reference
-audiences and approved fields, obligation/release semantics, evaluator/path bounds
-and public request/result/error schemas. The linked implementation plan proposes
-an implementation order and tests these as release gates; no repository or UI
-prototype may advertise complete enforcement before they pass.
+The adopted choices close the implementation gate. The linked plan records the
+verification commands and results. Review the complete change and its activation
+requirements before publication; local checks are not deployment evidence.

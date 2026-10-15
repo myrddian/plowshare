@@ -38,6 +38,7 @@
     "test:runs": "node scripts/build.mjs && node --experimental-strip-types scripts/runs-smoke.mjs",
     "test:run-navigation": "node scripts/build.mjs && node --experimental-strip-types scripts/run-navigation-smoke.mjs",
     "test:library": "node scripts/library-smoke.mjs",
+    "test:document-navigation": "node scripts/build.mjs && node --experimental-strip-types scripts/document-navigation-smoke.mjs",
     "test:authored-information": "node scripts/build.mjs && node --experimental-strip-types scripts/authored-information-smoke.mjs",
     "test:information": "node scripts/build.mjs && node --experimental-strip-types scripts/information-smoke.mjs",
     "test:sync": "node scripts/build.mjs && node scripts/sync-smoke.mjs",

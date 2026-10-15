@@ -1,3 +1,5 @@
+import { isNavigationOperation } from './information-navigation.ts';
+import { navigationPayloadProblem } from './navigation-validation.ts';
 import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
 import { providerCredentialProblem } from './provider-credentials.ts';
 import { identityProblem } from './application-identities.ts';
@@ -18,6 +20,12 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (isNavigationOperation(type) && type in SHAPES)
+    return navigationPayloadProblem(
+      type,
+      payload,
+      SHAPES[type as keyof ExtendedPayloads][0],
+    );
   if (
     type.startsWith('provider.connection.') ||
     type.startsWith('provider.credential.')
@@ -395,6 +403,50 @@ export const SHAPES: Record<
   ],
   'conversation.context.snapshot': [['conversation', 'agent'], ['measure']],
   'conversation.context.count': [['conversation', 'agent'], []],
+  'information.navigation.capabilities': [['scope'], []],
+  'information.documents.list': [
+    ['scope'],
+    ['filter', 'relatedTo', 'relation', 'direction', 'limit', 'offset'],
+  ],
+  'information.documents.facets': [
+    ['scope'],
+    ['filter', 'relatedTo', 'relation', 'direction'],
+  ],
+  'information.documents.get': [['scope', 'target'], []],
+  'information.relationships.list': [
+    ['scope', 'resource', 'direction'],
+    ['relation', 'otherResource', 'limit', 'offset'],
+  ],
+  'information.relationships.create': [
+    [
+      'scope',
+      'requestId',
+      'source',
+      'target',
+      'relation',
+      'expectedSourceRevision',
+    ],
+    [],
+  ],
+  'information.relationships.remove': [
+    ['scope', 'requestId', 'relationship', 'expectedVersion'],
+    [],
+  ],
+  'information.policy.get': [['scope', 'target'], []],
+  'information.policy.set': [
+    ['scope', 'requestId', 'target', 'expectedVersion', 'settings', 'reason'],
+    [],
+  ],
+  'information.views.list': [['scope'], []],
+  'information.views.get': [['scope', 'id'], []],
+  'information.views.save': [
+    ['scope', 'requestId', 'id', 'expectedVersion', 'label', 'path'],
+    [],
+  ],
+  'information.views.delete': [
+    ['scope', 'requestId', 'id', 'expectedVersion'],
+    [],
+  ],
   'information.types.capabilities': [['scope'], ['view']],
   'information.types.list': [
     ['scope', 'view'],
@@ -834,6 +886,8 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (isNavigationOperation(type))
+    return navigationPayloadProblem(type, body, required);
   if (
     [
       'application.deploy',

@@ -1,13 +1,12 @@
 # Authored navigation and reference-policy implementation plan
 
-Status: proposed next-milestone plan, 15 October 2026. The
-[proposal](authored-knowledge-design.md) records the agreed experience and
-[ADR 0026](decisions/0026-document-navigation-and-reference-policy.md) defines the
-proposed contract. This plan does not implement new runtime behaviour. The local
-schema milestone is `49fdab28834cdecf61b2f3cfe279ecdedce1247a`; fetched public main
-is `a6d642a9c8a12d419e6bb3c680617c7e826cdc3e`. Recheck main before coding or publication.
+Status: local implementation delivered, 15 October 2026. The user authorised
+the documented recommendations. [ADR 0026](decisions/0026-document-navigation-and-reference-policy.md)
+records the adopted choices; [the usage guide](authored-navigation.md) describes
+operations and activation. The schema baseline is
+`49fdab28834cdecf61b2f3cfe279ecdedce1247a`. Review/integration/publication remain separate.
 
-## Agreed scope and recommendations to review
+## Agreed scope and adopted recommendations
 
 Deliver document navigation over retained resource identities, explicit live or
 pinned relationships, policy-aware backlinks, project/document configuration,
@@ -20,7 +19,7 @@ separate content access, reference disclosure and propagation; projects choose
 defaults/constraints and permitted document overrides; only administrators and
 project managers administer those policies within their authority.
 
-Review these implementation recommendations together before beginning:
+The following implementation recommendations were adopted:
 
 | Recommendation | Reason / consequence |
 | --- | --- |
@@ -31,9 +30,8 @@ Review these implementation recommendations together before beginning:
 | Account-owned saved views first | Durable usable selections without adding project-wide view-editor permissions |
 | No cross-request allow-decision cache initially | Keeps revocation/head-change semantics direct while correctness is established |
 
-These are proposals, not assumptions hidden in implementation. If full policy
-relaxation is required in this milestone, design the release workflow and durable
-obligation history before estimating or implementing it.
+Audience widening is explicitly refused by this version; adding an authorised
+release workflow remains separate work. The durable obligation history is implemented.
 
 ## Verified owners and capability gaps
 
@@ -45,7 +43,7 @@ obligation history before estimating or implementing it.
 | V83 `information_readable`, `information_inputs`; `InformationJobs` | Recursive retained revision-input restrictions and rechecks for derived work | Central effective policy used by every existing surface; live resource references require separate semantics from actual inputs |
 | `AdminStore`, `ProjectAuthorization`, `ProjectRole` | Live server-admin checks and ordered project roles | Dedicated administration classification; management does not imply body access |
 | `DocumentPolicyAssignments` | Controlled migration/adoption of quarantined policies | Keep migration controls intact; new policy administration uses its own typed service/repository |
-| `InformationTransitions`, `InformationWriteGates` | Typed prepared transitions, stable receipt identities, pre/post hooks | New bounded candidates for relationship/policy changes with optimistic versions and safe audit payloads |
+| `InformationTransitions`, `InformationWriteGates` | Typed prepared transitions, stable receipt identities, pre/post hooks | Independent navigation control transactions with optimistic versions, receipts and audit; no body-transition hooks or model inputs |
 | `InformationRequest`, `InformationResponse`, `InformationOperations`; SDK generators | Shared revision/schema contracts; no relationship/saved-navigation contract | Closed document/reference/path/policy DTOs and cross-SDK cases, registered with implemented operations |
 | Desktop `renderer/information.ts`, `authored-information.ts` | Scoped Library, facets, typed metadata edits and processing controls | Document-level browse, paths/backlinks, locked-reference presentation, management controls and saved selections |
 
@@ -55,9 +53,9 @@ explicit platform extension under ADR 0001, not an adapter workaround.
 
 ## Public contract work
 
-Proposed operation families below describe contracts to implement, not current
-registered methods. Final names, DTO fields and operation/error fixtures belong
-to unit 1. Do not place speculative entries in generated catalogues.
+The operation families below are registered with typed DTOs, SDK fixtures and
+model/human classifications. The [usage guide](authored-navigation.md) lists the
+implemented operation names and recovery rules.
 
 | Family | Required capability |
 | --- | --- |
@@ -73,7 +71,7 @@ success fields or a partially redacted existing revision DTO to conceal a denial
 Administrative diagnostics may explain constraints only to authorised managers.
 Normal discovery cannot disclose a hidden target or hidden dependency chain.
 
-## Delivery units
+## Delivery units and acceptance criteria
 
 1. **Contract and policy matrix.** Finalise all review recommendations, policy
    combinations and override ordering. Specify source/target reference authority,
@@ -128,6 +126,9 @@ Normal discovery cannot disclose a hidden target or hidden dependency chain.
    read inventory. Enable the new capability only after all units pass. Disabling
    writes must leave policy enforcement active; no merge/deployment is implied
    by a local test pass or a draft PR.
+
+The delivery criteria above describe the implementation gate, not release status.
+The verification record below identifies the local evidence.
 
 Interfaces should be narrow domain contracts for effective policy, relationships,
 document navigation and saved selections. Services receive interfaces through
@@ -187,16 +188,66 @@ versus pinned opening, breadcrumb restoration and revocation on saved-view reope
 Record exact passed commands and distinguish mocked UI transport from real
 persistence and live deployment evidence.
 
-- [ ] Review decisions and exact policy/DTO/error matrix approved.
-- [ ] Durable obligation/release behaviour is complete; no read-triggered gap.
-- [ ] New policy administration is correctly scoped, audited and version-fenced.
-- [ ] Every existing public read has effective-policy coverage before disclosure.
-- [ ] Resource heads, tag sets, relationships and backlinks preserve agreed meaning.
-- [ ] All SDKs and model/human operation classifications match the server contracts.
-- [ ] Library and durable saved paths pass the complete acceptance journey.
-- [ ] Legacy catalogues, input restrictions, service ceilings and collection links remain compatible.
-- [ ] Required format, default checks, shared SDK and focused database gates pass.
-- [ ] Capability activation and rollback retain enforcement under all tested modes.
+- [x] Authorised recommendations and exact policy/DTO/error matrix implemented.
+- [x] Durable obligations commit transactionally; widening is refused pending a separate release workflow.
+- [x] Policy administration is scoped, audited and version-fenced.
+- [x] Existing public read owners retain central effective-policy enforcement before disclosure.
+- [x] Resource heads, tag sets, relationships and backlinks preserve agreed meaning.
+- [x] SDKs and model/human operation classifications match the server contracts.
+- [x] Library navigation, relationship controls and saved-path reopening pass isolated Electron acceptance checks; PostgreSQL proves durable state.
+- [x] Legacy catalogue/input/service compatibility checks pass; collection-link operations retain their existing contract.
+- [x] Required format, default checks, shared SDK and focused database gates pass.
+- [x] Writes default off and disabling writes retains read enforcement; rollback to an unaware binary is explicitly unsupported.
+
+## Local verification record
+
+The owning generators updated operation schemas, native SDK DTOs, public-boundary
+fixtures, the client capability inventory and model menus together. Public main was
+fetched at `a6d642a9c8a12d419e6bb3c680617c7e826cdc3e`; its migrations ended at V142.
+The schema baseline uses V143–V146; this milestone adds V147, with no duplicate
+versions or edits to shipped migrations.
+
+| Gate | Local result |
+| --- | --- |
+| `./gradlew format` | Passed after Java/TypeScript changes |
+| `./gradlew check formatCheck --no-daemon --no-parallel --max-workers=2` | Passed on the final source, 125 tasks; 3m 58s |
+| `./gradlew sdkCheck --no-daemon --no-parallel --max-workers=2` | Passed Java and shared Node/Python/.NET/Go checks, including 384 boundary fixtures across 267 operations |
+| Focused PostgreSQL tests below | Passed: 15 navigation, 39 existing document-policy and 7 authored-persistence cases; zero failures/errors/skips |
+| Desktop `test:document-navigation` | Passed isolated Electron/SDK/IPC/WebSocket journey: relationships including pinned creation/removal, latest heads, locked labels, breadcrumbs, saved views, pinning and revocation |
+| Screenshot inspection and `git diff --check` | Passed |
+
+One intermediate default run failed the existing `CodeMapToolTest` symbol-count
+assertion (zero instead of three); its class took 2.093 seconds, consistent with
+the parser's two-second deadline. The five-case class passed in isolation and
+subsequent complete checks passed. No code-map implementation or test was changed.
+The final run also passed the model graph source-revocation regression assertion.
+
+The database gate was limited to migration/SQL enforcement, row mapping,
+transaction rollback, concurrent version fencing and durable obligation/receipt
+assertions. Service/boundary cases otherwise use mocked repositories. Exact command:
+
+```sh
+./gradlew :plowshare-server:test -PfullDb \
+  --tests 'io.aeyer.plowshare.server.information.DocumentNavigationPersistenceTest' \
+  --tests 'io.aeyer.plowshare.server.information.DocumentPoliciesTest' \
+  --tests 'io.aeyer.plowshare.server.information.AuthoredInformationPersistenceTest' \
+  --no-daemon --no-parallel --max-workers=2
+```
+
+The read inventory routes catalogue/content/history, retrieval/ranking/evidence,
+facets, jobs/results and live events through `InformationSql` or the central
+`information_readable` predicate. V147 adds effective reference checks there;
+the separate pending-owner catalogue fallback was removed, and worker authority
+also checks reference policy. Cross-project related sets use each target's durable
+scope, while machine credentials retain their selected-project ceiling. Tests
+cover non-propagating intermediaries, inverse edges, unlink retention, cyclic and
+oversized closures, quarantine, same request UUIDs across accounts, and retained
+legacy corpus/input behavior. Model-tool coverage also refuses a graph if its source
+is revoked before the retained input can be bound, even for locked-only neighbors.
+
+These results establish local source behavior. The Electron transport is an
+isolated fixture, not a deployed server. No merge, deployment, activation or live
+interchange/export claim follows from these checks.
 
 ## Scope limits
 

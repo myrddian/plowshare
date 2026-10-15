@@ -569,15 +569,6 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
         context.selection().project(),
         context.selection().includeShared(),
-        context.account(),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().project(),
-        context.account(),
-        context.account(),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().project(),
-        context.selection().includeShared(),
         context.typedView());
   }
 
@@ -598,16 +589,10 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + " AS \"tagGroups\",CASE WHEN q.tag_groups_manual THEN 'manual' ELSE 'automatic' END AS \"tagGroupsSource\","
           + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
           + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id";
-  // Pending sources have no corpus row yet; ownership and project admission still apply.
-  // Dependencies always require live permission.
+  // The central predicate also admits an authenticated pending source owner. A separate owner
+  // fallback would bypass live document policy and retained reference obligations.
   private static final String READABLE =
-      "r.availability='active' AND (information_readable(r.id,?,?,?,?) OR ("
-          + "NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id) AND q.owner_handle=? AND q.namespace<>'legacy'"
-          + " AND ((q.project_id IS NULL AND ?='personal') OR (q.project_id IS NOT NULL AND ?='project'"
-          + " AND EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id"
-          + " WHERE p.id=q.project_id AND p.name=? AND m.handle=?)))"
-          + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
-          + " AND NOT information_readable(i.input_revision,?,?,?,?))))";
+      "r.availability='active' AND information_readable(r.id,?,?,?,?)";
 
   public void event(
       UUID revision, long generation, String actor, String stage, String action, String detail) {

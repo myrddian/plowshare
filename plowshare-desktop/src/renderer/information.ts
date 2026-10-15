@@ -1,3 +1,4 @@
+import { installDocumentNavigation } from './document-navigation.ts';
 import {
   contentHtml,
   metadataObject,
@@ -77,6 +78,7 @@ export function installInformation(
     <dialog data-add-dialog aria-labelledby="source-add-title"><header class="dialog-header"><h2 id="source-add-title">Add a source</h2><button type="button" data-add-close>Close</button></header><p>Save text or import a public web page. Processing uses your server’s configured models.</p><p data-add-error role="alert" hidden></p><form data-add><label>Source name<input name="name" autofocus required maxlength="512" placeholder="A name you will recognise"></label><label>Text<textarea name="text" rows="5" placeholder="Paste the source text"></textarea></label><label>Or a public web page URL<input name="url" type="url" placeholder="https://…"></label><p>When a URL is supplied, the web page is imported instead of the pasted text.</p><button class="primary-button">Save source</button></form></dialog>
     <details class="information-report"><summary>Advanced: save a report with evidence references</summary><p>Use this when you already have source version and evidence IDs. Read and ask about sources above for everyday work.</p><form data-report><label>Report name<input name="name" required></label><label>Report text<textarea name="text" rows="6" required></textarea></label><label>Source version IDs, comma separated<input name="inputs" required></label><label>Evidence IDs, comma separated<input name="evidence"></label><label>Previous report version ID (for feedback)<input name="feedback"></label><button>Save draft report</button></form></details>`;
   let authored: InformationContentCapabilities | undefined;
+  let navigationIdentity = '';
   let authoredIdentity = '',
     typeIdentity = '';
   let availableTypes: readonly InformationTypeVersion[] = [];
@@ -307,6 +309,22 @@ export function installInformation(
     });
     return decodeReply(`information.${operation}`, answer.information);
   }
+  const navigation =
+    options.manual || options.kind === 'report'
+      ? undefined
+      : installDocumentNavigation(
+          api,
+          authoredControls.parentElement!,
+          scope,
+          () => JSON.stringify([state().base, state().handle, state().mode]),
+          () => state().handle,
+          () => state().serverAdmin === true,
+          () =>
+            availableTypes.map((t) => ({
+              id: t.contract.type,
+              label: t.contract.label,
+            })),
+        );
   function requestId(operation: string, payload: object) {
     const key = JSON.stringify([scope(), operation, payload]);
     let id = requests.get(key);
@@ -337,6 +355,15 @@ export function installInformation(
           notice.hidden = false;
           notice.textContent =
             'This server has not advertised authored document types. Existing untyped sources remain available.';
+        }
+      }
+      if (navigation && navigationIdentity !== connectionIdentity) {
+        navigationIdentity = connectionIdentity;
+        try {
+          await navigation.probe();
+        } catch (reason) {
+          notice.hidden = false;
+          notice.textContent = `Document navigation is unavailable: ${errorMessage(reason)}`;
         }
       }
       const registryIdentity = JSON.stringify([connectionIdentity, scope()]);
@@ -1643,6 +1670,8 @@ export function installInformation(
           : 'personal';
       question.hidden = true;
       question.innerHTML = '';
+      navigation?.reset();
+      navigationIdentity = '';
       epoch++;
       selected = '';
       offset = 0;

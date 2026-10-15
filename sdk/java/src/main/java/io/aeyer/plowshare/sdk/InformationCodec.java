@@ -25,6 +25,14 @@ public final class InformationCodec {
       throw new IOException("information input must be an object");
     if (input.length() > 10 * 1024 * 1024)
       throw new IOException("information input exceeds 10 MiB");
+    if (operation.startsWith("documents.")
+        || operation.startsWith("relationships.")
+        || operation.startsWith("policy.")
+        || operation.startsWith("views.")
+        || operation.equals("navigation.capabilities")) {
+      if (!fields.has("scope")) throw new IOException("navigation requires explicit scope");
+      navigationFields(fields);
+    }
     ObjectNode body = fields.deepCopy();
     JsonNode scope = body.remove("scope"), project = body.remove("project");
     if (scope == null || scope.isNull()) {
@@ -51,6 +59,19 @@ public final class InformationCodec {
       throw new IOException("Typing members cannot be explicitly null");
     Class<? extends InformationRequest> shape =
         switch (operation) {
+          case "navigation.capabilities" -> InformationRequest.NavigationCapabilities.class;
+          case "documents.list" -> InformationRequest.DocumentList.class;
+          case "documents.facets" -> InformationRequest.DocumentFacets.class;
+          case "documents.get" -> InformationRequest.DocumentGet.class;
+          case "relationships.list" -> InformationRequest.RelationshipList.class;
+          case "relationships.create" -> InformationRequest.RelationshipCreate.class;
+          case "relationships.remove" -> InformationRequest.RelationshipRemove.class;
+          case "policy.get" -> InformationRequest.NavigationPolicyGet.class;
+          case "policy.set" -> InformationRequest.NavigationPolicySet.class;
+          case "views.list" -> InformationRequest.NavigationViews.class;
+          case "views.get" -> InformationRequest.NavigationViewGet.class;
+          case "views.save" -> InformationRequest.NavigationViewSave.class;
+          case "views.delete" -> InformationRequest.NavigationViewDelete.class;
           case "types.capabilities" -> InformationRequest.ContentCapabilities.class;
           case "content.get" -> InformationRequest.ContentRead.class;
           case "content.revise" -> InformationRequest.ContentRevise.class;
@@ -127,6 +148,37 @@ public final class InformationCodec {
     return SdkJson.decode(REQUESTS, body, shape);
   }
 
+  private static void navigationFields(JsonNode value) throws IOException {
+    if (value == null || value.isNull())
+      throw new IOException("navigation members cannot be explicitly null");
+    if (value.isObject()) {
+      var entries = value.fields();
+      while (entries.hasNext()) {
+        var entry = entries.next();
+        if (Set.of(
+                    "resource",
+                    "revision",
+                    "source",
+                    "requestId",
+                    "expectedSourceRevision",
+                    "relationship",
+                    "id",
+                    "relatedTo",
+                    "otherResource")
+                .contains(entry.getKey())
+            && (!entry.getValue().isTextual()
+                || !entry
+                    .getValue()
+                    .textValue()
+                    .matches("[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")))
+          throw new IOException("navigation identifier must be a UUID");
+        navigationFields(entry.getValue());
+      }
+    } else if (value.isArray()) {
+      for (var item : value) navigationFields(item);
+    }
+  }
+
   private static void action(ObjectNode body, String operation) throws IOException {
     if (body.has("action")) throw new IOException("action is derived from the operation");
     body.put("action", operation.toUpperCase(Locale.ROOT).replace('.', '_'));
@@ -168,6 +220,44 @@ public final class InformationCodec {
       throws IOException {
     var result =
         switch (request) {
+          case InformationRequest.NavigationCapabilities ignored ->
+              new InformationResponse.NavigationCapabilities(
+                  read(node, InformationNavigation.Capabilities.class));
+          case InformationRequest.DocumentList ignored ->
+              new InformationResponse.NavigationDocuments(
+                  read(node, InformationNavigation.Documents.class));
+          case InformationRequest.DocumentGet ignored ->
+              new InformationResponse.NavigationSelection(
+                  read(node, InformationNavigation.Selection.class));
+          case InformationRequest.RelationshipList ignored ->
+              new InformationResponse.NavigationConnections(
+                  read(node, InformationNavigation.Connections.class));
+          case InformationRequest.RelationshipCreate ignored ->
+              new InformationResponse.NavigationRelationship(
+                  read(node, InformationNavigation.Relationship.class));
+          case InformationRequest.RelationshipRemove ignored ->
+              new InformationResponse.NavigationChanged(
+                  read(node, InformationNavigation.Changed.class));
+          case InformationRequest.NavigationPolicyGet ignored ->
+              new InformationResponse.NavigationPolicy(
+                  read(node, InformationNavigation.PolicyView.class));
+          case InformationRequest.NavigationPolicySet ignored ->
+              new InformationResponse.NavigationPolicy(
+                  read(node, InformationNavigation.PolicyView.class));
+          case InformationRequest.NavigationViews ignored ->
+              new InformationResponse.NavigationViews(
+                  read(node, InformationNavigation.Views.class));
+          case InformationRequest.NavigationViewGet ignored ->
+              new InformationResponse.NavigationView(
+                  read(node, InformationNavigation.SavedView.class));
+          case InformationRequest.NavigationViewSave ignored ->
+              new InformationResponse.NavigationView(
+                  read(node, InformationNavigation.SavedView.class));
+          case InformationRequest.NavigationViewDelete ignored ->
+              new InformationResponse.NavigationChanged(
+                  read(node, InformationNavigation.Changed.class));
+          case InformationRequest.DocumentFacets ignored ->
+              new InformationResponse.Facets(read(node, Information.Facets.class));
           case InformationRequest.ContentCapabilities ignored ->
               new InformationResponse.ContentCapabilities(
                   read(node, InformationContent.Capabilities.class));
