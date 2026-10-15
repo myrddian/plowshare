@@ -20,6 +20,8 @@
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
+- [Document navigation and reference policy](decisions/0026-document-navigation-and-reference-policy.md) (proposed)
+- [Authored navigation implementation plan](authored-navigation-implementation.md) (proposed)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

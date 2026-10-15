@@ -8,6 +8,12 @@ records its delivery and verification. The [usage guide](authored-information.md
 describes the implemented content types and metadata-only workflow. The wider
 knowledge direction remains proposed; deployment is a separate action.
 
+[ADR 0026](decisions/0026-document-navigation-and-reference-policy.md) and the
+[navigation implementation plan](authored-navigation-implementation.md) define the
+proposed next milestone: document resolution, relationships, paths and configurable
+reference policy. They separate agreed behaviour from recommendations that still
+need review before implementation.
+
 Develop Plowshare's information system into a knowledge base that people and agents can author, connect, navigate and maintain together. The direction combines wiki-style documents and cross-references with intersecting metadata facets, building on the retained revisions, evidence, retrieval and processing that Plowshare already owns. Information is a first-class part of the platform, with useful reading, writing and navigation independent of a model run.
 
 Schema-defined content types are the first implementation milestone in that direction. A content type defines structured metadata, such as the severity and affected services of an incident report. Each typed information revision retains its exact type version and validated metadata. The document body, source bytes, evidence coordinates and processing lifecycle remain part of the existing information model.
@@ -31,15 +37,123 @@ The intended knowledge model brings these capabilities together:
 | Stable document identity and immutable revisions | Keep a continuing document while preserving exactly what earlier readers and runs used |
 | Markdown bodies and optional content types | Combine readable prose with a declared structure appropriate to a runbook, decision, glossary entry or incident report |
 | Authored cross-references and backlinks | Express relationships between documents and help readers discover the surrounding knowledge |
-| Intersecting facets | Find the same document through its type, tags, author and time without assigning it one canonical folder |
+| Tags and intersecting facets | Form aggregate views from sets of documents, combining type, tag, author and time selections without assigning one canonical folder |
+| Internal navigation paths | Record a journey through scopes, relationships and facet selections while keeping document identity independent of the route |
 | Editing and explicit permissions | Let authorised people and agents maintain knowledge with attribution and conflict detection |
 | Retained evidence and AI processing | Connect maintained knowledge to its sources, investigations and derived outputs |
 
-Schemas supply the structured meaning; links supply relationships; facets supply navigation; revision and permission rules support maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
+Schemas supply the structured meaning; relationships connect documents; facets narrow selections; internal paths describe navigation through both. Revision and permission rules support maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
 
-For example, a billing incident report can reference the runbook used during response and the architectural decision that explains the affected service. A reader can reach it through `content type = incident report`, `tag = billing` and a date range, then follow those relationships. The runbook can independently appear in operations and onboarding views. A breadcrumb records the selected intersection; it does not establish a filesystem path or move the document.
+For example, a billing incident report can reference the runbook used during response and the architectural decision that explains the affected service. A reader can reach it through `content type = incident report`, `tag = billing` and a date range, then follow those relationships. The runbook can independently appear in operations and onboarding views.
 
-Plowshare's current scopes, project membership, explicit sharing and information collections remain authoritative. Borrowing facet navigation does not create VOIDcore's single public pool or remove Plowshare's access boundaries. Saved views and collections can organise a reader's experience without becoming the only permitted location of a document. Counts, backlinks and suggested refinements must respect the same live access predicates as content reads.
+### Document sets and explicit relationships
+
+A tag denotes a set of documents. Selecting `billing` produces an aggregate view of accessible documents in that set; a document can belong to several sets. Facet selections intersect those sets, such as documents in both the Billing tag set and the Incident report type set. Membership groups documents for navigation without creating an explicit relationship between every pair of members or to a document named Billing.
+
+Explicit relationships connect continuing documents. The source belongs to the document's resource identity, and the target defaults to another document's resource UUID. For example, `Billing service —has runbook→ Refund recovery` remains a live document-to-document connection when either document gains a new revision. Following it opens the target's latest current revision under its lifecycle and access rules. Backlinks identify the continuing source documents, so edits do not strand discovery on their older revisions.
+
+Only an explicitly revision-pinned reference names one exact revision. Ordinary relationships must not implicitly pin either endpoint merely because a link was created while a particular body revision was current. Relationship changes need an audit history, but that history must not freeze live navigation to an earlier source revision. Evidence citations continue to identify exact retained revisions and remain distinct from ordinary relationships.
+
+### Content, reference visibility and propagation policy
+
+Reference handling is an explicit policy decision. A document whose content is locked may still be permitted to appear as a reference; another document may require its existence and associated references to remain hidden. Content access, discovery and restriction propagation must not be collapsed into one universal rule.
+
+The follow-on policy distinguishes three questions:
+
+1. **Content access:** who may read the body, metadata, exact revisions or derived content?
+2. **Reference visibility:** who may discover that the document exists, see a link or backlink, and receive which approved identifying fields?
+3. **Restriction propagation:** does referencing this document make the source subject to the target's restrictions, transitively?
+
+For example, reference visibility can support both of these behaviours:
+
+| Policy behaviour | What a reader without content access sees |
+| --- | --- |
+| Content locked, reference visible | An explicitly permitted reference with only policy-approved identity or label fields; opening the document still requires content access, and the ordinary link does not propagate the target's content restriction to its source |
+| Existence or reference hidden | No target entry, link, backlink, identifying metadata, preview or contribution to discovery counts |
+
+Reference visibility does not grant content access. A visible link cannot reveal a private title, excerpt or other field unless the policy separately permits its disclosure. Counts and aggregate views apply the relevant discovery policy; content-bearing search results and previews additionally require content access. Missing or unresolved policy fails closed. A reader or link creator cannot choose a permissive mode to bypass the target's policy.
+
+#### Configuration by project and document
+
+Plowshare's reference behaviour is configured at project and document level. Each project supplies defaults for content access, reference visibility and ordinary-reference propagation, and declares which settings documents may override. A document inherits those defaults unless an authorised document policy explicitly overrides an allowed setting. Project configuration can distinguish a default from a mandatory constraint: document overrides may choose another permitted behaviour but cannot weaken a project requirement.
+
+| Configuration level | Responsibility |
+| --- | --- |
+| Existing platform authority | Authentication, membership, explicit grants, retention and required input/evidence restrictions remain enforced |
+| Project policy | Select default behaviours, mandatory constraints and permitted document overrides |
+| Document policy | Inherit the defaults or select an authorised override within the project's allowed policy |
+
+Policy administration belongs to server administrators and project managers:
+
+This authority governs the new content/reference policy configuration and its overrides. Existing owner lifecycle controls retain their own contracts and operate within the effective policy; ownership does not additionally grant authority to change that policy configuration.
+
+| Actor | Policy-changing authority |
+| --- | --- |
+| Server administrator | Manage platform policy and mandatory constraints, project policies and document policies, including personal-document policies, through the applicable audited administration contracts |
+| Project manager | Manage defaults, project constraints and permitted document overrides within projects where the actor currently holds `MANAGER`, subject to mandatory platform constraints |
+| Document owner, contributor or viewer | No policy-changing authority solely through ownership, editing rights, membership or read access; creating a document inherits its applicable policy |
+
+A document owner who also holds the required administrator or project-manager role acts under that role when changing policy. A manager cannot change another project's target policy through a cross-project link. Personal documents have no project-manager authority; server administrators manage their policy baseline and overrides. Policy administration is distinct from content-read authority and does not itself grant access to a protected body.
+
+Enforcement must use current server-administrator status and current project roles, rechecked when applying the change. Plowshare already exposes these boundaries through `AdminStore.requireServerAdmin` and `ProjectMembers.requireRole(..., MANAGER)`; account existence alone is not administrator authority. Policy updates need an expected policy version and an atomic audit of actor, scope, previous/new settings and outcome. Demotion or removal of management authority must invalidate later policy changes, including from an existing session.
+
+For example, a project may default to content-locked/reference-visible documents with no ordinary-link propagation, while allowing individual documents to require hidden references and propagation. Another project may mandate those stronger restrictions for every document. These are project choices rather than one global navigation behaviour. Personal documents need an explicit account/platform policy baseline and the same controlled document override rules.
+
+Cross-project links evaluate both documents' applicable policies. A source project's permissive defaults cannot bypass a target document's required propagation or disclosure restrictions; source-side constraints may further restrict the result. Policy changes require the administrator/project-manager authority above, are auditable, and are rechecked on subsequent reads. These are server-owned policy settings, separate from schema metadata, tag labels and client display preferences. Exact defaults, allowed combinations and update/concurrency contracts must be specified before implementation; the policy-changing roles above are the agreed authority boundary.
+
+When the applicable policy requires propagation, an explicit reference creates a required access-policy dependency. If A references restricted B, reading A requires both A's own authority and satisfaction of B's applicable restrictions. If C references A, those restrictions also constrain C. Hiding just the link is insufficient in this mode: a source whose required dependency cannot be satisfied is itself unavailable, with its discoverability governed by the applicable visibility policy. A visible-reference policy without ordinary-link propagation may instead leave A readable while B's content remains locked.
+
+Restrictions flow from the referenced target to the referencing source. B does not inherit A's restrictions merely because the system generates a backlink. Each dependency is evaluated under its own scope and sharing rules; no reference copies an access grant or creates project membership. Reference creation requires authority to edit the source and the target's required reference authority. Where policy permits references without content access, that authority is distinct from permission to read the target body.
+
+Tags remain document-set membership. Sharing a tag does not by itself create reference dependencies or propagate a private member's restrictions to every other member. Aggregate views disclose only the members and fields permitted by their applicable policies.
+
+All modes retain these invariants:
+
+- **Live links use live policy.** Ordinary references follow continuing document identities and their latest current revisions. Policy, membership, withdrawal and current-revision changes are rechecked when reopening paths or serving cached projections. A stale cache is not authority to disclose content or references.
+- **Pinned content does not pin permission.** Exact revision references retain their target revision, but applicable access and retention restrictions remain live. Pinning cannot preserve revoked access.
+- **Propagation is enforced consistently where required.** Browsing, search, retrieval, model reads, history, sharing and export apply the required dependency closure before disclosure. Unresolved dependencies and exhausted evaluation bounds fail closed; cycles require bounded evaluation rather than recursive grants.
+- **Navigation policy cannot release derived content.** Existing retained input/evidence dependencies still constrain reports and other derived outputs, even when ordinary links may remain visible without propagation. Hiding or removing a rendered link cannot release protected information already retained in the source body. Removing a relationship is not automatic declassification; authorised release and historical restriction handling need their own rules.
+
+Plowshare already constrains derived outputs through retained information inputs, including uncited inputs. Policy-controlled discovery and propagation for live authored references are follow-on platform work, not new permissions supplied by the schema milestone. Their contracts must cover cross-project evaluation, policy changes, atomic relationship admission and historical retention while keeping ordinary relationships distinct from evidence citations.
+
+### Internal navigation paths
+
+A navigation path is an internal sequence of steps that lands a reader at a selection or document. It does not require an HTTP URL or a public HTTP route. Clients express the journey through navigation state and the platform's public operations, using WebSocket operations where supported. Displaying a path creates no filesystem directory or canonical parent for a document.
+
+Two kinds of steps work together:
+
+- **Facet selection** narrows the current collection. `Operations → Incident reports → Billing` means incident reports tagged Billing in the Operations project. Selecting that tag does not create a relationship to a Billing document. Each selection intersects the existing filters; available refinements and counts are recalculated from the authorised matching records. Search can further narrow that selection.
+- **Relationship traversal** follows an explicit connection between documents. `Billing service → Related incidents → Incident 42` follows a declared relationship and opens a target document. Its meaning comes from the relationship contract, not from a matching label, tag or UUID-shaped metadata string.
+
+A path can combine scope, relationship and facet steps:
+
+```text
+Operations → Billing service → Runbooks → Refund recovery
+```
+
+| Step | Meaning |
+| --- | --- |
+| Operations | Select the project scope |
+| Billing service | Open the service document by its stable resource identity |
+| Runbooks | Follow its declared relationship to related documents and filter the resulting selection to the runbook content type |
+| Refund recovery | Open a matching runbook document |
+
+The same runbook can be reached through another service, a tag selection, a saved view or a direct document selection. Navigating through another path does not move, duplicate or reparent it. Resource UUIDs identify continuing documents, revision UUIDs identify exact retained versions, and path labels are presentation rather than identity.
+
+Today, each retained resource also has a source name unique within its personal or project namespace. That scoped name is its named admission locator: re-ingesting the same namespace/name targets the existing resource and creates a revision under the applicable ownership and admission rules. A source name such as `runbooks/refunds.md` can contain slashes without defining directories, parent documents or relationships. There is currently no canonical knowledge-navigation path. Proposed paths coexist with scoped source names and resolve document targets by stable resource UUID, or revision UUID when explicitly pinned. Changing the journey to a document does not rename its source or change its identity.
+
+Which version opens follows the expected user behaviour:
+
+- **Ordinary navigation opens the latest current revision.** A document selection or unpinned relationship targets the continuing resource UUID. Opening it selects that document's latest current revision under its lifecycle and access rules. Later edits become visible through the same document target; a saved view with that target follows the latest current revision when reopened.
+- **An exact reference opens the named revision.** Revision-history selections, pinned relationships and evidence citations retain the specific revision UUID. Later edits do not retarget them or replace the content they reference.
+
+Both cases recheck current access. An unavailable, withdrawn, deleted or inaccessible target is shown as unavailable without exposing private details. Navigation must not silently fall back to an older revision, a different document or a same-named resource in another namespace.
+
+Breadcrumbs record the journey, including relationship and filter steps. Returning to an earlier breadcrumb restores that step's selection; removing a facet broadens the relevant selection without changing document relationships. Saved views retain useful navigation steps and filters, referencing stable identities rather than relying on displayed names. Reopening a saved view reevaluates it against current records and permissions; it is not a frozen result set or an access grant.
+
+These are follow-on navigation requirements. Document-set views identify members by resource UUID and show one entry per document, opening its latest current revision unless an exact revision was explicitly selected. Existing catalogue operations that enumerate or count revisions retain their contracts; document-level navigation requires an explicit projection rather than silently changing revision counts. The initial schema milestone supplies exact type/version filtering and existing facets. Saved-path persistence and explicit relationship traversal still require their owning contracts. General custom-metadata fields such as severity or status do not become queryable facets simply because a schema declares them.
+
+Plowshare's current scopes, project membership, explicit sharing and information collections remain authoritative, further constrained by reference dependencies where the applicable policy requires propagation. Borrowing facet navigation does not create VOIDcore's single public pool or remove Plowshare's access boundaries. Saved views and collections can organise a reader's experience without becoming the only permitted location of a document. Every traversal and reopened path rechecks content access, reference visibility and any required propagated restrictions. Counts, backlinks and suggested refinements must respect the applicable live discovery policy, with content reads enforcing their additional access rules. No view may expose fields or identities that its policy protects.
 
 Authored relationships must also stay distinguishable from evidence. A link meaning “related decision” does not prove a claim; a citation identifies evidence from an exact retained revision. Later relationship work should support links to a continuing resource and separately pinned revision references, with explicit semantics for each. It must not reinterpret existing evidence links as ordinary wiki links.
 
@@ -298,8 +412,8 @@ The broader destination is an authored knowledge system with wiki relationships,
 | Stage | Result | Scope |
 | --- | --- | --- |
 | Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and a minimal human authoring/read/revise flow | Detailed implementation milestone below, including safe metadata-only processing |
-| Authoring and navigation | Expand the initial Library workflow into a coherent knowledge experience, narrow it through facets and retain useful views | Follow-on client and workflow design over public operations |
-| Authored relationships | Cross-references and permission-aware backlinks connect maintained documents, separately from evidence citations | Follow-on relationship and identity design |
+| Authoring and navigation | Expand Library into a coherent knowledge experience with internal navigation paths, facet steps, breadcrumbs and saved views | Follow-on client/workflow design and saved-navigation contracts; HTTP URL design is unnecessary |
+| Authored relationships | Add explicit relationship traversal to internal paths, with cross-references, project/document policy-controlled visibility and propagation, and permission-aware backlinks distinct from evidence citations | Follow-on relationship, identity and restriction-policy design, including project defaults/constraints, document overrides, live versus pinned targets, cross-project dependencies and authorised release |
 | Collaborative maintenance | Explicit editor grants, attribution and conflict handling support shared upkeep | Follow-on authority design preserving owner-only management controls |
 | Portable interchange | Readable Markdown exports and structured bundles support external editing and authorised reimport | Follow-on public export/import contracts; the current schema design preserves the necessary data |
 
