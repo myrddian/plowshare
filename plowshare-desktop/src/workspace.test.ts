@@ -6,7 +6,14 @@ import type { Request as WsRequest } from 'plowshare-client-ts/operations/direct
 import type { Arrival } from 'plowshare-client-ts/binding/connection';
 import type { SavedProject } from './project-config.ts';
 import { present } from './fixture.test-support.ts';
-import { mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  realpath,
+  writeFile,
+  readFile,
+  rm,
+} from 'node:fs/promises';
 import { tmpdir, hostname } from 'node:os';
 import { thisMachine } from 'plowshare-client-node/marker';
 import { join } from 'node:path';
@@ -76,13 +83,22 @@ function fixture(
                     reason: fileRefusal,
                   };
                   listeners.get('close')?.(closing);
-                } else
+                } else {
+                  // Accepted ordinary file claims register a project on the server.
+                  if (
+                    !claim.project.startsWith('client:') &&
+                    !serverProjects.some(
+                      (project) => project.name === claim.project,
+                    )
+                  )
+                    serverProjects.push(projectWire(claim.project));
                   listeners.get('message')?.({
                     data: JSON.stringify({
                       ready: true,
                       project: claim.project,
                     }),
                   });
+                }
               }, 1);
               return {
                 addEventListener(type: string, fn: (event: Arrival) => void) {
@@ -668,6 +684,94 @@ await test('job recovery keeps receipts for unavailable projects instead of dele
     ),
     false,
   );
+});
+
+await test('choosing a new ordinary folder can register its project without allowing unlisted navigation', async () => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), 'workspace-new-')),
+  );
+  const root = join(directory, 'New project');
+  const { workspace, fileClaims, savedWrites, setServerProjects } = fixture(
+    undefined,
+    undefined,
+    true,
+  );
+  try {
+    await mkdir(root);
+    await mkdir(join(directory, 'plowshare'));
+    await connect(workspace);
+    await assert.rejects(
+      workspace.dispatch({ action: 'scope', project: 'New project' }),
+      /available project/,
+    );
+    assert.deepEqual(fileClaims, []);
+    const reply = await workspace.rootDirectory(root);
+    assert.equal(reply.rootProject, 'New project');
+    assert.deepEqual(fileClaims, ['New project']);
+    assert.equal(workspace.state.files.status, 'ready');
+    assert.equal(savedWrites.at(-1)?.path, root);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(root, '.plowshare/project'), 'utf8')),
+      { version: 1, name: 'New project' },
+    );
+    await workspace.dispatch({ action: 'refresh' });
+    assert.ok(
+      workspace.state.projects.some((row) => row.name === 'New project'),
+    );
+    // A later revocation still overrides the saved mapping and live child snapshot.
+    setServerProjects([projectWire('Research'), projectWire('Writing')]);
+    await workspace.dispatch({ action: 'refresh' });
+    assert.ok(
+      !workspace.state.projects.some((row) => row.name === 'New project'),
+    );
+    await assert.rejects(
+      workspace.dispatch({ action: 'scope', project: 'New project' }),
+      /available project/,
+    );
+    assert.deepEqual(fileClaims, ['New project']);
+  } finally {
+    await workspace.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test('a server refusal of a newly chosen folder stays unavailable and writes no marker', async () => {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), 'workspace-refused-new-')),
+  );
+  const { workspace, fileClaims, refuseFiles } = fixture(
+    undefined,
+    undefined,
+    true,
+  );
+  try {
+    await connect(workspace);
+    refuseFiles('This account may not root this project.');
+    await assert.rejects(
+      workspace.rootDirectory(root, 'Unavailable'),
+      /may not root/,
+    );
+    assert.deepEqual(fileClaims, ['Unavailable']);
+    assert.ok(
+      !workspace.state.projects.some((row) => row.name === 'Unavailable'),
+    );
+    assert.ok(
+      !workspace.state.projectFolders?.some(
+        (row) => row.name === 'Unavailable',
+      ),
+    );
+    await assert.rejects(readFile(join(root, '.plowshare/project')), {
+      code: 'ENOENT',
+    });
+    await assert.rejects(
+      workspace.dispatch({ action: 'scope', project: 'Unavailable' }),
+      /available project/,
+    );
+    assert.deepEqual(fileClaims, ['Unavailable']);
+  } finally {
+    await workspace.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 await test('manifest folders use their own project connection and are not persisted for other clients', async () => {
