@@ -4,6 +4,7 @@ import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import type { Payloads, Reply } from 'plowshare-client-ts';
 import type { Operation } from 'plowshare-client-ts/operations/direct';
 import { McpProvider } from './provider.ts';
+import { McpToolClient } from './tool-client.ts';
 import type { ProviderConnection } from './provider.ts';
 import {
   Credentials,
@@ -19,6 +20,106 @@ import { decodeMcpTool, object } from './codec.ts';
 import { DEFAULT_LIMITS } from './settings.ts';
 import { rawTool } from './wire.test-support.ts';
 import { setTimeout as pause } from 'node:timers/promises';
+
+await test('failed discovery refresh retires the direct client instead of retaining stale execution authority', async () => {
+  const sessions = new Sessions();
+  const client = await McpToolClient.discover(
+    sessions,
+    new AbortController().signal,
+  );
+  const page = sessions.page.bind(sessions);
+  try {
+    sessions.page = () => Promise.reject(new Error('Discovery disconnected'));
+    await assert.rejects(client.refresh(new AbortController().signal));
+    sessions.page = page;
+    const tool = client.tools[0];
+    assert.ok(tool);
+    assert.equal(
+      (
+        await client.invoke(
+          tool.name,
+          { values: [{ name: 'one' }] },
+          new AbortController().signal,
+        )
+      ).state,
+      'REJECTED',
+    );
+    assert.equal(sessions.calls, 0);
+  } finally {
+    await client.close();
+  }
+});
+
+await test('cancelled discovery cannot renew an old snapshot even if its page arrives late', async () => {
+  const session = new Sessions();
+  const client = await McpToolClient.discover(
+    session,
+    new AbortController().signal,
+  );
+  let release: (() => void) | undefined;
+  const page = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  session.page = async () => {
+    await page;
+    return { tools: session.tools, cursor: null };
+  };
+  const controller = new AbortController();
+  try {
+    const refreshing = client.refresh(controller.signal);
+    controller.abort();
+    release?.();
+    await assert.rejects(refreshing);
+    const tool = client.tools[0];
+    assert.ok(tool);
+    assert.equal(
+      (
+        await client.invoke(
+          tool.name,
+          { values: [] },
+          new AbortController().signal,
+        )
+      ).state,
+      'REJECTED',
+    );
+    assert.equal(session.calls, 0);
+  } finally {
+    release?.();
+    await client.close();
+  }
+});
+
+await test('a transport already known closed refuses a new effect before calling the session', async () => {
+  const closed = new AbortController();
+  const sessions = new Sessions();
+  const client = await McpToolClient.discover(
+    {
+      closedSignal: closed.signal,
+      page: () => sessions.page(),
+      call: () => sessions.call(),
+      close: () => sessions.close(),
+    },
+    new AbortController().signal,
+  );
+  try {
+    const tool = client.tools[0];
+    assert.ok(tool);
+    closed.abort();
+    assert.equal(
+      (
+        await client.invoke(
+          tool.name,
+          { values: [] },
+          new AbortController().signal,
+        )
+      ).state,
+      'REJECTED',
+    );
+    assert.equal(sessions.calls, 0);
+  } finally {
+    await client.close();
+  }
+});
 
 await test('separate credential subjects and generations create separate sessions and offered identities', async () => {
   const first = new Credentials(),

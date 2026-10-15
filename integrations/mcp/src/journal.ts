@@ -8,11 +8,33 @@ import {
 import { decodeToolCall } from 'plowshare-client-node/tools';
 import type { ToolJournal, ToolReceipt, ToolResult } from 'plowshare-client-ts';
 import { object, text } from './codec.ts';
+import { unknownResult } from './contracts.ts';
+
+/** Recover only while holding the journal's exclusive process/binding lock and after validating
+ * its owner/contract. An executing receipt proves intent, not completion or absence of an effect.
+ * Reuse the SDK's ready/UNKNOWN shape without publishing, consuming requests or inventing a new
+ * execution. Original requests and worker fences remain untouched for owning reconciliation.
+ */
+export async function recoverInterrupted(journal: ToolJournal): Promise<void> {
+  for (const receipt of await journal.all()) {
+    if (receipt.phase === 'executing')
+      await journal.save({
+        ...receipt,
+        phase: 'ready',
+        result: unknownResult(),
+        occurredAt: null,
+      });
+  }
+}
 
 function decodeReceipt(source: unknown): ToolReceipt {
   const raw = object(source);
   const invocationId = text(raw.invocationId, 36);
-  const request = textRequest(raw.request);
+  if (typeof raw.request !== 'string')
+    throw new Error('Invalid journal request');
+  const request = raw.request;
+  // The public decoder owns the complete envelope bound in UTF-16 units, not UTF-8 bytes.
+  // A second byte ceiling here would reject valid Unicode calls before durable intent.
   if (decodeToolCall(request).invocationId !== invocationId)
     throw new Error('Conflicting journal invocation');
   const phase = raw.phase;
@@ -61,11 +83,6 @@ function decodeReceipt(source: unknown): ToolReceipt {
           },
         }),
   };
-}
-function textRequest(value: unknown): string {
-  if (typeof value !== 'string' || Buffer.byteLength(value) > 32768)
-    throw new Error('Invalid journal request');
-  return value;
 }
 export function uuid(value: unknown): string {
   if (

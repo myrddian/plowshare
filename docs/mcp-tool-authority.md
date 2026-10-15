@@ -82,6 +82,8 @@ including upstream `isError`, is `COMPLETED`. An unverifiable dispatched effect 
 identity and fence. A model instruction, new credential, catalogue refresh or
 approval cannot authorize repeating an uncertain effect. Use read-only owning
 receipt reconciliation; never resubmit to recover a missing response.
+See [cancellation and recovery](mcp-recovery.md) for the phase-by-phase behavior and
+the remaining public lifecycle capability limits.
 
 ## Verification boundaries
 

@@ -13,6 +13,75 @@ import { McpWire } from './wire.test-support.ts';
 import type { McpProtocol } from './contracts.ts';
 
 for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
+  for (const stop of ['abort', 'close'] as const) {
+    await test(`${protocol}: STDIO ${stop} cancels the exact submitted request and restart never repeats its uncertain effect`, async () => {
+      const fixture = await nativeFixture(protocol, 'hang');
+      const sessions = new NativeMcpSessions({ NATIVE_SELECTED: 'one' });
+      const host = await NativeMcpHost.start(
+        fixture.config,
+        fixture.config.owner,
+        sessions,
+        true,
+      );
+      try {
+        const tool = host.tools[0];
+        assert.ok(tool);
+        const input = {
+          invocationId: randomUUID(),
+          tool: tool.name,
+          arguments: { values: [{ name: 'one' }] },
+          deadline: new Date(Date.now() + 2000).toISOString(),
+        };
+        const controller = new AbortController();
+        const pending = host.invoke(input, controller.signal);
+        const deadline = Date.now() + 1000;
+        while (
+          !(await fixture.seen()).some((row) => row.method === 'tools/call') &&
+          Date.now() < deadline
+        )
+          await delay(5);
+        assert.equal(
+          (await fixture.seen()).filter((row) => row.method === 'tools/call')
+            .length,
+          1,
+        );
+        if (stop === 'abort') controller.abort();
+        else await host.close();
+        assert.equal((await pending).state, 'UNKNOWN');
+        await host.close();
+        const seen = await fixture.seen();
+        const call = seen.find((row) => row.method === 'tools/call');
+        assert.ok(call);
+        const cancellations = seen.filter(
+          (row) => row.method === 'notifications/cancelled',
+        );
+        assert.equal(cancellations.length, 1);
+        assert.equal(cancellations[0]?.cancelledRequestId, call.requestId);
+        const restarted = await NativeMcpHost.start(
+          fixture.config,
+          fixture.config.owner,
+          sessions,
+          true,
+        );
+        try {
+          assert.equal((await restarted.invoke(input)).state, 'UNKNOWN');
+        } finally {
+          await restarted.close();
+        }
+        assert.equal(
+          (await fixture.seen()).filter((row) => row.method === 'tools/call')
+            .length,
+          1,
+        );
+      } finally {
+        await host.close();
+        await fixture.close();
+      }
+    });
+  }
+}
+
+for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
   await test(`${protocol}: direct STDIO uses selected env, nested values, private receipts and no Relay`, async () => {
     const fixture = await nativeFixture(protocol);
     const sessions = new NativeMcpSessions({

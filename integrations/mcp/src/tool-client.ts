@@ -21,6 +21,7 @@ export async function discoverTools(
   for (let page = 0; page < limits.maxPages; page++) {
     signal.throwIfAborted();
     const next = await session.page(cursor, signal);
+    signal.throwIfAborted();
     tools.push(...next.tools);
     if (
       Buffer.byteLength(JSON.stringify(tools.map((tool) => tool.metadata))) >
@@ -51,6 +52,8 @@ export async function discoverTools(
 export class McpToolClient {
   private active = true;
   private busy = false;
+  private readonly lifetime = new AbortController();
+  private closing: Promise<void> | undefined;
   private constructor(
     private readonly session: McpSession,
     readonly tools: readonly McpTool[],
@@ -69,21 +72,43 @@ export class McpToolClient {
   }
   async refresh(signal: AbortSignal): Promise<void> {
     if (!this.active) throw new Error('MCP context is unavailable');
-    const fresh = await discoverTools(this.session, signal, this.limits);
-    if (
-      contractHash(fresh.map((tool) => tool.metadata)) !==
-      contractHash(this.tools.map((tool) => tool.metadata))
-    ) {
+    try {
+      const fresh = await discoverTools(
+        this.session,
+        this.signal(signal),
+        this.limits,
+      );
+      if (
+        contractHash(fresh.map((tool) => tool.metadata)) !==
+        contractHash(this.tools.map((tool) => tool.metadata))
+      )
+        throw new Error(
+          'MCP catalogue changed; stop and review a new snapshot',
+        );
+    } catch (error) {
+      // Discovery loss/abort is not a renewal of the last known snapshot. Retire the context
+      // and abort any concurrent effect; only a new explicitly reviewed client may offer again.
       this.active = false;
-      throw new Error('MCP catalogue changed; stop and review a new snapshot');
+      this.lifetime.abort();
+      throw error;
     }
+  }
+  private signal(caller: AbortSignal): AbortSignal {
+    return AbortSignal.any([
+      caller,
+      this.lifetime.signal,
+      ...(this.session.closedSignal === undefined
+        ? []
+        : [this.session.closedSignal]),
+    ]);
   }
   async invoke(
     name: string,
     arguments_: ToolObject,
     signal: AbortSignal,
   ): Promise<ToolResult> {
-    if (!this.active || this.busy || signal.aborted)
+    const lifetime = this.signal(signal);
+    if (!this.active || this.busy || lifetime.aborted)
       return rejected('MCP context is unavailable; no call was sent.');
     const tool = this.tools.find((tool) => tool.name === name);
     if (tool === undefined)
@@ -99,19 +124,24 @@ export class McpToolClient {
     try {
       return result(
         tool,
-        await this.session.call(tool, values, signal),
+        await this.session.call(tool, values, lifetime),
         this.limits.maxResultBytes,
       );
     } catch {
       this.active = false;
+      this.lifetime.abort();
       return unknownResult();
     } finally {
       this.busy = false;
     }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.active = false;
-    await this.session.close();
+    // Abort the request first so close stops the local wait and lets the transport send its
+    // supported cancellation signal. This is not proof that the upstream effect was undone.
+    this.lifetime.abort();
+    this.closing ??= this.session.close();
+    return this.closing;
   }
 }
 

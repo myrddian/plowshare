@@ -25,7 +25,10 @@ export interface McpReply {
   readonly structured: ToolValue | undefined;
   readonly isError: boolean;
 }
-/** A session belongs to exactly one released credential context; implementations never retry effects. */
+/** A session belongs to exactly one released credential context; implementations never retry effects.
+ * Operations honor their AbortSignal by ending the local wait and requesting supported transport
+ * cancellation. Neither signal settlement nor close proves that an upstream effect was undone.
+ */
 export interface McpSession {
   /** Transport loss ends availability; optional for existing injected session implementations. */
   readonly closedSignal?: AbortSignal;
