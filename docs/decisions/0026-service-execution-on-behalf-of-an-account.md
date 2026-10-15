@@ -1,4 +1,4 @@
-# ADR 0024: Service execution on behalf of an account
+# ADR 0026: Service execution on behalf of an account
 
 Status: proposed. Drafted for discussion; implementation is not authorized.
 Changing core requires the separate platform authorization described in
@@ -16,19 +16,20 @@ token principal `@service/<token UUID>`. Authorization, ownership, conversations
 memory and accounting all follow that identity. There is no way to express
 "this Application performs this request for that account".
 
-A chat bridge shows the gap. A Discord, Teams or iMessage adapter receives
-messages from several people and should let each of them talk to their own bot,
-with their own Personal space, project roles, conversations and memory. Today the
-adapter has two options, and both fail:
+A chat bridge shows the gap. A Discord, Teams or iMessage adapter can serve both
+ordinary external users and people who also have a Plowshare account. Ordinary
+external users can use the bridge's own bounded service identity. A Plowshare
+user may additionally want their own Personal space, project roles, conversations
+and memory. For that personal access, today's alternatives are insufficient:
 
 - **Run everything as the adapter's service principal.** Every chat user shares
   one authority, one conversation owner and one memory scope. Service tokens
   cannot reach Personal space. Plowshare cannot tell which person asked for what.
-  The A2A receiver's external client aliases follow this model; it suits a public
-  entry point, not a personal assistant.
-- **Hold each person's own credential.** The adapter becomes full impersonation:
-  all of the account's authority, every session, no attribution, and a single
-  compromised adapter exposes every linked account.
+  The A2A receiver's external client aliases follow this model; it remains useful
+  for ordinary external users but does not provide a person's own account scope.
+- **Hold each person's unrestricted login credential.** The adapter becomes full
+  impersonation: all of the account's authority, every session, no attribution,
+  and a single compromised adapter exposes every linked account.
 
 The same shape appears in [ADR 0019](0019-mcp-provider-hosting.md), gap 3:
 Application calls require caller and provider identity equality, and a separate
@@ -52,13 +53,37 @@ and enforce the intersection on every later permission check.
 
 ## Decision
 
-Acting for an account needs three things, each owned by a different party:
+### Two ways to use the same bridge
+
+The bridge always authenticates to Plowshare with its own Application token. The
+Application and acting-context flow remain separate: a person's acting token is
+additional authority for a specific subject, not a replacement Application login.
+
+| User | Execution and authority |
+| --- | --- |
+| Ordinary Discord user without a Plowshare account | Requests run under the bridge's service identity, within its permissions, the Application's granted capabilities and the selected conversation/agent context's restrictions. An external alias identifies the caller but grants no additional access. |
+| Plowshare user who provisions an acting token | The same authenticated bridge opens an acting context for that account. Requests using that context can reach the subject's explicitly permitted scopes, including Personal, within the acting grant and token limits. |
+
+The bridge may pin an ordinary external user to a specific conversation with an
+agent. That routing restriction narrows what the user can do; it does not confer
+ownership of the conversation or access to a Plowshare account. A Discord identity,
+channel, conversation ID or choice of agent cannot itself open an acting context.
+
+The initial personal-bridge setup is direct provisioning: the Plowshare account
+owner places their acting token in the bridge's private credential configuration.
+It is not sent through Discord or another external chat channel. A personal
+bridge may be configured for one account; a bridge serving multiple people must
+keep each person's credential, context and conversation routing separate.
+
+### Authority for an acting context
+
+Acting for a Plowshare account needs three parts with distinct ownership:
 
 | Part | Owner | Answers |
 | --- | --- | --- |
 | **Actor**: the Application's owned service identity | Server administrator, through deployment | Who is asking? |
 | **Grant**: a named declaration in `plowshare.json` with an eligibility list | Server administrator, through deployment; eligibility through grant management | What may this Application ever do for anyone, and for whom? |
-| **Subject proof**: evidence that a specific person is present and consents | The person, or a trusted ticket system acting for them | For whom is this request, and did they agree? |
+| **Subject proof**: evidence of a specific account's delegated consent and its limits | The person, or a trusted ticket system acting for them | For whom may this request run, and with what delegated permissions? |
 
 Authority only ever narrows. For a server project, effective role is
 
@@ -72,6 +97,16 @@ min(subject's current role,
 and the subject must be on the grant's eligibility list. It is never a union.
 The last term lets a project manager remove the Application from a project without
 touching any grant or proof.
+
+Personal access is a separate, explicit capability: the acting grant and the
+subject's proof must both permit it, and the subject must be enabled and eligible.
+The Application service account does not gain Personal membership. The server
+admits access to that subject's Personal scope through the acting context while
+retaining the Application as actor. This supplies access unavailable in the
+ordinary external-user path without widening the Application's own identity.
+For server projects, the intersection above still applies; a person's token does
+not bypass the Application service account's project ceiling. Conversation,
+agent and tool restrictions continue to apply in either path.
 
 ### One invariant for every proof kind
 
@@ -91,6 +126,13 @@ The actor is the Application-owned service identity from ADR 0017,
 acting grants, because their identity is not tied atomically to the manifest
 that declares the grant. Token rotation keeps the principal and therefore its
 grants and proofs.
+
+The bridge's Application token authenticates the socket and supplies the actor's
+own permissions. The user's acting token authenticates the subject's delegation
+and supplies its permission limits when opening an acting context. In that sense
+the user's token carries both AUTH and PERMS for their delegated account access;
+it does not authenticate the socket as a different Application or grant the
+bridge an unrestricted human session. Both credentials remain at the bridge.
 
 ## Grant declaration
 
@@ -176,14 +218,28 @@ except the actor it was bound to.
 
 ### Identity links
 
-The verifier maps an external identity to a Plowshare account through one
-identity-link record: `{account, kind, issuer, externalSubject}`. The first slice
-writes links of kind `acting-token`, with the issuer being the Application and the
-external subject naming the person on the external channel, for example
-`discord:123456789`. Future verifiers add links of their own kind to the same
-record, created only by the account owner or by an administrator-configured
-mapping rule. A missing or ambiguous link is a refusal; there is no fallback by
-handle or email.
+An acting token identifies its issuing Plowshare account directly. A personal
+bridge configured for that account does not need an external identity-link record
+to establish the subject. Administrators manage eligibility, but do not need to
+manually map a Discord user for this personal setup.
+
+External user routing is a separate responsibility. When a bridge accepts
+external messages, it must authenticate the external sender and apply an explicit
+configured binding before choosing a person's credential or acting context. Even
+a personal bridge must restrict which external senders can use its owner's
+delegation. Possession of a Discord user ID or knowledge of a conversation ID is
+not proof of control of that identity. Ordinary users cannot select another
+person's context or inherit the bridge owner's token.
+
+If an external identity link is recorded, it has the shape
+`{account, kind, issuer, externalSubject}`. For `acting-token`, the issuer is the
+Application and the optional external subject identifies the external user. The
+account owner establishes that association during provisioning; a shared bridge's
+self-service identity-linking ceremony remains separate design work. A missing
+required binding or an ambiguous binding is refused, with no fallback by handle,
+email or another person's context. Future federated verifiers may require links
+of their own kind, created only by the account owner or an administrator-configured
+mapping rule.
 
 ### First proof kind: acting token
 
@@ -199,22 +255,31 @@ acting.token.issue {
 - It is refused unless the person is eligible for the grant, the grant accepts
   `acting-token`, and the requested projects and Personal flag are within the
   grant. The person may choose less than the grant allows, never more.
-- The response returns a one-time credential beginning with `psa_`. The server
-  stores its digest only.
+- The response reveals a credential beginning with `psa_` once. It remains usable
+  until expiry or revocation; the server stores its digest only.
 - The token is bound to that Application and grant. Presented by any other actor,
   it is refused and audited.
 - The person lists and revokes their tokens from any client under **Connected
   services**. Administrators can revoke but never issue them.
 
-The person then gives the credential to the integration, for example by pasting it
-into a direct message to the bridge. That channel may retain it indefinitely,
-which actor binding makes acceptable: the credential grants nothing to anyone who
-lacks the Application's own token.
+The person provisions the credential directly into the bridge's private credential
+configuration, separate from its Application token and public routing settings.
+The credential is held at the bridge and passed only to Plowshare's proof exchange;
+it is not pasted into a Discord DM, channel, agent conversation or other external
+message. Credentials must not appear in manifest source, conversation history,
+ordinary configuration summaries or logs.
+
+Actor binding means the acting token alone is insufficient without the bound
+Application's authentication. The bridge intentionally holds both credentials and
+is trusted to exercise the delegated permissions until expiry or revocation. The
+acting token records continuing consent; it does not prove the person is present
+for each later request.
 
 ## Using a proof
 
-The integration exchanges a proof for an **acting context** once, then refers to
-the context on each request:
+After authenticating with its Application token, the integration exchanges a
+person's proof for an **acting context** once, then refers to the context on each
+request for that person:
 
 ```text
 acting.context.open {
@@ -225,13 +290,18 @@ acting.context.open {
 ```
 
 Requests then carry `actingFor: {"context": "<UUID>"}`. Requests without
-`actingFor` keep today's behaviour under the actor's own identity.
+`actingFor` keep today's behaviour under the actor's own identity, including the
+ordinary Discord-user path. An invalid or expired acting context is a refusal;
+the bridge must not silently drop `actingFor` and retry under its service identity.
 
 - A context belongs to the authenticated socket session that opened it, and
   closing that session ends it. The SDK's shared connection can hold contexts for
   many people at once.
 - `validUntil` is the earlier of the proof's validity and a server maximum.
 - Proof credentials cross the wire once per context, not once per request.
+- A personal bridge normally uses one subject context. A shared bridge may use
+  several, but opening a context for one person does not authorize other external
+  users or change the socket's Application identity.
 
 The exchange is the only operation that sees proof material. Federated kinds later
 arrive at this same operation with a different `proof.kind` and produce the same
@@ -299,7 +369,8 @@ rechecks:
 - the subject account is enabled and still has the access being used;
 - the grant is still declared by the active revision and accepts the proof kind;
 - the subject is still eligible;
-- the actor token is still valid and its service account still holds its grant;
+- the actor's Application token is still valid and, for server-project access,
+  its service account still holds the required project grant;
 - the proof itself, according to its `recheck` rule.
 
 | Recheck rule | Meaning | Kinds |
@@ -334,6 +405,12 @@ creates no durable state and can simply be repeated.
 | SDKs | All six SDKs expose the acting operations and a typed `actingFor` option on a shared connection |
 | CLI, TUI, desktop, web console | Acting-token issuance and **Connected services** for each account; eligibility management for administrators |
 | Integrations | None required. The A2A receiver keeps its alias model. Chat bridges and a future MCP executor can adopt acting contexts as SDK consumers. |
+
+Bridge adoption keeps Application authentication for both user paths. A personal
+bridge adds private acting-token provisioning and subject-context routing through
+the public SDK. A shared bridge additionally needs external identity linking and
+user isolation; the first slice does not require an administrator-managed external
+user directory or a Discord-based credential delivery flow.
 
 ### What a later ticket system adds
 
@@ -392,6 +469,18 @@ ownership.
 - **Personal:** usable only when the grant and the proof both allow it.
 - **Actor binding:** an acting token presented by another Application, or for
   another grant, is refused and audited.
+- **Provisioning and authentication:** the bridge retains its Application login;
+  an acting token alone cannot authenticate as the Application. Direct personal
+  provisioning opens the issuing account's context without an external link;
+  neither credential is exposed through external chat, history, summaries or logs.
+- **Two user paths:** ordinary external users stay within service permissions,
+  Application grants and conversation/agent restrictions, with no Personal access.
+  A Plowshare user's valid context enables only their allowed scopes. Pinning a
+  conversation never grants account ownership or additional authority.
+- **Routing isolation:** missing or ambiguous required external bindings and
+  attempts to use another person's context are refused. An unapproved external
+  sender cannot use a personal bridge owner's token. Invalid delegated requests
+  never retry under the service identity or another subject.
 - **Manifest:** an invalid declaration fails deployment; removal or narrowing takes
   effect at activation; rollback never revives a wider grant; a manifest cannot
   name an unconfigured trust root.
@@ -404,7 +493,8 @@ ownership.
 - **Refused operations:** each refused family returns the policy refusal and an
   audit record.
 - **Attribution:** ownership, trajectories, usage and audit carry subject, actor,
-  grant, proof kind and external subject; historical rows read as direct.
+  grant and proof kind, plus the external subject when configured; historical
+  rows read as direct.
 - **Receipts:** lost-reply recovery and refusal of changed resubmissions for every
   acting mutation.
 - **Real PostgreSQL tests** for concurrent issue and revoke, and for acting
@@ -419,3 +509,6 @@ ownership.
 - Whether ADR 0019's separate MCP executor should adopt acting contexts or keep
   its credential-subject model.
 - Which federated kind comes first, and who may create its identity links.
+- How a shared bridge proves control of an external identity during self-service
+  linking. Direct token provisioning to a personal bridge does not depend on that
+  ceremony and does not send credentials through the external chat service.
