@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='plowshare-discord-consumer-') as tempor
     run('node', 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.json', cwd=consumer)
     run('node', '--input-type=module', '-e',
         "const adapter = await import('./build/discord/index.js'); "
-        "if (typeof adapter.DiscordAdapter !== 'function') throw new Error('Missing public Discord adapter');",
+        "if (typeof adapter.DiscordAdapter !== 'function' || typeof adapter.DiscordSetup !== 'function') throw new Error('Missing public Discord adapter/setup');",
         cwd=consumer)
     tests = sorted(str(file.relative_to(consumer)) for file in (consumer / 'build/discord').glob('*.test.js'))
     if not tests:

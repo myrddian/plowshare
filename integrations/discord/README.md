@@ -15,7 +15,8 @@ server imports, database access, core API changes or inference loop.
    Send Messages, Read Message History and Send Messages in Threads for the selected
    channels. The adapter requests Guilds, Guild Messages and Message Content;
    it does not request Server Members or Presence. It does not register slash commands.
-2. Configure and deploy the [Discord Application](#discord-application) as a server
+2. Use [automated setup](#automated-application-setup), or configure and deploy the
+   [Discord Application](#discord-application) as a server
    administrator. Its manifest declares an owned Contributor identity; deployment
    provisions the account, initial membership and project token scope. Explicitly
    issue its `pss_` credential through the Application controls or public
@@ -24,6 +25,8 @@ server imports, database access, core API changes or inference loop.
    must be exported and present in its server/project definition catalogue.
    Credentials cannot supply client-local bot definitions or local workspace presence.
 3. Copy [the configuration template](config.template.json) outside the checkout.
+   With automated setup, configure its nested `adapter` settings instead; no second
+   runtime configuration copy is needed.
    Replace the reserved placeholder origin, placeholder absolute state path and fictitious
    Discord IDs. Select real project and concrete exported bot names. List immutable
    Discord user IDs explicitly; this version has no role-based or open-access mode.
@@ -49,6 +52,92 @@ state to that principal/server/Discord bot, and checks each receiving bot's
 catalogue. Server membership, token ceilings and the deployed manifest determine
 effective access at submission and on later reads; successful catalogue discovery
 is not a grant to run work. No credentials are persisted in adapter state.
+
+## Automated Application setup
+
+Build the module, then copy [setup.template.json](setup.template.json) to a private
+location outside the checkout. Configure the selected administrator account,
+unused Application project/service handle, absolute source/output/runtime-state
+directories, destination FileStore/path and nested Discord `adapter` settings.
+All routes must target the owned Application project. Source, setup output and
+runtime state directories must be disjoint, including through symlink aliases.
+Choose a new, empty setup output directory; existing installations cannot be adopted.
+
+Sign in to the same server/account using the normal Plowshare CLI login first.
+Setup reads and renews only that explicitly selected SDK credential-store session.
+It never accepts an administrator password or service token in its configuration,
+uses no service-token environment fallback, and saves no administrator bearer in
+its output. The selected signed-in account must currently be a server administrator.
+
+```sh
+./gradlew :plowshare-discord-integration:discordBuild
+node integrations/discord/build/discord/setup.js install /absolute/path/to/private/setup.json
+```
+
+`install` snapshots the selected source with the public SDK, sets its Application
+name and owned Contributor declaration, and grants the selected human administrator
+MANAGER in the manifest. First deployment supplies the normal creator membership.
+Other explicit human grants in the source are preserved; their membership remains
+an administrator decision. The basic source manifest's caps are preserved and
+command execution stays off. Advanced manifest fields are refused before submission;
+use the normal deployment workflow for those Applications. Choose a served model
+in the bot source before installing.
+
+The command checks that the project has no existing deployment/identity, saves a
+fresh deployment intent, deploys through `application.deploy`, then explicitly issues
+the owned credential. It verifies the service principal and each configured bot
+catalog without sending a chat or starting inference. Only then does it publish:
+
+- `adapter.json`: ready-to-run Discord routing configuration.
+- `service-credential.json`: the current secret plus its receipt metadata.
+- `setup-state.json`: immutable deployment coordinates/source snapshot, credential
+  attempt metadata and receipts; no bearer secrets.
+- `credential-<request UUID>.json`: private request-linked one-time credential artifacts.
+
+The directory is private (0700), files are private (0600), and replacements are
+atomic with directory fsync. Keep it out of source control and back it up securely.
+The command prints readiness, never credential values. It does not create the
+Discord bot or start the adapter; supply the existing Discord bot token through
+the configured environment variable and start explicitly:
+
+```sh
+node integrations/discord/build/discord/setup.js start /absolute/path/to/private/setup.json
+```
+
+`start` needs no administrator login. It verifies the published service identity,
+passes its credential to the existing adapter in the child environment (never
+command arguments), and uses the separately configured Discord bot token. Existing
+`main.js`/environment deployments continue to work. Stop the started adapter before
+running setup maintenance: `start` holds the setup lock for its child's lifetime.
+
+For an interrupted installation or publication, retain the original setup file,
+output directory and signed-in administrator, then reconcile:
+
+```sh
+node integrations/discord/build/discord/setup.js recover /absolute/path/to/private/setup.json
+```
+
+Re-running `install` on its own journal also reconciles. Pending mutations are
+never resubmitted, even when a receipt is missing or the intent may not have been
+sent. A confirmed deployment may proceed to the never-attempted issuance step.
+A confirmed saved secret repairs partially published runtime files. A confirmed
+issuance whose secret was lost requires an explicit rotation of the same owned token:
+
+```sh
+node integrations/discord/build/discord/setup.js rotate /absolute/path/to/private/setup.json
+```
+
+Rotation first reconciles the previous receipt, then saves/submits a new UUID.
+It cannot bypass an unknown prior submission. Superseded, expired or revoked
+secrets are never automatically restored. Changed active source or owned identity
+stops setup maintenance for operator review. This helper handles first deployment
+and owned-token maintenance, not upgrades/adoption of unrelated existing projects.
+The journal holds up to 50 credential attempts; it never silently prunes evidence.
+
+One process owns `setup.lock`. An abrupt stop may leave it behind: prove the old
+process has stopped before deliberately removing that lock, and preserve all
+receipt/credential artifacts. Changing the setup configuration (including server,
+administrator or directories) cannot adopt another installation's journal.
 
 ## Chat, threads and controls
 
@@ -302,7 +391,9 @@ ordering, duplicate admission, uncertainty, cancellation boundaries, notificatio
 fencing and restart behavior. Filesystem tests check exclusive/private state.
 Test-only Java dependencies exercise current manifest and bot loaders, including
 owned service declarations, execution-principal resolution, explicit human grants,
-role ceilings and the initial bot's absence of tool authority.
+role ceilings and the initial bot's absence of tool authority. Setup tests also cover
+private publication, receipt-only recovery, lost secrets, explicit rotation and
+real public SDK encoder/decoder use without starting inference or Discord.
 The consumer check compiles and tests against packed public SDK artifacts outside
 the checkout. These checks start no database and do not prove live Discord login,
 intents, channel permissions or a configured Plowshare service token. Live
