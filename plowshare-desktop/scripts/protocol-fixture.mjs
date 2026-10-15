@@ -684,7 +684,8 @@ export async function protocolFixture(options = {}) {
       log.push({ ordinal, turnOrdinal: ordinal, kind: 'answer', state: 'stands', excerpt: answer });
       grew(conversation); push({ kind: 'inbox.changed', unread: unreadInbox().length });
     },
-    disconnectProject(name) { const id = fileSockets.get(name)?.claim.session; eventSockets.get(id)?.socket.close(); },
+    // Abrupt loss must reach the peer even when the logical packet owner has pending frames.
+    disconnectProject(name) { const id = fileSockets.get(name)?.claim.session; eventSockets.get(id)?.socket.terminate(); },
     setRefuseProjects(value) { refuseProjects = value; },
     failServiceTokenMetadataOnce() { refuseServiceTokenListingOnce = true; },
     setRefuseFiles(value) { refuseFiles = value; },

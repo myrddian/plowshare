@@ -269,10 +269,14 @@ export class DesktopWorkspace {
     this.requests.add(work);
     return work.finally(() => this.requests.delete(work));
   }
-  private async clientFor(project?: string): Promise<DesktopClient> {
+  private async clientFor(
+    project?: string,
+    source: 'navigation' | 'folder-selection' = 'navigation',
+  ): Promise<DesktopClient> {
     if (!project || this.control.state.mode === 'demo') return this.control;
     this.requireLive();
     if (
+      source === 'navigation' &&
       !this.state.projects.some((row) => row.name === project) &&
       !this.state.conversations.some((row) => row.project === project)
     )
@@ -489,7 +493,7 @@ export class DesktopWorkspace {
     if (selectProject) this.scope = mapping.name;
     this.emit();
     try {
-      await this.startProject(mapping, token);
+      await this.startProject(mapping, token, 'folder-selection');
     } catch (error) {
       if (previous && token === this.token) {
         await this.store.put(previous);
@@ -550,7 +554,11 @@ export class DesktopWorkspace {
     }
   }
 
-  private async startProject(mapping: SavedProject, token: object) {
+  private async startProject(
+    mapping: SavedProject,
+    token: object,
+    source: 'navigation' | 'folder-selection' = 'navigation',
+  ) {
     try {
       if (mapping.machine !== thisMachine(process.env, hostname()))
         throw new Error(
@@ -561,7 +569,10 @@ export class DesktopWorkspace {
           'The saved folder moved or became a symbolic link. Choose its location again.',
         );
       this.same(token);
-      const child = await this.clientFor(mapping.name);
+      // A native folder selection may introduce a project absent from the account listing.
+      // Only the server's accepted file claim can register it; saved mappings and navigation
+      // retain the listing check so they cannot restore revoked access.
+      const child = await this.clientFor(mapping.name, source);
       this.same(token);
       await child.rootDirectory(mapping.path, mapping.name);
       this.same(token);
