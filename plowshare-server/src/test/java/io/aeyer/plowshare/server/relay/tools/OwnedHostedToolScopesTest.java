@@ -88,6 +88,64 @@ class OwnedHostedToolScopesTest {
   }
 
   @Test
+  void an_authorized_service_credential_keeps_caller_worker_and_subject_distinct() {
+    String subject = "@service/44444444-4444-4444-4444-444444444444";
+    var original = f.grant.get();
+    var credential = original.credential();
+    f.grant.set(
+        new ProviderCredentialGrants.Reference(
+            original.connection(),
+            new ProviderCredentials.Credential(
+                credential.connection(),
+                credential.project(),
+                subject,
+                credential.generation(),
+                credential.connectionRevision(),
+                credential.state(),
+                credential.expiresAt(),
+                credential.keyId())));
+    var definition = HostedScopeFixture.definition();
+    // The fixture's credential-access capability represents already-authorized selection.
+    // ProviderBoundariesTest separately exercises the real administrator/subject role checks.
+    var binding =
+        f.service
+            .save(
+                OWNER,
+                new Save(
+                    PROJECT,
+                    ID,
+                    UUID.randomUUID(),
+                    null,
+                    new Definition(
+                        definition.scope(),
+                        definition.provider(),
+                        definition.prefix(),
+                        definition.grants(),
+                        definition.agents(),
+                        definition.leaseSeconds(),
+                        definition.credentialProject(),
+                        definition.connection(),
+                        subject,
+                        EXECUTOR)))
+            .binding();
+    var registered =
+        f.service.register(
+            EXECUTOR,
+            "worker-session",
+            "socket",
+            new Register(ID, UUID.randomUUID(), binding.generation()));
+    f.catalogue(binding, f.clock.instant());
+    var retained = retain(registered);
+    assertEquals(OWNER, retained.request().account());
+    assertEquals(OWNER, retained.hosted().owner());
+    assertEquals(EXECUTOR, retained.hosted().executor());
+    assertEquals(subject, retained.hosted().subject());
+    assertEquals(subject, release(registered, retained.id()).subject());
+    assertNotEquals(subject, retained.request().account());
+    assertNotEquals(EXECUTOR, retained.request().account());
+  }
+
+  @Test
   void binding_is_owner_bound_cross_client_and_personal_without_worker_membership() {
     var r = f.start();
     when(f.projects.personalOwner(PROJECT)).thenReturn(Optional.of(OWNER));

@@ -160,6 +160,12 @@ delegation and release of unused allowance. MCP does not create another billing
 ledger, and unknown upstream costs remain unknown. Model capacity pools are
 distinct from accounting ownership.
 
+[ADR 0025](decisions/0025-service-account-attribution-and-spending-pools.md) proposes
+the general spending-pool decision, reservation lifecycle and separate implementation
+gates. The [identity/accounting policy](mcp-accounting-policy.md) maps current source
+and ownership tests. This does not implement enforcement or accept the separate
+acting-grant proposal.
+
 ## Platform scope and implementation sequence
 
 Recursive provider values are now shared platform contracts. Existing SDK-only
