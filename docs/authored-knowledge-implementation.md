@@ -195,6 +195,88 @@ provenance rather than asserting only that a panel opens.
 
 These are source/build checks. No production server was migrated or deployed.
 
+## Full agent workflow validation — 16 October 2026
+
+`AuthoredKnowledgeEndToEndTest` exercises the running Spring Boot application,
+authenticated Java SDK over segmented WebSocket transport, all Flyway migrations
+and isolated PostgreSQL/pgvector. Documents, types, tags, relationships, evidence
+and reports are created through public operations. SQL only seeds fixture accounts
+and independently inspects the retained producer and input ledger.
+
+Chat decisions and embedding vectors are scripted. The agent is the shipped
+`interlocutor`, using the production tool binding, dispatcher and durable run
+lifecycle. Its script derives subsequent resource/revision/evidence identifiers
+and text offsets from actual tool responses. A real pinned local fixture tokenizer,
+extraction, derivation, embedding persistence and summary pipeline run normally.
+The fixture uses isolated storage and closed fallback inference endpoints; it
+never needs a deployed server or live paid model.
+
+| Step | Boundary and verified result |
+| --- | --- |
+| Ingest | SDK creates and activates a runbook type, uploads service/runbook/decoy sources and applies a billing tag; real content processing reaches ready |
+| Reject invalid classification | Metadata revision with a missing required field returns 422 and leaves the current head unchanged; the agent also receives structured invalidity from `types.validate` |
+| Classify | Agent `information_write content.revise` creates revision 2 with validated metadata; body hash remains unchanged, extraction is reused, processing is explicit-only and document spending is zero |
+| Discover | Agent `information_read documents.list` intersects the type and billing tag and receives one current resource entry, excluding the older revision and unrelated source |
+| Follow relationships | Agent creates an unpinned `runbook` relationship from the service, lists its actual connection and resolves the continuing target to the classified revision |
+| Consume | Agent reads exact retained text, including a supplementary Unicode character; the evidence operation uses the returned UTF-16 window and exact quotation |
+| Retain provenance | Agent records a draft report with the evidence UUID and no caller-supplied inputs; the server inherits the consumed service, original runbook and classified revision, excluding the unconsumed decoy |
+| Reconnect | A fresh SDK connection recovers the original classification receipt and reads the retained answer, type/version binding, revising actor, producing log, input ledger and exact evidence |
+| Enforce access | Another account cannot open the source or evidence; withdrawing the consumed revision makes the report, evidence and job result return 404 |
+
+The agent completes twelve scripted model steps. These assertions establish the
+platform path and durable provenance. They do not measure a live model's ability
+to choose a classification, identify relevant sources or produce accurate prose,
+and do not establish deployment or a server-restart recovery result.
+
+### Defects found and corrected
+
+- Three component-scanned repositories were declared `final`, preventing Spring's
+  class-based persistence exception-translation proxies from starting the server.
+  The declarations originated in `86b1930a` (`JdbcApplicationRegistrations`),
+  `02d742da` (`JdbcConversationContextRepository`) and `261126ab`
+  (`JdbcApplicationIdentityRepository`). They now support those proxies;
+  `RepositoryProxyCompatibilityTest` proves typed injection and invocation with
+  mocked JDBC and the actual Spring postprocessor.
+- `InformationAccess.forRun` treated an account's Personal workspace home as an
+  ordinary project information namespace. The mapping was already present in
+  `d38d55f4`; the schema milestone retained it. It now maps the exact owning
+  Personal identity to the account information collection using existing Personal
+  address/ownership validation. Mocked tests cover both Personal address forms,
+  foreign-account refusal and unchanged machine project/no-Shared ceilings.
+  Explicit project selections retain their project namespace; no stored records
+  are migrated by this mapping change.
+
+### Remaining compatibility gap
+
+The legacy Java convenience call `WsServerClient.openConversation(null, ...)`
+compares the returned project to null, although the server resolves an omitted
+project to the account's Personal home. It rejects the committed result as
+`INVALID_RESPONSE`; callers must not replay that uncertain creation automatically.
+The validated journey uses the existing public `AgentClient.run` with
+`newConversation:true`, which creates the appropriate Personal conversation.
+No SDK selector check was weakened. Aligning the legacy helper with current
+Personal/default-home semantics remains follow-up work.
+
+### Reproduce and results
+
+Only one database-backed class is selected, because the assertions require real
+admission/processing transactions, persisted projections, provenance row mapping
+and access enforcement after withdrawal. The other selected classes use mocks.
+
+```sh
+./gradlew format :plowshare-server:test -PfullDb \
+  --tests 'io.aeyer.plowshare.AuthoredKnowledgeEndToEndTest' \
+  --tests 'io.aeyer.plowshare.server.information.InformationAccessTest' \
+  --tests 'io.aeyer.plowshare.server.archive.RepositoryProxyCompatibilityTest' \
+  --no-daemon --no-parallel --max-workers=2
+```
+
+Passed: one full-server journey, five information-access cases and one Spring
+proxy case, with zero failures/errors/skips. The focused run completed in 40 seconds.
+`./gradlew check formatCheck --no-daemon --no-parallel --max-workers=2` also passed
+on the final source: 125 tasks, 4 minutes 11 seconds. That default gate excludes
+PostgreSQL tests. No SDK or shared contract changed in this validation work.
+
 ## Scope and estimation
 
 The first milestone includes all admission paths, native SDK contracts and the
