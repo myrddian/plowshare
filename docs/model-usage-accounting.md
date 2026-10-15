@@ -8,6 +8,13 @@ Source deletion does not cascade into accounting. The original account can inspe
 
 ## Accounting and prices
 
+Service-executed jobs retain their exact service-token accounting principal. A human
+using a service-owned upstream credential keeps the human's model attribution.
+Model capacity pools and execution-tree call budgets are not monetary spending
+pools. [MCP identities and accounting](mcp-accounting-policy.md) documents these
+boundaries and the proposed general reservation policy; enforced spending pools
+are not implemented by MCP support.
+
 Internal document processing uses the built-in **SYSTEM** identity for summaries,
 automatic tagging, tag grouping and embeddings. SYSTEM is an internal principal:
 it has no password, bearer token, login, administrator role or project membership.

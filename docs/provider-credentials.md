@@ -21,6 +21,11 @@ principal, while a replacement token has a different identity. No user can selec
 another human's credentials, and administrator status does not replace the
 subject's project membership or service-token ceiling.
 
+Selecting a service credential does not transfer the caller's model usage to that
+service principal or create a spending allowance. See [MCP identities and
+accounting](mcp-accounting-policy.md) for the current ownership rules and proposed
+general spending-pool policy.
+
 All public operations use the authenticated WebSocket and shared typed SDKs:
 
 | Operation | Input and result |

@@ -3,7 +3,9 @@
 Status: accepted. The reusable [outbound HTTP adapter](../../integrations/mcp/README.md)
 implements the existing provider mechanism with separate connection and credential
 contexts. Native instance hosting and service-account accounting pools remain
-separate tasks. The source audit below records the original design baseline.
+separate tasks. [ADR 0025](0025-service-account-attribution-and-spending-pools.md)
+proposes the attribution and general spending-pool policy; it implements no monetary
+enforcement. The source audit below records the original design baseline.
 Audited against main `e0886dd0b6472849dee1f4408a158f2556b02816` on 12 October 2026.
 
 ## Context and current source
