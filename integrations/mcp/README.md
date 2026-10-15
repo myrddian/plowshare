@@ -164,6 +164,13 @@ Credential selection does not relabel the invocation's original caller or model
 accounting. Service-account spending pools require the separate accounting
 capability; using a service account's MCP token alone does not create a pool.
 
+The [tool authority manual](../../docs/mcp-tool-authority.md) maps live grants,
+hook checks and retained invocation evidence. Both hosted and shared native handlers
+validate the admitted caller, exact route/name and nested schema before dispatch.
+MCP hints cannot waive those checks. Per-call human approval for arbitrary external
+tools is not implemented; the existing durable command approval gate remains
+separate. Withhold/deny tools that require that unsupported workflow.
+
 ## Protocol and schema profile
 
 The adapter pins the [official TypeScript MCP client](https://github.com/modelcontextprotocol/typescript-sdk)

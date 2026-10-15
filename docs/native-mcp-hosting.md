@@ -119,6 +119,11 @@ an unverifiable dispatched call becomes UNKNOWN and is never retried.
 
 ### Explicit server sharing
 
+Server sharing preserves the owning account, exact route, tool name and schema
+fingerprint at the native handler boundary. It does not turn launch/share consent
+into a per-call human approval. See [grants, hooks and invocation
+evidence](mcp-tool-authority.md) for the existing authorization and approval limits.
+
 `mcp local share /absolute/private/profile.json --payload - --timeout-ms DURATION`
 reads a complete sharing command from stdin:
 

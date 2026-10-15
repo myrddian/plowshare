@@ -119,11 +119,17 @@ unknown call or an uncertain result publication.
 ## Results and capabilities
 
 Render supported output as bounded JSON text in the existing `ToolResult`:
-ordered text content, optional typed structured data, upstream `isError` and the
-selected protocol. Preserve text and absent versus explicit null; validate against
-the pinned supported output schema where supplied. The encoded result envelope
-must fit the existing 32,768-unit limit. No coercion, truncation or implicit resource
-fetch is permitted.
+ordered text content, optional typed structured data and upstream `isError`.
+The selected profile governs decoding. Preserve text and absent versus explicit null; validate against
+the pinned supported output schema where supplied. The integration's encoded
+result text must fit 16,384 UTF-16 units and UTF-8 bytes (or its lower configured
+budget), and the complete provider result envelope must fit 32,768 UTF-16 units.
+No coercion, truncation or implicit resource fetch is permitted.
+
+The [authority manual](mcp-tool-authority.md) defines existing grants, hook checks
+and retained evidence. Upstream hints never select credentials or waive authority.
+The command approval gate does not provide per-call human approval for arbitrary
+MCP tools; do not claim that unsupported workflow from an annotation or hook `ask`.
 
 | Observation | Provider state and meaning |
 | --- | --- |
