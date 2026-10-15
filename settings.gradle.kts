@@ -74,3 +74,6 @@ project(":plowshare-network-privacy").projectDir = file("integrations/network-pr
 
 include("plowshare-mcp-integration")
 project(":plowshare-mcp-integration").projectDir = file("integrations/mcp")
+
+include("plowshare-discord-integration")
+project(":plowshare-discord-integration").projectDir = file("integrations/discord")

@@ -73,6 +73,37 @@ async function temporary(run: (root: string) => Promise<void>) {
   }
 }
 
+await test('an unmarked folder beside a plowshare directory can be identified and connected', async () =>
+  temporary(async (directory) => {
+    const root = join(directory, 'Research');
+    await mkdir(root);
+    await mkdir(join(directory, 'plowshare'));
+    assert.deepEqual(await identifyFolder(root), { root, project: 'Research' });
+    const presence = new FilePresence(
+      async (claim) => {
+        const channel = new Channel();
+        setTimeout(
+          () =>
+            channel.listeners.get('message')?.({
+              data: JSON.stringify({ ready: true, project: claim.project }),
+            }),
+          1,
+        );
+        return channel;
+      },
+      () => {},
+    );
+    try {
+      assert.equal(await presence.choose(root), 'Research');
+      assert.deepEqual(
+        JSON.parse(await readFile(join(root, '.plowshare/project'), 'utf8')),
+        { version: 1, name: 'Research' },
+      );
+    } finally {
+      await presence.close();
+    }
+  }));
+
 await test('presence serves real files, fences paths and withdraws without losing the marker', async () =>
   temporary(async (directory) => {
     const root = join(directory, 'project');

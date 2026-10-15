@@ -13,6 +13,7 @@ export const MODULES = [
   'console',
   'desktop',
   'mcp-integration',
+  'discord-integration',
 ];
 export const MODULE_PATHS = Object.fromEntries(
   MODULES.map((module) => [
@@ -21,9 +22,11 @@ export const MODULE_PATHS = Object.fromEntries(
       ? 'sdk/typescript'
       : module === 'client-node'
         ? 'sdk/node'
-        : module === 'mcp-integration'
-          ? 'integrations/mcp'
-          : `plowshare-${module}`,
+        : module === 'discord-integration'
+          ? 'integrations/discord'
+          : module === 'mcp-integration'
+            ? 'integrations/mcp'
+            : `plowshare-${module}`,
   ]),
 );
 // The standard owns this gate. Weakening the inherited file itself must also fail.
