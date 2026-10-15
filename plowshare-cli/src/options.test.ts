@@ -368,7 +368,7 @@ await test('options may follow commands and offline validation resolves scope wi
   );
 });
 
-await test('agent runs default to a new scoped conversation and explicit modes validate offline', async () => {
+await test('agent runs require scope and select fresh conversations unless explicitly continued', async () => {
   let output = '';
   const io = {
     env: { PLOWSHARE_PROJECT: '' },
@@ -398,8 +398,13 @@ await test('agent runs default to a new scoped conversation and explicit modes v
   };
   const basic = { agent: 'a', task: 'work' };
   let result = await validate(basic);
+  assert.equal(field(result, ['code']), 2);
+  result = await validate(basic, ['--project', 'repo']);
   assert.equal(field(result, ['code']), 0);
-  assert.deepEqual(field(result, ['value', 'scope']), { kind: 'global' });
+  assert.deepEqual(field(result, ['value', 'scope']), {
+    kind: 'project',
+    project: 'repo',
+  });
   assert.equal(field(result, ['value', 'payload', 'newConversation']), true);
   result = await validate(basic, ['--project', 'repo', '--new-conversation']);
   assert.equal(field(result, ['value', 'payload', 'project']), 'repo');
@@ -413,11 +418,22 @@ await test('agent runs default to a new scoped conversation and explicit modes v
     kind: 'conversation',
     id: 'cnv_existing',
   });
-  result = await validate(basic, ['--standalone']);
+  result = await validate(basic, ['--project', 'repo', '--standalone']);
   assert.equal(field(result, ['value', 'payload', 'newConversation']), false);
-  assert.equal((await validate({ ...basic, images: ['img_1'] })).code, 2);
   assert.equal(
-    (await validate({ ...basic, images: ['img_1'] }, ['--standalone'])).code,
+    (await validate({ ...basic, images: ['img_1'] }, ['--project', 'repo']))
+      .code,
+    2,
+  );
+  assert.equal((await validate({ ...basic, project: null })).code, 2);
+  assert.equal(
+    (
+      await validate({ ...basic, images: ['img_1'] }, [
+        '--project',
+        'repo',
+        '--standalone',
+      ])
+    ).code,
     0,
   );
   assert.equal(

@@ -3761,6 +3761,197 @@
   },
   {
     "boundary": "input",
+    "operation": "conversation.open",
+    "value": {},
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.open",
+    "value": {
+      "project": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.open",
+    "value": {
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.open",
+    "value": {
+      "project": "personal:66697874757265"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.list",
+    "value": {},
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.list",
+    "value": {
+      "project": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.list",
+    "value": {
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.list",
+    "value": {
+      "project": "personal:66697874757265"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.latest",
+    "value": {
+      "agent": "fixture"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.latest",
+    "value": {
+      "agent": "fixture",
+      "project": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.latest",
+    "value": {
+      "agent": "fixture",
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.latest",
+    "value": {
+      "agent": "fixture",
+      "project": "personal:66697874757265"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "orchestration.start",
+    "value": {
+      "agent": "fixture",
+      "definition": "workflow",
+      "request": "work",
+      "requestId": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "orchestration.start",
+    "value": {
+      "agent": "fixture",
+      "definition": "workflow",
+      "request": "work",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "orchestration.start",
+    "value": {
+      "agent": "fixture",
+      "definition": "workflow",
+      "request": "work",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "orchestration.start",
+    "value": {
+      "agent": "fixture",
+      "definition": "workflow",
+      "request": "work",
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "project": "personal:66697874757265"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "work"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "work",
+      "project": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "work",
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "work",
+      "project": "personal:66697874757265"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "agent.run",
+    "value": {
+      "agent": "fixture",
+      "task": "work",
+      "conversation": "cnv_fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
     "operation": "project.list",
     "value": {},
     "valid": true

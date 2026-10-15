@@ -300,6 +300,7 @@ public interface ServerClient {
     }
   }
 
+  /** Start in an explicit project, or continue an existing conversation without a project. */
   StartedJob run(String agent, String task, String project, String session, String conversation)
       throws IOException;
 
@@ -313,10 +314,13 @@ public interface ServerClient {
     }
   }
 
+  /** Upload into an explicit project; no implicit Personal destination. */
   UploadedImage uploadImage(String project, String filename, byte[] bytes) throws IOException;
 
+  /** Create in an explicit project; a missing project is refused before submission. */
   Conversation openConversation(String project, Integer maxModelCalls) throws IOException;
 
+  /** List the selected project; an explicit null argument reads Global history only. */
   List<Conversation> conversations(String project) throws IOException;
 
   Entries chat(String conversationId, Integer offset, Integer limit) throws IOException;

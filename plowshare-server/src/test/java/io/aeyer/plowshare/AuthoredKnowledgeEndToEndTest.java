@@ -18,6 +18,8 @@ import java.util.*;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.*;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -50,13 +52,14 @@ class AuthoredKnowledgeEndToEndTest {
   static final Scripted MODEL = new Scripted();
   static final String ACCOUNT = "knowledge-owner";
   static final String BODY = "Refund safety 🔎\nDisable automatic refunds before replay.";
-  static final InformationRequest.Selection SELECT =
+  InformationRequest.Selection selection =
       new InformationRequest.Selection(
           InformationRequest.Scope.personal(), "documents", null, InformationContent.VIEW);
   static final int CLOSED_PORT = closedPort();
   @LocalServerPort int port;
   @Autowired JdbcTemplate jdbc;
   @Autowired TokenStore tokens;
+  @Autowired org.springframework.context.ApplicationEventPublisher accountEvents;
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry properties) throws Exception {
@@ -68,6 +71,29 @@ class AuthoredKnowledgeEndToEndTest {
     properties.add(
         "plowshare.projects.workspace-directory", () -> temporary.resolve("workspaces").toString());
     properties.add("plowshare.information.navigation-writes-enabled", () -> true);
+    Path stores = temporary.resolve("filestores.js");
+    Files.createDirectories(temporary.resolve("applications"));
+    Files.writeString(
+        stores,
+        "export default "
+            + JSON.writeValueAsString(
+                Map.of(
+                    "version",
+                    1,
+                    "defaultStore",
+                    "applications",
+                    "fileStores",
+                    Map.of(
+                        "applications",
+                        Map.of(
+                            "root",
+                            temporary.resolve("applications").toString(),
+                            "access",
+                            Map.of(
+                                "accounts",
+                                List.of(Map.of("handle", ACCOUNT, "role", "MANAGER")))))))
+            + ";");
+    properties.add("plowshare.filestores.config-file", stores::toString);
     properties.add("LLM_BASE_URL", () -> "http://127.0.0.1:" + CLOSED_PORT + "/v1");
     properties.add("LLM_CHAT_MODEL", () -> Scripted.CHAT);
     properties.add("LLM_EMBEDDING_MODEL", () -> Scripted.EMBED);
@@ -98,46 +124,81 @@ class AuthoredKnowledgeEndToEndTest {
                   2,
                   2,
                   Duration.ofSeconds(10),
-                  MODEL)),
+                  MODEL,
+                  Set.of(Scripted.CHAT))),
           new NoOpTokenLedger(),
           ignored -> "fast");
     }
   }
 
   private WsServerClient client(String account) {
-    jdbc.update(
-        "INSERT INTO admins(handle,password_hash,server_admin,must_change_password) VALUES(?,'fixture',?,false) ON CONFLICT DO NOTHING",
-        account,
-        account.equals(ACCOUNT));
+    int created =
+        jdbc.update(
+            "INSERT INTO admins(handle,password_hash,server_admin,must_change_password) VALUES(?,'fixture',?,false) ON CONFLICT DO NOTHING",
+            account,
+            account.equals(ACCOUNT));
+    // Fixture-created humans receive the same account lifecycle event as public account creation.
+    if (created == 1)
+      accountEvents.publishEvent(
+          new io.aeyer.plowshare.server.personal.PersonalSpaces.AccountCreated(account));
     return new WsServerClient(
         "http://127.0.0.1:" + port, tokens.issuePair(account, false).access());
   }
 
-  private static Information.Revision status(ServerClient client, UUID revision)
-      throws IOException {
+  private String deployApplication(WsServerClient manager, String project) throws Exception {
+    var applications = new ApplicationClient(manager.connection());
+    applications.deploy(
+        new ApplicationDeployment.Deploy(
+            project,
+            UUID.randomUUID(),
+            null,
+            new FileStoreReference("applications", project),
+            List.of(),
+            List.of(
+                new ApplicationDeployment.File(
+                    "plowshare.json",
+                    JSON.writeValueAsString(
+                        Map.of(
+                            "version",
+                            1,
+                            "name",
+                            project,
+                            "service",
+                            Map.of("handle", "knowledge-worker", "role", "CONTRIBUTOR"),
+                            "access",
+                            Map.of(
+                                "accounts",
+                                List.of(Map.of("handle", ACCOUNT, "role", "MANAGER")))))))));
+    return applications
+        .issue(new ApplicationIdentity.Issue(project, UUID.randomUUID(), 1, false))
+        .credential();
+  }
+
+  private Information.Revision status(ServerClient client, UUID revision) throws IOException {
     return assertInstanceOf(
             InformationResponse.Revision.class,
-            client.information(new InformationRequest.Status(SELECT, revision, null)))
+            client.information(new InformationRequest.Status(selection, revision, null)))
         .value();
   }
 
-  private static InformationResponse.Admission upload(ServerClient client, String name, String text)
+  private InformationResponse.Admission upload(ServerClient client, String name, String text)
       throws IOException {
     return assertInstanceOf(
         InformationResponse.Admission.class,
         client.information(
             new InformationRequest.Admission(
                 InformationRequest.AdmissionAction.UPLOAD,
-                SELECT,
+                selection,
                 UUID.randomUUID(),
                 name,
                 text,
                 null)));
   }
 
-  private static void awaitPrepared(ServerClient client, UUID revision) throws Exception {
+  private void awaitPrepared(ServerClient client, UUID revision) throws Exception {
     long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
     while (true) {
+      if (MODEL.failed != null) throw MODEL.failed;
       var row = status(client, revision);
       var stages =
           row.steps().stream()
@@ -157,26 +218,87 @@ class AuthoredKnowledgeEndToEndTest {
     }
   }
 
-  @Test
-  void ingestClassifyDiscoverTraverseConsumeAndRetainProvenanceAcrossReconnect() throws Exception {
+  @ParameterizedTest(name = "Application service identity: {0}")
+  @ValueSource(booleans = {false, true})
+  void ingestClassifyDiscoverTraverseConsumeAndRetainProvenanceAcrossReconnect(boolean application)
+      throws Exception {
+    String project =
+        application
+            ? "knowledge-application"
+            : "personal:"
+                + HexFormat.of()
+                    .formatHex(ACCOUNT.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    if (application)
+      selection =
+          new InformationRequest.Selection(
+              new InformationRequest.Scope("project", project, false),
+              "documents",
+              null,
+              InformationContent.VIEW);
+    String credential;
+    String executionAccount;
+    try (var manager = client(ACCOUNT)) {
+      credential =
+          application
+              ? deployApplication(manager, project)
+              : tokens.issuePair(ACCOUNT, false).access();
+      executionAccount =
+          application
+              ? new ApplicationClient(manager.connection()).identity(project).identity().principal()
+              : ACCOUNT;
+    }
+    MODEL.reset();
     InformationResponse.Admission service;
     InformationResponse.Admission runbook;
     InformationResponse.Admission decoy;
     InformationContent.Contract contract;
     String job;
-    try (var sdk = client(ACCOUNT)) {
+    try (var sdk = new WsServerClient("http://127.0.0.1:" + port, credential);
+        var manager = client(ACCOUNT)) {
+      long conversationsBefore =
+          jdbc.queryForObject("SELECT count(*) FROM conversations", Long.class);
+      assertThrows(IllegalArgumentException.class, () -> sdk.openConversation(null, 10));
+      assertThrows(
+          IllegalArgumentException.class, () -> sdk.run("interlocutor", "work", null, null, null));
+      assertEquals(
+          conversationsBefore,
+          jdbc.queryForObject("SELECT count(*) FROM conversations", Long.class));
+      if (application) {
+        refused(
+            400,
+            () ->
+                sdk.information(
+                    new InformationRequest.NavigationCapabilities(
+                        InformationRequest.Selection.personal())));
+        var shared =
+            new InformationRequest.Selection(
+                new InformationRequest.Scope("project", project, true),
+                "documents",
+                null,
+                InformationContent.VIEW);
+        refused(400, () -> sdk.information(new InformationRequest.NavigationCapabilities(shared)));
+        refused(400, () -> sdk.openConversation("ungranted-project", 40));
+        refused(400, () -> sdk.conversations(null));
+        assertEquals(
+            conversationsBefore,
+            jdbc.queryForObject("SELECT count(*) FROM conversations", Long.class));
+      }
+      var explicit = sdk.openConversation(project, 40);
+      assertEquals(project, explicit.project());
+      assertTrue(
+          sdk.conversations(project).stream().anyMatch(row -> row.id().equals(explicit.id())));
       assertTrue(
           assertInstanceOf(
                   InformationResponse.NavigationCapabilities.class,
-                  sdk.information(new InformationRequest.NavigationCapabilities(SELECT)))
+                  sdk.information(new InformationRequest.NavigationCapabilities(selection)))
               .value()
               .writesEnabled());
       var draft =
           assertInstanceOf(
                   InformationResponse.TypeVersion.class,
-                  sdk.information(
+                  manager.information(
                       new InformationRequest.TypeDraft(
-                          SELECT,
+                          selection,
                           UUID.randomUUID(),
                           null,
                           null,
@@ -200,9 +322,9 @@ class AuthoredKnowledgeEndToEndTest {
       contract =
           assertInstanceOf(
                   InformationResponse.TypeVersion.class,
-                  sdk.information(
+                  manager.information(
                       new InformationRequest.TypeTransition(
-                          SELECT,
+                          selection,
                           UUID.randomUUID(),
                           draft.contract().version(),
                           draft.controlRevision(),
@@ -215,7 +337,7 @@ class AuthoredKnowledgeEndToEndTest {
           upload(sdk, "unrelated.md", "An unrelated record must not enter the report's inputs.");
       sdk.information(
           new InformationRequest.Tags(
-              SELECT, runbook.revision(), UUID.randomUUID(), List.of("billing")));
+              selection, runbook.revision(), UUID.randomUUID(), List.of("billing")));
       awaitPrepared(sdk, service.revision());
       awaitPrepared(sdk, runbook.revision());
       refused(
@@ -223,7 +345,7 @@ class AuthoredKnowledgeEndToEndTest {
           () ->
               sdk.information(
                   new InformationRequest.ContentRevise(
-                      SELECT,
+                      selection,
                       UUID.randomUUID(),
                       runbook.revision(),
                       new InformationContent.Typing(
@@ -233,7 +355,7 @@ class AuthoredKnowledgeEndToEndTest {
                   InformationResponse.NavigationSelection.class,
                   sdk.information(
                       new InformationRequest.DocumentGet(
-                          SELECT, new InformationNavigation.Target(runbook.resource(), null))))
+                          selection, new InformationNavigation.Target(runbook.resource(), null))))
               .value();
       assertEquals(
           runbook.revision(),
@@ -245,7 +367,7 @@ class AuthoredKnowledgeEndToEndTest {
                   new AgentClient.Run(
                       "interlocutor",
                       "Classify the refund runbook, discover it, follow its service relationship, read it and retain a report with exact evidence.",
-                      null,
+                      project,
                       null,
                       null,
                       true));
@@ -267,10 +389,10 @@ class AuthoredKnowledgeEndToEndTest {
       var metadata =
           assertInstanceOf(
                   InformationResponse.Content.class,
-                  sdk.information(new InformationRequest.ContentRead(SELECT, MODEL.classified)))
+                  sdk.information(new InformationRequest.ContentRead(selection, MODEL.classified)))
               .value();
       assertEquals(runbook.revision(), metadata.startingRevision());
-      assertEquals(ACCOUNT, metadata.revisedBy());
+      assertEquals(executionAccount, metadata.revisedBy());
       assertEquals("explicit_only", metadata.processingPolicy());
       assertEquals(contract.version(), metadata.contentType().contract().version());
       assertTrue(metadata.reused().stream().anyMatch(reuse -> reuse.stage().equals("extract")));
@@ -281,14 +403,14 @@ class AuthoredKnowledgeEndToEndTest {
     }
 
     // A fresh public connection recovers committed receipts and provenance, not cached test state.
-    try (var sdk = client(ACCOUNT);
+    try (var sdk = new WsServerClient("http://127.0.0.1:" + port, credential);
         var foreign = client("knowledge-outsider")) {
       var recovered =
           assertInstanceOf(
               InformationResponse.Admission.class,
               sdk.information(
                   new InformationRequest.ContentRevise(
-                      SELECT,
+                      selection,
                       MODEL.classificationRequest,
                       runbook.revision(),
                       new InformationContent.Typing(
@@ -301,7 +423,7 @@ class AuthoredKnowledgeEndToEndTest {
       var retainedAnswer =
           assertInstanceOf(
                   InformationResponse.Window.class,
-                  sdk.information(new InformationRequest.Read(SELECT, MODEL.report, 8192, 0)))
+                  sdk.information(new InformationRequest.Read(selection, MODEL.report, 8192, 0)))
               .value();
       assertTrue(retainedAnswer.text().contains(BODY));
       var report = status(sdk, MODEL.report);
@@ -314,9 +436,37 @@ class AuthoredKnowledgeEndToEndTest {
       String producer = report.report().producedBy();
       assertNotNull(producer);
       assertEquals(
-          ACCOUNT,
+          executionAccount,
           jdbc.queryForObject(
               "SELECT owner_handle FROM conversations WHERE id=?", String.class, producer));
+      assertEquals(
+          project,
+          jdbc.queryForObject(
+              "SELECT p.name FROM conversations c JOIN projects p ON p.id=c.project_id WHERE c.id=?",
+              String.class,
+              producer));
+      if (application) {
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_resources WHERE owner_handle=? AND project_id IS NULL",
+                Integer.class,
+                executionAccount));
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM conversations c LEFT JOIN projects p ON p.id=c.project_id WHERE c.owner_handle=? AND (p.name IS NULL OR p.name<>?)",
+                Integer.class,
+                executionAccount,
+                project));
+        assertEquals(
+            3,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM information_resources r JOIN projects p ON p.id=r.project_id WHERE r.owner_handle=? AND p.name=? AND r.kind='source'",
+                Integer.class,
+                executionAccount,
+                project));
+      }
       var ledger =
           jdbc.queryForList(
               "SELECT revision_id FROM information_job_inputs WHERE job_id=?",
@@ -326,37 +476,42 @@ class AuthoredKnowledgeEndToEndTest {
       var evidence =
           assertInstanceOf(
                   InformationResponse.Evidence.class,
-                  sdk.information(new InformationRequest.EvidenceRead(SELECT, MODEL.evidence)))
+                  sdk.information(new InformationRequest.EvidenceRead(selection, MODEL.evidence)))
               .value();
       assertEquals(MODEL.classified, evidence.revisionId());
       assertEquals(BODY, evidence.quote());
       assertEquals(BODY.length(), evidence.endOffset() - evidence.startOffset());
       refused(
-          404,
+          application ? 400 : 404,
           () ->
-              foreign.information(new InformationRequest.Read(SELECT, MODEL.classified, 8192, 0)));
+              foreign.information(
+                  new InformationRequest.Read(selection, MODEL.classified, 8192, 0)));
       refused(
-          404,
-          () -> foreign.information(new InformationRequest.EvidenceRead(SELECT, MODEL.evidence)));
-      assertInstanceOf(
-          InformationNavigation.Unavailable.class,
-          assertInstanceOf(
-                  InformationResponse.NavigationSelection.class,
-                  foreign.information(
-                      new InformationRequest.DocumentGet(
-                          SELECT, new InformationNavigation.Target(runbook.resource(), null))))
-              .value());
+          application ? 400 : 404,
+          () ->
+              foreign.information(new InformationRequest.EvidenceRead(selection, MODEL.evidence)));
+      if (!application)
+        assertInstanceOf(
+            InformationNavigation.Unavailable.class,
+            assertInstanceOf(
+                    InformationResponse.NavigationSelection.class,
+                    foreign.information(
+                        new InformationRequest.DocumentGet(
+                            selection, new InformationNavigation.Target(runbook.resource(), null))))
+                .value());
       // A real source lifecycle mutation must close old report, evidence and job-result paths.
       sdk.information(
           new InformationRequest.RevisionChange(
               InformationRequest.RevisionAction.WITHDRAW,
-              SELECT,
+              selection,
               MODEL.classified,
               UUID.randomUUID()));
       refused(
-          404, () -> sdk.information(new InformationRequest.Read(SELECT, MODEL.report, 8192, 0)));
+          404,
+          () -> sdk.information(new InformationRequest.Read(selection, MODEL.report, 8192, 0)));
       refused(
-          404, () -> sdk.information(new InformationRequest.EvidenceRead(SELECT, MODEL.evidence)));
+          404,
+          () -> sdk.information(new InformationRequest.EvidenceRead(selection, MODEL.evidence)));
       refused(404, () -> sdk.job(job));
     }
   }
@@ -383,6 +538,16 @@ class AuthoredKnowledgeEndToEndTest {
     final UUID classificationRequest = UUID.randomUUID();
     volatile JsonNode window;
     volatile int calls;
+    volatile AssertionError failed;
+
+    synchronized void reset() {
+      calls = 0;
+      failed = null;
+      classified = null;
+      evidence = null;
+      report = null;
+      window = null;
+    }
 
     synchronized void arm(
         InformationResponse.Admission service,
@@ -406,7 +571,9 @@ class AuthoredKnowledgeEndToEndTest {
     @Override
     public synchronized Completion complete(
         String model, List<ChatMessage> messages, Sampling sampling, List<ToolSchema> tools) {
-      if (tools.isEmpty()) {
+      // Project harnesses can offer auxiliary tools to internal processors. Only the
+      // knowledge agent exposes information_write and follows the twelve-step script.
+      if (tools.stream().noneMatch(schema -> schema.name().equals("information_write"))) {
         String system = messages.getFirst().content();
         String text =
             system.contains("autoTag")
@@ -591,6 +758,9 @@ class AuthoredKnowledgeEndToEndTest {
             "tool_calls",
             TokenUsage.of(20, 10, null),
             List.of(new ToolCall("journey_" + calls, tool, JSON.writeValueAsString(arguments))));
+      } catch (AssertionError failure) {
+        failed = failure;
+        throw failure;
       } catch (IOException invalid) {
         throw new java.io.UncheckedIOException(invalid);
       }

@@ -92,7 +92,7 @@ Options (before or after the command; -- ends option parsing):
 Authentication: run login once; clients share saved tokens per server.
 For service automation, PLOWSHARE_TOKEN supplies an ephemeral pss_ bearer; no login or refresh.
 Setup and login prompt. PLOWSHARE_HANDLE/PLOWSHARE_PASSWORD remain ephemeral overrides.
-JSON project:null selects global; omitted budgets and paging stay server-owned.
+JSON project:null selects Global reads/setup; fresh agent, conversation and workflow work needs a project. Omitted budgets and paging stay server-owned.
 Exit: 0 completed, 1 refused/failed, 2 usage/auth, 3 accepted/running/cancelling,
       4 incomplete/cancelled/awaiting, 5 unknown/transport/deadline/protocol.
 Disconnect, timeout or Ctrl-C never replays or cancels a server mutation.`;

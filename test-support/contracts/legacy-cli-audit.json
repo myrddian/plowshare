@@ -332,7 +332,7 @@
     "Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --server and --url select the explicit server origin, --root replaces --workspace, and global options may precede or follow the command.",
     "JSON mode returns structured Outcomes with raw fields and incomplete/refused outcomes. Human project listings group Applications and Projects and omit filesystem paths; --json preserves the project.list reply.",
     "Java exits 0 success, 1 incomplete/nonanswered, 2 usage/refusal/unavailable. TS exits 0 success, 1 refusal/unavailable job ending, 2 usage/auth bootstrap, 3 accepted/running/cancelling, 4 incomplete/nonanswered, 5 unknown/deadline/protocol.",
-    "Global scope is explicit with --global or JSON project:null; blank project is refused. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.",
+    "Setup/memory global scope uses --global or JSON project:null; blank project is refused. Runtime starts require an explicit project or an existing conversation; omission/null never selects Personal through the SDK. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.",
     "One memory.read per invocation replaces Java multi-id reads; no implicit provenance defaults for JSON writes/resolutions.",
     "Auth/bootstrap stays HTTP; operational reads, mutations and observers are WS. Existing sync Git bytes retain their documented HTTP transport.",
     "PDF/image conversion is server-side; clients stream bytes and read cached text windows."
@@ -341,8 +341,8 @@
     "sources": {
       "test-support/contracts/legacy-cli-baseline.json": "57483661334a470cef344b7b6b046446560bfcbb645e1b78a961b1ecc8e311c7",
       "sdk/typescript/src/operations/catalog.ts": "e6b931b1f00b09dd4ab9fe55423a7892b8b9dfe0f404b1d468602677a85a312b",
-      "sdk/typescript/src/operations/direct.ts": "b57006c69d86cf99e75cb51a07645782286d0f59378faa390d88a90d8c9ba03b",
-      "plowshare-cli/src/run.ts": "13b874393dae8727f70c98b4acc74c748cc830915470bcddf835832c38d8ee5a"
+      "sdk/typescript/src/operations/direct.ts": "00fac0a24b5f3c0bbf94c31fd2c8a44785382fe4776a5a50d40e201620de9999",
+      "plowshare-cli/src/run.ts": "deae7dcf58c7244e6fde1887e8c6505057443990c60e2ed128094329f05faeab"
     },
     "runtime": [
       "plowshare-cli/src/socket.test.ts",

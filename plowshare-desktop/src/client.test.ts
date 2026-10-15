@@ -1860,6 +1860,12 @@ await test('direct workflow starts check the agent grant, preserve the request k
     f.calls.some((call) => call.type === 'orchestration.start'),
     false,
   );
+  await assert.rejects(f.client.dispatch(input), /explicit project/);
+  f.client.state.conversations = f.client.state.conversations.map((row) => ({
+    ...row,
+    project: 'repo',
+  }));
+  f.client.state.agents['repo'] = f.client.state.agents[''] ?? [];
   let finish!: (answer: Outcome) => void;
   f.workflow(
     () =>
@@ -1883,6 +1889,7 @@ await test('direct workflow starts check the agent grant, preserve the request k
     {
       agent: 'bot',
       definition: 'research',
+      project: 'repo',
       request: 'Original\nquestion',
       requestId: input.requestId,
     },

@@ -219,9 +219,14 @@ export function constrain(graph) {
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
       field(s, 'type', {pattern:'^(MANAGED|DISJOINT)$'});
     }
+    // SDK admission requires an explicit runtime destination; wire defaults remain server-owned.
+    if (['conversation.open', 'orchestration.start'].includes(op))
+      rules(s, present('project'));
+    if (['conversation.list', 'conversation.latest'].includes(op)) rules(s, {has:'project'});
     if (op === 'agent.run')
       rules(
         s,
+        or(present('conversation'), present('project')),
         implies(eq('newConversation', true), absent('conversation')),
         implies(present('conversation'), absent('project')),
         implies(

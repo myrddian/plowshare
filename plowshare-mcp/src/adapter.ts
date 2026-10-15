@@ -6,7 +6,7 @@ import type {
   Payloads,
 } from 'plowshare-client-ts/operations/direct';
 import type { Claim } from 'plowshare-client-ts/binding/auth';
-import tools from './tools.json' with { type: 'json' };
+import legacyTools from './tools.json' with { type: 'json' };
 import {
   array,
   integer,
@@ -39,7 +39,31 @@ export interface Backend {
     path: string,
   ): Promise<{ previous?: Claim; current: Claim }>;
 }
-export { tools };
+// The retained menu is a migration baseline. External SDK execution now requires
+// a destination even with human credentials; advertise that deliberate contract change.
+export const tools = legacyTools.map((tool) =>
+  tool.name === 'agent_run' || tool.name === 'conversation_list'
+    ? {
+        ...tool,
+        description: tool.description.replace(
+          'Omit it for the memories that hold everywhere.',
+          'Select the project explicitly; choose Personal only when intended.',
+        ),
+        inputSchema: {
+          ...tool.inputSchema,
+          required: [...tool.inputSchema.required, 'project'],
+          properties: {
+            ...tool.inputSchema.properties,
+            project: {
+              type: 'string',
+              description:
+                'The explicitly selected project; Personal must be chosen deliberately.',
+            },
+          },
+        },
+      }
+    : tool,
+);
 export const names = new Set(tools.map((tool) => tool.name));
 function offset(args: Data): number {
   let value: number;
@@ -177,7 +201,7 @@ export async function call(
     case 'agent_run': {
       const agent = required(args, 'agent'),
         task = required(args, 'task'),
-        home = project(args);
+        home = required(args, 'project');
       return jobs.started(
         await ask('agent.run', {
           agent,
@@ -282,8 +306,8 @@ export async function call(
       return projects.forgotten(project);
     }
     case 'conversation_list': {
-      const home = project(args, 'global tier'),
-        start = offset(args);
+      const start = offset(args),
+        home = required(args, 'project');
       return conversations.conversations(
         await ask('conversation.list', { project: home }),
         home,

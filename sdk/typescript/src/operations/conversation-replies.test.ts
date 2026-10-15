@@ -156,6 +156,10 @@ const asked = (type: ConversationOperation): Request => {
       text: '{}',
       revision: 'a'.repeat(64),
     });
+  if (type === 'conversation.open' || type === 'conversation.list')
+    return request(type, { project: 'repo' });
+  if (type === 'conversation.latest')
+    return request(type, { project: 'repo', agent: 'worker' });
   return { type, payload: { conversation: 'c' } } as Request;
 };
 const object = (value: unknown): value is Record<string, unknown> =>

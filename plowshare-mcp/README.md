@@ -51,8 +51,10 @@ unless interrupted. JSON-RPC protocol errors use error envelopes.
 
 ## Scope, jobs and local presence
 
-Omitted project selects global home where supported. `PLOWSHARE_PROJECT` is
-ignored, and a blank project does not become global. `agent_run` submits a
+`agent_run` and `conversation_list` require an explicit project, even with human
+credentials. Personal must be selected deliberately. Setup/memory tools retain
+their documented global scope where supported. `PLOWSHARE_PROJECT` is ignored,
+and a blank project does not become global. `agent_run` submits a
 standalone job with `conversation=null`; it carries a session only while this
 process holds an acknowledged file claim. Accepted maintenance/document jobs
 return their handle immediately. Poll/result/cancel remain separate tools, and

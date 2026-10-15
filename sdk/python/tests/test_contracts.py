@@ -217,13 +217,15 @@ class ContractsTest(unittest.TestCase):
             encode_request(contracts.JobStatusRequest(job="\0bad"))
 
     def test_omitted_and_explicit_null(self) -> None:
-        from plowshare.contracts import ConversationOpenRequest
+        from plowshare.contracts import ConversationOpenRequest, MemoryIndexRequest
 
-        self.assertNotIn(
-            "project", _object(encode_request(ConversationOpenRequest())[1])
-        )
+        with self.assertRaises(ValueError):
+            encode_request(ConversationOpenRequest())
+        with self.assertRaises(ValueError):
+            encode_request(ConversationOpenRequest(project=None))
+        self.assertNotIn("project", _object(encode_request(MemoryIndexRequest())[1]))
         self.assertIn(
-            "project", _object(encode_request(ConversationOpenRequest(project=None))[1])
+            "project", _object(encode_request(MemoryIndexRequest(project=None))[1])
         )
 
 

@@ -861,7 +861,7 @@ describe('the conversation a bot continues', () => {
   it('asks for it under conversation.latest, naming who is answering', () => {
     expect(continuing('aristoxenus')).toEqual({
       type: CONVERSATION_LATEST,
-      payload: { agent: 'aristoxenus' },
+      payload: { agent: 'aristoxenus', project: null },
     });
   });
 
@@ -1242,13 +1242,11 @@ describe('the two listings, which are what a terminal can see', () => {
     expect(PROJECT_LIST).toBe('project.list');
   });
 
-  it("asks for one home's conversations, and says global as an absence", () => {
-    // `RequestedHome.in(null)` reads an absent project as the global tier,
-    // which is the endpoint's reading too. A payload of nulls would be this
-    // client stating something it was never asked — `opening`'s ruling.
+  it("asks for one home's conversations, and selects Global history explicitly", () => {
+    // Global history is a deliberate read-only selection; runtime starts require a project.
     expect(listingConversations()).toEqual({
       type: CONVERSATION_LIST,
-      payload: {},
+      payload: { project: null },
     });
     expect(listingConversations('plowshare')).toEqual({
       type: CONVERSATION_LIST,

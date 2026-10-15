@@ -235,7 +235,14 @@ const examples: Record<string, unknown> = {
     makeDefault: true,
     requestId: '00000000-0000-0000-0000-000000000001',
   },
-  'agent.run': { agent: 'my_agent', task: 'Inspect retained sources' },
+  'conversation.open': { project: 'my_project' },
+  'conversation.list': { project: 'my_project' },
+  'conversation.latest': { project: 'my_project', agent: 'my_agent' },
+  'agent.run': {
+    project: 'my_project',
+    agent: 'my_agent',
+    task: 'Inspect retained sources',
+  },
   'project.attach': {
     name: 'local-integration',
     workspace: '/home/me/integration',
@@ -263,6 +270,7 @@ const examples: Record<string, unknown> = {
     workspace: '/srv/plowshare-workspaces/home-assistant',
   },
   'orchestration.start': {
+    project: 'my_project',
     agent: 'farnsworth',
     definition: 'deep_research',
     request: 'Compare the evidence and contrary findings',
@@ -384,7 +392,15 @@ export function discovery(target = '') {
             ? 'Server administration; target account from handle; caller from the authenticated socket. Requires a server administrator except admin.status.'
             : operation.startsWith('information.')
               ? 'Explicit scope selection; migration controls have their declared exceptions; account from authenticated socket.'
-              : 'Project from payload or --project; project:null selects global. Conversations, jobs and run IDs own their scope. Authorization uses the authenticated account and is checked by the server.',
+              : ['conversation.list', 'conversation.latest'].includes(operation)
+                ? 'Select a project explicitly, or project:null for Global history. Authorization uses the authenticated account.'
+                : [
+                      'agent.run',
+                      'conversation.open',
+                      'orchestration.start',
+                    ].includes(operation)
+                  ? 'An explicit project is required; agent.run may instead continue an existing conversation, which owns its scope. Personal must be selected deliberately. Authorization uses the authenticated account.'
+                  : 'Project from payload or --project; project:null selects global. Conversations, jobs and run IDs own their scope. Authorization uses the authenticated account and is checked by the server.',
           pagination: shape
             ? [...shape[0], ...shape[1]].filter((f) =>
                 [

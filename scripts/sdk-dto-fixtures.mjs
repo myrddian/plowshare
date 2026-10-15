@@ -158,6 +158,17 @@ input('schedule.list',{project:'fixture'},true);
 input('schedule.files',{project:null},false);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeShared:false}},true);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',extra:true}},false);
+// Explicit project or existing conversation: omission/null must never choose Personal implicitly.
+for (const operation of ['conversation.open','conversation.list','conversation.latest','orchestration.start','agent.run']) {
+  const base = operation === 'agent.run' ? {agent:'fixture',task:'work'} :
+    operation === 'conversation.latest' ? {agent:'fixture'} :
+    operation === 'orchestration.start' ? {agent:'fixture',definition:'workflow',request:'work',requestId:receipt} : {};
+  input(operation,base,false);
+  input(operation,{...base,project:null},['conversation.list','conversation.latest'].includes(operation));
+  input(operation,{...base,project:'fixture'},true);
+  input(operation,{...base,project:'personal:66697874757265'},true);
+}
+input('agent.run',{agent:'fixture',task:'work',conversation:'cnv_fixture'},true);
 input('project.list', {}, true);
 input('project.list', { future: 1 }, false);
 for (const job of ['job_fixture', '', '  '])

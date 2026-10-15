@@ -2228,6 +2228,10 @@ export class DesktopClient {
       )
     )
       throw new Error('Choose a workflow granted to this agent.');
+    if (!conversation.project)
+      throw new Error(
+        'Select an explicit project or Personal conversation before starting a workflow.',
+      );
     text(input.text, 'workflow request');
     if (
       typeof input.requestId !== 'string' ||

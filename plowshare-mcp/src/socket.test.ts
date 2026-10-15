@@ -1,3 +1,4 @@
+import { tools } from './adapter.js';
 import { nodePacketSocket } from 'plowshare-client-node';
 import { record, field, json } from './json.test-support.js';
 import { httpHandler, wireText } from './http.test-support.js';
@@ -471,10 +472,7 @@ await test(
     });
     const peer = await sdk(fake.base);
     try {
-      assert.deepEqual(
-        (await peer.client.listTools()).tools,
-        legacy.toolsList.result.tools,
-      );
+      assert.deepEqual((await peer.client.listTools()).tools, tools);
       const cases = legacy.cases.filter(
         (item) =>
           item.id.endsWith('/minimal') || item.id.endsWith('/explicit-options'),
@@ -487,6 +485,17 @@ await test(
           item.request.params.name,
           item.request.params.arguments,
         );
+        if (
+          ['agent_run', 'conversation_list'].includes(
+            item.request.params.name,
+          ) &&
+          item.request.params.arguments['project'] == null
+        ) {
+          assert.equal(response.isError, true);
+          assert.match(JSON.stringify(response), /project/);
+          assert.equal(cursor, 0);
+          continue;
+        }
         const expected = record(
           json(
             JSON.stringify(item.response.result).replaceAll(
@@ -552,6 +561,7 @@ await test(
       await peer.call('agent_run', {
         agent: 'fixture',
         task: 'before rooting',
+        project: 'repo',
       });
       assert.equal(fake.frames.at(-1)?.payload['session'], null);
       const missing = await peer.call('client_root_project_here', {
@@ -666,6 +676,7 @@ await test(
       const blocked = await peer.call('agent_run', {
         agent: 'fixture',
         task: 'after loss',
+        project: 'repo',
       });
       assert.equal(blocked.isError, true);
       assert.match(JSON.stringify(blocked), /not submitted/);
@@ -675,7 +686,11 @@ await test(
         path: outside,
       });
       assert.equal(fake.claims.length, 2);
-      await peer.call('agent_run', { agent: 'fixture', task: 'rooted again' });
+      await peer.call('agent_run', {
+        agent: 'fixture',
+        task: 'rooted again',
+        project: 'repo',
+      });
       assert.equal(fake.frames.at(-1)?.payload['session'], fake.session());
       noSecrets(peer.stderr());
     } finally {
@@ -712,6 +727,7 @@ await test(
           const blocked = await peer.call('agent_run', {
             agent: 'fixture',
             task: 'after refusal',
+            project: 'repo',
           });
           assert.equal(blocked.isError, true);
           assert.match(JSON.stringify(blocked), /root explicitly again/);
@@ -744,7 +760,11 @@ await test(
     try {
       assert.match(
         JSON.stringify(
-          await peer.call('agent_run', { agent: 'fixture', task: 'submit' }),
+          await peer.call('agent_run', {
+            agent: 'fixture',
+            task: 'submit',
+            project: 'repo',
+          }),
         ),
         /job_real/,
       );
@@ -752,8 +772,13 @@ await test(
       assert.equal(result.isError, true);
       assert.match(JSON.stringify(result), /completion is unknown/);
       assert.equal(
-        (await peer.call('agent_run', { agent: 'fixture', task: 'no replay' }))
-          .isError,
+        (
+          await peer.call('agent_run', {
+            agent: 'fixture',
+            task: 'no replay',
+            project: 'repo',
+          })
+        ).isError,
         true,
       );
       assert.deepEqual(
@@ -929,7 +954,7 @@ await test(
     );
     const peer = await sdk(fake.base);
     try {
-      const listed = await peer.call('conversation_list', {});
+      const listed = await peer.call('conversation_list', { project: 'repo' });
       assert.notEqual(listed.isError, true);
       assert.match(JSON.stringify(listed), /c — allowance unlimited/);
       const trajectory = await peer.call('conversation_trajectory', {

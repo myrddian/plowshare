@@ -90,6 +90,47 @@ Filesystem lending, process execution, binary uploads and Git transfers remain
 platform integrations. Calling an operation does not install its provider
 or assert that a remote system has an accessible filesystem.
 
+## Explicit execution scope
+
+External systems configure a named project and use an Application-owned service
+credential (or another scoped service token). SDK admission never derives a runtime
+destination from the bearer or socket session.
+
+`agent.run` requires a non-null, nonblank `project` for standalone or fresh
+conversation work, including `newConversation:true`. To continue an existing
+conversation, supply `conversation` and omit `project`: the retained conversation
+owns its scope. Supplying both selectors is refused. `conversation.open` and
+`orchestration.start` also require an explicit project. Read-only
+`conversation.list` and `conversation.latest` require an explicit selector:
+a project name or `project:null` for Global history. Java image uploads require
+their destination project. Missing/null execution destinations are refused locally
+before submitting the operation.
+These checks apply with human credentials as well as service credentials.
+
+```ts
+await client.request('agent.run', {
+  project: configuredProject,
+  agent: 'interlocutor',
+  task: 'Read the current runbook and retain an answer with evidence.',
+  newConversation: true,
+});
+```
+
+Information operations use an explicit `{ kind: 'project', project:
+configuredProject, includeShared: false }` scope. An Application manager configures
+types and policies; a CONTRIBUTOR service identity ingests and classifies records,
+then discovers, traverses and consumes information within its grants. Project
+membership and token ceilings remain server-enforced.
+
+Personal clients must deliberately select their own Personal project `name`
+returned by `project.list`; they cannot use omission/null as an execution shortcut.
+This is a breaking
+admission change for callers relying on server defaults: retain the selected
+project in configuration and pass it explicitly, or use a conversation ID for
+continuation. Existing global setup/memory contracts remain unchanged. Server
+wire defaults are unchanged; no record is moved and no retry is introduced.
+Explicit reply-selector checks still reject a foreign project without replay.
+
 ## Server FileStores
 
 `filestore.list` accepts an empty request and returns `stores`, each with an

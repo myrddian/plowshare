@@ -1222,6 +1222,27 @@ export function commandProblem(
     return 'choose maxTurns or noTurnCap:true';
   if (body['noBudget'] === true && 'maxModelCalls' in body)
     return 'choose maxModelCalls or noBudget:true';
+  // Read-only Global selection is explicit null; omission is not a scope choice.
+  if (
+    ['conversation.list', 'conversation.latest'].includes(type) &&
+    (!Object.hasOwn(body, 'project') ||
+      (typeof body['project'] === 'string' &&
+        body['project'] !== body['project'].trim()))
+  )
+    return 'Choose an explicit project or project:null for Global history';
+  // Runtime destinations must be chosen by the caller, never inferred from its bearer.
+  // An existing conversation is itself an explicit scope and owns its project.
+  if (
+    ['conversation.open', 'orchestration.start'].includes(type) ||
+    (type === 'agent.run' && body['conversation'] == null)
+  ) {
+    if (
+      typeof body['project'] !== 'string' ||
+      body['project'].trim() === '' ||
+      body['project'] !== body['project'].trim()
+    )
+      return 'Choose an explicit project or an existing conversation';
+  }
   if (type === 'agent.run' && body['newConversation'] === true) {
     if (body['conversation'] != null)
       return 'newConversation cannot be combined with a conversation id';

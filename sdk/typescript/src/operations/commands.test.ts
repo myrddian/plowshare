@@ -34,14 +34,19 @@ describe('operator WS boundaries', () => {
         'agent run {"agent":"a","task":"work","project":null}',
         'repo',
       ),
-    ).toMatchObject({ request: { payload: { project: null } } });
+    ).toMatchObject({ kind: 'usage' });
     expect(parseDirect('project list').kind).toBe('unhandled');
     expect(parseDirect('conversation list').kind).toBe('unhandled');
   });
-  it('preserves server defaults and explicit global tiers, without adding projects to corpus reads', () => {
-    expect(parseCommand('conversation open')).toEqual({
+  it('requires explicit runtime destinations without adding projects to corpus reads', () => {
+    expect(parseCommand('conversation open').kind).toBe('usage');
+    expect(parseCommand('conversation list', null)).toEqual({
       kind: 'request',
-      request: request('conversation.open', {}),
+      request: request('conversation.list', { project: null }),
+    });
+    expect(parseCommand('conversation open', 'repo')).toEqual({
+      kind: 'request',
+      request: request('conversation.open', { project: 'repo' }),
     });
     expect(
       parseCommand('conversation list {"project":null}', 'repo'),
@@ -132,7 +137,7 @@ describe('operator WS boundaries', () => {
     expect(isPayloadCommand('document upload')).toBe(false);
   });
   it.each([
-    request('agent.run', { agent: 'a', task: 'x' }),
+    request('agent.run', { agent: 'a', task: 'x', project: 'repo' }),
     request('conversation.resume', { conversation: 'c' }),
     request('document.ask', { document: 'd', question: 'x' }),
   ])(

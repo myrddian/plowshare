@@ -246,36 +246,68 @@ and do not establish deployment or a server-restart recovery result.
   Explicit project selections retain their project namespace; no stored records
   are migrated by this mapping change.
 
-### Remaining compatibility gap
+### Explicit SDK scope and external Application workflow
 
-The legacy Java convenience call `WsServerClient.openConversation(null, ...)`
-compares the returned project to null, although the server resolves an omitted
-project to the account's Personal home. It rejects the committed result as
-`INVALID_RESPONSE`; callers must not replay that uncertain creation automatically.
-The validated journey uses the existing public `AgentClient.run` with
-`newConversation:true`, which creates the appropriate Personal conversation.
-No SDK selector check was weakened. Aligning the legacy helper with current
-Personal/default-home semantics remains follow-up work.
+The Java selector mismatch originated in `f78e4f04`: the helper compared an omitted
+project to the returned project, while current server admission can resolve the
+omission to Personal. SDKs now require callers to choose the runtime destination
+before submission. `agent.run` requires an explicit project unless it continues a
+conversation; `conversation.open` and `orchestration.start` require a project.
+Read-only `conversation.list/latest` require a project selector, allowing explicit
+null only for Global history. Java image upload also requires its destination.
+Explicit conversation selection owns its project and cannot be combined with another project selector.
+Reply correlation remains strict, and uncertain creations are never replayed.
+
+The acceptance test runs the same journey in two scopes: an explicitly selected
+human Personal workspace and a named Application project. In the external case,
+the manager deploys a manifest declaring a CONTRIBUTOR service identity through
+`ApplicationClient.deploy`, obtains its credential through `application.token.issue`,
+and configures/activates the type. The external client uses only that issued
+credential and project scope with `includeShared:false` for admission, agent work
+and reconnect recovery. No service principal or token is manufactured by SQL.
+
+Independent persistence checks assert that the producer belongs to the issued
+principal and named project, all three source resources belong to that project,
+and the service has no unscoped information or out-of-project conversations.
+Missing runtime scope is refused before conversation creation. Existing access,
+source-withdrawal, metadata-only reuse and exact evidence/provenance assertions
+apply to both journeys. [SDK scope and migration](sdks.md#explicit-execution-scope)
+describes the caller-visible change; no stored records are migrated. Human
+terminal clients select their advertised Personal identity explicitly. Global
+history remains a deliberately selected read-only scope and cannot create work.
+The CLI validates execution destination selection before authentication. MCP advertises and enforces
+required projects for `agent_run` and `conversation_list`, retaining its frozen
+legacy menu as migration evidence rather than changing that historical fixture.
 
 ### Reproduce and results
 
-Only one database-backed class is selected, because the assertions require real
-admission/processing transactions, persisted projections, provenance row mapping
-and access enforcement after withdrawal. The other selected classes use mocks.
+The focused database run selects only the acceptance class: its assertions require
+real Application credential issuance, admission/processing transactions, persisted
+projections, provenance row mapping and access enforcement after withdrawal.
 
 ```sh
-./gradlew format :plowshare-server:test -PfullDb \
+./gradlew :plowshare-server:test -PfullDb \
   --tests 'io.aeyer.plowshare.AuthoredKnowledgeEndToEndTest' \
-  --tests 'io.aeyer.plowshare.server.information.InformationAccessTest' \
-  --tests 'io.aeyer.plowshare.server.archive.RepositoryProxyCompatibilityTest' \
   --no-daemon --no-parallel --max-workers=2
 ```
 
-Passed: one full-server journey, five information-access cases and one Spring
-proxy case, with zero failures/errors/skips. The focused run completed in 40 seconds.
-`./gradlew check formatCheck --no-daemon --no-parallel --max-workers=2` also passed
-on the final source: 125 tasks, 4 minutes 11 seconds. That default gate excludes
-PostgreSQL tests. No SDK or shared contract changed in this validation work.
+Passed: two full-server journeys, zero failures/errors/skips, with 46 seconds of
+test execution (1 minute 6 seconds for Gradle). The service case additionally
+proves that explicit Global history, Personal information, Shared access and an
+ungranted project are refused without creating work outside the configured project.
+The prior information-access and Spring proxy regressions remain in the default
+mocked suite. Chat and embeddings are scripted in both journeys.
+
+The repository `check` and `formatCheck` gates passed (125 tasks, 1 minute
+24 seconds). `sdkCheck` passed (19 tasks, 58 seconds) with
+verified Python and an isolated local .NET 8 SDK after replacing a missing local
+toolchain path: strict Python lint/format/mypy, Python/.NET/Go contract tests, Go
+race tests, and real WebSocket conformance for Node, Python, .NET and Go. The
+canonical generator verified 267 operations and 405 shared DTO boundary cases.
+These gates exclude PostgreSQL by default. SDK contracts and shared DTO boundary
+cases are regenerated by their owning scripts; CLI, MCP and human-client scope behavior are
+covered alongside Java, Node, Python, Go and .NET contracts. Integration and
+deployment remain separate actions.
 
 ## Scope and estimation
 
