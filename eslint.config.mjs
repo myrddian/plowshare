@@ -4,6 +4,7 @@ import tseslint from 'typescript-eslint';
 const files = [
   'clients/**/*.ts',
   'integrations/mcp/src/**/*.ts',
+  'integrations/discord/src/**/*.ts',
   'sdk/*/src/**/*.ts',
   'plowshare-*/src/**/*.ts',
   'plowshare-*/vite.config.ts',
@@ -33,6 +34,7 @@ export default tseslint.config(
           'sdk/typescript/src/tsconfig.test.json',
           'sdk/node/tsconfig.lint.json',
           'integrations/mcp/tsconfig.json',
+          'integrations/discord/tsconfig.json',
           'plowshare-cli/tsconfig.test.json',
           'plowshare-mcp/tsconfig.test.json',
           'plowshare-tui/tsconfig.lint.json',

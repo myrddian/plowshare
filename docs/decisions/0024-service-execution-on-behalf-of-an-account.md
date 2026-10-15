@@ -245,6 +245,8 @@ The first implementation refuses, whatever the ceilings allow:
   including issuing acting tokens;
 - managing grants, eligibility or identity links;
 - owner-only information controls: finalization, sharing, deletion and tags;
+- content-type management: creating type versions, activation and deprecation;
+- explicitly clearing a resource's content type (`clear` typing mode);
 - project membership changes;
 - approvals, which stay a direct human action;
 - creating schedules or triggers.
@@ -252,6 +254,23 @@ The first implementation refuses, whatever the ceilings allow:
 Approvals and schedules are deliberate follow-ups, not oversights. Approving
 through a chat bridge is useful, but it lets a compromised adapter approve
 anything within the subject's authority. That needs its own decision.
+
+### Typed information under an acting context
+
+The [authored knowledge design](../authored-knowledge-design.md) proposes content
+types and metadata-only revisions. Type management is refused above, consistent
+with that design's rule that model tools cannot manage types and service
+credentials gain no administrative authority.
+
+Typed admissions and `information.content.revise` are permitted in `inherit` and
+`set` modes, within the effective role. The subject owns the resource, and a
+metadata-only revision makes no model call, fetches nothing and spends no
+allowance. The revision records the acting record as its revising actor, so
+history shows the change came through the Application. `clear` is refused because
+it discards a resource's declared structure; it stays a direct owner action.
+
+If that design changes its owner or processing rules before acceptance, this
+section follows it.
 
 ## Ownership and attribution
 
