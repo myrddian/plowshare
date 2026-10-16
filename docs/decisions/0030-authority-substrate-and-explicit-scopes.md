@@ -296,6 +296,51 @@ Document processing retains its existing no-tools/no-delegation capability ceili
 
 ## Splitting Global
 
+### Deployment definitions and SYSTEM worker resolution
+
+Deployment is the installation's administrator-controlled configuration layer,
+separate from the Global memory Project. Bundled resources supply release
+defaults; deployment definitions supply validated additions and permitted
+overrides. Their presence in the server data directory does not select an
+execution account. Ordinary bots resolved from either source run under the
+admitted user's account and authority, just as project bots do.
+
+A SYSTEM worker is an agent executing a trusted internal workload under the locked
+SYSTEM account. Its task retains that account's exclusive execution identity and
+bounded workload authority; the agent never receives an assignable SYSTEM role.
+The server's admitted worker purpose selects the executor and scope independently
+of the selected definition's filesystem location, name or authored metadata.
+
+For an internal purpose such as conversation summarization, resolve the worker
+only within the deployment-plus-bundle definition context:
+
+1. Use an authorized, valid deployment override for the worker purpose when present.
+2. Otherwise use its bundled definition.
+3. Never search project, Personal, connected-client, Application or Global-memory
+   sources to satisfy that internal worker lookup. A missing worker or invalid
+   authoritative override refuses the task; it does not broaden the search or
+   silently substitute the bundled definition after an override failure.
+
+For example, overriding the summarizer in deployment configuration changes its
+permitted definition, not the identity of the already admitted internal task:
+the summarizer still executes under SYSTEM with the same scope and input limits.
+A project namesake cannot replace that worker. Conversely, an ordinary deployment
+bot executes under the user and cannot obtain SYSTEM execution by naming itself
+after the summarizer or declaring a role. SYSTEM worker discovery and selection
+use this internal resolution context; user catalogue lookup never selects a
+SYSTEM executor. Authorized administration can inspect/manage worker configuration
+without making the worker user-invocable.
+
+Keep two facts distinct when accepting an override: the replacement remains
+deployment-authored, and the trusted worker binding continues to identify a SYSTEM
+workload. Editing a file does not acquire bundled provenance or make authored
+`is-system` metadata trustworthy. Override management is a privileged
+server-administration action because it can change server-directed SYSTEM work.
+The bundle/deployment context is a definition-resolution boundary, not permission
+to read the entire server data directory. These are proposal requirements; current
+bundled-only classification and worker lookup do not yet implement this full
+identity/admission model.
+
 ### Global memory collection
 
 Define Global as a built-in Project containing deliberately published memories,
@@ -477,7 +522,8 @@ leases, schemas and uncertain-effect receipts.
 | --- | --- |
 | Server/internal execution context conflated with scope | Locked SYSTEM account, SYSTEM role and explicit workload grants |
 | Server configuration and internal Relay topics | Explicit server-administration scope and scoped administration grants |
-| Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and worker lookup |
+| Operator-authored deployment defaults and overrides | Deployment configuration over bundled resources, managed through server-administration scope; no automatic SYSTEM execution |
+| Internal worker definitions | Trusted worker-purpose binding resolved only from deployment overrides and bundled resources; SYSTEM execution remains bounded by task admission |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
 | Memories deliberately published across projects | Built-in Global memory Project with fixed reserved UUIDs, human ADMIN publication and separately granted reads |
 | MCP/client tools configured for broad reuse | Existing provider scopes, owner/project/agent assignments and Relay lifecycle; no new Global tool registry |

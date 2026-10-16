@@ -128,6 +128,25 @@ project overrides. Scribe, Curator, Learner and document workers still need trus
 lookup by internal worker purpose. Preserve worker execution while separating it from
 user catalogue availability and published data.
 
+Call the operator configuration layer **Deployment**, independently of Global
+memory. [AgentsConfig.agentRegistry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentsConfig.java)
+currently layers deployment files from `global/agents/` and `global/bots/` over
+bundled resources; `ReloadingGlobalAgents` refreshes those same sources. Internal
+Scribe/Curator/Learner and compaction wiring consumes these snapshots rather than
+the caller's project registry. This supports the desired resolution boundary,
+but is not evidence that the proposed SYSTEM account/admission model exists.
+
+The proposed worker-purpose contract restricts internal definition discovery to
+authorized deployment overrides followed by bundled defaults. Project, Personal,
+client-session, Application and Global-memory sources cannot supply a SYSTEM
+worker. An invalid authoritative override refuses; only absence permits the
+bundled default. A deployment summarizer override remains deployment-authored
+while its admitted internal task still runs under SYSTEM, with unchanged scope
+and input ceilings. An ordinary deployment bot instead runs under its admitted
+user's account. Preserve the distinction between trusted worker binding,
+definition provenance and execution identity; do not implement the binding as
+an authored name or `is-system` flag that grants root execution.
+
 The audit's hardcoded `daedalus` assertion is obsolete at this baseline.
 [AgentExposure.operatorOnly](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentExposure.java)
 uses `definition.isSystem()`. The bundled diagnostic is now the private
@@ -213,6 +232,12 @@ Default mocked/fake tests should cover:
   not automatically propagate to children and remain subject to live revocation.
 - SYSTEM execution inside one admitted scope, refusing unrelated resources and
   publication even when the root role permits the action in principle.
+- SYSTEM worker lookup uses only deployment and bundled sources. Valid deployment
+  summarizer overrides retain the admitted SYSTEM executor and task limits;
+  project/Personal/client/Application namesakes cannot replace the worker or gain
+  its execution identity. Invalid authoritative overrides refuse. Ordinary
+  deployment bots execute under the user's account; authored overrides retain
+  their provenance without acquiring bundled-only classification.
 - ADMIN management without implicit Personal/content access; role bundles versus
   resource ACL grants; delegation allowed only within the issuing authority.
 - Expired/revoked parents, grant cycles, unknown provenance and attempted widening

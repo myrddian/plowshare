@@ -170,6 +170,7 @@ does not contain every tenant/project's content by implication.
 | Define server schedules or admit maintenance/event effects | Named operational-control action | No | No | No |
 | Run retention/buffer maintenance or quarantine adoption/release | Named maintenance action and targets | No | No | No |
 | Manage the SYSTEM-owned installed definition catalogue | Named catalogue-management action | No | No | No |
+| Manage Deployment defaults and permitted SYSTEM worker overrides | Named deployment/worker-configuration action | No | No | No |
 | Read private project/Personal bodies merely because server administration is granted | No | No | No | No |
 | Log in as SYSTEM, assign SYSTEM or grant ADMIN to an agent | No | No | No | No |
 
@@ -183,6 +184,14 @@ Current code does not yet expose that general role/projection.
 Deployment files and provider secrets that are currently operator-only files do
 not become remotely editable just because this table names an administrative
 action. A public configuration capability would need its own design and contracts.
+
+Deployment definition placement does not grant an execution role. Ordinary bots
+there run under the admitted user's account. A trusted internal SYSTEM worker
+resolves only authorized Deployment overrides and bundled defaults, retaining its
+SYSTEM executor and bounded task authority when its definition is overridden.
+That resolution excludes project, Personal, client-session, Application and
+Global-memory sources. Managing the override does not assign SYSTEM to its author
+or make the worker callable as SYSTEM through the user catalogue.
 
 ## Personal and private client scope matrix
 
