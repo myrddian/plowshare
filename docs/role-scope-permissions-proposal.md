@@ -282,12 +282,15 @@ endpoint restrictions also remain independent. Cross-project messaging/Relay
 requires both source/destination authority and configured routing, not just a
 CONTRIBUTOR role at one end.
 
-Tools available across eligible projects are installed platform capabilities in
-the SYSTEM-controlled catalogue. Global does not store or grant those tools.
-Availability permits selection; explicit agent/workflow grants permit offering;
-role, actual target scope and other capability restrictions govern invocation.
-External tools retain explicit owner/project/provider assignments and credentials,
-even when their declarations are intentionally reused by several projects.
+Built-in tools available across eligible projects are installed platform
+capabilities. MCP/client tools already use provider catalogues and interactive or
+hosted scope bindings; reuse those mechanisms without a second tool registry.
+Global does not store or grant either kind of tool. Availability permits selection;
+the appropriate definition/workflow or external provider assignment permits
+offering; role, actual target scope and other capability restrictions govern
+invocation. External tools retain explicit owner/project/provider/agent assignments
+and credential subjects, even when configuration is reused by several projects.
+The current contracts require concrete projects, not a project-less wildcard grant.
 
 Current ordinary service tokens may have effective MANAGER project ceilings;
 current acting scopes explicitly reject MANAGER and only support VIEWER or

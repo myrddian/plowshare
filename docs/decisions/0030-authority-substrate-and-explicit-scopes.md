@@ -364,7 +364,34 @@ not a special SYSTEM-name permission branch.
 
 ### Tools available across projects
 
-Platform tools belong to the SYSTEM-controlled installed capability catalogue,
+For MCP and client-provided tools, reuse the existing provider scopes, catalogue
+and Relay invocation mechanism. This proposal introduces no replacement tool
+catalogue, global provider runtime or new common tool-grant bundle. A tool
+configuration intended for broad reuse is separate from the Global memory Project
+and does not become SYSTEM-owned credential material.
+
+Interactive providers attach through `tool.scope.connect/list/disconnect` and
+`SessionToolScopes`; server-hosted providers retain bindings through
+`tool.scope.host.*` and `OwnedHostedToolScopes`. `CombinedToolScopeConnections`
+projects both through the existing `ApplicationToolRegistry`. Account, project,
+provider, selected agents, grants, dynamic opt-in, catalogue freshness and
+invocation identity remain explicit. Interactive bindings additionally retain the
+authenticated socket/session; hosted bindings use their distinct durable owner,
+credential-subject and executor lifecycle. Applications retain manifest assignments.
+
+Current connection/binding contracts require a concrete project; they do not
+provide a project-less server-wide wildcard grant. If a client calls reusable
+configuration global, that describes configuration breadth rather than authority
+over every project. Materialize only authorized assignments in the intended scopes.
+A future convenience for selecting multiple projects must reuse these bindings
+and checks, not attach provider tools to the Global memory Project.
+
+The [provider scope contract](../tool-scopes.md),
+[hosted scope contract](../hosted-tool-scopes.md) and
+[MCP authority contract](../mcp-tool-authority.md) own this behavior. This separates
+the existing external-tool mechanism from built-in registration below.
+
+Built-in platform tools belong to the SYSTEM-controlled installed capability catalogue,
 administered under the server configuration scope. They do not belong to the
 Global memory project and are not imported from it. Tool installation/availability,
 agent capability grants and invocation authority are separate decisions:
@@ -373,13 +400,13 @@ agent capability grants and invocation authority are separate decisions:
 | --- | --- |
 | Installed tool definition | The server has the implementation, schema and declared action/target contract |
 | Availability policy | Eligible project/scope kinds may discover or select the capability |
-| Agent or workflow grant | The admitted definition/workflow is permitted to offer that tool |
+| Agent or workflow assignment | Declared built-in grants or authorized external provider-scope assignments make the tool offerable; dynamic opt-in alone grants nothing |
 | Invocation authority | The actual caller/run may perform the action on the resolved targets, within all retained ceilings and resource policies |
 
 Available everywhere means available for selection in each eligible project,
 not automatically granted to every agent or permitted to access every resource.
-An explicit default capability bundle may supply common grants if adopted; its
-contents and policy must be visible and cannot bypass role/scope restrictions.
+Any existing configuration that supplies defaults must keep its assignments
+visible and cannot bypass role/scope restrictions.
 
 For example, `get_date` needs no private data target but still needs an admitted
 capability. `memory_read` can be an installed platform capability while each call
@@ -411,7 +438,8 @@ leases, schemas and uncertain-effect receipts.
 | Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and worker lookup |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
 | Memories deliberately published across projects | Built-in Global memory Project with fixed reserved UUIDs, human ADMIN publication and separately granted reads |
-| Tools available across eligible projects | SYSTEM-controlled installed capability catalogue plus explicit availability and agent grants; invocation remains scoped |
+| MCP/client tools configured for broad reuse | Existing provider scopes, owner/project/agent assignments and Relay lifecycle; no new Global tool registry |
+| Built-in tools available across eligible projects | Installed capability catalogue plus admitted definition/workflow grants; invocation remains scoped |
 | Other published knowledge such as shared documents | Its own published-resource policy and audience, separate from Global memories |
 | A user's work with no selected project | Explicit Personal scope selected at admission where the operation permits that default |
 | Account-owned outgoing work | Explicit owning scope plus account ownership and original receipt lifecycle |

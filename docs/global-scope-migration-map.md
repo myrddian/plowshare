@@ -69,13 +69,21 @@ authority over that project is required for publication and
 content/lifecycle administration. Ordinary resource publication remains separate;
 shared documents do not become Global memories or SYSTEM resources.
 
-Tools available across projects remain in the installed platform catalogue, not
+Built-in tools available across projects remain in the installed platform catalogue, not
 inside the Global memory project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
 separates registered names from offered capabilities; [ScopedTools](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedTools.java)
 and [ApplicationToolRegistry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/ApplicationToolRegistry.java)
 add live project/provider tools under their own grants. Reuse these owners for
 explicit availability and invocation authority rather than creating a Global-tool
 fallback or a duplicate provider runtime.
+
+For MCP and client-provided tools specifically, the provider-scope mechanism is
+already the owning capability. `SessionToolScopes` handles interactive bindings;
+`OwnedHostedToolScopes` handles durable hosted assignments, combined through
+`CombinedToolScopeConnections`. Their concrete project, owner, agent and provider
+bindings are retained. Broadly reusable configuration does not imply a current
+project-less wildcard grant. The Global migration must preserve this mechanism,
+not rehome external tools or their credentials into SYSTEM or the Global Project.
 
 The precise list/selection defaults require review before implementation. A read
 may offer an explicit authorized aggregate selection without adopting the same
