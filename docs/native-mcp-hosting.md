@@ -117,6 +117,12 @@ the SDK's portable envelope; invalid arguments fail before execution intent or a
 MCP tool effect. A received MCP tool error remains a received result with `isError`;
 an unverifiable dispatched call becomes UNKNOWN and is never retried.
 
+Explicit startup records interrupted SDK receipts as UNKNOWN under the exclusive
+host lock before opening a new MCP session. Existing requests and results remain
+retained. See [cancellation and recovery](mcp-recovery.md) for abort/close behavior,
+exact STDIO cancellation and the distinction between stopping a wait and undoing
+an upstream effect.
+
 ### Explicit server sharing
 
 Server sharing preserves the owning account, exact route, tool name and schema

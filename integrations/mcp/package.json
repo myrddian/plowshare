@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test build/mcp/*.test.js",
+    "test": "node scripts/test.mjs",
     "start": "node build/mcp/main.js"
   },
   "dependencies": {

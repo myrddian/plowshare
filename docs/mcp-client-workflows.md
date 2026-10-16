@@ -1,12 +1,11 @@
 # MCP connection management and native hosting workflows
 
-Status: accepted client workflow design, audited against main
-`7443fea2981615846d2a21ea835d6b0841447e0e` on 13 October 2026.
-Credentials and durable provider bindings are implemented. The shared owner
-management lifecycle and initial CLI/TUI/desktop/console controls are documented
-in [client management](provider-management-clients.md). Friendly native host verbs,
-MCP transports and native host lifetime remain planned. This is not a live MCP or
-deployed-client acceptance claim.
+Status: server management and native CLI/TUI/desktop HTTP/STDIO controls are
+implemented. Desktop separates **This client** from **Server**; console exposes
+server management in Projects. Current commands and profile behavior are in
+[native hosting](native-mcp-hosting.md) and [provider management](provider-management-clients.md).
+The [interoperability runbook](mcp-interoperability.md) separates controlled evidence
+from organization OAuth and distributed-client acceptance.
 
 The server-facing MCP adapter consumes the existing SDK provider, scopes, catalogue leases, Relay invocation
 record and exclusive provider journal. See the [provider design](mcp-client-design.md),
@@ -167,15 +166,14 @@ perform no Relay operation. Explicit server sharing uses the existing authentica
 scope/provider boundary. See [native configuration, commands and recovery](native-mcp-hosting.md)
 and [ADR 0024](decisions/0024-native-mcp-direct-execution.md).
 
-The following layout guidance describes the friendly management controls planned
-for #108. Process ownership, explicit consent, private instance profiles and SDK
+The following layout guidance describes the implemented management controls. Process ownership, explicit consent, private instance profiles and SDK
 receipt recovery remain the runtime contracts; the browser does not launch STDIO.
 
-## Proposed native verbs and terminal layout
+## Native verbs and terminal layout
 
 CLI inspect/start/call/share and the raw native TUI/desktop command boundary are
-implemented as documented in [native hosting](native-mcp-hosting.md). The friendly
-reconcile panel and layouts below remain #108; read-only inspection must never
+implemented as documented in [native hosting](native-mcp-hosting.md). A standalone
+`mcp local reconcile` verb remains proposed; read-only inspection must never
 launch STDIO merely to examine an original journal.
 
 | Proposed verb | Behavior |
@@ -208,8 +206,8 @@ host's final summary and later inspection.
 ## Console placement and lifecycle
 
 Work overview, inbox, jobs, results and approvals remain the first console
-implementation priority. Management is a later project slice via the existing
-Projects surface, with a proposed **Tool connections** action. Do not reorder the
+implementation priority. Management uses the existing
+Projects surface and its **Tool connections** action. Do not reorder the
 work rail or replace the shell. General URL/history changes belong to navigation
 design, not this panel.
 
@@ -288,7 +286,7 @@ or generic Relay-log queries to manufacture UI evidence.
    revocation, schema changes, restart and cancellation. Real browser/native
    distribution acceptance is required before claiming shipped UX.
 
-This design changes no runtime API, persistence, schema, tool grants, dependency
-or navigation catalogue. The initial owner controls have source and controlled
-client fixture coverage; MCP adapter/native-host and deployed acceptance remain
-later increments.
+The controls reuse existing public capabilities and add no second tool registry
+or execution ledger. Source and controlled fixtures cover the adapter and clients;
+configured server, organization OAuth and distribution evidence must be recorded
+separately using the interoperability runbook.

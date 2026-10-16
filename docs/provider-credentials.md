@@ -5,7 +5,8 @@ is separate from Plowshare login, tool catalogues, Relay invocation receipts and
 provider scopes. [Durable hosted scopes](hosted-tool-scopes.md) gate credential
 release to configured external executors using retained owner/invocation authority,
 as described in [ADR 0019](decisions/0019-mcp-provider-hosting.md). An external MCP
-transport and its session caches remain separate adapter work.
+transport and subject-scoped sessions are implemented in the separate
+[reusable adapter](../integrations/mcp/README.md).
 
 The [client management manual](provider-management-clients.md) covers safe entry,
 browser authorization and original-receipt recovery in CLI/TUI/desktop/console.
@@ -46,7 +47,7 @@ Nullable fields must be explicitly present. Invalid nested input, unsupported
 headers, unknown input fields and coercion are refused before side effects. Java
 uses `ProviderConnectionClient`; TypeScript/Node use the checked operation
 transport; Python, Go and .NET expose generated typed requests and paired replies.
-Dedicated client management screens remain separate work.
+Client management screens use those same operations; see the linked client manual.
 
 Retain a fresh mutation request UUID before sending. If delivery is unknown, read
 its receipt and current status. A committed UUID always refuses resubmission;

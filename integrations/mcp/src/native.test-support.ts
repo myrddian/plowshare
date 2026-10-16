@@ -5,6 +5,50 @@ import { decodeNativeConfig } from './native-config.ts';
 import type { NativeMcpConfig } from './native-config.ts';
 import { rawTool } from './wire.test-support.ts';
 import type { McpProtocol } from './contracts.ts';
+import { object } from './codec.ts';
+
+interface NativeObservation {
+  readonly method: string;
+  readonly pid: number;
+  readonly child: number | null;
+  readonly home: boolean;
+  readonly selected: string | null;
+  readonly requestId: string | number | null;
+  readonly cancelledRequestId: string | number | null;
+}
+function requestIdentity(value: unknown): value is string | number | null {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    (typeof value === 'number' && Number.isSafeInteger(value))
+  );
+}
+function observation(source: unknown): NativeObservation {
+  const row = object(source);
+  const requestId = row.requestId,
+    cancelledRequestId = row.cancelledRequestId;
+  if (
+    typeof row.method !== 'string' ||
+    typeof row.pid !== 'number' ||
+    !Number.isSafeInteger(row.pid) ||
+    (row.child !== null &&
+      (typeof row.child !== 'number' || !Number.isSafeInteger(row.child))) ||
+    typeof row.home !== 'boolean' ||
+    (row.selected !== null && typeof row.selected !== 'string') ||
+    !requestIdentity(requestId) ||
+    !requestIdentity(cancelledRequestId)
+  )
+    throw new Error('Invalid native wire observation');
+  return {
+    method: row.method,
+    pid: row.pid,
+    child: row.child,
+    home: row.home,
+    selected: row.selected,
+    requestId,
+    cancelledRequestId,
+  };
+}
 
 export async function nativeFixture(
   protocol: McpProtocol = '2026-07-28',
@@ -13,15 +57,7 @@ export async function nativeFixture(
   config: NativeMcpConfig;
   file: string;
   directory: string;
-  seen: () => Promise<
-    readonly {
-      method: string;
-      pid: number;
-      child: number | null;
-      home: boolean;
-      selected: string | null;
-    }[]
-  >;
+  seen: () => Promise<readonly NativeObservation[]>;
   close: () => Promise<void>;
 }> {
   const directory = await mkdtemp(join(tmpdir(), 'plowshare-native-mcp-'));
@@ -38,7 +74,7 @@ const child=mode==='tree'?spawn(process.execPath,['-e','setInterval(()=>{},1000)
 process.stderr.write('fixture-secret-stderr\\n');
 for await(const line of createInterface({input:process.stdin,terminal:false})) {
  const message=JSON.parse(line), method=message.method;
- appendFileSync(log,JSON.stringify({method,pid:process.pid,child:child?.pid??null,home:process.env.HOME!==undefined,selected:process.env.SELECTED??null})+'\\n');
+ appendFileSync(log,JSON.stringify({method,pid:process.pid,child:child?.pid??null,home:process.env.HOME!==undefined,selected:process.env.SELECTED??null,requestId:message.id??null,cancelledRequestId:message.params?.requestId??null})+'\\n');
  if(message.id===undefined)continue;
  let result;
  if(method==='server/discover')result={resultType:'complete',supportedVersions:[protocol],capabilities:{tools:{}},ttlMs:0,cacheScope:'public',_meta:{'io.modelcontextprotocol/serverInfo':{name:'fixture',version:'1'}}};
@@ -87,16 +123,7 @@ process.exit(0);
           .trim()
           .split('\n')
           .filter(Boolean)
-          .map(
-            (line) =>
-              JSON.parse(line) as {
-                method: string;
-                pid: number;
-                child: number | null;
-                home: boolean;
-                selected: string | null;
-              },
-          );
+          .map((line) => observation(JSON.parse(line)));
       } catch (error) {
         if (
           error instanceof Error &&

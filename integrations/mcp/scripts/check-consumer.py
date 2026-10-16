@@ -24,6 +24,7 @@ with tempfile.TemporaryDirectory(prefix='plowshare-mcp-consumer-') as temporary:
         package['dependencies'][name] = 'file:' + str(consumer / (name + '-0.1.0.tgz'))
     (consumer / 'package.json').write_text(json.dumps(package))
     shutil.copytree(ADAPTER / 'src', consumer / 'src')
+    shutil.copytree(ADAPTER / 'scripts', consumer / 'scripts')
     shutil.copy(ROOT / 'tsconfig.strict.json', consumer / 'tsconfig.strict.json')
     config = json.loads((ADAPTER / 'tsconfig.json').read_text())
     config['extends'] = './tsconfig.strict.json'
@@ -37,5 +38,5 @@ with tempfile.TemporaryDirectory(prefix='plowshare-mcp-consumer-') as temporary:
     tests = sorted(str(file.relative_to(consumer)) for file in (consumer / 'build/mcp').glob('*.test.js'))
     if not tests:
         raise RuntimeError('No installed-consumer MCP tests')
-    run('node', '--test', *tests, cwd=consumer)
+    run('node', 'scripts/test.mjs', cwd=consumer)
     print('MCP adapter compiled and passed fixtures using installed public SDK artifacts.')

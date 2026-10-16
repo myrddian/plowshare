@@ -1,28 +1,26 @@
 # MCP client design and implementation plan
 
-Status: proposed MCP design for review, audited against public main
-`e0886dd0b6472849dee1f4408a158f2556b02816` on 12 October 2026.
-This plan covers nested provider schemas, server-held
-per-user MCP credentials, service-account bindings, and native client hosting.
-It does not describe an implemented MCP client.
+Status: the shared schema, server credentials/bindings, reusable HTTP adapter,
+native HTTP/STDIO hosts and initial client controls are implemented. This document
+retains the design and delivery sequence. Use the [server adapter manual](../integrations/mcp/README.md),
+[native hosting manual](native-mcp-hosting.md) and [interoperability runbook](mcp-interoperability.md)
+for current configuration and the distinction between fixtures and configured acceptance.
+Separate spending pools, general external-tool human approval and immediate
+server-to-worker cancellation advisories remain platform gaps.
 
 MCP consumption uses the existing SDK tool provider mechanism demonstrated by
 `integrations/network-privacy`. Plowshare continues to own tool visibility,
 authorization, jobs, accounting, invocation receipts and recovery. The MCP
 provider owns upstream discovery, authentication and protocol translation.
 
-The shared tool schema, SDK, [provider credential foundation](provider-credentials.md)
-and [durable hosted binding authority](hosted-tool-scopes.md) are implemented. MCP
-transport, subject-scoped session caches, service-account accounting selection and
-instance-local MCP hosting remain planned. [ADR 0019](decisions/0019-mcp-provider-hosting.md) traces current source,
-records the precise platform gaps and defines the ownership decision. The
-[bounded MCP profile](mcp-provider-profile.md) pins protocol/SDK revisions, discovery,
-results and unsupported capabilities, with an independent reproducible design probe.
-
-The [client workflow design](mcp-client-workflows.md), audited against the merged
-credential and hosted foundations, specifies roles/locations, current client gaps,
-management layouts, native process lifetime and receipt recovery. Its screens and
-hosting verbs are planned, not shipped.
+The shared [tool schema](tool-schemas.md), [provider credentials](provider-credentials.md)
+and [durable hosted authority](hosted-tool-scopes.md) supply the platform contracts.
+[ADR 0019](decisions/0019-mcp-provider-hosting.md) records their ownership decision;
+the [bounded tools profile](mcp-provider-profile.md) documents pinned protocol/SDK
+revisions, admission, results and unsupported features. The [client workflows](mcp-client-workflows.md)
+cover server tools and instance-local controls. Implementation and acceptance are
+separate facts: source and controlled fixtures do not establish organization OAuth
+or every distributed client/host combination.
 
 ## Existing provider mechanism
 
@@ -64,7 +62,7 @@ SDK providers and carries immutable recursive values through the existing
 catalogue/invocation mechanism. See [Shared tool schemas](tool-schemas.md) and
 [the platform decision](decisions/0018-shared-tool-schemas.md) for the implemented
 bounded profile, unsupported keywords, canonical fingerprints and versioned
-compatibility. MCP transport and subject-scoped sessions remain planned work.
+compatibility. The MCP adapter consumes this profile through subject-isolated sessions.
 
 An MCP adapter must validate discovered schemas against that profile before
 publishing them. Unsupported keywords or dialects produce visible compatibility
@@ -174,8 +172,8 @@ server-owned credentials and durable availability bindings across client session
 Credential ownership and delegated hosting are general platform capabilities;
 plan these as separate platform changes under
 [ADR 0001](decisions/0001-integration-boundary.md), followed by the SDK-only MCP
-consumer. This request authorizes the design and implementation plan; runtime
-changes remain a subsequent implementation task.
+consumer. These platform foundations are now implemented; additional general
+capabilities still require their own platform design and authorization.
 
 1. **Shared tool schema and SDK extension: delivered.** The standalone foundation
    includes server integration, all SDK façades and existing provider compatibility.
@@ -187,7 +185,7 @@ changes remain a subsequent implementation task.
    services and shared SDK operations extend existing provider scopes while
    retaining the owning invocation ledger. See the credential and hosted manuals
    for configuration, migrations, key rollback, revocation and uncertainty.
-4. **Build the MCP provider.** Implement profile-specific discovery/initialization,
+4. **MCP provider: delivered.** The reusable adapter implements profile-specific discovery/initialization,
    bounded pagination, catalogue renewal/withdrawal, collision-safe name mapping and `tools/call`
    handlers under `integrations/`. Pin original upstream names, schemas and
    credential subjects. Server hosting accepts HTTP only; native hosting adds
@@ -197,8 +195,8 @@ changes remain a subsequent implementation task.
    inside native client processes, with optional server sharing through existing
    provider scopes. CLI foreground commands, TUI commands and desktop main IPC
    own lifetime and receipts. See [native hosting](native-mcp-hosting.md).
-6. **Expose connection management in clients.** First review the
-   [workflow matrix and layouts](mcp-client-workflows.md), then provide server-held user
+6. **Client connection controls: delivered.** The
+   [workflow matrix and layouts](mcp-client-workflows.md) cover server-held user
    authorization, authorized service-account selection, agent assignments,
    compatibility diagnostics and instance-local hosting in CLI/TUI/desktop.
    Browser management operates through typed server capabilities. Reuse shared
