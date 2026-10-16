@@ -32,6 +32,23 @@ def main():
     with (node / 'types.ts').open('a') as checks:
         checks.write("import { ToolProvider, nodeToolHost, type ToolJournal, type ToolBinding } from 'plowshare-client-node/tools'\nimport type { ToolDeclaration } from 'plowshare-client-ts'\nconst scope: ToolDeclaration = { name: 'network_scope', description: 'Inspect scope', parameters: [], timeoutSeconds: 30 }\nasync function tools(client: Parameters<typeof ToolProvider.create>[0], binding: ToolBinding, journal: ToolJournal) { return ToolProvider.create(client, binding, [{ declaration: scope, handler: async () => ({ state: 'COMPLETED', text: 'scope' }) }], journal, nodeToolHost) }\n")
     run('node', str(ROOT / 'sdk/node/node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'ES2022', '--lib', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.ts', cwd=node)
+    # The interchange module must resolve from installed packages, not checkout links.
+    with (node / 'types.ts').open('a') as checks:
+        checks.write("import { unpackPortableBundle, packEditedPortableBundle, portableCodec } from 'plowshare-client-node/interchange'\nimport type { PortableBundle } from 'plowshare-client-ts/operations/information-interchange'\nasync function interchange(bundle: PortableBundle) { const { manifest, files } = await unpackPortableBundle(bundle, portableCodec); return packEditedPortableBundle(manifest, files, portableCodec) }\n")
+    run('node', str(ROOT / 'sdk/node/node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'ES2022', '--lib', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', 'types.ts', cwd=node)
+    (node / 'interchange.mjs').write_text("""
+import { createHash } from 'node:crypto';
+import { unpackPortableBundle, packEditedPortableBundle, portableCodec } from 'plowshare-client-node/interchange';
+const id='11111111-1111-4111-8111-111111111111', body=Buffer.from('\\uFEFF# Safety 🔎\\r\\n');
+const hash=createHash('sha256').update(body).digest('hex');
+const descriptor={resource:id,revision:id,ordinal:1,sourceName:'source.md',title:'Source',path:'documents/source.md',mediaType:'text/markdown',contentHash:hash,tags:[],provenance:{owner:'owner',kind:'source',createdAt:'2026-10-16T00:00:00Z',sourceHash:hash,dependencies:[],evidence:[]}};
+const bundle={format:'plowshare-information-bundle/1',id,documents:[{descriptor,bytesBase64:body.toString('base64')}],relationships:[],relationshipCoverage:'included-endpoints-only'};
+const {manifest,files}=await unpackPortableBundle(bundle,portableCodec);
+if(!Buffer.from(files[0].bytes).equals(body))throw new Error('Installed interchange lost original bytes');
+const packed=await packEditedPortableBundle(manifest,files,portableCodec);
+if(packed.documents[0].descriptor.contentHash!==hash)throw new Error('Installed interchange hash differs');
+""")
+    run('node', 'interchange.mjs', cwd=node)
     env['PLOWSHARE_SDK_NODE_ENTRY'] = (node / 'entry.mjs').as_uri()
 
     python = tool('PLOWSHARE_SDK_PYTHON', 'python3', ROOT / 'build/sdk-python-env/bin/python')

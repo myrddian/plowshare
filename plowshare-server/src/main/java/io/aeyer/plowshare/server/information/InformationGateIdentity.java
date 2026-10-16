@@ -5,6 +5,68 @@ import java.util.*;
 
 /** Reviewed transition identities. Their fingerprints retain the existing receipt encoding. */
 public sealed interface InformationGateIdentity {
+  record InterchangeImport(String planHash) implements InformationGateIdentity {
+    public InterchangeImport {
+      planHash = digest(planHash);
+    }
+  }
+
+  record TypedIntake(
+      Intake source,
+      UUID expectedRevision,
+      io.aeyer.plowshare.protocol.InformationContent.Typing typing)
+      implements InformationGateIdentity {
+    public TypedIntake {
+      Objects.requireNonNull(source);
+      Objects.requireNonNull(typing);
+    }
+  }
+
+  record TypedReport(
+      Report source,
+      UUID expectedRevision,
+      io.aeyer.plowshare.protocol.InformationContent.Typing typing)
+      implements InformationGateIdentity {
+    public TypedReport {
+      Objects.requireNonNull(source);
+      Objects.requireNonNull(typing);
+    }
+  }
+
+  record MetadataRevision(
+      UUID expectedRevision, io.aeyer.plowshare.protocol.InformationContent.Typing typing)
+      implements InformationGateIdentity {
+    public MetadataRevision {
+      Objects.requireNonNull(expectedRevision);
+      Objects.requireNonNull(typing);
+    }
+  }
+
+  record ContentTypeDraft(
+      UUID type,
+      Long controlRevision,
+      String slug,
+      String label,
+      String description,
+      io.aeyer.plowshare.protocol.SchemaDefinition schema,
+      io.aeyer.plowshare.protocol.SchemaValue.ObjectValue presentation)
+      implements InformationGateIdentity {
+    public ContentTypeDraft {
+      io.aeyer.plowshare.protocol.DocumentMetadata.definition(schema);
+      presentation =
+          io.aeyer.plowshare.protocol.DocumentMetadata.presentation(schema, presentation);
+    }
+  }
+
+  record ContentTypeLifecycle(UUID version, long controlRevision, boolean activate)
+      implements InformationGateIdentity {
+    public ContentTypeLifecycle {
+      Objects.requireNonNull(version);
+      if (controlRevision < 1)
+        throw new IllegalArgumentException("Expected type control revision required");
+    }
+  }
+
   record Intake(
       String name,
       String hash,

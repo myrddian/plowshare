@@ -3,11 +3,45 @@ package io.aeyer.plowshare.sdk;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
+import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.Test;
 
 /** Invalid inputs are refused before a connection or mutation can be submitted. */
 class WsRequestValidationTest {
+  @Test
+  void image_receipts_must_match_the_explicit_project_without_replay() throws Exception {
+    for (String returned : List.of("selected", "foreign")) {
+      try (var server = new MockWebServer();
+          var client = new WsServerClient(server.url("/").toString(), null)) {
+        server.enqueue(
+            new MockResponse()
+                .setBody("{\"id\":\"image\",\"project\":\"" + returned + "\",\"format\":\"png\"}"));
+        if (returned.equals("selected"))
+          assertEquals(
+              "selected", client.uploadImage("selected", "image.png", new byte[] {1}).project());
+        else
+          assertEquals(
+              Plowshare.Delivery.INVALID_RESPONSE,
+              assertThrows(
+                      Plowshare.TransportException.class,
+                      () -> client.uploadImage("selected", "image.png", new byte[] {1}))
+                  .delivery());
+        assertEquals(1, server.getRequestCount());
+      }
+    }
+  }
+
+  @Test
+  void an_existing_conversation_is_an_explicit_scope() {
+    var request = new AgentClient.Run("worker", "work", null, null, "cnv_existing", false);
+    assertNull(request.project());
+    assertEquals("cnv_existing", request.conversation());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentClient.Run("worker", "work", null, null, "cnv_existing", true));
+  }
+
   @Test
   void malformed_requests_never_open_a_socket_or_upload() throws Exception {
     try (var server = new MockWebServer();
@@ -31,6 +65,14 @@ class WsRequestValidationTest {
               () -> client.listDocuments(null, 1, -1),
               () -> client.run("agent", "", null, null, null),
               () -> client.openConversation(null, 0),
+              () -> client.openConversation(null, 10),
+              () -> client.openConversation(" project ", 10),
+              () -> client.uploadImage(" project ", "image", new byte[] {1}),
+              () -> client.conversations(" project "),
+              () -> client.run("agent", "work", null, null, null),
+              () -> client.run("agent", "work", "project", null, "conversation"),
+              () -> client.uploadImage(null, "image", new byte[] {1}),
+              () -> new AgentClient.Run("agent", "work", null, null, null, true),
               () -> client.chat("conversation", 0, 0),
               () -> client.trajectory("conversation", -1, 1),
               () -> client.context("", null),

@@ -5,7 +5,7 @@ import org.springframework.stereotype.Repository;
 
 /** Stores only application boundary adoption; account grants remain in deployed source. */
 @Repository
-public final class JdbcApplicationRegistrations implements ApplicationRegistrations {
+public class JdbcApplicationRegistrations implements ApplicationRegistrations {
   private final JdbcTemplate jdbc;
 
   public JdbcApplicationRegistrations(JdbcTemplate jdbc) {

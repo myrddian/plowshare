@@ -25,8 +25,12 @@ public final class OrchestrationClient {
     return SdkJson.decode(codec, codec.readTree(input), Orchestration.Start.class);
   }
 
-  /** Submit once. A transport exception never retries or substitutes HTTP. */
+  /**
+   * Submit once into an explicit project. A transport exception never retries or substitutes HTTP.
+   */
   public Orchestration.Started start(Orchestration.Start request) throws IOException {
+    Objects.requireNonNull(request, "request");
+    io.aeyer.plowshare.protocol.Home.of(request.project());
     return check(
         connection.exchange("orchestration.start", request, Orchestration.Started.class),
         request.requestId());

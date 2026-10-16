@@ -1,12 +1,25 @@
 # Authored knowledge and schema defined document types in Plowshare
 
-Status: proposed design. Date: 15 October 2026.
+Status: proposed design. Updated: 16 October 2026.
 
-Develop Plowshare's information system into a knowledge base that people and agents can author, connect, navigate and maintain together. The direction combines wiki-style documents and cross-references with intersecting metadata facets, building on the retained revisions, evidence, retrieval and processing that Plowshare already owns. Information is a first-class part of the platform, with useful reading, writing and navigation independent of a model run.
+[ADR 0027](decisions/0027-authored-information-contracts.md) records the accepted
+first-milestone contracts, and the [implementation plan](authored-knowledge-implementation.md)
+records its delivery and verification. The [usage guide](authored-information.md)
+describes the implemented content types and metadata-only workflow. The wider
+knowledge direction remains proposed; deployment is a separate action.
+
+[ADR 0028](decisions/0028-document-navigation-and-reference-policy.md) and the
+[navigation implementation plan](authored-navigation-implementation.md) record
+the locally implemented navigation milestone: document resolution, relationships, paths and configurable
+reference policy. The [navigation guide](authored-navigation.md) describes the local
+implementation and its explicit write activation. Review, integration and deployment
+remain separate actions.
+
+Develop Plowshare's information system into a knowledge base for agents, with people supplying content and maintaining its metadata, relationships and policy. The direction combines retained documents and cross-references with intersecting metadata facets, building on the revisions, evidence, retrieval and processing that Plowshare already owns. Content may originate in external editors, repositories or agent outputs. Information remains useful to people for reading and navigation independently of a model run.
 
 Schema-defined content types are the first implementation milestone in that direction. A content type defines structured metadata, such as the severity and affected services of an incident report. Each typed information revision retains its exact type version and validated metadata. The document body, source bytes, evidence coordinates and processing lifecycle remain part of the existing information model.
 
-The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare capability with its own ownership and lifecycle. Collaborative editor grants and document backlinks belong to the broader direction and require subsequent designs. The first milestone implements schemas. Real-time editing and VOIDcore integration remain outside this proposal.
+The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare information capability with its own ownership and lifecycle. The first milestone implements schemas; ADR 0028 defines the locally implemented relationships and policy-aware backlinks. Collaborative editing, editor-grant expansion and real-time coauthoring are outside this roadmap. VOIDcore integration remains a separate decision.
 
 ## Purpose and boundaries
 
@@ -14,9 +27,35 @@ Plowshare can retain and retrieve a runbook today, but its catalogue cannot requ
 
 Introduce a reusable content-type registry and typed revision metadata. People and authorised model tools may create documents conforming to published types. Schema validation establishes structural conformance; it does not establish factual accuracy, trustworthy authorship, evidence support or authority to execute instructions.
 
-Existing untyped documents remain supported. No AI call is required to publish a schema, validate metadata or retain a typed revision. New bodies continue through ordinary source processing under its existing allowance and readiness rules. Metadata-only revisions use the explicit processing policy below: their creation makes no model call and does not automatically schedule paid processing.
+Existing untyped documents remain supported. No AI call is required to publish a schema, validate metadata or retain a typed revision. New bodies continue through ordinary source processing under its existing allowance and readiness rules. Metadata-only revisions use the explicit processing policy below: their creation makes no document-processing model call and does not automatically schedule paid processing. Explicitly configured transition hooks retain their own separate policy and accounting.
 
-## Wiki documents with faceted navigation
+### Content replacement and metadata maintenance
+
+Plowshare retains and processes submitted information. The content-authoring
+workflow can live in an external editor, a repository or an agent. A minimal
+user-facing **EDIT** action means preparing replacement content and submitting it
+through the existing revision admission or re-upload path. It creates another
+immutable revision of the continuing resource, with an expected starting revision,
+current ownership/access checks and authenticated provenance. It does not mutate
+previously retained bytes or merge concurrent changes. Reports continue to use
+their owning admission rules for prose, inputs and citations. **EDIT** describes
+that workflow; it is not a proposal for an additional wire operation.
+
+Metadata is the primary direct maintenance surface. The implemented workflow
+already supports type binding, validation and metadata-only revisions that retain
+the body and reuse compatible processing outputs. Tags, explicit relationships
+and policy remain separate controls with their existing authority and lifecycle;
+they do not require a collaborative body editor or new editor grants. Content
+replacement retains ordinary processing rules; metadata-only maintenance retains
+its explicit-only document-processing policy and separate configured hook rules.
+
+A Git-backed authoring workflow could separately provide branches, diffs, merges
+and collaboration, then submit selected content to Plowshare. That workflow is
+optional and outside this proposal. The knowledge system does not need to solve
+collaborative editing to ingest, classify, discover and supply retained information
+to agents.
+
+## Retained information with faceted navigation
 
 The intended knowledge model brings these capabilities together:
 
@@ -25,15 +64,123 @@ The intended knowledge model brings these capabilities together:
 | Stable document identity and immutable revisions | Keep a continuing document while preserving exactly what earlier readers and runs used |
 | Markdown bodies and optional content types | Combine readable prose with a declared structure appropriate to a runbook, decision, glossary entry or incident report |
 | Authored cross-references and backlinks | Express relationships between documents and help readers discover the surrounding knowledge |
-| Intersecting facets | Find the same document through its type, tags, author and time without assigning it one canonical folder |
-| Editing and explicit permissions | Let authorised people and agents maintain knowledge with attribution and conflict detection |
+| Tags and intersecting facets | Form aggregate views from sets of documents, combining type, tag, author and time selections without assigning one canonical folder |
+| Internal navigation paths | Record a journey through scopes, relationships and facet selections while keeping document identity independent of the route |
+| Revision admission and explicit permissions | Accept replacement content and metadata-only revisions under existing authority, preserving attribution and rejecting stale updates |
 | Retained evidence and AI processing | Connect maintained knowledge to its sources, investigations and derived outputs |
 
-Schemas supply the structured meaning; links supply relationships; facets supply navigation; revision and permission rules support maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
+Schemas supply the structured meaning; relationships connect documents; facets narrow selections; internal paths describe navigation through both. Revision admission and permission rules support information maintenance. These are related parts of one information system. A runbook is useful to a person before an agent consumes it, and a report can remain useful knowledge after its producing job completes.
 
-For example, a billing incident report can reference the runbook used during response and the architectural decision that explains the affected service. A reader can reach it through `content type = incident report`, `tag = billing` and a date range, then follow those relationships. The runbook can independently appear in operations and onboarding views. A breadcrumb records the selected intersection; it does not establish a filesystem path or move the document.
+For example, a billing incident report can reference the runbook used during response and the architectural decision that explains the affected service. A reader can reach it through `content type = incident report`, `tag = billing` and a date range, then follow those relationships. The runbook can independently appear in operations and onboarding views.
 
-Plowshare's current scopes, project membership, explicit sharing and information collections remain authoritative. Borrowing facet navigation does not create VOIDcore's single public pool or remove Plowshare's access boundaries. Saved views and collections can organise a reader's experience without becoming the only permitted location of a document. Counts, backlinks and suggested refinements must respect the same live access predicates as content reads.
+### Document sets and explicit relationships
+
+A tag denotes a set of documents. Selecting `billing` produces an aggregate view of accessible documents in that set; a document can belong to several sets. Facet selections intersect those sets, such as documents in both the Billing tag set and the Incident report type set. Membership groups documents for navigation without creating an explicit relationship between every pair of members or to a document named Billing.
+
+Explicit relationships connect continuing documents. The source belongs to the document's resource identity, and the target defaults to another document's resource UUID. For example, `Billing service —has runbook→ Refund recovery` remains a live document-to-document connection when either document gains a new revision. Following it opens the target's latest current revision under its lifecycle and access rules. Backlinks identify the continuing source documents, so edits do not strand discovery on their older revisions.
+
+Only an explicitly revision-pinned reference names one exact revision. Ordinary relationships must not implicitly pin either endpoint merely because a link was created while a particular body revision was current. Relationship changes need an audit history, but that history must not freeze live navigation to an earlier source revision. Evidence citations continue to identify exact retained revisions and remain distinct from ordinary relationships.
+
+### Content, reference visibility and propagation policy
+
+Reference handling is an explicit policy decision. A document whose content is locked may still be permitted to appear as a reference; another document may require its existence and associated references to remain hidden. Content access, discovery and restriction propagation must not be collapsed into one universal rule.
+
+The follow-on policy distinguishes three questions:
+
+1. **Content access:** who may read the body, metadata, exact revisions or derived content?
+2. **Reference visibility:** who may discover that the document exists, see a link or backlink, and receive which approved identifying fields?
+3. **Restriction propagation:** does referencing this document make the source subject to the target's restrictions, transitively?
+
+For example, reference visibility can support both of these behaviours:
+
+| Policy behaviour | What a reader without content access sees |
+| --- | --- |
+| Content locked, reference visible | An explicitly permitted reference with only policy-approved identity or label fields; opening the document still requires content access, and the ordinary link does not propagate the target's content restriction to its source |
+| Existence or reference hidden | No target entry, link, backlink, identifying metadata, preview or contribution to discovery counts |
+
+Reference visibility does not grant content access. A visible link cannot reveal a private title, excerpt or other field unless the policy separately permits its disclosure. Counts and aggregate views apply the relevant discovery policy; content-bearing search results and previews additionally require content access. Missing or unresolved policy fails closed. A reader or link creator cannot choose a permissive mode to bypass the target's policy.
+
+#### Configuration by project and document
+
+Plowshare's reference behaviour is configured at project and document level. Each project supplies defaults for content access, reference visibility and ordinary-reference propagation, and declares which settings documents may override. A document inherits those defaults unless an authorised document policy explicitly overrides an allowed setting. Project configuration can distinguish a default from a mandatory constraint: document overrides may choose another permitted behaviour but cannot weaken a project requirement.
+
+| Configuration level | Responsibility |
+| --- | --- |
+| Existing platform authority | Authentication, membership, explicit grants, retention and required input/evidence restrictions remain enforced |
+| Project policy | Select default behaviours, mandatory constraints and permitted document overrides |
+| Document policy | Inherit the defaults or select an authorised override within the project's allowed policy |
+
+Policy administration belongs to server administrators and project managers:
+
+This authority governs the new content/reference policy configuration and its overrides. Existing owner lifecycle controls retain their own contracts and operate within the effective policy; ownership does not additionally grant authority to change that policy configuration.
+
+| Actor | Policy-changing authority |
+| --- | --- |
+| Server administrator | Manage platform policy and mandatory constraints, project policies and document policies, including personal-document policies, through the applicable audited administration contracts |
+| Project manager | Manage defaults, project constraints and permitted document overrides within projects where the actor currently holds `MANAGER`, subject to mandatory platform constraints |
+| Document owner, contributor or viewer | No policy-changing authority solely through ownership, editing rights, membership or read access; creating a document inherits its applicable policy |
+
+A document owner who also holds the required administrator or project-manager role acts under that role when changing policy. A manager cannot change another project's target policy through a cross-project link. Personal documents have no project-manager authority; server administrators manage their policy baseline and overrides. Policy administration is distinct from content-read authority and does not itself grant access to a protected body.
+
+Enforcement must use current server-administrator status and current project roles, rechecked when applying the change. Plowshare already exposes these boundaries through `AdminStore.requireServerAdmin` and `ProjectMembers.requireRole(..., MANAGER)`; account existence alone is not administrator authority. Policy updates need an expected policy version and an atomic audit of actor, scope, previous/new settings and outcome. Demotion or removal of management authority must invalidate later policy changes, including from an existing session.
+
+For example, a project may default to content-locked/reference-visible documents with no ordinary-link propagation, while allowing individual documents to require hidden references and propagation. Another project may mandate those stronger restrictions for every document. These are project choices rather than one global navigation behaviour. Personal documents need an explicit account/platform policy baseline and the same controlled document override rules.
+
+Cross-project links evaluate both documents' applicable policies. A source project's permissive defaults cannot bypass a target document's required propagation or disclosure restrictions; source-side constraints may further restrict the result. Policy changes require the administrator/project-manager authority above, are auditable, and are rechecked on subsequent reads. These are server-owned policy settings, separate from schema metadata, tag labels and client display preferences. ADR 0028 and the navigation guide specify the implemented defaults, allowed combinations, optimistic concurrency and refusal of policy widening without a release workflow. The policy-changing roles above remain the authority boundary.
+
+When the applicable policy requires propagation, an explicit reference creates a required access-policy dependency. If A references restricted B, reading A requires both A's own authority and satisfaction of B's applicable restrictions. If C references A, those restrictions also constrain C. Hiding just the link is insufficient in this mode: a source whose required dependency cannot be satisfied is itself unavailable, with its discoverability governed by the applicable visibility policy. A visible-reference policy without ordinary-link propagation may instead leave A readable while B's content remains locked.
+
+Restrictions flow from the referenced target to the referencing source. B does not inherit A's restrictions merely because the system generates a backlink. Each dependency is evaluated under its own scope and sharing rules; no reference copies an access grant or creates project membership. Reference creation requires authority to edit the source and the target's required reference authority. Where policy permits references without content access, that authority is distinct from permission to read the target body.
+
+Tags remain document-set membership. Sharing a tag does not by itself create reference dependencies or propagate a private member's restrictions to every other member. Aggregate views disclose only the members and fields permitted by their applicable policies.
+
+All modes retain these invariants:
+
+- **Live links use live policy.** Ordinary references follow continuing document identities and their latest current revisions. Policy, membership, withdrawal and current-revision changes are rechecked when reopening paths or serving cached projections. A stale cache is not authority to disclose content or references.
+- **Pinned content does not pin permission.** Exact revision references retain their target revision, but applicable access and retention restrictions remain live. Pinning cannot preserve revoked access.
+- **Propagation is enforced consistently where required.** Browsing, search, retrieval, model reads, history, sharing and export apply the required dependency closure before disclosure. Unresolved dependencies and exhausted evaluation bounds fail closed; cycles require bounded evaluation rather than recursive grants.
+- **Navigation policy cannot release derived content.** Existing retained input/evidence dependencies still constrain reports and other derived outputs, even when ordinary links may remain visible without propagation. Hiding or removing a rendered link cannot release protected information already retained in the source body. Removing a relationship is not automatic declassification; authorised release and historical restriction handling need their own rules.
+
+Plowshare already constrains derived outputs through retained information inputs, including uncited inputs. Policy-controlled discovery and propagation for live authored references are implemented as a separate platform milestone under ADR 0028. They cover cross-project evaluation, policy changes, atomic relationship admission and historical retention while keeping ordinary relationships distinct from evidence citations.
+
+### Internal navigation paths
+
+A navigation path is an internal sequence of steps that lands a reader at a selection or document. It does not require an HTTP URL or a public HTTP route. Clients express the journey through navigation state and the platform's public operations, using WebSocket operations where supported. Displaying a path creates no filesystem directory or canonical parent for a document.
+
+Two kinds of steps work together:
+
+- **Facet selection** narrows the current collection. `Operations → Incident reports → Billing` means incident reports tagged Billing in the Operations project. Selecting that tag does not create a relationship to a Billing document. Each selection intersects the existing filters; available refinements and counts are recalculated from the authorised matching records. Search can further narrow that selection.
+- **Relationship traversal** follows an explicit connection between documents. `Billing service → Related incidents → Incident 42` follows a declared relationship and opens a target document. Its meaning comes from the relationship contract, not from a matching label, tag or UUID-shaped metadata string.
+
+A path can combine scope, relationship and facet steps:
+
+```text
+Operations → Billing service → Runbooks → Refund recovery
+```
+
+| Step | Meaning |
+| --- | --- |
+| Operations | Select the project scope |
+| Billing service | Open the service document by its stable resource identity |
+| Runbooks | Follow its declared relationship to related documents and filter the resulting selection to the runbook content type |
+| Refund recovery | Open a matching runbook document |
+
+The same runbook can be reached through another service, a tag selection, a saved view or a direct document selection. Navigating through another path does not move, duplicate or reparent it. Resource UUIDs identify continuing documents, revision UUIDs identify exact retained versions, and path labels are presentation rather than identity.
+
+Today, each retained resource also has a source name unique within its personal or project namespace. That scoped name is its named admission locator: re-ingesting the same namespace/name targets the existing resource and creates a revision under the applicable ownership and admission rules. A source name such as `runbooks/refunds.md` can contain slashes without defining directories, parent documents or relationships. There is currently no canonical knowledge-navigation path. Proposed paths coexist with scoped source names and resolve document targets by stable resource UUID, or revision UUID when explicitly pinned. Changing the journey to a document does not rename its source or change its identity.
+
+Which version opens follows the expected user behaviour:
+
+- **Ordinary navigation opens the latest current revision.** A document selection or unpinned relationship targets the continuing resource UUID. Opening it selects that document's latest current revision under its lifecycle and access rules. Later edits become visible through the same document target; a saved view with that target follows the latest current revision when reopened.
+- **An exact reference opens the named revision.** Revision-history selections, pinned relationships and evidence citations retain the specific revision UUID. Later edits do not retarget them or replace the content they reference.
+
+Both cases recheck current access. An unavailable, withdrawn, deleted or inaccessible target is shown as unavailable without exposing private details. Navigation must not silently fall back to an older revision, a different document or a same-named resource in another namespace.
+
+Breadcrumbs record the journey, including relationship and filter steps. Returning to an earlier breadcrumb restores that step's selection; removing a facet broadens the relevant selection without changing document relationships. Saved views retain useful navigation steps and filters, referencing stable identities rather than relying on displayed names. Reopening a saved view reevaluates it against current records and permissions; it is not a frozen result set or an access grant.
+
+ADR 0028 implements these navigation requirements in the local `document-navigation-v1` capability. Document-set views identify members by resource UUID and show one entry per document, opening its latest current revision unless an exact revision was explicitly selected. Existing catalogue operations that enumerate or count revisions retain their contracts; document-level navigation requires an explicit projection rather than silently changing revision counts. The initial schema milestone supplies exact type/version filtering and existing facets. Saved-path persistence and explicit relationship traversal use the separate contracts described in the navigation guide. General custom-metadata fields such as severity or status do not become queryable facets simply because a schema declares them.
+
+Plowshare's current scopes, project membership, explicit sharing and information collections remain authoritative, further constrained by reference dependencies where the applicable policy requires propagation. Borrowing facet navigation does not create VOIDcore's single public pool or remove Plowshare's access boundaries. Saved views and collections can organise a reader's experience without becoming the only permitted location of a document. Every traversal and reopened path rechecks content access, reference visibility and any required propagated restrictions. Counts, backlinks and suggested refinements must respect the applicable live discovery policy, with content reads enforcing their additional access rules. No view may expose fields or identities that its policy protects.
 
 Authored relationships must also stay distinguishable from evidence. A link meaning “related decision” does not prove a claim; a citation identifies evidence from an exact retained revision. Later relationship work should support links to a continuing resource and separately pinned revision references, with explicit semantics for each. It must not reinterpret existing evidence links as ordinary wiki links.
 
@@ -43,7 +190,7 @@ PostgreSQL is Plowshare's authoritative information store. It gives retained bod
 
 Plowshare already reads Markdown and other supported UTF-8 text, retains sources and produces Markdown reports. It also supports ordinary editable workspace Markdown. Workspace files remain useful for repositories, external editors and file-based workflows. A workspace file and an admitted information revision have distinct identities: indexing or publishing a file creates an explicit retained snapshot, and later file edits do not silently rewrite that snapshot. This design does not require every Markdown file to become a database document.
 
-The broader direction must support portable exchange as well as native authoring. Define two export purposes:
+The broader direction supports portable exchange with external authoring workflows. Define two export purposes:
 
 - **Readable export:** an authorised document body as ordinary Markdown when that is its retained format; converted material is labelled as an extraction, with original bytes offered separately when available. Related metadata can use a JSON sidecar so Markdown editors can read the prose without a Plowshare plugin.
 - **Structured bundle:** selected authorised revisions, their original bytes, content hashes, metadata, exact schema definitions and a versioned manifest. As relationship features arrive, the manifest records link targets, revision pinning and provenance. A Markdown file alone does not encode all of those semantics.
@@ -52,7 +199,7 @@ Export paths are a portable view of selected records, not the database's canonic
 
 Reimport is an authenticated admission or revision operation. It validates types and metadata, resolves collisions explicitly, and preserves the distinction between imported provenance and locally authenticated authorship. Foreign identifiers are mapped rather than blindly trusted; imported grants cannot create project membership or expand sharing. Editing an exported Markdown file and importing it back creates a new revision against an explicit starting revision. It does not overwrite cited history.
 
-These are requirements for a later portable interchange capability, not a claim that a complete bundle exporter/importer already exists. The schema milestone keeps definitions and instance metadata serialisable and source bytes intact so that interchange can build on public contracts. Any missing public operation for original bytes, history or relationship closure must be designed as platform work; an exporter must not reach into database tables or server internals.
+[ADR 0029](decisions/0029-portable-information-interchange.md) and the [portable exchange guide](portable-information.md) now define the locally implemented bounded interchange capability. It preserves original bytes and exact bindings through public operations, with explicit destination/type/revision-reuse maps and no imported permissions. This is not a backup/restore claim. The schema milestone keeps definitions and instance metadata serialisable and source bytes intact so that interchange can build on public contracts. Any missing public operation for original bytes, history or relationship closure must be designed as platform work; an exporter must not reach into database tables or server internals.
 
 ## Reference implementation and adaptations
 
@@ -187,7 +334,7 @@ A body-edited report records the actor and actual run that produced the edited c
 
 ## Metadata-only processing policy
 
-Adopt the following behaviour for the first milestone. A metadata-only revision is a deterministic owner-authorised transition: it validates metadata, retains the unchanged body and commits its own revision without calling a model, fetching a source or automatically scheduling paid processing. It does not require a positive model-call allowance merely to save metadata. New bodies retain the ordinary admission lifecycle. This distinction is a server contract, not a client preference or an assumption that copied bytes already have ready projections.
+Adopt the following behaviour for the first milestone. A metadata-only revision is a deterministic owner-authorised transition: it validates metadata, retains the unchanged body and commits its own revision without invoking document-processing models, fetching a source or automatically scheduling paid document processing. It does not require a positive document model-call allowance merely to save metadata. New bodies retain the ordinary admission lifecycle. Existing configured transition hooks still apply and may independently invoke models under their own authority and accounting; clients must distinguish that configured hook usage from document processing. This distinction is a server contract, not a client preference or an assumption that copied bytes already have ready projections.
 
 Reuse is limited to completed, committed outputs from the starting revision that match the unchanged source and extraction hashes, each stage's input identity and the currently configured pipeline fingerprint. Reuse is evaluated per stage in dependency order. Copy eligible outputs into revision-owned snapshots through specialist repository operations, retaining the originating revision, generation and stage fingerprint as provenance. Never reuse a failed or running stage, a private paid-response checkpoint, an incompatible projection or an output that has not passed its completion gates. A stage is marked ready only when its required outputs and upstream dependencies have been retained and verified for the new revision. Content-type metadata remains outside body processing inputs in this release.
 
@@ -287,17 +434,17 @@ An older server must not continue writing typed resources without validation. De
 
 ## Delivery direction
 
-The broader destination is an authored knowledge system with wiki relationships, facets and portable Markdown workflows. Deliver it through bounded platform changes that extend the existing retained information lifecycle:
+The broader destination is an information and knowledge system for agents, with metadata maintenance, explicit relationships, facets and optional portable Markdown exchange. Deliver it through bounded platform changes that extend the existing retained information lifecycle:
 
 | Stage | Result | Scope |
 | --- | --- | --- |
-| Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and a minimal human authoring/read/revise flow | Detailed implementation milestone below, including safe metadata-only processing |
-| Authoring and navigation | Expand the initial Library workflow into a coherent knowledge experience, narrow it through facets and retain useful views | Follow-on client and workflow design over public operations |
-| Authored relationships | Cross-references and permission-aware backlinks connect maintained documents, separately from evidence citations | Follow-on relationship and identity design |
-| Collaborative maintenance | Explicit editor grants, attribution and conflict handling support shared upkeep | Follow-on authority design preserving owner-only management controls |
-| Portable interchange | Readable Markdown exports and structured bundles support external editing and authorised reimport | Follow-on public export/import contracts; the current schema design preserves the necessary data |
+| Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and admission, reading and metadata maintenance | Detailed implementation milestone below, including safe metadata-only processing |
+| Information navigation | Browse retained knowledge through internal navigation paths, facet steps, breadcrumbs and saved views | Local implementation under ADR 0028; internal paths and account-owned saved views; publication remains separate |
+| Authored relationships | Add explicit relationship traversal to internal paths, with cross-references, project/document policy-controlled visibility and propagation, and permission-aware backlinks distinct from evidence citations | Local implementation under ADR 0028, including project defaults/constraints, document overrides, live/pinned targets and retained cross-project obligations; authorised release remains deferred |
+| Agent workflow validation and release | Verify ingestion, metadata classification, discovery, relationship traversal, agent consumption and retained provenance together | Local end-to-end acceptance passes with scripted models; see the [validation record](authored-knowledge-implementation.md#full-agent-workflow-validation--16-october-2026); review, integration and release remain separate |
+| Portable interchange | Readable Markdown exports and structured bundles support external authoring and authorised revision admission | Local implementation under ADR 0029; bounded public export/import, explicit identity/reuse maps, SDK file helpers and Library review; deployment remains separate |
 
-These stages describe a direction, not an instruction to implement all of them in the schema change. Portable representation and stable identities are requirements from the first stage, even where the export user flow arrives later. AI retrieval and research continue to use the same knowledge and evidence records rather than a parallel wiki store.
+These stages describe a direction, not an instruction to implement all of them in the schema change. The complete agent information workflow now has local end-to-end acceptance coverage, with the model and deployment limits recorded in the implementation plan. The next step is review, integration and release of the implemented capabilities; SDK execution now requires explicit project or conversation selection, with named-project Application service coverage recorded alongside the Personal workflow. Collaborative editing and editor grants are not prerequisites or later stages of this roadmap. Portable representation and stable identities remain requirements from the first stage; the bounded interchange implementation now supplies public export/import and caller-owned file helpers without a server filesystem hierarchy. AI retrieval and research continue to use the same knowledge and evidence records.
 
 ## Schema milestone implementation sequence
 
@@ -320,7 +467,7 @@ Required cases include:
 - Draft/active/deprecated transitions; inherited deprecated bindings; explicit upgrades; schema conflicts; concurrent writers; exact version retention.
 - Expected revision UUID belongs to the selected resource and names its highest committed revision; inheritance and source copying use that same UUID. Stale edits conflict without implicit merge, head substitution or private revision disclosure.
 - Same body with different metadata creates a distinct revision; old citations and hashes remain valid; metadata-only revisions preserve source/provenance and make reports draft. Original body producer and metadata reviser remain distinguishable; body-edited reports do not falsely attribute replacement prose to the original run.
-- Metadata-only saves need no positive model allowance and make no model or acquisition call. Compatible completed outputs are reused atomically with origin provenance and unchanged evidence offsets; failed, running, incompatible and gated/private outputs are never reused. Reuse races conflict without publishing a different plan after approval.
+- Metadata-only saves need no positive document model allowance and make no document-processing model or acquisition call. Configured hook gates and their independent accounting remain intact. Compatible completed outputs are reused atomically with origin provenance and unchanged evidence offsets; failed, running, incompatible and gated/private outputs are never reused. Reuse races conflict without publishing a different plan after approval.
 - Missing/stale outputs remain visibly unprepared; automatic workers and enrichment sweeps do not process explicit-only revisions, including after restart. Owner-requested repair respects stage selection, dependencies, access, allowance and gates. Reused outputs create no new usage charge or allowance transfer, and report finalisation still requires five compatible ready stages.
 - Deletion redacts each revision's copied projections and metadata atomically; reuse provenance cannot retrieve deleted origin content or bypass live access. Revision-specific sharing grants are not inherited, and original report input restrictions remain effective.
 - Every admission path refuses invalid metadata and silent stripping of typing, including URL refresh, legacy by-name upload and report recording.
@@ -338,7 +485,7 @@ Before merging implementation, run formatter/check gates, operation/schema/manif
 
 Tags alone cannot validate required fields. YAML parsing alone cannot give source revisions an authoritative typed metadata contract. An Application-owned JSON validator cannot enforce cross-client admission and discovery. Extending `kind` or format classification would collapse independent concepts. A second document store would duplicate retained revision and access lifecycles. These alternatives do not address the platform need.
 
-Adopt authored knowledge with wiki relationships and faceted navigation as the broader direction. Implement optional content types on existing information revisions first, using scoped definitions, exact version pinning and the shared bounded validation profile. Include safe projection reuse and durable explicit-only processing for metadata-only revisions, with a minimal human authoring/read/revise workflow. This increases the first milestone's lifecycle and verification work but keeps ordinary metadata maintenance independent of paid inference. PostgreSQL owns authoritative state; Markdown remains an authoring and exchange format, with portable interchange developed through explicit public contracts.
+Adopt an agent information and knowledge system with explicit relationships and faceted navigation as the broader direction. Keep content authoring external or as minimal replacement-content admission, and make metadata the primary direct maintenance surface. Implement optional content types on existing information revisions first, using scoped definitions, exact version pinning and the shared bounded validation profile. Include safe projection reuse and durable explicit-only processing for metadata-only revisions, with a minimal human authoring/read/revise workflow. This increases the first milestone's lifecycle and verification work but keeps ordinary metadata maintenance independent of paid inference. PostgreSQL owns authoritative state; Markdown remains an authoring and exchange format, with portable interchange developed through explicit public contracts.
 
 Keep default insertion, date/URI assertion, arbitrary field queries, model-generated metadata, Application-distributed type packages, editor grants, relationship APIs and export/import tooling out of the first schema release. Those boundaries preserve an achievable first milestone without reducing the knowledge model to a metadata add-on. VOIDcore integration remains a separate decision.
 

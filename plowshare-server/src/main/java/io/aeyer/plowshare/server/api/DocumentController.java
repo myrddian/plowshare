@@ -94,11 +94,16 @@ public class DocumentController {
             .getRequest()
             .getAttribute(io.aeyer.plowshare.server.auth.AuthFilter.HANDLE_ATTRIBUTE);
     String project = request.getRequest().getParameter("project");
-    return informationAccess.resolve(
-        account instanceof String handle ? handle : null,
-        project == null
-            ? null
-            : io.aeyer.plowshare.server.information.InformationContext.Selection.project(project));
+    return informationAccess
+        .resolve(
+            account instanceof String handle ? handle : null,
+            project == null
+                ? null
+                : io.aeyer.plowshare.server.information.InformationContext.Selection.project(
+                    project))
+        .withView(
+            io.aeyer.plowshare.server.information.InformationContentInputs.view(
+                request.getRequest().getParameter("view")));
   }
 
   private io.aeyer.plowshare.server.information.InformationCatalogue catalogue;
@@ -572,12 +577,10 @@ public class DocumentController {
    *     {@code @RequestParam("file")}, so a client written against either sends the same request
    * @param name what the corpus should file it under. Defaults to the uploaded filename. <b>This is
    *     the document's identity</b> — a second upload under the same name is a re-ingest of the
-   *     same document, and a paragraph whose text is unchanged keeps its id — so it is offered as a
-   *     decision somebody can take rather than left as an accident of what the file happened to be
-   *     called on a disk
-   * @param by who asked, recorded on the row. Defaults to {@code operator}, which is who is holding
-   *     the credential: {@code AuthFilter} gates every {@code /v1} path, and this server is
-   *     single-user
+   *     resource with a new retained revision — so it is offered as a decision somebody can take
+   *     rather than left as an accident of what the file happened to be called on a disk
+   * @param by legacy ingestion attribution. Retained intake uses the authenticated account and
+   *     selection; this field cannot impersonate another resource owner
    * @return {@code 202} and the job handle, at once
    */
   @PostMapping(path = "/v1/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -612,8 +615,32 @@ public class DocumentController {
       } catch (IllegalArgumentException invalid) {
         throw new io.aeyer.plowshare.server.faults.CallerFault("requestId must be a UUID");
       }
+      var authored = new java.util.LinkedHashMap<String, Object>();
+      String expected = attributes.getRequest().getParameter("expectedRevision");
+      if (expected != null) authored.put("expectedRevision", expected);
+      var typing =
+          io.aeyer.plowshare.server.information.InformationContentInputs.multipart(
+              attributes.getRequest().getParameter("typing"));
+      if (typing != null && !context.typedView())
+        throw new io.aeyer.plowshare.server.faults.CallerFault("unsupported-view");
+      if (typing != null
+          && (requested == null || !requestId.toString().equalsIgnoreCase(requested)))
+        throw new io.aeyer.plowshare.server.faults.CallerFault(
+            "Typed intake requires a stable UUID requestId");
+      if (expected != null && typing == null)
+        throw new io.aeyer.plowshare.server.faults.CallerFault(
+            "expectedRevision requires explicit typing");
       var admission =
-          catalogue.admit(context, requestId, sourceName, bytes, file.getContentType(), null);
+          catalogue.admitForSession(
+              context,
+              requestId,
+              sourceName,
+              bytes,
+              file.getContentType(),
+              null,
+              null,
+              io.aeyer.plowshare.server.information.InformationContentInputs.expected(authored),
+              typing);
       var home =
           context.selection().project() == null
               ? io.aeyer.plowshare.protocol.Home.global()

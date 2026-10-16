@@ -29,6 +29,17 @@ sealed interface InformationCommandParameters {
     }
   }
 
+  record Processing(String from, List<String> stages) implements InformationCommandParameters {
+    public Processing {
+      stages = List.copyOf(stages);
+      if (stages.isEmpty()
+          || stages.size() > 7
+          || stages.stream().distinct().count() != stages.size()
+          || stages.stream().anyMatch(stage -> !InformationCatalogue.STAGES.contains(stage)))
+        throw new CallerFault("invalid selected processing stages");
+    }
+  }
+
   record Rebuild(String stage) implements InformationCommandParameters {
     public Rebuild {
       if (!Set.of("embed", "summarise", "summary_embed", "autoTag", "tagGroups").contains(stage))

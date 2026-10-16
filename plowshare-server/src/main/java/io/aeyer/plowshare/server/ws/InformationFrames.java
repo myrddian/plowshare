@@ -22,6 +22,9 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class InformationFrames implements FrameArea {
+  private final InformationNavigationService navigation;
+  private final InformationInterchangeService interchange;
+
   private final InformationCatalogue catalogue;
   private final InformationAccess access;
   private final DocumentStore documents;
@@ -30,6 +33,8 @@ public final class InformationFrames implements FrameArea {
   private final JobStore jobs;
   private final DocumentsProperties properties;
   private final PageFetcher fetcher;
+  private final InformationContentTypes contentTypes;
+  private final InformationContentSettings contentSettings;
 
   public InformationFrames(
       InformationCatalogue catalogue,
@@ -39,7 +44,13 @@ public final class InformationFrames implements FrameArea {
       Deliberation deliberation,
       JobStore jobs,
       DocumentsProperties properties,
-      PageFetcher fetcher) {
+      PageFetcher fetcher,
+      InformationContentTypes contentTypes,
+      InformationContentSettings contentSettings,
+      InformationNavigationService navigation,
+      InformationInterchangeService interchange) {
+    this.interchange = java.util.Objects.requireNonNull(interchange);
+    this.navigation = java.util.Objects.requireNonNull(navigation);
     this.catalogue = catalogue;
     this.access = access;
     this.documents = documents;
@@ -48,6 +59,8 @@ public final class InformationFrames implements FrameArea {
     this.jobs = jobs;
     this.properties = properties;
     this.fetcher = fetcher;
+    this.contentTypes = java.util.Objects.requireNonNull(contentTypes);
+    this.contentSettings = java.util.Objects.requireNonNull(contentSettings);
   }
 
   private InformationAcquisitions acquisitions;
@@ -70,12 +83,34 @@ public final class InformationFrames implements FrameArea {
     for (String verb : io.aeyer.plowshare.protocol.frames.InformationOperations.ALL) {
       String type = "information." + verb;
       handlers.put(
-          type, (payload, asking) -> handle(verb, payload == null ? Map.of() : payload, asking));
+          type,
+          (payload, asking) -> {
+            try {
+              return handle(verb, payload == null ? Map.of() : payload, asking);
+            } catch (InformationMetadataFault invalid) {
+              return new Outcome(
+                  Code.VALIDATION_FAILED, invalid.getMessage(), invalid.validation());
+            }
+          });
     }
     return Map.copyOf(handlers);
   }
 
   private Outcome handle(String verb, Map<String, Object> payload, Asking asking) {
+    if (verb.startsWith("interchange.")) {
+      return Outcome.ok(
+          interchange.execute(
+              asking.requireHandle("information." + verb),
+              InformationInterchangeInputs.command(verb, payload),
+              asking.sessionId()));
+    }
+    if (InformationNavigationInputs.supports(verb)) {
+      return Outcome.ok(
+          navigation.execute(
+              asking.requireHandle("information." + verb),
+              InformationNavigationInputs.command(verb, payload)));
+    }
+
     InformationContext context =
         access
             .resolve(
@@ -83,16 +118,77 @@ public final class InformationFrames implements FrameArea {
                 verb.startsWith("migration.") ? null : InformationScopes.from(payload))
             .withCorpus(
                 io.aeyer.plowshare.server.information.InformationInputs.corpus(
-                    payload.get("corpus")));
+                    payload.get("corpus")))
+            .withView(InformationContentInputs.view(payload.get("view")));
     if (List.of("list", "facets", "search", "rank").contains(verb))
       context =
           context.withFacets(
               io.aeyer.plowshare.server.information.InformationInputs.facets(
                   payload.get("filter")));
+    if (!context.typedView()
+        && (context.facets().contentType() != null
+            || context.facets().contentTypeVersion() != null
+            || context.facets().untyped() != null)) throw new CallerFault("unsupported-view");
     if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
             != io.aeyer.plowshare.server.archive.ProjectRole.VIEWER
         && !verb.startsWith("migration.")) access.requireWork(context);
     Object result;
+    if (verb.equals("types.capabilities"))
+      return Outcome.ok(
+          new io.aeyer.plowshare.protocol.InformationContent.Capabilities(
+              io.aeyer.plowshare.protocol.InformationContent.CAPABILITY,
+              io.aeyer.plowshare.protocol.InformationContent.VIEW,
+              io.aeyer.plowshare.protocol.DocumentMetadata.PROFILE,
+              contentSettings.writesEnabled()));
+    if (verb.startsWith("types.") || verb.startsWith("content.")) {
+      var command = InformationContentInputs.command(verb, payload);
+      return Outcome.ok(
+          switch (command) {
+            case io.aeyer.plowshare.protocol.InformationRequest.TypeList q ->
+                contentTypes.list(
+                    context,
+                    Boolean.TRUE.equals(q.drafts()),
+                    q.limit() == null ? 50 : q.limit(),
+                    q.offset() == null ? 0 : q.offset());
+            case io.aeyer.plowshare.protocol.InformationRequest.TypeRead q ->
+                Boolean.TRUE.equals(q.publishedOnly())
+                    ? contentTypes.published(context, q.version(), q.attachedRevision())
+                    : contentTypes.get(context, q.version(), q.attachedRevision());
+            case io.aeyer.plowshare.protocol.InformationRequest.TypeValidate q ->
+                Boolean.TRUE.equals(q.publishedOnly())
+                    ? io.aeyer.plowshare.protocol.DocumentMetadata.validate(
+                        contentTypes.published(context, q.version(), q.attachedRevision()).schema(),
+                        q.metadata())
+                    : contentTypes.validate(
+                        context, q.version(), q.attachedRevision(), q.metadata());
+            case io.aeyer.plowshare.protocol.InformationRequest.TypeDraft q ->
+                contentTypes.create(
+                    context,
+                    q.requestId(),
+                    q.type(),
+                    q.expectedControlRevision(),
+                    q.slug(),
+                    q.label(),
+                    q.description(),
+                    q.schema(),
+                    q.presentation(),
+                    asking.sessionId());
+            case io.aeyer.plowshare.protocol.InformationRequest.TypeTransition q ->
+                contentTypes.transition(
+                    context,
+                    q.requestId(),
+                    q.version(),
+                    q.expectedControlRevision(),
+                    q.activate(),
+                    asking.sessionId());
+            case io.aeyer.plowshare.protocol.InformationRequest.ContentRead q ->
+                catalogue.content(context, q.revision());
+            case io.aeyer.plowshare.protocol.InformationRequest.ContentRevise q ->
+                catalogue.reviseMetadata(
+                    context, q.requestId(), q.expectedRevision(), q.typing(), asking.sessionId());
+            default -> throw new IllegalStateException("unexpected authored-information request");
+          });
+    }
     switch (verb) {
       case "migration.list" -> {
         if (migration == null) throw new CallerFault("migration is unavailable");
@@ -158,11 +254,21 @@ public final class InformationFrames implements FrameArea {
                 required(payload, "text").getBytes(StandardCharsets.UTF_8),
                 "text/plain; charset=utf-8",
                 null,
-                asking.sessionId());
+                asking.sessionId(),
+                InformationContentInputs.expected(payload),
+                InformationContentInputs.typing(payload));
         catalogue.callerSession(admitted, asking.sessionId());
         return new Outcome(Code.ACCEPTED, null, admitted);
       }
       case "acquire", "refresh" -> {
+        if (verb.equals("acquire")
+            && (payload.containsKey("typing") || payload.containsKey("expectedRevision")))
+          throw new CallerFault(
+              "URL acquisition creates an untyped source; assign metadata after import");
+        if (verb.equals("refresh")
+            && payload.containsKey("typing")
+            && !uuid(payload, "revision").equals(InformationContentInputs.expected(payload)))
+          throw new CallerFault("expectedRevision must match refresh revision");
         if (verb.equals("refresh")) catalogue.revisionName(context, uuid(payload, "revision"));
         String url =
             verb.equals("refresh")
@@ -179,7 +285,13 @@ public final class InformationFrames implements FrameArea {
             Code.ACCEPTED,
             null,
             acquisitions.submit(
-                context, uuid(payload, "requestId"), url, name, asking.sessionId()));
+                context,
+                uuid(payload, "requestId"),
+                url,
+                name,
+                asking.sessionId(),
+                InformationContentInputs.expected(payload),
+                InformationContentInputs.typing(payload)));
       }
       case "inventory" ->
           result =
@@ -316,7 +428,9 @@ public final class InformationFrames implements FrameArea {
                 payload.containsKey("feedback") ? uuid(payload, "feedback") : null,
                 asking.sessionId(),
                 io.aeyer.plowshare.server.information.InformationReportDetailsDecoder.from(payload),
-                null);
+                null,
+                InformationContentInputs.expected(payload),
+                InformationContentInputs.typing(payload));
         catalogue.callerSession(admitted, asking.sessionId());
         return new Outcome(Code.ACCEPTED, null, admitted);
       }
@@ -367,7 +481,8 @@ public final class InformationFrames implements FrameArea {
             context,
             uuid(payload, "revision"),
             required(payload, "stage"),
-            uuid(payload, "requestId"));
+            uuid(payload, "requestId"),
+            stages(payload));
         result = Map.of("queued", true);
       }
       case "retry" -> {
@@ -375,12 +490,23 @@ public final class InformationFrames implements FrameArea {
           acquisitions.retry(context, uuid(payload, "acquisition"));
           return Outcome.ok(Map.of("queued", true));
         }
-        catalogue.retry(context, uuid(payload, "revision"), uuid(payload, "requestId"));
+        catalogue.retry(
+            context, uuid(payload, "revision"), uuid(payload, "requestId"), stages(payload));
         result = Map.of("queued", true);
       }
       default -> throw new IllegalStateException("unregistered information operation");
     }
     return Outcome.ok(result);
+  }
+
+  private static List<String> stages(Map<String, Object> payload) {
+    if (!payload.containsKey("stages")) return null;
+    if (!(payload.get("stages") instanceof List<?> values)
+        || values.isEmpty()
+        || values.size() > 7
+        || values.stream().anyMatch(value -> !(value instanceof String)))
+      throw new CallerFault("invalid selected stages");
+    return values.stream().map(String.class::cast).toList();
   }
 
   private static String required(Map<String, Object> payload, String key) {

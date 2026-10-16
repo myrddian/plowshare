@@ -18,6 +18,12 @@
 - [Memory navigation](memory-digests.md)
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
+- [Authored knowledge implementation plan](authored-knowledge-implementation.md)
+- [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
+- [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
+- [Document navigation usage](authored-navigation.md) — relationships, paths and policy administration.
+- [Document navigation and reference policy](decisions/0028-document-navigation-and-reference-policy.md) — implemented locally; release is separate.
+- [Authored navigation implementation plan](authored-navigation-implementation.md)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)

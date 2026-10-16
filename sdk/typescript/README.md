@@ -115,7 +115,15 @@ or running an agent. Simple forms include `/memory index`, `/memory read mem_1`,
 ```
 
 Tiered commands use the current project unless JSON explicitly names another
-project or `project:null` for global. Curation requires a project. Defaults for
+project. Runtime starts (`agent.run`, `conversation.open` and
+`orchestration.start`) require an explicit project; `agent.run` can instead name
+an existing conversation, which owns its scope. Missing/null project is refused
+before transport, even with human credentials. Conversation list/latest reads
+allow explicit `project:null` for Global history. Memory/global setup operations
+retain their own `project:null` semantics. External systems configure a named
+project and use an Application/service credential; Personal clients select
+Personal deliberately. See [explicit scope](../../docs/sdks.md#explicit-execution-scope).
+Curation requires a project. Defaults for
 budgets, recall limits and pagination remain server-owned. Digest/curation return
 handles immediately; `/job status` reads the durable outcome and `/job cancel`
 requests cancellation. The [headless CLI](../../plowshare-cli/README.md) now consumes

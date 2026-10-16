@@ -50,18 +50,102 @@ public final class Information {
       List<Event> events,
       List<UUID> inputs,
       Report report,
-      List<UUID> citations) {
+      List<UUID> citations,
+      InformationContent.Identity contentType,
+      String processingPolicy) {
+    /** Source-compatible constructor for the untyped revision view. */
+    public Revision(
+        UUID id,
+        UUID resourceId,
+        int ordinal,
+        String title,
+        String mediaType,
+        String documentType,
+        String documentSubtype,
+        String sourceUri,
+        String contentHash,
+        String textHash,
+        Long byteSize,
+        Instant createdAt,
+        String availability,
+        boolean excluded,
+        long generation,
+        String converter,
+        int allowanceTotal,
+        int allowanceSpent,
+        String sourceName,
+        String kind,
+        String author,
+        List<String> tags,
+        List<String> autoTag,
+        Boolean autoTagGenerated,
+        String documentAuthor,
+        String documentAuthorSource,
+        Map<String, List<String>> tagGroups,
+        String tagGroupsSource,
+        String reportStatus,
+        Boolean canManage,
+        List<Step> steps,
+        Progress progress,
+        List<Event> events,
+        List<UUID> inputs,
+        Report report,
+        List<UUID> citations) {
+      this(
+          id,
+          resourceId,
+          ordinal,
+          title,
+          mediaType,
+          documentType,
+          documentSubtype,
+          sourceUri,
+          contentHash,
+          textHash,
+          byteSize,
+          createdAt,
+          availability,
+          excluded,
+          generation,
+          converter,
+          allowanceTotal,
+          allowanceSpent,
+          sourceName,
+          kind,
+          author,
+          tags,
+          autoTag,
+          autoTagGenerated,
+          documentAuthor,
+          documentAuthorSource,
+          tagGroups,
+          tagGroupsSource,
+          reportStatus,
+          canManage,
+          steps,
+          progress,
+          events,
+          inputs,
+          report,
+          citations,
+          null,
+          null);
+    }
+
     public Revision {
       Objects.requireNonNull(id);
       Objects.requireNonNull(resourceId);
       Objects.requireNonNull(createdAt);
       if (ordinal < 1
           || generation < 1
-          || allowanceTotal < 1
+          || allowanceTotal < 0
           || allowanceSpent < 0
           || allowanceSpent > allowanceTotal
           || byteSize != null && byteSize < 0)
         throw new IllegalArgumentException("invalid revision counters");
+      if (processingPolicy != null
+          && !Set.of("automatic", "explicit_only").contains(processingPolicy))
+        throw new IllegalArgumentException("invalid processing policy");
       sourceName = text(sourceName, 1024);
       title = text(title, 32768);
       if (!Set.of("source", "report").contains(kind)
@@ -129,7 +213,9 @@ public final class Information {
           checkedEvents,
           checkedInputs,
           checkedReport,
-          checkedCitations);
+          checkedCitations,
+          readable ? contentType : null,
+          processingPolicy);
     }
   }
 
@@ -295,7 +381,11 @@ public final class Information {
       var names =
           Set.of(
               "kind", "author", "documentAuthor", "tagGroup", "subtype", "when", "tags", "autoTag");
-      if (!facets.keySet().equals(names) || !hasMore.keySet().equals(names))
+      var allowed = new HashSet<>(names);
+      allowed.addAll(Set.of("contentType", "contentTypeVersion"));
+      if (!facets.keySet().containsAll(names)
+          || !allowed.containsAll(facets.keySet())
+          || !hasMore.keySet().equals(facets.keySet()))
         throw new IllegalArgumentException("incomplete facet schema");
       var copy = new LinkedHashMap<String, List<FacetCount>>();
       facets.forEach(

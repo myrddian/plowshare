@@ -6,14 +6,28 @@ import java.util.Objects;
  * Resource selection derived by an adapter from its authenticated caller, never model ownership.
  */
 public record InformationContext(
-    String account, Selection selection, Corpus corpus, InformationFacets facets) {
+    String account,
+    Selection selection,
+    Corpus corpus,
+    InformationFacets facets,
+    boolean typedView) {
+
+  public InformationContext(
+      String account, Selection selection, Corpus corpus, InformationFacets facets) {
+    this(account, selection, corpus, facets, false);
+  }
+
+  public InformationContext withView(boolean supporting) {
+    return new InformationContext(account, selection, corpus, facets, supporting);
+  }
 
   public InformationContext(String account, Selection selection, Corpus corpus) {
     this(account, selection, corpus, InformationFacets.NONE);
   }
 
   public InformationContext withFacets(InformationFacets value) {
-    return new InformationContext(account, selection, corpus, Objects.requireNonNull(value));
+    return new InformationContext(
+        account, selection, corpus, Objects.requireNonNull(value), typedView);
   }
 
   public InformationContext(String account, Selection selection) {
@@ -36,7 +50,9 @@ public record InformationContext(
 
   /** Corpus selection changes discovery, never ownership or workspace permissions. */
   public InformationContext withCorpus(Corpus value) {
-    return value == null ? this : new InformationContext(account, selection, value, facets);
+    return value == null
+        ? this
+        : new InformationContext(account, selection, value, facets, typedView);
   }
 
   public InformationContext {

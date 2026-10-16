@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.information;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 import io.aeyer.plowshare.server.archive.JdbcProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
@@ -2303,7 +2304,11 @@ class DocumentPoliciesTest {
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.documents.Deliberation.class),
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.JobStore.class),
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
-                fetcher)
+                fetcher,
+                org.mockito.Mockito.mock(InformationContentTypes.class),
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2438,7 +2443,11 @@ class DocumentPoliciesTest {
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.documents.Deliberation.class),
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.JobStore.class),
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
-                org.mockito.Mockito.mock(io.aeyer.plowshare.server.fetch.PageFetcher.class))
+                org.mockito.Mockito.mock(io.aeyer.plowshare.server.fetch.PageFetcher.class),
+                org.mockito.Mockito.mock(InformationContentTypes.class),
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2731,7 +2740,11 @@ class DocumentPoliciesTest {
                 null,
                 null,
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
-                null)
+                null,
+                org.mockito.Mockito.mock(InformationContentTypes.class),
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var rows =
         (List<?>)
@@ -2919,7 +2932,11 @@ class DocumentPoliciesTest {
                 null,
                 null,
                 new io.aeyer.plowshare.server.documents.DocumentsProperties(),
-                null)
+                null,
+                org.mockito.Mockito.mock(InformationContentTypes.class),
+                new InformationContentSettings(true),
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         Map.<String, Object>of(

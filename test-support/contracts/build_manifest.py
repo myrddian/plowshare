@@ -250,7 +250,7 @@ def inventory():
     direct_frames = direct_memory_frames | {"conversation.search", "job.status", "job.cancel"}
     cli_source = "sdk/typescript/src/operations/catalog.ts"
     cli_catalog = read(cli_source).split("export const CLI_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
-    cli_frames = direct_frames | set(re.findall(r"'[^']+': '([a-z.]+)'", cli_catalog))
+    cli_frames = direct_frames | set(re.findall(r"'[^']+':\s*'([a-z.]+)'", cli_catalog))
     one_shot_frames = set(cli_frames)
     observer_source = "sdk/typescript/src/operations/observation.ts"
     observer_catalog = read(observer_source).split("export const OBSERVER_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
@@ -270,7 +270,7 @@ def inventory():
     bound_catalog = read(administrative_source).split("export const BOUND_OPERATIONS = {", 1)[1].split("} as const", 1)[0]
     bound_frames = dict(re.findall(r"'([a-z.]+)': '([^']+)'", bound_catalog))
     typed_frames = set()
-    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts", "sdk/typescript/src/operations/provider-credentials.ts", "sdk/typescript/src/operations/hosted-tool-scopes.ts"]:
+    for source in [direct_source, cli_source, administrative_source, "sdk/typescript/src/operations/information-payloads.ts", "sdk/typescript/src/operations/information-navigation.ts", "sdk/typescript/src/operations/information-interchange.ts", "sdk/typescript/src/operations/usage.ts", "sdk/typescript/src/operations/messaging.ts", "sdk/typescript/src/operations/relay.ts", "sdk/typescript/src/operations/relay-ports.ts", "sdk/typescript/src/operations/tool-scopes.ts", "sdk/typescript/src/operations/provider-credentials.ts", "sdk/typescript/src/operations/hosted-tool-scopes.ts"]:
         typed_frames.update(re.findall(r"^\s*'([a-z]+(?:\.[a-z]+)+)':", read(source), re.M))
     assert typed_frames == set(areas), "typed payload catalog differs from the registered WS surface"
     assert one_shot_frames.isdisjoint(bound_frames) and cli_frames | set(bound_frames) == typed_frames
@@ -283,15 +283,23 @@ def inventory():
         ("administrative", "AdministrativeReplies", 34, 35),
         ("conversation", "ConversationReplies", 42, 79),
         ("inspection", "InspectionReplies", 14, 8),
-        ("information", "InformationReplies", 33, 40),
+        ("information", "InformationReplies", 69, 67),
         ("messaging", "MessagingReplies", 5, 9),
     ]:
         source = f"sdk/typescript/src/operations/{family}-replies.ts" if family != "messaging" else "sdk/typescript/src/operations/messaging.ts"
         text = read(source)
         types = [value for value in re.findall(r"^export interface (\w+)\s*\{", text, re.M) if value != name]
-        operations = re.findall(r"'([^']+)':", re.search(rf"export interface {name} \{{([^}}]+)\}}", text, re.S).group(1))
+        operations = re.findall(r"'([^']+)':", re.search(rf"export interface {name}(?:\s+extends NavigationReplies(?:, InterchangeReplies)?)?\s+\{{(.*?)^\}}", text, re.S | re.M).group(1))
         if family == "information":
             types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/information-views.ts"), re.M))
+            types.extend(re.findall(r"^export interface (\w+)\s*\{", read("sdk/typescript/src/operations/information-content.ts"), re.M))
+        if family == "information":
+            navigation = read("sdk/typescript/src/operations/information-navigation.ts")
+            types.extend(value for value in re.findall(r"^export interface (\w+)\s*\{", navigation, re.M) if value not in {"NavigationPayloads", "NavigationReplies"})
+            operations.extend(re.findall(r"'([^']+)':", re.search(r"export interface NavigationReplies \{(.*?)^\}",navigation,re.S|re.M).group(1)))
+            interchange = read("sdk/typescript/src/operations/information-interchange.ts")
+            types.extend(value for value in re.findall(r"^export interface (\w+)\s*\{", interchange, re.M) if value not in {"InterchangePayloads", "InterchangeReplies"})
+            operations.extend(re.findall(r"'([^']+)':", re.search(r"export interface InterchangeReplies \{(.*?)^\}",interchange,re.S|re.M).group(1)))
         assert len(types) == expected_types and len(operations) == expected_operations, family
         response_families[family] = {"source": source, "wireDtos": types, "operations": operations,
                                      "fixtures": f"test-support/contracts/ws-{family}-fixtures.json"}

@@ -21,6 +21,8 @@ final class InformationCatalogueFingerprint {
           case InformationCommandParameters.Link value -> List.of(value.project(), value.remove());
           case InformationCommandParameters.Sharing value -> List.of(value.shared());
           case InformationCommandParameters.Availability value -> List.of(value.state());
+          case InformationCommandParameters.Processing value ->
+              Arrays.asList(value.from(), value.stages());
           case InformationCommandParameters.Rebuild value -> List.of(value.stage());
           case InformationCommandParameters.Allowance value -> List.of(value.total());
           case InformationCommandParameters.Tags value -> value.values();
