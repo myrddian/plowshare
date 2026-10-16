@@ -163,6 +163,10 @@ These are narrow capabilities, not an arbitrary global server overlay. Deploymen
 Clients cannot replace the deployed Application tier. Server schedules are enrolled
 for reconciliation on first deployment; they retain ordinary owner permission and
 pause rules. Update packaged schedule definitions with a new source deployment.
+Application agent and bot definitions also belong to their source package.
+Update `agents/` or `bots/` through `application.deploy` for managed source, or the
+owning external deployment workflow for DISJOINT source. `agent.define` is for
+ordinary project/global tiers and refuses an Application before writing any file.
 
 A lost or unreadable reply is uncertain. Read its retained receipt, using the
 original server, account, project and request UUID; do not automatically resubmit:

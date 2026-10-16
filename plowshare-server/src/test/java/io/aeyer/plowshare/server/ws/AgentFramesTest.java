@@ -214,7 +214,13 @@ class AgentFramesTest {
             turns,
             org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
     runs = new Runs(callers, jobs, turns);
-    definitions = new Definitions(writer, resolver, projects, callers);
+    definitions =
+        new Definitions(
+            writer,
+            resolver,
+            projects,
+            callers,
+            io.aeyer.plowshare.server.agents.ApplicationResources.NONE);
 
     // FrameParity.endpointsOf and not a bare standaloneSetup: this file
     // compares rendered bodies, and the bare harness's converters are not

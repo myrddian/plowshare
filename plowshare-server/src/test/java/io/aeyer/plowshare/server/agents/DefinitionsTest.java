@@ -48,6 +48,7 @@ class DefinitionsTest {
   private ProjectStore projects;
   private DataLayout layout;
   private Definitions definitions;
+  private ApplicationResources applicationResources;
 
   @BeforeEach
   void setUp(@TempDir Path data) throws Exception {
@@ -60,7 +61,9 @@ class DefinitionsTest {
             projects,
             mock(Turn.class),
             org.mockito.Mockito.mock(io.aeyer.plowshare.server.agents.CallerAccess.class));
-    definitions = new Definitions(writerOver(layout), resolver, projects, callers);
+    applicationResources = mock(ApplicationResources.class);
+    definitions =
+        new Definitions(writerOver(layout), resolver, projects, callers, applicationResources);
   }
 
   // --- the branch that changes the shape of the answer -------------------------
@@ -131,6 +134,56 @@ class DefinitionsTest {
             definitions.define(
                 new Definitions.Ask("payments", "helper", definition("helper", "hi"), false)));
 
+    verify(resolver, never()).invalidate(any());
+  }
+
+  /** Deployed source owns Application definitions; the ordinary tier must stay untouched. */
+  @Test
+  void an_application_write_is_refused_before_creating_or_replacing_an_inert_file()
+      throws Exception {
+    when(projects.id("payments")).thenReturn(7L);
+    Path deployed = layout.botsFor(7L).resolveSibling("deployed-source");
+    when(applicationResources.root(7L)).thenReturn(java.util.Optional.of(deployed));
+
+    CallerFault refused =
+        assertThrows(
+            CallerFault.class,
+            () ->
+                definitions.define(
+                    new Definitions.Ask("payments", "helper", definition("helper", "new"), false)));
+
+    assertTrue(refused.getMessage().contains("application.deploy"));
+    assertFalse(Files.exists(layout.botsFor(7L).resolve("helper.md")));
+    assertFalse(Files.exists(deployed));
+    Files.createDirectories(layout.botsFor(7L));
+    Path inert = layout.botsFor(7L).resolve("helper.md");
+    Files.writeString(inert, "retained prior bytes");
+    assertThrows(
+        CallerFault.class,
+        () ->
+            definitions.define(
+                new Definitions.Ask("payments", "helper", definition("helper", "new"), true)));
+    assertEquals("retained prior bytes", Files.readString(inert));
+    verify(resolver, never()).invalidate(any());
+    verify(resolver, never()).forCaller(any());
+  }
+
+  /** A broken authoritative Application must not fall back to a writable ordinary tier. */
+  @Test
+  void an_unavailable_application_refuses_before_writing() {
+    when(projects.id("payments")).thenReturn(7L);
+    when(applicationResources.root(7L))
+        .thenThrow(
+            new io.aeyer.plowshare.server.files.WorkspaceRefusedException(
+                "Application source is unavailable"));
+
+    assertThrows(
+        io.aeyer.plowshare.server.files.WorkspaceRefusedException.class,
+        () ->
+            definitions.define(
+                new Definitions.Ask("payments", "helper", definition("helper", "new"), false)));
+
+    assertFalse(Files.exists(layout.botsFor(7L).resolve("helper.md")));
     verify(resolver, never()).invalidate(any());
   }
 
