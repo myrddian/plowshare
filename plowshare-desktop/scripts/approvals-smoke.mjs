@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 
 const temporary = await mkdtemp(join(tmpdir(), 'plowshare-approvals-'));
-const fixture = await protocolFixture({ controls: true });
+const fixture = await protocolFixture({ controls: true, foregroundApprovals: true });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(temporary, 'credentials'), PLOWSHARE_DESKTOP_CONFIG: join(temporary, 'config'), PLOWSHARE_DESKTOP_PROFILE: join(temporary, 'profile') };
 delete env.ELECTRON_RUN_AS_NODE;
 let app;
@@ -20,6 +20,10 @@ try {
   const decisions = () => fixture.frames.filter(frame => frame.type === 'approval.answer');
   const prompt = (surface, id) => surface.locator(`[data-approval-prompt="${id}"]`);
   await expect(prompt(page.locator('#approval-bar'), 'fixture-approval')).toBeVisible();
+  // Foreground questions have no pinned account handle: account-wide reads are
+  // empty, so opening the conversation must discover its own pending questions.
+  assert.ok(fixture.frames.some(frame => frame.type === 'approval.list' && frame.payload.mine === true));
+  assert.ok(fixture.frames.some(frame => frame.type === 'approval.list' && frame.payload.conversation === 'fixture-first'));
   await prompt(page.locator('#approval-bar'), 'fixture-approval').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(page.locator('#approval-bar'), 'fixture-approval')).toHaveCount(0);
   assert.equal(decisions()[0].payload.decision, 'once');

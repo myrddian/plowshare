@@ -97,6 +97,12 @@ that displayed request; do not reuse another run's approval key. Declining,
 leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
 
+Desktop reads pending approvals from both the signed-in account and each open
+conversation. Foreground command questions belong to their conversation and may
+not appear in the account-wide listing. Opening or refreshing that conversation
+rediscovers its pending requests without submitting another agent turn. A run
+ending `AWAITING` also refreshes its conversation's questions.
+
 The inbox holds durable deliveries and read receipts. Opening the application or
 seeing an unread count is not proof that an item was read. Open the item to read
 its actual result, and inspect its source work when more context is needed.
