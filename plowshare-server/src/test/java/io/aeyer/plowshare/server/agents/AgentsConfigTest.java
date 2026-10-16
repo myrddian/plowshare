@@ -461,6 +461,7 @@ class AgentsConfigTest {
             "coder",
             "coder_minimal",
             "command_judge",
+            "conversation_diagnostician",
             "conversation_folder",
             "critic",
             "diagnosis_verifier",
@@ -952,7 +953,7 @@ class AgentsConfigTest {
                       "diagnosis_verifier",
                       "aristoxenus",
                       "farnsworth",
-                      "daedalus")) {
+                      "conversation_diagnostician")) {
                 var definition = registry.get(name);
                 assertTrue(
                     definition.scopes().stream().anyMatch(grant -> grant.allows(Mode.READ)), name);

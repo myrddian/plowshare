@@ -945,6 +945,8 @@ public class ConversationController {
     access.requireWork(home.project(), handle);
     AgentDefinition definition =
         definitions.requireAgent(named, definitions.callerForConversation(id, session));
+    // Definition lookup may use the conversation owner. Exposure belongs to the request actor.
+    io.aeyer.plowshare.server.agents.AgentExposure.requireAvailable(definition, handle);
     String job = speaking.resume(id, definition, session, turnCap, request.maxModelCalls());
     return ResponseEntity.accepted().body(new StartedJob(job, definition.name()));
   }

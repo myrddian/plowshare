@@ -4,13 +4,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
-import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.BoundTools;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.harness.Harness;
 import io.aeyer.plowshare.server.hooks.Hooks;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -66,7 +64,7 @@ class InformationMetadataCheckpointTest {
                     null),
                 () -> {});
     var definition =
-        AgentRegistry.of(Path.of("src/main/resources/agents"), BoundTools.boundByThisServer())
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
             .get("information_tagger");
     String response =
         "```json\n{\"autoTag\":[\"tcp probes\"],\"tagGroups\":{\"security\":[\"tcp probes\"]},\"documentAuthor\":null,\"documentOrganisation\":null}\n```";

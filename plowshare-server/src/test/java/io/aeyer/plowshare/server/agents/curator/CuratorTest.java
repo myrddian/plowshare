@@ -53,7 +53,6 @@ import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1847,7 +1846,7 @@ class CuratorTest {
   @Test
   void the_shipped_judge_definition_is_a_valid_agent_declaring_only_memory_read() {
     AgentDefinition shipped =
-        AgentRegistry.of(Path.of("src/main/resources/agents"), BoundTools.boundByThisServer())
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
             .get(Curator.AGENT);
 
     assertEquals(List.of(MemoryTools.READ_NAME), shipped.tools());

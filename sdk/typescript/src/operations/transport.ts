@@ -1,3 +1,4 @@
+import { actingOptions, type RequestOptions } from '../binding/acting.ts';
 import { outcomeIn } from '../binding/envelope.ts';
 import type { Answer } from './response.ts';
 import { ConnectionFault } from '../binding/connection.ts';
@@ -10,12 +11,23 @@ import type { OperationTransport } from './response.ts';
  * inputs never reach the wire. An unreadable reply means uncertain completion;
  * callers reconcile through durable reads rather than replaying the mutation. */
 export function checkedTransport(wire: {
-  ask(type: string, payload?: unknown): Promise<Answer>;
+  ask(
+    type: string,
+    payload?: unknown,
+    options?: RequestOptions,
+  ): Promise<Answer>;
 }): OperationTransport {
   return {
-    async ask(type, payload) {
+    async ask(type, payload, options) {
       const request = decodeRequest(type, payload);
-      const raw = await wire.ask(request.type, request.payload);
+      const raw =
+        options === undefined
+          ? await wire.ask(request.type, request.payload)
+          : await wire.ask(
+              request.type,
+              request.payload,
+              actingOptions(options),
+            );
       try {
         const answer = outcomeIn(raw);
         const detail = {

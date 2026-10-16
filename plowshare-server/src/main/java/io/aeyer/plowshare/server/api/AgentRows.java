@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.api;
 
+import io.aeyer.plowshare.server.agents.AgentExposure;
 import io.aeyer.plowshare.server.agents.AgentRegistry;
 import io.aeyer.plowshare.server.agents.Callers;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
+import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,22 +22,39 @@ public final class AgentRows {
   private AgentRows() {}
 
   /**
+   * Public discovery uses the authenticated actor; internal registry enumeration is unchanged.
+   *
    * @param preferred what {@link DefinitionResolver#defaultBot} found for the same caller the
    *     registry was resolved for
+   * @param account authenticated request actor, or null for internal enumeration
    */
   public static List<AgentView> of(
-      AgentRegistry registry, Callers callers, Optional<DefinitionResolver.DefaultBot> preferred) {
+      AgentRegistry registry,
+      Callers callers,
+      Optional<DefinitionResolver.DefaultBot> preferred,
+      String account) {
     Map<String, AgentView> rows = new TreeMap<>();
     for (String name : registry.exportedNames()) {
       var selected = registry.get(name);
+      if (!AgentExposure.availableTo(selected, account)) continue;
       rows.put(
           name,
           AgentView.of(selected, callers.withheldFrom(registry, selected.name()))
               .addressedAs(name));
     }
     for (Map.Entry<String, String> refused : registry.disabled().entrySet()) {
+      if (ServiceCredentials.principal(account) && registry.isSystem(refused.getKey())) continue;
       rows.put(refused.getKey(), AgentView.disabled(refused.getKey(), refused.getValue()));
     }
+    preferred =
+        preferred.filter(
+            named ->
+                registry
+                    .find(named.name())
+                    .map(definition -> AgentExposure.availableTo(definition, account))
+                    .orElse(
+                        !ServiceCredentials.principal(account)
+                            || !registry.isSystem(named.name())));
     preferred.ifPresent(
         named -> {
           AgentView row = rows.get(named.name());

@@ -39,11 +39,11 @@ import java.util.UUID;
  * provenance.
  *
  * <p>A diagnostic reader has one additional operation those person-facing surfaces do not:
- * presenting a tool-result handle reads the exact persisted result. Daedalus cannot use its
- * ordinary {@code result_read} for that because the handle belongs to the target conversation
- * rather than its diagnostic conversation. This tool has already established the shared home before
- * it asks {@link EntryStore#redeem} with the target id, preserving both scope checks while making a
- * cut entry inspectable.
+ * presenting a tool-result handle reads the exact persisted result. The conversation diagnostician
+ * cannot use its ordinary {@code result_read} for that because the handle belongs to the target
+ * conversation rather than its diagnostic conversation. This tool has already established the
+ * shared home before it asks {@link EntryStore#redeem} with the target id, preserving both scope
+ * checks while making a cut entry inspectable.
  */
 public final class ConversationTrajectoryTool implements AgentTool {
 
@@ -162,8 +162,8 @@ public final class ConversationTrajectoryTool implements AgentTool {
    * The full persisted result from the conversation being diagnosed.
    *
    * <p>This is deliberately not {@code result_read}. That tool is authorised by its run's
-   * transcript, which for Daedalus is the diagnostic conversation; a handle in the target
-   * conversation therefore cannot be redeemed there. The home check above and {@link
+   * transcript, which for the conversation diagnostician is the diagnostic conversation; a handle
+   * in the target conversation therefore cannot be redeemed there. The home check above and {@link
    * EntryStore#redeem}'s conversation predicate are the two fences on this exceptional read.
    */
   private String result(String conversation, String sentHandle) {

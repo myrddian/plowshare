@@ -183,7 +183,7 @@ export async function authenticate(
   return {
     session: door.session,
     handle: resolvedHandle,
-    ask: (type, payload) => {
+    ask: (type, payload, options) => {
       signal.throwIfAborted();
       if (eventsLost)
         return Promise.reject(
@@ -191,7 +191,7 @@ export async function authenticate(
             'the event connection was lost; completion is unknown; restart the client; no request was replayed',
           ),
         );
-      return opened.connection.ask(type, payload);
+      return opened.connection.ask(type, payload, options);
     },
     runSession: () => {
       if (presenceLost)
@@ -320,7 +320,7 @@ export async function authenticateService(
     return {
       session,
       handle: payload.handle,
-      ask(type, payload) {
+      ask(type, payload, options) {
         signal.throwIfAborted();
         if (lost)
           return Promise.reject(
@@ -328,7 +328,7 @@ export async function authenticateService(
               'the service connection was lost; no request was replayed',
             ),
           );
-        return opened.connection.ask(type, payload);
+        return opened.connection.ask(type, payload, options);
       },
       runSession: () => null,
       root: () =>

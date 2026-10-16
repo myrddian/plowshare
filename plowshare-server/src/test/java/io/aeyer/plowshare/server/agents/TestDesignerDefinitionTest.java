@@ -21,7 +21,8 @@ class TestDesignerDefinitionTest {
 
   private static AgentDefinition shipped() {
     AgentDefinition designer =
-        AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer()).get("test_designer");
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
+            .get("test_designer");
     assertNotNull(designer, "test_designer.md did not load against the tools this boot binds");
     return designer;
   }

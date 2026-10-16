@@ -1,4 +1,5 @@
 from ._protocol import OPERATIONS, PROTOCOL_VERSION
+from .acting import ActingSelection
 from .client import CancelledRequest, Client, Delivery, Refusal, Reply, TransportError
 from .tool_journal import SqliteToolJournal
 from .tools import (
@@ -16,6 +17,7 @@ from .tools import (
 )
 
 __all__ = [
+    "ActingSelection",
     "SchemaDefinition",
     "ToolValue",
     "decode_tool_schema",

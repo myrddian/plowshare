@@ -8,7 +8,21 @@ import java.nio.file.*;
 /**
  * Reads the admitted manifest through a bounded, unlinked source boundary; never reads a secret.
  */
-public record ApplicationIdentitySource(Declaration declaration, String principal) {
+public record ApplicationIdentitySource(
+    Declaration declaration,
+    String principal,
+    java.util.List<io.aeyer.plowshare.server.acting.ActingPolicySource.Grant> acting) {
+  public ApplicationIdentitySource {
+    acting = java.util.List.copyOf(acting);
+  }
+
+  private static String rootProject(String source) throws java.io.IOException {
+    var name = new com.fasterxml.jackson.databind.ObjectMapper().readTree(source).get("name");
+    if (name == null || !name.isTextual())
+      throw new IllegalArgumentException("Missing Application name");
+    return name.textValue();
+  }
+
   public static ApplicationIdentitySource read(Path root) {
     Path file = root.resolve("plowshare.json");
     try {
@@ -21,7 +35,8 @@ public record ApplicationIdentitySource(Declaration declaration, String principa
             StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString();
         return new ApplicationIdentitySource(
             ApplicationServiceManifest.declaration(source).orElse(null),
-            ApplicationToolScopes.parse(source).executionAccount());
+            ApplicationToolScopes.parse(source).executionAccount(),
+            io.aeyer.plowshare.server.acting.ActingManifest.read(source, rootProject(source)));
       }
     } catch (java.io.IOException | IllegalArgumentException invalid) {
       throw new CallerFault("Invalid Application identity source");

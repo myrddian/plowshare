@@ -18,6 +18,7 @@
 - [Memory navigation](memory-digests.md)
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
+- [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [JavaScript orchestrations](scripted-orchestrations.md)

@@ -1,3 +1,4 @@
+import type { RequestOptions } from '../binding/acting.ts';
 import type { Code } from '../binding/codes.ts';
 import type { Operation, Payloads } from './direct.ts';
 import type { Replies } from './replies.ts';
@@ -67,5 +68,6 @@ export interface OperationTransport {
     this: void,
     type: K,
     payload: Payloads[K],
+    options?: RequestOptions,
   ): Promise<CheckedAnswer>;
 }

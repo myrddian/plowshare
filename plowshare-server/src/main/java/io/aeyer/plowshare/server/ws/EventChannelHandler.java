@@ -623,6 +623,10 @@ public final class EventChannelHandler extends TextWebSocketHandler
 
   @Override
   public void afterConnectionClosed(WebSocketSession socket, CloseStatus status) {
+    // A socket that never routed a frame cannot own an acting context. Do not resolve the lazy
+    // routing graph during teardown, especially while the application context is shutting down.
+    FrameRouter currentRouter = router;
+    if (currentRouter != null) currentRouter.disconnected(socket.getId());
     if (socketAuthorization != null) socketAuthorization.detach(socket);
     // Whatever else happens, this connection's drain thread stops. Before
     // the detach and outside every branch below, because a displaced socket

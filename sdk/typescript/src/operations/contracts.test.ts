@@ -94,6 +94,10 @@ describe('typed requests cover the actual server contracts', () => {
     expect([...cli, ...remaining].sort()).toEqual(typed);
     expect(cli.size).toBe(236);
     expect(remaining.sort()).toEqual([
+      'acting.context.close',
+      'acting.context.open',
+      'acting.turn.receipt',
+      'acting.turn.start',
       'incoming.cancel',
       'incoming.catalog',
       'incoming.receive',

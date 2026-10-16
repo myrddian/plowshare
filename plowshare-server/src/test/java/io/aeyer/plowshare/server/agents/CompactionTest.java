@@ -1501,11 +1501,7 @@ class CompactionTest {
    */
   @Test
   void the_folders_prompt_still_ships_containment() {
-    var registry =
-        new AgentRegistry(
-            AgentRegistry.load(
-                java.nio.file.Path.of("src/main/resources/agents"),
-                BoundTools.boundByThisServer()));
+    var registry = new AgentRegistry(ShippedDefinitions.agents(BoundTools.boundByThisServer()));
     String prompt = registry.get("conversation_folder").prompt();
 
     assertTrue(

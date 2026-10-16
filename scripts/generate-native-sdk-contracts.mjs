@@ -144,7 +144,7 @@ const fields = (k) =>
   Object.entries(defs[k].properties ?? {}).filter(
     ([, r]) => !defs[id(r)].forbidden,
   );
-const secretField = (n, f) => (n === 'HostedToolCredentialDto' && f === 'value') || (n === 'ApplicationCredentialDto' && f === 'credential') || (n.startsWith('ProviderCredentialPut') && f === 'secret') || (n.startsWith('ProviderAuthorization') && f === 'authorizationUrl');
+const secretField = (n, f) => (f === 'credential' && n.includes('Proof')) || (n === 'HostedToolCredentialDto' && f === 'value') || (n === 'ApplicationCredentialDto' && f === 'credential') || (n.startsWith('ProviderCredentialPut') && f === 'secret') || (n.startsWith('ProviderAuthorization') && f === 'authorizationUrl');
 const redacted = (n,k) => n + '[' + fields(k).filter(([f])=>secretField(n,f)).map(([f])=>f+'=<redacted>').join(', ') + ']';
 function pyClass(n, k, base = '') {
   const required = new Set(defs[k].required ?? []);
@@ -214,7 +214,7 @@ export function nativeContracts() {
       .join('') +
     '}\n';
   let go = `// ${header}\npackage plowshare\nimport ("context"; "encoding/json"; "errors")\n`;
-  let cs = `// ${header}\nusing System.Text.Json;\nusing System.Text.Json.Serialization;\nnamespace Plowshare.Sdk;\n`;
+  let cs = `// ${header}\n#nullable enable\nusing System.Text.Json;\nusing System.Text.Json.Serialization;\nnamespace Plowshare.Sdk;\n`;
   function objectModels(n, k) {
     const required = new Set(defs[k].required ?? []);
     go +=
@@ -323,7 +323,7 @@ export function nativeContracts() {
       cs += `\npublic sealed record ${n}(${typ(k, 'cs')} Selection);\n`;
     } else objectModels(n, k);
     go += `\n// ${pascal(op)} validates before submission and returns the paired result DTO.\nfunc(c *Client) ${pascal(op)}(ctx context.Context, request ${n}) (Reply[${gresult}],error) { return requestTyped[${gresult}](ctx,c,${quote(op)},request) }\n`;
-    cs += `public static partial class Operations { public static Task<Reply<${cresult}>> ${pascal(op)}Async(this Client client,${n} request,CancellationToken cancellationToken=default)=>client.RequestTypedAsync<${defs[k].anyOf ? typ(k, 'cs') : n},${cresult}>(${quote(op)},${defs[k].anyOf ? 'request.Selection' : 'request'},cancellationToken); }\n`;
+    cs += `public static partial class Operations { public static Task<Reply<${cresult}>> ${pascal(op)}Async(this Client client,${n} request,CancellationToken cancellationToken=default,RequestOptions? options=null)=>client.RequestTypedAsync<${defs[k].anyOf ? typ(k, 'cs') : n},${cresult}>(${quote(op)},${defs[k].anyOf ? 'request.Selection' : 'request'},cancellationToken,options); }\n`;
   }
   go += `\n// ServerPush is a validated notification; reconcile durable state through operations.\ntype ServerPush = ${typ(id(OPERATION_SCHEMAS.pushes), 'go')}\n`;
   cs += `\npublic sealed record ServerPush(${typ(id(OPERATION_SCHEMAS.pushes), 'cs')} Notification);\n`;

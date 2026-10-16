@@ -554,8 +554,7 @@ class InformationFacetsTest {
             .admit(own, UUID.randomUUID(), "paid.txt", "PostgreSQL".getBytes(), "text/plain", null)
             .revision();
     var definition =
-        io.aeyer.plowshare.server.agents.AgentRegistry.of(
-                java.nio.file.Path.of("src/main/resources/agents"),
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
                 io.aeyer.plowshare.server.agents.BoundTools.boundByThisServer())
             .get("information_tagger");
     var denied = new java.util.concurrent.atomic.AtomicBoolean(true);

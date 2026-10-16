@@ -1,3 +1,4 @@
+import type { RequestOptions } from './acting.ts';
 import { CURRENT_VERSION, asking, isAnswer, outcomeIn } from './envelope.ts';
 import type { Outcome } from './envelope.ts';
 
@@ -157,7 +158,11 @@ export interface Connection {
    *     rejected only when there is <b>no</b> answer to give: the socket
    *     closed, or a frame arrived that this build cannot read as one
    */
-  ask(type: string, payload?: unknown): Promise<Outcome>;
+  ask(
+    type: string,
+    payload?: unknown,
+    options?: RequestOptions,
+  ): Promise<Outcome>;
 
   /** Hangs up, failing every ask still outstanding. */
   close(): void;
@@ -177,7 +182,11 @@ export interface Reply {
   readonly raw: Readonly<Record<string, unknown>>;
 }
 export interface Connected extends Connection {
-  request(type: string, payload?: unknown): Promise<Reply>;
+  request(
+    type: string,
+    payload?: unknown,
+    options?: RequestOptions,
+  ): Promise<Reply>;
 }
 
 /** Delivery state for recovery without replaying a mutation. */
@@ -348,7 +357,11 @@ export function connect(options: ConnectOptions): Connected {
     }
   }
 
-  function request(type: string, payload?: unknown): Promise<Reply> {
+  function request(
+    type: string,
+    payload?: unknown,
+    requestOptions?: RequestOptions,
+  ): Promise<Reply> {
     if (!open) {
       return Promise.reject(
         new ConnectionFault(
@@ -370,7 +383,7 @@ export function connect(options: ConnectOptions): Connected {
       const asker: Waiting = { type, answered, failed };
       waiting.set(id, asker);
       try {
-        socket.send(JSON.stringify(asking(id, type, payload)));
+        socket.send(JSON.stringify(asking(id, type, payload, requestOptions)));
       } catch (trouble) {
         // Nothing left the process, so nothing will answer this id.
         waiting.delete(id);
@@ -397,7 +410,8 @@ export function connect(options: ConnectOptions): Connected {
   }
   return {
     request,
-    ask: async (type, payload) => (await request(type, payload)).outcome,
+    ask: async (type, payload, options) =>
+      (await request(type, payload, options)).outcome,
 
     close(): void {
       strand('this connection was closed before this frame was answered');

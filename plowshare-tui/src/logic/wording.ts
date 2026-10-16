@@ -678,9 +678,6 @@ export const TRAJECTORY_COMMAND = '/trajectory';
  */
 export const EARLIER_COMMAND = '/earlier';
 
-/** Ask Daedalus to diagnose this conversation, or the id named after the command. */
-export const DIAGNOSE_COMMAND = '/diagnose';
-
 /** Makes the directory the client stands in a project, and roots it. */
 export const HERE_COMMAND = '/here';
 
@@ -777,7 +774,6 @@ export const COMMANDS: readonly string[] = [
   LOG_COMMAND,
   TRAJECTORY_COMMAND,
   EARLIER_COMMAND,
-  DIAGNOSE_COMMAND,
   HERE_COMMAND,
   PROJECT_COMMAND,
   CD_COMMAND,
@@ -850,8 +846,6 @@ export function describeArguments(command: string): string {
       return ' [off]';
     case CAP_COMMAND:
       return '';
-    case DIAGNOSE_COMMAND:
-      return ' [conversation-id] [-- question]';
     case PROJECT_COMMAND:
       return ' <name> | create|define|member-add|member-remove <JSON>';
     case CD_COMMAND:
@@ -955,8 +949,6 @@ export function describeCommand(command: string): string {
       return 'explore this conversation step by step: every call, what came back, and the logs of agents it handed work to';
     case EARLIER_COMMAND:
       return 'the part of this conversation before what is on the screen';
-    case DIAGNOSE_COMMAND:
-      return 'ask Daedalus why a conversation went wrong';
     case HERE_COMMAND:
       return 'make this directory a project and lend it its files';
     case PROJECT_COMMAND:
@@ -1001,19 +993,6 @@ export function describeNoEarlier(): string {
  */
 export function describeNotYetShown(): string {
   return "this conversation's log is not on the screen yet, so there is nowhere to go back from";
-}
-
-/** A diagnosis needs a persisted target; no current conversation means there is no implicit one. */
-export function describeNoDiagnosis(): string {
-  return (
-    `there is no current conversation to diagnose — use ${DIAGNOSE_COMMAND}` +
-    ' <conversation-id> [-- question]'
-  );
-}
-
-/** The separate conversation is named because it remains in the append-only archive. */
-export function describeDiagnosing(target: string, diagnostic: string): string {
-  return `Daedalus is diagnosing ${target} in diagnostic conversation ${diagnostic}`;
 }
 
 /**

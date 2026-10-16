@@ -84,7 +84,7 @@ public final class AgentListHandler implements FrameHandler {
             asking.sessionId(),
             asking.handle());
     var registry = resolver.refreshForCaller(caller);
-    var rows = AgentRows.of(registry, callers, resolver.defaultBot(caller));
+    var rows = AgentRows.of(registry, callers, resolver.defaultBot(caller), asking.handle());
     if (skills == null) return Outcome.ok(rows);
     var packages = skills.forCaller(caller);
     var procedures =

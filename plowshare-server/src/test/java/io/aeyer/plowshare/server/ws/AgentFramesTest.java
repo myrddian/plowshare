@@ -778,10 +778,13 @@ class AgentFramesTest {
     JsonNode rows = FrameJson.answering().readTree(http.getContentAsString());
     for (JsonNode row : rows) {
       String name = row.path("name").asText();
-      assertEquals(name.equals("figure_reader") ? 0 : 1, row.path("commands").size());
+      assertEquals(
+          name.equals("figure_reader") ? 0 : name.equals("aristoxenus") ? 2 : 1,
+          row.path("commands").size());
       if (!name.equals("figure_reader")) {
-        assertEquals("/skill:review", row.path("commands").get(0).path("command").asText());
-        assertEquals(name, row.path("commands").get(0).path("executor").asText());
+        JsonNode review = row.path("commands").get(name.equals("aristoxenus") ? 1 : 0);
+        assertEquals("/skill:review", review.path("command").asText());
+        assertEquals(name, review.path("executor").asText());
         assertTrue(row.path("withheld").toString().contains("broken"));
       }
     }
@@ -792,7 +795,8 @@ class AgentFramesTest {
     outcome = route(FrameTypes.AGENT_LIST, "{}");
     FrameParity.assertSameAnswer(http, outcome);
     for (JsonNode row : FrameJson.answering().readTree(http.getContentAsString())) {
-      assertEquals(0, row.path("commands").size());
+      assertEquals(
+          row.path("name").asText().equals("aristoxenus") ? 1 : 0, row.path("commands").size());
     }
   }
 

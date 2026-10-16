@@ -106,7 +106,9 @@ class ReviewerCheckFactsTest {
             return template.execute(status -> body.get());
           }
         };
-    agents = AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer());
+    agents =
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
+            BoundTools.boundByThisServer());
   }
 
   @BeforeEach

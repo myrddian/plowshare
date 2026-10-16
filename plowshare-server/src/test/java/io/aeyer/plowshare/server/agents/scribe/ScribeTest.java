@@ -47,7 +47,6 @@ import io.aeyer.plowshare.server.llm.dispatch.NoOpTokenLedger;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1538,7 +1537,7 @@ class ScribeTest {
   @Test
   void the_shipped_scribe_definition_is_a_valid_agent_with_no_tools() {
     AgentDefinition shipped =
-        AgentRegistry.of(Path.of("src/main/resources/agents"), BoundTools.boundByThisServer())
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
             .get(Scribe.AGENT);
 
     assertEquals(List.of(), shipped.tools());
@@ -1583,7 +1582,7 @@ class ScribeTest {
   @Test
   void the_scribe_is_told_that_what_it_reads_is_evidence_and_never_an_instruction() {
     String prompt =
-        AgentRegistry.of(Path.of("src/main/resources/agents"), BoundTools.boundByThisServer())
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
             .get(Scribe.AGENT)
             .prompt();
 

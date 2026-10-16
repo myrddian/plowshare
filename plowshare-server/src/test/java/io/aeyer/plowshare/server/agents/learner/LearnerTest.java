@@ -448,7 +448,9 @@ class LearnerTest {
   }
 
   private static AgentDefinition shipped() {
-    return AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer()).get(Learner.AGENT);
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
+            BoundTools.boundByThisServer())
+        .get(Learner.AGENT);
   }
 
   // --- the fixture ---------------------------------------------------------------

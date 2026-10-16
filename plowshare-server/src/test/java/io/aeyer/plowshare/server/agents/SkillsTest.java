@@ -257,7 +257,9 @@ class SkillsTest {
             id -> true,
             session -> true,
             (project, session) -> false);
-    assertTrue(resolver.forCaller(new DefinitionResolver.Caller(7L, "other")).skills().isEmpty());
+    var catalog = resolver.forCaller(new DefinitionResolver.Caller(7L, "other"));
+    assertEquals(Set.of("diagnose-conversation"), catalog.skills().keySet());
+    assertEquals(Tier.SHIPPED, catalog.skills().get("diagnose-conversation").definition().tier());
     assertTrue(requests.isEmpty());
   }
 

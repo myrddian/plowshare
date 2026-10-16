@@ -2,8 +2,11 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.AccessRequest;
+import io.aeyer.plowshare.server.access.ResourceScopeRepository.Kind;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -199,6 +202,77 @@ public final class JobRuntime {
     };
   }
 
+  private boolean confined;
+  private Runnable admittedAuthority = () -> {};
+  private String admittedSubject;
+
+  private RunAuthority retainedResources;
+
+  /**
+   * A per-admission view of the existing runtime. Standard grants, hooks and file fences remain;
+   * independent consumers without a retained-authority contract are not installed here.
+   */
+  public JobRuntime forAdmittedTurn(RunAdmission admission) {
+    JobRuntime retained = retainedCopy(admission.authority());
+    retained.confined = true;
+    retained.admittedAuthority = admission.check();
+    retained.admittedSubject = admission.subject();
+    retained.retainedResources = admission.authority();
+    return retained;
+  }
+
+  private JobRuntime retainedCopy(RunAuthority authority) {
+    RunProviders retainedFiles =
+        files == null
+            ? null
+            : (home, grants, session, owner) -> {
+              authority.require(home, List.of());
+              if (session != null)
+                throw new CallerFault("Acting work cannot borrow a client session");
+              return files.forRun(home, grants, null, owner);
+            };
+    AgentDelegates retainedDelegates =
+        new AgentDelegates() {
+          public AgentRegistry visible(Home home, String session, String account) {
+            authority.require(home, List.of());
+            return delegates.visible(home, session, account);
+          }
+
+          public Optional<AgentDefinition> find(
+              Home home, String session, String account, String name) {
+            authority.require(home, List.of());
+            var found = delegates.find(home, session, account, name);
+            found.ifPresent(RetainedAgent::require);
+            return found;
+          }
+        };
+    JobRuntime retained =
+        new JobRuntime(
+            dispatcher,
+            List.copyOf(byName.values()),
+            agents,
+            retainedFiles,
+            clock,
+            Reminding.NONE,
+            images,
+            refusals,
+            ticker,
+            retainedDelegates);
+    retained.confined = confined;
+    retained.admittedAuthority = admittedAuthority;
+    retained.admittedSubject = admittedSubject;
+    retained.retainedResources = authority;
+    retained.runUsage = runUsage;
+    retained.hooks = hooks;
+    retained.environments = environments;
+    retained.fileRules = fileRules;
+    retained.fileChecks = fileChecks;
+    retained.rulePrompts = rulePrompts;
+    retained.todos = todos;
+    retained.activity = activity;
+    return retained;
+  }
+
   private final LlmDispatcher dispatcher;
   private final Map<String, AgentTool> byName;
   private final Supplier<AgentRegistry> agents;
@@ -373,8 +447,7 @@ public final class JobRuntime {
     if (definition.nativeOnly()
         && !io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
             definition.prompt()))
-      throw new io.aeyer.plowshare.server.faults.CallerFault(
-          "Native-only execution requires a script manifest");
+      throw new CallerFault("Native-only execution requires a script manifest");
     if (io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram.isScript(
         definition.prompt())) return definition;
     definition = rulePrompts.apply(definition, home, session, owner);
@@ -1398,6 +1471,69 @@ public final class JobRuntime {
       List<Content.Image> images,
       String callerHandle,
       boolean incoming) {
+    if (!confined)
+      return execute(
+          definition,
+          userPrompt,
+          home,
+          budget,
+          cancelled,
+          sessionId,
+          watch,
+          transcript,
+          cap,
+          images,
+          callerHandle,
+          incoming);
+    RetainedAgent.require(definition);
+    JobRuntime bound = retainedCopy(retainedResources);
+    // Each child pins its own definition while retaining every ancestor's checks. No mutable
+    // current-agent/current-account state is shared between parent and child loops.
+    bound.admittedAuthority =
+        () -> {
+          admittedAuthority.run();
+          retainedResources.require(
+              home,
+              transcript.conversationId() == null
+                  ? List.of()
+                  : List.of(
+                      new AccessRequest.Resource(Kind.CONVERSATION, transcript.conversationId())));
+          if (!Objects.equals(admittedSubject, callerHandle)
+              || sessionId != null
+              || (agents != null
+                  && !delegates
+                      .find(home, null, callerHandle, definition.name())
+                      .filter(definition::equals)
+                      .isPresent())) throw new CallerFault("Acting agent authority changed");
+        };
+    return bound.execute(
+        definition,
+        userPrompt,
+        home,
+        budget,
+        cancelled,
+        sessionId,
+        watch,
+        transcript,
+        cap,
+        images,
+        callerHandle,
+        incoming);
+  }
+
+  private Outcome execute(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      Budget budget,
+      BooleanSupplier cancelled,
+      String sessionId,
+      JobWatch watch,
+      Transcript transcript,
+      TurnCap cap,
+      List<Content.Image> images,
+      String callerHandle,
+      boolean incoming) {
     Objects.requireNonNull(cap, "cap");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(watch, "watch");
@@ -1416,6 +1552,8 @@ public final class JobRuntime {
     // of how a fallback that stopped -- cancelled, capped, out of budget,
     // unreachable -- becomes the refusal standing, without any of the
     // loop's own returns knowing a fallback exists. See Rerouting.
+    admittedAuthority.run();
+    if (confined) RetainedAgent.require(definition);
     String owner = ownerOf(callerHandle, sessionId, transcript.conversationId());
     RunUsage tracking = runUsage;
     Transcript ownedTranscript =
@@ -2258,6 +2396,7 @@ public final class JobRuntime {
     Set<AgentRules.Rule> deliveredFileRules = new java.util.HashSet<>();
 
     while (true) {
+      admittedAuthority.run();
       Set<AgentRules.Rule> fileRulesForThisStep = Set.copyOf(deliveredFileRules);
       if (informationInputs != null)
         informationInputs.requireLog(transcript.conversationId(), owner);
@@ -2873,6 +3012,7 @@ public final class JobRuntime {
       // a name no tool answers to is known here and not readable off the result's text.
       List<String> outcomes = new ArrayList<>(asked.size());
       for (ToolCall wanted : asked) {
+        admittedAuthority.run();
         // Counted before the dispatch and for every call the model
         // asked for, whether or not anything answers to the name. What
         // is being counted is what the model did, not what the runtime
@@ -3012,6 +3152,10 @@ public final class JobRuntime {
               // The tool's own permission check -- the fence, inside
               // run -- judges whatever actually runs, so a rewrite is
               // checked exactly once, on what is executed.
+              if (confined)
+                retainedResources.require(
+                    home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+              admittedAuthority.run();
               tool.calledAs(wanted.id());
               // Internal grants come from the admitted definition. External provider proxies
               // recheck their additional authority inside run, alongside tool-owned access checks.
@@ -3022,6 +3166,10 @@ public final class JobRuntime {
                           : tool.run(
                               preTool.arguments(), home, usageFor(transcript, definition, steps)),
                       wanted.name());
+              admittedAuthority.run();
+              if (confined)
+                retainedResources.require(
+                    home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
               ToolPost postTool =
                   toolPost(
                       activeHooks(route, harnessRun, skillChecks),
@@ -4556,11 +4704,19 @@ public final class JobRuntime {
 
   private Completion streamed(
       Scheduling.Slot slot, ChatRequest request, Deltas sink, BooleanSupplier cancelled) {
-    if (slot.pool() == null) {
-      return dispatcher.stream(request, sink, cancelled);
-    }
-    return dispatcher.streamOn(
-        slot.pool(), request.withBudget(LlmPool.NO_DEADLINE), sink, cancelled);
+    admittedAuthority.run();
+    request = request.withAuthorization(admittedAuthority::run);
+    Completion completed =
+        slot.pool() == null
+            ? dispatcher.stream(request, confined ? DISCARDS : sink, cancelled)
+            : dispatcher.streamOn(
+                slot.pool(),
+                request.withBudget(LlmPool.NO_DEADLINE),
+                confined ? DISCARDS : sink,
+                cancelled);
+    // Revocation during inference prevents publishing its output or starting another effect.
+    admittedAuthority.run();
+    return completed;
   }
 
   /**

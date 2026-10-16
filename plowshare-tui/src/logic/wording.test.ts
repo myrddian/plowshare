@@ -24,8 +24,6 @@ import {
   describeSchedules,
   describeUsage,
   describeWhen,
-  describeDiagnosing,
-  describeNoDiagnosis,
   describePace,
   describePhase,
   describeStanding,
@@ -35,7 +33,6 @@ import {
   describeRun,
   describeRuns,
   AGENTS_COMMAND,
-  DIAGNOSE_COMMAND,
   FIRE_COMMAND,
   FIRINGS_COMMAND,
   INBOX_COMMAND,
@@ -105,24 +102,6 @@ import {
   type Explorer,
 } from './explorer.ts';
 import { pickingAbout } from './caps.ts';
-
-describe('the diagnosis command', () => {
-  it('is advertised with its optional target and explains both honest states', () => {
-    expect(COMMANDS).toContain(DIAGNOSE_COMMAND);
-    expect(describeHelp().join('\n')).toContain(
-      '/diagnose [conversation-id] [-- question]',
-    );
-    expect(describeNoDiagnosis()).toContain(
-      '/diagnose <conversation-id> [-- question]',
-    );
-    expect(describeDiagnosing('cnv_target', 'cnv_diagnostic')).toContain(
-      'cnv_target',
-    );
-    expect(describeDiagnosing('cnv_target', 'cnv_diagnostic')).toContain(
-      'cnv_diagnostic',
-    );
-  });
-});
 
 describe('the inbox command', () => {
   it('offers /inbox and says what it is', () => {

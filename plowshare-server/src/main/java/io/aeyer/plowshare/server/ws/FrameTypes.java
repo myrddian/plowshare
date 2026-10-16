@@ -59,6 +59,12 @@ public final class FrameTypes {
   public static final String PROVIDER_CREDENTIAL_REFRESH = "provider.credential.refresh";
 
   public static final String APPLICATION_IDENTITY_STATUS = "application.identity.status";
+  public static final String ACTING_TURN_START = "acting.turn.start";
+  public static final String ACTING_TURN_RECEIPT = "acting.turn.receipt";
+
+  public static final String ACTING_CONTEXT_OPEN = "acting.context.open";
+  public static final String ACTING_CONTEXT_CLOSE = "acting.context.close";
+
   public static final String APPLICATION_TOKEN_ISSUE = "application.token.issue";
   public static final String APPLICATION_TOKEN_RECEIPT = "application.token.receipt";
   public static final String APPLICATION_DEPLOY = "application.deploy";

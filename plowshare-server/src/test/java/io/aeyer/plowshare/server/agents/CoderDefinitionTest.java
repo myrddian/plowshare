@@ -17,7 +17,9 @@ class CoderDefinitionTest {
   private static final Path SHIPPED = Path.of("src/main/resources/agents");
 
   private static AgentDefinition shipped() {
-    AgentDefinition coder = AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer()).get("coder");
+    AgentDefinition coder =
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
+            .get("coder");
     assertNotNull(coder, "coder.md did not load against the tools this boot binds");
     return coder;
   }

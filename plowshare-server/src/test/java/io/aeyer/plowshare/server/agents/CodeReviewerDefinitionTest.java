@@ -33,7 +33,9 @@ class CodeReviewerDefinitionTest {
   private static final String FENCE = "---";
 
   private static AgentDefinition shipped() {
-    return AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer()).get(AGENT);
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
+            BoundTools.boundByThisServer())
+        .get(AGENT);
   }
 
   /**

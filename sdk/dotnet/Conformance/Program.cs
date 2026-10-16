@@ -11,6 +11,12 @@ try { await using var invalid = await Client.ConnectAsync(origin + "/wrong", "sd
 try { await using var redirect = await Client.ConnectAsync(origin, "sdk-redirect-fixture", "dotnet-redirect", TimeSpan.FromMilliseconds(300)); throw new Exception("redirect followed"); } catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "wrong redirect state"); }
 try { await using var unsupported = await Client.ConnectAsync(origin, "sdk-legacy-fixture", "dotnet-legacy-refusal"); throw new Exception("unsupported transport accepted"); } catch (TransportException e) { Check(e.Delivery == Delivery.NotSubmitted, "unsupported negotiation submitted work"); }
 async Task<Client> Open(string name) => await Client.ConnectAsync(origin, "sdk-fixture-token", "typed-dotnet/" + name, TimeSpan.FromMilliseconds(300));
+await using (var selected = await Open("acting-selection"))
+{
+    foreach(var id in new[]{"00000000-0000-0000-0000-000000000001","00000000-0000-0000-0000-000000000002"})
+        (await selected.ConversationTurnsAsync(new ConversationTurnsRequest{Conversation="fixture"},options:new RequestOptions(new ActingSelection(Guid.Parse(id))))).RequirePayload();
+    (await selected.ConversationTurnsAsync(new ConversationTurnsRequest{Conversation="fixture"})).RequirePayload();
+}
 await using (var client = await Open("multiplex"))
 {
     var one = client.ProjectListAsync(new ProjectListRequest());

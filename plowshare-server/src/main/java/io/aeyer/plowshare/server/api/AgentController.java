@@ -407,7 +407,7 @@ public class AgentController {
         new DefinitionResolver.Caller(
             RequestedProjectId.forListing(projects, project), null, handle);
     var registry = resolver.forCaller(caller);
-    var rows = AgentRows.of(registry, callers, resolver.defaultBot(caller));
+    var rows = AgentRows.of(registry, callers, resolver.defaultBot(caller), handle);
     if (skills != null)
       rows =
           AgentRows.withCommands(

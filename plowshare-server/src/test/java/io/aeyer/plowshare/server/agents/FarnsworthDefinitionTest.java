@@ -7,8 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FarnsworthDefinitionTest {
 
   private static AgentDefinition shipped() {
-    return AgentRegistry.of(ShippedDefinitions.asOneSet(), BoundTools.boundByThisServer())
-        .get("farnsworth");
+    return ShippedDefinitions.registry(BoundTools.boundByThisServer()).get("farnsworth");
   }
 
   @org.junit.jupiter.api.Test

@@ -334,12 +334,13 @@ evidence where granted; acquisition acceptance is not readable extraction. A raw
 file capture is not automatically an information-catalogue entry, and a Markdown
 wiki is not automatically searchable through the information catalogue.
 
-The shipped Farnsworth, Aristoxenus and Daedalus bots, and the Interlocutor and
-Librarian agents, declare both `information_read` and `information_write`.
+The shipped Farnsworth and Aristoxenus bots, and the Interlocutor, Librarian and
+conversation diagnostician agents, declare both `information_read` and `information_write`.
 These tools use the authenticated account and the run's Personal or project
 namespace. They support retained-source acquisition, readiness checks, exact
 evidence and draft reports; granting them does not share or finalize a report.
-Daedalus retains its read-only filesystem grants.
+The conversation diagnostician retains read-only filesystem grants and is invoked
+through the `diagnose-conversation` skill in a fresh child context.
 
 Start with index navigation and ordinary file search. Add a knowledge-specific
 search adapter only if scale makes that insufficient. A deterministic link/source

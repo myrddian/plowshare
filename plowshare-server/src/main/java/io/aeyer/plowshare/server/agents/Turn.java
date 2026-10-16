@@ -858,6 +858,54 @@ public final class Turn {
       boolean incoming,
       Speaker speaker,
       Budget given) {
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        admissible,
+        incoming,
+        speaker,
+        given,
+        null);
+  }
+
+  /** Personal delegated turn: no bridge session, automatic budget increase or extension effects. */
+  public String speakAdmitted(
+      String conversation, AgentDefinition definition, String utterance, RunAdmission admission) {
+    admission.check().run();
+    RetainedAgent.requireRoot(definition);
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        null,
+        null,
+        null,
+        outcome -> admission.ended().run(),
+        Turn::requireSpeakable,
+        false,
+        Speaker.person(admission.subject()),
+        null,
+        admission);
+  }
+
+  private String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> admissible,
+      boolean incoming,
+      Speaker speaker,
+      Budget given,
+      RunAdmission admission) {
     ConversationRecord record =
         conversations
             .find(conversation)
@@ -908,7 +956,8 @@ public final class Turn {
       // limit is safe to name, because a budget with no ceiling is never
       // exhausted and so never gets here.
       boolean automaticBudgetGrant =
-          given == null
+          admission == null
+              && given == null
               && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
@@ -933,80 +982,69 @@ public final class Turn {
                     + "; "
                     + budget.spent()
                     + " calls remain accounted for."));
+      if (admission != null) transcript.confine(admission.check(), admission.subject());
+      Consumer<Outcome> ended =
+          outcome -> {
+            try {
+              // The budget first, and the order is an argument
+              // rather than a habit. Both writes are the record of
+              // one turn, and if only one of them can land it must
+              // be this one: a conversation whose spending was not
+              // written hands the next utterance calls that have
+              // already been made, while a conversation missing a
+              // transcript row has a gap in a history. One
+              // overspends and the other under-remembers.
+              //
+              // A lease is the board's to settle (BoardPot.settle); a seat's row
+              // holds no numbers to write back.
+              if (given == null) {
+                conversations.turnEnded(id, budget);
+              }
+              // The entries, the turn's row and the fold, in that
+              // order and for the reasons `Transcript.closed`
+              // gives. It used to be three statements here; there
+              // are four doors into a run now and four copies of
+              // one ordering is three chances for a correction to
+              // land on some of them. What stayed behind is the
+              // budget write above, which is the one step the four
+              // doors genuinely do differently -- a delegated
+              // child writes none, because the allowance is its
+              // parent's.
+              transcript.closed(utterance, outcome);
+            } finally {
+              free(id);
+              try {
+                alsoEnded.accept(outcome);
+              } catch (RuntimeException broken) {
+                log.warn("what was waiting on turn in {} to end threw", id, broken);
+              }
+            }
+          };
       String job =
-          jobs.submit(
-              definition,
-              utterance,
-              record.home(),
-              sessionId,
-              budget,
-              transcript,
-              // record.origin(), and never anything `admissible` above has
-              // not already let through: Origin.TURN, by
-              // requireSpeakable, for a call arriving through speak();
-              // Origin.ORCHESTRATION, by requireConductor, for one
-              // arriving through speakToConductor(). This run's own copy
-              // of the conversation's own origin, which is what used to
-              // be hardcoded to Origin.TURN before an orchestration's
-              // conductor could be spoken into as well.
-              // Job#conversationOrigin is this run's own copy of that
-              // fact, so JobView can answer `resumable` honestly without a
-              // second lookup -- and originIsResumable stays Origin.TURN
-              // only, so an orchestration's job still answers false there.
-              record.origin(),
-              // The three levels, resolved where all three are visible.
-              // record.turnCap() is null for a conversation that decides
-              // nothing, which is not the same as one that decided there
-              // is to be no cap -- see ConversationRecord.
-              // Runs on the job's own thread, inside JobStore.finish, and
-              // before the job reports DONE at all — so neither route out
-              // of a finished turn, the ENDED event or a poll of GET
-              // /v1/jobs/{id}, can carry a person to their next utterance
-              // before this row write. JobStore.finish owns that ordering
-              // and says why. The finally is what makes the refusal above
-              // temporary even when the write-back fails: a conversation
-              // nobody can speak into because a database blinked would be
-              // a worse fault than a count that is one turn stale.
-              outcome -> {
-                try {
-                  // The budget first, and the order is an argument
-                  // rather than a habit. Both writes are the record of
-                  // one turn, and if only one of them can land it must
-                  // be this one: a conversation whose spending was not
-                  // written hands the next utterance calls that have
-                  // already been made, while a conversation missing a
-                  // transcript row has a gap in a history. One
-                  // overspends and the other under-remembers.
-                  //
-                  // A lease is the board's to settle (BoardPot.settle); a seat's row
-                  // holds no numbers to write back.
-                  if (given == null) {
-                    conversations.turnEnded(id, budget);
-                  }
-                  // The entries, the turn's row and the fold, in that
-                  // order and for the reasons `Transcript.closed`
-                  // gives. It used to be three statements here; there
-                  // are four doors into a run now and four copies of
-                  // one ordering is three chances for a correction to
-                  // land on some of them. What stayed behind is the
-                  // budget write above, which is the one step the four
-                  // doors genuinely do differently -- a delegated
-                  // child writes none, because the allowance is its
-                  // parent's.
-                  transcript.closed(utterance, outcome);
-                } finally {
-                  free(id);
-                  try {
-                    alsoEnded.accept(outcome);
-                  } catch (RuntimeException broken) {
-                    log.warn("what was waiting on turn in {} to end threw", id, broken);
-                  }
-                }
-              },
-              TurnCap.chosen(turnCap, record.turnCap(), definition),
-              List.of(),
-              given != null ? conversations.ownerOf(id).orElse(null) : null,
-              incoming);
+          admission == null
+              ? jobs.submit(
+                  definition,
+                  utterance,
+                  record.home(),
+                  sessionId,
+                  budget,
+                  transcript,
+                  record.origin(),
+                  ended,
+                  TurnCap.chosen(turnCap, record.turnCap(), definition),
+                  List.of(),
+                  given != null ? conversations.ownerOf(id).orElse(null) : null,
+                  incoming)
+              : jobs.submitAdmitted(
+                  definition,
+                  utterance,
+                  record.home(),
+                  budget,
+                  transcript,
+                  record.origin(),
+                  ended,
+                  TurnCap.chosen(turnCap, record.turnCap(), definition),
+                  admission);
       started = true;
       return job;
     } finally {

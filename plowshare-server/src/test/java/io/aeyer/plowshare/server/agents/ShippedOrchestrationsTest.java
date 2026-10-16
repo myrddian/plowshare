@@ -50,7 +50,7 @@ class ShippedOrchestrationsTest {
                 OrchestrationDefinition.Tier.SHIPPED,
                 new ClasspathDefinitions(ClasspathDefinitions.SHIPPED_ORCHESTRATIONS))),
         BoundTools.boundByThisServer(),
-        new AgentRegistry(AgentRegistry.load(SHIPPED_AGENTS, BoundTools.boundByThisServer())),
+        new AgentRegistry(ShippedDefinitions.agents(BoundTools.boundByThisServer())),
         DefinitionChecks.NONE);
   }
 
@@ -550,7 +550,7 @@ class ShippedOrchestrationsTest {
   @Test
   void the_interlocutor_may_start_design_orchestration() {
     AgentDefinition interlocutor =
-        AgentRegistry.load(SHIPPED_AGENTS, BoundTools.boundByThisServer()).get("interlocutor");
+        ShippedDefinitions.agents(BoundTools.boundByThisServer()).get("interlocutor");
     assertNotNull(interlocutor);
     assertTrue(interlocutor.orchestrations().contains("design_orchestration"), "granted");
   }
@@ -575,7 +575,7 @@ class ShippedOrchestrationsTest {
   @Test
   void every_shipped_trigger_is_reachable_through_a_shipped_grant() {
     Map<String, AgentDefinition> agentsAndBots =
-        AgentRegistry.of(ShippedDefinitions.asOneSet(), BoundTools.boundByThisServer()).byName();
+        ShippedDefinitions.registry(BoundTools.boundByThisServer()).byName();
     Set<String> granted =
         agentsAndBots.values().stream()
             .flatMap(agent -> agent.orchestrations().stream())

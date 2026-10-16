@@ -10,25 +10,29 @@ import io.aeyer.plowshare.server.files.Scope;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** The shipped diagnostic bot and the evidence it is structurally able to inspect. */
-class DaedalusDefinitionTest {
+/** The shipped private diagnostic agent and the evidence it is structurally able to inspect. */
+class ConversationDiagnosticianDefinitionTest {
 
   private static AgentDefinition shipped() {
-    return AgentRegistry.of(ShippedDefinitions.asOneSet(), BoundTools.boundByThisServer())
-        .get("daedalus");
+    return ShippedDefinitions.registry(BoundTools.boundByThisServer())
+        .get("conversation_diagnostician");
   }
 
   @Test
-  void daedalus_is_a_persons_bot_and_not_an_agents_callee() {
-    assertTrue(shipped().bot());
-    assertTrue(shipped().exported());
-    assertFalse(shipped().delegable());
+  void diagnostician_is_a_private_system_agent_for_skill_delegation() {
+    assertTrue(shipped().isSystem());
+    assertFalse(shipped().bot());
+    assertFalse(shipped().exported());
+    assertTrue(shipped().delegable());
+    assertFalse(shipped().board());
+    assertEquals(List.of("diagnose-conversation"), shipped().skills());
     assertEquals(List.of("diagnosis_verifier"), shipped().calls());
     assertEquals("diagnosis_verifier", shipped().reviewWith());
   }
 
   @Test
-  void daedalus_reads_trajectories_and_project_evidence_without_file_edit_tools() {
+  void
+      conversation_diagnostician_reads_trajectories_and_project_evidence_without_file_edit_tools() {
     assertEquals(
         List.of(
             ConversationTrajectoryTool.NAME,
@@ -55,13 +59,14 @@ class DaedalusDefinitionTest {
     assertFalse(shipped().tools().contains(FileTools.EDIT_NAME));
     assertFalse(shipped().tools().contains(FileTools.DELETE_NAME));
     assertFalse(shipped().tools().contains(FileTools.MOVE_NAME));
-    assertTrue(shipped().canRecall(), "Daedalus may query memory deliberately");
+    assertTrue(shipped().canRecall(), "The diagnostician may query memory deliberately");
     assertFalse(
-        shipped().canBeReminded(), "Daedalus must not begin with memories injected by the harness");
+        shipped().canBeReminded(),
+        "The diagnostician must not begin with memories injected by the harness");
   }
 
   @Test
-  void daedalus_is_told_to_follow_persisted_evidence_to_the_first_divergence() {
+  void conversation_diagnostician_is_told_to_follow_persisted_evidence_to_the_first_divergence() {
     String prompt = shipped().prompt().replaceAll("\\s+", " ");
     assertTrue(
         prompt.contains("use `conversation_trajectory` before relying on a projection"), prompt);

@@ -35,7 +35,8 @@ class AskDefinitionsTest {
   private static final Path SHIPPED = Path.of("src/main/resources/agents");
 
   private static Map<String, AgentDefinition> shipped() {
-    return AgentRegistry.load(SHIPPED, BoundTools.boundByThisServer());
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+        BoundTools.boundByThisServer());
   }
 
   private static AgentDefinition definition(String name) {

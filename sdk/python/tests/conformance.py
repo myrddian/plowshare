@@ -6,8 +6,16 @@ import os
 import sys
 from pathlib import Path
 
-from plowshare import OPERATIONS, CancelledRequest, Client, Refusal, TransportError
+from plowshare import (
+    OPERATIONS,
+    ActingSelection,
+    CancelledRequest,
+    Client,
+    Refusal,
+    TransportError,
+)
 from plowshare.contracts import (
+    ConversationTurnsRequest,
     JobStatusRequest,
     ProjectListRequest,
     ProviderConnectionListRequest,
@@ -41,6 +49,18 @@ async def main() -> None:
         raise AssertionError("unsupported transport accepted")
     except TransportError as error:
         assert error.delivery == "NOT_SUBMITTED"
+    async with await Client.connect(
+        origin, "sdk-fixture-token", session="typed-python/acting-selection"
+    ) as selected:
+        for context in [
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+        ]:
+            await selected.request(
+                ConversationTurnsRequest(conversation="fixture"),
+                acting_for=ActingSelection(context),
+            )
+        await selected.request(ConversationTurnsRequest(conversation="fixture"))
     async with await Client.connect(
         origin, "sdk-fixture-token", session="typed-python/multiplex"
     ) as client:

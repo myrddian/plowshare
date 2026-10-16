@@ -18,7 +18,8 @@ class ResearchCriticDefinitionTest {
 
   private static AgentDefinition shipped() {
     AgentDefinition critic =
-        AgentRegistry.of(SHIPPED, BoundTools.boundByThisServer()).get("research_critic");
+        io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(BoundTools.boundByThisServer())
+            .get("research_critic");
     assertNotNull(critic, "research_critic.md did not load against the tools this boot binds");
     return critic;
   }

@@ -644,6 +644,7 @@ public final class LlmPool implements AutoCloseable {
               observer.started();
               started.countDown();
               try {
+                observer.beforeDispatch();
                 if (observer.enabled() && abandoned.getAsBoolean()) {
                   throw new CallerAbandonedException(name);
                 }

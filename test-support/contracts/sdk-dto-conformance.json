@@ -2342,6 +2342,327 @@
   },
   {
     "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": "Hello"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": "Hello",
+      "conversation": "cnv_ABC123"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "bad",
+      "agent": "chat",
+      "task": "Hello"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "bad name",
+      "task": "Hello"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": " "
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": "Hello",
+      "conversation": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": "Hello",
+      "session": "bridge-files"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "task": "Hello",
+      "project": "research"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "bad"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.start",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "conversation": "cnv_ABC123",
+      "state": "STARTED",
+      "job": "job_ABC123"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "bad",
+      "agent": "chat",
+      "conversation": "cnv_ABC123",
+      "state": "STARTED",
+      "job": "job_ABC123"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "conversation": "other",
+      "state": "STARTED",
+      "job": "job_ABC123"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "conversation": "cnv_ABC123",
+      "state": "REPLAY",
+      "job": "job_ABC123"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "conversation": "cnv_ABC123",
+      "state": "STARTED",
+      "job": "other"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.turn.receipt",
+    "value": {
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "agent": "chat",
+      "conversation": "cnv_ABC123",
+      "state": "STARTED",
+      "job": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "users",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "psa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "personal:alice",
+      "grant": "users",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "psa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "bad name",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "psa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "users",
+      "proof": {
+        "kind": "oidc",
+        "credential": "secret"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "users",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "bad"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "users",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "psa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "extra": 1
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.open",
+    "value": {
+      "application": "bridge",
+      "grant": "users",
+      "proof": {
+        "kind": "acting-token",
+        "credential": "psa_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "extra": 1
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.close",
+    "value": {
+      "context": "11111111-1111-1111-1111-111111111111"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "acting.context.close",
+    "value": {
+      "context": "1-1-1-1-1"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.context.open",
+    "value": {
+      "context": "11111111-1111-1111-1111-111111111111",
+      "subject": "alice",
+      "expiresAt": "2026-10-16T00:05:00Z"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.context.open",
+    "value": {
+      "context": "bad",
+      "subject": "alice",
+      "expiresAt": "2026-10-16T00:05:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.context.open",
+    "value": {
+      "context": "11111111-1111-1111-1111-111111111111",
+      "subject": "@service/bad",
+      "expiresAt": "2026-10-16T00:05:00Z"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "acting.context.open",
+    "value": {
+      "context": "11111111-1111-1111-1111-111111111111",
+      "subject": "alice",
+      "expiresAt": "bad"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "application.token.issue",
     "value": {
       "project": "fixture",
