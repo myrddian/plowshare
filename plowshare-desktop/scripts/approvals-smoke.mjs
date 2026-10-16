@@ -24,6 +24,15 @@ try {
   await expect(prompt(page.locator('#approval-bar'), 'fixture-approval')).toHaveCount(0);
   assert.equal(decisions()[0].payload.decision, 'once');
 
+  await expect(page.locator('#composer-status-text')).toHaveText('Ready');
+  await page.evaluate(() => window.plowshare.request({ action: 'run', conversation: 'fixture-first', agent: 'fixture-bot', text: 'Request a command approval' }));
+  fixture.awaitApproval('awaiting-without-reason');
+  await expect(prompt(page.locator('#approval-bar'), 'awaiting-without-reason')).toBeVisible();
+  await page.screenshot({ path: 'build/smoke/awaiting-approval.png' });
+  await prompt(page.locator('#approval-bar'), 'awaiting-without-reason').getByRole('button', { name: 'Deny', exact: true }).click();
+  await expect(prompt(page.locator('#approval-bar'), 'awaiting-without-reason')).toHaveCount(0);
+  assert.deepEqual(decisions().at(-1).payload, { id: 'awaiting-without-reason', decision: 'deny' });
+
   // New requests discovered from an Inbox push appear in their chat prompt and remain actionable.
   fixture.queueApproval('inline-request');
   await expect(prompt(page.locator('#transcript'), 'inline-request')).toBeVisible();
@@ -59,8 +68,8 @@ try {
   await prompt(trajectory, 'trajectory-request').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(prompt(trajectory, 'trajectory-request')).toHaveCount(0);
   assert.deepEqual(decisions().at(-1).payload, { id: 'trajectory-request', decision: 'once' });
-  assert.equal(fixture.frames.some(frame => frame.type === 'agent.run'), false, 'Decisions continue their original request, never submit another agent turn');
-  assert.equal(decisions().length, 5, 'Each click answers exactly one approval');
+  assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1, 'Decisions continue their original request, never submit another agent turn');
+  assert.equal(decisions().length, 6, 'Each click answers exactly one approval');
   assert.deepEqual(errors, []);
   console.log('Approval smoke passed: direct Approve/Deny in command prompts, chat, Inbox and trajectory; live discovery, legacy notices and no replay.');
 } finally {

@@ -13124,7 +13124,7 @@
             "$ref": "#/$defs/shape121"
           },
           "reason": {
-            "$ref": "#/$defs/shape1"
+            "$ref": "#/$defs/shape37"
           },
           "scope": {
             "$ref": "#/$defs/shape37"

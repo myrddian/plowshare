@@ -47,7 +47,7 @@ export interface ApprovalView {
   readonly side: string;
   readonly command: readonly string[];
   readonly cwd: string;
-  readonly reason: string;
+  readonly reason: string | null;
   readonly state: string;
   readonly scope: string | null;
   readonly prefix: readonly string[] | null;
@@ -363,7 +363,7 @@ const approval = record({
   side: text,
   command: strings,
   cwd: text,
-  reason: text,
+  reason: nullable(text),
   state: named,
   scope: nullable(text),
   prefix: nullable(strings),

@@ -2367,9 +2367,7 @@ export class DesktopClient {
     if (this.usage.push(value)) return;
     const event = fieldsOf(value);
     if (event['kind'] === 'inbox.changed')
-      void this.refresh()
-        .then(() => this.emit())
-        .catch(() => {});
+      this.background(this.refresh().then(() => this.emit()));
     if (typeof event['job'] !== 'string') {
       if (this.options.accountActivity !== false) {
         this.activity.push(value);
@@ -2413,7 +2411,7 @@ export class DesktopClient {
       job.phase = 'thinking';
       job.tool = undefined;
     }
-    if (event['kind'] === 'ended') this.readJob(id).catch(() => {});
+    if (event['kind'] === 'ended') this.background(this.readJob(id));
     this.emit();
   }
   private poll(id: string) {
@@ -2502,6 +2500,9 @@ export class DesktopClient {
       job.detail = ended?.detail;
       clearInterval(this.timers.get(id));
       this.timers.delete(id);
+      // A fast completion can stop polling before its first approval read. The durable
+      // outcome is sufficient to discover questions even if no Inbox push arrives.
+      if (ending === 'AWAITING') await this.refresh();
       if (job.conversation) {
         await this.history(job.conversation);
         this.background(

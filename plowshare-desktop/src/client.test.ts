@@ -354,6 +354,57 @@ await test('an Inbox change discovers approvals from another client without an a
   );
 });
 
+await test('a run ending AWAITING discovers a command without a reason before polling stops', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  f.approvals([approvalWire({ reason: null })]);
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: {
+        ending: 'AWAITING',
+        answered: false,
+        text: 'Approve running echo fixture in /fixture on the server side? [approval-one]',
+      },
+    },
+  }));
+  // No Inbox push: the durable job outcome must also discover the pending decision.
+  f.push({ job: 'job-one', kind: 'ended', ending: 'AWAITING' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(present(f.client.state.jobs[0]).ending, 'AWAITING');
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.equal(f.client.state.approvals[0]?.reason, undefined);
+  assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 1);
+  assert.equal(
+    f.calls.some((call) => call.type === 'approval.answer'),
+    false,
+  );
+});
+
+await test('an unreadable approval push reports its refresh failure and preserves pending requests', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  f.rawApprovals(() => ({ code: 'OK', payload: {} }));
+  f.push({ kind: 'inbox.changed', unread: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.match(
+    f.client.state.backgroundError ?? '',
+    /unreadable approval.list/,
+  );
+});
+
 await test('the same approval cannot be submitted twice while another window is answering it', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());
