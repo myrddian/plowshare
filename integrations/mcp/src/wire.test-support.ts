@@ -51,6 +51,8 @@ export class McpWire {
   tools: readonly unknown[] = [rawTool];
   cursor: string | undefined;
   advertisedVersion: string;
+  onCall: (() => void) | undefined;
+  abortedCalls = 0;
   private readonly server = createServer((request, response) => {
     this.respond(request, response).catch((error: unknown) => {
       this.faults.push(error);
@@ -147,6 +149,10 @@ export class McpWire {
         ...(this.cursor === undefined ? {} : { nextCursor: this.cursor }),
       };
     else if (method === 'tools/call') {
+      response.once('close', () => {
+        if (!response.writableFinished) this.abortedCalls++;
+      });
+      this.onCall?.();
       if (this.mode === 'loss') {
         response.destroy();
         return;
