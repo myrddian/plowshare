@@ -1,3 +1,4 @@
+import type { InterchangeReplies } from './information-interchange.ts';
 import type { NavigationReplies } from './information-navigation.ts';
 import { isNavigationOperation } from './information-navigation.ts';
 import type {
@@ -229,7 +230,8 @@ export interface InformationFence {
   readonly complete: boolean;
   readonly outcomes: readonly InformationAwaitOutcome[];
 }
-export interface InformationReplies extends NavigationReplies {
+export interface InformationReplies
+  extends NavigationReplies, InterchangeReplies {
   'information.types.capabilities': InformationContentCapabilities;
   'information.types.list': InformationTypeVersions;
   'information.types.get': InformationTypeContract;
@@ -282,6 +284,12 @@ export interface InformationReplies extends NavigationReplies {
 }
 export type InformationFrame = keyof InformationReplies;
 export const INFORMATION_FRAMES = [
+  'information.interchange.capabilities',
+  'information.interchange.export',
+  'information.interchange.readable',
+  'information.interchange.import',
+  'information.interchange.origin',
+
   'information.navigation.capabilities',
   'information.documents.list',
   'information.documents.facets',
@@ -405,7 +413,8 @@ function legacyInformationReply(
     return undefined;
   const value = outcome.payload,
     verb = type.slice('information.'.length);
-  if (isNavigationOperation(verb)) return value;
+  if (isNavigationOperation(verb) || verb.startsWith('interchange.'))
+    return value;
   if (verb.startsWith('types.') || verb.startsWith('content.')) return value;
   if (verb === 'rank') return retrievalReply('document.rank', value);
   if (['list', 'inventory', 'acquisitions'].includes(verb)) {

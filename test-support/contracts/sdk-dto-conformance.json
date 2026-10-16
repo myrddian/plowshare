@@ -1,6 +1,1603 @@
 [
   {
     "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [
+            {
+              "source": "11111111-1111-1111-1111-111111111111",
+              "target": "11111111-1111-1111-1111-111111111111",
+              "pinnedRevision": "11111111-1111-1111-1111-111111111111",
+              "relation": "reference"
+            }
+          ],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [
+            {
+              "source": "11111111-1111-1111-1111-111111111111",
+              "target": "11111111-1111-1111-1111-111111111111",
+              "pinnedRevision": "11111111-1111-1111-1111-111111111111",
+              "relation": "reference"
+            }
+          ],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            },
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "22222222-2222-4222-8222-222222222222",
+                "ordinal": 2,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/next.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [
+                    "11111111-1111-1111-1111-111111111111"
+                  ],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "revise",
+            "expectedRevision": "22222222-2222-4222-8222-222222222222"
+          }
+        ],
+        "types": [],
+        "reuse": [
+          {
+            "foreignRevision": "11111111-1111-1111-1111-111111111111",
+            "localRevision": "11111111-1111-1111-1111-111111111111"
+          }
+        ],
+        "restoreRelationships": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "information.interchange.export",
+    "value": {
+      "format": "plowshare-information-bundle/1",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "documents": [
+        {
+          "descriptor": {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "revision": "11111111-1111-1111-1111-111111111111",
+            "ordinal": 1,
+            "sourceName": "source.md",
+            "title": "Source",
+            "path": "documents/source.md",
+            "mediaType": "text/markdown",
+            "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+            "tags": [
+              "billing"
+            ],
+            "provenance": {
+              "owner": "owner",
+              "kind": "source",
+              "createdAt": "2026-10-16T00:00:00Z",
+              "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+              "dependencies": [],
+              "evidence": []
+            }
+          },
+          "bytesBase64": "SGVsbG8g8J+Ujg0K"
+        }
+      ],
+      "relationships": [],
+      "relationshipCoverage": "included-endpoints-only"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.export",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revisions": [
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.export",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revisions": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.export",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revisions": [
+        "bad"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.export",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revisions": [
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.export",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "revisions": [
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "/absolute.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "../source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe/../source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe//source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe/CON.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe/.git/config",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe/nul",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "file.",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "safe/",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": ""
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "QQ"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "QR=="
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "QQ==\n"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "source.md",
+            "mode": "revise"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "source.md",
+            "mode": "create",
+            "expectedRevision": "11111111-1111-1111-1111-111111111111"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [
+          {
+            "foreignRevision": "bad",
+            "localRevision": "11111111-1111-1111-1111-111111111111"
+          }
+        ],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [],
+        "types": [],
+        "reuse": [
+          {
+            "foreignRevision": "11111111-1111-1111-1111-111111111111",
+            "localRevision": "11111111-1111-1111-1111-111111111111"
+          }
+        ],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": "yes"
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "shared"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false,
+        "permissions": [
+          "admin"
+        ]
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "information.interchange.import",
+    "value": {
+      "scope": {
+        "kind": "personal"
+      },
+      "requestId": "11111111-1111-1111-1111-111111111111",
+      "plan": {
+        "bundle": {
+          "format": "plowshare-information-bundle/1",
+          "id": "11111111-1111-1111-1111-111111111111",
+          "documents": [
+            {
+              "descriptor": {
+                "resource": "11111111-1111-1111-1111-111111111111",
+                "revision": "11111111-1111-1111-1111-111111111111",
+                "ordinal": 1,
+                "sourceName": "source.md",
+                "title": "Source",
+                "path": "documents/source.md",
+                "mediaType": "text/markdown",
+                "contentHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                "tags": [
+                  "billing"
+                ],
+                "provenance": {
+                  "owner": "owner",
+                  "kind": "source",
+                  "createdAt": "2026-10-16T00:00:00Z",
+                  "sourceHash": "02172ffd62822ceeb4a08755bc3dd9e9800e47343c06d45a8bda3f89c70f4769",
+                  "dependencies": [
+                    "22222222-2222-4222-8222-222222222222"
+                  ],
+                  "evidence": []
+                }
+              },
+              "bytesBase64": "SGVsbG8g8J+Ujg0K"
+            }
+          ],
+          "relationships": [],
+          "relationshipCoverage": "included-endpoints-only"
+        },
+        "destinations": [
+          {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "name": "imported/source.md",
+            "mode": "create"
+          }
+        ],
+        "types": [],
+        "reuse": [],
+        "restoreRelationships": false
+      }
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "information.views.save",
     "value": {
       "scope": {

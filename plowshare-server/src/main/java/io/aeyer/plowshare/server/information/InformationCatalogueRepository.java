@@ -100,7 +100,43 @@ public interface InformationCatalogueRepository {
       String fingerprint,
       io.aeyer.plowshare.protocol.InformationContent.Binding binding,
       UUID expectedRevision,
-      boolean typingExplicit) {
+      boolean typingExplicit,
+      String processingPolicy) {
+    public AdmissionWrite(
+        String name,
+        byte[] bytes,
+        String mediaType,
+        String sourceUri,
+        String kind,
+        List<UUID> inputs,
+        String session,
+        int allowance,
+        int capturedAllowance,
+        boolean syntaxOnly,
+        io.aeyer.plowshare.protocol.DocumentType documentType,
+        String fingerprint,
+        io.aeyer.plowshare.protocol.InformationContent.Binding binding,
+        UUID expectedRevision,
+        boolean typingExplicit) {
+      this(
+          name,
+          bytes,
+          mediaType,
+          sourceUri,
+          kind,
+          inputs,
+          session,
+          allowance,
+          capturedAllowance,
+          syntaxOnly,
+          documentType,
+          fingerprint,
+          binding,
+          expectedRevision,
+          typingExplicit,
+          "automatic");
+    }
+
     public AdmissionWrite(
         String name,
         byte[] bytes,
@@ -129,10 +165,13 @@ public interface InformationCatalogueRepository {
           fingerprint,
           null,
           null,
-          false);
+          false,
+          "automatic");
     }
 
     public AdmissionWrite {
+      if (!Set.of("automatic", "explicit_only").contains(processingPolicy))
+        throw new IllegalArgumentException("Invalid admission processing policy");
       if (name == null
           || name.isBlank()
           || name.length() > 1024

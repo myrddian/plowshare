@@ -351,12 +351,68 @@ These are integration checks, not deployment or live-model quality evidence.
 Chat and embeddings in the full-server fixture remain scripted. A published PR
 does not establish production migration or activation of navigation writes.
 
+## Portable exchange extension — 16 October 2026
+
+[ADR 0029](decisions/0029-portable-information-interchange.md) and
+[the exchange guide](portable-information.md) define the implemented bounded
+export/import extension. Five public WebSocket operations cover capabilities,
+original-byte bundles, readable Markdown/sidecars, atomic import and retained
+origin reads. The shared catalogue now contains 272 operations and 437 DTO
+boundary cases. V148 adds immutable, deletion-redacted imported origins; the
+142 migrations on main remain unchanged and versions 143–148 are unique.
+
+Imports require explicit scope, destination/type/reuse mappings and a relationship
+choice. They create new local source revisions with foreign claims retained
+separately, `explicit_only` processing, zero allowance spent and no authorized
+processing stages. Export checks required dependency closure before reading
+bytes. Bundles preserve original bytes, exact bindings, history and included
+live/pinned relationships. TypeScript/Node helpers expose caller-owned files
+without filesystem access; Library provides download and reviewed-plan import.
+
+Final repository validation passed:
+
+```sh
+./gradlew format check formatCheck sdkCheck sdkPackageCheck \
+  --no-daemon --no-parallel --max-workers=2
+```
+
+This completed 163 tasks in 7 minutes 48 seconds. All 5,472 default server tests
+passed without failures, errors or skips; this gate excludes PostgreSQL. Native
+SDK checks and fresh-installed Node/Python/.NET/Go distributions passed real
+WebSocket conformance. Installed Node interchange helpers also preserved exact
+BOM, Unicode and CRLF bytes. Mock tests verify hidden required-dependency refusal,
+readable representation labels, origin access checks and receipt fingerprints
+that survive schema/metadata JSON object-key reordering.
+
+The four focused PostgreSQL suites listed above passed 63 tests after the
+interchange extension: both full-server journeys additionally cover original-byte
+and schema round trips, explicit new/reused revision mappings, collision and
+stale-head refusal, rollback after admissions, stable receipt recovery, origin
+redaction, and live versus pinned links after an edited import. These assertions
+require actual migrations, constraints and committing transactions.
+
+After the final receipt-fingerprint and portable-validation review, rerunning
+only `AuthoredKnowledgeEndToEndTest` with `-PfullDb --tests` passed both journeys
+again, with zero failures/errors/skips (1 minute for Gradle). Desktop
+`test:information-interchange`, `test:authored-information` and
+`test:document-navigation` also passed against isolated protocol fixtures. The
+portable smoke checks exact downloads, review before mutation, stable request-ID
+recovery and unsafe-plan refusal; its rendered Library panel was inspected.
+
+Portable v1 is bounded to 16 revisions, 64 relationships, 2 MiB original bytes
+and 8 MiB JSON. Foreign claims confer no local membership or processing authority;
+copies follow explicit destination policies and cannot be remotely revoked.
+Chat/embeddings in acceptance tests remain scripted. Source validation does not
+establish production deployment, migration or navigation-write activation.
+
 ## Scope and estimation
 
 The first milestone includes all admission paths, native SDK contracts and the
 Library workflow. Projection reuse deliberately accepts only complete compatible
 content stages; automatic tags/groups remain unprepared and require explicit
 processing. This conservative policy avoids inventing completeness evidence.
-Backlinks, collaboration, arbitrary-field queries, a general form designer and
-export/import bundles remain outside this milestone. Deployment is a separate
-operational action.
+Backlinks, arbitrary-field queries and a general form designer remain outside
+this milestone. Collaborative editing is outside Plowshare's information-system
+scope. The subsequent portable-exchange extension supports external authoring
+through explicit new revisions; see [the exchange guide](portable-information.md).
+Deployment is a separate operational action.

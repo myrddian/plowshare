@@ -59,6 +59,8 @@ internal static class Validation
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
         if (schema.TryGetProperty("maxJsonBytes", out var jsonByteLimit) && System.Text.Encoding.UTF8.GetByteCount(value.GetRawText()) > jsonByteLimit.GetInt32()) throw new JsonException("JSON value exceeds byte bound");
+        if (Flag(schema,"portablePath") && (value.ValueKind != JsonValueKind.String || !InterchangeValidation.Path(value.GetString()!))) throw new JsonException("Unsafe portable path");
+        if (schema.TryGetProperty("portableGraph",out var portableKind)) InterchangeValidation.Check(portableKind.GetString()!,value);
         try
         {
             if (Flag(schema, "schemaInstance")) ToolSchemas.DecodeValue(value);

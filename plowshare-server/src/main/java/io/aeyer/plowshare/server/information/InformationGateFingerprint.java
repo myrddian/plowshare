@@ -13,6 +13,8 @@ final class InformationGateFingerprint {
       String operation, InformationContext.Selection selection, InformationGateIdentity identity) {
     List<?> tuple =
         switch (identity) {
+          case InformationGateIdentity.InterchangeImport i ->
+              List.of("interchange-import-v1", i.planHash());
           case InformationGateIdentity.TypedIntake i ->
               List.of(
                   "typed-intake-v1",

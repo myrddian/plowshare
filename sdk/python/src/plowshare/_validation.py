@@ -107,6 +107,15 @@ def _application_files(value: list[object] | tuple[object, ...]) -> bool:
 def check(schema: dict[str, object], value: object) -> None:
     if value is None:
         return
+    if schema.get("portableGraph"):
+        from ._interchange import check as interchange_check
+
+        interchange_check(value, cast(str, schema["portableGraph"]))
+    if schema.get("portablePath"):
+        from ._interchange import path as portable_path
+
+        if not portable_path(value):
+            raise ValueError("Unsafe portable path")
     if "maxJsonBytes" in schema and len(
         json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ) > cast(int, schema["maxJsonBytes"]):

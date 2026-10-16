@@ -5,6 +5,12 @@ import java.util.*;
 
 /** Reviewed transition identities. Their fingerprints retain the existing receipt encoding. */
 public sealed interface InformationGateIdentity {
+  record InterchangeImport(String planHash) implements InformationGateIdentity {
+    public InterchangeImport {
+      planHash = digest(planHash);
+    }
+  }
+
   record TypedIntake(
       Intake source,
       UUID expectedRevision,

@@ -324,6 +324,12 @@ export const CLI_OPERATIONS = {
   'information views get': 'information.views.get',
   'information views save': 'information.views.save',
   'information views delete': 'information.views.delete',
+  'information interchange capabilities':
+    'information.interchange.capabilities',
+  'information interchange export': 'information.interchange.export',
+  'information interchange readable': 'information.interchange.readable',
+  'information interchange import': 'information.interchange.import',
+  'information interchange origin': 'information.interchange.origin',
   'information types capabilities': 'information.types.capabilities',
   'information types list': 'information.types.list',
   'information types get': 'information.types.get',

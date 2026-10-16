@@ -850,3 +850,12 @@
 .information-panel:has(> .information-navigation[open]) > :is(.information-workspace,.information-faceting,.information-types,.information-report) { display:none; }
 @media(max-width:720px) { .navigation-workspace { grid-template-columns:minmax(0,1fr); max-height:none; overflow:visible; } .navigation-documents { max-height:240px; border-right:0; } }
 .information-panel:has(> .information-navigation[open]) [data-question] { display:none; }
+
+/* Portable exchange remains a bounded tool pane beside the independently scrolling reader. */
+.information-interchange { flex-shrink:0; max-height:35vh; overflow:auto; }
+.information-panel > .information-interchange[hidden] { display:none; }
+.information-interchange [data-portable-preview] { overflow-wrap:anywhere; }
+.information-interchange [data-portable-status] { color:var(--accent); }
+.information-panel:has(> .information-interchange[open]) { overflow:auto; }
+.information-panel:has(> .information-interchange[open]) > .information-workspace { flex:0 0 320px; min-height:240px; }
+.information-interchange[open] { max-height:none; overflow:visible; }

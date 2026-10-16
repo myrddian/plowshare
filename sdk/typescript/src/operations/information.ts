@@ -1,3 +1,4 @@
+import { INTERCHANGE_OPERATIONS } from './information-interchange.ts';
 import { NAVIGATION_OPERATIONS } from './information-navigation.ts';
 import {
   decodeMetadataValidation,
@@ -15,6 +16,7 @@ export type InformationScope =
   | { kind: 'project'; project: string; includeShared?: boolean };
 export const INFORMATION_OPERATIONS = [
   ...NAVIGATION_OPERATIONS,
+  ...INTERCHANGE_OPERATIONS,
   'types.capabilities',
   'types.list',
   'types.get',

@@ -279,6 +279,12 @@ export function constrain(graph) {
       field(s,'reason',{...text(4096),nonblank:true});
       if(['information.documents.list','information.documents.facets'].includes(op)) rules(s,implies(or(present('relation'),present('direction')),present('relatedTo')));
     }
+    if (op.startsWith('information.interchange.')) {
+      field(s,'revisions',{minItems:1,maxItems:16,uniqueItems:true,element:canonicalUuid});
+      field(s,'revision',canonicalUuid); field(s,'requestId',canonicalUuid);
+      add(s,{maxJsonBytes:8388608});
+      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','shared')));
+    }
     if (op.startsWith('information.')) {
       field(s, 'waitMs', { maximum: 30000 });
       for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
@@ -606,6 +612,30 @@ export function constrain(graph) {
         pattern:
           '^(?:ANSWERED|TURN_CAP|CALL_BUDGET|CANCELLED|STUCK|UNAVAILABLE|SUB_AGENT_FAILED|SESSION_GONE|AWAITING)?$',
       });
+    }
+    if (title?.startsWith('Portable')) {
+      for(const key of ['resource','revision','id','source','target','pinnedRevision','foreignResource','foreignRevision','foreignVersion','localVersion','localRevision','expectedRevision','bundle']) if(p[key] && stringShape(p[key])) field(s,key,canonicalUuid);
+      for(const key of ['manifestHash','contentHash','textHash','sourceHash']) field(s,key,{pattern:'^[a-f0-9]{64}$',maxLength:64});
+      if(p.path) field(s,'path',{portablePath:true,maxLength:240});
+      if(title==='PortableDescriptor') {
+        add(s,{portableGraph:'descriptor'}); field(s,'ordinal',integer(1));field(s,'sourceName',text(1024,1));field(s,'title',text(32768));
+        field(s,'mediaType',{maxLength:256,pattern:'^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+(?:;[ -~]{1,128})?$'});
+        field(s,'tags',{maxItems:32,element:{...identity,maxLength:64}});
+      }
+      if(title==='PortableProvenance') {
+        field(s,'owner',identity); field(s,'createdAt',instant);field(s,'producer',text(1024,1));field(s,'producerDefinitionHash',{pattern:'^[a-f0-9]{64}$',maxLength:64});rules(s,implies(present('producerDefinitionHash'),present('producer')));
+        field(s,'sourceHash',{pattern:'^[a-f0-9]{64}$',maxLength:64}); field(s,'dependencies',{maxItems:16,uniqueItems:true,element:canonicalUuid}); field(s,'evidence',{maxItems:64});
+      }
+      if(title==='PortableEvidence') {
+        field(s,'start',integer()); field(s,'end',integer(1)); field(s,'quote',{...text(65536),nonblank:true}); field(s,'locator',text(4096)); rules(s,{gt:[g('end'),g('start')]});
+      }
+      if(title==='PortableBundle') {add(s,{portableGraph:'bundle',maxJsonBytes:8388608}); field(s,'documents',{minItems:1,maxItems:16}); field(s,'relationships',{maxItems:64});}
+      if(title==='PortableImportPlan') {add(s,{portableGraph:'plan',maxJsonBytes:8388608}); field(s,'destinations',{minItems:1,maxItems:16}); field(s,'types',{maxItems:16}); field(s,'reuse',{maxItems:16});}
+      if(title==='PortableDestination') field(s,'name',{...identity,maxLength:1024});
+      if(title==='PortableDocument') field(s,'bytesBase64',{minLength:4,maxLength:2796204,pattern:'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$'});
+      if(title==='PortableLink') field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+      if(title==='PortableImported') field(s,'mappings',{minItems:1,maxItems:16});
+      if(title==='PortableReadable') field(s,'markdown',text(2097152));
     }
     if (title === 'NavigationPath') field(s,'steps',{minItems:1,maxItems:32,navigationSteps:true});
     if (title === 'ReferencePolicySettings') field(s,'referenceLabel',{...identity,maxLength:120});

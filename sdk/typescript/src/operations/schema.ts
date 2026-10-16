@@ -1,3 +1,4 @@
+import { interchangeProblem } from './interchange-validation.ts';
 import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
@@ -204,6 +205,8 @@ export function decodePayload<K extends Operation>(
   type: K,
   value: unknown,
 ): Payloads[K] {
+  const portableFailure = interchangeProblem(type, value);
+  if (portableFailure) throw new Error(portableFailure);
   const schema = OPERATION_SCHEMAS.inputs[type];
   if (schema === undefined) throw new Error('unknown Plowshare operation');
   // This assertion is confined to the generated, recursively validated boundary.
@@ -254,6 +257,8 @@ export function decodeReply<K extends keyof Replies>(
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
   validateProviderCredentialReply(type, decoded);
+  const portableFailure = interchangeProblem(type, decoded, true);
+  if (portableFailure) throw new Error(portableFailure);
   validateHostedReply(type, decoded);
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);

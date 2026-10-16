@@ -752,7 +752,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     UUID revision = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,source_uri,"
-            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype,starting_revision,revised_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype,starting_revision,revised_by,processing_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         revision,
         resource,
         ordinal,
@@ -767,7 +767,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         documentType.type(),
         documentType.subtype(),
         write.expectedRevision(),
-        write.typingExplicit() ? context.account() : null);
+        write.typingExplicit() ? context.account() : null,
+        write.processingPolicy());
     if (write.binding() != null) {
       var binding = write.binding();
       jdbc.update(

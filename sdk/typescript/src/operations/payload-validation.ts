@@ -1,3 +1,4 @@
+import { interchangeProblem } from './interchange-validation.ts';
 import { isNavigationOperation } from './information-navigation.ts';
 import { navigationPayloadProblem } from './navigation-validation.ts';
 import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
@@ -20,6 +21,8 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (type.startsWith('information.interchange.'))
+    return interchangeProblem(type, payload);
   if (isNavigationOperation(type) && type in SHAPES)
     return navigationPayloadProblem(
       type,
@@ -403,6 +406,11 @@ export const SHAPES: Record<
   ],
   'conversation.context.snapshot': [['conversation', 'agent'], ['measure']],
   'conversation.context.count': [['conversation', 'agent'], []],
+  'information.interchange.capabilities': [['scope'], []],
+  'information.interchange.export': [['scope', 'revisions'], []],
+  'information.interchange.readable': [['scope', 'revision'], []],
+  'information.interchange.origin': [['scope', 'revision'], []],
+  'information.interchange.import': [['scope', 'requestId', 'plan'], []],
   'information.navigation.capabilities': [['scope'], []],
   'information.documents.list': [
     ['scope'],
@@ -886,6 +894,8 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (type.startsWith('information.interchange.'))
+    return interchangeProblem(type, body);
   if (isNavigationOperation(type))
     return navigationPayloadProblem(type, body, required);
   if (

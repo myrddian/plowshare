@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 @Component
 public final class InformationFrames implements FrameArea {
   private final InformationNavigationService navigation;
+  private final InformationInterchangeService interchange;
 
   private final InformationCatalogue catalogue;
   private final InformationAccess access;
@@ -46,7 +47,9 @@ public final class InformationFrames implements FrameArea {
       PageFetcher fetcher,
       InformationContentTypes contentTypes,
       InformationContentSettings contentSettings,
-      InformationNavigationService navigation) {
+      InformationNavigationService navigation,
+      InformationInterchangeService interchange) {
+    this.interchange = java.util.Objects.requireNonNull(interchange);
     this.navigation = java.util.Objects.requireNonNull(navigation);
     this.catalogue = catalogue;
     this.access = access;
@@ -94,6 +97,13 @@ public final class InformationFrames implements FrameArea {
   }
 
   private Outcome handle(String verb, Map<String, Object> payload, Asking asking) {
+    if (verb.startsWith("interchange.")) {
+      return Outcome.ok(
+          interchange.execute(
+              asking.requireHandle("information." + verb),
+              InformationInterchangeInputs.command(verb, payload),
+              asking.sessionId()));
+    }
     if (InformationNavigationInputs.supports(verb)) {
       return Outcome.ok(
           navigation.execute(

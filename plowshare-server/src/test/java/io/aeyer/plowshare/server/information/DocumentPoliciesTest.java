@@ -2307,7 +2307,8 @@ class DocumentPoliciesTest {
                 fetcher,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
                 new InformationContentSettings(true),
-                mock(InformationNavigationService.class))
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2445,7 +2446,8 @@ class DocumentPoliciesTest {
                 org.mockito.Mockito.mock(io.aeyer.plowshare.server.fetch.PageFetcher.class),
                 org.mockito.Mockito.mock(InformationContentTypes.class),
                 new InformationContentSettings(true),
-                mock(InformationNavigationService.class))
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         java.util.Map.<String, Object>of(
@@ -2741,7 +2743,8 @@ class DocumentPoliciesTest {
                 null,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
                 new InformationContentSettings(true),
-                mock(InformationNavigationService.class))
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var rows =
         (List<?>)
@@ -2932,7 +2935,8 @@ class DocumentPoliciesTest {
                 null,
                 org.mockito.Mockito.mock(InformationContentTypes.class),
                 new InformationContentSettings(true),
-                mock(InformationNavigationService.class))
+                mock(InformationNavigationService.class),
+                mock(InformationInterchangeService.class))
             .frames();
     var payload =
         Map.<String, Object>of(

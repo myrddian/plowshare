@@ -90,6 +90,17 @@ Filesystem lending, process execution, binary uploads and Git transfers remain
 platform integrations. Calling an operation does not install its provider
 or assert that a remote system has an accessible filesystem.
 
+## Portable information
+
+All SDKs expose typed `information.interchange.capabilities`, `.export`, `.readable`,
+`.import` and `.origin` operations. Use explicit information scope and exact revision
+identities; import needs a stable request UUID, explicit destination/type/reuse maps
+and a relationship-restoration choice. The [portable exchange guide](portable-information.md)
+explains byte preservation, unverified foreign provenance, collisions and the
+`explicit_only` processing policy. Node's `plowshare-client-node/interchange` exports
+file helpers and the existing byte/crypto codec. Helpers return bytes/relative paths;
+the caller owns filesystem access and workspace fencing.
+
 ## Explicit execution scope
 
 External systems configure a named project and use an Application-owned service

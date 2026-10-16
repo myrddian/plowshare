@@ -16,6 +16,38 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Configuration
 public class InformationConfig {
   @Bean
+  public InformationInterchangeRepository informationInterchangeRepository(JdbcTemplate jdbc) {
+    return new JdbcInformationInterchangeRepository(jdbc);
+  }
+
+  @Bean
+  public InformationInterchangeService informationInterchangeService(
+      InformationCatalogue catalogue,
+      InformationCatalogueRepository records,
+      InformationContentRepository content,
+      InformationContentTypes types,
+      InformationContentSettings settings,
+      InformationInterchangeRepository repository,
+      InformationNavigationRepository navigationRecords,
+      InformationNavigationService navigation,
+      InformationAccess access,
+      UnitOfWork work,
+      InformationTransitions gates) {
+    return new PortableInformation(
+        catalogue,
+        records,
+        content,
+        types,
+        settings,
+        repository,
+        navigationRecords,
+        navigation,
+        access,
+        work,
+        gates);
+  }
+
+  @Bean
   public InformationNavigationRepository informationNavigationRepository(JdbcTemplate jdbc) {
     return new JdbcInformationNavigationRepository(jdbc);
   }

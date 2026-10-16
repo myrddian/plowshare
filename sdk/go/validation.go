@@ -17,6 +17,8 @@ import (
 
 // constraints are boundary metadata, not application property bags.
 type constraints struct {
+	PortablePath          bool     `json:"portablePath"`
+	PortableGraph         string   `json:"portableGraph"`
 	NavigationSteps       bool     `json:"navigationSteps"`
 	MaxJsonBytes          *int     `json:"maxJsonBytes"`
 	SchemaInstance        bool     `json:"schemaInstance"`
@@ -169,6 +171,17 @@ func canonicalRelativePath(value string) bool {
 	return true
 }
 func check(s shape, value any) error {
+	if s.PortablePath {
+		text, ok := value.(string)
+		if !ok || !portablePath(text) {
+			return contractError
+		}
+	}
+	if s.PortableGraph != "" {
+		if err := checkPortableGraph(s.PortableGraph, value); err != nil {
+			return err
+		}
+	}
 	if s.NavigationSteps {
 		steps, ok := value.([]any)
 		if !ok || len(steps) == 0 || len(steps) > 32 {

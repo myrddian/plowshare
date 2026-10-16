@@ -9,6 +9,11 @@ public final class InformationOperations {
 
   public static final List<String> ALL =
       List.of(
+          "interchange.capabilities",
+          "interchange.export",
+          "interchange.readable",
+          "interchange.import",
+          "interchange.origin",
           "navigation.capabilities",
           "documents.list",
           "documents.facets",

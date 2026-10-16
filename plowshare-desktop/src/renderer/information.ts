@@ -1,3 +1,4 @@
+import { installInformationInterchange } from './information-interchange.ts';
 import { installDocumentNavigation } from './document-navigation.ts';
 import {
   contentHtml,
@@ -325,6 +326,17 @@ export function installInformation(
               label: t.contract.label,
             })),
         );
+  const portable = options.manual
+    ? undefined
+    : installInformationInterchange(
+        api,
+        authoredControls.parentElement!,
+        scope,
+        () => JSON.stringify([state().base, state().handle, state().mode]),
+        () => selected,
+        reload,
+      );
+  let portableIdentity = '';
   function requestId(operation: string, payload: object) {
     const key = JSON.stringify([scope(), operation, payload]);
     let id = requests.get(key);
@@ -356,6 +368,11 @@ export function installInformation(
           notice.textContent =
             'This server has not advertised authored document types. Existing untyped sources remain available.';
         }
+      }
+      const portableContext = JSON.stringify([connectionIdentity, scope()]);
+      if (portable && portableIdentity !== portableContext) {
+        portableIdentity = portableContext;
+        await portable.probe();
       }
       if (navigation && navigationIdentity !== connectionIdentity) {
         navigationIdentity = connectionIdentity;
@@ -1671,6 +1688,8 @@ export function installInformation(
       question.hidden = true;
       question.innerHTML = '';
       navigation?.reset();
+      portable?.reset();
+      portableIdentity = '';
       navigationIdentity = '';
       epoch++;
       selected = '';

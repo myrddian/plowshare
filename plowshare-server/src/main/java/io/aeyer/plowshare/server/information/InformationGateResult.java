@@ -5,10 +5,19 @@ import java.util.*;
 
 /** The closed set of successful write-gate receipts. Persisted responses never expose raw JSON. */
 public sealed interface InformationGateResult
-    permits InformationCatalogue.Admission,
+    permits InformationGateResult.Imported,
+        InformationCatalogue.Admission,
         InformationGateResult.Recorded,
         InformationGateResult.ContentTypeVersion,
         InformationGateResult.Completed {
+  record Imported(@JsonValue io.aeyer.plowshare.protocol.InformationInterchange.Imported value)
+      implements InformationGateResult {
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public Imported {
+      Objects.requireNonNull(value);
+    }
+  }
+
   record Recorded(@JsonValue UUID id) implements InformationGateResult {
     @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public Recorded {

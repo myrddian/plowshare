@@ -25,6 +25,9 @@ public final class InformationCodec {
       throw new IOException("information input must be an object");
     if (input.length() > 10 * 1024 * 1024)
       throw new IOException("information input exceeds 10 MiB");
+    if (operation.startsWith("interchange.")
+        && (fields.has("selection") || !fields.hasNonNull("scope")))
+      throw new IOException("Interchange requires explicit scope");
     if (operation.startsWith("documents.")
         || operation.startsWith("relationships.")
         || operation.startsWith("policy.")
@@ -59,6 +62,11 @@ public final class InformationCodec {
       throw new IOException("Typing members cannot be explicitly null");
     Class<? extends InformationRequest> shape =
         switch (operation) {
+          case "interchange.capabilities" -> InformationRequest.InterchangeCapabilities.class;
+          case "interchange.export" -> InformationRequest.InterchangeExport.class;
+          case "interchange.readable" -> InformationRequest.InterchangeReadable.class;
+          case "interchange.import" -> InformationRequest.InterchangeImport.class;
+          case "interchange.origin" -> InformationRequest.InterchangeOrigin.class;
           case "navigation.capabilities" -> InformationRequest.NavigationCapabilities.class;
           case "documents.list" -> InformationRequest.DocumentList.class;
           case "documents.facets" -> InformationRequest.DocumentFacets.class;
@@ -220,6 +228,21 @@ public final class InformationCodec {
       throws IOException {
     var result =
         switch (request) {
+          case InformationRequest.InterchangeCapabilities ignored ->
+              new InformationResponse.InterchangeCapabilities(
+                  read(node, InformationInterchange.Capabilities.class));
+          case InformationRequest.InterchangeExport ignored ->
+              new InformationResponse.InterchangeBundle(
+                  read(node, InformationInterchange.Bundle.class));
+          case InformationRequest.InterchangeReadable ignored ->
+              new InformationResponse.InterchangeReadable(
+                  read(node, InformationInterchange.Readable.class));
+          case InformationRequest.InterchangeImport ignored ->
+              new InformationResponse.InterchangeImported(
+                  read(node, InformationInterchange.Imported.class));
+          case InformationRequest.InterchangeOrigin ignored ->
+              new InformationResponse.InterchangeOrigin(
+                  read(node, InformationInterchange.Origin.class));
           case InformationRequest.NavigationCapabilities ignored ->
               new InformationResponse.NavigationCapabilities(
                   read(node, InformationNavigation.Capabilities.class));
@@ -338,8 +361,33 @@ public final class InformationCodec {
           case InformationRequest.MigrationAdopt ignored ->
               read(node, InformationResponse.Adopted.class);
         };
+    if (request instanceof InformationRequest.InterchangeExport asked
+        && result instanceof InformationResponse.InterchangeBundle exported) {
+      var returned =
+          exported.value().documents().stream()
+              .map(doc -> doc.descriptor().revision())
+              .collect(java.util.stream.Collectors.toSet());
+      if (!returned.containsAll(asked.revisions()))
+        throw new IOException("Portable export omitted a requested exact revision");
+    }
+    if (request instanceof InformationRequest.InterchangeImport asked
+        && result instanceof InformationResponse.InterchangeImported imported) {
+      var expectedForeign =
+          asked.plan().bundle().documents().stream()
+              .map(doc -> doc.descriptor().revision())
+              .collect(java.util.stream.Collectors.toSet());
+      var returned =
+          imported.value().mappings().stream()
+              .map(io.aeyer.plowshare.protocol.InformationInterchange.Mapping::foreignRevision)
+              .collect(java.util.stream.Collectors.toSet());
+      if (!imported.value().bundle().equals(asked.plan().bundle().id())
+          || !expectedForeign.equals(returned)
+          || returned.size() != imported.value().mappings().size())
+        throw new IOException("Portable import receipt differs from requested bundle");
+    }
     UUID expected =
         switch (request) {
+          case InformationRequest.InterchangeReadable read -> read.revision();
           case InformationRequest.ContentRead read -> read.revision();
           case InformationRequest.Status status ->
               status.revision() == null ? status.acquisition() : status.revision();
@@ -351,6 +399,8 @@ public final class InformationCodec {
         };
     UUID actual =
         switch (result) {
+          case InformationResponse.InterchangeReadable readable ->
+              readable.value().sidecar().revision();
           case InformationResponse.Content content -> content.value().revision();
           case InformationResponse.Revision revision -> revision.value().id();
           case InformationResponse.Acquisition acquisition -> acquisition.value().id();

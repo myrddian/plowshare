@@ -828,5 +828,116 @@
       "version": 2,
       "retainedObligations": false
     }
+  },
+  "information.interchange.capabilities": {
+    "code": "OK",
+    "payload": {
+      "format": "plowshare-information-bundle/1",
+      "maxDocuments": 16,
+      "maxBytes": 2097152,
+      "maxJsonBytes": 8388608
+    }
+  },
+  "information.interchange.export": {
+    "code": "OK",
+    "payload": {
+      "format": "plowshare-information-bundle/1",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "documents": [
+        {
+          "descriptor": {
+            "resource": "11111111-1111-1111-1111-111111111111",
+            "revision": "11111111-1111-1111-1111-111111111111",
+            "ordinal": 1,
+            "path": "documents/source.md",
+            "mediaType": "text/markdown",
+            "contentHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+            "tags": [],
+            "provenance": {
+              "owner": "owner",
+              "kind": "source",
+              "createdAt": "2026-10-16T00:00:00Z",
+              "sourceHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+              "dependencies": [],
+              "evidence": []
+            },
+            "sourceName": "source.md",
+            "title": "Source"
+          },
+          "bytesBase64": "IyBSZWFkYWJsZSBzb3VyY2UNCg=="
+        }
+      ],
+      "relationships": [],
+      "relationshipCoverage": "included-endpoints-only"
+    }
+  },
+  "information.interchange.readable": {
+    "code": "OK",
+    "payload": {
+      "format": "plowshare-information-bundle/1",
+      "path": "documents/source.md",
+      "representation": "original_markdown",
+      "markdown": "# Readable source\r\n",
+      "textHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+      "sidecar": {
+        "resource": "11111111-1111-1111-1111-111111111111",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "ordinal": 1,
+        "path": "documents/source.md",
+        "mediaType": "text/markdown",
+        "contentHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+        "tags": [],
+        "provenance": {
+          "owner": "owner",
+          "kind": "source",
+          "createdAt": "2026-10-16T00:00:00Z",
+          "sourceHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+          "dependencies": [],
+          "evidence": []
+        },
+        "sourceName": "source.md",
+        "title": "Source"
+      }
+    }
+  },
+  "information.interchange.import": {
+    "code": "OK",
+    "payload": {
+      "bundle": "11111111-1111-1111-1111-111111111111",
+      "mappings": [
+        {
+          "foreignResource": "11111111-1111-1111-1111-111111111111",
+          "foreignRevision": "11111111-1111-1111-1111-111111111111",
+          "resource": "11111111-1111-1111-1111-111111111111",
+          "revision": "11111111-1111-1111-1111-111111111111"
+        }
+      ]
+    }
+  },
+  "information.interchange.origin": {
+    "code": "OK",
+    "payload": {
+      "bundle": "11111111-1111-1111-1111-111111111111",
+      "manifestHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+      "foreignDocument": {
+        "resource": "11111111-1111-1111-1111-111111111111",
+        "revision": "11111111-1111-1111-1111-111111111111",
+        "ordinal": 1,
+        "path": "documents/source.md",
+        "mediaType": "text/markdown",
+        "contentHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+        "tags": [],
+        "provenance": {
+          "owner": "owner",
+          "kind": "source",
+          "createdAt": "2026-10-16T00:00:00Z",
+          "sourceHash": "f5cb58c4b8d60279d3af6c472f57895462c79c5566f896de2325cf29c3150cd9",
+          "dependencies": [],
+          "evidence": []
+        },
+        "sourceName": "source.md",
+        "title": "Source"
+      }
+    }
   }
 }

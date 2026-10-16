@@ -14,6 +14,32 @@ const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
 const receipt = '11111111-1111-1111-1111-111111111111';
+
+const portableBody=Buffer.from('Hello 🔎\r\n');
+const portableHash=createHash('sha256').update(portableBody).digest('hex');
+const portableDescriptor={resource:receipt,revision:receipt,ordinal:1,sourceName:'source.md',title:'Source',path:'documents/source.md',mediaType:'text/markdown',contentHash:portableHash,tags:['billing'],provenance:{owner:'owner',kind:'source',createdAt:'2026-10-16T00:00:00Z',sourceHash:portableHash,dependencies:[],evidence:[]}};
+const portableBundle={format:'plowshare-information-bundle/1',id:receipt,documents:[{descriptor:portableDescriptor,bytesBase64:portableBody.toString('base64')}],relationships:[],relationshipCoverage:'included-endpoints-only'};
+const portablePlan={bundle:portableBundle,destinations:[{resource:receipt,name:'imported/source.md',mode:'create'}],types:[],reuse:[],restoreRelationships:false};
+const portableImport={scope:{kind:'personal'},requestId:receipt,plan:portablePlan};
+input('information.interchange.import',portableImport,true);
+const portableEditedPin={...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,sourceHash:'0'.repeat(64)}}}],relationships:[{source:receipt,target:receipt,pinnedRevision:receipt,relation:'reference'}]};
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:portableEditedPin,restoreRelationships:true}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:portableEditedPin,restoreRelationships:false}},true);
+
+const portableNext='22222222-2222-4222-8222-222222222222';
+const reusedBundle={...portableBundle,documents:[...portableBundle.documents,{descriptor:{...portableDescriptor,revision:portableNext,ordinal:2,path:'documents/next.md',provenance:{...portableDescriptor.provenance,dependencies:[receipt]}},bytesBase64:portableBody.toString('base64')}]};
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:reusedBundle,destinations:[{resource:receipt,name:'imported/source.md',mode:'revise',expectedRevision:portableNext}],reuse:[{foreignRevision:receipt,localRevision:receipt}]}},true);
+
+result('information.interchange.export',portableBundle,true);
+input('information.interchange.export',{scope:{kind:'personal'},revisions:[receipt]},true);
+for(const revisions of [[],['bad'],Array(17).fill(receipt),[receipt,receipt]]) input('information.interchange.export',{scope:{kind:'personal'},revisions},false);
+for(const path of ['/absolute.md','../source.md','safe/../source.md','safe//source.md','safe/CON.md','safe/.git/config','safe/nul','file.','safe/']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,path}}]}}},false);
+for(const bytesBase64 of ['', 'QQ','QR==','QQ==\n']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:portableDescriptor,bytesBase64}]}}},false);
+for(const changed of [{destinations:[]},{destinations:[{resource:receipt,name:'source.md',mode:'revise'}]},{destinations:[{resource:receipt,name:'source.md',mode:'create',expectedRevision:receipt}]},{reuse:[{foreignRevision:'bad',localRevision:receipt}]},{reuse:[{foreignRevision:receipt,localRevision:receipt}],destinations:[]},{restoreRelationships:'yes'}]) input('information.interchange.import',{...portableImport,plan:{...portablePlan,...changed}},false);
+input('information.interchange.import',{...portableImport,scope:{kind:'shared'}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,permissions:['admin']}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,dependencies:['22222222-2222-4222-8222-222222222222']}},bytesBase64:portableBody.toString('base64')}]}}},false);
+
 const navScope={kind:'personal'};
 const navPolicy={ownerOnly:false,referenceHidden:true,propagate:true};
 const navSettings={defaults:navPolicy,mandatory:{ownerOnly:false,referenceHidden:false,propagate:false},allowOverrides:true,referenceLabel:'Restricted document'};

@@ -499,6 +499,7 @@ class AuthoredKnowledgeEndToEndTest {
                         new InformationRequest.DocumentGet(
                             selection, new InformationNavigation.Target(runbook.resource(), null))))
                 .value());
+      verifyInterchange(sdk, foreign, service, application, credential);
       // A real source lifecycle mutation must close old report, evidence and job-result paths.
       sdk.information(
           new InformationRequest.RevisionChange(
@@ -530,6 +531,322 @@ class AuthoredKnowledgeEndToEndTest {
   }
 
   /** Script consumes actual tool results and derives all downstream IDs and offsets from them. */
+  private void verifyInterchange(
+      WsServerClient sdk,
+      WsServerClient foreign,
+      InformationResponse.Admission service,
+      boolean application,
+      String credential)
+      throws Exception {
+    sdk.information(
+        new InformationRequest.RelationshipCreate(
+            selection,
+            UUID.randomUUID(),
+            service.resource(),
+            new InformationNavigation.Target(
+                status(sdk, MODEL.classified).resourceId(), MODEL.classified),
+            "pinned-runbook",
+            service.revision()));
+    var bundle =
+        assertInstanceOf(
+                InformationResponse.InterchangeBundle.class,
+                sdk.information(
+                    new InformationRequest.InterchangeExport(selection, List.of(MODEL.report))))
+            .value();
+    assertEquals(4, bundle.documents().size());
+    var exportedReport =
+        bundle.documents().stream()
+            .map(InformationInterchange.Document::descriptor)
+            .filter(d -> d.revision().equals(MODEL.report))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        status(sdk, MODEL.report).report().producedBy(), exportedReport.provenance().producer());
+    assertEquals(2, bundle.relationships().size());
+    var readable =
+        assertInstanceOf(
+                InformationResponse.InterchangeReadable.class,
+                sdk.information(
+                    new InformationRequest.InterchangeReadable(selection, MODEL.classified)))
+            .value();
+    assertEquals(BODY, readable.markdown());
+    assertEquals("original_markdown", readable.representation());
+    var destinations = new ArrayList<InformationInterchange.Destination>();
+    var resources = new HashSet<UUID>();
+    var versions = new HashSet<UUID>();
+    var types = new ArrayList<InformationInterchange.TypeMapping>();
+    for (var doc : bundle.documents()) {
+      var d = doc.descriptor();
+      if (resources.add(d.resource()))
+        destinations.add(
+            new InformationInterchange.Destination(
+                d.resource(), "imported/" + d.resource() + ".md", "create", null));
+      if (d.contentType() != null && versions.add(d.contentType().contract().version()))
+        types.add(
+            new InformationInterchange.TypeMapping(
+                d.contentType().contract().version(), d.contentType().contract().version()));
+    }
+    var plan = new InformationInterchange.ImportPlan(bundle, destinations, types);
+    var request = new InformationRequest.InterchangeImport(selection, UUID.randomUUID(), plan);
+    var imported =
+        assertInstanceOf(InformationResponse.InterchangeImported.class, sdk.information(request))
+            .value();
+    assertEquals(bundle.id(), imported.bundle());
+    assertEquals(bundle.documents().size(), imported.mappings().size());
+    for (var mapping : imported.mappings()) {
+      assertNotEquals(mapping.foreignResource(), mapping.resource());
+      assertNotEquals(mapping.foreignRevision(), mapping.revision());
+      var d =
+          bundle.documents().stream()
+              .filter(doc -> doc.descriptor().revision().equals(mapping.foreignRevision()))
+              .findFirst()
+              .orElseThrow();
+      var retained = status(sdk, mapping.revision());
+      assertEquals("source", retained.kind());
+      assertEquals("explicit_only", retained.processingPolicy());
+      assertEquals(0, retained.allowanceSpent());
+      assertEquals(d.descriptor().contentHash(), retained.contentHash());
+      assertArrayEquals(
+          InformationInterchange.bytes(d.bytesBase64()),
+          jdbc.queryForObject(
+              "SELECT source_bytes FROM information_revisions WHERE id=?",
+              byte[].class,
+              mapping.revision()));
+      var origin =
+          assertInstanceOf(
+                  InformationResponse.InterchangeOrigin.class,
+                  sdk.information(
+                      new InformationRequest.InterchangeOrigin(selection, mapping.revision())))
+              .value();
+      assertEquals(d.descriptor(), origin.foreignDocument());
+      assertEquals(bundle.id(), origin.bundle());
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM information_steps WHERE revision_id=? AND state<>'pending'",
+              Integer.class,
+              mapping.revision()));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM information_stage_authorizations WHERE revision_id=?",
+              Integer.class,
+              mapping.revision()));
+    }
+    try (var reconnected = new WsServerClient("http://127.0.0.1:" + port, credential)) {
+      assertEquals(
+          imported,
+          assertInstanceOf(
+                  InformationResponse.InterchangeImported.class, reconnected.information(request))
+              .value());
+    }
+    refused(
+        application ? 400 : 404,
+        () ->
+            foreign.information(
+                new InformationRequest.InterchangeExport(selection, List.of(MODEL.report))));
+    refused(
+        400,
+        () ->
+            sdk.information(
+                new InformationRequest.InterchangeImport(selection, UUID.randomUUID(), plan)));
+    // A failure after every admission must roll back all local records, relationships and origins.
+    var rollbackDest =
+        destinations.stream()
+            .map(
+                d ->
+                    new InformationInterchange.Destination(
+                        d.resource(), "rollback/" + d.resource() + ".md", "create", null))
+            .toList();
+    jdbc.execute(
+        "CREATE FUNCTION interchange_fixture_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture rollback'; END $$");
+    jdbc.execute(
+        "CREATE TRIGGER interchange_fixture_failure BEFORE INSERT ON information_import_origins FOR EACH ROW EXECUTE FUNCTION interchange_fixture_failure()");
+    try {
+      refused(
+          500,
+          () ->
+              sdk.information(
+                  new InformationRequest.InterchangeImport(
+                      selection,
+                      UUID.randomUUID(),
+                      new InformationInterchange.ImportPlan(bundle, rollbackDest, types))));
+    } finally {
+      jdbc.execute("DROP TRIGGER interchange_fixture_failure ON information_import_origins");
+      jdbc.execute("DROP FUNCTION interchange_fixture_failure()");
+    }
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_resources WHERE owner_handle=? AND source_name LIKE 'rollback/%'",
+            Integer.class, status(sdk, MODEL.report).author()));
+    // An edited head reuses its unchanged history explicitly and creates exactly one revision.
+    var editBundle =
+        assertInstanceOf(
+                InformationResponse.InterchangeBundle.class,
+                sdk.information(
+                    new InformationRequest.InterchangeExport(selection, List.of(MODEL.classified))))
+            .value();
+    byte[] editedBytes =
+        (BODY + "\nReviewed externally.").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    var editedDocuments = new ArrayList<InformationInterchange.Document>();
+    var reuse = new ArrayList<InformationInterchange.Reuse>();
+    for (var doc : editBundle.documents()) {
+      var d = doc.descriptor();
+      if (d.revision().equals(MODEL.classified)) {
+        var edited =
+            new InformationInterchange.Descriptor(
+                d.resource(),
+                d.revision(),
+                d.ordinal(),
+                d.sourceName(),
+                d.title(),
+                d.path(),
+                d.mediaType(),
+                InformationInterchange.hash(editedBytes),
+                d.tags(),
+                d.contentType(),
+                d.provenance());
+        editedDocuments.add(
+            new InformationInterchange.Document(
+                edited, Base64.getEncoder().encodeToString(editedBytes)));
+      } else {
+        editedDocuments.add(doc);
+        var existing =
+            imported.mappings().stream()
+                .filter(m -> m.foreignRevision().equals(d.revision()))
+                .findFirst()
+                .orElseThrow();
+        reuse.add(new InformationInterchange.Reuse(d.revision(), existing.revision()));
+      }
+    }
+    var oldHead =
+        imported.mappings().stream()
+            .filter(m -> m.foreignRevision().equals(MODEL.classified))
+            .findFirst()
+            .orElseThrow();
+    var editedBundle =
+        new InformationInterchange.Bundle(
+            editBundle.format(),
+            editBundle.id(),
+            editedDocuments,
+            editBundle.relationships(),
+            editBundle.relationshipCoverage());
+    var editPlan =
+        new InformationInterchange.ImportPlan(
+            editedBundle,
+            List.of(
+                new InformationInterchange.Destination(
+                    oldHead.foreignResource(),
+                    "imported/" + oldHead.foreignResource() + ".md",
+                    "revise",
+                    oldHead.revision())),
+            types,
+            reuse,
+            false);
+    var editRequest =
+        new InformationRequest.InterchangeImport(selection, UUID.randomUUID(), editPlan);
+    var edited =
+        assertInstanceOf(
+                InformationResponse.InterchangeImported.class, sdk.information(editRequest))
+            .value();
+    var head =
+        edited.mappings().stream()
+            .filter(m -> m.foreignRevision().equals(MODEL.classified))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(3, status(sdk, head.revision()).ordinal());
+    assertEquals(oldHead.resource(), head.resource());
+    assertEquals(
+        3,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_revisions WHERE resource_id=?",
+            Integer.class,
+            head.resource()));
+    assertEquals(
+        InformationInterchange.hash(editedBytes), status(sdk, head.revision()).contentHash());
+    assertEquals(0, status(sdk, head.revision()).allowanceSpent());
+    assertEquals(
+        oldHead.revision(),
+        assertInstanceOf(
+                InformationResponse.Content.class,
+                sdk.information(new InformationRequest.ContentRead(selection, head.revision())))
+            .value()
+            .startingRevision());
+    refused(
+        400,
+        () ->
+            sdk.information(
+                new InformationRequest.InterchangeImport(selection, UUID.randomUUID(), editPlan)));
+    assertEquals(
+        edited,
+        assertInstanceOf(
+                InformationResponse.InterchangeImported.class, sdk.information(editRequest))
+            .value());
+    var exchangedAgain =
+        assertInstanceOf(
+                InformationResponse.InterchangeBundle.class,
+                sdk.information(
+                    new InformationRequest.InterchangeExport(selection, List.of(head.revision()))))
+            .value();
+    var descriptorAgain =
+        exchangedAgain.documents().stream()
+            .map(InformationInterchange.Document::descriptor)
+            .filter(d -> d.revision().equals(head.revision()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(MODEL.classified, descriptorAgain.provenance().importedFrom().revision());
+    assertEquals(
+        editedDocuments.stream()
+            .map(InformationInterchange.Document::descriptor)
+            .filter(d -> d.revision().equals(MODEL.classified))
+            .findFirst()
+            .orElseThrow()
+            .provenance()
+            .sourceHash(),
+        descriptorAgain.provenance().importedFrom().sourceHash());
+    var serviceCopy =
+        imported.mappings().stream()
+            .filter(m -> m.foreignRevision().equals(service.revision()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        head.revision(),
+        jdbc.queryForObject(
+            "SELECT information_navigation_head(target) FROM information_relationships WHERE source=? AND relation='runbook'",
+            UUID.class,
+            serviceCopy.resource()));
+    assertEquals(
+        oldHead.revision(),
+        jdbc.queryForObject(
+            "SELECT pinned_revision FROM information_relationships WHERE source=? AND relation='pinned-runbook'",
+            UUID.class,
+            serviceCopy.resource()));
+
+    var reportCopy =
+        imported.mappings().stream()
+            .filter(m -> m.foreignRevision().equals(MODEL.report))
+            .findFirst()
+            .orElseThrow();
+    sdk.information(
+        new InformationRequest.RevisionChange(
+            InformationRequest.RevisionAction.DELETE,
+            selection,
+            reportCopy.revision(),
+            UUID.randomUUID()));
+    refused(
+        404,
+        () ->
+            sdk.information(
+                new InformationRequest.InterchangeOrigin(selection, reportCopy.revision())));
+    assertEquals(
+        "{}",
+        jdbc.queryForObject(
+            "SELECT origin::text FROM information_import_origins WHERE revision_id=? AND redacted",
+            String.class,
+            reportCopy.revision()));
+  }
+
   static final class Scripted implements LlmTransport {
     static final String CHAT = "journey-chat", EMBED = "journey-embed";
     InformationResponse.Admission service, original;

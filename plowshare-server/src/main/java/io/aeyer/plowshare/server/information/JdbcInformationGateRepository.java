@@ -50,6 +50,7 @@ public final class JdbcInformationGateRepository implements InformationGateRepos
     if (fingerprint == null
         || !fingerprint.matches("[a-f0-9]{64}")
         || !Set.of(
+                "interchange.import",
                 "intake",
                 "evidence.record",
                 "record.report",

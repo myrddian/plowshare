@@ -91,59 +91,26 @@ class DocumentTargetDto:
     revision: str | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
-class CommonDto:
-    """Validated fields of the Common protocol contract."""
+class SelectionDto:
+    """Validated fields of the Selection protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
-CommonDtoScope: TypeAlias = "CommonDtoScopeVariant1Dto | CommonDtoScopeVariant2Dto"
+SelectionDtoScope: TypeAlias = "SelectionDtoScopeVariant1Dto | SelectionDtoScopeVariant2Dto"
 
 @dataclass(frozen=True, kw_only=True)
-class CommonDtoScopeVariant1Dto:
-    """Validated fields of the CommonDtoScopeVariant1Dto protocol contract."""
+class SelectionDtoScopeVariant1Dto:
+    """Validated fields of the SelectionDtoScopeVariant1Dto protocol contract."""
     include_shared: bool | Unset = UNSET
     kind: Literal["personal", "shared"]
 
 @dataclass(frozen=True, kw_only=True)
-class CommonDtoScopeVariant2Dto:
-    """Validated fields of the CommonDtoScopeVariant2Dto protocol contract."""
+class SelectionDtoScopeVariant2Dto:
+    """Validated fields of the SelectionDtoScopeVariant2Dto protocol contract."""
     include_shared: bool | Unset = UNSET
     kind: Literal["project"]
     project: str
-
-@dataclass(frozen=True, kw_only=True)
-class ReferencePolicyDto:
-    """Validated fields of the ReferencePolicy protocol contract."""
-    owner_only: bool
-    propagate: bool
-    reference_hidden: bool
-
-@dataclass(frozen=True, kw_only=True)
-class ReferencePolicySettingsDto:
-    """Validated fields of the ReferencePolicySettings protocol contract."""
-    allow_overrides: bool
-    defaults: ReferencePolicyDto
-    mandatory: ReferencePolicyDto
-    reference_label: str
-
-@dataclass(frozen=True, kw_only=True)
-class ReportFindingDto:
-    """Validated fields of the ReportFinding protocol contract."""
-    claim: str
-    counter_evidence: tuple[str, ...] | Unset = UNSET
-    id: str
-    objective: str
-    rationale: str
-    support: tuple[str, ...] | Unset = UNSET
-    verdict: Literal["holds", "weakened", "refuted", "not_checked"]
-
-@dataclass(frozen=True, kw_only=True)
-class ReportReviewDto:
-    """Validated fields of the ReportReview protocol contract."""
-    outcome: str
-    stage: str
-    text: str
 
 @dataclass(frozen=True, kw_only=True)
 class SchemaDefinitionDto:
@@ -199,6 +166,176 @@ SchemaDefinitionDtoConst: TypeAlias = "None | str | float | Literal[False] | Lit
 SchemaDefinitionDtoType: TypeAlias = "Literal[\"string\"] | Literal[\"number\"] | Literal[\"boolean\"] | Literal[\"object\"] | Literal[\"array\"] | Literal[\"integer\"] | Literal[\"null\"] | tuple[Literal[\"string\", \"number\", \"boolean\", \"object\", \"array\", \"integer\", \"null\"], ...]"
 
 @dataclass(frozen=True, kw_only=True)
+class InformationTypeContractDto:
+    """Validated fields of the InformationTypeContract protocol contract."""
+    definition_hash: str
+    description: str
+    label: str
+    ordinal: float
+    presentation: Mapping[str, SchemaObjectEntry]
+    profile: Literal["plowshare-document-metadata/1"]
+    schema: SchemaDefinitionDto
+    slug: str
+    type_: str
+    version: str
+
+@dataclass(frozen=True, kw_only=True)
+class InformationContentBindingDto:
+    """Validated fields of the InformationContentBinding protocol contract."""
+    contract: InformationTypeContractDto
+    metadata: Mapping[str, SchemaObjectEntry]
+    metadata_hash: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableEvidenceDto:
+    """Validated fields of the PortableEvidence protocol contract."""
+    end: float
+    id: str
+    locator: str | Unset = UNSET
+    quote: str
+    revision: str
+    start: float
+
+@dataclass(frozen=True, kw_only=True)
+class PortableOriginReferenceDto:
+    """Validated fields of the PortableOriginReference protocol contract."""
+    bundle: str
+    manifest_hash: str
+    owner: str
+    resource: str
+    revision: str
+    source_hash: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableProvenanceDto:
+    """Validated fields of the PortableProvenance protocol contract."""
+    created_at: str
+    dependencies: tuple[str, ...]
+    evidence: tuple[PortableEvidenceDto, ...]
+    imported_from: PortableOriginReferenceDto | Unset = UNSET
+    kind: Literal["source", "report"]
+    owner: str
+    producer: str | Unset = UNSET
+    producer_definition_hash: str | Unset = UNSET
+    source_hash: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableDescriptorDto:
+    """Validated fields of the PortableDescriptor protocol contract."""
+    content_hash: str
+    content_type: InformationContentBindingDto | Unset = UNSET
+    media_type: str
+    ordinal: float
+    path: str
+    provenance: PortableProvenanceDto
+    resource: str
+    revision: str
+    source_name: str
+    tags: tuple[str, ...]
+    title: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableDocumentDto:
+    """Validated fields of the PortableDocument protocol contract."""
+    bytes_base64: str
+    descriptor: PortableDescriptorDto
+
+@dataclass(frozen=True, kw_only=True)
+class PortableLinkDto:
+    """Validated fields of the PortableLink protocol contract."""
+    pinned_revision: str | Unset = UNSET
+    relation: str
+    source: str
+    target: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableBundleDto:
+    """Validated fields of the PortableBundle protocol contract."""
+    documents: tuple[PortableDocumentDto, ...]
+    format: Literal["plowshare-information-bundle/1"]
+    id: str
+    relationship_coverage: Literal["included-endpoints-only"]
+    relationships: tuple[PortableLinkDto, ...]
+
+@dataclass(frozen=True, kw_only=True)
+class PortableReuseDto:
+    """Validated fields of the PortableReuse protocol contract."""
+    foreign_revision: str
+    local_revision: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableTypeMappingDto:
+    """Validated fields of the PortableTypeMapping protocol contract."""
+    foreign_version: str
+    local_version: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableImportPlanDto:
+    """Validated fields of the PortableImportPlan protocol contract."""
+    bundle: PortableBundleDto
+    destinations: tuple[PortableImportPlanDtoDestinationsItem, ...]
+    restore_relationships: bool
+    reuse: tuple[PortableReuseDto, ...]
+    types: tuple[PortableTypeMappingDto, ...]
+
+PortableImportPlanDtoDestinationsItem: TypeAlias = "PortableImportPlanDtoDestinationsItemVariant1Dto | PortableImportPlanDtoDestinationsItemVariant2Dto"
+
+@dataclass(frozen=True, kw_only=True)
+class PortableImportPlanDtoDestinationsItemVariant1Dto:
+    """Validated fields of the PortableImportPlanDtoDestinationsItemVariant1Dto protocol contract."""
+    mode: Literal["create"]
+    name: str
+    resource: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableImportPlanDtoDestinationsItemVariant2Dto:
+    """Validated fields of the PortableImportPlanDtoDestinationsItemVariant2Dto protocol contract."""
+    expected_revision: str
+    mode: Literal["revise"]
+    name: str
+    resource: str
+
+@dataclass(frozen=True, kw_only=True)
+class CommonDto:
+    """Validated fields of the Common protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class ReferencePolicyDto:
+    """Validated fields of the ReferencePolicy protocol contract."""
+    owner_only: bool
+    propagate: bool
+    reference_hidden: bool
+
+@dataclass(frozen=True, kw_only=True)
+class ReferencePolicySettingsDto:
+    """Validated fields of the ReferencePolicySettings protocol contract."""
+    allow_overrides: bool
+    defaults: ReferencePolicyDto
+    mandatory: ReferencePolicyDto
+    reference_label: str
+
+@dataclass(frozen=True, kw_only=True)
+class ReportFindingDto:
+    """Validated fields of the ReportFinding protocol contract."""
+    claim: str
+    counter_evidence: tuple[str, ...] | Unset = UNSET
+    id: str
+    objective: str
+    rationale: str
+    support: tuple[str, ...] | Unset = UNSET
+    verdict: Literal["holds", "weakened", "refuted", "not_checked"]
+
+@dataclass(frozen=True, kw_only=True)
+class ReportReviewDto:
+    """Validated fields of the ReportReview protocol contract."""
+    outcome: str
+    stage: str
+    text: str
+
+@dataclass(frozen=True, kw_only=True)
 class NavigationPathDto:
     """Validated fields of the NavigationPath protocol contract."""
     steps: tuple[NavigationPathDtoStepsItem, ...]
@@ -209,7 +346,7 @@ NavigationPathDtoStepsItem: TypeAlias = "NavigationPathDtoStepsItemVariant1Dto |
 class NavigationPathDtoStepsItemVariant1Dto:
     """Validated fields of the NavigationPathDtoStepsItemVariant1Dto protocol contract."""
     kind: Literal["scope"]
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
 
 @dataclass(frozen=True, kw_only=True)
 class NavigationPathDtoStepsItemVariant2Dto:
@@ -1965,27 +2102,6 @@ class InformationFenceDto:
     settled: float
 
 @dataclass(frozen=True, kw_only=True)
-class InformationTypeContractDto:
-    """Validated fields of the InformationTypeContract protocol contract."""
-    definition_hash: str
-    description: str
-    label: str
-    ordinal: float
-    presentation: Mapping[str, SchemaObjectEntry]
-    profile: Literal["plowshare-document-metadata/1"]
-    schema: SchemaDefinitionDto
-    slug: str
-    type_: str
-    version: str
-
-@dataclass(frozen=True, kw_only=True)
-class InformationContentBindingDto:
-    """Validated fields of the InformationContentBinding protocol contract."""
-    contract: InformationTypeContractDto
-    metadata: Mapping[str, SchemaObjectEntry]
-    metadata_hash: str
-
-@dataclass(frozen=True, kw_only=True)
 class InformationProjectionReuseDto:
     """Validated fields of the InformationProjectionReuse protocol contract."""
     fingerprint: str
@@ -2077,7 +2193,7 @@ class CurrentDocumentDto:
     owner: str
     resource: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     source_name: str
     tags: tuple[str, ...]
     title: str
@@ -2122,6 +2238,45 @@ class RecordedEvidenceDto:
 class FinalisedInformationDto:
     """Validated fields of the FinalisedInformation protocol contract."""
     finalised: Literal[True]
+
+@dataclass(frozen=True, kw_only=True)
+class PortableCapabilitiesDto:
+    """Validated fields of the PortableCapabilities protocol contract."""
+    format: Literal["plowshare-information-bundle/1"]
+    max_bytes: Literal[2097152]
+    max_documents: Literal[16]
+    max_json_bytes: Literal[8388608]
+
+@dataclass(frozen=True, kw_only=True)
+class PortableMappingDto:
+    """Validated fields of the PortableMapping protocol contract."""
+    foreign_resource: str
+    foreign_revision: str
+    resource: str
+    revision: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableImportedDto:
+    """Validated fields of the PortableImported protocol contract."""
+    bundle: str
+    mappings: tuple[PortableMappingDto, ...]
+
+@dataclass(frozen=True, kw_only=True)
+class PortableOriginDto:
+    """Validated fields of the PortableOrigin protocol contract."""
+    bundle: str
+    foreign_document: PortableDescriptorDto
+    manifest_hash: str
+
+@dataclass(frozen=True, kw_only=True)
+class PortableReadableDto:
+    """Validated fields of the PortableReadable protocol contract."""
+    format: Literal["plowshare-information-bundle/1"]
+    markdown: str
+    path: str
+    representation: Literal["original_markdown", "extraction"]
+    sidecar: PortableDescriptorDto
+    text_hash: str
 
 @dataclass(frozen=True, kw_only=True)
 class InformationTypeIdentityDto:
@@ -4050,7 +4205,7 @@ class DocumentCitationsPayloadDto:
 class DocumentDetailPayloadDto:
     """Validated fields of the DocumentDetailPayloadDto protocol contract."""
     document: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class DocumentListPayloadDto:
@@ -4165,7 +4320,7 @@ class InformationAcquirePayloadDto:
     expected_revision: str | Unset = UNSET
     name: str | Unset = UNSET
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     url: str
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4196,7 +4351,7 @@ class InformationAcquisitionsPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4206,7 +4361,7 @@ class InformationAllowancePayloadDto:
     max_model_calls: float
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4216,14 +4371,14 @@ class InformationAskPayloadDto:
     max_model_calls: float | Unset = UNSET
     question: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class InformationAwaitPayloadDto:
     """Validated fields of the InformationAwaitPayloadDto protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     sources: tuple[InformationAwaitPayloadDtoSourcesItem, ...]
     view: Literal["content-types-v1"] | Unset = UNSET
     wait_ms: float | Unset = UNSET
@@ -4245,7 +4400,7 @@ class InformationContentGetPayloadDto:
     """Validated fields of the InformationContentGetPayloadDto protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"]
 
 @dataclass(frozen=True, kw_only=True)
@@ -4254,7 +4409,7 @@ class InformationContentRevisePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_revision: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping
     view: Literal["content-types-v1"]
 
@@ -4264,7 +4419,7 @@ class InformationDeletePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4275,14 +4430,14 @@ class InformationDocumentsFacetsPayloadDto:
     filter: InformationFilterDto | Unset = UNSET
     related_to: str | Unset = UNSET
     relation: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
 class InformationDocumentsGetPayloadDto:
     """Validated fields of the InformationDocumentsGetPayloadDto protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     target: DocumentTargetDto
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4296,7 +4451,7 @@ class InformationDocumentsListPayloadDto:
     offset: float | Unset = UNSET
     related_to: str | Unset = UNSET
     relation: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4312,7 +4467,7 @@ class InformationEventsPayloadDto:
     after: float | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4320,7 +4475,7 @@ class InformationEvidenceReadPayloadDto:
     """Validated fields of the InformationEvidenceReadPayloadDto protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
     evidence: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4332,7 +4487,7 @@ class InformationEvidenceRecordPayloadDto:
     quote: str
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     start: float
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4342,7 +4497,7 @@ class InformationExcludePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4351,7 +4506,7 @@ class InformationFacetsPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     filter: InformationFilterDto | Unset = UNSET
     kind: Literal["source", "report"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4360,7 +4515,40 @@ class InformationFinalisePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeExportPayloadDto:
+    """Validated fields of the InformationInterchangeExportPayloadDto protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revisions: tuple[str, ...]
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeImportPayloadDto:
+    """Validated fields of the InformationInterchangeImportPayloadDto protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    plan: PortableImportPlanDto
+    request_id: str
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeOriginPayloadDto:
+    """Validated fields of the InformationInterchangeOriginPayloadDto protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revision: str
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeReadablePayloadDto:
+    """Validated fields of the InformationInterchangeReadablePayloadDto protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revision: str
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4369,7 +4557,7 @@ class InformationInventoryPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4379,7 +4567,7 @@ class InformationLinkPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4390,7 +4578,7 @@ class InformationListPayloadDto:
     kind: Literal["source", "report"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4402,7 +4590,7 @@ class InformationMigrationAdoptPayloadDto:
     reason: str
     request_id: str
     revision: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     visibility: str
 
@@ -4414,7 +4602,7 @@ class InformationMigrationInspectPayloadDto:
     offset: float | Unset = UNSET
     payload: str
     reason: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4423,7 +4611,7 @@ class InformationMigrationListPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4435,7 +4623,7 @@ class InformationMigrationReleasePayloadDto:
     payload: str
     reason: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4445,13 +4633,13 @@ class InformationOutlinePayloadDto:
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
 
 @dataclass(frozen=True, kw_only=True)
 class InformationPolicyGetPayloadDto:
     """Validated fields of the InformationPolicyGetPayloadDto protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     target: ReferencePolicyViewDtoTarget
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4462,7 +4650,7 @@ class InformationPolicySetPayloadDto:
     expected_version: float
     reason: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     settings: ReferencePolicySettingsDto
     target: ReferencePolicyViewDtoTarget
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4474,7 +4662,7 @@ class InformationRankPayloadDto:
     filter: InformationFilterDto | Unset = UNSET
     limit: float | Unset = UNSET
     query: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4484,7 +4672,7 @@ class InformationReadPayloadDto:
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4493,7 +4681,7 @@ class InformationRebuildPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     stage: str
     stages: tuple[Literal["extract", "derive", "embed", "summarise", "summary_embed", "autoTag", "tagGroups"], ...] | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4511,7 +4699,7 @@ class InformationRecordReportPayloadDto:
     objectives: tuple[str, ...] | Unset = UNSET
     request_id: str
     reviews: tuple[ReportReviewDto, ...] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     scope_changes: tuple[str, ...] | Unset = UNSET
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
@@ -4524,7 +4712,7 @@ class InformationRefreshPayloadDto:
     expected_revision: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4535,7 +4723,7 @@ class InformationRelationshipsCreatePayloadDto:
     expected_source_revision: str
     relation: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     source: str
     target: DocumentTargetDto
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4550,7 +4738,7 @@ class InformationRelationshipsListPayloadDto:
     other_resource: str | Unset = UNSET
     relation: str | Unset = UNSET
     resource: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4567,7 +4755,7 @@ class InformationRelationshipsRemovePayloadDto:
     expected_version: float
     relationship: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4578,7 +4766,7 @@ class InformationReplacePayloadDto:
     name: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4589,7 +4777,7 @@ class InformationRestorePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4599,7 +4787,7 @@ class InformationRetryPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str | Unset = UNSET
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     stages: tuple[Literal["extract", "derive", "embed", "summarise", "summary_embed", "autoTag", "tagGroups"], ...] | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4611,7 +4799,7 @@ class InformationRevisePayloadDto:
     name: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4624,7 +4812,7 @@ class InformationSearchPayloadDto:
     limit: float | Unset = UNSET
     query: str
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4633,7 +4821,7 @@ class InformationSharePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4642,7 +4830,7 @@ class InformationStatusPayloadDto:
     acquisition: str | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 InformationStatusResult: TypeAlias = "InformationAcquisitionDto | InformationRevisionDto"
@@ -4655,7 +4843,7 @@ class InformationSymbolsPayloadDto:
     offset: float | Unset = UNSET
     query: str
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
 
 @dataclass(frozen=True, kw_only=True)
 class InformationTagsPayloadDto:
@@ -4663,7 +4851,7 @@ class InformationTagsPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     tags: tuple[str, ...]
     view: Literal["content-types-v1"] | Unset = UNSET
 
@@ -4674,7 +4862,7 @@ class InformationTagsGroupsPayloadDto:
     groups: InformationTagsGroupsPayloadDtoGroups
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 InformationTagsGroupsPayloadDtoGroups: TypeAlias = "None | Mapping[str, tuple[str, ...]]"
@@ -4685,7 +4873,7 @@ class InformationTypesActivatePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_control_revision: float
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
 
@@ -4693,7 +4881,7 @@ class InformationTypesActivatePayloadDto:
 class InformationTypesCapabilitiesPayloadDto:
     """Validated fields of the InformationTypesCapabilitiesPayloadDto protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4702,7 +4890,7 @@ class InformationTypesDeprecatePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_control_revision: float
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
 
@@ -4712,7 +4900,7 @@ class InformationTypesGetPayloadDto:
     attached_revision: str | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     published_only: bool | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
 
@@ -4723,7 +4911,7 @@ class InformationTypesListPayloadDto:
     drafts: bool | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"]
 
 @dataclass(frozen=True, kw_only=True)
@@ -4733,7 +4921,7 @@ class InformationTypesValidatePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     metadata: Mapping[str, SchemaObjectEntry]
     published_only: bool | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
 
@@ -4747,7 +4935,7 @@ class InformationTypesVersionCreatePayloadDto:
     presentation: Mapping[str, SchemaObjectEntry] | Unset = UNSET
     request_id: str
     schema: SchemaDefinitionDto
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     slug: str | Unset = UNSET
     type_: str | Unset = UNSET
     view: Literal["content-types-v1"]
@@ -4758,7 +4946,7 @@ class InformationUnexcludePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4768,7 +4956,7 @@ class InformationUnlinkPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4777,7 +4965,7 @@ class InformationUnsharePayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4787,7 +4975,7 @@ class InformationUploadPayloadDto:
     expected_revision: str | Unset = UNSET
     name: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -4799,7 +4987,7 @@ class InformationViewsDeletePayloadDto:
     expected_version: float
     id: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4807,7 +4995,7 @@ class InformationViewsGetPayloadDto:
     """Validated fields of the InformationViewsGetPayloadDto protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
     id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4824,7 +5012,7 @@ class InformationViewsSavePayloadDto:
     label: str
     path: NavigationPathDto
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -4833,7 +5021,7 @@ class InformationWithdrawPayloadDto:
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
 
 @dataclass(frozen=True, kw_only=True)
@@ -6286,7 +6474,7 @@ class DocumentCitationsRequest(Request[CitationsResponseDto]):
 class DocumentDetailRequest(Request[DocumentDetailResponseDto]):
     """Validated fields of the DocumentDetailRequest protocol contract."""
     document: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     operation: ClassVar[str] = "document.detail"
 
 @dataclass(frozen=True, kw_only=True)
@@ -6405,7 +6593,7 @@ class InformationAcquireRequest(Request[InformationAcquisitionDto]):
     expected_revision: str | Unset = UNSET
     name: str | Unset = UNSET
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     url: str
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6417,7 +6605,7 @@ class InformationAcquisitionsRequest(Request[tuple[InformationAcquisitionDto, ..
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.acquisitions"
 
@@ -6428,7 +6616,7 @@ class InformationAllowanceRequest(Request[ChangedInformationDto]):
     max_model_calls: float
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.allowance"
 
@@ -6439,7 +6627,7 @@ class InformationAskRequest(Request[InformationQuestionDto]):
     max_model_calls: float | Unset = UNSET
     question: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.ask"
 
@@ -6447,7 +6635,7 @@ class InformationAskRequest(Request[InformationQuestionDto]):
 class InformationAwaitRequest(Request[InformationFenceDto]):
     """Validated fields of the InformationAwaitRequest protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     sources: tuple[InformationAwaitPayloadDtoSourcesItem, ...]
     view: Literal["content-types-v1"] | Unset = UNSET
     wait_ms: float | Unset = UNSET
@@ -6458,7 +6646,7 @@ class InformationContentGetRequest(Request[InformationContentViewDto]):
     """Validated fields of the InformationContentGetRequest protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.content.get"
 
@@ -6468,7 +6656,7 @@ class InformationContentReviseRequest(Request[InformationAdmissionDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_revision: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.content.revise"
@@ -6479,7 +6667,7 @@ class InformationDeleteRequest(Request[InformationAvailabilityDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.delete"
 
@@ -6491,7 +6679,7 @@ class InformationDocumentsFacetsRequest(Request[InformationFacetCountsDto]):
     filter: InformationFilterDto | Unset = UNSET
     related_to: str | Unset = UNSET
     relation: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.documents.facets"
 
@@ -6499,7 +6687,7 @@ class InformationDocumentsFacetsRequest(Request[InformationFacetCountsDto]):
 class InformationDocumentsGetRequest(Request[DocumentConnectionDtoSelection]):
     """Validated fields of the InformationDocumentsGetRequest protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     target: DocumentTargetDto
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.documents.get"
@@ -6514,7 +6702,7 @@ class InformationDocumentsListRequest(Request[InformationDocumentsListResultDto]
     offset: float | Unset = UNSET
     related_to: str | Unset = UNSET
     relation: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.documents.list"
 
@@ -6524,7 +6712,7 @@ class InformationEventsRequest(Request[InformationEventsDto]):
     after: float | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.events"
 
@@ -6533,7 +6721,7 @@ class InformationEvidenceReadRequest(Request[InformationEvidenceDto]):
     """Validated fields of the InformationEvidenceReadRequest protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
     evidence: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.evidence.read"
 
@@ -6546,7 +6734,7 @@ class InformationEvidenceRecordRequest(Request[RecordedEvidenceDto]):
     quote: str
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     start: float
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.evidence.record"
@@ -6557,7 +6745,7 @@ class InformationExcludeRequest(Request[InformationAvailabilityDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.exclude"
 
@@ -6567,7 +6755,7 @@ class InformationFacetsRequest(Request[InformationFacetCountsDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     filter: InformationFilterDto | Unset = UNSET
     kind: Literal["source", "report"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.facets"
 
@@ -6577,9 +6765,54 @@ class InformationFinaliseRequest(Request[FinalisedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.finalise"
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeCapabilitiesRequest(Request[PortableCapabilitiesDto]):
+    """Validated fields of the Selection protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+    operation: ClassVar[str] = "information.interchange.capabilities"
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeExportRequest(Request[PortableBundleDto]):
+    """Validated fields of the InformationInterchangeExportRequest protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revisions: tuple[str, ...]
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+    operation: ClassVar[str] = "information.interchange.export"
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeImportRequest(Request[PortableImportedDto]):
+    """Validated fields of the InformationInterchangeImportRequest protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    plan: PortableImportPlanDto
+    request_id: str
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+    operation: ClassVar[str] = "information.interchange.import"
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeOriginRequest(Request[PortableOriginDto]):
+    """Validated fields of the InformationInterchangeOriginRequest protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revision: str
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+    operation: ClassVar[str] = "information.interchange.origin"
+
+@dataclass(frozen=True, kw_only=True)
+class InformationInterchangeReadableRequest(Request[PortableReadableDto]):
+    """Validated fields of the InformationInterchangeReadableRequest protocol contract."""
+    corpus: Literal["documents"] | Unset = UNSET
+    revision: str
+    scope: SelectionDtoScope
+    view: Literal["content-types-v1"] | Unset = UNSET
+    operation: ClassVar[str] = "information.interchange.readable"
 
 @dataclass(frozen=True, kw_only=True)
 class InformationInventoryRequest(Request[tuple[InformationRevisionDto, ...]]):
@@ -6587,7 +6820,7 @@ class InformationInventoryRequest(Request[tuple[InformationRevisionDto, ...]]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.inventory"
 
@@ -6598,7 +6831,7 @@ class InformationLinkRequest(Request[ChangedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.link"
 
@@ -6610,7 +6843,7 @@ class InformationListRequest(Request[tuple[InformationRevisionDto, ...]]):
     kind: Literal["source", "report"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.list"
 
@@ -6623,7 +6856,7 @@ class InformationMigrationAdoptRequest(Request[AdoptedInformationDto]):
     reason: str
     request_id: str
     revision: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     visibility: str
     operation: ClassVar[str] = "information.migration.adopt"
@@ -6636,7 +6869,7 @@ class InformationMigrationInspectRequest(Request[InformationMigrationInspectionD
     offset: float | Unset = UNSET
     payload: str
     reason: str
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.migration.inspect"
 
@@ -6646,7 +6879,7 @@ class InformationMigrationListRequest(Request[InformationMigrationInventoryDto])
     corpus: Literal["documents", "code"] | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope | Unset = UNSET
+    scope: SelectionDtoScope | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.migration.list"
 
@@ -6659,7 +6892,7 @@ class InformationMigrationReleaseRequest(Request[ReleasedInformationDto]):
     payload: str
     reason: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.migration.release"
 
@@ -6667,7 +6900,7 @@ class InformationMigrationReleaseRequest(Request[ReleasedInformationDto]):
 class InformationNavigationCapabilitiesRequest(Request[NavigationCapabilitiesDto]):
     """Validated fields of the Common protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.navigation.capabilities"
 
@@ -6678,14 +6911,14 @@ class InformationOutlineRequest(Request[CodeOutlineDto]):
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     operation: ClassVar[str] = "information.outline"
 
 @dataclass(frozen=True, kw_only=True)
 class InformationPolicyGetRequest(Request[ReferencePolicyViewDto]):
     """Validated fields of the InformationPolicyGetRequest protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     target: ReferencePolicyViewDtoTarget
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.policy.get"
@@ -6697,7 +6930,7 @@ class InformationPolicySetRequest(Request[ReferencePolicyViewDto]):
     expected_version: float
     reason: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     settings: ReferencePolicySettingsDto
     target: ReferencePolicyViewDtoTarget
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6710,7 +6943,7 @@ class InformationRankRequest(Request[DocumentRankingResponseDto]):
     filter: InformationFilterDto | Unset = UNSET
     limit: float | Unset = UNSET
     query: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.rank"
 
@@ -6721,7 +6954,7 @@ class InformationReadRequest(Request[InformationWindowDto]):
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.read"
 
@@ -6731,7 +6964,7 @@ class InformationRebuildRequest(Request[QueuedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     stage: str
     stages: tuple[Literal["extract", "derive", "embed", "summarise", "summary_embed", "autoTag", "tagGroups"], ...] | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6750,7 +6983,7 @@ class InformationRecordReportRequest(Request[InformationAdmissionDto]):
     objectives: tuple[str, ...] | Unset = UNSET
     request_id: str
     reviews: tuple[ReportReviewDto, ...] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     scope_changes: tuple[str, ...] | Unset = UNSET
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
@@ -6764,7 +6997,7 @@ class InformationRefreshRequest(Request[InformationAcquisitionDto]):
     expected_revision: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.refresh"
@@ -6776,7 +7009,7 @@ class InformationRelationshipsCreateRequest(Request[DocumentRelationshipDto]):
     expected_source_revision: str
     relation: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     source: str
     target: DocumentTargetDto
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6792,7 +7025,7 @@ class InformationRelationshipsListRequest(Request[InformationRelationshipsListRe
     other_resource: str | Unset = UNSET
     relation: str | Unset = UNSET
     resource: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.relationships.list"
 
@@ -6803,7 +7036,7 @@ class InformationRelationshipsRemoveRequest(Request[NavigationChangedDto]):
     expected_version: float
     relationship: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.relationships.remove"
 
@@ -6815,7 +7048,7 @@ class InformationReplaceRequest(Request[InformationAdmissionDto]):
     name: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6827,7 +7060,7 @@ class InformationRestoreRequest(Request[InformationAvailabilityDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.restore"
 
@@ -6838,7 +7071,7 @@ class InformationRetryRequest(Request[QueuedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str | Unset = UNSET
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     stages: tuple[Literal["extract", "derive", "embed", "summarise", "summary_embed", "autoTag", "tagGroups"], ...] | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.retry"
@@ -6851,7 +7084,7 @@ class InformationReviseRequest(Request[InformationAdmissionDto]):
     name: str | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -6865,7 +7098,7 @@ class InformationSearchRequest(Request[tuple[InformationSearchHitDto, ...]]):
     limit: float | Unset = UNSET
     query: str
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.search"
 
@@ -6875,7 +7108,7 @@ class InformationShareRequest(Request[ChangedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.share"
 
@@ -6885,7 +7118,7 @@ class InformationStatusRequest(Request[InformationStatusResult]):
     acquisition: str | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.status"
 
@@ -6897,7 +7130,7 @@ class InformationSymbolsRequest(Request[CodeSymbolMatchesDto]):
     offset: float | Unset = UNSET
     query: str
     revision: str | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     operation: ClassVar[str] = "information.symbols"
 
 @dataclass(frozen=True, kw_only=True)
@@ -6906,7 +7139,7 @@ class InformationTagsRequest(Request[ChangedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     tags: tuple[str, ...]
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.tags"
@@ -6918,7 +7151,7 @@ class InformationTagsGroupsRequest(Request[ChangedInformationDto]):
     groups: InformationTagsGroupsPayloadDtoGroups
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.tags.groups"
 
@@ -6928,7 +7161,7 @@ class InformationTypesActivateRequest(Request[InformationTypeVersionDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_control_revision: float
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.types.activate"
@@ -6937,7 +7170,7 @@ class InformationTypesActivateRequest(Request[InformationTypeVersionDto]):
 class InformationTypesCapabilitiesRequest(Request[InformationContentCapabilitiesDto]):
     """Validated fields of the InformationTypesCapabilitiesRequest protocol contract."""
     corpus: Literal["documents", "code"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.types.capabilities"
 
@@ -6947,7 +7180,7 @@ class InformationTypesDeprecateRequest(Request[InformationTypeVersionDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     expected_control_revision: float
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.types.deprecate"
@@ -6958,7 +7191,7 @@ class InformationTypesGetRequest(Request[InformationTypeContractDto]):
     attached_revision: str | Unset = UNSET
     corpus: Literal["documents", "code"] | Unset = UNSET
     published_only: bool | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.types.get"
@@ -6970,7 +7203,7 @@ class InformationTypesListRequest(Request[InformationTypeVersionsDto]):
     drafts: bool | Unset = UNSET
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.types.list"
 
@@ -6981,7 +7214,7 @@ class InformationTypesValidateRequest(Request[MetadataValidationResultDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     metadata: Mapping[str, SchemaObjectEntry]
     published_only: bool | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     version: str
     view: Literal["content-types-v1"]
     operation: ClassVar[str] = "information.types.validate"
@@ -6996,7 +7229,7 @@ class InformationTypesVersionCreateRequest(Request[InformationTypeVersionDto]):
     presentation: Mapping[str, SchemaObjectEntry] | Unset = UNSET
     request_id: str
     schema: SchemaDefinitionDto
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     slug: str | Unset = UNSET
     type_: str | Unset = UNSET
     view: Literal["content-types-v1"]
@@ -7008,7 +7241,7 @@ class InformationUnexcludeRequest(Request[InformationAvailabilityDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.unexclude"
 
@@ -7019,7 +7252,7 @@ class InformationUnlinkRequest(Request[ChangedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.unlink"
 
@@ -7029,7 +7262,7 @@ class InformationUnshareRequest(Request[ChangedInformationDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.unshare"
 
@@ -7040,7 +7273,7 @@ class InformationUploadRequest(Request[InformationAdmissionDto]):
     expected_revision: str | Unset = UNSET
     name: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     text: str
     typing: InformationAcquirePayloadDtoTyping | Unset = UNSET
     view: Literal["content-types-v1"] | Unset = UNSET
@@ -7053,7 +7286,7 @@ class InformationViewsDeleteRequest(Request[NavigationChangedDto]):
     expected_version: float
     id: str
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.views.delete"
 
@@ -7062,7 +7295,7 @@ class InformationViewsGetRequest(Request[SavedNavigationViewDto]):
     """Validated fields of the InformationViewsGetRequest protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
     id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.views.get"
 
@@ -7070,7 +7303,7 @@ class InformationViewsGetRequest(Request[SavedNavigationViewDto]):
 class InformationViewsListRequest(Request[InformationViewsListResultDto]):
     """Validated fields of the Common protocol contract."""
     corpus: Literal["documents"] | Unset = UNSET
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.views.list"
 
@@ -7083,7 +7316,7 @@ class InformationViewsSaveRequest(Request[SavedNavigationViewDto]):
     label: str
     path: NavigationPathDto
     request_id: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.views.save"
 
@@ -7093,7 +7326,7 @@ class InformationWithdrawRequest(Request[InformationAvailabilityDto]):
     corpus: Literal["documents", "code"] | Unset = UNSET
     request_id: str
     revision: str
-    scope: CommonDtoScope
+    scope: SelectionDtoScope
     view: Literal["content-types-v1"] | Unset = UNSET
     operation: ClassVar[str] = "information.withdraw"
 
@@ -8191,368 +8424,386 @@ _MODELS = {
     "shape125": IncomingSourceDtoPartsItemDto,
     "shape160": InformationFilterDto,
     "shape165": DocumentTargetDto,
-    "shape180": CommonDto,
-    "shape100": CommonDtoScopeVariant1Dto,
-    "shape104": CommonDtoScopeVariant2Dto,
-    "shape191": ReferencePolicyDto,
-    "shape190": ReferencePolicySettingsDto,
-    "shape206": ReportFindingDto,
-    "shape213": ReportReviewDto,
-    "shape237": SchemaDefinitionDto,
-    "shape260": NavigationPathDto,
-    "shape263": NavigationPathDtoStepsItemVariant1Dto,
-    "shape265": NavigationPathDtoStepsItemVariant2Dto,
-    "shape266": NavigationPathDtoStepsItemVariant3Dto,
-    "shape268": NavigationPathDtoStepsItemVariant4Dto,
-    "shape275": TierDto2,
-    "shape281": MemoryProposalDto,
-    "shape293": OrchestrationChoiceDto,
-    "shape295": TierDto3,
-    "shape317": Readonly3EntryDto,
-    "shape321": Readonly5EntryVariant1Dto,
-    "shape322": Readonly5EntryVariant1DtoApiKeySecuritySchemeDto,
-    "shape327": Readonly5EntryVariant2Dto,
-    "shape328": Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto,
-    "shape329": Readonly5EntryVariant3Dto,
-    "shape330": Readonly5EntryVariant3DtoOauth2SecuritySchemeDto,
-    "shape332": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto,
-    "shape333": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto,
-    "shape335": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto,
-    "shape336": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto,
-    "shape337": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto,
-    "shape338": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto,
-    "shape339": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto,
-    "shape340": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto,
-    "shape341": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto,
-    "shape342": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto,
-    "shape343": Readonly5EntryVariant4Dto,
-    "shape344": Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto,
-    "shape345": Readonly5EntryVariant5Dto,
-    "shape346": Readonly5EntryVariant5DtoMtlsSecuritySchemeDto,
-    "shape351": IncomingCommandDto,
-    "shape304": AgentCardDto,
-    "shape306": AgentCardDtoCapabilitiesVariant2Dto,
-    "shape310": AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto,
-    "shape312": AgentCardDtoProviderVariant2Dto,
-    "shape315": AgentCardDtoSecurityRequirementsVariant2ItemDto,
-    "shape348": AgentCardDtoSkillsItemDto,
-    "shape350": AgentCardDtoSkillsItemDtoMetadataVariant2Dto,
-    "shape357": AgentCardDtoSupportedInterfacesVariant2ItemDto,
-    "shape367": ExternalMetadataDto,
-    "shape386": ExternalMessageDto,
-    "shape370": ExternalMessageDtoPartsItemVariant1Dto,
-    "shape371": ExternalMessageDtoPartsItemVariant2Dto,
-    "shape372": ExternalMessageDtoPartsItemVariant3Dto,
-    "shape373": ExternalMessageDtoPartsItemVariant4Dto,
-    "shape375": ExternalMessageDtoPartsItemVariant4DtoDataVariant1Dto,
-    "shape376": ExternalMessageDtoPartsItemVariant4DtoDataVariant1DtoArgumentsDto,
-    "shape379": ExternalMessageDtoPartsItemVariant4DtoDataVariant2Dto,
-    "shape380": ExternalMessageDtoPartsItemVariant4DtoDataVariant2DtoArgumentsDto,
-    "shape362": ExternalTaskDto,
-    "shape365": ExternalTaskDtoArtifactsVariant2ItemDto,
-    "shape389": ExternalTaskDtoStatusDto,
-    "shape413": ActionContextDto,
-    "shape403": IntegrationReadingDto,
-    "shape452": ProviderOAuthSettingsDto,
-    "shape442": ProviderConnectionDefinitionDto,
-    "shape454": ProviderCredentialMutationDto,
-    "shape456": ProviderCredentialTargetDto,
-    "shape458": RelayAckRequestDto,
-    "shape459": RelayConsumeRequestDto,
-    "shape466": RelayOperateRequestDto,
-    "shape474": RelayPublishRequestDto,
-    "shape485": ScheduleDefinitionDto,
-    "shape486": ScheduleDefinitionDtoActionDto,
-    "shape494": ScheduleDefinitionDtoLimitsDto,
-    "shape496": ScheduleDefinitionDtoTargetDto,
-    "shape507": ToolScopeConnectDto,
-    "shape513": HostedToolDefinitionDto,
-    "shape517": HostedToolAcknowledgementDto,
-    "shape519": HostedToolConsumptionDto,
-    "shape520": HostedToolCredentialRequestDto,
-    "shape525": HostedToolPublicationDto,
-    "shape528": HostedToolWorkerDto,
-    "shape560": UsageFilterDto,
-    "shape577": ServerAccountDto,
-    "shape576": AccountCredentialDto,
-    "shape581": AdminAuditDto,
-    "shape579": AdminAuditPageDto,
-    "shape588": PricingRatesDto,
-    "shape590": PricingTierDto,
-    "shape585": PricingCardDto,
-    "shape583": PricingEntryDto,
-    "shape592": ServiceAccountDto,
-    "shape597": ServiceScopeDto,
-    "shape595": ServiceTokenDto,
-    "shape594": ServiceCredentialDto,
-    "shape600": SessionsRevokedDto,
-    "shape602": ServerSessionDto,
-    "shape603": AdminStatusDto,
-    "shape604": ObservedStartedJobDto,
-    "shape608": CommandEntryDto,
-    "shape606": AgentViewDto,
-    "shape605": DefinedAgentDto,
-    "shape611": ApplicationReleaseDto,
-    "shape610": ApplicationDeploymentReceiptDto,
-    "shape612": ProjectViewDto,
-    "shape616": ApplicationDeploymentStatusDto,
-    "shape618": ApplicationFileDocumentDto,
-    "shape621": ApplicationFileEntryDto,
-    "shape619": ApplicationFileListingDto,
-    "shape625": ApplicationServiceDeclarationDto,
-    "shape624": ApplicationIdentityBindingDto,
-    "shape622": ApplicationIdentityStatusDto,
-    "shape631": ApplicationTokenReceiptDto,
-    "shape630": ApplicationCredentialDto,
-    "shape632": ApprovalAnsweredDto,
-    "shape635": ApprovalViewDto,
-    "shape633": ApprovalListedDto,
-    "shape638": ApprovalRevokedDto,
-    "shape641": BoardDecisionDto,
-    "shape643": BoardMessageDto,
-    "shape646": SwarmSelectionDto,
-    "shape644": BoardTopicDto,
-    "shape649": BoardSeatDto,
-    "shape648": SeatViewDto,
-    "shape639": BoardMessagesDto,
-    "shape651": BoardMessageDto2,
-    "shape650": BoardOpenedDto,
-    "shape653": BoardPostedDto,
-    "shape654": BoardRetriedDto,
-    "shape657": BoardSummaryDto,
-    "shape655": BoardTopicsDto,
-    "shape658": BufferPurgeReportDto,
-    "shape663": SourceViewDto,
-    "shape667": OpenedViewDto,
-    "shape665": AskedViewDto,
-    "shape661": EntryViewDto,
-    "shape659": EntryPageViewDto,
-    "shape669": CompactionViewDto,
-    "shape672": MeasuredTurnDto,
-    "shape674": TokenCountDto,
-    "shape678": ToolCostDto,
-    "shape676": PrefixDto,
-    "shape680": UnavailableDto,
-    "shape670": ContextViewDto,
-    "shape682": ContextCountDto,
-    "shape692": ProjectionMessageDto,
-    "shape695": ProjectionMessageDtoPartsItemVariant1Dto,
-    "shape697": ProjectionMessageDtoPartsItemVariant2Dto,
-    "shape705": ProjectionMessageDtoToolCallsItemDto,
-    "shape706": ContextSamplingDto,
-    "shape707": ContextSamplingDtoResponseFormatDto,
-    "shape688": ContextSnapshotDto,
-    "shape690": ContextSnapshotDtoCountVariant2Dto,
-    "shape713": ContextSnapshotDtoToolsItemDto,
-    "shape716": ConversationViewDto,
-    "shape717": LifecycleViewDto,
-    "shape721": ProjectionMessageDto2,
-    "shape719": ProjectionViewDto,
-    "shape725": SearchEvidenceDto,
-    "shape724": LogSearchHitDto,
-    "shape726": LogSearchReachDto,
-    "shape729": PassageCoverageDto,
-    "shape727": SearchRetrievalDto,
-    "shape722": LogSearchResponseDto,
-    "shape731": TurnViewDto,
-    "shape734": UnitViewDto,
-    "shape732": ChunkDetailResponseDto,
-    "shape737": CitationDto,
-    "shape735": CitationsResponseDto,
-    "shape740": DocumentChapterDto,
-    "shape738": DocumentDetailResponseDto,
-    "shape744": DocumentListEntryDto,
-    "shape742": DocumentListResponseDto,
-    "shape747": RankedDocumentDto,
-    "shape745": DocumentRankingResponseDto,
-    "shape750": RetrieveHitDto,
-    "shape748": RetrieveResponseDto,
-    "shape753": DocumentSearchHitDto,
-    "shape751": ObservedSearchDto,
-    "shape754": DocumentStanceResponseDto,
-    "shape756": FiringRecordDto,
-    "shape759": FileStoreOptionDto,
-    "shape757": FileStoreCatalogDto,
-    "shape762": InboxItemDto,
-    "shape760": InboxPageDto,
-    "shape763": InboxMarkedDto,
-    "shape764": IncomingTaskDto,
-    "shape766": IncomingTaskDtoRepliesItemDto,
-    "shape772": InformationGateDto,
-    "shape774": InformationGateDtoRecordsItemDto,
-    "shape769": InformationAcquisitionDto,
-    "shape782": ChangedInformationDto,
-    "shape783": InformationQuestionDto,
-    "shape786": InformationAwaitOutcomeDto,
-    "shape784": InformationFenceDto,
-    "shape789": InformationTypeContractDto,
-    "shape788": InformationContentBindingDto,
-    "shape795": InformationProjectionReuseDto,
-    "shape787": InformationContentViewDto,
-    "shape796": InformationAdmissionDto,
-    "shape797": InformationAvailabilityDto,
-    "shape801": InformationFacetValueDto,
-    "shape799": InformationFacetValuesDto,
-    "shape802": InformationFacetMoreDto,
-    "shape805": InformationTagEdgeDto,
-    "shape803": InformationTagGraphDto,
-    "shape798": InformationFacetCountsDto,
-    "shape808": CurrentDocumentDto,
-    "shape817": InformationEventDto,
-    "shape815": InformationEventsDto,
-    "shape819": InformationEvidenceDto,
-    "shape820": RecordedEvidenceDto,
-    "shape821": FinalisedInformationDto,
-    "shape829": InformationTypeIdentityDto,
-    "shape834": InformationProgressDto,
-    "shape835": InformationProgressDtoPassageVectorsDto,
-    "shape836": InformationProgressDtoStoredSummaryEntitiesDto,
-    "shape837": InformationReportDto,
-    "shape838": InformationReportDtoDetailsDto,
-    "shape844": InformationStepDto,
-    "shape823": InformationRevisionDto,
-    "shape853": AdoptedInformationDto,
-    "shape856": MigrationEntryDto,
-    "shape859": MigrationEntryDtoToolCallsVariant2ItemDto,
-    "shape861": MigrationJobDto,
-    "shape863": MigrationLogDto,
-    "shape854": InformationMigrationInspectionDto,
-    "shape866": MigrationDocumentDto,
-    "shape868": MigrationPayloadDto,
-    "shape864": InformationMigrationInventoryDto,
-    "shape869": ReleasedInformationDto,
-    "shape870": NavigationCapabilitiesDto,
-    "shape880": CodeSymbolDto,
-    "shape872": CodeOutlineDto,
-    "shape881": ReferencePolicyViewDto,
-    "shape184": ReferencePolicyViewDtoTargetVariant1Dto,
-    "shape186": ReferencePolicyViewDtoTargetVariant2Dto,
-    "shape187": ReferencePolicyViewDtoTargetVariant3Dto,
-    "shape882": InformationWindowDto,
-    "shape883": QueuedInformationDto,
-    "shape884": DocumentRelationshipDto,
-    "shape887": DocumentConnectionDto,
-    "shape807": DocumentConnectionDtoSelectionVariant1Dto,
-    "shape810": DocumentConnectionDtoSelectionVariant2Dto,
-    "shape812": DocumentConnectionDtoSelectionVariant3Dto,
-    "shape888": NavigationChangedDto,
-    "shape893": InformationSearchPlacementDto,
-    "shape895": InformationSearchPlacementDtoChapterTitleVariant1Dto,
-    "shape896": InformationSearchPlacementDtoChapterTitleVariant2Dto,
-    "shape897": InformationUnplacedDto,
-    "shape891": InformationSearchChunkDto,
-    "shape890": InformationSearchHitDto,
-    "shape901": CodeSymbolMatchDto,
-    "shape899": CodeSymbolMatchesDto,
-    "shape903": InformationTypeVersionDto,
-    "shape906": InformationContentCapabilitiesDto,
-    "shape908": InformationTypeVersionsDto,
-    "shape912": MetadataValidationIssueDto,
-    "shape910": MetadataValidationResultDto,
-    "shape917": SavedNavigationViewDto,
-    "shape922": PartialDto,
-    "shape926": PartialDto2,
-    "shape924": ObservedOutcomeDto,
-    "shape920": ObservedJobDto,
-    "shape929": ObservedIndexDto,
-    "shape931": MemoryProvenanceDto,
-    "shape932": MemoryHomeDto,
-    "shape934": MemoryInvalidationDto,
-    "shape930": MemoryRecordDto,
-    "shape936": NavigationRetrievalDto,
-    "shape935": MemoryNavigationDto,
-    "shape937": ObservedRecallDto,
-    "shape939": MemoryRepairDto,
-    "shape940": MemoryWriteResponseDto,
-    "shape941": MessageDeliveryDto,
-    "shape942": MessageDeliveriesDto,
-    "shape944": MessageInstanceDto,
-    "shape949": MessageInstancesDto,
-    "shape951": OrchestrationAnsweredDto,
-    "shape952": OrchestrationCancelledDto,
-    "shape954": SettingViewDto,
-    "shape955": BooleanSettingViewDto,
-    "shape953": CapsViewDto,
-    "shape960": StageViewDto,
-    "shape958": DefinitionViewDto,
-    "shape956": DefinitionsDto,
-    "shape963": RunViewDto,
-    "shape961": OrchestrationListedDto,
-    "shape967": RecordViewDto,
-    "shape965": RecordPageViewDto,
-    "shape971": ChildViewDto,
-    "shape979": QuestionOptionDto,
-    "shape977": QuestionDto,
-    "shape973": MessageViewDto,
-    "shape975": MessageViewDtoStructureVariant2Dto,
-    "shape980": MessageViewDtoStructureVariant3Dto,
-    "shape982": TodoViewDto,
-    "shape969": OrchestrationStatusDto,
-    "shape983": OutgoingWorkDto,
-    "shape361": OutgoingWorkDtoResultVariant2Dto,
-    "shape400": OutgoingWorkDtoResultVariant3Dto,
-    "shape401": OutgoingWorkDtoResultVariant4Dto,
-    "shape414": OutgoingWorkDtoResultVariant5Dto,
-    "shape419": OutgoingWorkDtoResultVariant6Dto,
-    "shape1006": ProjectGrantChangeDto,
-    "shape1008": ProjectGrantDto,
-    "shape1004": ProjectAccessDto,
-    "shape1010": ProjectMembersDto,
-    "shape1012": ProposalViewDto,
-    "shape1013": ReconsideredDto,
-    "shape1014": ResolvedProposalDto,
-    "shape1016": ProviderConnectionDto,
-    "shape1018": ProviderCredentialStatusDto,
-    "shape1015": ProviderMutationReceiptDto,
-    "shape1035": ProviderAuthorizationDto,
-    "shape1038": ProviderFactsDto,
-    "shape1037": ProviderRegistrationDto,
-    "shape1044": RelayCausationDto,
-    "shape1042": RelayEventDto,
-    "shape1045": RelayEventDtoPayloadDto,
-    "shape1053": RelayEventDtoPayloadDtoLifecycleVariant2Dto,
-    "shape1055": RelayEventDtoPayloadDtoWakeVariant2Dto,
-    "shape1040": RelayBatchDto,
-    "shape1065": RelayBranchDto,
-    "shape1077": RelayTopicDto,
-    "shape1078": RelayControlResultDto,
-    "shape1089": SweepReportDto,
-    "shape1090": ScheduleRecordDto,
-    "shape1092": ScheduleFileDto,
-    "shape1098": ScheduleNamesDto,
-    "shape1097": ScheduleProposalDto,
-    "shape1101": PoolUseDto,
-    "shape1103": ReadyDto,
-    "shape1099": SwarmDto,
-    "shape1106": SwarmTypeDto,
-    "shape1104": SwarmTypesDto,
-    "shape1107": ToolScopeConnectionDto,
-    "shape1110": HostedToolBindingDto,
-    "shape1109": HostedToolReceiptDto,
-    "shape1117": HostedToolCredentialDto,
-    "shape1119": HostedToolReconciliationDto,
-    "shape1121": HostedToolRegistrationDto,
-    "shape1122": HostedToolWorkerStatusDto,
-    "shape1124": TriggerRecordDto,
-    "shape1130": UnionConflictDto,
-    "shape1128": UnionConflictsDto,
-    "shape1135": IneligibleUnionDto,
-    "shape1136": EligibleUnionDto,
-    "shape1140": UsageTotalsDto,
-    "shape1142": UsageHealthDto,
-    "shape1137": UsageReportDto,
-    "shape1138": UsageReportDtoFiltersDto,
-    "shape1148": UsageAttemptDto,
-    "shape1146": UsageCallDto,
-    "shape1144": UsageAuditDto,
-    "shape1150": UsageAuditDtoFiltersDto,
-    "shape1152": UsageAttemptsDto,
-    "shape1153": UsageInitialDto,
-    "shape1154": WebFetchResponseDto,
-    "shape1157": WebSearchHitDto,
-    "shape1155": WebSearchResponseDto,
-    "shape1159": JobEventDto,
-    "shape1160": JobDeltaDto,
+    "shape173": SelectionDto,
+    "shape100": SelectionDtoScopeVariant1Dto,
+    "shape104": SelectionDtoScopeVariant2Dto,
+    "shape184": SchemaDefinitionDto,
+    "shape182": InformationTypeContractDto,
+    "shape181": InformationContentBindingDto,
+    "shape202": PortableEvidenceDto,
+    "shape203": PortableOriginReferenceDto,
+    "shape200": PortableProvenanceDto,
+    "shape180": PortableDescriptorDto,
+    "shape179": PortableDocumentDto,
+    "shape207": PortableLinkDto,
+    "shape177": PortableBundleDto,
+    "shape215": PortableReuseDto,
+    "shape217": PortableTypeMappingDto,
+    "shape176": PortableImportPlanDto,
+    "shape210": PortableImportPlanDtoDestinationsItemVariant1Dto,
+    "shape212": PortableImportPlanDtoDestinationsItemVariant2Dto,
+    "shape227": CommonDto,
+    "shape238": ReferencePolicyDto,
+    "shape237": ReferencePolicySettingsDto,
+    "shape253": ReportFindingDto,
+    "shape260": ReportReviewDto,
+    "shape291": NavigationPathDto,
+    "shape294": NavigationPathDtoStepsItemVariant1Dto,
+    "shape296": NavigationPathDtoStepsItemVariant2Dto,
+    "shape297": NavigationPathDtoStepsItemVariant3Dto,
+    "shape299": NavigationPathDtoStepsItemVariant4Dto,
+    "shape306": TierDto2,
+    "shape312": MemoryProposalDto,
+    "shape324": OrchestrationChoiceDto,
+    "shape326": TierDto3,
+    "shape348": Readonly3EntryDto,
+    "shape352": Readonly5EntryVariant1Dto,
+    "shape353": Readonly5EntryVariant1DtoApiKeySecuritySchemeDto,
+    "shape358": Readonly5EntryVariant2Dto,
+    "shape359": Readonly5EntryVariant2DtoHttpAuthSecuritySchemeDto,
+    "shape360": Readonly5EntryVariant3Dto,
+    "shape361": Readonly5EntryVariant3DtoOauth2SecuritySchemeDto,
+    "shape363": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1Dto,
+    "shape364": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant1DtoAuthorizationCodeDto,
+    "shape366": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2Dto,
+    "shape367": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant2DtoClientCredentialsDto,
+    "shape368": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3Dto,
+    "shape369": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant3DtoImplicitDto,
+    "shape370": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4Dto,
+    "shape371": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant4DtoPasswordDto,
+    "shape372": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5Dto,
+    "shape373": Readonly5EntryVariant3DtoOauth2SecuritySchemeDtoFlowsVariant5DtoDeviceCodeDto,
+    "shape374": Readonly5EntryVariant4Dto,
+    "shape375": Readonly5EntryVariant4DtoOpenIdConnectSecuritySchemeDto,
+    "shape376": Readonly5EntryVariant5Dto,
+    "shape377": Readonly5EntryVariant5DtoMtlsSecuritySchemeDto,
+    "shape382": IncomingCommandDto,
+    "shape335": AgentCardDto,
+    "shape337": AgentCardDtoCapabilitiesVariant2Dto,
+    "shape341": AgentCardDtoCapabilitiesVariant2DtoExtensionsVariant2ItemDto,
+    "shape343": AgentCardDtoProviderVariant2Dto,
+    "shape346": AgentCardDtoSecurityRequirementsVariant2ItemDto,
+    "shape379": AgentCardDtoSkillsItemDto,
+    "shape381": AgentCardDtoSkillsItemDtoMetadataVariant2Dto,
+    "shape388": AgentCardDtoSupportedInterfacesVariant2ItemDto,
+    "shape398": ExternalMetadataDto,
+    "shape417": ExternalMessageDto,
+    "shape401": ExternalMessageDtoPartsItemVariant1Dto,
+    "shape402": ExternalMessageDtoPartsItemVariant2Dto,
+    "shape403": ExternalMessageDtoPartsItemVariant3Dto,
+    "shape404": ExternalMessageDtoPartsItemVariant4Dto,
+    "shape406": ExternalMessageDtoPartsItemVariant4DtoDataVariant1Dto,
+    "shape407": ExternalMessageDtoPartsItemVariant4DtoDataVariant1DtoArgumentsDto,
+    "shape410": ExternalMessageDtoPartsItemVariant4DtoDataVariant2Dto,
+    "shape411": ExternalMessageDtoPartsItemVariant4DtoDataVariant2DtoArgumentsDto,
+    "shape393": ExternalTaskDto,
+    "shape396": ExternalTaskDtoArtifactsVariant2ItemDto,
+    "shape420": ExternalTaskDtoStatusDto,
+    "shape444": ActionContextDto,
+    "shape434": IntegrationReadingDto,
+    "shape483": ProviderOAuthSettingsDto,
+    "shape473": ProviderConnectionDefinitionDto,
+    "shape485": ProviderCredentialMutationDto,
+    "shape487": ProviderCredentialTargetDto,
+    "shape489": RelayAckRequestDto,
+    "shape490": RelayConsumeRequestDto,
+    "shape497": RelayOperateRequestDto,
+    "shape505": RelayPublishRequestDto,
+    "shape516": ScheduleDefinitionDto,
+    "shape517": ScheduleDefinitionDtoActionDto,
+    "shape525": ScheduleDefinitionDtoLimitsDto,
+    "shape527": ScheduleDefinitionDtoTargetDto,
+    "shape538": ToolScopeConnectDto,
+    "shape544": HostedToolDefinitionDto,
+    "shape548": HostedToolAcknowledgementDto,
+    "shape550": HostedToolConsumptionDto,
+    "shape551": HostedToolCredentialRequestDto,
+    "shape556": HostedToolPublicationDto,
+    "shape559": HostedToolWorkerDto,
+    "shape591": UsageFilterDto,
+    "shape608": ServerAccountDto,
+    "shape607": AccountCredentialDto,
+    "shape612": AdminAuditDto,
+    "shape610": AdminAuditPageDto,
+    "shape619": PricingRatesDto,
+    "shape621": PricingTierDto,
+    "shape616": PricingCardDto,
+    "shape614": PricingEntryDto,
+    "shape623": ServiceAccountDto,
+    "shape628": ServiceScopeDto,
+    "shape626": ServiceTokenDto,
+    "shape625": ServiceCredentialDto,
+    "shape631": SessionsRevokedDto,
+    "shape633": ServerSessionDto,
+    "shape634": AdminStatusDto,
+    "shape635": ObservedStartedJobDto,
+    "shape639": CommandEntryDto,
+    "shape637": AgentViewDto,
+    "shape636": DefinedAgentDto,
+    "shape642": ApplicationReleaseDto,
+    "shape641": ApplicationDeploymentReceiptDto,
+    "shape643": ProjectViewDto,
+    "shape647": ApplicationDeploymentStatusDto,
+    "shape649": ApplicationFileDocumentDto,
+    "shape652": ApplicationFileEntryDto,
+    "shape650": ApplicationFileListingDto,
+    "shape656": ApplicationServiceDeclarationDto,
+    "shape655": ApplicationIdentityBindingDto,
+    "shape653": ApplicationIdentityStatusDto,
+    "shape662": ApplicationTokenReceiptDto,
+    "shape661": ApplicationCredentialDto,
+    "shape663": ApprovalAnsweredDto,
+    "shape666": ApprovalViewDto,
+    "shape664": ApprovalListedDto,
+    "shape669": ApprovalRevokedDto,
+    "shape672": BoardDecisionDto,
+    "shape674": BoardMessageDto,
+    "shape677": SwarmSelectionDto,
+    "shape675": BoardTopicDto,
+    "shape680": BoardSeatDto,
+    "shape679": SeatViewDto,
+    "shape670": BoardMessagesDto,
+    "shape682": BoardMessageDto2,
+    "shape681": BoardOpenedDto,
+    "shape684": BoardPostedDto,
+    "shape685": BoardRetriedDto,
+    "shape688": BoardSummaryDto,
+    "shape686": BoardTopicsDto,
+    "shape689": BufferPurgeReportDto,
+    "shape694": SourceViewDto,
+    "shape698": OpenedViewDto,
+    "shape696": AskedViewDto,
+    "shape692": EntryViewDto,
+    "shape690": EntryPageViewDto,
+    "shape700": CompactionViewDto,
+    "shape703": MeasuredTurnDto,
+    "shape705": TokenCountDto,
+    "shape709": ToolCostDto,
+    "shape707": PrefixDto,
+    "shape711": UnavailableDto,
+    "shape701": ContextViewDto,
+    "shape713": ContextCountDto,
+    "shape723": ProjectionMessageDto,
+    "shape726": ProjectionMessageDtoPartsItemVariant1Dto,
+    "shape728": ProjectionMessageDtoPartsItemVariant2Dto,
+    "shape736": ProjectionMessageDtoToolCallsItemDto,
+    "shape737": ContextSamplingDto,
+    "shape738": ContextSamplingDtoResponseFormatDto,
+    "shape719": ContextSnapshotDto,
+    "shape721": ContextSnapshotDtoCountVariant2Dto,
+    "shape744": ContextSnapshotDtoToolsItemDto,
+    "shape747": ConversationViewDto,
+    "shape748": LifecycleViewDto,
+    "shape752": ProjectionMessageDto2,
+    "shape750": ProjectionViewDto,
+    "shape756": SearchEvidenceDto,
+    "shape755": LogSearchHitDto,
+    "shape757": LogSearchReachDto,
+    "shape760": PassageCoverageDto,
+    "shape758": SearchRetrievalDto,
+    "shape753": LogSearchResponseDto,
+    "shape762": TurnViewDto,
+    "shape765": UnitViewDto,
+    "shape763": ChunkDetailResponseDto,
+    "shape768": CitationDto,
+    "shape766": CitationsResponseDto,
+    "shape771": DocumentChapterDto,
+    "shape769": DocumentDetailResponseDto,
+    "shape775": DocumentListEntryDto,
+    "shape773": DocumentListResponseDto,
+    "shape778": RankedDocumentDto,
+    "shape776": DocumentRankingResponseDto,
+    "shape781": RetrieveHitDto,
+    "shape779": RetrieveResponseDto,
+    "shape784": DocumentSearchHitDto,
+    "shape782": ObservedSearchDto,
+    "shape785": DocumentStanceResponseDto,
+    "shape787": FiringRecordDto,
+    "shape790": FileStoreOptionDto,
+    "shape788": FileStoreCatalogDto,
+    "shape793": InboxItemDto,
+    "shape791": InboxPageDto,
+    "shape794": InboxMarkedDto,
+    "shape795": IncomingTaskDto,
+    "shape797": IncomingTaskDtoRepliesItemDto,
+    "shape803": InformationGateDto,
+    "shape805": InformationGateDtoRecordsItemDto,
+    "shape800": InformationAcquisitionDto,
+    "shape813": ChangedInformationDto,
+    "shape814": InformationQuestionDto,
+    "shape817": InformationAwaitOutcomeDto,
+    "shape815": InformationFenceDto,
+    "shape823": InformationProjectionReuseDto,
+    "shape818": InformationContentViewDto,
+    "shape824": InformationAdmissionDto,
+    "shape825": InformationAvailabilityDto,
+    "shape829": InformationFacetValueDto,
+    "shape827": InformationFacetValuesDto,
+    "shape830": InformationFacetMoreDto,
+    "shape833": InformationTagEdgeDto,
+    "shape831": InformationTagGraphDto,
+    "shape826": InformationFacetCountsDto,
+    "shape836": CurrentDocumentDto,
+    "shape845": InformationEventDto,
+    "shape843": InformationEventsDto,
+    "shape847": InformationEvidenceDto,
+    "shape848": RecordedEvidenceDto,
+    "shape849": FinalisedInformationDto,
+    "shape850": PortableCapabilitiesDto,
+    "shape856": PortableMappingDto,
+    "shape854": PortableImportedDto,
+    "shape857": PortableOriginDto,
+    "shape858": PortableReadableDto,
+    "shape869": InformationTypeIdentityDto,
+    "shape874": InformationProgressDto,
+    "shape875": InformationProgressDtoPassageVectorsDto,
+    "shape876": InformationProgressDtoStoredSummaryEntitiesDto,
+    "shape877": InformationReportDto,
+    "shape878": InformationReportDtoDetailsDto,
+    "shape884": InformationStepDto,
+    "shape863": InformationRevisionDto,
+    "shape893": AdoptedInformationDto,
+    "shape896": MigrationEntryDto,
+    "shape899": MigrationEntryDtoToolCallsVariant2ItemDto,
+    "shape901": MigrationJobDto,
+    "shape903": MigrationLogDto,
+    "shape894": InformationMigrationInspectionDto,
+    "shape906": MigrationDocumentDto,
+    "shape908": MigrationPayloadDto,
+    "shape904": InformationMigrationInventoryDto,
+    "shape909": ReleasedInformationDto,
+    "shape910": NavigationCapabilitiesDto,
+    "shape920": CodeSymbolDto,
+    "shape912": CodeOutlineDto,
+    "shape921": ReferencePolicyViewDto,
+    "shape231": ReferencePolicyViewDtoTargetVariant1Dto,
+    "shape233": ReferencePolicyViewDtoTargetVariant2Dto,
+    "shape234": ReferencePolicyViewDtoTargetVariant3Dto,
+    "shape922": InformationWindowDto,
+    "shape923": QueuedInformationDto,
+    "shape924": DocumentRelationshipDto,
+    "shape927": DocumentConnectionDto,
+    "shape835": DocumentConnectionDtoSelectionVariant1Dto,
+    "shape838": DocumentConnectionDtoSelectionVariant2Dto,
+    "shape840": DocumentConnectionDtoSelectionVariant3Dto,
+    "shape928": NavigationChangedDto,
+    "shape933": InformationSearchPlacementDto,
+    "shape935": InformationSearchPlacementDtoChapterTitleVariant1Dto,
+    "shape936": InformationSearchPlacementDtoChapterTitleVariant2Dto,
+    "shape937": InformationUnplacedDto,
+    "shape931": InformationSearchChunkDto,
+    "shape930": InformationSearchHitDto,
+    "shape941": CodeSymbolMatchDto,
+    "shape939": CodeSymbolMatchesDto,
+    "shape943": InformationTypeVersionDto,
+    "shape946": InformationContentCapabilitiesDto,
+    "shape948": InformationTypeVersionsDto,
+    "shape952": MetadataValidationIssueDto,
+    "shape950": MetadataValidationResultDto,
+    "shape957": SavedNavigationViewDto,
+    "shape962": PartialDto,
+    "shape966": PartialDto2,
+    "shape964": ObservedOutcomeDto,
+    "shape960": ObservedJobDto,
+    "shape969": ObservedIndexDto,
+    "shape971": MemoryProvenanceDto,
+    "shape972": MemoryHomeDto,
+    "shape974": MemoryInvalidationDto,
+    "shape970": MemoryRecordDto,
+    "shape976": NavigationRetrievalDto,
+    "shape975": MemoryNavigationDto,
+    "shape977": ObservedRecallDto,
+    "shape979": MemoryRepairDto,
+    "shape980": MemoryWriteResponseDto,
+    "shape981": MessageDeliveryDto,
+    "shape982": MessageDeliveriesDto,
+    "shape984": MessageInstanceDto,
+    "shape989": MessageInstancesDto,
+    "shape991": OrchestrationAnsweredDto,
+    "shape992": OrchestrationCancelledDto,
+    "shape994": SettingViewDto,
+    "shape995": BooleanSettingViewDto,
+    "shape993": CapsViewDto,
+    "shape1000": StageViewDto,
+    "shape998": DefinitionViewDto,
+    "shape996": DefinitionsDto,
+    "shape1003": RunViewDto,
+    "shape1001": OrchestrationListedDto,
+    "shape1007": RecordViewDto,
+    "shape1005": RecordPageViewDto,
+    "shape1011": ChildViewDto,
+    "shape1019": QuestionOptionDto,
+    "shape1017": QuestionDto,
+    "shape1013": MessageViewDto,
+    "shape1015": MessageViewDtoStructureVariant2Dto,
+    "shape1020": MessageViewDtoStructureVariant3Dto,
+    "shape1022": TodoViewDto,
+    "shape1009": OrchestrationStatusDto,
+    "shape1023": OutgoingWorkDto,
+    "shape392": OutgoingWorkDtoResultVariant2Dto,
+    "shape431": OutgoingWorkDtoResultVariant3Dto,
+    "shape432": OutgoingWorkDtoResultVariant4Dto,
+    "shape445": OutgoingWorkDtoResultVariant5Dto,
+    "shape450": OutgoingWorkDtoResultVariant6Dto,
+    "shape1046": ProjectGrantChangeDto,
+    "shape1048": ProjectGrantDto,
+    "shape1044": ProjectAccessDto,
+    "shape1050": ProjectMembersDto,
+    "shape1052": ProposalViewDto,
+    "shape1053": ReconsideredDto,
+    "shape1054": ResolvedProposalDto,
+    "shape1056": ProviderConnectionDto,
+    "shape1058": ProviderCredentialStatusDto,
+    "shape1055": ProviderMutationReceiptDto,
+    "shape1075": ProviderAuthorizationDto,
+    "shape1078": ProviderFactsDto,
+    "shape1077": ProviderRegistrationDto,
+    "shape1084": RelayCausationDto,
+    "shape1082": RelayEventDto,
+    "shape1085": RelayEventDtoPayloadDto,
+    "shape1093": RelayEventDtoPayloadDtoLifecycleVariant2Dto,
+    "shape1095": RelayEventDtoPayloadDtoWakeVariant2Dto,
+    "shape1080": RelayBatchDto,
+    "shape1105": RelayBranchDto,
+    "shape1117": RelayTopicDto,
+    "shape1118": RelayControlResultDto,
+    "shape1129": SweepReportDto,
+    "shape1130": ScheduleRecordDto,
+    "shape1132": ScheduleFileDto,
+    "shape1138": ScheduleNamesDto,
+    "shape1137": ScheduleProposalDto,
+    "shape1141": PoolUseDto,
+    "shape1143": ReadyDto,
+    "shape1139": SwarmDto,
+    "shape1146": SwarmTypeDto,
+    "shape1144": SwarmTypesDto,
+    "shape1147": ToolScopeConnectionDto,
+    "shape1150": HostedToolBindingDto,
+    "shape1149": HostedToolReceiptDto,
+    "shape1157": HostedToolCredentialDto,
+    "shape1159": HostedToolReconciliationDto,
+    "shape1161": HostedToolRegistrationDto,
+    "shape1162": HostedToolWorkerStatusDto,
+    "shape1164": TriggerRecordDto,
+    "shape1170": UnionConflictDto,
+    "shape1168": UnionConflictsDto,
+    "shape1175": IneligibleUnionDto,
+    "shape1176": EligibleUnionDto,
+    "shape1180": UsageTotalsDto,
+    "shape1182": UsageHealthDto,
+    "shape1177": UsageReportDto,
+    "shape1178": UsageReportDtoFiltersDto,
+    "shape1188": UsageAttemptDto,
+    "shape1186": UsageCallDto,
+    "shape1184": UsageAuditDto,
+    "shape1190": UsageAuditDtoFiltersDto,
+    "shape1192": UsageAttemptsDto,
+    "shape1193": UsageInitialDto,
+    "shape1194": WebFetchResponseDto,
+    "shape1197": WebSearchHitDto,
+    "shape1195": WebSearchResponseDto,
+    "shape1199": JobEventDto,
+    "shape1200": JobDeltaDto,
     "shape0": AdminAccountCreatePayloadDto,
     "shape5": AdminAccountResetPayloadDto,
     "shape6": AdminAccountUpdatePayloadDto,
@@ -8596,7 +8847,7 @@ _MODELS = {
     "shape75": ConversationChatPayloadDto,
     "shape77": ConversationContextPayloadDto,
     "shape78": ConversationContextCountPayloadDto,
-    "shape681": ConversationContextCountResultDto,
+    "shape712": ConversationContextCountResultDto,
     "shape79": ConversationContextSnapshotPayloadDto,
     "shape81": ConversationFollowPayloadVariant1Dto,
     "shape82": ConversationFollowPayloadVariant2Dto,
@@ -8624,7 +8875,7 @@ _MODELS = {
     "shape115": InboxReadPayloadDto,
     "shape116": IncomingCancelPayloadDto,
     "shape117": IncomingCatalogPayloadDto,
-    "shape767": IncomingCatalogResultDto,
+    "shape798": IncomingCatalogResultDto,
     "shape118": IncomingReceivePayloadDto,
     "shape129": IncomingStatusPayloadDto,
     "shape130": InformationAcquirePayloadDto,
@@ -8643,188 +8894,192 @@ _MODELS = {
     "shape156": InformationDocumentsFacetsPayloadDto,
     "shape164": InformationDocumentsGetPayloadDto,
     "shape166": InformationDocumentsListPayloadDto,
-    "shape813": InformationDocumentsListResultDto,
+    "shape841": InformationDocumentsListResultDto,
     "shape167": InformationEventsPayloadDto,
     "shape168": InformationEvidenceReadPayloadDto,
     "shape169": InformationEvidenceRecordPayloadDto,
     "shape170": InformationExcludePayloadDto,
     "shape171": InformationFacetsPayloadDto,
     "shape172": InformationFinalisePayloadDto,
-    "shape173": InformationInventoryPayloadDto,
-    "shape174": InformationLinkPayloadDto,
-    "shape175": InformationListPayloadDto,
-    "shape176": InformationMigrationAdoptPayloadDto,
-    "shape177": InformationMigrationInspectPayloadDto,
-    "shape178": InformationMigrationListPayloadDto,
-    "shape179": InformationMigrationReleasePayloadDto,
-    "shape181": InformationOutlinePayloadDto,
-    "shape182": InformationPolicyGetPayloadDto,
-    "shape189": InformationPolicySetPayloadDto,
-    "shape192": InformationRankPayloadDto,
-    "shape193": InformationReadPayloadDto,
-    "shape194": InformationRebuildPayloadDto,
-    "shape204": InformationRecordReportPayloadDto,
-    "shape214": InformationRefreshPayloadDto,
-    "shape215": InformationRelationshipsCreatePayloadDto,
-    "shape216": InformationRelationshipsListPayloadDto,
-    "shape885": InformationRelationshipsListResultDto,
-    "shape217": InformationRelationshipsRemovePayloadDto,
-    "shape218": InformationReplacePayloadDto,
-    "shape219": InformationRestorePayloadDto,
-    "shape220": InformationRetryPayloadDto,
-    "shape221": InformationRevisePayloadDto,
-    "shape222": InformationSearchPayloadDto,
-    "shape223": InformationSharePayloadDto,
-    "shape224": InformationStatusPayloadDto,
-    "shape225": InformationSymbolsPayloadDto,
-    "shape226": InformationTagsPayloadDto,
-    "shape227": InformationTagsGroupsPayloadDto,
-    "shape230": InformationTypesActivatePayloadDto,
-    "shape231": InformationTypesCapabilitiesPayloadDto,
-    "shape232": InformationTypesDeprecatePayloadDto,
-    "shape233": InformationTypesGetPayloadDto,
-    "shape234": InformationTypesListPayloadDto,
-    "shape235": InformationTypesValidatePayloadDto,
-    "shape236": InformationTypesVersionCreatePayloadDto,
-    "shape253": InformationUnexcludePayloadDto,
-    "shape254": InformationUnlinkPayloadDto,
-    "shape255": InformationUnsharePayloadDto,
-    "shape256": InformationUploadPayloadDto,
-    "shape257": InformationViewsDeletePayloadDto,
-    "shape258": InformationViewsGetPayloadDto,
-    "shape918": InformationViewsListResultDto,
-    "shape259": InformationViewsSavePayloadDto,
-    "shape270": InformationWithdrawPayloadDto,
-    "shape271": JobCancelPayloadDto,
-    "shape272": JobLimitsPayloadDto,
-    "shape273": JobStatusPayloadDto,
-    "shape274": JobStreamPayloadDto,
-    "shape276": MemoryInvalidatePayloadDto,
-    "shape277": MemoryNavigatePayloadDto,
-    "shape278": MemoryReadPayloadDto,
-    "shape279": MemoryRecallPayloadDto,
-    "shape280": MemoryWritePayloadDto,
-    "shape282": MessageCancelPayloadDto,
-    "shape283": MessageDeliveriesPayloadDto,
-    "shape284": MessageDeliveryPayloadDto,
-    "shape285": MessageInstancePayloadDto,
-    "shape286": MessageInstanceArchivePayloadDto,
-    "shape287": MessageInstanceDefaultPayloadDto,
-    "shape288": MessageInstanceOpenPayloadDto,
-    "shape289": MessageInstanceStopPayloadDto,
-    "shape290": MessageInstancesPayloadDto,
-    "shape291": OrchestrationAnswerPayloadDto,
-    "shape294": OrchestrationCapsPayloadDto,
-    "shape296": OrchestrationListPayloadDto,
-    "shape297": OrchestrationReceiptPayloadDto,
-    "shape964": OrchestrationReceiptResultDto,
-    "shape298": OrchestrationRecordPayloadDto,
-    "shape299": OrchestrationResumePayloadDto,
-    "shape300": OrchestrationStartPayloadDto,
-    "shape968": OrchestrationStartResultDto,
-    "shape301": OutgoingAdvertisePayloadDto,
-    "shape358": OutgoingClaimPayloadDto,
-    "shape994": OutgoingClaimResultDto,
-    "shape1000": OutgoingPeersResultDto,
-    "shape1002": OutgoingPeersResultDtoDetailsItemDto,
-    "shape359": OutgoingReportPayloadDto,
-    "shape420": OutgoingSendPayloadDto,
-    "shape421": ProjectAccessPayloadDto,
-    "shape422": ProjectAttachPayloadDto,
-    "shape423": ProjectCreatePayloadDto,
-    "shape424": ProjectDefinePayloadDto,
-    "shape425": ProjectForgetPayloadDto,
-    "shape426": ProjectLendPayloadDto,
-    "shape427": ProjectMemberAddPayloadDto,
-    "shape428": ProjectMemberRemovePayloadDto,
-    "shape429": ProjectMemberRolePayloadDto,
-    "shape430": ProjectMovePayloadDto,
-    "shape431": ProjectUnlendPayloadDto,
-    "shape432": ProjectWorkspacePayloadDto,
-    "shape433": ProposalResolvePayloadDto,
-    "shape434": ProviderConnectionChangePayloadDto,
-    "shape439": ProviderConnectionListPayloadDto,
-    "shape440": ProviderConnectionReceiptPayloadDto,
-    "shape441": ProviderConnectionSavePayloadDto,
-    "shape453": ProviderConnectionStatusPayloadDto,
-    "shape455": ProviderCredentialPutPayloadDto,
-    "shape457": ProviderDeregisterPayloadDto,
-    "shape1039": RelayAckResultDto,
-    "shape464": RelayLogPayloadVariant1Dto,
-    "shape465": RelayLogPayloadVariant2Dto,
-    "shape1063": RelayLogResultDto,
-    "shape1073": RelayLogResultDtoRecoveriesItemDto,
-    "shape1074": RelayLogResultDtoScopeDto,
-    "shape1076": RelayLogResultDtoSubscribersItemDto,
-    "shape473": RelayProcessPayloadDto,
-    "shape1082": RelayProcessResultDto,
-    "shape1084": RelayProcessResultDtoGapsItemDto,
-    "shape1085": RelayPublishResultDto,
-    "shape476": RelayTopicsPayloadVariant1Dto,
-    "shape477": RelayTopicsPayloadVariant2Dto,
-    "shape1086": RelayTopicsResultDto,
-    "shape1087": RelayTopicsResultDtoScopeDto,
-    "shape478": ScheduleDefinePayloadDto,
-    "shape479": ScheduleFilesPayloadDto,
-    "shape480": ScheduleForgetPayloadDto,
-    "shape481": ScheduleListPayloadDto,
-    "shape482": SchedulePausePayloadDto,
-    "shape483": ScheduleReadPayloadDto,
-    "shape484": ScheduleSavePayloadDto,
-    "shape504": ScheduleSyncPayloadDto,
-    "shape505": SwarmTypesPayloadDto,
-    "shape506": TodosReadPayloadDto,
-    "shape508": ToolScopeDisconnectPayloadDto,
-    "shape1108": ToolScopeDisconnectResultDto,
-    "shape509": ToolScopeHostChangePayloadDto,
-    "shape510": ToolScopeHostListPayloadDto,
-    "shape511": ToolScopeHostReceiptPayloadDto,
-    "shape512": ToolScopeHostSavePayloadDto,
-    "shape514": ToolScopeHostStatusPayloadDto,
-    "shape515": ToolScopeListPayloadDto,
-    "shape1115": ToolScopeListResultDto,
-    "shape516": ToolScopeWorkerAckPayloadDto,
-    "shape518": ToolScopeWorkerConsumePayloadDto,
-    "shape524": ToolScopeWorkerPublishPayloadDto,
-    "shape526": ToolScopeWorkerReadPayloadDto,
-    "shape527": ToolScopeWorkerRegisterPayloadDto,
-    "shape529": ToolScopeWorkerStatusPayloadDto,
-    "shape530": TriggerDefinePayloadDto,
-    "shape531": TriggerForgetPayloadDto,
-    "shape532": TriggerPausePayloadDto,
-    "shape533": UnionAbortPayloadDto,
-    "shape534": UnionBeginPayloadDto,
-    "shape1127": UnionBeginResultDto,
-    "shape535": UnionConflictListPayloadDto,
-    "shape536": UnionConflictOpenPayloadDto,
-    "shape1131": UnionConflictOpenResultDto,
-    "shape537": UnionConflictResolvePayloadDto,
-    "shape542": UnionDisablePayloadDto,
-    "shape543": UnionEnablePayloadDto,
-    "shape1132": UnionEnableResultDto,
-    "shape544": UnionHiddenPayloadDto,
-    "shape1133": UnionHiddenResultDto,
-    "shape545": UnionReadyPayloadDto,
-    "shape546": UnionStatusPayloadDto,
-    "shape547": UsageAgentPayloadDto,
-    "shape558": UsageCallsPayloadDto,
-    "shape559": UsageConversationPayloadDto,
-    "shape561": UsageOrchestrationPayloadDto,
-    "shape562": UsageProjectPayloadDto,
-    "shape563": UsageRunPayloadDto,
-    "shape564": UsageSubscribePayloadDto,
-    "shape573": UsageUnsubscribePayloadDto,
-    "shape574": WebFetchPayloadDto,
-    "shape575": WebSearchPayloadDto,
-    "shape1164": NotificationVariant3Dto,
-    "shape1166": NotificationVariant4Dto,
-    "shape1168": NotificationVariant5Dto,
-    "shape1175": NotificationVariant6Dto,
-    "shape1177": NotificationVariant7Dto,
-    "shape1179": NotificationVariant8Dto,
-    "shape1181": NotificationVariant9Dto,
-    "shape1183": NotificationVariant10Dto,
-    "shape1185": NotificationVariant11Dto,
+    "shape174": InformationInterchangeExportPayloadDto,
+    "shape175": InformationInterchangeImportPayloadDto,
+    "shape218": InformationInterchangeOriginPayloadDto,
+    "shape219": InformationInterchangeReadablePayloadDto,
+    "shape220": InformationInventoryPayloadDto,
+    "shape221": InformationLinkPayloadDto,
+    "shape222": InformationListPayloadDto,
+    "shape223": InformationMigrationAdoptPayloadDto,
+    "shape224": InformationMigrationInspectPayloadDto,
+    "shape225": InformationMigrationListPayloadDto,
+    "shape226": InformationMigrationReleasePayloadDto,
+    "shape228": InformationOutlinePayloadDto,
+    "shape229": InformationPolicyGetPayloadDto,
+    "shape236": InformationPolicySetPayloadDto,
+    "shape239": InformationRankPayloadDto,
+    "shape240": InformationReadPayloadDto,
+    "shape241": InformationRebuildPayloadDto,
+    "shape251": InformationRecordReportPayloadDto,
+    "shape261": InformationRefreshPayloadDto,
+    "shape262": InformationRelationshipsCreatePayloadDto,
+    "shape263": InformationRelationshipsListPayloadDto,
+    "shape925": InformationRelationshipsListResultDto,
+    "shape264": InformationRelationshipsRemovePayloadDto,
+    "shape265": InformationReplacePayloadDto,
+    "shape266": InformationRestorePayloadDto,
+    "shape267": InformationRetryPayloadDto,
+    "shape268": InformationRevisePayloadDto,
+    "shape269": InformationSearchPayloadDto,
+    "shape270": InformationSharePayloadDto,
+    "shape271": InformationStatusPayloadDto,
+    "shape272": InformationSymbolsPayloadDto,
+    "shape273": InformationTagsPayloadDto,
+    "shape274": InformationTagsGroupsPayloadDto,
+    "shape277": InformationTypesActivatePayloadDto,
+    "shape278": InformationTypesCapabilitiesPayloadDto,
+    "shape279": InformationTypesDeprecatePayloadDto,
+    "shape280": InformationTypesGetPayloadDto,
+    "shape281": InformationTypesListPayloadDto,
+    "shape282": InformationTypesValidatePayloadDto,
+    "shape283": InformationTypesVersionCreatePayloadDto,
+    "shape284": InformationUnexcludePayloadDto,
+    "shape285": InformationUnlinkPayloadDto,
+    "shape286": InformationUnsharePayloadDto,
+    "shape287": InformationUploadPayloadDto,
+    "shape288": InformationViewsDeletePayloadDto,
+    "shape289": InformationViewsGetPayloadDto,
+    "shape958": InformationViewsListResultDto,
+    "shape290": InformationViewsSavePayloadDto,
+    "shape301": InformationWithdrawPayloadDto,
+    "shape302": JobCancelPayloadDto,
+    "shape303": JobLimitsPayloadDto,
+    "shape304": JobStatusPayloadDto,
+    "shape305": JobStreamPayloadDto,
+    "shape307": MemoryInvalidatePayloadDto,
+    "shape308": MemoryNavigatePayloadDto,
+    "shape309": MemoryReadPayloadDto,
+    "shape310": MemoryRecallPayloadDto,
+    "shape311": MemoryWritePayloadDto,
+    "shape313": MessageCancelPayloadDto,
+    "shape314": MessageDeliveriesPayloadDto,
+    "shape315": MessageDeliveryPayloadDto,
+    "shape316": MessageInstancePayloadDto,
+    "shape317": MessageInstanceArchivePayloadDto,
+    "shape318": MessageInstanceDefaultPayloadDto,
+    "shape319": MessageInstanceOpenPayloadDto,
+    "shape320": MessageInstanceStopPayloadDto,
+    "shape321": MessageInstancesPayloadDto,
+    "shape322": OrchestrationAnswerPayloadDto,
+    "shape325": OrchestrationCapsPayloadDto,
+    "shape327": OrchestrationListPayloadDto,
+    "shape328": OrchestrationReceiptPayloadDto,
+    "shape1004": OrchestrationReceiptResultDto,
+    "shape329": OrchestrationRecordPayloadDto,
+    "shape330": OrchestrationResumePayloadDto,
+    "shape331": OrchestrationStartPayloadDto,
+    "shape1008": OrchestrationStartResultDto,
+    "shape332": OutgoingAdvertisePayloadDto,
+    "shape389": OutgoingClaimPayloadDto,
+    "shape1034": OutgoingClaimResultDto,
+    "shape1040": OutgoingPeersResultDto,
+    "shape1042": OutgoingPeersResultDtoDetailsItemDto,
+    "shape390": OutgoingReportPayloadDto,
+    "shape451": OutgoingSendPayloadDto,
+    "shape452": ProjectAccessPayloadDto,
+    "shape453": ProjectAttachPayloadDto,
+    "shape454": ProjectCreatePayloadDto,
+    "shape455": ProjectDefinePayloadDto,
+    "shape456": ProjectForgetPayloadDto,
+    "shape457": ProjectLendPayloadDto,
+    "shape458": ProjectMemberAddPayloadDto,
+    "shape459": ProjectMemberRemovePayloadDto,
+    "shape460": ProjectMemberRolePayloadDto,
+    "shape461": ProjectMovePayloadDto,
+    "shape462": ProjectUnlendPayloadDto,
+    "shape463": ProjectWorkspacePayloadDto,
+    "shape464": ProposalResolvePayloadDto,
+    "shape465": ProviderConnectionChangePayloadDto,
+    "shape470": ProviderConnectionListPayloadDto,
+    "shape471": ProviderConnectionReceiptPayloadDto,
+    "shape472": ProviderConnectionSavePayloadDto,
+    "shape484": ProviderConnectionStatusPayloadDto,
+    "shape486": ProviderCredentialPutPayloadDto,
+    "shape488": ProviderDeregisterPayloadDto,
+    "shape1079": RelayAckResultDto,
+    "shape495": RelayLogPayloadVariant1Dto,
+    "shape496": RelayLogPayloadVariant2Dto,
+    "shape1103": RelayLogResultDto,
+    "shape1113": RelayLogResultDtoRecoveriesItemDto,
+    "shape1114": RelayLogResultDtoScopeDto,
+    "shape1116": RelayLogResultDtoSubscribersItemDto,
+    "shape504": RelayProcessPayloadDto,
+    "shape1122": RelayProcessResultDto,
+    "shape1124": RelayProcessResultDtoGapsItemDto,
+    "shape1125": RelayPublishResultDto,
+    "shape507": RelayTopicsPayloadVariant1Dto,
+    "shape508": RelayTopicsPayloadVariant2Dto,
+    "shape1126": RelayTopicsResultDto,
+    "shape1127": RelayTopicsResultDtoScopeDto,
+    "shape509": ScheduleDefinePayloadDto,
+    "shape510": ScheduleFilesPayloadDto,
+    "shape511": ScheduleForgetPayloadDto,
+    "shape512": ScheduleListPayloadDto,
+    "shape513": SchedulePausePayloadDto,
+    "shape514": ScheduleReadPayloadDto,
+    "shape515": ScheduleSavePayloadDto,
+    "shape535": ScheduleSyncPayloadDto,
+    "shape536": SwarmTypesPayloadDto,
+    "shape537": TodosReadPayloadDto,
+    "shape539": ToolScopeDisconnectPayloadDto,
+    "shape1148": ToolScopeDisconnectResultDto,
+    "shape540": ToolScopeHostChangePayloadDto,
+    "shape541": ToolScopeHostListPayloadDto,
+    "shape542": ToolScopeHostReceiptPayloadDto,
+    "shape543": ToolScopeHostSavePayloadDto,
+    "shape545": ToolScopeHostStatusPayloadDto,
+    "shape546": ToolScopeListPayloadDto,
+    "shape1155": ToolScopeListResultDto,
+    "shape547": ToolScopeWorkerAckPayloadDto,
+    "shape549": ToolScopeWorkerConsumePayloadDto,
+    "shape555": ToolScopeWorkerPublishPayloadDto,
+    "shape557": ToolScopeWorkerReadPayloadDto,
+    "shape558": ToolScopeWorkerRegisterPayloadDto,
+    "shape560": ToolScopeWorkerStatusPayloadDto,
+    "shape561": TriggerDefinePayloadDto,
+    "shape562": TriggerForgetPayloadDto,
+    "shape563": TriggerPausePayloadDto,
+    "shape564": UnionAbortPayloadDto,
+    "shape565": UnionBeginPayloadDto,
+    "shape1167": UnionBeginResultDto,
+    "shape566": UnionConflictListPayloadDto,
+    "shape567": UnionConflictOpenPayloadDto,
+    "shape1171": UnionConflictOpenResultDto,
+    "shape568": UnionConflictResolvePayloadDto,
+    "shape573": UnionDisablePayloadDto,
+    "shape574": UnionEnablePayloadDto,
+    "shape1172": UnionEnableResultDto,
+    "shape575": UnionHiddenPayloadDto,
+    "shape1173": UnionHiddenResultDto,
+    "shape576": UnionReadyPayloadDto,
+    "shape577": UnionStatusPayloadDto,
+    "shape578": UsageAgentPayloadDto,
+    "shape589": UsageCallsPayloadDto,
+    "shape590": UsageConversationPayloadDto,
+    "shape592": UsageOrchestrationPayloadDto,
+    "shape593": UsageProjectPayloadDto,
+    "shape594": UsageRunPayloadDto,
+    "shape595": UsageSubscribePayloadDto,
+    "shape604": UsageUnsubscribePayloadDto,
+    "shape605": WebFetchPayloadDto,
+    "shape606": WebSearchPayloadDto,
+    "shape1204": NotificationVariant3Dto,
+    "shape1206": NotificationVariant4Dto,
+    "shape1208": NotificationVariant5Dto,
+    "shape1215": NotificationVariant6Dto,
+    "shape1217": NotificationVariant7Dto,
+    "shape1219": NotificationVariant8Dto,
+    "shape1221": NotificationVariant9Dto,
+    "shape1223": NotificationVariant10Dto,
+    "shape1225": NotificationVariant11Dto,
 }
 
 _REQUESTS = {
@@ -8921,6 +9176,11 @@ _REQUESTS = {
     InformationExcludeRequest: "information.exclude",
     InformationFacetsRequest: "information.facets",
     InformationFinaliseRequest: "information.finalise",
+    InformationInterchangeCapabilitiesRequest: "information.interchange.capabilities",
+    InformationInterchangeExportRequest: "information.interchange.export",
+    InformationInterchangeImportRequest: "information.interchange.import",
+    InformationInterchangeOriginRequest: "information.interchange.origin",
+    InformationInterchangeReadableRequest: "information.interchange.readable",
     InformationInventoryRequest: "information.inventory",
     InformationLinkRequest: "information.link",
     InformationListRequest: "information.list",
@@ -9108,14 +9368,29 @@ _FIELDS = {
     IncomingSourceDtoPartsItemDto: {"mediaType": "media_type", "text": "text"},
     InformationFilterDto: {"author": "author", "autoTag": "auto_tag", "contentType": "content_type", "contentTypeVersion": "content_type_version", "documentAuthor": "document_author", "kind": "kind", "search": "search", "subtype": "subtype", "tagGroup": "tag_group", "tags": "tags", "untyped": "untyped", "when": "when"},
     DocumentTargetDto: {"resource": "resource", "revision": "revision"},
+    SelectionDto: {"corpus": "corpus", "scope": "scope", "view": "view"},
+    SelectionDtoScopeVariant1Dto: {"includeShared": "include_shared", "kind": "kind"},
+    SelectionDtoScopeVariant2Dto: {"includeShared": "include_shared", "kind": "kind", "project": "project"},
+    SchemaDefinitionDto: {"$anchor": "_anchor", "$defs": "_defs", "$id": "_id", "$ref": "_ref", "$schema": "_schema", "additionalProperties": "additional_properties", "allOf": "all_of", "anyOf": "any_of", "const": "const", "contains": "contains", "default": "default", "deprecated": "deprecated", "description": "description", "else": "else_", "enum": "enum", "examples": "examples", "exclusiveMaximum": "exclusive_maximum", "exclusiveMinimum": "exclusive_minimum", "format": "format", "if": "if_", "items": "items", "maximum": "maximum", "maxItems": "max_items", "maxLength": "max_length", "maxProperties": "max_properties", "minimum": "minimum", "minItems": "min_items", "minLength": "min_length", "minProperties": "min_properties", "multipleOf": "multiple_of", "not": "not_", "oneOf": "one_of", "pattern": "pattern", "patternProperties": "pattern_properties", "prefixItems": "prefix_items", "properties": "properties", "readOnly": "read_only", "required": "required", "then": "then", "title": "title", "type": "type_", "uniqueItems": "unique_items", "writeOnly": "write_only"},
+    InformationTypeContractDto: {"definitionHash": "definition_hash", "description": "description", "label": "label", "ordinal": "ordinal", "presentation": "presentation", "profile": "profile", "schema": "schema", "slug": "slug", "type": "type_", "version": "version"},
+    InformationContentBindingDto: {"contract": "contract", "metadata": "metadata", "metadataHash": "metadata_hash"},
+    PortableEvidenceDto: {"end": "end", "id": "id", "locator": "locator", "quote": "quote", "revision": "revision", "start": "start"},
+    PortableOriginReferenceDto: {"bundle": "bundle", "manifestHash": "manifest_hash", "owner": "owner", "resource": "resource", "revision": "revision", "sourceHash": "source_hash"},
+    PortableProvenanceDto: {"createdAt": "created_at", "dependencies": "dependencies", "evidence": "evidence", "importedFrom": "imported_from", "kind": "kind", "owner": "owner", "producer": "producer", "producerDefinitionHash": "producer_definition_hash", "sourceHash": "source_hash"},
+    PortableDescriptorDto: {"contentHash": "content_hash", "contentType": "content_type", "mediaType": "media_type", "ordinal": "ordinal", "path": "path", "provenance": "provenance", "resource": "resource", "revision": "revision", "sourceName": "source_name", "tags": "tags", "title": "title"},
+    PortableDocumentDto: {"bytesBase64": "bytes_base64", "descriptor": "descriptor"},
+    PortableLinkDto: {"pinnedRevision": "pinned_revision", "relation": "relation", "source": "source", "target": "target"},
+    PortableBundleDto: {"documents": "documents", "format": "format", "id": "id", "relationshipCoverage": "relationship_coverage", "relationships": "relationships"},
+    PortableReuseDto: {"foreignRevision": "foreign_revision", "localRevision": "local_revision"},
+    PortableTypeMappingDto: {"foreignVersion": "foreign_version", "localVersion": "local_version"},
+    PortableImportPlanDto: {"bundle": "bundle", "destinations": "destinations", "restoreRelationships": "restore_relationships", "reuse": "reuse", "types": "types"},
+    PortableImportPlanDtoDestinationsItemVariant1Dto: {"mode": "mode", "name": "name", "resource": "resource"},
+    PortableImportPlanDtoDestinationsItemVariant2Dto: {"expectedRevision": "expected_revision", "mode": "mode", "name": "name", "resource": "resource"},
     CommonDto: {"corpus": "corpus", "scope": "scope", "view": "view"},
-    CommonDtoScopeVariant1Dto: {"includeShared": "include_shared", "kind": "kind"},
-    CommonDtoScopeVariant2Dto: {"includeShared": "include_shared", "kind": "kind", "project": "project"},
     ReferencePolicyDto: {"ownerOnly": "owner_only", "propagate": "propagate", "referenceHidden": "reference_hidden"},
     ReferencePolicySettingsDto: {"allowOverrides": "allow_overrides", "defaults": "defaults", "mandatory": "mandatory", "referenceLabel": "reference_label"},
     ReportFindingDto: {"claim": "claim", "counterEvidence": "counter_evidence", "id": "id", "objective": "objective", "rationale": "rationale", "support": "support", "verdict": "verdict"},
     ReportReviewDto: {"outcome": "outcome", "stage": "stage", "text": "text"},
-    SchemaDefinitionDto: {"$anchor": "_anchor", "$defs": "_defs", "$id": "_id", "$ref": "_ref", "$schema": "_schema", "additionalProperties": "additional_properties", "allOf": "all_of", "anyOf": "any_of", "const": "const", "contains": "contains", "default": "default", "deprecated": "deprecated", "description": "description", "else": "else_", "enum": "enum", "examples": "examples", "exclusiveMaximum": "exclusive_maximum", "exclusiveMinimum": "exclusive_minimum", "format": "format", "if": "if_", "items": "items", "maximum": "maximum", "maxItems": "max_items", "maxLength": "max_length", "maxProperties": "max_properties", "minimum": "minimum", "minItems": "min_items", "minLength": "min_length", "minProperties": "min_properties", "multipleOf": "multiple_of", "not": "not_", "oneOf": "one_of", "pattern": "pattern", "patternProperties": "pattern_properties", "prefixItems": "prefix_items", "properties": "properties", "readOnly": "read_only", "required": "required", "then": "then", "title": "title", "type": "type_", "uniqueItems": "unique_items", "writeOnly": "write_only"},
     NavigationPathDto: {"steps": "steps"},
     NavigationPathDtoStepsItemVariant1Dto: {"kind": "kind", "scope": "scope"},
     NavigationPathDtoStepsItemVariant2Dto: {"kind": "kind", "target": "target"},
@@ -9302,8 +9577,6 @@ _FIELDS = {
     InformationQuestionDto: {"job": "job", "revision": "revision"},
     InformationAwaitOutcomeDto: {"acquisition": "acquisition", "revision": "revision", "state": "state"},
     InformationFenceDto: {"complete": "complete", "expected": "expected", "outcomes": "outcomes", "pending": "pending", "ready": "ready", "settled": "settled"},
-    InformationTypeContractDto: {"definitionHash": "definition_hash", "description": "description", "label": "label", "ordinal": "ordinal", "presentation": "presentation", "profile": "profile", "schema": "schema", "slug": "slug", "type": "type_", "version": "version"},
-    InformationContentBindingDto: {"contract": "contract", "metadata": "metadata", "metadataHash": "metadata_hash"},
     InformationProjectionReuseDto: {"fingerprint": "fingerprint", "generation": "generation", "revision": "revision", "stage": "stage"},
     InformationContentViewDto: {"authorisedStages": "authorised_stages", "contentType": "content_type", "processingPolicy": "processing_policy", "reused": "reused", "revisedBy": "revised_by", "revision": "revision", "startingRevision": "starting_revision"},
     InformationAdmissionDto: {"created": "created", "resource": "resource", "revision": "revision"},
@@ -9320,6 +9593,11 @@ _FIELDS = {
     InformationEvidenceDto: {"created_at": "created_at", "end_offset": "end_offset", "id": "id", "locator": "locator", "paragraph_id": "paragraph_id", "quote": "quote", "revision_id": "revision_id", "start_offset": "start_offset"},
     RecordedEvidenceDto: {"evidence": "evidence"},
     FinalisedInformationDto: {"finalised": "finalised"},
+    PortableCapabilitiesDto: {"format": "format", "maxBytes": "max_bytes", "maxDocuments": "max_documents", "maxJsonBytes": "max_json_bytes"},
+    PortableMappingDto: {"foreignResource": "foreign_resource", "foreignRevision": "foreign_revision", "resource": "resource", "revision": "revision"},
+    PortableImportedDto: {"bundle": "bundle", "mappings": "mappings"},
+    PortableOriginDto: {"bundle": "bundle", "foreignDocument": "foreign_document", "manifestHash": "manifest_hash"},
+    PortableReadableDto: {"format": "format", "markdown": "markdown", "path": "path", "representation": "representation", "sidecar": "sidecar", "textHash": "text_hash"},
     InformationTypeIdentityDto: {"definitionHash": "definition_hash", "label": "label", "ordinal": "ordinal", "slug": "slug", "type": "type_", "version": "version"},
     InformationProgressDto: {"passage_vectors": "passage_vectors", "stored_summary_entities": "stored_summary_entities"},
     InformationProgressDtoPassageVectorsDto: {"completed": "completed", "total": "total"},
@@ -9567,6 +9845,10 @@ _FIELDS = {
     InformationExcludePayloadDto: {"corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
     InformationFacetsPayloadDto: {"corpus": "corpus", "filter": "filter", "kind": "kind", "scope": "scope", "view": "view"},
     InformationFinalisePayloadDto: {"corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
+    InformationInterchangeExportPayloadDto: {"corpus": "corpus", "revisions": "revisions", "scope": "scope", "view": "view"},
+    InformationInterchangeImportPayloadDto: {"corpus": "corpus", "plan": "plan", "requestId": "request_id", "scope": "scope", "view": "view"},
+    InformationInterchangeOriginPayloadDto: {"corpus": "corpus", "revision": "revision", "scope": "scope", "view": "view"},
+    InformationInterchangeReadablePayloadDto: {"corpus": "corpus", "revision": "revision", "scope": "scope", "view": "view"},
     InformationInventoryPayloadDto: {"corpus": "corpus", "limit": "limit", "offset": "offset", "scope": "scope", "view": "view"},
     InformationLinkPayloadDto: {"collectionProject": "collection_project", "corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
     InformationListPayloadDto: {"corpus": "corpus", "filter": "filter", "kind": "kind", "limit": "limit", "offset": "offset", "scope": "scope", "view": "view"},
@@ -9835,6 +10117,11 @@ _FIELDS = {
     InformationExcludeRequest: {"corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
     InformationFacetsRequest: {"corpus": "corpus", "filter": "filter", "kind": "kind", "scope": "scope", "view": "view"},
     InformationFinaliseRequest: {"corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
+    InformationInterchangeCapabilitiesRequest: {"corpus": "corpus", "scope": "scope", "view": "view"},
+    InformationInterchangeExportRequest: {"corpus": "corpus", "revisions": "revisions", "scope": "scope", "view": "view"},
+    InformationInterchangeImportRequest: {"corpus": "corpus", "plan": "plan", "requestId": "request_id", "scope": "scope", "view": "view"},
+    InformationInterchangeOriginRequest: {"corpus": "corpus", "revision": "revision", "scope": "scope", "view": "view"},
+    InformationInterchangeReadableRequest: {"corpus": "corpus", "revision": "revision", "scope": "scope", "view": "view"},
     InformationInventoryRequest: {"corpus": "corpus", "limit": "limit", "offset": "offset", "scope": "scope", "view": "view"},
     InformationLinkRequest: {"collectionProject": "collection_project", "corpus": "corpus", "requestId": "request_id", "revision": "revision", "scope": "scope", "view": "view"},
     InformationListRequest: {"corpus": "corpus", "filter": "filter", "kind": "kind", "limit": "limit", "offset": "offset", "scope": "scope", "view": "view"},

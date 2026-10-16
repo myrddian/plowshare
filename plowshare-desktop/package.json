@@ -51,7 +51,8 @@
     "test:screens": "node scripts/build.mjs && node --experimental-strip-types scripts/screens-smoke.mjs",
     "test:connections": "node scripts/build.mjs && node scripts/connections-smoke.mjs",
     "test:multiple-clients": "node scripts/build.mjs && node scripts/multiple-clients-smoke.mjs",
-    "test:filestores": "node scripts/build.mjs && node scripts/filestores-smoke.mjs"
+    "test:filestores": "node scripts/build.mjs && node scripts/filestores-smoke.mjs",
+    "test:information-interchange": "node scripts/build.mjs && node --experimental-strip-types scripts/information-interchange-smoke.mjs"
   },
   "devDependencies": {
     "@electron/packager": "20.0.4",

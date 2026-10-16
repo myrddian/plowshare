@@ -11,6 +11,76 @@ public sealed interface InformationRequest {
 
   String operation();
 
+  record InterchangeCapabilities(Selection selection) implements InformationRequest {
+    public InterchangeCapabilities {
+      interchangeSelection(selection);
+    }
+
+    public String operation() {
+      return "interchange.capabilities";
+    }
+  }
+
+  record InterchangeExport(Selection selection, List<UUID> revisions)
+      implements InformationRequest {
+    public InterchangeExport {
+      interchangeSelection(selection);
+      revisions = List.copyOf(revisions);
+      if (revisions.isEmpty()
+          || revisions.size() > InformationInterchange.MAX_DOCUMENTS
+          || new HashSet<>(revisions).size() != revisions.size())
+        throw new IllegalArgumentException("Select 1–16 distinct exact revisions");
+    }
+
+    public String operation() {
+      return "interchange.export";
+    }
+  }
+
+  record InterchangeReadable(Selection selection, UUID revision) implements InformationRequest {
+    public InterchangeReadable {
+      interchangeSelection(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    public String operation() {
+      return "interchange.readable";
+    }
+  }
+
+  record InterchangeImport(
+      Selection selection, UUID requestId, InformationInterchange.ImportPlan plan)
+      implements InformationRequest {
+    public InterchangeImport {
+      interchangeSelection(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(plan);
+      if (selection.scope().kind().equals("shared"))
+        throw new IllegalArgumentException("Import requires an owned destination scope");
+    }
+
+    public String operation() {
+      return "interchange.import";
+    }
+  }
+
+  record InterchangeOrigin(Selection selection, UUID revision) implements InformationRequest {
+    public InterchangeOrigin {
+      interchangeSelection(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    public String operation() {
+      return "interchange.origin";
+    }
+  }
+
+  private static void interchangeSelection(Selection selection) {
+    Objects.requireNonNull(selection);
+    if (!selection.corpus().equals("documents") || selection.filter() != null)
+      throw new IllegalArgumentException("Interchange selects exact document revisions");
+  }
+
   @com.fasterxml.jackson.annotation.JsonInclude(
       com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record Scope(String kind, String project, Boolean includeShared) {

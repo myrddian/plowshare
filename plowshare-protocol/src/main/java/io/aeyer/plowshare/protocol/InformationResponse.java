@@ -6,6 +6,41 @@ import java.util.*;
 
 /** Complete result alternatives for information operations; no arbitrary JSON result is exposed. */
 public sealed interface InformationResponse {
+  record InterchangeCapabilities(@JsonValue InformationInterchange.Capabilities value)
+      implements InformationResponse {
+    public InterchangeCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeBundle(@JsonValue InformationInterchange.Bundle value)
+      implements InformationResponse {
+    public InterchangeBundle {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeReadable(@JsonValue InformationInterchange.Readable value)
+      implements InformationResponse {
+    public InterchangeReadable {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeImported(@JsonValue InformationInterchange.Imported value)
+      implements InformationResponse {
+    public InterchangeImported {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeOrigin(@JsonValue InformationInterchange.Origin value)
+      implements InformationResponse {
+    public InterchangeOrigin {
+      Objects.requireNonNull(value);
+    }
+  }
+
   record NavigationCapabilities(@JsonValue InformationNavigation.Capabilities value)
       implements InformationResponse {
     public NavigationCapabilities {
