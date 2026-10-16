@@ -2,6 +2,8 @@
 
 Status: architecture proposal and source map, 17 October 2026. No implementation.
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
+The [role and scope permission matrices](role-scope-permissions-proposal.md)
+separate current operation gates from proposed action bundles and scope overlays.
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners

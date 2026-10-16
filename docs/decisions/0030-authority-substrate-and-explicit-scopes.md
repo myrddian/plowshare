@@ -25,6 +25,9 @@ or impersonation. Administrative authority does not make the administrator SYSTE
 
 The [current implementation and Global migration map](../global-scope-migration-map.md)
 records the source baseline, reusable contracts, gaps and proposed work sequence.
+The [role and scope permission matrices](../role-scope-permissions-proposal.md)
+map current enforcement to proposed ADMIN, MANAGER, CONTRIBUTOR and READER actions,
+including owner-only controls and agent ceilings.
 This decision extends the authority model of [ADR 0026](0026-service-execution-on-behalf-of-an-account.md)
 and must preserve the independent accounting concerns of
 [ADR 0025](0025-service-account-attribution-and-spending-pools.md).
