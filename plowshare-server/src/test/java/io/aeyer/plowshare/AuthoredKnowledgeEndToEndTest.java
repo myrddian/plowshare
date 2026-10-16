@@ -70,7 +70,6 @@ class AuthoredKnowledgeEndToEndTest {
     properties.add("plowshare.data.dir", () -> temporary.resolve("server").toString());
     properties.add(
         "plowshare.projects.workspace-directory", () -> temporary.resolve("workspaces").toString());
-    properties.add("plowshare.information.navigation-writes-enabled", () -> true);
     Path stores = temporary.resolve("filestores.js");
     Files.createDirectories(temporary.resolve("applications"));
     Files.writeString(

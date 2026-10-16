@@ -46,6 +46,19 @@ management:
 # single-pool shape below can be replaced by a complete external pool list.
 # LlmProperties rejects unknown keys and LlmConfig validates the fleet at boot.
 plowshare:
+  information:
+    # Startup-only, server-wide operator controls; both default on. Account/project
+    # roles, service-token ceilings, document access and reference policies still apply.
+    # Details: docs/server-administration.md#information-feature-switches
+    # false stops schema administration, metadata revisions, explicit typing on
+    # admissions and portable import. Retained typed reads/exports and processing
+    # fences remain; ordinary untyped ingestion keeps its existing contract.
+    content-types-enabled: ${PLOWSHARE_INFORMATION_CONTENT_TYPES_ENABLED:true}
+    # false stops relationship create/remove, policy changes and saved-view writes.
+    # Reads, existing links and inherited access obligations remain enforced.
+    # Restoring relationships on import needs both information switches on.
+    # This switch does not select or relax any project's reference policy.
+    navigation-writes-enabled: ${PLOWSHARE_INFORMATION_NAVIGATION_WRITES_ENABLED:true}
   filestores:
     # The Docker image supplies a persistent default; source launches remain explicit.
     # A private Spring overlay can still replace this property entirely.

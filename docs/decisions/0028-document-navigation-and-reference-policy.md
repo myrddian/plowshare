@@ -252,10 +252,16 @@ ledger; approved locked references do not imply body consumption. Policy and
 saved-view controls remain outside model tools. Configured revision hooks keep
 their existing authority and accounting.
 
-Writes require `plowshare.information.navigation-writes-enabled=true`; the default
-is false. Disabling writes retains read enforcement. Existing schema writes and
-legacy revision/collection operations retain their contracts. The implementation
-adds V147 without changing earlier migrations.
+Writes use `plowshare.information.navigation-writes-enabled=true`, which now
+defaults to true under the normal permissions and scope checks. The original
+implementation defaulted it off as a rollout guard; the operator decision on
+17 October 2026 makes enabled behavior the product default. An explicit false
+remains an operator control to suspend new relationship, policy and saved-view
+writes while retaining read enforcement and incurred obligations. It does not
+choose a project's reference policy. Both information controls and their upgrade
+behavior are documented in [server administration](../server-administration.md#information-feature-switches).
+Existing schema writes and legacy revision/collection operations retain their
+contracts. The implementation adds V147 without changing earlier migrations.
 
 ## Consequences and review gate
 
