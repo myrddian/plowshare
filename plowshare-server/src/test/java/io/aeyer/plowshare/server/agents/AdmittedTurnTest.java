@@ -77,6 +77,19 @@ class AdmittedTurnTest {
         });
   }
 
+  /**
+   * Admission settlement precedes JobStore publishing the outcome. Waiting on its callback alone
+   * races publication; DONE is the store's guarantee that the outcome and accounting are visible.
+   */
+  void awaitCompletion(JobStore jobs, String id) throws InterruptedException {
+    assertTrue(ended.await(5, TimeUnit.SECONDS), "admission did not settle");
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (jobs.get(id).state() != Job.State.DONE && System.nanoTime() < deadline) {
+      TimeUnit.MILLISECONDS.sleep(10);
+    }
+    assertEquals(Job.State.DONE, jobs.get(id).state(), "job did not publish its outcome");
+  }
+
   @Test
   void real_turn_persists_identity_before_model_and_settles_existing_budget() throws Exception {
     fixture();
@@ -93,7 +106,7 @@ class AdmittedTurnTest {
     try (JobStore jobs = new JobStore(runtime)) {
       Turn turns = new Turn(jobs, conversations, history, compaction);
       String id = turns.speakAdmitted("cnv_ABC123", definition, "Hello", admission());
-      assertTrue(ended.await(5, TimeUnit.SECONDS));
+      awaitCompletion(jobs, id);
       assertEquals(id, admittedJob.get());
       verify(conversations).turnEnded("cnv_ABC123", budget);
       verify(transcript).confine(any(), eq("alice"));
@@ -125,7 +138,7 @@ class AdmittedTurnTest {
       String id =
           new Turn(jobs, conversations, history, compaction)
               .speakAdmitted("cnv_ABC123", definition, "Hello", admission());
-      assertTrue(ended.await(5, TimeUnit.SECONDS));
+      awaitCompletion(jobs, id);
       assertEquals(Outcome.Ending.ANSWERED, jobs.get(id).outcome().orElseThrow().ending());
       verify(date).run("{}", home);
       assertEquals(2, budget.spent());
@@ -159,7 +172,7 @@ class AdmittedTurnTest {
       String id =
           new Turn(jobs, conversations, history, compaction)
               .speakAdmitted("cnv_ABC123", definition, "Hello", admission());
-      assertTrue(ended.await(5, TimeUnit.SECONDS));
+      awaitCompletion(jobs, id);
       var result = jobs.get(id).outcome().orElseThrow();
       assertEquals(Outcome.Ending.UNAVAILABLE, result.ending());
       assertFalse(result.text().contains("must not escape"));
@@ -190,7 +203,7 @@ class AdmittedTurnTest {
       assertTrue(streaming.await(5, TimeUnit.SECONDS));
       jobs.cancel(id);
       release.countDown();
-      assertTrue(ended.await(5, TimeUnit.SECONDS));
+      awaitCompletion(jobs, id);
       assertEquals(Outcome.Ending.CANCELLED, jobs.get(id).outcome().orElseThrow().ending());
     } finally {
       release.countDown();
@@ -242,7 +255,7 @@ class AdmittedTurnTest {
       String id =
           new Turn(jobs, conversations, history, compaction)
               .speakAdmitted("cnv_ABC123", definition, "Hello", admission());
-      assertTrue(ended.await(5, TimeUnit.SECONDS));
+      awaitCompletion(jobs, id);
       verifyNoInteractions(extras);
       verify(hooks, atLeastOnce()).promptPre(any(), anyString());
       verify(tool, never()).run(anyString(), any());
