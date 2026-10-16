@@ -405,6 +405,49 @@ copies follow explicit destination policies and cannot be remotely revoked.
 Chat/embeddings in acceptance tests remain scripted. Source validation does not
 establish production deployment, migration or navigation-write activation.
 
+## Portable exchange review corrections — 16 October 2026
+
+Independent review of commit `00a2a11` found four issues. The corrections share
+navigation's current/pinned neighbour-disclosure predicate with portable export
+and require a readable current relationship source before exporting an optional
+edge. Included readable history cannot reveal a hidden live relationship. Exact
+permitted pins remain exportable. `PortableInformation` now consumes the existing
+`InformationReadAccess` interface.
+
+Every SDK now verifies readable text against its SHA-256 hash over exact UTF-8
+bytes. The shared boundary corpus contains 447 cases, including correct and
+incorrect hashes for empty text, whitespace, BOM/CRLF, non-BMP and combining
+Unicode. The previously reproduced TypeScript and Python mismatches are refused.
+
+Library keeps the scoped in-memory recovery key when resetting its view. Before
+submitting, it uses a Library-only typed IPC operation and native save dialog to
+write the complete validated recovery record at a user-selected destination.
+The private temporary file is synced and atomically renamed before submission
+can proceed. Cancellation/write failures submit nothing and retain the draft/key.
+After closing Library or restarting, users review that saved file under the
+original connection/account/scope and explicitly recover the original request.
+No automatic replay is introduced.
+
+Focused verification passed 18 PostgreSQL tests: all navigation persistence cases,
+including the new readable-history/hidden-current regression, and both public-SDK
+full-server journeys. Withdrawal models unavailable content; exclusion retains its
+existing discovery-only semantics. The Electron smoke checks canceled/failed
+saves, independently reads the actual saved record before accepting an import,
+then destroys/reopens Library and recovers the same request ID. Three default
+filesystem tests verify complete private writes, symlink-safe replacement and
+failure/invalid-record refusal. The independent reviewer found no further
+actionable issues in the corrected diff.
+
+Final `check formatCheck` passed (132 tasks, 4 minutes 51 seconds), including all
+5,472 default server tests with no failures/errors/skips. `sdkCheck
+sdkPackageCheck` passed (29 tasks, 1 minute 40 seconds), including all 447 shared
+boundary cases and fresh-installed Node/Python/.NET/Go WebSocket conformance.
+The final Desktop check passed all 231 tests, with recovery-file tests included
+in both its Gradle and package entry points.
+Portable exchange, authored-information and navigation Electron smokes all passed
+on the final build. These are source checks against controlled fixtures; no
+deployment or feature activation is included.
+
 ## Scope and estimation
 
 The first milestone includes all admission paths, native SDK contracts and the

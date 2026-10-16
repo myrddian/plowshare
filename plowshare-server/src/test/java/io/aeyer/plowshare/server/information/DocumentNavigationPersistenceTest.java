@@ -204,6 +204,48 @@ class DocumentNavigationPersistenceTest {
   }
 
   @Test
+  void portableRelationshipsDoNotUseReadableHistoryToRevealHiddenCurrentLinks() {
+    UUID a = resource("alice", "operations", "service");
+    UUID b = resource("alice", "operations", "runbook");
+    set(new PolicyTarget("project", "operations", null), 0, permissive());
+    set(
+        new PolicyTarget("document", null, b),
+        0,
+        new PolicySettings(new Policy(false, true, false), Policy.NONE, true, "Restricted"));
+    UUID source = head(a), oldTarget = head(b);
+    link(a, b);
+    work.inTransaction(
+        () -> {
+          repository.lock();
+          return repository.create(
+              alice, UUID.randomUUID(), a, new Target(b, oldTarget), "pinned", source);
+        });
+    var interchange = new JdbcInformationInterchangeRepository(jdbc);
+    var selected = List.of(source, oldTarget);
+    assertEquals(2, interchange.relationships(viewer, selected).size());
+
+    UUID latest = revision(b, 2, "alice", "operations", "runbook");
+    jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", latest);
+    assertTrue(readable(a, "viewer", "operations"));
+    assertInstanceOf(Readable.class, repository.select(viewer, new Target(b, oldTarget)));
+    assertInstanceOf(Unavailable.class, repository.select(viewer, new Target(b, null)));
+    var ordinary = repository.relationships(viewer, a, "outgoing", null, 50, 0).connections();
+    assertEquals(1, ordinary.size());
+    assertEquals("pinned", ordinary.getFirst().relationship().relation());
+    var exported = interchange.relationships(viewer, selected);
+    assertEquals(1, exported.size());
+    assertEquals("pinned", exported.getFirst().relation());
+    assertEquals(oldTarget, exported.getFirst().pinnedRevision());
+
+    // An old readable source must not expose its unavailable current resource's graph either.
+    UUID latestSource = revision(a, 2, "alice", "operations", "service");
+    jdbc.update(
+        "UPDATE information_revisions SET availability='withdrawn' WHERE id=?", latestSource);
+    assertInstanceOf(Readable.class, repository.select(viewer, new Target(a, source)));
+    assertTrue(interchange.relationships(viewer, selected).isEmpty());
+  }
+
+  @Test
   void latestHeadNeverFallsBackAndDocumentCountsDeduplicateTags() {
     UUID a = resource("alice", "operations", "runbook");
     UUID old = head(a);

@@ -30,6 +30,14 @@ const portableNext='22222222-2222-4222-8222-222222222222';
 const reusedBundle={...portableBundle,documents:[...portableBundle.documents,{descriptor:{...portableDescriptor,revision:portableNext,ordinal:2,path:'documents/next.md',provenance:{...portableDescriptor.provenance,dependencies:[receipt]}},bytesBase64:portableBody.toString('base64')}]};
 input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:reusedBundle,destinations:[{resource:receipt,name:'imported/source.md',mode:'revise',expectedRevision:portableNext}],reuse:[{foreignRevision:receipt,localRevision:receipt}]}},true);
 
+const portableReadable={format:portableBundle.format,path:portableDescriptor.path,representation:'original_markdown',markdown:portableBody.toString('utf8'),textHash:portableHash,sidecar:portableDescriptor};
+result('information.interchange.readable',portableReadable,true);
+result('information.interchange.readable',{...portableReadable,textHash:'0'.repeat(64)},false);
+for(const markdown of ['', ' \r\n', '\uFEFF# Safety 🔎\r\n', 'é e\u0301 漢字']) {
+  const textHash=createHash('sha256').update(markdown,'utf8').digest('hex');
+  result('information.interchange.readable',{...portableReadable,markdown,textHash},true);
+  result('information.interchange.readable',{...portableReadable,markdown,textHash:'0'.repeat(64)},false);
+}
 result('information.interchange.export',portableBundle,true);
 input('information.interchange.export',{scope:{kind:'personal'},revisions:[receipt]},true);
 for(const revisions of [[],['bad'],Array(17).fill(receipt),[receipt,receipt]]) input('information.interchange.export',{scope:{kind:'personal'},revisions},false);

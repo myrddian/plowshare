@@ -27,7 +27,8 @@ public final class JdbcInformationInterchangeRepository
         revision);
   }
 
-  public List<Link> relationships(List<UUID> revisions) {
+  public List<Link> relationships(InformationContext context, List<UUID> revisions) {
+    Objects.requireNonNull(context);
     revisions = List.copyOf(revisions);
     if (revisions.isEmpty()
         || revisions.size() > 16
@@ -39,6 +40,14 @@ public final class JdbcInformationInterchangeRepository
     args.addAll(revisions);
     args.addAll(revisions);
     args.addAll(revisions);
+    var visible = InformationSql.relationshipNeighbour(context, true);
+    args.add(context.account());
+    args.add(context.selection().scope().name().toLowerCase(Locale.ROOT));
+    args.add(context.selection().project());
+    args.add(context.selection().includeShared());
+    args.addAll(visible.arguments());
+    // Historical bytes do not grant access to a resource's current relationships. Use the same
+    // source/current-head and neighbour disclosure predicates as ordinary outgoing navigation.
     return jdbc
         .query(
             "SELECT e.source,e.target,e.pinned_revision,e.relation FROM information_relationships e WHERE NOT e.removed AND e.source IN (SELECT resource_id FROM information_revisions WHERE id IN ("
@@ -47,7 +56,9 @@ public final class JdbcInformationInterchangeRepository
                 + slots
                 + ")) AND (e.pinned_revision IS NULL OR e.pinned_revision IN ("
                 + slots
-                + ")) ORDER BY e.source,e.target,e.relation,e.pinned_revision LIMIT 65",
+                + ")) AND information_readable(information_navigation_head(e.source),?,?,?,?) AND "
+                + visible.sql()
+                + " ORDER BY e.source,e.target,e.relation,e.pinned_revision LIMIT 65",
             (r, n) ->
                 new Link(
                     r.getObject(1, UUID.class),

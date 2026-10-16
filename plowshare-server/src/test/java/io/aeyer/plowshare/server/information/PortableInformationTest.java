@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 /** Export authorization must finish before any source bytes can leave a dependency closure. */
 class PortableInformationTest {
-  final InformationCatalogue catalogue = mock(InformationCatalogue.class);
+  final InformationReadAccess catalogue = mock(InformationReadAccess.class);
   final InformationCatalogueRepository records = mock(InformationCatalogueRepository.class);
   final InformationContentRepository content = mock(InformationContentRepository.class);
   final InformationInterchangeRepository repository = mock(InformationInterchangeRepository.class);
@@ -81,7 +81,7 @@ class PortableInformationTest {
                 null));
     verify(records, never()).bytes(any());
     verify(records, never()).metadata(any());
-    verify(repository, never()).relationships(anyList());
+    verify(repository, never()).relationships(any(), anyList());
   }
 
   @Test

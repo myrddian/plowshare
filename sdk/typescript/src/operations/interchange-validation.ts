@@ -37,6 +37,30 @@ export function portableBytes(encoded: string): Uint8Array {
   }
   return result;
 }
+/** Exact UTF-8 bytes without a Node/DOM dependency; reject malformed Unicode rather than repair it. */
+function utf8Bytes(value: string): Uint8Array {
+  const bytes = new Uint8Array(utf8Length(value));
+  let offset = 0;
+  for (const character of value) {
+    const point = character.codePointAt(0) ?? 0;
+    if (point >= 0xd800 && point <= 0xdfff) fail();
+    if (point < 0x80) bytes[offset++] = point;
+    else if (point < 0x800) {
+      bytes[offset++] = 0xc0 | (point >> 6);
+      bytes[offset++] = 0x80 | (point & 0x3f);
+    } else if (point < 0x10000) {
+      bytes[offset++] = 0xe0 | (point >> 12);
+      bytes[offset++] = 0x80 | ((point >> 6) & 0x3f);
+      bytes[offset++] = 0x80 | (point & 0x3f);
+    } else {
+      bytes[offset++] = 0xf0 | (point >> 18);
+      bytes[offset++] = 0x80 | ((point >> 12) & 0x3f);
+      bytes[offset++] = 0x80 | ((point >> 6) & 0x3f);
+      bytes[offset++] = 0x80 | (point & 0x3f);
+    }
+  }
+  return bytes;
+}
 function fail(): never {
   throw new Error(
     'Invalid portable data: check paths, identities, hashes and dependency mappings',
@@ -280,7 +304,8 @@ export function interchangeProblem(
         portablePath(row['path']);
         hash(row['textHash']);
         descriptor(row['sidecar']);
-        text(row['markdown'], 2097152, false);
+        const markdown = text(row['markdown'], 2097152, false);
+        if (sha256(utf8Bytes(markdown)) !== row['textHash']) fail();
       }
       if (type.endsWith('.import')) {
         id(row['bundle']);

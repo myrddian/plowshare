@@ -17,7 +17,7 @@ import java.util.*;
  * scheduled.
  */
 public final class PortableInformation implements InformationInterchangeService {
-  private final InformationCatalogue catalogue;
+  private final InformationReadAccess catalogue;
   private final InformationCatalogueRepository records;
   private final InformationContentRepository content;
   private final InformationContentTypes types;
@@ -30,7 +30,7 @@ public final class PortableInformation implements InformationInterchangeService 
   private final InformationTransitions gates;
 
   public PortableInformation(
-      InformationCatalogue catalogue,
+      InformationReadAccess catalogue,
       InformationCatalogueRepository records,
       InformationContentRepository content,
       InformationContentTypes types,
@@ -123,7 +123,7 @@ public final class PortableInformation implements InformationInterchangeService 
             InformationInterchange.FORMAT,
             UUID.randomUUID(),
             docs,
-            repository.relationships(List.copyOf(visited)),
+            repository.relationships(context, List.copyOf(visited)),
             InformationInterchange.COVERAGE);
     bounded(bundle);
     return bundle;

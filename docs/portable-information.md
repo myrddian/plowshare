@@ -127,8 +127,16 @@ retained access constraints even when ordinary links are omitted or later remove
 In Library, choose an import-plan JSON file, review the displayed destinations,
 revision counts and relationship choice, then confirm **Import reviewed plan**.
 Malformed plans are refused before submission. Changing connection/scope requires
-review again. The request ID remains stable across a refusal or uncertain response;
-recover the same request rather than creating a replacement effect.
+review again. The request ID remains stable across a refusal or uncertain response. Reopening
+the sources panel in the same Library window preserves the reviewed draft. Before submission Library opens a native save dialog for
+an import recovery JSON file containing the original request ID, scope and exact
+plan. The import is submitted only after the complete file is written and synced;
+canceling the save or a write failure prevents submission. Keep that file until
+the outcome is known. After closing the Library window or restarting the app, select the
+original connection/account/scope, review the recovery file through the same file
+picker, and explicitly confirm recovery. Loading a recovery file never submits
+work automatically. Recover the same request rather than reviewing the original
+plain plan as a new operation.
 
 ## What is retained
 

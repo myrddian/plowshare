@@ -1,3 +1,9 @@
+import {
+  RECOVERY_FORMAT,
+  scopeKey,
+  recoveryContext,
+  decodeImportRecovery,
+} from '../import-recovery-contract.ts';
 import type { PortableCodec } from 'plowshare-client-ts/operations/interchange-files';
 import { sha256 } from 'plowshare-client-ts/binding/sha256';
 import type { DesktopApi } from '../shared.ts';
@@ -6,7 +12,7 @@ import { decodeInformationCall } from 'plowshare-client-ts/operations/informatio
 import { decodeReply } from 'plowshare-client-ts/operations/schema';
 import type { PortableImportPlan } from 'plowshare-client-ts/operations/information-interchange';
 import { readablePortableFiles } from 'plowshare-client-ts/operations/interchange-files';
-import { errorMessage } from 'plowshare-client-ts/binding/values';
+import { errorMessage, isObject } from 'plowshare-client-ts/binding/values';
 
 const codec: PortableCodec = {
   encode: (text) => new TextEncoder().encode(text),
@@ -19,6 +25,12 @@ const codec: PortableCodec = {
   unbase64: (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0)),
   hash: (bytes) => Promise.resolve(sha256(bytes)),
 };
+interface ImportDraft {
+  readonly plan: PortableImportPlan;
+  readonly requestId: string;
+  readonly context: string;
+  recoverySaved: boolean;
+}
 /** Portable exchange owns only a reviewed draft; the server owns admission and receipt recovery. */
 export function installInformationInterchange(
   api: DesktopApi,
@@ -31,24 +43,39 @@ export function installInformationInterchange(
   const panel = document.createElement('details');
   panel.hidden = true;
   panel.className = 'information-interchange';
-  panel.innerHTML = `<summary>Portable exchange</summary><p>Export a selected version for external authoring. Bundles include original bytes, metadata and permitted dependencies. Markdown exports label extracted text.</p><button type="button" data-portable-bundle>Download selected document bundle</button><button type="button" data-portable-readable>Download Markdown and sidecar</button><p>Import a prepared plan with explicit destinations, schema mappings and relationship choices. Imported documents remain unprocessed until you request processing.</p><form data-portable-review><label>Import plan file<input name="plan" type="file" accept="application/json,.json" required></label><button>Review import plan</button></form><section data-portable-preview></section><button type="button" data-portable-import hidden>Import reviewed plan</button><p data-portable-status role="status"></p>`;
+  panel.innerHTML = `<summary>Portable exchange</summary><p>Export a selected version for external authoring. Bundles include original bytes, metadata and permitted dependencies. Markdown exports label extracted text.</p><button type="button" data-portable-bundle>Download selected document bundle</button><button type="button" data-portable-readable>Download Markdown and sidecar</button><p>Import a prepared plan or recovery file with explicit destinations, schema mappings and relationship choices. A recovery file must be saved before submission; keep it until the result is known. Imported documents remain unprocessed until you request processing.</p><form data-portable-review><label>Import plan or recovery file<input name="plan" type="file" accept="application/json,.json" required></label><button>Review import plan</button></form><section data-portable-preview></section><button type="button" data-portable-import hidden>Import reviewed plan</button><p data-portable-status role="status"></p>`;
   host.append(panel);
   const statusNode = panel.querySelector<HTMLElement>('[data-portable-status]'),
-    preview = panel.querySelector<HTMLElement>('[data-portable-preview]'),
-    confirm = panel.querySelector<HTMLButtonElement>('[data-portable-import]');
-  if (!statusNode || !preview || !confirm)
+    previewNode = panel.querySelector<HTMLElement>('[data-portable-preview]'),
+    confirmNode = panel.querySelector<HTMLButtonElement>(
+      '[data-portable-import]',
+    );
+  if (!statusNode || !previewNode || !confirmNode)
     throw new Error('Portable exchange controls unavailable');
-  const status = statusNode;
-  let prepared:
-    | {
-        readonly plan: PortableImportPlan;
-        readonly requestId: string;
-        readonly context: string;
-      }
-    | undefined;
+  const status = statusNode,
+    preview = previewNode,
+    confirm = confirmNode;
+  let prepared: ImportDraft | undefined;
   let busy = false,
     generation = 0;
-  const context = () => JSON.stringify([identity(), scope()]);
+  const context = () => recoveryContext(identity(), scope());
+
+  function showReview(draft: ImportDraft) {
+    preview.replaceChildren();
+    const summary = document.createElement('p');
+    summary.textContent = `Admit ${draft.plan.bundle.documents.length - draft.plan.reuse.length} new versions; reuse ${draft.plan.reuse.length} existing versions. ${draft.plan.restoreRelationships ? 'Restore mapped relationships.' : 'Omit relationship restoration.'} Foreign authorship remains an unverified origin claim.`;
+    preview.append(summary);
+    const list = document.createElement('ul');
+    for (const destination of draft.plan.destinations) {
+      const row = document.createElement('li');
+      row.textContent = `${destination.name}: ${destination.mode === 'create' ? 'create only; refuse an existing name' : 'revise only against the selected starting version'}`;
+      list.append(row);
+    }
+    preview.append(list);
+    confirm.hidden = false;
+    status.textContent =
+      'Review the destinations, then submit or recover this import. Recovery always uses the original request ID.';
+  }
   function download(name: string, bytes: Uint8Array) {
     const url = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer])),
       anchor = document.createElement('a');
@@ -143,9 +170,23 @@ export function installInformationInterchange(
         const key = context(),
           stamp = generation,
           raw: unknown = JSON.parse(await file.text());
+        let requestId: string = crypto.randomUUID(),
+          plan: unknown = raw;
+        if (isObject(raw) && raw['format'] === RECOVERY_FORMAT) {
+          const recovered = decodeImportRecovery(raw);
+          if (
+            recovered.context !== key ||
+            scopeKey(recovered.scope) !== scopeKey(scope())
+          )
+            throw new Error(
+              'Select the original connection, account and scope before reviewing this recovery file.',
+            );
+          requestId = recovered.requestId;
+          plan = recovered.plan;
+        }
         const checked = decodeInformationCall(
           'interchange.import',
-          { requestId: crypto.randomUUID(), plan: raw },
+          { requestId, plan },
           scope(),
         );
         if (checked.operation !== 'interchange.import')
@@ -155,19 +196,9 @@ export function installInformationInterchange(
           plan: checked.payload.plan,
           requestId: checked.payload.requestId,
           context: key,
+          recoverySaved: false,
         };
-        const summary = document.createElement('p');
-        summary.textContent = `Admit ${prepared.plan.bundle.documents.length - prepared.plan.reuse.length} new versions; reuse ${prepared.plan.reuse.length} existing versions. ${prepared.plan.restoreRelationships ? 'Restore mapped relationships.' : 'Omit relationship restoration.'} Foreign authorship remains an unverified origin claim.`;
-        preview.append(summary);
-        const list = document.createElement('ul');
-        for (const destination of prepared.plan.destinations) {
-          const row = document.createElement('li');
-          row.textContent = `${destination.name}: ${destination.mode === 'create' ? 'create only; refuse an existing name' : 'revise only against the selected starting version'}`;
-          list.append(row);
-        }
-        preview.append(list);
-        confirm.hidden = false;
-        status.textContent = 'Review the destinations and confirm import.';
+        showReview(prepared);
       });
     });
   confirm.addEventListener('click', () =>
@@ -182,6 +213,25 @@ export function installInformationInterchange(
         { plan: draft.plan, requestId: draft.requestId },
         scope(),
       );
+      // Await actual private-file persistence before any uncertain network effect. Canceling
+      // the native picker or a write failure leaves the original draft/key available to retry.
+      if (!draft.recoverySaved) {
+        await api.request({
+          action: 'information-import-recovery-save',
+          recovery: {
+            format: RECOVERY_FORMAT,
+            requestId: draft.requestId,
+            context: draft.context,
+            scope: scope(),
+            plan: draft.plan,
+          },
+        });
+        if (draft.context !== context())
+          throw new Error(
+            'The connection or scope changed. Review this import again.',
+          );
+        draft.recoverySaved = true;
+      }
       const answer = await api.request({
         action: 'information',
         ...checked,
@@ -220,14 +270,18 @@ export function installInformationInterchange(
           scope: scope(),
         });
         decodeReply('information.interchange.capabilities', answer.information);
-        if (stamp === generation && key === context()) panel.hidden = false;
+        if (stamp === generation && key === context()) {
+          panel.hidden = false;
+          if (prepared?.context === key) showReview(prepared);
+        }
       } catch {
         /* Older servers do not offer portable exchange. Existing Library operations remain available. */
       }
     },
     reset() {
       generation++;
-      prepared = undefined;
+      // Reset the view, not an uncertain operation's recovery identity. Probe requires the same
+      // connection/account/scope and another explicit confirmation before submitting anything.
       confirm.hidden = true;
       panel.hidden = true;
       panel.open = false;

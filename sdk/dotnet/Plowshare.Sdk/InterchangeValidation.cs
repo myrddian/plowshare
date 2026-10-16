@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -7,6 +8,7 @@ namespace Plowshare.Sdk;
 /// <summary>Private codec validation of foreign graph data, never permissions or application DTOs.</summary>
 internal static class InterchangeValidation
 {
+    private sealed record Readable(string Markdown, string TextHash);
     private sealed record Evidence(string Revision, int Start, int End, string Quote);
     private sealed record Provenance(string SourceHash, string[] Dependencies, Evidence[] Evidence);
     private sealed record Descriptor(string Resource, string Revision, int Ordinal, string Path, string ContentHash, Provenance Provenance);
@@ -59,6 +61,22 @@ internal static class InterchangeValidation
     {
         switch (kind)
         {
+            case "readable":
+                var readable = value.Deserialize<Readable>(Options) ?? throw new JsonException("Missing readable export");
+                if (readable.Markdown is null) throw new JsonException("Missing readable text");
+                // Strict encoding preserves the exact text and refuses malformed Unicode.
+                byte[] bytes;
+                try
+                {
+                    bytes = new UTF8Encoding(false, true).GetBytes(readable.Markdown);
+                }
+                catch (EncoderFallbackException invalid)
+                {
+                    throw new JsonException("Invalid readable Unicode", invalid);
+                }
+                if (Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant() != readable.TextHash)
+                    throw new JsonException("Readable text hash differs");
+                break;
             case "descriptor": CheckDescriptor(value.Deserialize<Descriptor>(Options) ?? throw new JsonException("Missing descriptor")); break;
             case "bundle": CheckBundle(value.Deserialize<Bundle>(Options) ?? throw new JsonException("Missing bundle")); break;
             case "plan":

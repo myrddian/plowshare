@@ -179,6 +179,6 @@ describe('portable external authoring', () => {
     );
     await expect(
       readablePortableFiles({ ...readable, textHash: '0'.repeat(64) }, codec),
-    ).rejects.toThrow('hash differs');
+    ).rejects.toThrow('Invalid portable data');
   });
 });

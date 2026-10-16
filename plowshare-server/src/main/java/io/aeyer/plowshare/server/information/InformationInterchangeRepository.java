@@ -9,7 +9,10 @@ import java.util.*;
 public interface InformationInterchangeRepository {
   List<UUID> dependencies(UUID revision);
 
-  List<Link> relationships(List<UUID> revisions);
+  /**
+   * Included endpoints do not authorize disclosure; filter live/pinned visibility before bounds.
+   */
+  List<Link> relationships(InformationContext context, List<UUID> revisions);
 
   void lockDestination(InformationContext context, String name);
 

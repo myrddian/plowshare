@@ -635,7 +635,7 @@ export function constrain(graph) {
       if(title==='PortableDocument') field(s,'bytesBase64',{minLength:4,maxLength:2796204,pattern:'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$'});
       if(title==='PortableLink') field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
       if(title==='PortableImported') field(s,'mappings',{minItems:1,maxItems:16});
-      if(title==='PortableReadable') field(s,'markdown',text(2097152));
+      if(title==='PortableReadable') {add(s,{portableGraph:'readable'});field(s,'markdown',text(2097152));}
     }
     if (title === 'NavigationPath') field(s,'steps',{minItems:1,maxItems:32,navigationSteps:true});
     if (title === 'ReferencePolicySettings') field(s,'referenceLabel',{...identity,maxLength:120});

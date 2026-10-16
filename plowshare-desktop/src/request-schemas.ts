@@ -11117,6 +11117,56 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
       ],
       "additionalProperties": false
     },
+    "shape882": {
+      "const": "information-import-recovery-save"
+    },
+    "shape884": {
+      "const": "plowshare-information-import-recovery/1"
+    },
+    "shape883": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/shape6"
+        },
+        "format": {
+          "$ref": "#/$defs/shape884"
+        },
+        "plan": {
+          "$ref": "#/$defs/shape263"
+        },
+        "requestId": {
+          "$ref": "#/$defs/shape6"
+        },
+        "scope": {
+          "$ref": "#/$defs/shape181"
+        }
+      },
+      "required": [
+        "context",
+        "format",
+        "plan",
+        "requestId",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "shape881": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/shape882"
+        },
+        "recovery": {
+          "$ref": "#/$defs/shape883"
+        }
+      },
+      "required": [
+        "action",
+        "recovery"
+      ],
+      "additionalProperties": false
+    },
     "shape0": {
       "anyOf": [
         {
@@ -11781,6 +11831,9 @@ export const DESKTOP_SCHEMA: {request: Schema; $defs: Record<string,Schema>} = {
         },
         {
           "$ref": "#/$defs/shape872"
+        },
+        {
+          "$ref": "#/$defs/shape881"
         }
       ]
     }

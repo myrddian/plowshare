@@ -132,7 +132,14 @@ def _bundle(value: object) -> dict[str, object]:
 
 
 def check(value: object, kind: str) -> None:
-    if kind == "descriptor":
+    if kind == "readable":
+        readable = _object(value)
+        # Hash the exact UTF-8 text, preserving BOM and line endings; do not normalize or repair.
+        if hashlib.sha256(
+            _text(readable.get("markdown")).encode("utf-8")
+        ).hexdigest() != readable.get("textHash"):
+            raise ValueError("Readable text hash differs")
+    elif kind == "descriptor":
         _descriptor(value)
     elif kind == "bundle":
         _bundle(value)

@@ -171,6 +171,20 @@ func checkPortableGraph(kind string, value any) error {
 		return err
 	}
 	switch kind {
+	case "readable":
+		var readable struct {
+			Markdown string
+			TextHash string
+		}
+		if err = json.Unmarshal(encoded, &readable); err != nil {
+			return err
+		}
+		// Hash exact UTF-8 bytes without normalizing BOM, Unicode or line endings.
+		sum := sha256.Sum256([]byte(readable.Markdown))
+		if hex.EncodeToString(sum[:]) != readable.TextHash {
+			return contractError
+		}
+		return nil
 	case "descriptor":
 		var d portableDescriptor
 		if err = json.Unmarshal(encoded, &d); err != nil {

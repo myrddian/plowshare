@@ -42,6 +42,32 @@ public final class InformationSql {
         List.of(context.typedView()));
   }
 
+  /**
+   * Resolve relationship neighbours exactly as navigation does: live links use the current head,
+   * pins use their exact revision, and unavailable content exposes only permitted references.
+   * Repositories apply this predicate before paging or export bounds. The e alias is code-owned.
+   */
+  public static Filter relationshipNeighbour(InformationContext context, boolean outgoing) {
+    String neighbour = outgoing ? "e.target" : "e.source";
+    String pin = outgoing ? "e.pinned_revision" : "NULL::uuid";
+    return new Filter(
+        "(information_navigation_own_readable(coalesce("
+            + pin
+            + ",information_navigation_head("
+            + neighbour
+            + ")),?,?) AND information_reference_readable(coalesce("
+            + pin
+            + ",information_navigation_head("
+            + neighbour
+            + ")),?,?) OR information_navigation_reference_visible("
+            + neighbour
+            + ",?,?))",
+        java.util.Arrays.asList(
+            context.account(), context.selection().project(),
+            context.account(), context.selection().project(),
+            context.account(), context.selection().project()));
+  }
+
   public record Filter(String sql, List<Object> arguments) {
     public Filter {
       Objects.requireNonNull(sql, "sql");

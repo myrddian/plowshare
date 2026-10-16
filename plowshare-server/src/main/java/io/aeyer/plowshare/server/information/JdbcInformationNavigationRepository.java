@@ -503,30 +503,13 @@ public final class JdbcInformationNavigationRepository implements InformationNav
     boolean outgoing = direction.equals("outgoing");
     // Filter hidden neighbours BEFORE paging. Returned relationship fields never contain captions.
     String neighbour = outgoing ? "e.target" : "e.source";
-    String pin = outgoing ? "e.pinned_revision" : "NULL::uuid";
-    String visible =
-        "(information_navigation_own_readable(coalesce("
-            + pin
-            + ",information_navigation_head("
-            + neighbour
-            + ")),?,?) AND information_reference_readable(coalesce("
-            + pin
-            + ",information_navigation_head("
-            + neighbour
-            + ")),?,?) OR information_navigation_reference_visible("
-            + neighbour
-            + ",?,?))";
+    var visible = InformationSql.relationshipNeighbour(c, outgoing);
     var a = new ArrayList<Object>();
     a.add(resource);
     a.addAll(args(c));
     if (relation != null) a.add(relation);
     if (otherResource != null) a.add(otherResource);
-    a.add(c.account());
-    a.add(c.selection().project());
-    a.add(c.account());
-    a.add(c.selection().project());
-    a.add(c.account());
-    a.add(c.selection().project());
+    a.addAll(visible.arguments());
     a.add(limit);
     a.add(offset);
     var edges =
@@ -539,7 +522,7 @@ public final class JdbcInformationNavigationRepository implements InformationNav
                 + (relation == null ? "" : " AND e.relation=?")
                 + (otherResource == null ? "" : " AND " + neighbour + "=?")
                 + " AND "
-                + visible
+                + visible.sql()
                 + " ORDER BY e.id LIMIT ? OFFSET ?",
             (rs, n) -> relationship(rs),
             a.toArray());

@@ -22,7 +22,7 @@ public class InformationConfig {
 
   @Bean
   public InformationInterchangeService informationInterchangeService(
-      InformationCatalogue catalogue,
+      InformationReadAccess catalogue,
       InformationCatalogueRepository records,
       InformationContentRepository content,
       InformationContentTypes types,

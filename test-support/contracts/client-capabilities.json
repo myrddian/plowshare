@@ -4176,6 +4176,7 @@
       "typescriptConstants": [],
       "desktopConsumer": true,
       "desktopSourceReferences": [
+        "plowshare-desktop/src/import-recovery-contract.ts",
         "plowshare-desktop/src/renderer/information-interchange.ts"
       ],
       "headlessCliConsumer": true,
