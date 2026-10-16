@@ -19,6 +19,8 @@
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
+- [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (proposed architecture)
+- [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
