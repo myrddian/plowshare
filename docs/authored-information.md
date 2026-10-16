@@ -176,7 +176,10 @@ Reuse is bounded to 10,000 rows per corpus hierarchy and 64 MiB of retained
 projection material. Oversized projections remain unprepared while metadata can
 still be saved with compatible extraction. Code revisions are not supported.
 
-Set `plowshare.information.content-types-enabled=false` to stop authored writes
-during rollback. Retained bindings, typed reads and processing fences remain in
-place. Migrations are additive: existing revisions remain untyped; no byte rewrite
+`plowshare.information.content-types-enabled` defaults to `true`. Operators can
+set it to `false` to suspend schema administration, metadata revisions, admissions
+with explicit typing directives and portable imports. The independent navigation-write switch also defaults
+on; see [information feature switches](server-administration.md#information-feature-switches)
+for scope, environment overrides and restart behavior. Retained bindings, typed
+reads and processing fences remain in place. Migrations are additive: existing revisions remain untyped; no byte rewrite
 or inferred metadata backfill occurs.

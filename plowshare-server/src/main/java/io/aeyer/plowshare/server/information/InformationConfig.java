@@ -14,6 +14,7 @@ import org.springframework.context.annotation.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration
+@Import(InformationFeatureConfig.class)
 public class InformationConfig {
   @Bean
   public InformationInterchangeRepository informationInterchangeRepository(JdbcTemplate jdbc) {
@@ -50,25 +51,6 @@ public class InformationConfig {
   @Bean
   public InformationNavigationRepository informationNavigationRepository(JdbcTemplate jdbc) {
     return new JdbcInformationNavigationRepository(jdbc);
-  }
-
-  @Bean
-  public InformationNavigationService informationNavigationService(
-      InformationNavigationRepository repository,
-      InformationAccess access,
-      UnitOfWork work,
-      @org.springframework.beans.factory.annotation.Value(
-              "${plowshare.information.navigation-writes-enabled:false}")
-          boolean enabled) {
-    return new DocumentNavigation(repository, access, work, enabled);
-  }
-
-  @Bean
-  public InformationContentSettings informationContentSettings(
-      @org.springframework.beans.factory.annotation.Value(
-              "${plowshare.information.content-types-enabled:true}")
-          boolean enabled) {
-    return new InformationContentSettings(enabled);
   }
 
   @Bean
