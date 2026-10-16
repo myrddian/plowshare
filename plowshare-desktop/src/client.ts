@@ -89,6 +89,7 @@ import {
   readingLogTail,
   readingLogBefore,
   listingMyApprovals,
+  listingAsked,
   answeringApproval,
 } from 'plowshare-client-ts/operations/session';
 import {
@@ -117,6 +118,7 @@ import type {
   Reply,
   Request,
   Conversation,
+  Approval,
 } from './shared.ts';
 import { demoState, demoAnswer } from './demo.ts';
 
@@ -1819,6 +1821,8 @@ export class DesktopClient {
       )
         await this.catchUp(conversation);
     }
+    await this.refresh();
+    this.emit();
   }
   private syncFollows(): Promise<void> {
     if (this.followFlight) return this.followFlight;
@@ -2531,13 +2535,36 @@ export class DesktopClient {
     flight.promise = (async () => {
       do {
         flight.dirty = false;
-        const listed = approvalsOf(ok(await this.send(listingMyApprovals())));
-        if (!listed)
-          throw new Error(
-            'The server returned an unreadable approval listing.',
-          );
+        // Attended command questions belong to their conversation and have no
+        // pinned account recipient. Account-only reads find background questions
+        // but omit those foreground requests. Read both through their owning APIs.
+        const conversations = new Set([
+          ...this.views.values(),
+          ...this.state.jobs
+            .filter(
+              (job) =>
+                job.ending === 'AWAITING' &&
+                inspectionConversation(this.state, job.conversation),
+            )
+            .map((job) => job.conversation),
+        ]);
+        const pages = await Promise.all(
+          [listingMyApprovals(), ...[...conversations].map(listingAsked)].map(
+            async (request) => {
+              const rows = approvalsOf(ok(await this.send(request)));
+              if (!rows)
+                throw new Error(
+                  'The server returned an unreadable approval listing.',
+                );
+              return rows;
+            },
+          ),
+        );
+        const listed = new Map<string, Approval>();
+        for (const rows of pages)
+          for (const row of rows) listed.set(row.id, row);
         if (generation === this.generation && this.state.connected)
-          this.state.approvals = listed;
+          this.state.approvals = [...listed.values()];
       } while (
         flight.dirty &&
         generation === this.generation &&
