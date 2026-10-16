@@ -330,3 +330,9 @@ tasks.named("check") {
 // base plugin's `clean` deletes on its own. `node_modules/` is not in that set
 // on purpose: it is a dependency cache, and deleting it on `clean` would make
 // every clean build a network operation.
+
+// Source execution still imports compiled SDK and MCP packages. Assemble must prepare
+// the same runtime graph as check; installing only the TUI leaves linked packages unbuilt.
+tasks.named("assemble") {
+    dependsOn(pnpmInstall, ":plowshare-mcp-integration:mcpIntegrationBuild")
+}

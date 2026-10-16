@@ -32,8 +32,11 @@ if ! command -v node >/dev/null || ! node -e 'const [major,minor]=process.versio
     echo 'plowshare-talk: Node 22.13 or newer is required.' >&2
     exit 2
 fi
-if [[ ! -f "$CLIENT/node_modules/plowshare-client-ts/build/binding/auth.js" ]]; then
-    echo 'Build the client with ./gradlew :plowshare-client-ts:assemble :plowshare-tui:pnpmInstall.' >&2
+if [[ ! -f "$CLIENT/node_modules/plowshare-client-ts/build/binding/auth.js" ||
+      ! -f "$CLIENT/node_modules/plowshare-client-node/build/marker.js" ||
+      ! -f "$CLIENT/node_modules/plowshare-mcp-integration/build/mcp/index.js" ||
+      ! -f "$CLIENT/node_modules/plowshare-mcp-integration/build/mcp/native-editor.js" ]]; then
+    echo 'Build the client with ./gradlew :plowshare-tui:assemble.' >&2
     exit 2
 fi
 # Preserve the caller's project root before moving into the client source tree.
