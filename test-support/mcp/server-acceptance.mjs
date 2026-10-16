@@ -54,6 +54,7 @@ const request = async (client, operation, payload) =>
 const agent =
   '---\nname: mcp_probe\ndescription: Isolated MCP acceptance\nmodel: mcp-test-chat\nmax-turns: 4\nmax-model-calls: 8\ndynamic: true\nexported: true\ntools: []\n---\nCall the offered MCP echo once, then finish.\n';
 let integration;
+let integrationFailure;
 const stop = new AbortController();
 try {
   if (action === 'provision') {
@@ -177,6 +178,21 @@ try {
     await persist(state + '/application.json', overlay);
     saved.phase = 'provisioned';
     await persist(secretFile, saved);
+    const login = [
+      'Local MCP test instance',
+      'Console: ' + origin,
+      '',
+      'Administrator: test-admin',
+      'Password: ' + settings.password,
+      '',
+      ...saved.users.flatMap((user) => [
+        'User: ' + user.account,
+        'Password: ' + user.password,
+        '',
+      ]),
+      'Synthetic model/MCP services only. Keep this file private.',
+    ].join('\n');
+    await writeFile(state + '/LOGIN.txt', login, { mode: 0o600, flag: 'wx' });
     console.log(
       'Provisioned two users and an Application-owned service identity. Stop/start the instance, then run exercise.',
     );
@@ -295,7 +311,6 @@ try {
       },
       workers: saved.workers,
     });
-    let integrationFailure;
     integration = runIntegration(
       executor,
       config,
@@ -404,7 +419,7 @@ try {
         label +
           ': own credential, two clients and one MCP effect passed; accounting ' +
           (actor.accountingGap
-            ? 'BLOCKED by public response contract'
+            ? 'BLOCKED by public accounting read'
             : 'passed'),
       );
     }
@@ -432,7 +447,11 @@ try {
       status: accountingPassed ? 'passed' : 'blocked-accounting',
       accounting: accountingPassed
         ? 'verified public usage reads'
-        : 'usage.calls INVALID_ENVELOPE; separate platform fix required',
+        : 'public accounting read blocked; separate platform fix required',
+      accountingGaps: actors.flatMap((actor) =>
+        actor.accountingGap ? [actor.accountingGap] : [],
+      ),
+      configuredExecutionPassed: true,
       environment:
         'local configured server and synthetic TLS MCP/model services',
       users: 2,
@@ -592,4 +611,8 @@ try {
   stop.abort();
   if (integration) await integration;
   for (const client of clients.reverse()) client.close();
+  if (integrationFailure)
+    throw new Error('Configured worker failed; inspect retained journals', {
+      cause: integrationFailure,
+    });
 }

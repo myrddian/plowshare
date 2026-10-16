@@ -39,18 +39,19 @@ policy for service reads; the harness retains that failure and exits 2 with
 redacted result; `acceptance-private.json` retains sensitive provision intents,
 credentials, original jobs and usage results for inspection.
 
-`origin.txt` contains the console URL. `instance.json` contains the `test-admin`
-password; `acceptance-private.json` contains test-user passwords after provisioning.
+`origin.txt` contains the console URL. After provisioning, `LOGIN.txt` contains
+the administrator and two human test-user logins. `instance.json` and
+`acceptance-private.json` also retain private setup credentials.
 These files are private and must never enter source or shared diagnostic output.
 The UI and source are the actual Plowshare build; model replies are deterministic
 fixtures, so this is a functional test environment rather than a general assistant.
 The fixture's synthetic model capability declaration keeps the shipped agent graph
 loadable; it does not prove image/model-provider interoperability.
 
-The server uses explicit Spring interface proxies because the current final
-`JdbcApplicationRegistrations` repository cannot be class-proxied. This supported
-configuration is confined to the test instance; the recipe changes no core source.
-Its private working directory, server data, Application source and explicit
+The server uses the default proxy configuration. An earlier test run exposed a
+final-repository class-proxy failure; current main fixes it independently in
+`2292a30`. This recipe adds no core source workaround. Its private working
+directory, server data, Application source and explicit
 FileStore roots are separate so workspace fences remain enforced. PostgreSQL is
 bound only on a fresh loopback port. Normal authentication stays enabled.
 

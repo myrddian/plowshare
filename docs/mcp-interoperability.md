@@ -38,6 +38,12 @@ Use the [profile](mcp-provider-profile.md) for version behavior and refused feat
 [schemas](tool-schemas.md) for the common recursive profile, and
 [recovery](mcp-recovery.md) for original-invocation inspection.
 
+The shared offered-name ceiling is 256 characters, but Application manifest exact
+`toolScopes` grants currently retain a legacy 64-character validator. A longer
+valid offered name therefore cannot yet receive an exact Application grant.
+Keep that platform limitation explicit; never silently replace an exact grant
+with a provider wildcard. It needs a separate shared-contract alignment.
+
 Input and output schemas retain supported constraints exactly. Unsupported schema
 keywords, required capabilities and malformed pages refuse coherent discovery;
 there is no partial publication. Accepted tools preserve nested objects/arrays.
@@ -131,7 +137,7 @@ refused by the current operation policy. The conversation accounting read also
 fails SDK validation. No raw response or internal database read substitutes for
 those failures. See the [redacted acceptance record](../test-support/mcp/acceptance-evidence.md).
 
-The test setup uses explicit interface proxies to avoid a final-repository default
-startup failure. This configuration does not prove the default launch path works.
-Both problems need separately scoped general platform fixes; this adapter change
+An initial final-repository startup failure was fixed independently by current
+main (`2292a30`). The current test setup uses default proxy configuration.
+Accounting still requires a separately scoped platform fix; this adapter change
 does not alter core, authorization or accounting contracts.

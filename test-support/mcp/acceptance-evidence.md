@@ -6,7 +6,7 @@ request/result payload.
 
 | Evidence | Observed result |
 | --- | --- |
-| Independent HTTP/STDIO/adapter/recovery fixtures | 100 passed across the two pinned protocol profiles; 28 new HTTP interoperability assertions. |
+| Independent HTTP/STDIO/adapter/recovery fixtures | 100 passed across the two pinned protocol profiles; 28 new HTTP interoperability tests. |
 | Packed public SDK consumer | Same fixture suite compiled and passed against installed public SDK artifacts. |
 | Repository gate | `formatCheck check` passed in default non-database mode. |
 | Configured instance | Current built server, a new dedicated PostgreSQL database, authentication enabled, loopback synthetic model and independent TLS MCP endpoint. |
@@ -17,7 +17,8 @@ request/result payload.
 | Cross-user boundaries | Server refuses another owner's binding; public SDK refuses another human's credential selector before sending it. Metadata replies retain the authenticated subject. |
 | Human accounting | **BLOCKED:** both original `usage.calls` replies fail public SDK validation. Omitted nullable fields include model family, price version, optional ancestry, preflight observation and cursor. Conversation accounting also fails SDK validation. |
 | Service accounting | **BLOCKED:** current service-token operation policy refuses the accounting read, including an explicit project filter. No internal read substitutes for it. |
-| Default server startup | **BLOCKED:** final `JdbcApplicationRegistrations` cannot be class-proxied. The isolated instance starts with explicit Spring interface proxies. |
+| Default server startup | Initial failure traced to final repository classes; current main independently fixes them in `2292a30`. A fresh authenticated instance with three MCP jobs verified default proxy configuration. |
+| Long exact Application grants | **LIMITATION:** legacy manifest validation still accepts only 64 characters although shared offered tool names accept 256. No automatic wildcard substitution. |
 | Organization OAuth / third-party MCP | **NOT RUN:** no configured organization test endpoint/accounts supplied. |
 | Browser/native distributions and separate hosts | **NOT RUN:** controlled SDK acceptance is not UI or deployment acceptance. |
 

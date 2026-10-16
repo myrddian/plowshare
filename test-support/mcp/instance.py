@@ -154,7 +154,7 @@ def main():
     port = settings['serverPort']
     overlay = state / 'application.json'
     if not overlay.exists():
-        private(overlay, json.dumps({'spring': {'aop': {'proxy-target-class': False}}, 'plowshare': {'providers': {
+        private(overlay, json.dumps({'plowshare': {'providers': {
             'credentials': {'enabled': True, 'active-key': 'test', 'keys': {'test': settings['key']},
                 'allowed-origins': [fixture_config['endpoint'].rsplit('/', 1)[0]],
                 'callback': 'https://fixture.invalid/provider-credentials/oauth/callback'},
