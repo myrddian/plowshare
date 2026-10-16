@@ -61,10 +61,21 @@ project/resource scope and refuses Global work.
 | Outgoing send/advertise/claim | Account-bound null project | Resolve an explicit owning scope and retain account ownership |
 | Retained acting turn | Explicit acting context and subject Personal authority | Preserve explicit actor/subject admission and supported capability limits |
 
-The target Global collection admits memories and derived retrieval/index views
-only. Human ADMIN authority over that collection is required for publication and
+The target Global collection is a built-in Project with a fixed reserved project
+UUID and scope UUID, recorded in ADR 0030. Those identities are materialized
+idempotently rather than generated at runtime or regenerated on startup. Its
+policy admits memories and derived retrieval/index views only. Human ADMIN
+authority over that project is required for publication and
 content/lifecycle administration. Ordinary resource publication remains separate;
 shared documents do not become Global memories or SYSTEM resources.
+
+Tools available across projects remain in the installed platform catalogue, not
+inside the Global memory project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
+separates registered names from offered capabilities; [ScopedTools](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedTools.java)
+and [ApplicationToolRegistry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/ApplicationToolRegistry.java)
+add live project/provider tools under their own grants. Reuse these owners for
+explicit availability and invocation authority rather than creating a Global-tool
+fallback or a duplicate provider runtime.
 
 The precise list/selection defaults require review before implementation. A read
 may offer an explicit authorized aggregate selection without adopting the same
@@ -199,6 +210,12 @@ Default mocked/fake tests should cover:
 - Global admits memories and derived retrieval/index views only; every Global
   conversation selection refuses. Historical null-project rows, if present,
   retain identity and restricted access until classified, without guessed ownership.
+- The built-in Global project and scope have the same reserved UUIDs on every
+  startup/installation; existing ordinary projects named global keep their own
+  identities. Missing built-in records never cause a replacement UUID or fallback.
+- A platform tool available in multiple projects still requires an agent/workflow
+  grant and target/action authority. Its catalogue entry creates no Global-memory
+  read permission and no cross-project provider/credential authority.
 - Global publication/content/lifecycle actions require human ADMIN over the
   collection plus source-release authority. Agents can propose but cannot approve
   their own publication; forced MANAGER does not override that rule. Read/use

@@ -50,7 +50,7 @@ text as the same capability.
 | --- | --- | --- |
 | Server administration | Enabled human server-admin account; specific operation/service gates | Explicit server-administration scope; ADMIN grants named control actions |
 | Internal server Relay | `Relay.SystemScope.SERVER`, separate from project topics | Explicit server scope; no implicit project/tenant data coverage |
-| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | Retain an explicit memory-only Global collection; move other meanings to server configuration, separate publication policies or restricted legacy history; no Global conversations |
+| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | Built-in memory-only Global Project with fixed reserved project/scope UUIDs; move other meanings to server configuration, separate publication policies or restricted legacy history; no Global conversations |
 | Ordinary project | Project row/name, live project roles and resource-derived project resolution | Explicit project scope with scoped role grants |
 | Application project | Ordinary project roles plus active manifest, execution identity, placement and source rules | Same project role vocabulary with additional Application boundaries |
 | Personal execution workspace | Account-owned private project/union | Explicit Personal scope with fixed owner control; no ordinary membership sharing |
@@ -217,8 +217,9 @@ use the separate current checkout/provider/session fences.
 
 ### Global memory permissions
 
-Global is a proposed explicit memory collection, separate from the SYSTEM account,
-SYSTEM role, server-administration scope and shared-document catalogue. Its
+Global is a proposed built-in memory Project with fixed reserved project/scope
+UUIDs, separate from the SYSTEM account, SYSTEM role, server-administration scope
+and shared-document catalogue. Its
 initial admitted kinds are memories and their derived retrieval/index views.
 
 | Global memory action | ADMIN | MANAGER | CONTRIBUTOR | READER |
@@ -280,6 +281,13 @@ change its tool grants or alter server configuration. Network privacy and provid
 endpoint restrictions also remain independent. Cross-project messaging/Relay
 requires both source/destination authority and configured routing, not just a
 CONTRIBUTOR role at one end.
+
+Tools available across eligible projects are installed platform capabilities in
+the SYSTEM-controlled catalogue. Global does not store or grant those tools.
+Availability permits selection; explicit agent/workflow grants permit offering;
+role, actual target scope and other capability restrictions govern invocation.
+External tools retain explicit owner/project/provider assignments and credentials,
+even when their declarations are intentionally reused by several projects.
 
 Current ordinary service tokens may have effective MANAGER project ceilings;
 current acting scopes explicitly reject MANAGER and only support VIEWER or

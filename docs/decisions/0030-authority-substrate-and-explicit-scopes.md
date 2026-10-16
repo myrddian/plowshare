@@ -298,12 +298,39 @@ Document processing retains its existing no-tools/no-delegation capability ceili
 
 ### Global memory collection
 
-Retain Global as an explicit UUID-backed collection of deliberately published
-memories. Global and SYSTEM are separate concepts: Global identifies published
+Define Global as a built-in Project containing deliberately published memories,
+using the same project/scope authority model as other projects. Global and SYSTEM
+are separate concepts: Global identifies published
 knowledge; SYSTEM identifies root ownership, a locked executor account and its
 intrinsic role. Global has its own scope identity, admitted resource kinds,
 audience and administrative grants. It is not an alias for server administration
 or a default destination for work without a project.
+
+Reserve these fixed identities in the proposal's built-in identity registry:
+
+| Entity | Reserved UUID |
+| --- | --- |
+| Global project | `00000000-0000-0000-0000-000000000004` |
+| Global project scope | `00000000-0000-0000-0000-000000000005` |
+
+These are proposed constant registry values, not generated runtime, startup or
+installation IDs. Bootstrap idempotently materializes the project/scope records
+with those identities and their fixed mapping. Restarts and upgrades retain them.
+Their values are distinct from the reserved SYSTEM account, role and server scope;
+none of the identifiers is itself an authorization bypass.
+
+The reserved UUIDs identify these built-in records within an installation.
+Grant provenance, execution admissions and receipts remain bound to their issuing
+server; the same UUID on another server does not transfer authority or make an
+imported policy trusted.
+
+The built-in project's policy admits memories and derived retrieval/index views,
+disallows conversations, agent-run homes and workspaces, and requires the explicit
+administrative actions below. Generic project-kind/resource-kind and action
+checks enforce those properties. A project named `global` is not this project
+merely because its name matches; existing named projects keep their own identities.
+An unavailable built-in record fails clearly instead of generating a replacement
+identity, manufacturing a null project or choosing a different project.
 
 The initial Global collection admits memories and their derived retrieval/index
 views only. Conversations cannot be created, resumed, listed or searched with
@@ -335,6 +362,46 @@ kind needs an explicit purpose, admission policy and action/audience decision.
 Resource-kind admission is a scope property enforced through generic contracts,
 not a special SYSTEM-name permission branch.
 
+### Tools available across projects
+
+Platform tools belong to the SYSTEM-controlled installed capability catalogue,
+administered under the server configuration scope. They do not belong to the
+Global memory project and are not imported from it. Tool installation/availability,
+agent capability grants and invocation authority are separate decisions:
+
+| Layer | Meaning |
+| --- | --- |
+| Installed tool definition | The server has the implementation, schema and declared action/target contract |
+| Availability policy | Eligible project/scope kinds may discover or select the capability |
+| Agent or workflow grant | The admitted definition/workflow is permitted to offer that tool |
+| Invocation authority | The actual caller/run may perform the action on the resolved targets, within all retained ceilings and resource policies |
+
+Available everywhere means available for selection in each eligible project,
+not automatically granted to every agent or permitted to access every resource.
+An explicit default capability bundle may supply common grants if adopted; its
+contents and policy must be visible and cannot bypass role/scope restrictions.
+
+For example, `get_date` needs no private data target but still needs an admitted
+capability. `memory_read` can be an installed platform capability while each call
+resolves and authorizes the requested memory's project. Reading a Global memory
+requires the Global project's audience/read authority. The tool's availability
+never supplies that authority or widens a project's recall implicitly.
+
+Current built-ins are registered through `AgentsConfig` and collected in
+`JobRuntime`; `knownTools` validates installed names, while `offeredTo` builds a
+run's offered tools from declared grants and explicit per-run mechanisms. External
+tools use the existing live provider catalogue, `ScopedTools`, `ToolGrants` and
+Application/owner/project assignments. Preserve those distinct boundaries rather
+than adding a second catalogue or applying external-provider grant lookup to every
+declared internal tool. General scope/action checks still protect actual data and
+effects. Existing hidden Global recall expansion remains migration work.
+
+An external tool can be made available to multiple projects only through explicit
+provider/connection assignments and grants in those scopes. Moving its declaration
+into Global, using a wildcard over unrelated projects, or reusing another owner's
+credential does not establish authority. Reuse existing provider/Relay lifecycle,
+leases, schemas and uncertain-effect receipts.
+
 ### Destinations for existing meanings
 
 | Existing Global meaning | Proposed destination |
@@ -343,7 +410,8 @@ not a special SYSTEM-name permission branch.
 | Server configuration and internal Relay topics | Explicit server-administration scope and scoped administration grants |
 | Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and worker lookup |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
-| Memories deliberately published across projects | Explicit Global memory collection with human ADMIN publication and separately granted reads |
+| Memories deliberately published across projects | Built-in Global memory Project with fixed reserved UUIDs, human ADMIN publication and separately granted reads |
+| Tools available across eligible projects | SYSTEM-controlled installed capability catalogue plus explicit availability and agent grants; invocation remains scoped |
 | Other published knowledge such as shared documents | Its own published-resource policy and audience, separate from Global memories |
 | A user's work with no selected project | Explicit Personal scope selected at admission where the operation permits that default |
 | Account-owned outgoing work | Explicit owning scope plus account ownership and original receipt lifecycle |
