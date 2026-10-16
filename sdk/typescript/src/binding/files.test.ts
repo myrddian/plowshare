@@ -171,6 +171,30 @@ describe('lines, as String.lines has them', () => {
   it('counts bytes as UTF-8 does', () => {
     expect(utf8Length('aé€😀')).toBe(1 + 2 + 3 + 4);
   });
+
+  it('matches Java replacement semantics across Unicode and malformed surrogate boundaries', () => {
+    const bmp = Array.from({ length: 65536 }, (_, point) =>
+      String.fromCharCode(point),
+    ).join('');
+    for (const text of [
+      '',
+      'ASCII\0\n',
+      'é€😀',
+      bmp,
+      '\ud800',
+      '\udfff',
+      '\ud800x\udfff',
+      '\ud800\ud800\udc00\udc00',
+      '\udbff\udfff',
+      'x'.repeat(65536) + '😀' + 'y'.repeat(65536),
+    ]) {
+      // Under /u, the class matches only unpaired surrogates. Java encodes each
+      // as '?'; Buffer supplies an independent UTF-8 oracle for the rest.
+      expect(utf8Length(text)).toBe(
+        Buffer.byteLength(text.replace(/[\ud800-\udfff]/gu, '?'), 'utf8'),
+      );
+    }
+  });
 });
 
 describe('a needle', () => {

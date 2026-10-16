@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as relayText from '../binding/relay-text.ts';
 import { MAX_RELAY_TEXT_BYTES } from '../binding/relay-text.ts';
 import { decodePayload, decodeReply } from './schema.ts';
 import { request, resultOf } from './direct.ts';
@@ -24,6 +25,35 @@ const empty = {
   events: [],
 };
 describe('Relay topic port reply boundaries', () => {
+  it('validates publication text once per decoded request', () => {
+    const validation = vi.spyOn(relayText, 'validRelayText');
+    try {
+      expect(
+        decodePayload('relay.publish', {
+          project: input.project,
+          topic: input.topic,
+          requestId: id,
+          occurredAt: '2026-10-09T00:00:00Z',
+          text: 'One checked publication',
+        }).text,
+      ).toBe('One checked publication');
+      // Each scan blocks the SDK event loop; schema and command validation must
+      // share the owning Relay check rather than repeat it for every message.
+      expect(validation).toHaveBeenCalledTimes(1);
+      expect(() =>
+        decodePayload('relay.publish', {
+          project: input.project,
+          topic: input.topic,
+          requestId: id,
+          occurredAt: '2026-10-09T00:00:00Z',
+          text: 'Valid text',
+          unexpected: true,
+        }),
+      ).toThrow();
+    } finally {
+      validation.mockRestore();
+    }
+  });
   it('bounds raw UTF-8 bytes rather than UTF-16 units or escaped JSON', () => {
     const publish = {
       project: input.project,
