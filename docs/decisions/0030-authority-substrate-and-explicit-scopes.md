@@ -94,10 +94,10 @@ establishes the root account's intrinsic authority; recovery does not make that
 authority assignable. Account, role and delegation policy enforce these
 restrictions through generic authentication and admission boundaries.
 
-An agent can receive a scoped ADMIN grant where authorized, but `AGENT_X has
-SYSTEM_ROLE` is always invalid. Being SYSTEM-owned, having trusted `is-system`
-classification, or running as an internal worker does not assign the agent the
-SYSTEM role. A worker executed by the SYSTEM account receives bounded task
+Agents cannot receive ADMIN or SYSTEM. CONTRIBUTOR is their default maximum;
+MANAGER requires the explicit exception described below. Being SYSTEM-owned,
+having trusted `is-system` classification, or running as an internal worker does
+not assign the agent the SYSTEM role. A worker executed by the SYSTEM account receives bounded task
 authority, not its own copy of the root role.
 
 Internal executors obtain workload authority through trusted server admission.
@@ -126,7 +126,7 @@ Retain the familiar role model, with explicit action sets:
 | Role | Proposed purpose |
 | --- | --- |
 | SYSTEM | Intrinsic root authority of the locked SYSTEM account; never assignable or delegable |
-| ADMIN | Delegated administration within the scope and actions of its grant |
+| ADMIN | Delegated administration for human users within the scope and actions of their grants; never granted to an agent |
 | MANAGER | Manage a scope's membership and permitted local configuration |
 | CONTRIBUTOR | Perform permitted work and modify resources within a scope |
 | READER | Read permitted resources within a scope |
@@ -136,6 +136,46 @@ implemented rename. ADMIN is currently represented by server-admin state rather
 than a member of `ProjectRole`. Define the action mapping explicitly before
 changing contracts. Never place SYSTEM above MANAGER in the current ordinal enum
 and allow that ordering to become a general permission hierarchy.
+
+### Agent grant ceiling
+
+Human users can receive scoped ADMIN authority where the issuer may grant it.
+For agents, Plowshare applies CONTRIBUTOR as the default maximum, retaining any
+lower requested role. A MANAGER request is narrowed to CONTRIBUTOR unless an
+authorized human explicitly forces MANAGER for the particular agent and scope.
+ADMIN is rejected rather than narrowed, even when force is requested. SYSTEM is
+always rejected as non-assignable.
+
+| Recipient and requested role | Result |
+| --- | --- |
+| Human user requests ADMIN | Permit only through valid scoped issuing authority |
+| Agent requests READER or CONTRIBUTOR | Retain the requested role if otherwise authorized |
+| Agent requests MANAGER without force | Descope to CONTRIBUTOR, subject to all other ceilings |
+| Agent requests MANAGER with an authorized explicit force | Permit scoped MANAGER within the issuing authority and retained execution limits |
+| Agent requests ADMIN, with or without force | Reject the grant request |
+| Any recipient requests SYSTEM | Reject; root authority is intrinsic to the locked SYSTEM account |
+
+Force is an authorized grant-issuance decision, never an agent instruction,
+self-selected flag or general override. It names the recipient, scope and MANAGER
+exception; the issuer must have permission to grant those actions and authorize
+the exception. Record the issuer, requested/effective roles and exception in the
+grant and audit. Report descoping to the caller before executing dependent work;
+do not silently claim that MANAGER was granted. Rejected ADMIN/SYSTEM requests
+create no grant or partial grant effects.
+
+Apply the ceiling to semantic actions, including ACL entries, tools and delegated
+work, so individual grants cannot reconstruct prohibited ADMIN authority under
+another role name. SYSTEM-owned/classified agents and agents acting for ADMIN
+users follow the same ceiling. Human sponsorship does not lend an agent the
+human's ADMIN role, and internal execution does not give the agent root authority.
+This proposal does not impose the agent ceiling on every direct non-agent
+Application operation merely because it uses a service account.
+
+A forced MANAGER exception does not widen scope, consent, issuer authority or
+other execution restrictions. It is specific to the admitted recipient and scope;
+children do not acquire it automatically. Each child remains at most CONTRIBUTOR
+unless covered by its own explicit authorized MANAGER exception. Recheck the
+exception's live grant provenance alongside the retained admission ceiling.
 
 A grant records its subject, issuer, issuing authority reference, target scope or
 resource, actions or versioned role binding, permitted delegation, expiry and
@@ -180,6 +220,7 @@ valid live grant provenance
 AND the required action is granted
 AND the actual resource and destination are within admitted scope
 AND actor and subject restrictions permit the operation
+AND the agent role/action ceiling and any explicit MANAGER exception permit it
 AND tool, filesystem, network and budget ceilings permit the operation
 AND resource policy and lifecycle permit the operation
 ```
@@ -306,7 +347,9 @@ All schema changes belong in new Flyway migrations after separate authorization.
 2. Assign the reserved identity registry and decide UUID introduction alongside
    existing keys; specify the minimum durable grant and execution records.
 3. Approve action sets and delegation rights for ADMIN/MANAGER/CONTRIBUTOR/READER,
-   including policy administration versus data access and emergency recovery.
+   including policy administration versus data access, authorized issuance of
+   forced MANAGER exceptions for agents, and emergency recovery. Agent ADMIN
+   rejection and the default CONTRIBUTOR ceiling are fixed proposal requirements.
 4. Define publication audiences and release authority, especially for Personal
    content, derived outputs and existing server-shared material.
 5. Specify explicit catalogue availability, instruction imports and operation

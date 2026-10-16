@@ -12,7 +12,7 @@ and symbols at that revision; target behavior is proposed.
 | Area | Current source and behavior | Proposed treatment |
 | --- | --- | --- |
 | Account identity and administration | [AdminStore](../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/AdminStore.java) uses account handles and `server_admin`; [V111](../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql) admits USER, SERVICE and SERVICE_TOKEN account kinds | Add a real locked SYSTEM principal and explicit root/admin grants. Today's SYSTEM accounting status is not that account |
-| Project RBAC | [ProjectRole](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) has ordered VIEWER, CONTRIBUTOR and MANAGER; [ProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectMembers.java) owns live memberships and grant history | Reuse scoped membership contracts; define action bundles and grant provenance. READER/ADMIN need explicit action mappings; SYSTEM is intrinsic to its locked account and can never be assigned to another account or agent |
+| Project RBAC | [ProjectRole](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) has ordered VIEWER, CONTRIBUTOR and MANAGER; [ProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectMembers.java) owns live memberships and grant history | Reuse scoped membership contracts; define action bundles and grant provenance. Human ADMIN remains possible; agent MANAGER is descoped to CONTRIBUTOR unless explicitly forced by an authorized human, and agent ADMIN is rejected. SYSTEM is never assignable |
 | Administrative project access | [JdbcProjectMembers.role](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) grants server admins MANAGER for ordinary non-client/non-Personal projects; [ProjectAuthorization](../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/ProjectAuthorization.java) has operation-specific admin rules | Replace ambient privileges with reviewed explicit administrative scope/action grants; preserve necessary operations without silently expanding data access |
 | Personal isolation | [PersonalSpaces](../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/PersonalSpaces.java) maps an account to a private project/union, enforces exact ownership and supplies human runnable defaults | Preserve private control and explicit scope. Do not grant an Application Personal membership to enable acting work |
 | Tenant isolation | Relevant current account, project, Personal and information contracts use account/project identities rather than a first-class tenant identity | Specify tenant entities and mappings separately; do not declare each existing project a tenant by assumption |
@@ -138,7 +138,8 @@ the complete substrate remains under design.
    public selection/default contract before client cutover.
 3. **Introduce explicit identities and root grants.** Add durable scope mappings,
    the locked SYSTEM account/role, administrative grants and auditable grant
-   provenance. Preserve existing IDs and last-manager/recovery invariants.
+   provenance. Enforce agent role ceilings and record any explicit forced MANAGER
+   exception. Preserve existing IDs and last-manager/recovery invariants.
 4. **Carry bounded execution authority through consumers.** Extend the existing
    retained-authority model across ordinary jobs, schedules, orchestration,
    messaging, Relay, approvals and internal workers. Migrate a consumer only when
@@ -156,8 +157,16 @@ the complete substrate remains under design.
 Default mocked/fake tests should cover:
 
 - SYSTEM cannot be assigned through any role/grant, agent configuration, inheritance,
-  delegation, execution profile or operator/recovery path. Authorized scoped ADMIN
-  grants remain usable; trusted agent classification never confers the SYSTEM role.
+  delegation, execution profile or operator/recovery path. Authorized scoped human
+  ADMIN grants remain usable; agents cannot receive ADMIN. Trusted agent
+  classification never confers the SYSTEM role.
+- Agent READER/CONTRIBUTOR grants retain the requested level; unforced MANAGER
+  descopes to CONTRIBUTOR and reports the effective grant. Forced MANAGER requires
+  an explicit authorized human decision for that agent and scope. Force cannot
+  override another ceiling, and ADMIN/SYSTEM reject without partial grant effects.
+- ACL actions, tools, SYSTEM ownership/classification, human ADMIN sponsorship and
+  child-agent delegation cannot bypass the agent ceiling. MANAGER exceptions do
+  not automatically propagate to children and remain subject to live revocation.
 - SYSTEM execution inside one admitted scope, refusing unrelated resources and
   publication even when the root role permits the action in principle.
 - ADMIN management without implicit Personal/content access; role bundles versus
