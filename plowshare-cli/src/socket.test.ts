@@ -282,11 +282,13 @@ await test(
         'agent',
         'run',
         '{"agent":"a","task":"work"}',
+        '--project',
+        'repo',
         '--json',
       ]).done;
       assert.equal(first.code, 3, first.stdout + first.stderr);
       assert.equal(field(json(first.stdout), ['conversation']), 'cnv_new_1');
-      assert.equal(fake.frames[0]!.payload.project, undefined);
+      assert.equal(fake.frames[0]!.payload.project, 'repo');
       const second = await cli(fake.base, [
         'agent',
         'run',
@@ -321,6 +323,8 @@ await test(
         'agent',
         'run',
         '{"agent":"a","task":"work"}',
+        '--project',
+        'repo',
         '--json',
       ]).done;
       assert.equal(result.code, 5);
@@ -920,14 +924,19 @@ await test(
   async () => {
     const cases: readonly [string, string, Record<string, unknown>, number][] =
       [
-        ['conversation open', 'conversation.open', {}, 0],
+        ['conversation open', 'conversation.open', { project: 'repo' }, 0],
         [
           'conversation list',
           'conversation.list',
-          { lifecycle: 'archived' },
+          { project: 'repo', lifecycle: 'archived' },
           0,
         ],
-        ['conversation latest', 'conversation.latest', { agent: 'a' }, 0],
+        [
+          'conversation latest',
+          'conversation.latest',
+          { project: 'repo', agent: 'a' },
+          0,
+        ],
         [
           'conversation lifecycle',
           'conversation.lifecycle',
@@ -984,6 +993,7 @@ await test(
           {
             agent: 'a',
             task: 'standalone',
+            project: 'repo',
             session: null,
             newConversation: false,
           },
@@ -1719,7 +1729,7 @@ await test(
         '1',
         'agent',
         'run',
-        '{"agent":"a","task":"work","newConversation":false}',
+        '{"agent":"a","task":"work","newConversation":false,"project":"repo"}',
       ]).done;
       assert.equal(result.code, 4, result.stderr + result.stdout);
       const output = result.stdout
@@ -1831,7 +1841,7 @@ await test(
         '--watch',
         'agent',
         'run',
-        '{"agent":"a","task":"work","newConversation":false}',
+        '{"agent":"a","task":"work","newConversation":false,"project":"repo"}',
       ]).done;
       assert.equal(refused.code, 1, refused.stdout);
       assert.equal(
@@ -2177,6 +2187,7 @@ await test(
           agent: 'caller',
           definition: 'custom',
           request: 'small task',
+          project: 'repo',
           requestId: key,
         }),
         '--json',

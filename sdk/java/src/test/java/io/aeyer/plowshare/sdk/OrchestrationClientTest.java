@@ -66,7 +66,8 @@ class OrchestrationClientTest {
                 IOException.class,
                 () ->
                     sdk.start(
-                        new Orchestration.Start("caller", "work", "task", null, null, requestId)));
+                        new Orchestration.Start(
+                            "caller", "work", "task", null, "selected", requestId)));
         assertTrue(failure.getMessage().contains("outcome unconfirmed"));
         assertEquals(1, received.get());
       }

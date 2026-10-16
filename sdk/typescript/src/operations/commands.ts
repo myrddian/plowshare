@@ -18,7 +18,7 @@ const COMMAND_HEADS = Object.keys(CLI_OPERATIONS)
   }));
 
 /** Shared headless command grammar. TUI parseDirect retains its own command boundaries. */
-export function parseCommand(line: string, project?: string): Parsed {
+export function parseCommand(line: string, project?: string | null): Parsed {
   const trimmed = line.trim();
   const recognized = COMMAND_HEADS.map((head) => ({
     name: head.name,
@@ -34,7 +34,7 @@ export function parseCommand(line: string, project?: string): Parsed {
         kind: 'usage',
         said: `${bound} requires ${BOUND_OPERATIONS[bound as keyof typeof BOUND_OPERATIONS]}; use a persistent platform client`,
       };
-    return parseDirect(line, project);
+    return parseDirect(line, project ?? undefined);
   }
   const type = CLI_OPERATIONS[name as keyof typeof CLI_OPERATIONS];
   const argument = (recognized?.match?.[1] ?? '').trim();
@@ -65,6 +65,9 @@ export function parseCommand(line: string, project?: string): Parsed {
   if (
     !('project' in body) &&
     project !== undefined &&
+    (project !== null ||
+      type === 'conversation.list' ||
+      type === 'conversation.latest') &&
     (SCOPED.includes(type) ||
       type === 'outgoing.send' ||
       type === 'outgoing.peers' ||

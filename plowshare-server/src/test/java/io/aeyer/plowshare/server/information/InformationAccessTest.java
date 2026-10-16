@@ -9,6 +9,48 @@ import org.junit.jupiter.api.Test;
 
 class InformationAccessTest {
   @Test
+  void personalRunUsesAccountInformationAndNeverAnotherAccountsPersonalSpace() {
+    var members = mock(ProjectMembers.class);
+    var access = new InformationAccess(members);
+    for (String project :
+        java.util.List.of(
+            io.aeyer.plowshare.server.personal.PersonalSpaces.name("alice"),
+            io.aeyer.plowshare.server.personal.PersonalSpaces.address("alice"))) {
+      var context = access.forRun("alice", io.aeyer.plowshare.protocol.Home.of(project));
+      assertEquals(InformationContext.Selection.personal(), context.selection());
+      assertTrue(context.typedView());
+    }
+    for (String foreign :
+        java.util.List.of(
+            io.aeyer.plowshare.server.personal.PersonalSpaces.name("bob"),
+            io.aeyer.plowshare.server.personal.PersonalSpaces.address("bob"))) {
+      assertThrows(
+          CallerFault.class,
+          () -> access.forRun("alice", io.aeyer.plowshare.protocol.Home.of(foreign)));
+    }
+    verifyNoInteractions(members);
+  }
+
+  @Test
+  void personalMappingPreservesServiceProjectAndSharedCeilings() {
+    var members = mock(ProjectMembers.class);
+    var access = new InformationAccess(members);
+    String machine = "@service/fixture";
+    assertThrows(
+        CallerFault.class,
+        () ->
+            access.forRun(
+                machine,
+                io.aeyer.plowshare.protocol.Home.of(
+                    io.aeyer.plowshare.server.personal.PersonalSpaces.name(machine))));
+    when(members.mayUse("research", machine)).thenReturn(true);
+    var context = access.forRun(machine, io.aeyer.plowshare.protocol.Home.of("research"));
+    assertEquals(InformationContext.Scope.PROJECT, context.selection().scope());
+    assertEquals("research", context.selection().project());
+    assertFalse(context.selection().includeShared());
+  }
+
+  @Test
   void omission_means_personal_plus_shared_and_needs_an_authenticated_account() {
     ProjectMembers members = mock(ProjectMembers.class);
     InformationAccess access = new InformationAccess(members);
@@ -48,7 +90,8 @@ class InformationAccessTest {
             access.admitted(access.resolve("alice' OR true --", null)), "d");
     assertFalse(filter.sql().contains("alice"));
     assertEquals(
-        java.util.Arrays.asList("alice' OR true --", "personal", null, true), filter.arguments());
+        java.util.Arrays.asList("alice' OR true --", "personal", null, true, false),
+        filter.arguments());
     assertThrows(
         IllegalArgumentException.class,
         () ->

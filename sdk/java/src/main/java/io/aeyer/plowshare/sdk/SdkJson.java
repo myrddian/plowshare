@@ -26,6 +26,7 @@ final class SdkJson {
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .build();
@@ -51,6 +52,18 @@ final class SdkJson {
       throws IOException {
     if (node == null || node.isNull()) {
       if (type.isPrimitive()) throw new IOException("Missing required " + path);
+      return;
+    }
+    // These wire values have delegating strict codecs, not the reflected Java record shape.
+    // Decode now so malformed schema vocabulary and neutral instance bounds cannot be skipped.
+    if (type.getRawClass() == io.aeyer.plowshare.protocol.SchemaDefinition.class) {
+      json.treeToValue(node, io.aeyer.plowshare.protocol.SchemaDefinition.class);
+      return;
+    }
+    if (io.aeyer.plowshare.protocol.SchemaValue.class.isAssignableFrom(type.getRawClass())) {
+      json.treeToValue(node, io.aeyer.plowshare.protocol.SchemaValue.class);
+      if (type.getRawClass() == io.aeyer.plowshare.protocol.SchemaValue.ObjectValue.class
+          && !node.isObject()) throw new IOException("Expected metadata object at " + path);
       return;
     }
     if (type.getRawClass() == java.util.UUID.class

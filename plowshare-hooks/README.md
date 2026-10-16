@@ -204,6 +204,16 @@ revision. Existing orchestration contexts keep their original meanings. The chai
 is harness → project → the owner's pinned local hooks; a caller cannot borrow
 another account's session or let a hook override scope/readiness/generation checks.
 
+Authored-document transitions additionally supply `document.candidate`: the exact
+expected revision, explicit typing intent, validated immutable contract/metadata
+binding and processing policy. Metadata-only candidates include the retained
+`manifestHash` and `reusedStages` approved for copying. The server rechecks that
+snapshot before committing; a stale head or changed projection conflicts without
+substituting another candidate. Hooks may inspect these fields but cannot change
+the type, metadata, reuse plan or processing authority. Schema conformance does
+not establish that a document's claims are true. The types are declared by
+`DocumentCandidate` in the hooks contract.
+
 Pre denial prevents work. Post denial prevents completion/publication while valid
 private checkpoints and paid model responses survive. Explicit repair rechecks the
 gates. Positive sharing/finalisation gates a prepared transition before applying it.

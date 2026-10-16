@@ -58,6 +58,28 @@ internal static class Validation
     internal static void Check(JsonElement schema, JsonElement value)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
+        if (schema.TryGetProperty("maxJsonBytes", out var jsonByteLimit) && System.Text.Encoding.UTF8.GetByteCount(value.GetRawText()) > jsonByteLimit.GetInt32()) throw new JsonException("JSON value exceeds byte bound");
+        if (Flag(schema,"portablePath") && (value.ValueKind != JsonValueKind.String || !InterchangeValidation.Path(value.GetString()!))) throw new JsonException("Unsafe portable path");
+        if (schema.TryGetProperty("portableGraph",out var portableKind)) InterchangeValidation.Check(portableKind.GetString()!,value);
+        try
+        {
+            if (Flag(schema, "schemaInstance")) ToolSchemas.DecodeValue(value);
+            if (Flag(schema, "documentSchema")) ToolSchemas.Decode(value.GetRawText());
+        }
+        catch (ArgumentException invalidSchema)
+        {
+            throw new JsonException("Invalid bounded schema value", invalidSchema);
+        }
+        if (Flag(schema, "navigationSteps"))
+        {
+            if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() < 1 || value.GetArrayLength() > 32) throw new JsonException("Path needs 1..32 steps");
+            var index = 0;
+            foreach (var step in value.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object || !step.TryGetProperty("kind", out var kind) || (kind.GetString() == "scope") != (index == 0)) throw new JsonException("Path starts with its only scope");
+                index++;
+            }
+        }
         bool invalid = false;
         switch (value.ValueKind)
         {

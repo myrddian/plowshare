@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * model/network/hook runs in a database transaction. Approved receipts resume without refiring
  * hooks.
  */
-public final class InformationWriteGates implements UsageAware {
+public final class InformationWriteGates implements UsageAware, InformationTransitions {
   private UsageOwners usageOwners = UsageOwners.NONE;
 
   @Override
@@ -61,6 +61,27 @@ public final class InformationWriteGates implements UsageAware {
       String session,
       Class<T> resultType,
       Supplier<T> transition) {
+    return executePrepared(
+        context,
+        request,
+        operation,
+        identity,
+        sources,
+        session,
+        resultType,
+        () -> new InformationTransitions.Prepared<>(transition, null));
+  }
+
+  @Override
+  public <T extends InformationGateResult> T executePrepared(
+      InformationContext context,
+      UUID request,
+      String operation,
+      InformationGateIdentity identity,
+      List<UUID> sources,
+      String session,
+      Class<T> resultType,
+      Supplier<InformationTransitions.Prepared<T>> prepare) {
     access.requireSelection(context);
     if (request == null) throw new CallerFault("stage transition needs a stable requestId");
     String fingerprint = InformationGateFingerprint.of(operation, context.selection(), identity);
@@ -68,6 +89,17 @@ public final class InformationWriteGates implements UsageAware {
         work.inTransaction(
             () -> repository.claim(context.account(), request, fingerprint, operation, resultType));
     if (receipt.state() == InformationGateRepository.State.COMPLETED) return receipt.response();
+    final InformationTransitions.Prepared<T> prepared;
+    try {
+      prepared = Objects.requireNonNull(prepare.get(), "prepared transition");
+    } catch (RuntimeException invalid) {
+      repository.blocked(
+          context.account(),
+          request,
+          receipt.token(),
+          invalid.getMessage() == null ? invalid.getClass().getSimpleName() : invalid.getMessage());
+      throw invalid;
+    }
     HarnessRun run = harness.begin();
     try {
       if (receipt.state() != InformationGateRepository.State.APPROVED) {
@@ -110,7 +142,9 @@ public final class InformationWriteGates implements UsageAware {
                         sources.isEmpty() ? null : sources.getFirst().toString(),
                         1,
                         operation,
-                        1));
+                        1,
+                        null,
+                        prepared.candidate()));
         Hooks chain = Hooks.chain(run.forModel(null), configured);
         var shown = new StageShown(operation, operation, 0, 1);
         Gate pre = chain.stagePre(hookContext, new StageStart(shown, null, null));
@@ -135,7 +169,7 @@ public final class InformationWriteGates implements UsageAware {
             fence(context, request, receipt);
             access.requireSelection(context);
             inputs.requireLog(openedLog(context, request), context.account());
-            T result = transition.get();
+            T result = prepared.transition().get();
             repository.completed(context.account(), request, result);
             return result;
           });

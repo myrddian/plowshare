@@ -23,6 +23,7 @@ describe('job conversation selection', () => {
     expect(
       parseCommand(
         'agent run {"agent":"a","task":"work","newConversation":false,"images":["img_1"]}',
+        'repo',
       ).kind,
     ).toBe('request');
   });

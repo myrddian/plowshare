@@ -49,7 +49,19 @@ public record HookContext(
       long generation,
       String stage,
       int attempt,
-      String sourceUri) {
+      String sourceUri,
+      io.aeyer.plowshare.protocol.InformationContent.Candidate candidate) {
+    public Document(
+        String operation,
+        String resource,
+        String revision,
+        long generation,
+        String stage,
+        int attempt,
+        String sourceUri) {
+      this(operation, resource, revision, generation, stage, attempt, sourceUri, null);
+    }
+
     public Document(
         String operation,
         String resource,
@@ -57,7 +69,7 @@ public record HookContext(
         long generation,
         String stage,
         int attempt) {
-      this(operation, resource, revision, generation, stage, attempt, null);
+      this(operation, resource, revision, generation, stage, attempt, null, null);
     }
   }
 

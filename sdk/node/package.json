@@ -87,6 +87,10 @@
     "./applications": {
       "types": "./build/applications.d.ts",
       "import": "./build/applications.js"
+    },
+    "./interchange": {
+      "types": "./build/interchange.d.ts",
+      "import": "./build/interchange.js"
     }
   },
   "description": "Plowshare WebSocket SDK and optional Node platform adapters"

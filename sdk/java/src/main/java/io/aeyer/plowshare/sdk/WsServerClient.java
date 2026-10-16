@@ -76,7 +76,7 @@ public class WsServerClient implements ServerClient, AutoCloseable {
     return connection;
   }
 
-  /** A missing project deliberately selects the global scope; blank never does. */
+  /** Setup/memory operations may select global; runtime admissions require a project first. */
   private static String project(String value) {
     return value == null ? null : Home.of(value).project();
   }
@@ -175,7 +175,7 @@ public class WsServerClient implements ServerClient, AutoCloseable {
   @Override
   public UploadedImage uploadImage(String project, String filename, byte[] bytes)
       throws IOException {
-    project = project(project);
+    project = Home.of(project).project();
     if (filename != null) filename = ContractChecks.identity(filename, "filename");
     Objects.requireNonNull(bytes, "bytes");
     if (bytes.length == 0) throw new IllegalArgumentException("image bytes must not be empty");
@@ -199,7 +199,10 @@ public class WsServerClient implements ServerClient, AutoCloseable {
     try (Response response = uploads.newCall(request.build()).execute()) {
       if (!response.isSuccessful()) throw new ServerError(response.code(), "image upload refused");
       if (response.body() == null) throw new IOException("image upload returned no receipt");
-      return SdkJson.decode(JSON, JSON.readTree(response.body().string()), UploadedImage.class);
+      var result =
+          SdkJson.decode(JSON, JSON.readTree(response.body().string()), UploadedImage.class);
+      selected(project, result.project());
+      return result;
     }
   }
 
@@ -363,7 +366,7 @@ public class WsServerClient implements ServerClient, AutoCloseable {
 
   @Override
   public Conversation openConversation(String project, Integer maxModelCalls) throws IOException {
-    project = project(project);
+    project = Home.of(project).project();
     positive(maxModelCalls, "maxModelCalls");
     var result =
         ask(

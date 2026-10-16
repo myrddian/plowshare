@@ -282,6 +282,8 @@ class PlowshareTest {
                             switch (frame.path("type").asText()) {
                               case "conversation.open" ->
                                   Map.of(
+                                      "project",
+                                      "selected",
                                       "id",
                                       "cnv_test",
                                       "noBudget",
@@ -343,7 +345,7 @@ class PlowshareTest {
       try (var sdk =
           new WsServerClient(server.url("/").toString(), null, Plowshare.TransportMode.LEGACY)) {
         assertEquals(0, server.getRequestCount());
-        var conversation = sdk.openConversation(null, null);
+        var conversation = sdk.openConversation("selected", null);
         assertNull(conversation.maxModelCalls());
         assertTrue(conversation.noBudget());
         var job = sdk.job("job_test");

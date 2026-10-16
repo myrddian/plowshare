@@ -1,3 +1,9 @@
+import { INTERCHANGE_OPERATIONS } from './information-interchange.ts';
+import { NAVIGATION_OPERATIONS } from './information-navigation.ts';
+import {
+  decodeMetadataValidation,
+  type MetadataValidationResult,
+} from './information-content.ts';
 import type { Payloads } from './direct.ts';
 import type { OperationTransport } from './response.ts';
 import type { InformationPayloads } from './information-payloads.ts';
@@ -9,6 +15,17 @@ export type InformationScope =
   | { kind: 'personal' | 'shared'; includeShared?: boolean }
   | { kind: 'project'; project: string; includeShared?: boolean };
 export const INFORMATION_OPERATIONS = [
+  ...NAVIGATION_OPERATIONS,
+  ...INTERCHANGE_OPERATIONS,
+  'types.capabilities',
+  'types.list',
+  'types.get',
+  'types.validate',
+  'types.version.create',
+  'types.activate',
+  'types.deprecate',
+  'content.get',
+  'content.revise',
   'upload',
   'acquire',
   'refresh',
@@ -87,20 +104,34 @@ export function decodeInformationCall(
   return { operation, payload } as InformationCall;
 }
 export type InformationTransport = OperationTransport;
+export class InformationMetadataError extends Error {
+  readonly validation: MetadataValidationResult;
+  constructor(validation: MetadataValidationResult) {
+    super(
+      validation.issues
+        .map((issue) => `${issue.instancePointer || '/'}: ${issue.message}`)
+        .join('\n') || validation.status,
+    );
+    this.validation = validation;
+  }
+}
 
 /** All operations use the existing socket. Callers keep mutation request IDs across uncertain delivery. */
 export class InformationClient {
   private readonly transport: InformationTransport;
   readonly scope: InformationScope;
   readonly corpus: InformationCorpus;
+  readonly view: 'content-types-v1' | undefined;
   constructor(
     transport: InformationTransport,
     scope: InformationScope,
     corpus: InformationCorpus = 'documents',
+    view?: 'content-types-v1',
   ) {
     this.transport = transport;
     this.scope = scope;
     this.corpus = corpus;
+    this.view = view;
   }
   async call<K extends InformationOperation>(
     operation: K,
@@ -111,6 +142,7 @@ export class InformationClient {
     const payload = decodePayload(`information.${operation}`, {
       ...(args[0] ?? {}),
       scope: this.scope,
+      ...(this.view ? { view: this.view } : {}),
       ...(this.corpus === 'code' ? { corpus: this.corpus } : {}),
     });
     return this.exchange(operation, payload);
@@ -121,6 +153,7 @@ export class InformationClient {
     const payload = decodePayload(`information.${call.operation}`, {
       ...call.payload,
       scope: this.scope,
+      ...(this.view ? { view: this.view } : {}),
       ...(this.corpus === 'code' ? { corpus: this.corpus } : {}),
     });
     return this.exchange(call.operation, payload);
@@ -133,6 +166,10 @@ export class InformationClient {
       `information.${operation}`,
       payload,
     );
+    if (outcome.code === 'VALIDATION_FAILED')
+      throw new InformationMetadataError(
+        decodeMetadataValidation(outcome.metadataValidation),
+      );
     if (outcome.code !== 'OK' && outcome.code !== 'ACCEPTED')
       throw new Error(
         outcome.said ?? `Information request answered ${outcome.code}.`,

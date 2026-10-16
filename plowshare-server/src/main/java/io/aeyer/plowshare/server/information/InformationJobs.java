@@ -50,7 +50,7 @@ public final class InformationJobs implements InformationLogAccess {
     for (var input : inputs) {
       var selection = input.selection();
       try {
-        var context = access.resolve(account, selection);
+        var context = access.resolve(account, selection).withView(true);
         if (catalogue != null) {
           catalogue.requireReadable(context, input.revision());
           continue;

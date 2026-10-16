@@ -11,6 +11,10 @@ public final class AgentClient {
     this.connection = Objects.requireNonNull(connection);
   }
 
+  /**
+   * A project is required for fresh work; an existing conversation supplies its own scope instead.
+   * Personal clients must select their Personal project explicitly, never inherit it from a bearer.
+   */
   public record Run(
       String agent,
       String task,
@@ -21,6 +25,11 @@ public final class AgentClient {
     public Run {
       agent = ContractChecks.identity(agent, "agent");
       task = ContractChecks.text(task, "task");
+      if (conversation == null && project == null)
+        throw new IllegalArgumentException(
+            "Choose an explicit project or an existing conversation");
+      if (conversation != null && project != null)
+        throw new IllegalArgumentException("conversation owns its project; omit project");
       if (project != null) project = io.aeyer.plowshare.protocol.Home.of(project).project();
       if (session != null) session = ContractChecks.identity(session, "session");
       if (conversation != null)

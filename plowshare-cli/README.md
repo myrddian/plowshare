@@ -161,8 +161,9 @@ bin/plowshare-cli project define '{"name":"repo","workspace":"/server/repo"}'
 ```
 
 An `agent run` without `conversation` opens a fresh conversation and submits its first
-turn in one authenticated request. No selected project means global; an explicit
-payload project, `--project` or configured `PLOWSHARE_PROJECT` selects that project.
+turn in one authenticated request. A project is required: select it through the
+payload, `--project` or configured `PLOWSHARE_PROJECT`. Missing/null project fails
+before authentication or submission. Personal clients select Personal explicitly.
 Use `--new-conversation` to state this choice explicitly. It conflicts with an existing
 conversation id. `--standalone` (or JSON `newConversation:false`) retains a job-only
 run and supports images. New and reused conversation turns retain the existing image
@@ -171,10 +172,10 @@ keeps the conversation id in its final output. Offline `--validate` shows the re
 `newConversation` choice without creating anything.
 
 ```sh
-bin/plowshare-cli agent run '{"agent":"a","task":"Review the evidence"}' --json
+bin/plowshare-cli agent run '{"agent":"a","task":"Review the evidence"}' --project repo --json
 bin/plowshare-cli agent run '{"agent":"a","task":"Review the build"}' --new-conversation --project repo --json
 bin/plowshare-cli agent run '{"agent":"a","task":"Continue","conversation":"cnv_RETURNED_ID"}' --json
-bin/plowshare-cli agent run '{"agent":"a","task":"Inspect this image","images":["img_1"]}' --standalone --json
+bin/plowshare-cli agent run '{"agent":"a","task":"Inspect this image","images":["img_1"]}' --project repo --standalone --json
 ```
 
 Other job families and orchestrations already own their conversation logs; the
@@ -274,7 +275,7 @@ its reply may have taken effect even when no handle was received.
 ## Persistent observation
 
 ```sh
-bin/plowshare-cli --global --watch --timeout-ms 300000 agent run '{"agent":"a","task":"Review this question"}'
+bin/plowshare-cli --project repo --watch --timeout-ms 300000 agent run '{"agent":"a","task":"Review this question"}'
 bin/plowshare-cli --json --global --timeout-ms 300000 job watch job_1
 bin/plowshare-cli --json --global --timeout-ms 300000 conversation follow cnv_1
 ```

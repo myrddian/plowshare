@@ -132,12 +132,13 @@ internal static class Codec
     {
         Validation.Check(schema, value);
         if (depth > 64 || schema.TryGetProperty("forbidden", out _)) throw Invalid();
+        // Count JSON nesting, not trusted generated graph indirections.
         if (schema.TryGetProperty("$ref", out var reference))
-            return Decode(Definitions.GetProperty(reference.GetString()!.Replace("#/$defs/", "")), value, input, depth + 1);
+            return Decode(Definitions.GetProperty(reference.GetString()!.Replace("#/$defs/", "")), value, input, depth);
         if (schema.TryGetProperty("anyOf", out var variants))
         {
             foreach (var variant in variants.EnumerateArray())
-                try { return Decode(variant, value, input, depth + 1); } catch (JsonException) { /* Require a complete variant. */ }
+                try { return Decode(variant, value, input, depth); } catch (JsonException) { /* Require a complete variant. */ }
             throw Invalid();
         }
         if (schema.TryGetProperty("const", out var literal))

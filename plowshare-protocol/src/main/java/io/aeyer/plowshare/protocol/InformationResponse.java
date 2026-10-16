@@ -6,6 +6,142 @@ import java.util.*;
 
 /** Complete result alternatives for information operations; no arbitrary JSON result is exposed. */
 public sealed interface InformationResponse {
+  record InterchangeCapabilities(@JsonValue InformationInterchange.Capabilities value)
+      implements InformationResponse {
+    public InterchangeCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeBundle(@JsonValue InformationInterchange.Bundle value)
+      implements InformationResponse {
+    public InterchangeBundle {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeReadable(@JsonValue InformationInterchange.Readable value)
+      implements InformationResponse {
+    public InterchangeReadable {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeImported(@JsonValue InformationInterchange.Imported value)
+      implements InformationResponse {
+    public InterchangeImported {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record InterchangeOrigin(@JsonValue InformationInterchange.Origin value)
+      implements InformationResponse {
+    public InterchangeOrigin {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationCapabilities(@JsonValue InformationNavigation.Capabilities value)
+      implements InformationResponse {
+    public NavigationCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationDocuments(@JsonValue InformationNavigation.Documents value)
+      implements InformationResponse {
+    public NavigationDocuments {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationSelection(@JsonValue InformationNavigation.Selection value)
+      implements InformationResponse {
+    public NavigationSelection {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationConnections(@JsonValue InformationNavigation.Connections value)
+      implements InformationResponse {
+    public NavigationConnections {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationRelationship(@JsonValue InformationNavigation.Relationship value)
+      implements InformationResponse {
+    public NavigationRelationship {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationPolicy(@JsonValue InformationNavigation.PolicyView value)
+      implements InformationResponse {
+    public NavigationPolicy {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationViews(@JsonValue InformationNavigation.Views value)
+      implements InformationResponse {
+    public NavigationViews {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationView(@JsonValue InformationNavigation.SavedView value)
+      implements InformationResponse {
+    public NavigationView {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record NavigationChanged(@JsonValue InformationNavigation.Changed value)
+      implements InformationResponse {
+    public NavigationChanged {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record ContentCapabilities(@JsonValue InformationContent.Capabilities value)
+      implements InformationResponse {
+    public ContentCapabilities {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Content(@JsonValue InformationContent.View value) implements InformationResponse {
+    public Content {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Types(@JsonValue InformationContent.Versions value) implements InformationResponse {
+    public Types {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record Type(@JsonValue InformationContent.Contract value) implements InformationResponse {
+    public Type {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record TypeVersion(@JsonValue InformationContent.Version value) implements InformationResponse {
+    public TypeVersion {
+      Objects.requireNonNull(value);
+    }
+  }
+
+  record MetadataValidation(@JsonValue SchemaValidation.Result value)
+      implements InformationResponse {
+    public MetadataValidation {
+      Objects.requireNonNull(value);
+    }
+  }
+
   record Revision(@JsonValue Information.Revision value) implements InformationResponse {
     public Revision {
       Objects.requireNonNull(value, "value");

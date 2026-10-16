@@ -20,9 +20,9 @@ var methods = typeof(Operations).GetMethods(System.Reflection.BindingFlags.Publi
 if (methods.Length != Protocol.Operations.Count) throw new Exception("Missing typed operations");
 foreach (var method in methods)
     if (method.GetParameters().Any(p => p.ParameterType == typeof(object) || p.ParameterType == typeof(JsonElement))) throw new Exception("Raw public request");
-var absent = Codec.Input("conversation.open", new ConversationOpenRequest());
+var absent = Codec.Input("memory.index", new MemoryIndexRequest());
 if (absent.TryGetProperty("project", out _)) throw new Exception("Absent field encoded");
-var explicitNull = Codec.Input("conversation.open", new ConversationOpenRequest { Project = TierDtoProject.FromVariant1(default) });
+var explicitNull = Codec.Input("memory.index", new MemoryIndexRequest { Project = TierDtoProject.FromVariant1(default) });
 if (explicitNull.GetProperty("project").ValueKind != JsonValueKind.Null) throw new Exception("Explicit null lost");
 using var deploymentRequest = JsonDocument.Parse("""{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","revision":"22222222-2222-2222-2222-222222222222"}""");
 using var deploymentReceipt = JsonDocument.Parse("""{"project":"app","requestId":"11111111-1111-1111-1111-111111111111","release":{"revision":"22222222-2222-2222-2222-222222222222"}}""");

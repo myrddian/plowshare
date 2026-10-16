@@ -687,7 +687,10 @@ export async function run(args: readonly string[], io: IO): Promise<number> {
             request: request('union.status', { project: opts.project! }),
           }
         : follow === undefined
-          ? parseCommand(command, opts.project)
+          ? parseCommand(
+              command,
+              args.includes('--global') ? null : opts.project,
+            )
           : { kind: 'request' as const, request: follow };
     if (parsed.kind !== 'request')
       throw new Usage(

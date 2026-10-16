@@ -825,3 +825,37 @@
 .tool-connections-dialog button:disabled { opacity:.5; }
 .tool-connections-dialog [hidden] { display:none !important; }
 @media(min-width:700px) { .tool-connections-dialog .native-profile-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:16px; } }
+
+/* Schema authoring stays within its own scroll area so the source workspace remains usable. */
+.information-panel .information-types { max-height:min(30vh,260px); overflow:auto; flex-shrink:0; }
+.information-panel .information-types[hidden] { display:none; }
+.information-type-version { border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
+
+.information-panel>[data-error], .information-panel>[data-notice] { flex-shrink:0; max-height:6em; overflow:auto; }
+
+/* Current-document navigation shares Library authority but has its own compact reader. */
+.information-navigation[open] { display:flex; flex-direction:column; min-height:0; flex:1; }
+.information-navigation [data-nav-toolbar], .information-panel .information-navigation form[data-nav-filter], .information-panel .information-navigation form[data-nav-save-form] { display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin:8px 0; }
+.information-navigation [data-nav-toolbar] { align-items:center; }
+.information-navigation [data-nav-toolbar] label, .information-navigation [data-nav-save-form] label { width:180px; }
+.information-navigation [data-nav-filter] label { flex:1; min-width:140px; }
+.information-navigation [data-nav-crumbs] { display:flex; align-items:center; flex-wrap:wrap; gap:5px; padding:8px 0; }
+.navigation-workspace { display:grid; grid-template-columns:minmax(190px,28%) minmax(0,1fr); min-height:320px; max-height:54vh; flex:1; overflow:hidden; border-top:1px solid var(--line); }
+.navigation-documents, .navigation-reader { min-width:0; overflow:auto; padding:14px; }
+.navigation-documents { border-right:1px solid var(--line); }
+.information-navigation [data-nav-results] button { display:block; width:100%; text-align:left; margin-bottom:8px; }
+.information-navigation [data-nav-results] small { display:block; margin-top:5px; color:var(--muted); }
+.information-navigation [data-nav-text] { white-space:pre-wrap; overflow-wrap:anywhere; max-height:25vh; overflow:auto; line-height:1.6; }
+.information-navigation input[type=checkbox] { width:auto; }
+.information-panel:has(> .information-navigation[open]) > :is(.information-workspace,.information-faceting,.information-types,.information-report) { display:none; }
+@media(max-width:720px) { .navigation-workspace { grid-template-columns:minmax(0,1fr); max-height:none; overflow:visible; } .navigation-documents { max-height:240px; border-right:0; } }
+.information-panel:has(> .information-navigation[open]) [data-question] { display:none; }
+
+/* Portable exchange remains a bounded tool pane beside the independently scrolling reader. */
+.information-interchange { flex-shrink:0; max-height:35vh; overflow:auto; }
+.information-panel > .information-interchange[hidden] { display:none; }
+.information-interchange [data-portable-preview] { overflow-wrap:anywhere; }
+.information-interchange [data-portable-status] { color:var(--accent); }
+.information-panel:has(> .information-interchange[open]) { overflow:auto; }
+.information-panel:has(> .information-interchange[open]) > .information-workspace { flex:0 0 320px; min-height:240px; }
+.information-interchange[open] { max-height:none; overflow:visible; }

@@ -1,3 +1,4 @@
+import { decodeMetadataValidation } from 'plowshare-client-ts/operations/information-content';
 import {
   NativeHostCommands,
   NativeMcpSessions,
@@ -794,6 +795,14 @@ export class DesktopClient {
           }
         : {
             code: answer.code,
+            ...(answer.code === 'VALIDATION_FAILED' &&
+            request.type.startsWith('information.') &&
+            [
+              'INFORMATION_METADATA_INVALID',
+              'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
+            ].includes(answer.said ?? '')
+              ? { metadataValidation: decodeMetadataValidation(answer.payload) }
+              : {}),
             ...(answer.said === undefined ? {} : { said: answer.said }),
           };
     });
@@ -2219,6 +2228,10 @@ export class DesktopClient {
       )
     )
       throw new Error('Choose a workflow granted to this agent.');
+    if (!conversation.project)
+      throw new Error(
+        'Select an explicit project or Personal conversation before starting a workflow.',
+      );
     text(input.text, 'workflow request');
     if (
       typeof input.requestId !== 'string' ||

@@ -1,3 +1,18 @@
+import { installInformationInterchange } from './information-interchange.ts';
+import { installDocumentNavigation } from './document-navigation.ts';
+import {
+  contentHtml,
+  metadataObject,
+  typeOptions,
+} from './authored-information.ts';
+import { parseSchemaDefinition } from 'plowshare-client-ts/operations/schema-instances';
+import type {
+  InformationContentCapabilities,
+  InformationContentView,
+  InformationTypeVersion,
+  InformationTyping,
+  InformationProcessingStage,
+} from 'plowshare-client-ts/operations/information-content';
 import type { InformationFilter } from 'plowshare-client-ts/operations/information-payloads';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
 import { background } from './events.ts';
@@ -63,6 +78,26 @@ export function installInformation(
     <div class="information-workspace"><section class="information-list-pane" aria-label="Sources"><div data-list></div><div class="information-toolbar information-pagination"><button data-previous>Previous sources</button><button data-next>More sources</button></div></section><section data-detail aria-label="Selected source"><div class="information-empty"><h2>Read, ask, and collect evidence</h2><p>Choose a source from the list to read its text or ask a question grounded in that source.</p><p>Use Add source to save text or import a public web page.</p></div></section></div>
     <dialog data-add-dialog aria-labelledby="source-add-title"><header class="dialog-header"><h2 id="source-add-title">Add a source</h2><button type="button" data-add-close>Close</button></header><p>Save text or import a public web page. Processing uses your server’s configured models.</p><p data-add-error role="alert" hidden></p><form data-add><label>Source name<input name="name" autofocus required maxlength="512" placeholder="A name you will recognise"></label><label>Text<textarea name="text" rows="5" placeholder="Paste the source text"></textarea></label><label>Or a public web page URL<input name="url" type="url" placeholder="https://…"></label><p>When a URL is supplied, the web page is imported instead of the pasted text.</p><button class="primary-button">Save source</button></form></dialog>
     <details class="information-report"><summary>Advanced: save a report with evidence references</summary><p>Use this when you already have source version and evidence IDs. Read and ask about sources above for everyday work.</p><form data-report><label>Report name<input name="name" required></label><label>Report text<textarea name="text" rows="6" required></textarea></label><label>Source version IDs, comma separated<input name="inputs" required></label><label>Evidence IDs, comma separated<input name="evidence"></label><label>Previous report version ID (for feedback)<input name="feedback"></label><button>Save draft report</button></form></details>`;
+  let authored: InformationContentCapabilities | undefined;
+  let navigationIdentity = '';
+  let authoredIdentity = '',
+    typeIdentity = '';
+  let availableTypes: readonly InformationTypeVersion[] = [];
+  let selectedContent: InformationContentView | undefined;
+  let pendingMetadataEdit: InformationTyping | undefined;
+  let pendingMetadataScope = '';
+  const authoredControls = document.createElement('details');
+  authoredControls.hidden = true;
+  authoredControls.className = 'information-types';
+  authoredControls.innerHTML = `<summary>Document types</summary><p>Types validate metadata structure. They do not verify factual claims.</p><label>Filter by active type<select data-type-filter><option value="">All document types</option><option value="untyped">Untyped</option></select></label><div data-type-manager hidden><form data-type-create><label>Slug<input name="slug" required maxlength="64" pattern="[a-z][a-z0-9-]*"></label><label>Label<input name="label" required maxlength="120"></label><label>Description<textarea name="description" maxlength="4096"></textarea></label><label>Object schema<textarea name="schema" rows="7" required maxlength="65536">{ "type": "object", "properties": {}, "additionalProperties": false }</textarea></label><button>Create immutable draft</button></form><div data-type-versions></div></div></details>`;
+  dialog.querySelector('[data-faceting]')!.before(authoredControls);
+  const authorFields = `<fieldset data-typed-author hidden><label>Document type<select name="contentVersion"><option value="">Untyped</option></select></label><label>Complete metadata object<textarea name="metadata" rows="5" maxlength="16384">{}</textarea></label><p>Defaults in a schema are annotations. Enter every required field explicitly.</p></fieldset>`;
+  for (const form of dialog.querySelectorAll<HTMLFormElement>(
+    '[data-add],[data-report]',
+  ))
+    form
+      .querySelector('button')!
+      .insertAdjacentHTML('beforebegin', authorFields);
   const select = dialog.querySelector<HTMLSelectElement>('[data-scope]')!;
   const view = dialog.querySelector<HTMLSelectElement>('[data-view]')!;
   const list = dialog.querySelector<HTMLElement>('[data-list]')!;
@@ -89,6 +124,8 @@ export function installInformation(
     'documentAuthor',
     'when',
     'subtype',
+    'contentType',
+    'contentTypeVersion',
   ] as const;
   const facetLabels: Record<string, string> = {
     kind: 'Resource kind',
@@ -99,6 +136,8 @@ export function installInformation(
     documentAuthor: 'Document author',
     when: 'Saved month (UTC)',
     subtype: 'Format or language',
+    contentType: 'Document type ID',
+    contentTypeVersion: 'Type version ID',
   };
   function renderFacets(value: InformationFacetCounts) {
     const choices = dialog.querySelector<HTMLElement>('[data-facet-choices]')!;
@@ -106,10 +145,14 @@ export function installInformation(
       `· ${String(value.total)} ${value.total === 1 ? 'version' : 'versions'}`;
     const facets = value.facets;
     const html = facetNames
-      .filter((name) => name !== 'kind' || !options.kind)
+      .filter(
+        (name) =>
+          (name !== 'kind' || !options.kind) &&
+          (authored || !['contentType', 'contentTypeVersion'].includes(name)),
+      )
       .map((name) => {
         const selected = filters[name];
-        const available = facets[name].filter((row) =>
+        const available = (facets[name] ?? []).filter((row) =>
           isList(selected)
             ? !selected.includes(String(row.value))
             : selected !== row.value,
@@ -255,7 +298,11 @@ export function installInformation(
       : [payload: InformationInput<K>]
   ): Promise<Replies[`information.${K}`]> {
     const selection = scope();
-    const checked = decodeInformationCall(operation, args[0] ?? {}, selection);
+    const checked = decodeInformationCall(
+      operation,
+      { ...(args[0] ?? {}), ...(authored ? { view: authored.view } : {}) },
+      selection,
+    );
     const answer = await api.request({
       action: 'information',
       ...checked,
@@ -263,6 +310,33 @@ export function installInformation(
     });
     return decodeReply(`information.${operation}`, answer.information);
   }
+  const navigation =
+    options.manual || options.kind === 'report'
+      ? undefined
+      : installDocumentNavigation(
+          api,
+          authoredControls.parentElement!,
+          scope,
+          () => JSON.stringify([state().base, state().handle, state().mode]),
+          () => state().handle,
+          () => state().serverAdmin === true,
+          () =>
+            availableTypes.map((t) => ({
+              id: t.contract.type,
+              label: t.contract.label,
+            })),
+        );
+  const portable = options.manual
+    ? undefined
+    : installInformationInterchange(
+        api,
+        authoredControls.parentElement!,
+        scope,
+        () => JSON.stringify([state().base, state().handle, state().mode]),
+        () => selected,
+        reload,
+      );
+  let portableIdentity = '';
   function requestId(operation: string, payload: object) {
     const key = JSON.stringify([scope(), operation, payload]);
     let id = requests.get(key);
@@ -277,6 +351,100 @@ export function installInformation(
     reloading = true;
     const stamp = epoch;
     try {
+      const connectionIdentity = JSON.stringify([
+        state().base,
+        state().handle,
+        state().mode,
+      ]);
+      if (authoredIdentity !== connectionIdentity) {
+        authoredIdentity = connectionIdentity;
+        authored = undefined;
+        typeIdentity = '';
+        availableTypes = [];
+        try {
+          authored = await call('types.capabilities', {});
+        } catch {
+          notice.hidden = false;
+          notice.textContent =
+            'This server has not advertised authored document types. Existing untyped sources remain available.';
+        }
+      }
+      const portableContext = JSON.stringify([connectionIdentity, scope()]);
+      if (portable && portableIdentity !== portableContext) {
+        portableIdentity = portableContext;
+        await portable.probe();
+      }
+      if (navigation && navigationIdentity !== connectionIdentity) {
+        navigationIdentity = connectionIdentity;
+        try {
+          await navigation.probe();
+        } catch (reason) {
+          notice.hidden = false;
+          notice.textContent = `Document navigation is unavailable: ${errorMessage(reason)}`;
+        }
+      }
+      const registryIdentity = JSON.stringify([connectionIdentity, scope()]);
+      if (pendingMetadataScope !== registryIdentity) {
+        pendingMetadataScope = registryIdentity;
+        pendingMetadataEdit = undefined;
+      }
+      if (authored && typeIdentity !== registryIdentity) {
+        typeIdentity = registryIdentity;
+        availableTypes =
+          scope().kind === 'shared'
+            ? []
+            : (await call('types.list', { view: authored.view, limit: 100 }))
+                .results;
+        const registryScope = scope();
+        const manager =
+          registryScope.kind === 'personal' ||
+          (registryScope.kind === 'project' &&
+            state().projects.some(
+              (project) =>
+                project.name === registryScope.project &&
+                project.role === 'MANAGER',
+            ));
+        authoredControls.hidden = !!options.manual || scope().kind === 'shared';
+        authoredControls.querySelector<HTMLElement>(
+          '[data-type-manager]',
+        )!.hidden = !manager || !authored.typedWrites;
+        const versions =
+          manager && authored.typedWrites
+            ? (
+                await call('types.list', {
+                  view: authored.view,
+                  drafts: true,
+                  limit: 100,
+                })
+              ).results
+            : availableTypes;
+        authoredControls.querySelector<HTMLElement>(
+          '[data-type-versions]',
+        )!.innerHTML = versions
+          .map((type) => {
+            const controls =
+              manager && authored?.typedWrites
+                ? `<details><summary>Prepare a new immutable version</summary><form data-type-version><input type="hidden" name="type" value="${escape(type.contract.type)}"><input type="hidden" name="controlRevision" value="${escape(type.controlRevision)}"><label>Object schema<textarea name="schema" rows="6" maxlength="65536" required>${escape(JSON.stringify(type.contract.schema, null, 2))}</textarea></label><label>Presentation hints<textarea name="presentation" rows="3" maxlength="8192">${escape(JSON.stringify(type.contract.presentation, null, 2))}</textarea></label><button>Create next draft</button></form></details>${type.state === 'draft' && manager ? `<button data-type-transition="${escape(type.contract.version)}" data-control-revision="${escape(type.controlRevision)}" data-type-action="activate">Activate</button>` : type.state === 'active' && manager ? `<button data-type-transition="${escape(type.contract.version)}" data-control-revision="${escape(type.controlRevision)}" data-type-action="deprecate">Deprecate</button>` : ''}`
+                : '';
+            return `<section class="information-type-version"><p>${escape(type.contract.label)} · ${escape(type.contract.ordinal)} · ${escape(type.state)} <code>${escape(type.contract.version)}</code></p>${controls}</section>`;
+          })
+          .join('');
+        authoredControls.querySelector<HTMLSelectElement>(
+          '[data-type-filter]',
+        )!.innerHTML =
+          '<option value="">All document types</option><option value="untyped">Untyped</option>' +
+          typeOptions(availableTypes);
+        for (const fieldset of dialog.querySelectorAll<HTMLElement>(
+          '[data-typed-author]',
+        )) {
+          fieldset.hidden =
+            !authored.typedWrites ||
+            scope().kind === 'shared' ||
+            !!options.manual;
+          fieldset.querySelector<HTMLSelectElement>('select')!.innerHTML =
+            '<option value="">Untyped</option>' + typeOptions(availableTypes);
+        }
+      }
       const faceting = dialog.querySelector<HTMLElement>('[data-faceting]')!;
       faceting.hidden = view.value !== 'list';
       // Manual navigation stays in its shared collection even after clearing search filters.
@@ -433,6 +601,18 @@ export function installInformation(
       extraction,
       sourceOffset,
     ]);
+    const content =
+      authored && value.availability === 'active'
+        ? await call('content.get', { view: authored.view, revision: id })
+        : undefined;
+    if (
+      stamp !== epoch ||
+      inspection !== inspectRevision ||
+      selected !== id ||
+      !active
+    )
+      return;
+    selectedContent = content;
     const report = value.report;
     const answerJob = state()
       .jobs.filter((job) => job.source === 'information' && job.revision === id)
@@ -469,6 +649,7 @@ export function installInformation(
     const nextSignature = JSON.stringify([
       id,
       value,
+      content,
       answerJob?.status,
       answerJob?.text,
       answerJob?.detail,
@@ -538,14 +719,22 @@ export function installInformation(
           ? 'Needs attention'
           : !steps.length
             ? 'Processing status unavailable'
-            : preparing
-              ? 'Preparing source'
-              : legacy
-                ? 'Saved legacy text'
-                : 'Processing complete';
+            : content?.processingPolicy === 'explicit_only' &&
+                steps.some(
+                  (step) =>
+                    step.state === 'pending' &&
+                    !content.authorisedStages.includes(step.stage),
+                )
+              ? 'Saved; processing awaits an explicit request'
+              : preparing
+                ? 'Preparing source'
+                : legacy
+                  ? 'Saved legacy text'
+                  : 'Processing complete';
     question.hidden = false;
     question.innerHTML = `<form data-ask data-ready="${sourceCanAsk}" class="information-ask"><label>Ask about this source<input name="question" aria-describedby="source-question-help-${host.id}" placeholder="What does this source say about…?" required></label><button class="primary-button" title="${escape(questionHelp)}" ${questionBusy || !sourceCanAsk ? 'disabled' : ''}>${questionBusy ? 'Reading…' : 'Ask source'}</button><p class="information-help" id="source-question-help-${host.id}">${escape(questionHelp)}</p></form>`;
     detail.innerHTML = `<header class="information-source-heading"><h2>${escape(value.title ?? value.source_name)}</h2>${value.documentAuthor ? `<p class="information-document-author">Document author: ${escape(value.documentAuthor)}${value.documentAuthorSource === 'organisation' ? ' · issuing organisation' : value.documentAuthorSource === 'account' ? ' · owner account (fallback)' : ''}</p>` : ''}<p>Version ${escape(value.ordinal)} · ${escape(status)}${report?.status ? ` · ${escape(report?.status)} report` : ''}</p>${attention ? '<p role="status">Some processing needs attention. Open Processing details below for the reason and recovery options.</p>' : ''}</header>
+      ${content ? contentHtml(content, availableTypes, manage, !!authored?.typedWrites, !!pendingMetadataEdit) : ''}
       <div data-answer role="status">${answerJob ? `<p>${escape(answerJob.status === 'finished' ? 'Answer' : answerJob.status === 'running' ? 'Finding an answer…' : answerJob.status)}</p><div class="markdown-body">${markdownHtml(answerJob.text || answerJob.detail || 'Waiting for the source answer.')}</div>` : ''}</div>
       <div data-source>${textUnavailable || (cachedText?.key === textKey ? cachedText.html : '<p>Loading source text…</p>')}</div>
       <div class="information-source-tools"><details><summary>${options.kind === 'report' ? 'Evidence' : 'Evidence and source references'}</summary><p>Saved quotations connect findings to the exact text they came from.</p>${(isList(value.inputs) ? value.inputs : []).map((id) => `<button data-open-revision="${escape(id)}">Read source version ${escape(id)}</button>`).join('')}${(isList(value.citations) ? value.citations : []).map((id) => `<button data-evidence="${escape(id)}">Read saved quotation ${escape(id)}</button>`).join('')}<div data-evidence-detail></div></details>
@@ -560,7 +749,7 @@ export function installInformation(
           '',
         )}</select></label><button name="direction" value="link">Link</button><button name="direction" value="unlink">Unlink</button></form>
       ${value.source_uri ? '<button data-control="refresh">Refresh original URL into a new revision</button>' : ''}
-      <form data-revise><label>Replacement text<textarea name="text" rows="4" required></textarea></label><button>Save a new version</button></form>`
+      ${value.kind === 'report' ? '<p>To edit report prose, use Save a report with the prior report UUID and its inputs and citations.</p>' : '<form data-revise><label>Replacement text<textarea name="text" rows="4" required></textarea></label><button>Save a new version</button></form>'}`
           : ''
       }
       </details>
@@ -730,11 +919,25 @@ export function installInformation(
       // The mapped decoder owns dynamic operation pairing and validates before IPC.
       const checked = decodeInformationCall(
         operation,
-        { ...body, requestId: requestId(operation, body) },
+        {
+          ...body,
+          ...(authored ? { view: authored.view } : {}),
+          requestId: requestId(operation, body),
+        },
         scope(),
       );
       await api.request({ action: 'information', ...checked, scope: scope() });
       requests.delete(key);
+      if (operation.startsWith('types.')) typeIdentity = '';
+      if (operation === 'types.activate' || operation === 'types.deprecate')
+        authoredControls.open = false;
+      if (operation === 'content.revise') {
+        pendingMetadataEdit = undefined;
+        selected = '';
+        selectedContent = undefined;
+        detail.innerHTML =
+          '<p>Metadata-only revision saved. Choose the new version to read it; processing awaits explicit selection.</p>';
+      }
       if (operation === 'tags.groups') resetGroupDraft = true;
       detailSignature = '';
       cachedText = undefined;
@@ -751,8 +954,24 @@ export function installInformation(
         if (operation === 'acquire') view.value = 'acquisitions';
       }
     } catch (reason) {
-      if (stamp === epoch) showError(reason);
+      if (stamp === epoch) {
+        const message =
+          reason instanceof Error ? reason.message : errorMessage(reason);
+        showError(
+          message.includes('INFORMATION_REVISION_CONFLICT')
+            ? new Error(
+                'A newer revision exists. Refresh and select the newest version, then reapply and validate your saved metadata edit.',
+              )
+            : message.includes('INFORMATION_TYPE_CONFLICT')
+              ? new Error(
+                  'The type changed. Refresh its current control revision before reapplying this change.',
+                )
+              : reason,
+        );
+        detailSignature = '';
+      }
     } finally {
+      if (operation.startsWith('types.')) typeIdentity = '';
       busy = false;
       select.disabled = view.disabled = false;
       await reload();
@@ -877,6 +1096,7 @@ export function installInformation(
     if (target.hasAttribute('data-use-auto-groups'))
       background(mutate('tags.groups', { revision: selected, groups: null }));
     if (target.hasAttribute('data-refresh')) {
+      typeIdentity = '';
       detailSignature = '';
       cachedText = undefined;
       background(reload());
@@ -903,6 +1123,63 @@ export function installInformation(
       });
     if (target.dataset.openRevision)
       void inspect(target.dataset.openRevision, false).catch(reportError);
+    if (target.dataset.typeTransition)
+      background(
+        mutate(
+          target.dataset.typeAction === 'activate'
+            ? 'types.activate'
+            : 'types.deprecate',
+          {
+            view: 'content-types-v1',
+            version: target.dataset.typeTransition,
+            expectedControlRevision: Number(target.dataset.controlRevision),
+          },
+        ),
+      );
+    if (target.hasAttribute('data-reapply-metadata') && pendingMetadataEdit) {
+      const form = target.closest('form')!;
+      form.querySelector<HTMLSelectElement>('[name="mode"]')!.value =
+        pendingMetadataEdit.mode;
+      form.querySelector<HTMLSelectElement>('[name="version"]')!.value =
+        pendingMetadataEdit.version ?? '';
+      form.querySelector<HTMLTextAreaElement>('[name="metadata"]')!.value =
+        JSON.stringify(pendingMetadataEdit.metadata ?? {}, null, 2);
+    }
+    if (target.hasAttribute('data-metadata-validate')) {
+      const form = target.closest('form')!;
+      const data = new FormData(form);
+      const version =
+        data.get('mode') === 'set'
+          ? displayText(data.get('version'))
+          : selectedContent?.contentType?.contract.version;
+      if (!version) {
+        showError('Select a type before validation.');
+        return;
+      }
+      background(
+        (async () => {
+          const result = await call('types.validate', {
+            view: 'content-types-v1',
+            version,
+            ...(data.get('mode') !== 'set'
+              ? { attachedRevision: selected }
+              : {}),
+            metadata: metadataObject(displayText(data.get('metadata'))),
+          });
+          form.querySelector<HTMLElement>(
+            '[data-metadata-validation]',
+          )!.textContent =
+            result.status === 'VALID'
+              ? 'Metadata conforms to the bound schema. Claims have not been verified.'
+              : result.issues
+                  .map(
+                    (issue) =>
+                      `${issue.instancePointer || '/'}: ${issue.message}`,
+                  )
+                  .join('\n');
+        })().catch(reportError),
+      );
+    }
     if (target.dataset.control) {
       if (
         target.dataset.control === 'delete' &&
@@ -932,10 +1209,52 @@ export function installInformation(
           'refresh',
         ] as const)
       ) {
-        background(mutate(operation, { revision: selected }));
+        if (operation === 'refresh' && selectedContent?.contentType)
+          background(
+            mutate(operation, {
+              revision: selected,
+              expectedRevision: selected,
+              typing: { mode: 'inherit' },
+            }),
+          );
+        else if (
+          operation === 'retry' &&
+          selectedContent?.processingPolicy === 'explicit_only'
+        )
+          showError(
+            'Select stages in Document metadata and processing before retrying.',
+          );
+        else background(mutate(operation, { revision: selected }));
       } else showError('Unknown source action.');
     }
   });
+  authoredControls
+    .querySelector<HTMLSelectElement>('[data-type-filter]')!
+    .addEventListener('change', (event) => {
+      const value = (event.target as HTMLSelectElement).value;
+      const { contentTypeVersion: _type, untyped: _untyped, ...rest } = filters;
+      filters = {
+        ...rest,
+        ...(value === 'untyped'
+          ? { untyped: true }
+          : value
+            ? { contentTypeVersion: value }
+            : {}),
+      };
+      offset = 0;
+      background(reload());
+    });
+  function authorTyping(data: FormData): InformationTyping | undefined {
+    const version = displayText(data.get('contentVersion')).trim();
+    return version
+      ? {
+          mode: 'set',
+          version,
+          metadata: metadataObject(displayText(data.get('metadata'))),
+        }
+      : undefined;
+  }
+
   const collectionNote = () => {
     dialog.querySelector<HTMLElement>('[data-scope-note]')!.textContent =
       select.value === 'personal'
@@ -1068,6 +1387,88 @@ export function installInformation(
       }
       background(mutate('tags.groups', { revision: selected, groups }));
     }
+    if (form.hasAttribute('data-type-version')) {
+      try {
+        background(
+          mutate('types.version.create', {
+            view: 'content-types-v1',
+            type: displayText(data.get('type')),
+            expectedControlRevision: Number(data.get('controlRevision')),
+            schema: parseSchemaDefinition(displayText(data.get('schema'))),
+            presentation: metadataObject(displayText(data.get('presentation'))),
+          }),
+        );
+      } catch (reason) {
+        showError(reason);
+      }
+    }
+    if (form.hasAttribute('data-type-create')) {
+      try {
+        background(
+          mutate('types.version.create', {
+            view: 'content-types-v1',
+            slug: displayText(data.get('slug')),
+            label: displayText(data.get('label')),
+            description: displayText(data.get('description')),
+            schema: parseSchemaDefinition(displayText(data.get('schema'))),
+          }),
+        );
+      } catch (reason) {
+        showError(reason);
+      }
+    }
+    if (form.hasAttribute('data-metadata')) {
+      try {
+        const mode = displayText(data.get('mode'));
+        const typing: InformationTyping =
+          mode === 'clear'
+            ? { mode: 'clear' }
+            : mode === 'set'
+              ? {
+                  mode: 'set',
+                  version: displayText(data.get('version')),
+                  metadata: metadataObject(displayText(data.get('metadata'))),
+                }
+              : {
+                  mode: 'inherit',
+                  ...(selectedContent?.contentType
+                    ? {
+                        metadata: metadataObject(
+                          displayText(data.get('metadata')),
+                        ),
+                      }
+                    : {}),
+                };
+        pendingMetadataEdit = typing;
+        background(
+          mutate('content.revise', {
+            view: 'content-types-v1',
+            expectedRevision: selected,
+            typing,
+          }),
+        );
+      } catch (reason) {
+        showError(reason);
+      }
+    }
+    if (form.hasAttribute('data-process')) {
+      const stages = data
+        .getAll('stages')
+        .filter(
+          (stage): stage is InformationProcessingStage =>
+            typeof stage === 'string' &&
+            [
+              'extract',
+              'derive',
+              'embed',
+              'summarise',
+              'summary_embed',
+              'autoTag',
+              'tagGroups',
+            ].includes(stage),
+        );
+      background(mutate('retry', { revision: selected, stages }));
+    }
     if (form.hasAttribute('data-report')) {
       const ids = (name: string) =>
         displayText(data.get(name) ?? '')
@@ -1075,6 +1476,13 @@ export function installInformation(
           .map((id) => id.trim())
           .filter(Boolean);
       const feedback = displayText(data.get('feedback') ?? '').trim();
+      let typing: InformationTyping | undefined;
+      try {
+        typing = authorTyping(data);
+      } catch (reason) {
+        showError(reason);
+        return;
+      }
       background(
         mutate('record.report', {
           name: displayText(data.get('name')),
@@ -1082,6 +1490,9 @@ export function installInformation(
           inputs: ids('inputs'),
           evidence: ids('evidence'),
           ...(feedback ? { feedback } : {}),
+          ...(typing
+            ? { typing, ...(feedback ? { expectedRevision: feedback } : {}) }
+            : {}),
         }),
       );
     }
@@ -1093,10 +1504,23 @@ export function installInformation(
         showError('Enter source text or a URL.');
         return;
       }
+      let typing: InformationTyping | undefined;
+      try {
+        typing = authorTyping(data);
+      } catch (reason) {
+        showError(reason);
+        return;
+      }
+      if (url && typing) {
+        showError(
+          'Import the URL first, then assign metadata on its retained version.',
+        );
+        return;
+      }
       background(
         url
           ? mutate('acquire', { name, url })
-          : mutate('upload', { name, text }),
+          : mutate('upload', { name, text, ...(typing ? { typing } : {}) }),
       );
     }
     if (form.hasAttribute('data-link'))
@@ -1116,6 +1540,12 @@ export function installInformation(
         mutate('revise', {
           revision: selected,
           text: displayText(data.get('text')),
+          ...(selectedContent?.contentType
+            ? {
+                expectedRevision: selected,
+                typing: { mode: 'inherit' } as const,
+              }
+            : {}),
         }),
       );
     if (form.hasAttribute('data-ask')) {
@@ -1179,6 +1609,13 @@ export function installInformation(
         mutate('rebuild', {
           revision: selected,
           stage: displayText(data.get('stage')),
+          ...(selectedContent?.processingPolicy === 'explicit_only'
+            ? {
+                stages: [
+                  displayText(data.get('stage')) as InformationProcessingStage,
+                ],
+              }
+            : {}),
         }),
       );
   });
@@ -1250,6 +1687,10 @@ export function installInformation(
           : 'personal';
       question.hidden = true;
       question.innerHTML = '';
+      navigation?.reset();
+      portable?.reset();
+      portableIdentity = '';
+      navigationIdentity = '';
       epoch++;
       selected = '';
       offset = 0;

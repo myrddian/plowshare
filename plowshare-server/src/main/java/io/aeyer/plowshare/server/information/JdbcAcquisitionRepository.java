@@ -44,7 +44,30 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
         (String) row.get("project_name"),
         (String) row.get("log_id"),
         (String) row.get("caller_session"),
-        (UUID) row.get("token"));
+        (UUID) row.get("token"),
+        intent(row.get("content_intent")));
+  }
+
+  private static Intent intent(Object value) {
+    if (value == null) return null;
+    try {
+      return JSON.readValue(value.toString(), Intent.class);
+    } catch (java.io.IOException invalid) {
+      throw new IllegalStateException("invalid retained acquisition typing", invalid);
+    }
+  }
+
+  @Override
+  public Optional<UUID> prior(String account, UUID request, String fingerprint) {
+    var rows =
+        jdbc.queryForList(
+            "SELECT id,fingerprint FROM information_acquisitions WHERE account=? AND request_id=?",
+            account,
+            request);
+    if (rows.isEmpty()) return Optional.empty();
+    if (!fingerprint.equals(rows.getFirst().get("fingerprint")))
+      throw new CallerFault("requestId was already used for a different acquisition");
+    return Optional.of((UUID) rows.getFirst().get("id"));
   }
 
   private static Gate gate(Object value) {
@@ -65,6 +88,20 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
       String session,
       int total,
       String corpus) {
+    return submit(context, request, fingerprint, url, name, session, total, corpus, null);
+  }
+
+  @Override
+  public UUID submit(
+      InformationContext context,
+      UUID request,
+      String fingerprint,
+      String url,
+      String name,
+      String session,
+      int total,
+      String corpus,
+      Intent intent) {
     Objects.requireNonNull(context);
     Objects.requireNonNull(request);
     if (total < 1
@@ -98,7 +135,7 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
         != 0) throw new CallerFault("requestId was already used for information intake");
     UUID ticket = UUID.randomUUID();
     jdbc.update(
-        "INSERT INTO information_acquisitions(id,account,request_id,scope,project_name,fingerprint,url,source_name,caller_session,allowance_total,corpus) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO information_acquisitions(id,account,request_id,scope,project_name,fingerprint,url,source_name,caller_session,allowance_total,corpus,content_intent) VALUES(?,?,?,?,?,?,?,?,?,?,?,CAST(? AS jsonb))",
         ticket,
         context.account(),
         request,
@@ -109,7 +146,8 @@ public final class JdbcAcquisitionRepository implements AcquisitionRepository {
         name,
         session,
         total,
-        corpus);
+        corpus,
+        intent == null ? null : InformationJson.json(intent));
     return ticket;
   }
 

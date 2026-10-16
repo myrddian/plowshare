@@ -46,7 +46,47 @@ public interface AcquisitionRepository {
       String project,
       String log,
       String session,
-      UUID token) {}
+      UUID token,
+      Intent intent) {
+    public Ticket(
+        Status status,
+        String account,
+        UUID requestId,
+        String project,
+        String log,
+        String session,
+        UUID token) {
+      this(status, account, requestId, project, log, session, token, null);
+    }
+  }
+
+  record Intent(
+      UUID expectedRevision,
+      io.aeyer.plowshare.protocol.InformationContent.Typing typing,
+      io.aeyer.plowshare.protocol.InformationContent.Binding binding) {
+    public Intent {
+      Objects.requireNonNull(typing);
+    }
+  }
+
+  default Optional<UUID> prior(String account, UUID request, String fingerprint) {
+    return Optional.empty();
+  }
+
+  default UUID submit(
+      InformationContext context,
+      UUID request,
+      String fingerprint,
+      String url,
+      String name,
+      String session,
+      int total,
+      String corpus,
+      Intent intent) {
+    if (intent != null)
+      throw new UnsupportedOperationException("typed acquisition persistence unavailable");
+    return submit(context, request, fingerprint, url, name, session, total, corpus);
+  }
 
   record Retained(UUID resource, String sourceUri) {}
 
