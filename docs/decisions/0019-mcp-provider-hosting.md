@@ -2,8 +2,8 @@
 
 Status: accepted. The reusable [outbound HTTP adapter](../../integrations/mcp/README.md)
 implements the existing provider mechanism with separate connection and credential
-contexts. Native instance hosting and service-account accounting pools remain
-separate tasks. [ADR 0025](0025-service-account-attribution-and-spending-pools.md)
+contexts. [Native instance hosting](../native-mcp-hosting.md) is implemented
+separately; service-account accounting pools remain proposed. [ADR 0025](0025-service-account-attribution-and-spending-pools.md)
 proposes the attribution and general spending-pool policy; it implements no monetary
 enforcement. The source audit below records the original design baseline.
 Audited against main `e0886dd0b6472849dee1f4408a158f2556b02816` on 12 October 2026.
@@ -26,7 +26,9 @@ This already supplies tool visibility, agent opt-in, permissions, schema pinning
 causal identity, invocation receipts and unknown-effect recovery. It needs no new
 MCP registry, job runtime or effect ledger. Remote metadata confers no authority.
 
-The requested cross-client behavior has three specific public capability gaps:
+The original design identified these three public capability gaps; server-held
+credentials and delegated hosting now implement the first two. The general acting
+grant remains separate proposed platform work:
 
 1. There is no server-held external credential lifecycle or invocation-bound
    credential access operation. Application token issuance authenticates to

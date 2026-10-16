@@ -272,3 +272,9 @@ ToolProvider catalogue publication, Relay consumption/acknowledgement, durable
 receipts and original-fence reconciliation. These tests use no database and do
 not claim live organization-server or OAuth-provider interoperability; that is
 the separate acceptance run.
+
+For a separate local authenticated test server and repeatable configured public-SDK
+acceptance, use the [interoperability runbook](../../docs/mcp-interoperability.md)
+and [test-instance recipe](../../test-support/mcp/README.md). The redacted report
+distinguishes passed execution/identity checks from blocked accounting and untested
+organization OAuth or separate-host deployment.

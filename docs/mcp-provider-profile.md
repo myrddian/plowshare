@@ -2,7 +2,8 @@
 
 This is the adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
 The [reusable outbound HTTP integration](../integrations/mcp/README.md) implements
-the shared-schema tools profile. Native STDIO hosting remains separate work.
+the shared-schema tools profile. [Native HTTP/STDIO hosting](native-mcp-hosting.md)
+uses the same direct client; only explicit server sharing uses Relay.
 
 ## Protocol selection and transport
 
@@ -177,3 +178,12 @@ The probe adds no runtime dependency or database schema. Later platform services
 use mocked interfaces by default, with focused PostgreSQL opt-in only for introduced
 persistence invariants. Adapter acceptance must use public SDKs against a configured
 server, including separate host/container deployments.
+
+Current independent integration fixtures are run through
+`./gradlew :plowshare-mcp-integration:check`; the installed-consumer check repeats
+them against packed public SDKs. HTTPS fixtures retain hostname/certificate
+verification, with a public test certificate trusted only by the spawned test
+process. No runtime TLS bypass is added. The [acceptance runbook](mcp-interoperability.md)
+documents configured server setup and evidence that still needs a real organization
+endpoint. The design probe above is historical profile evidence, not a substitute
+for that acceptance.
