@@ -350,8 +350,16 @@ Curator can assess and propose; it cannot approve its own Global publication.
 The server may carry out a specifically authorized administrative effect under
 its retained admission without assigning ADMIN to the performing agent.
 
-Read access is a separate explicit audience/read grant for eligible direct-human
-or admitted internal work. External SDK integrations are ineligible for Global,
+The only interactive clients eligible for Global are Plowshare's CLI, TUI and GUI.
+A human ADMIN uses those clients to manage Global, subject to the collection's
+action grant and source-release requirements. Ordinary read eligibility still
+requires its own audience/read grant; being one of those clients does not supply
+permissions. Internal workers carry bounded server admissions rather than
+constituting an additional external client.
+
+Read access is a separate explicit audience/read grant for eligible human work
+admitted through the CLI/TUI/GUI, or bounded internal work. External SDK
+integrations are ineligible for Global,
 including Applications, service-token integrations, provider/client-tool workers
 and requests acting for a human subject. Neither an explicit project grant,
 manifest scope, provider assignment nor a forced MANAGER exception can override
@@ -365,13 +373,19 @@ its own scope has no match. Omitted/null selections never become Global. Curatio
 under external authority cannot consult Global neighbors or approve publication;
 any later human administrative publication is a separate authorized admission.
 
-External denotes the authenticated integration/acting authority, not which SDK
-language or package the client uses. Supported human clients may use the SDK
-without becoming external integrations. Enforce eligibility from trusted principal
-and admission provenance, never client-supplied names or a claimed first-party
-flag. If the transport admits indistinguishable human credentials from external
-clients, a reliable client-origin distinction requires its own authentication
-contract; SDK use or a User-Agent string cannot establish one.
+The CLI, TUI and GUI may use the shared SDK internally; that does not extend Global
+eligibility to arbitrary SDK consumers. An external application authenticating a
+human, invoking the CLI as a proxy, or claiming a CLI/TUI/GUI client name does not
+thereby acquire Global authority. Preserve the authenticated actor and admission
+provenance across every such delegation.
+
+Enforce client eligibility from trusted principal/session admission, never an SDK
+package, User-Agent, client-supplied name or claimed first-party flag. The exact
+credential/session contract distinguishing approved client admissions is an
+implementation prerequisite. If every client presents indistinguishable reusable
+human credentials, the server cannot reliably enforce this client distinction
+merely by inspecting request labels. This proposal defines the required boundary
+without claiming that current transport authentication already proves it.
 
 The Global project's admitted principal/workload kinds carry this restriction
 through generic scope policy. A project representation with a normal UUID must

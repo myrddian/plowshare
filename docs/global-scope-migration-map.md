@@ -72,8 +72,11 @@ shared documents do not become Global memories or SYSTEM resources.
 External SDK integrations receive no Global access, including discovery, explicit
 project selection, memory IDs, implicit recall/navigation, publication and tool
 scope bindings. This includes acting requests whose subject is human: the external
-actor remains ineligible. Preserve eligible direct-human/internal use under its
-own grants. The fixed-UUID Global project needs an explicit principal/workload
+actor remains ineligible. Only the CLI, TUI and GUI are eligible interactive Global
+clients; human ADMIN management and audience-limited reads retain their own grants.
+Internal work retains bounded server admission. A generic human login in an
+external application does not by itself establish approved-client eligibility.
+The fixed-UUID Global project needs an explicit principal/workload
 eligibility policy; the current service-token null-project refusal is insufficient
 once Global is represented as a normal project. No SDK-library/client-name check
 can substitute for trusted authenticated authority provenance.
@@ -237,6 +240,10 @@ Default mocked/fake tests should cover:
   through an acting human subject or bind tools there. Project recall/navigation
   cannot append/retry Global or use a SYSTEM worker as a proxy. Test the fixed UUID,
   aliases, resource IDs, projections and omitted/null scope under the same policy.
+- CLI/TUI/GUI Global admissions still require the human's actual role/audience
+  grant. External human-login clients, claimed first-party labels and CLI proxies
+  cannot acquire Global eligibility; verify the trusted session/admission contract
+  before asserting that the transport enforces this distinction.
 - Global publication/content/lifecycle actions require human ADMIN over the
   collection plus source-release authority. Agents can propose but cannot approve
   their own publication; forced MANAGER does not override that rule. Read/use

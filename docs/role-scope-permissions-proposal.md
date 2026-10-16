@@ -222,13 +222,24 @@ UUIDs, separate from the SYSTEM account, SYSTEM role, server-administration scop
 and shared-document catalogue. Its
 initial admitted kinds are memories and their derived retrieval/index views.
 
-The matrix below applies only to eligible direct-human or explicitly admitted
-internal work. External SDK integrations, Applications, service-token integrations
+The matrix below applies only to eligible human work through the CLI, TUI or GUI,
+or explicitly admitted internal work. These are the only interactive Global
+clients; human ADMIN management still requires actual collection/action authority.
+External SDK integrations, Applications, service-token integrations
 and provider/client-tool workers have no Global access at any role. Acting for a
 human does not change the external actor's exclusion. No explicit role grant,
 forced MANAGER, provider assignment, SDK tool call or internal-worker proxy can
-override it. Direct-human client use of an SDK library is not by itself an external
-integration identity; eligibility follows trusted authentication/admission provenance.
+override it. The CLI/TUI/GUI may use SDK libraries internally, but an arbitrary
+external client using human credentials is not thereby eligible. Client names,
+User-Agent strings and CLI proxies do not establish the required trusted
+authentication/admission provenance.
+
+| Interactive entry point | Global eligibility |
+| --- | --- |
+| Plowshare CLI | Eligible human admission; ADMIN manages, reads require their audience grant |
+| Plowshare TUI | Same human admission, role and audience requirements |
+| Plowshare GUI | Same human admission, role and audience requirements |
+| External SDK application, including a human acting subject or generic human login | Ineligible |
 
 | Global memory action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
