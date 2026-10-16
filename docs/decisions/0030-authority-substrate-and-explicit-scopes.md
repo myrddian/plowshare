@@ -86,9 +86,19 @@ preserved through explicit mappings.
 The SYSTEM account is locked against interactive login, passwords, normal bearer
 credentials, user selection, impersonation and ordinary acting-context admission.
 The SYSTEM role contains the root action vocabulary and grant-issuing authority.
-Ordinary role management cannot assign it. These restrictions are enforced by
-account, role and delegation policy through generic authentication and admission
-boundaries.
+It is intrinsic to the locked SYSTEM account and is never an assignable role.
+No administrator, operator, grant issuer, agent definition or internal API may
+assign SYSTEM to another account or agent. It cannot be acquired by delegation,
+role inheritance, copying a role or selecting an execution profile. Bootstrap
+establishes the root account's intrinsic authority; recovery does not make that
+authority assignable. Account, role and delegation policy enforce these
+restrictions through generic authentication and admission boundaries.
+
+An agent can receive a scoped ADMIN grant where authorized, but `AGENT_X has
+SYSTEM_ROLE` is always invalid. Being SYSTEM-owned, having trusted `is-system`
+classification, or running as an internal worker does not assign the agent the
+SYSTEM role. A worker executed by the SYSTEM account receives bounded task
+authority, not its own copy of the root role.
 
 Internal executors obtain workload authority through trusted server admission.
 A request for internal processing cannot select an unrestricted SYSTEM execution.
@@ -115,7 +125,7 @@ Retain the familiar role model, with explicit action sets:
 
 | Role | Proposed purpose |
 | --- | --- |
-| SYSTEM | Root authority; reserved for internal policy and bounded workload admission |
+| SYSTEM | Intrinsic root authority of the locked SYSTEM account; never assignable or delegable |
 | ADMIN | Delegated administration within the scope and actions of its grant |
 | MANAGER | Manage a scope's membership and permitted local configuration |
 | CONTRIBUTOR | Perform permitted work and modify resources within a scope |
@@ -174,7 +184,8 @@ AND tool, filesystem, network and budget ceilings permit the operation
 AND resource policy and lifecycle permit the operation
 ```
 
-Scope is a mandatory restriction even when the executor has the SYSTEM role.
+Scope is a mandatory restriction for work executed by the locked SYSTEM account.
+That execution does not assign the SYSTEM role to the agent performing the task.
 An account's other grants are not implicitly added to an already admitted run.
 Scope ancestry describes containment; it does not imply universal descendant
 access. A scope grant must state any permitted descendant coverage. A worker
@@ -245,7 +256,7 @@ Document processing retains its existing no-tools/no-delegation capability ceili
 | --- | --- |
 | Server/internal execution context conflated with scope | Locked SYSTEM account, SYSTEM role and explicit workload grants |
 | Server configuration and internal Relay topics | Explicit server-administration scope and scoped administration grants |
-| Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and role lookup |
+| Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and worker lookup |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
 | Knowledge visible across projects | Published resources with an explicit audience and discoverable selections |
 | A user's work with no selected project | Explicit Personal scope selected at admission where the operation permits that default |
@@ -263,7 +274,7 @@ Remove automatic Global recall/navigation, shared-corpus inclusion and prompt
 inheritance. Intentional access uses an explicit selection, import or configured
 default policy admitted within the caller's authority. Missing or broken project
 configuration refuses rather than recovering to a different registry. Internal
-role lookup remains available independently of user catalogue resolution.
+worker lookup remains available independently of user catalogue resolution.
 
 Curation continues to assess project knowledge and may propose release. A model's
 judgment that a claim is generally useful is not publication permission. Promoting

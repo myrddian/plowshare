@@ -12,7 +12,7 @@ and symbols at that revision; target behavior is proposed.
 | Area | Current source and behavior | Proposed treatment |
 | --- | --- | --- |
 | Account identity and administration | [AdminStore](../plowshare-server/src/main/java/io/aeyer/plowshare/server/auth/AdminStore.java) uses account handles and `server_admin`; [V111](../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql) admits USER, SERVICE and SERVICE_TOKEN account kinds | Add a real locked SYSTEM principal and explicit root/admin grants. Today's SYSTEM accounting status is not that account |
-| Project RBAC | [ProjectRole](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) has ordered VIEWER, CONTRIBUTOR and MANAGER; [ProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectMembers.java) owns live memberships and grant history | Reuse scoped membership contracts; define action bundles and grant provenance. READER/ADMIN/SYSTEM need explicit contract decisions |
+| Project RBAC | [ProjectRole](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) has ordered VIEWER, CONTRIBUTOR and MANAGER; [ProjectMembers](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectMembers.java) owns live memberships and grant history | Reuse scoped membership contracts; define action bundles and grant provenance. READER/ADMIN need explicit action mappings; SYSTEM is intrinsic to its locked account and can never be assigned to another account or agent |
 | Administrative project access | [JdbcProjectMembers.role](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) grants server admins MANAGER for ordinary non-client/non-Personal projects; [ProjectAuthorization](../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/ProjectAuthorization.java) has operation-specific admin rules | Replace ambient privileges with reviewed explicit administrative scope/action grants; preserve necessary operations without silently expanding data access |
 | Personal isolation | [PersonalSpaces](../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/PersonalSpaces.java) maps an account to a private project/union, enforces exact ownership and supplies human runnable defaults | Preserve private control and explicit scope. Do not grant an Application Personal membership to enable acting work |
 | Tenant isolation | Relevant current account, project, Personal and information contracts use account/project identities rather than a first-class tenant identity | Specify tenant entities and mappings separately; do not declare each existing project a tenant by assumption |
@@ -83,7 +83,7 @@ their underlying scope representation.
 [ReloadingGlobalAgents](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ReloadingGlobalAgents.java)
 and `GlobalAgentDefinitions` provide a server registry independent of caller
 project overrides. Scribe, Curator, Learner and document workers still need trusted
-internal role resolution. Preserve worker execution while separating it from
+lookup by internal worker purpose. Preserve worker execution while separating it from
 user catalogue availability and published data.
 
 The audit's hardcoded `daedalus` assertion is obsolete at this baseline.
@@ -155,6 +155,9 @@ the complete substrate remains under design.
 
 Default mocked/fake tests should cover:
 
+- SYSTEM cannot be assigned through any role/grant, agent configuration, inheritance,
+  delegation, execution profile or operator/recovery path. Authorized scoped ADMIN
+  grants remain usable; trusted agent classification never confers the SYSTEM role.
 - SYSTEM execution inside one admitted scope, refusing unrelated resources and
   publication even when the root role permits the action in principle.
 - ADMIN management without implicit Personal/content access; role bundles versus
