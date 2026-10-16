@@ -13,6 +13,11 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+// Approval reasons are optional on the server, including ordinary local commands.
+const approvalQuestion = {id:'approval-fixture',conversation:'conversation-fixture',askedIn:'conversation-fixture',agent:'worker',side:'local',command:['echo','fixture'],cwd:'/fixture',reason:null,state:'asked',scope:null,prefix:null,defaultPrefix:['echo'],createdAt:'2026-10-17T00:00:00Z',answeredAt:null,commands:null,judged:null};
+for (const reason of [null, '', 'Review the command']) result('approval.list',{approvals:[{...approvalQuestion,reason}]},true);
+for (const reason of [false, 1, [], {}]) result('approval.list',{approvals:[{...approvalQuestion,reason}]},false);
+
 const receipt = '11111111-1111-1111-1111-111111111111';
 
 const portableBody=Buffer.from('Hello 🔎\r\n');

@@ -520,3 +520,28 @@ in a loop and explicitly call `relay.ack` after handling the batch. Python, Go,
 .NET and Java expose the same typed operations. The detector protocol described
 in [message filtering](message-filtering.md) uses these ordinary ports: consuming
 or acknowledging a review request is separate from publishing its acceptance.
+
+## SDK validation cost
+
+The shared TypeScript SDK validates Relay text synchronously on the client's
+event loop. Large payloads therefore consume client CPU before transmission and
+when decoding consumed events. Publication decoding runs the owning Relay
+validation once, after schema validation; it does not repeat the full text scan
+through command validation. UTF-8 byte counting uses an ASCII fast path and an
+allocation-free Unicode scan, preserving Java's replacement semantics for other
+SDK file operations. Relay still rejects unpaired surrogates and NUL.
+
+To inspect SDK validation cost with several clients running concurrently:
+
+```sh
+node --experimental-strip-types scripts/relay-validation-benchmark.mjs
+```
+
+This fixed workload releases four independent client event loops together. Each
+validates twelve 5 MiB publications, including ASCII, multibyte and JSON-escaped
+text. It reports the elapsed time before a queued callback can run. It exercises
+the real SDK decoder without a server and measures synchronous client delay,
+not broker throughput. A recorded [before/after measurement](../test-support/performance/relay-validation-2026-10-17.json)
+documents the timeout investigation. Database concurrency tests separately cover
+publication ordering/idempotency, consumer ownership and exclusive branch claims;
+they require the explicit full-database test mode.

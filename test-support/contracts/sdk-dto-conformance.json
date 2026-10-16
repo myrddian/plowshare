@@ -1,5 +1,229 @@
 [
   {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": null,
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": "",
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": "Review the command",
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": false,
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": 1,
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": [],
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "approval.list",
+    "value": {
+      "approvals": [
+        {
+          "id": "approval-fixture",
+          "conversation": "conversation-fixture",
+          "askedIn": "conversation-fixture",
+          "agent": "worker",
+          "side": "local",
+          "command": [
+            "echo",
+            "fixture"
+          ],
+          "cwd": "/fixture",
+          "reason": {},
+          "state": "asked",
+          "scope": null,
+          "prefix": null,
+          "defaultPrefix": [
+            "echo"
+          ],
+          "createdAt": "2026-10-17T00:00:00Z",
+          "answeredAt": null,
+          "commands": null,
+          "judged": null
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
     "boundary": "input",
     "operation": "information.interchange.import",
     "value": {

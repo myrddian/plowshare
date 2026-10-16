@@ -115,6 +115,11 @@ Git-backed synchronization is a separate explicit mode. Attaching files does not
 enable it. Resolve a conflict using the reviewed file and conflict state; a stale
 preview is not permission to overwrite a changed file.
 
+For a source checkout, run `./gradlew :plowshare-tui:assemble` before
+`./bin/plowshare-talk`. This installs the TUI dependencies and builds its linked
+SDK and native MCP runtime packages. Run it again after pulling dependency changes;
+the launcher reports this remedy when a required runtime package is missing.
+
 ### Named connections
 
 Desktop, CLI and TUI use the same named server/account registry. The desktop

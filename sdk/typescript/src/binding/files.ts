@@ -507,19 +507,27 @@ export function cut(
  * window it is sent against Java's count, not this one's.
  */
 export function utf8Length(text: string): number {
+  // Most protocol text is ASCII. Let the engine scan it without constructing a
+  // string iterator entry for every character, or allocating an encoded copy.
+  if (!/[\u0080-\uffff]/.test(text)) return text.length;
   let bytes = 0;
-  for (const character of text) {
-    const point = character.codePointAt(0) ?? 0;
-    if (point >= 0xd800 && point <= 0xdfff) {
+  for (let index = 0; index < text.length; index++) {
+    const unit = text.charCodeAt(index);
+    if (unit < 0x80) {
       bytes += 1;
-    } else if (point < 0x80) {
-      bytes += 1;
-    } else if (point < 0x800) {
+    } else if (unit < 0x800) {
       bytes += 2;
-    } else if (point < 0x10000) {
-      bytes += 3;
+    } else if (unit >= 0xd800 && unit <= 0xdfff) {
+      const next = text.charCodeAt(index + 1);
+      if (unit <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index++;
+      } else {
+        // Preserve Java's one-byte replacement for each unpaired surrogate.
+        bytes += 1;
+      }
     } else {
-      bytes += 4;
+      bytes += 3;
     }
   }
   return bytes;

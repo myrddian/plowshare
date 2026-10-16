@@ -1300,7 +1300,7 @@ class ApprovalViewDto:
     id: str
     judged: TierDtoProject
     prefix: IncomingSourceDtoExtensions
-    reason: str
+    reason: TierDtoProject
     scope: TierDtoProject
     side: str
     state: str

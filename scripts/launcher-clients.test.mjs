@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-async function fixture(name, args, settings = {}) {
+async function fixture(name, args, settings = {}, runtime = true) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), 'plowshare-basic-launch-')),
   );
@@ -34,6 +34,17 @@ async function fixture(name, args, settings = {}) {
       ),
       '',
     );
+    if (runtime) {
+      for (const entry of [
+        'plowshare-client-node/build/marker.js',
+        'plowshare-mcp-integration/build/mcp/index.js',
+        'plowshare-mcp-integration/build/mcp/native-editor.js',
+      ]) {
+        const path = join(root, 'plowshare-tui/node_modules', entry);
+        await mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
+        await writeFile(path, '');
+      }
+    }
     await mkdir(join(root, 'extensions/search-searxng/build/libs'), {
       recursive: true,
     });
@@ -156,7 +167,19 @@ test('simple launcher help works without endpoint configuration', async () => {
 });
 
 test('TUI forwards connection management without requiring an origin', async () => {
- const result = await fixture('plowshare-talk', ['connection', 'list']);
- assert.equal(result.code, 0, result.error);
- assert.deepEqual(JSON.parse(result.output).args.slice(-3), ['src/view/main.ts', 'connection', 'list']);
+  const result = await fixture('plowshare-talk', ['connection', 'list']);
+  assert.equal(result.code, 0, result.error);
+  assert.deepEqual(JSON.parse(result.output).args.slice(-3), [
+    'src/view/main.ts',
+    'connection',
+    'list',
+  ]);
+});
+
+test('TUI refuses an older SDK-only install with the complete runtime build remedy', async () => {
+  const result = await fixture('plowshare-talk', [], {}, false);
+  assert.equal(result.code, 2);
+  assert.equal(result.output, '');
+  assert.match(result.error, /gradlew :plowshare-tui:assemble/);
+  assert.doesNotMatch(result.error, /ERR_MODULE_NOT_FOUND/);
 });

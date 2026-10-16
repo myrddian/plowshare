@@ -679,6 +679,13 @@ export async function protocolFixture(options = {}) {
       conversations.push(conversationWire(row.id, row)); entries.set(row.id, []);
       if (bot) botLatest.set(JSON.stringify([row.project, bot]), row.id);
     },
+    awaitApproval(id) {
+      const job = [...jobs.values()].findLast(row => !row.outcome);
+      if (!job) throw new Error('No active fixture run');
+      approvals.push(approvalWire({ id, conversation: job.conversation, agent: 'fixture-bot', side: 'local' }));
+      // No Inbox notification: the durable ending must trigger discovery itself.
+      finish(job, 'AWAITING', `Approve running echo fixture in /fixture on the local side? [${id}]`);
+    },
     queueApproval(id, conversation = 'fixture-first', legacy = false) {
       const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.' });
       approvals.push(row);

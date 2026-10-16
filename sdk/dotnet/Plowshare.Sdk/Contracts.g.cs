@@ -1887,7 +1887,7 @@ public sealed record ApprovalViewDto {
  [JsonPropertyName("id")] public required string Id { get; init; }
  [JsonPropertyName("judged")] public required TierDtoProject Judged { get; init; }
  [JsonPropertyName("prefix")] public required IncomingSourceDtoExtensions Prefix { get; init; }
- [JsonPropertyName("reason")] public required string Reason { get; init; }
+ [JsonPropertyName("reason")] public required TierDtoProject Reason { get; init; }
  [JsonPropertyName("scope")] public required TierDtoProject Scope { get; init; }
  [JsonPropertyName("side")] public required string Side { get; init; }
  [JsonPropertyName("state")] public required string State { get; init; }
