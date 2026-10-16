@@ -300,6 +300,21 @@ export async function dispatch(
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
+  if (
+    asked.type === 'acting.context.open' ||
+    asked.type === 'acting.context.close' ||
+    asked.type === 'acting.turn.start' ||
+    asked.type === 'acting.turn.receipt'
+  ) {
+    if (outcome.code !== 'OK') return { kind: 'refused', outcome };
+    try {
+      decodeReply(asked.type, outcome.payload);
+      return { kind: 'completed', outcome };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
+
   const body = fields(outcome.payload);
   if (
     asked.type === 'tool.scope.connect' ||

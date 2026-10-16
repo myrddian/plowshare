@@ -59,6 +59,7 @@ import java.util.Set;
  *     accumulates the fragments per {@code index} and returns the same {@link ToolCall} list the
  *     blocking path returns for the same turn. Nothing about a request changes with how it is
  *     dispatched.
+ * @param authorization live effect check retained across queueing; never sent to a model
  * @param attribution server-validated ownership, carried explicitly across pool queue threads.
  *     Compatibility callers use {@link UsageAttribution#LEGACY}; production callers will supply an
  *     owner as durable recording is integrated. This metadata is not sent to the model.
@@ -81,7 +82,28 @@ public record ChatRequest(
     Duration submitTimeout,
     List<ToolSchema> tools,
     ToolChoice toolChoice,
-    UsageAttribution attribution) {
+    UsageAttribution attribution,
+    CallAuthorization authorization) {
+
+  /** Ordinary callers retain their existing path; delegated callers attach explicit authority. */
+  public ChatRequest(
+      String specifier,
+      List<ChatMessage> messages,
+      Sampling sampling,
+      Duration submitTimeout,
+      List<ToolSchema> tools,
+      ToolChoice toolChoice,
+      UsageAttribution attribution) {
+    this(
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        CallAuthorization.DIRECT);
+  }
 
   /** Compatibility for existing callers; production ownership is supplied with withAttribution. */
   public ChatRequest(
@@ -96,6 +118,7 @@ public record ChatRequest(
 
   public ChatRequest {
     java.util.Objects.requireNonNull(attribution, "attribution");
+    java.util.Objects.requireNonNull(authorization, "authorization");
     Specifiers.require(specifier);
     // Copied, so a caller that builds a conversation, passes it and then
     // appends to it cannot change what a request already in a pool queue
@@ -265,7 +288,8 @@ public record ChatRequest(
   }
 
   public ChatRequest withBudget(Duration budget) {
-    return new ChatRequest(specifier, messages, sampling, budget, tools, toolChoice, attribution);
+    return new ChatRequest(
+        specifier, messages, sampling, budget, tools, toolChoice, attribution, authorization);
   }
 
   /**
@@ -277,7 +301,14 @@ public record ChatRequest(
    */
   public ChatRequest withSampling(Sampling resolved) {
     return new ChatRequest(
-        specifier, messages, resolved, submitTimeout, tools, toolChoice, attribution);
+        specifier,
+        messages,
+        resolved,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        authorization);
   }
 
   /**
@@ -286,7 +317,14 @@ public record ChatRequest(
    */
   public ChatRequest withTools(List<ToolSchema> offered) {
     return new ChatRequest(
-        specifier, messages, sampling, submitTimeout, offered, toolChoice, attribution);
+        specifier,
+        messages,
+        sampling,
+        submitTimeout,
+        offered,
+        toolChoice,
+        attribution,
+        authorization);
   }
 
   /**
@@ -305,7 +343,8 @@ public record ChatRequest(
         submitTimeout,
         tools,
         java.util.Objects.requireNonNull(choice, "toolChoice"),
-        attribution);
+        attribution,
+        authorization);
   }
 
   /**
@@ -317,11 +356,25 @@ public record ChatRequest(
    */
   public ChatRequest withMessages(List<ChatMessage> conversation) {
     return new ChatRequest(
-        specifier, conversation, sampling, submitTimeout, tools, toolChoice, attribution);
+        specifier,
+        conversation,
+        sampling,
+        submitTimeout,
+        tools,
+        toolChoice,
+        attribution,
+        authorization);
   }
 
   /** Immutable ownership travels with the request when a pool submits it on another thread. */
   public ChatRequest withAttribution(UsageAttribution owner) {
-    return new ChatRequest(specifier, messages, sampling, submitTimeout, tools, toolChoice, owner);
+    return new ChatRequest(
+        specifier, messages, sampling, submitTimeout, tools, toolChoice, owner, authorization);
+  }
+
+  /** Preserved by every immutable copy, including filtering and accounting attribution. */
+  public ChatRequest withAuthorization(CallAuthorization check) {
+    return new ChatRequest(
+        specifier, messages, sampling, submitTimeout, tools, toolChoice, attribution, check);
   }
 }

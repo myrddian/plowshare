@@ -33,7 +33,8 @@ class LibrarianDefinitionTest {
   private static final String AGENT = "librarian";
 
   private static Map<String, AgentDefinition> shippedSet() {
-    return AgentRegistry.load(SHIPPED, BoundTools.boundByThisServer());
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+        BoundTools.boundByThisServer());
   }
 
   private static AgentDefinition shipped() {

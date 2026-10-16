@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.ApplicationDeployment.*;
 import io.aeyer.plowshare.protocol.FileStoreReference;
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.acting.*;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.applications.SourceApplicationDeployments;
 import io.aeyer.plowshare.server.events.ScheduleDefinitionStore;
@@ -260,7 +261,9 @@ class ApplicationDeploymentPersistenceTest {
             work,
             event -> {},
             clock);
-    store = new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities);
+    store =
+        new JdbcApplicationDeploymentStore(
+            jdbc, work, projects, schedules, identities, actingRepository());
     deployments =
         new SourceApplicationDeployments(
             store,
@@ -287,6 +290,617 @@ class ApplicationDeploymentPersistenceTest {
         original.destination(),
         original.writableAreas(),
         List.of(new File("plowshare.json", manifest), original.files().get(1)));
+  }
+
+  private JdbcActingRepository actingRepository() {
+    return new JdbcActingRepository(
+        jdbc,
+        new io.aeyer.plowshare.server.applications.JdbcApplicationIdentityRepository(jdbc),
+        () -> true);
+  }
+
+  private Deploy actingRequest(UUID expected, String handle, String ceiling) {
+    var original = ownedRequest(UUID.randomUUID(), expected, handle);
+    String manifest = original.files().getFirst().text();
+    manifest =
+        manifest.substring(0, manifest.length() - 1)
+            + ",\"acting\":[{\"grant\":\"users\",\"ceiling\":\""
+            + ceiling
+            + "\",\"personal\":true,\"proofs\":[\"acting-token\"]}]}";
+    return new Deploy(
+        name,
+        original.requestId(),
+        expected,
+        original.destination(),
+        original.writableAreas(),
+        List.of(new File("plowshare.json", manifest), original.files().get(1)));
+  }
+
+  private io.aeyer.plowshare.server.applications.ApplicationIdentities actingFixture() {
+    var identities = ownedLifecycle();
+    String handle = "acting-" + UUID.randomUUID();
+    deployments.deploy("deployer", actingRequest(null, handle, "CONTRIBUTOR"));
+    identities.issue(
+        "deployer",
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+            name, UUID.randomUUID(), 30, false));
+    actingTokens()
+        .eligibility(
+            new RequestAuthority.Direct("deployer"),
+            new ActingTokens.Eligibility(
+                name, "users", Set.of("deployer"), Set.of(), UUID.randomUUID()));
+    return identities;
+  }
+
+  private ActingTokens actingTokens() {
+    return new OwnedActingTokens(
+        actingRepository(), new JdbcProjectMembers(jdbc), work, java.time.Clock.systemUTC());
+  }
+
+  private ActingTokens.Issue actingIssue(UUID requestId) {
+    return new ActingTokens.Issue(
+        name,
+        "users",
+        new ActingScope(ProjectRole.CONTRIBUTOR, Set.of(name), false),
+        7,
+        Optional.of("external fixture"),
+        requestId);
+  }
+
+  @Test
+  void actingPersonalTurnReceiptsRoundTripAndSurviveForgottenConversation() {
+    var identities = actingFixture();
+    String personalName = io.aeyer.plowshare.server.personal.PersonalSpaces.name("deployer");
+    jdbc.update("INSERT INTO projects(name) VALUES (?) ON CONFLICT DO NOTHING", personalName);
+    Long personalId =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, personalName);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,'deployer','MANAGER') ON CONFLICT DO NOTHING",
+        personalId);
+    var token =
+        actingTokens()
+            .issue(
+                new RequestAuthority.Direct("deployer"),
+                new ActingTokens.Issue(
+                    name,
+                    "users",
+                    new ActingScope(ProjectRole.CONTRIBUTOR, Set.of(), true),
+                    7,
+                    Optional.empty(),
+                    UUID.randomUUID()))
+            .token();
+    var authority =
+        new RequestAuthority.Delegated(
+            token.actor(),
+            token.subject(),
+            new RequestAuthority.Delegation(name, "users", token.id(), token.scope()));
+    var consent = actingRepository();
+    var repository =
+        new JdbcActingWorkRepository(
+            jdbc, new ConversationStore(jdbc), consent, new DataSourceTransactionManager(source));
+    var policy =
+        new LiveActingAuthorization(
+            consent, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var definition =
+        new io.aeyer.plowshare.server.agents.AgentDefinition(
+            "chat", "chat", "fast", List.of(), List.of(), List.of(), 4, 8, "Answer", true, false);
+    var count = new java.util.concurrent.atomic.AtomicInteger();
+    ActingTurns executor =
+        (conversation, agent, task, admission) -> {
+          count.incrementAndGet();
+          admission.check().run();
+          admission.started().accept("job_" + UUID.randomUUID().toString().replace("-", ""));
+        };
+    var service =
+        new PersonalActingWork(
+            repository,
+            policy,
+            (subject, agent) -> definition,
+            executor,
+            work,
+            10,
+            mock(io.aeyer.plowshare.server.access.ResourceScopeRepository.class));
+    var request =
+        new ActingWork.Start(
+            UUID.randomUUID(), "chat", "Private task must not reach receipt", null);
+    var receipt = service.start(authority, request);
+    assertEquals(ActingWork.State.STARTED, receipt.state());
+    assertEquals(authority, repository.binding(receipt.conversation()).orElseThrow().authority());
+    assertEquals(
+        "deployer", new ConversationStore(jdbc).ownerOf(receipt.conversation()).orElseThrow());
+    var restarted =
+        new JdbcActingWorkRepository(
+            jdbc, new ConversationStore(jdbc), consent, new DataSourceTransactionManager(source));
+    assertEquals(
+        receipt, restarted.receipt(authority.actor(), request.requestId()).orElseThrow().receipt());
+    assertEquals(receipt, service.start(authority, request));
+    assertEquals(1, count.get());
+    identities.issue(
+        "deployer",
+        new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+            name, UUID.randomUUID(), 30, true));
+    service.requireJob(authority, receipt.job(), ActingPermission.READ);
+    assertEquals(
+        authority.actor(),
+        restarted.job(receipt.job()).orElseThrow().binding().authority().actor());
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> repository.started(authority.actor(), request.requestId(), "job_ANOTHER"));
+    repository.finished(authority.actor(), request.requestId());
+    repository.uncertain(authority.actor(), request.requestId());
+    assertEquals(
+        ActingWork.State.FINISHED, service.receipt(authority, request.requestId()).state());
+
+    actingTokens().revoke(new RequestAuthority.Direct("deployer"), token.id(), UUID.randomUUID());
+    assertThrows(
+        CallerFault.class,
+        () -> service.requireJob(authority, receipt.job(), ActingPermission.READ));
+    // A physical history deletion must not erase idempotency or restore a used request UUID.
+    jdbc.update("DELETE FROM conversations WHERE id=?", receipt.conversation());
+    assertTrue(restarted.receipt(authority.actor(), request.requestId()).isPresent());
+    assertFalse(restarted.owns(restarted.binding(receipt.conversation()).orElseThrow()));
+    assertThrows(CallerFault.class, () -> service.start(authority, request));
+    assertEquals(1, count.get());
+  }
+
+  @Test
+  void actingPersonalConcurrentAdmissionAndRollbackUseOneReceipt() throws Exception {
+    actingFixture();
+    String personalName = io.aeyer.plowshare.server.personal.PersonalSpaces.name("deployer");
+    jdbc.update("INSERT INTO projects(name) VALUES (?) ON CONFLICT DO NOTHING", personalName);
+    Long personalId =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, personalName);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,'deployer','MANAGER') ON CONFLICT DO NOTHING",
+        personalId);
+    var token =
+        actingTokens()
+            .issue(
+                new RequestAuthority.Direct("deployer"),
+                new ActingTokens.Issue(
+                    name,
+                    "users",
+                    new ActingScope(ProjectRole.CONTRIBUTOR, Set.of(), true),
+                    7,
+                    Optional.empty(),
+                    UUID.randomUUID()))
+            .token();
+    var authority =
+        new RequestAuthority.Delegated(
+            token.actor(),
+            token.subject(),
+            new RequestAuthority.Delegation(name, "users", token.id(), token.scope()));
+    var repository =
+        new JdbcActingWorkRepository(
+            jdbc,
+            new ConversationStore(jdbc),
+            actingRepository(),
+            new DataSourceTransactionManager(source));
+    var policy =
+        new LiveActingAuthorization(
+            actingRepository(), new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var definition =
+        new io.aeyer.plowshare.server.agents.AgentDefinition(
+            "chat", "chat", "fast", List.of(), List.of(), List.of(), 4, 8, "Answer", true, false);
+    var submissions = new java.util.concurrent.atomic.AtomicInteger();
+    var service =
+        new PersonalActingWork(
+            repository,
+            policy,
+            (subject, agent) -> definition,
+            (conversation, agent, task, admission) -> {
+              submissions.incrementAndGet();
+              admission.started().accept("job_" + UUID.randomUUID().toString().replace("-", ""));
+            },
+            work,
+            10,
+            mock(io.aeyer.plowshare.server.access.ResourceScopeRepository.class));
+    var request = new ActingWork.Start(UUID.randomUUID(), "chat", "Hello", null);
+    CountDownLatch ready = new CountDownLatch(1);
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first =
+          threads.submit(
+              () -> {
+                ready.await();
+                return service.start(authority, request);
+              });
+      var second =
+          threads.submit(
+              () -> {
+                ready.await();
+                return service.start(authority, request);
+              });
+      ready.countDown();
+      assertEquals(
+          first.get(10, TimeUnit.SECONDS).conversation(),
+          second.get(10, TimeUnit.SECONDS).conversation());
+    }
+    assertEquals(1, submissions.get());
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM acting_work_receipts WHERE actor=? AND request_id=?",
+            Integer.class,
+            authority.actor(),
+            request.requestId()));
+    UUID rolledBack = UUID.randomUUID();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  service.start(
+                      authority, new ActingWork.Start(rolledBack, "chat", "Rollback", null));
+                  throw new IllegalStateException("rollback");
+                }));
+    assertTrue(repository.receipt(authority.actor(), rolledBack).isEmpty());
+    assertEquals(1, submissions.get(), "outer transaction rollback must not enqueue work");
+  }
+
+  @Test
+  void actingProofExchangeAuditContainsOnlyMetadata() {
+    actingFixture();
+    var caller = new RequestAuthority.Direct("deployer");
+    var credential = actingTokens().issue(caller, actingIssue(UUID.randomUUID()));
+    var repository = actingRepository();
+    assertEquals(
+        credential.token(),
+        repository
+            .proof(io.aeyer.plowshare.server.auth.Tokens.hash(credential.credential()))
+            .orElseThrow());
+    var policy =
+        new LiveActingAuthorization(
+            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    var contexts = new BoundActingContexts(repository, policy, java.time.Clock.systemUTC());
+    var connection =
+        new ActingContexts.Connection(
+            "fixture-connection", "fixture-session", credential.token().actor());
+    var request =
+        new io.aeyer.plowshare.protocol.ActingContext.Open(
+            name,
+            "users",
+            new io.aeyer.plowshare.protocol.ActingContext.Proof(
+                "acting-token", credential.credential()));
+    var opened = contexts.open(connection, request);
+    assertEquals("deployer", opened.subject());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            contexts.open(
+                connection,
+                new io.aeyer.plowshare.protocol.ActingContext.Open(
+                    name,
+                    "users",
+                    new io.aeyer.plowshare.protocol.ActingContext.Proof(
+                        "acting-token", "psa_" + "0".repeat(48)))));
+    contexts.close(connection, opened.context());
+    assertEquals(
+        List.of("OPEN", "REFUSED", "CLOSE"),
+        jdbc.queryForList(
+            "SELECT action FROM acting_context_audit WHERE application=? ORDER BY id",
+            String.class,
+            name));
+    for (String row :
+        jdbc.queryForList(
+            "SELECT row_to_json(a)::text FROM acting_context_audit a WHERE application=?",
+            String.class,
+            name)) {
+      assertFalse(row.contains(credential.credential()));
+      assertFalse(
+          row.contains(io.aeyer.plowshare.server.auth.Tokens.hash(credential.credential())));
+    }
+  }
+
+  @Test
+  void actingDeclarationsFollowActivationNarrowingAndRollback() {
+    var identities = actingFixture();
+    var repository = actingRepository();
+    var caller = new RequestAuthority.Direct("deployer");
+    var issued = actingTokens().issue(caller, actingIssue(UUID.randomUUID()));
+    var authority =
+        new RequestAuthority.Delegated(
+            issued.token().actor(),
+            "deployer",
+            new RequestAuthority.Delegation(
+                name, "users", issued.token().id(), issued.token().scope()));
+    var policy =
+        new LiveActingAuthorization(
+            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    assertEquals(
+        ProjectRole.CONTRIBUTOR,
+        policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
+    var initial = deployments.status("deployer", name).activeRevision();
+    String handle = identities.status("deployer", name).identity().service().handle();
+    var lower = deployments.deploy("deployer", actingRequest(initial, handle, "VIEWER"));
+    assertEquals(ProjectRole.VIEWER, repository.grant(name, "users").orElseThrow().ceiling());
+    assertThrows(
+        CallerFault.class,
+        () -> policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
+    var removed =
+        deployments.deploy(
+            "deployer", ownedRequest(UUID.randomUUID(), lower.release().revision(), handle));
+    assertTrue(repository.grant(name, "users").isEmpty());
+    assertThrows(
+        CallerFault.class,
+        () -> policy.require(authority, ActingPermission.READ, new ActingTarget.Project(name)));
+    deployments.activate(
+        "deployer",
+        new Activate(
+            name, UUID.randomUUID(), removed.release().revision(), lower.release().revision()));
+    assertEquals(ProjectRole.VIEWER, repository.grant(name, "users").orElseThrow().ceiling());
+    assertEquals(
+        ProjectRole.VIEWER,
+        policy.require(authority, ActingPermission.READ, new ActingTarget.Project(name)));
+    assertThrows(
+        CallerFault.class,
+        () -> policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
+  }
+
+  @Test
+  void actingIssueReceiptRestartAndRevocationNeverRetainSecret() {
+    var identities = actingFixture();
+    var caller = new RequestAuthority.Direct("deployer");
+    var issue = actingIssue(UUID.randomUUID());
+    var credential = actingTokens().issue(caller, issue);
+    var repository = actingRepository();
+    assertEquals(credential.token(), repository.token(credential.token().id()).orElseThrow());
+    var rotated =
+        identities.issue(
+            "deployer",
+            new io.aeyer.plowshare.protocol.ApplicationIdentity.Issue(
+                name, UUID.randomUUID(), 30, true));
+    assertEquals(credential.token().actor(), "@service/" + rotated.receipt().tokenId());
+    var authority =
+        new RequestAuthority.Delegated(
+            credential.token().actor(),
+            "deployer",
+            new RequestAuthority.Delegation(
+                name, "users", credential.token().id(), credential.token().scope()));
+    var policy =
+        new LiveActingAuthorization(
+            repository, new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    assertEquals(
+        ProjectRole.CONTRIBUTOR,
+        policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(name)));
+    assertEquals(
+        credential.receipt(), actingTokens().receipt(caller, issue.requestId()).orElseThrow());
+    assertEquals(
+        io.aeyer.plowshare.server.auth.Tokens.hash(credential.credential()),
+        jdbc.queryForObject(
+            "SELECT digest FROM acting_tokens WHERE id=?", String.class, credential.token().id()));
+    String stored =
+        jdbc.queryForObject(
+            "SELECT row_to_json(t)::text FROM acting_tokens t WHERE id=?",
+            String.class,
+            credential.token().id());
+    assertFalse(stored.contains(credential.credential()));
+    assertTrue(
+        new io.aeyer.plowshare.server.auth.JdbcServiceCredentialsRepository(
+                jdbc, java.time.Clock.systemUTC())
+            .authentication(credential.credential())
+            .isEmpty());
+    assertThrows(CallerFault.class, () -> actingTokens().issue(caller, issue));
+    UUID revoke = UUID.randomUUID();
+    var receipt = actingTokens().revoke(caller, credential.token().id(), revoke);
+    assertEquals(receipt, actingTokens().revoke(caller, credential.token().id(), revoke));
+    assertTrue(repository.token(credential.token().id()).orElseThrow().revoked());
+    assertThrows(
+        CallerFault.class,
+        () -> policy.require(authority, ActingPermission.READ, new ActingTarget.Project(name)));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM acting_audit WHERE request_id=?", Integer.class, revoke));
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "UPDATE acting_tokens SET digest='plaintext' WHERE id=?", credential.token().id()));
+  }
+
+  @Test
+  void actingEligibilityReplacementAndMutationFailuresRollBack() {
+    actingFixture();
+    var repository = actingRepository();
+    var caller = new RequestAuthority.Direct("deployer");
+    String membershipProject = "eligibility-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO projects(name) VALUES (?)", membershipProject);
+    Long membershipId =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, membershipProject);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,'deployer','VIEWER')",
+        membershipId);
+    actingTokens()
+        .eligibility(
+            caller,
+            new ActingTokens.Eligibility(
+                name, "users", Set.of(), Set.of(membershipProject), UUID.randomUUID()));
+    assertTrue(repository.eligible(name, "users", "deployer"));
+    jdbc.update("DELETE FROM project_members WHERE project_id=?", membershipId);
+    assertFalse(repository.eligible(name, "users", "deployer"));
+    UUID failed = UUID.randomUUID();
+    assertThrows(
+        CallerFault.class,
+        () ->
+            actingTokens()
+                .eligibility(
+                    caller,
+                    new ActingTokens.Eligibility(
+                        name, "users", Set.of("deployer"), Set.of("missing-project"), failed)));
+    assertTrue(actingTokens().receipt(caller, failed).isEmpty());
+    assertFalse(repository.eligible(name, "users", "deployer"));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM acting_eligible_projects WHERE application=?",
+            Integer.class,
+            name));
+    actingTokens()
+        .eligibility(
+            caller,
+            new ActingTokens.Eligibility(
+                name, "users", Set.of("deployer"), Set.of(), UUID.randomUUID()));
+    var before = actingTokens().tokens(caller).size();
+    var failureRepository = spy(repository);
+    doThrow(new CallerFault("fixture receipt failure")).when(failureRepository).complete(any());
+    var service =
+        new OwnedActingTokens(
+            failureRepository, new JdbcProjectMembers(jdbc), work, java.time.Clock.systemUTC());
+    var issue = actingIssue(UUID.randomUUID());
+    assertThrows(CallerFault.class, () -> service.issue(caller, issue));
+    assertEquals(before, actingTokens().tokens(caller).size());
+    assertTrue(repository.receipt(issue.requestId()).isEmpty());
+  }
+
+  @Test
+  void actingProjectConsentCannotFollowARecreatedProjectName() {
+    var identities = actingFixture();
+    var binding = identities.status("deployer", name).identity();
+    String scopeProject = "scope-" + UUID.randomUUID();
+    jdbc.update("INSERT INTO projects(name) VALUES (?)", scopeProject);
+    Long oldId =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, scopeProject);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'CONTRIBUTOR')",
+        oldId,
+        binding.service().handle());
+    jdbc.update(
+        "INSERT INTO service_token_scopes(token_id,project_id,role) VALUES (?,?,'CONTRIBUTOR')",
+        binding.tokenId(),
+        oldId);
+    var issue =
+        new ActingTokens.Issue(
+            name,
+            "users",
+            new ActingScope(ProjectRole.CONTRIBUTOR, Set.of(scopeProject), false),
+            7,
+            Optional.empty(),
+            UUID.randomUUID());
+    var credential = actingTokens().issue(new RequestAuthority.Direct("deployer"), issue);
+    var authority =
+        new RequestAuthority.Delegated(
+            binding.principal(),
+            "deployer",
+            new RequestAuthority.Delegation(name, "users", credential.token().id(), issue.scope()));
+    var policy =
+        new LiveActingAuthorization(
+            actingRepository(), new JdbcProjectMembers(jdbc), java.time.Clock.systemUTC());
+    assertEquals(
+        ProjectRole.CONTRIBUTOR,
+        policy.require(authority, ActingPermission.WORK, new ActingTarget.Project(scopeProject)));
+    jdbc.update("DELETE FROM service_token_scopes WHERE project_id=?", oldId);
+    jdbc.update("DELETE FROM project_members WHERE project_id=?", oldId);
+    jdbc.update("DELETE FROM projects WHERE id=?", oldId);
+    jdbc.update("INSERT INTO projects(name) VALUES (?)", scopeProject);
+    Long newId =
+        jdbc.queryForObject("SELECT id FROM projects WHERE name=?", Long.class, scopeProject);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES (?,?,'CONTRIBUTOR')",
+        newId,
+        binding.service().handle());
+    jdbc.update(
+        "INSERT INTO service_token_scopes(token_id,project_id,role) VALUES (?,?,'CONTRIBUTOR')",
+        binding.tokenId(),
+        newId);
+    assertNotEquals(oldId, newId);
+    assertTrue(
+        actingRepository()
+            .token(credential.token().id())
+            .orElseThrow()
+            .scope()
+            .projects()
+            .isEmpty());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            policy.require(
+                authority, ActingPermission.WORK, new ActingTarget.Project(scopeProject)));
+  }
+
+  @Test
+  void actingConcurrentIssueAndRevokeRetainOneOutcomePerRequest() throws Exception {
+    actingFixture();
+    var caller = new RequestAuthority.Direct("deployer");
+    var issue = actingIssue(UUID.randomUUID());
+    var barrier = new CyclicBarrier(2);
+    try (var pool = Executors.newFixedThreadPool(2)) {
+      var attempts = new ArrayList<Future<Boolean>>();
+      for (int n = 0; n < 2; n++)
+        attempts.add(
+            pool.submit(
+                () -> {
+                  barrier.await(10, TimeUnit.SECONDS);
+                  try {
+                    actingTokens().issue(caller, issue);
+                    return true;
+                  } catch (CallerFault refused) {
+                    return false;
+                  }
+                }));
+      int successes = 0;
+      for (var attempt : attempts) if (attempt.get(20, TimeUnit.SECONDS)) successes++;
+      assertEquals(1, successes);
+      var receipt = actingTokens().receipt(caller, issue.requestId()).orElseThrow();
+      UUID token = receipt.token().orElseThrow();
+      UUID revoke = UUID.randomUUID();
+      var revokes = new ArrayList<Future<ActingTokens.Receipt>>();
+      for (int n = 0; n < 2; n++)
+        revokes.add(
+            pool.submit(
+                () -> {
+                  barrier.await(10, TimeUnit.SECONDS);
+                  return actingTokens().revoke(caller, token, revoke);
+                }));
+      assertEquals(
+          revokes.get(0).get(20, TimeUnit.SECONDS), revokes.get(1).get(20, TimeUnit.SECONDS));
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM acting_tokens WHERE application=?", Integer.class, name));
+      assertEquals(
+          2,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM acting_audit WHERE token_id=?", Integer.class, token));
+    }
+  }
+
+  @Test
+  void actingGrantActivationFailureRollsBackSourceHeadAndAudit() {
+    var identities = ownedLifecycle();
+    String handle = "acting-" + UUID.randomUUID();
+    var repository = spy(actingRepository());
+    doAnswer(
+            invocation -> {
+              invocation.callRealMethod();
+              throw new CallerFault("fixture activation failure");
+            })
+        .when(repository)
+        .activate(anyString(), any(), anyList(), anyString());
+    store =
+        new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities, repository);
+    deployments =
+        new SourceApplicationDeployments(
+            store,
+            new JdbcProjectMembers(jdbc),
+            projects,
+            files,
+            (project, root) -> {},
+            identities);
+    assertThrows(
+        CallerFault.class,
+        () -> deployments.deploy("deployer", actingRequest(null, handle, "CONTRIBUTOR")));
+    assertTrue(projects.find(name).isEmpty());
+    assertNull(deployments.status("deployer", name).activeRevision());
+    assertTrue(actingRepository().grant(name, "users").isEmpty());
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM acting_grants WHERE application=?", Integer.class, name));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM acting_audit WHERE application=?", Integer.class, name));
   }
 
   @Test

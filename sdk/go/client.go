@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -162,7 +163,11 @@ func Connect(ctx context.Context, origin, token string, options Options) (*Clien
 // request owns correlation and the raw envelope; generated methods own DTO conversion.
 func (c *Client) request(ctx context.Context, operation string, body []byte) (outcome, error) {
 	id := identity()
-	wire, err := json.Marshal(map[string]any{"id": id, "type": operation, "protocol_version": ProtocolVersion, "payload": json.RawMessage(body)})
+	envelope := map[string]any{"id": id, "type": operation, "protocol_version": ProtocolVersion, "payload": json.RawMessage(body)}
+	if selection, ok := ctx.Value(actingContextKey{}).(string); ok {
+		envelope["actingFor"] = map[string]string{"context": selection}
+	}
+	wire, err := json.Marshal(envelope)
 	if err != nil {
 		return outcome{}, err
 	}
@@ -281,4 +286,15 @@ func (c *Client) Close() error {
 	c.closeOnce.Do(func() { c.cancel(); _ = c.socket.CloseNow() })
 	<-c.done
 	return nil
+}
+
+// actingContextKey is private so request metadata can only be selected through validation.
+type actingContextKey struct{}
+
+// WithActingContext returns an immutable per-request selection. It never mutates Client state.
+func WithActingContext(ctx context.Context, id string) (context.Context, error) {
+	if !regexp.MustCompile(`^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$`).MatchString(id) {
+		return nil, errors.New("choose a canonical acting context UUID")
+	}
+	return context.WithValue(ctx, actingContextKey{}, id), nil
 }

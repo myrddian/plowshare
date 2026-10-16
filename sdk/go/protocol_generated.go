@@ -4,6 +4,10 @@ package plowshare
 const ProtocolVersion = "plowshare-v1"
 
 var operationNames = []string{
+	"acting.context.close",
+	"acting.context.open",
+	"acting.turn.receipt",
+	"acting.turn.start",
 	"admin.account.create",
 	"admin.account.reset",
 	"admin.account.update",

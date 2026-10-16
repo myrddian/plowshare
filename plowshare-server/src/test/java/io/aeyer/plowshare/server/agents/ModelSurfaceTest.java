@@ -376,7 +376,7 @@ class ModelSurfaceTest {
     Map<String, AgentDefinition> definitions =
         new TreeMap<>(
             AgentRegistry.read(
-                    ShippedDefinitions.asOneSet(), runtime.knownTools(), AgentsConfig.REQUIRED)
+                    ShippedDefinitions.source(), runtime.knownTools(), AgentsConfig.REQUIRED)
                 .enabled());
     AgentRegistry registry = new AgentRegistry(definitions);
     agents.set(registry);
@@ -432,12 +432,12 @@ class ModelSurfaceTest {
       Outcome outcome = boot.runtime().run(definition, TASK, Home.global(), Budget.of(1), null);
 
       // Both of these are about the recording rather than about the
-      // agent. An ending other than ANSWERED means the run stopped
-      // somewhere this file has not accounted for, and more than one call
-      // means the capture is of a later turn — one with tool results in
-      // it, which is a conversation and not an opening.
+      // agent. Ordinary definitions finish in one call; mandatory review cannot finish in this
+      // one-call allowance. More than one call would capture a later turn rather than the opening.
       assertEquals(
-          Outcome.Ending.ANSWERED,
+          // Only the opening call is rendered. A reviewed definition needs further calls to
+          // finish, so exhausting this fixture's one-call budget is the expected boundary.
+          definition.reviewWith() == null ? Outcome.Ending.ANSWERED : Outcome.Ending.CALL_BUDGET,
           outcome.ending(),
           "rendering '" + agent + "' did not reach the transport cleanly");
       assertEquals(

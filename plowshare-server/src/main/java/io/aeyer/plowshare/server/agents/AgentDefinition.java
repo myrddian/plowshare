@@ -132,7 +132,67 @@ public record AgentDefinition(
     String alias,
     String guidance,
     /** Opt-in to owner-assigned runtime tools; never authority by itself. */
-    boolean dynamic) {
+    boolean dynamic,
+    /** Trusted bundled classification, not runtime authority or SYSTEM usage attribution. */
+    boolean isSystem) {
+
+  /** Programmatic definitions are ordinary unless a trusted loader classifies them. */
+  public AgentDefinition(
+      String name,
+      String description,
+      String model,
+      Sampling.Intent intent,
+      Sampling sampling,
+      List<String> tools,
+      List<String> calls,
+      List<Grant> scopes,
+      int maxTurns,
+      int maxModelCalls,
+      String prompt,
+      boolean exported,
+      boolean delegable,
+      boolean vision,
+      boolean bot,
+      boolean announcesInbox,
+      Fallback fallback,
+      List<String> orchestrations,
+      String reviewWith,
+      boolean board,
+      List<String> skills,
+      String displayName,
+      String origin,
+      String alias,
+      String guidance,
+      boolean dynamic) {
+    this(
+        name,
+        description,
+        model,
+        intent,
+        sampling,
+        tools,
+        calls,
+        scopes,
+        maxTurns,
+        maxModelCalls,
+        prompt,
+        exported,
+        delegable,
+        vision,
+        bot,
+        announcesInbox,
+        fallback,
+        orchestrations,
+        reviewWith,
+        board,
+        skills,
+        displayName,
+        origin,
+        alias,
+        guidance,
+        dynamic,
+        false);
+  }
 
   /**
    * Only a validated native script conductor may omit its model and declare zero calls. Runtime
@@ -544,7 +604,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /**
@@ -578,7 +639,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /** The pre-skills shape: an ordinary agent gets no implicit skill grant. */
@@ -659,7 +721,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   AgentDefinition withCalls(List<String> granted) {
@@ -689,7 +752,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /** The pre-board shape: an undeclared grant allows no topic openings. */
@@ -1087,7 +1151,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /**
@@ -1120,7 +1185,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        allowed);
+        allowed,
+        isSystem);
   }
 
   public AgentDefinition withTools(List<String> tools) {
@@ -1150,7 +1216,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /**
@@ -1186,7 +1253,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /**
@@ -1231,7 +1299,8 @@ public record AgentDefinition(
         origin,
         alias,
         guidance,
-        dynamic);
+        dynamic,
+        isSystem);
   }
 
   /**
@@ -1294,8 +1363,9 @@ public record AgentDefinition(
    * <h2>It grants deliberate recall</h2>
    *
    * <p>An agent holding {@code memory_recall} has the archive in scope by an operator's decision.
-   * That remains true even when {@link #canBeReminded()} refuses unsolicited recall: Daedalus may
-   * ask memory for a hypothesis but must begin a diagnosis without the harness preloading one.
+   * That remains true even when {@link #canBeReminded()} refuses unsolicited recall: the
+   * conversation diagnostician may ask memory for a hypothesis but must begin a diagnosis without
+   * the harness preloading one.
    *
    * <p>{@link #canRedeem()}'s shape exactly: one place asks the question, so the name cannot drift
    * from the one {@code MemoryTools.Recall} registers itself under.

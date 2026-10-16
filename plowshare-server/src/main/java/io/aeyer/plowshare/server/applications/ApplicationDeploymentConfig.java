@@ -19,8 +19,9 @@ public class ApplicationDeploymentConfig {
       UnitOfWork work,
       ServerProjects projects,
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
-      ApplicationIdentities identities) {
-    return new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities);
+      ApplicationIdentities identities,
+      io.aeyer.plowshare.server.acting.ActingRepository acting) {
+    return new JdbcApplicationDeploymentStore(jdbc, work, projects, schedules, identities, acting);
   }
 
   @Bean

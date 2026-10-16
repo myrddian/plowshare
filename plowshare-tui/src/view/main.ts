@@ -323,9 +323,7 @@ import {
   describeAlreadyMarked,
   describeFilesElsewhere,
   describeMoved,
-  describeDiagnosing,
   describeMovedTo,
-  describeNoDiagnosis,
   describeNoDirectory,
   describeNoSuchProject,
   describeNotADirectory,
@@ -3869,7 +3867,7 @@ export async function converse(talking: Talking): Promise<void> {
   /**
    * A turn of this client's own has ended: let pushes through again, and catch up on what
    * they said while it streamed — counting the turn it streamed as shown only when that turn
-   * was in the conversation on screen (a `/diagnose` streams in Daedalus's), and only when a
+   * was in the conversation on screen, and only when a
    * run was handed over at all.
    */
   const settle = async (
@@ -4083,14 +4081,6 @@ export async function converse(talking: Talking): Promise<void> {
   type Entered = 'entered' | 'root-refused' | 'declined';
   let place: Place | undefined;
   hereNow = () => place?.conversation;
-  /**
-   * Daedalus's continuing conversation in each tier, once this client has
-   * found or opened it. A diagnosis must stay out of the conversation it is
-   * examining, but a second diagnosis must stay in the first diagnostic
-   * conversation: that history is where an operator's correction and a
-   * narrower follow-up become evidence rather than a brand-new prompt.
-   */
-  const diagnostics = new Map<string, Conversation>();
   /**
    * Whether `job.stream` has gone out. Once per session: the subscription is
    * the socket's and not the tier's, and a start that is retried in the global
@@ -5616,53 +5606,6 @@ export async function converse(talking: Talking): Promise<void> {
           if (shown === 'refused') {
             show('trouble', describeTrajectoryUnreadable(conversation));
           }
-          continue;
-        }
-        if (line.kind === 'diagnose') {
-          // A DIAGNOSIS IS NOT A CHANGE OF SPEAKER. Continue Daedalus's
-          // separate conversation in this home, opening one only when he
-          // has none, and leave `now.conversation` untouched. The
-          // separation preserves the original agent pinning; the
-          // continuation preserves corrections and follow-up questions.
-          const target = line.conversation ?? now.conversation;
-          if (target === undefined) {
-            show('client', describeNoDiagnosis());
-            continue;
-          }
-          const home = now.project ?? '';
-          let diagnostic = diagnostics.get(home);
-          if (diagnostic === undefined) {
-            const latest = continuing('daedalus', now.project);
-            const found = await connection.ask(latest.type, latest.payload);
-            if (found.code !== OK) {
-              show('trouble', refusal(found));
-              continue;
-            }
-            diagnostic = continued(found);
-          }
-          if (diagnostic === undefined) {
-            const start = opening(now.project);
-            const openedDiagnosis = await connection.ask(
-              start.type,
-              start.payload,
-            );
-            diagnostic = opened(openedDiagnosis);
-            if (diagnostic === undefined) {
-              show('trouble', refusal(openedDiagnosis));
-              continue;
-            }
-          }
-          diagnostics.set(home, diagnostic);
-          show('client', describeDiagnosing(target, diagnostic.id));
-          const focus =
-            line.question === undefined
-              ? ' Diagnose the run generally and find the earliest relevant divergence.'
-              : ` The operator's current question is the controlling scope: ${line.question}`;
-          await speak(
-            diagnostic.id,
-            'daedalus',
-            `Diagnose conversation ${target}.${focus} Read the persisted trajectory around that scope; do not substitute an earlier unrelated problem. This request supersedes any prior diagnostic scope in this Daedalus conversation.`,
-          );
           continue;
         }
         if (line.kind === 'retrieval-error') {

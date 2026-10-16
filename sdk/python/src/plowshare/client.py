@@ -25,6 +25,7 @@ from ._codec import (
 from ._packets import PROTOCOL as PACKET_PROTOCOL
 from ._packets import Packets
 from ._protocol import CODES, PROTOCOL_VERSION
+from .acting import ActingSelection
 
 T = TypeVar("T")
 
@@ -168,8 +169,15 @@ class Client:
             )
         return cls(socket, session, timeout)
 
-    async def request(self, request: contracts.Request[T]) -> Reply[T]:
+    async def request(
+        self,
+        request: contracts.Request[T],
+        *,
+        acting_for: ActingSelection | None = None,
+    ) -> Reply[T]:
         """Validate before submission. Cancellation after a write never replays the request."""
+        if acting_for is not None and not isinstance(acting_for, ActingSelection):
+            raise ValueError("Invalid acting selection")
         operation, payload = encode_request(request)
         identity = str(uuid4())
         wire = json.dumps(
@@ -178,6 +186,11 @@ class Client:
                 "type": operation,
                 "protocol_version": PROTOCOL_VERSION,
                 "payload": payload,
+                **(
+                    {"actingFor": {"context": acting_for.context}}
+                    if acting_for is not None
+                    else {}
+                ),
             },
             allow_nan=False,
         )

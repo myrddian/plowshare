@@ -197,7 +197,7 @@ class AgentAliasTest {
     var registry = registry(directory, "minimal");
     var callers = mock(Callers.class);
     when(callers.withheldFrom(registry, "light")).thenReturn(List.of());
-    var rows = AgentRows.of(registry, callers, Optional.empty());
+    var rows = AgentRows.of(registry, callers, Optional.empty(), null);
     var alias = rows.stream().filter(row -> row.name().equals("coder")).findFirst().orElseThrow();
     assertTrue(alias.description().contains("resolves to light"));
     assertEquals(List.of("run"), alias.tools());

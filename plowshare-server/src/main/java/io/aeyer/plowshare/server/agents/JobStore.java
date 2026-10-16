@@ -741,6 +741,68 @@ public final class JobStore implements AutoCloseable, EventRuns {
       String callerHandle,
       boolean incoming,
       RelayCausation causation) {
+    return submit(
+        definition,
+        userPrompt,
+        home,
+        sessionId,
+        budget,
+        transcript,
+        origin,
+        ended,
+        cap,
+        images,
+        callerHandle,
+        incoming,
+        causation,
+        null);
+  }
+
+  /** A retained-authority turn; the receipt is committed before any executor can start. */
+  public String submitAdmitted(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      Budget budget,
+      Transcript transcript,
+      Origin origin,
+      Consumer<Outcome> ended,
+      TurnCap cap,
+      RunAdmission admission) {
+    RetainedAgent.requireRoot(definition);
+    admission.check().run();
+    return submit(
+        definition,
+        userPrompt,
+        home,
+        null,
+        budget,
+        transcript,
+        origin,
+        ended,
+        cap,
+        List.of(),
+        admission.subject(),
+        false,
+        null,
+        admission);
+  }
+
+  private String submit(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      String sessionId,
+      Budget budget,
+      Transcript transcript,
+      Origin origin,
+      Consumer<Outcome> ended,
+      TurnCap cap,
+      List<Content.Image> images,
+      String callerHandle,
+      boolean incoming,
+      RelayCausation causation,
+      RunAdmission admission) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(budget, "budget");
@@ -799,20 +861,27 @@ public final class JobStore implements AutoCloseable, EventRuns {
         conversationOrigin,
         ended,
         (watch, cancelled) ->
-            runtime.run(
-                definition,
-                userPrompt,
-                home,
-                budget,
-                cancelled,
-                sessionId,
-                watch,
-                transcript,
-                under,
-                images,
-                callerHandle,
-                incoming),
-        transcript::startedAs,
+            (admission == null ? runtime : runtime.forAdmittedTurn(admission))
+                .run(
+                    definition,
+                    userPrompt,
+                    home,
+                    budget,
+                    cancelled,
+                    sessionId,
+                    watch,
+                    transcript,
+                    under,
+                    images,
+                    callerHandle,
+                    incoming),
+        id -> {
+          if (admission != null) {
+            admission.check().run();
+            admission.started().accept(id);
+          }
+          transcript.startedAs(id);
+        },
         causation);
   }
 

@@ -71,6 +71,13 @@ export function constrain(graph) {
       for (const variant of s.anyOf ?? [ref])
         field(resolve(graph, variant), 'topic', { ...portName, maxLength: 1024 });
     if (s.anyOf) continue;
+    if (op==='acting.context.open') {
+      field(s,'application',providerProject);
+      field(s,'grant',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
+      const proof=nested(s,'proof');
+      if (proof) field(proof,'credential',{pattern:'^psa_[0-9a-f]{48}$',maxLength:52});
+    }
+    if (op==='acting.context.close') field(s,'context',canonicalUuid);
     if (op.startsWith('provider.connection.') || op.startsWith('provider.credential.')) {
       field(s,'project',providerProject);
       for(const key of ['connection','requestId','expectedRevision','expectedGeneration']) field(s,key,canonicalUuid);
@@ -376,6 +383,18 @@ export function constrain(graph) {
       );
     }
   }
+  for(const operation of ['acting.turn.start','acting.turn.receipt']) {
+    const turnReceipt=resolve(graph,graph.results[operation]);
+    field(turnReceipt,'requestId',canonicalUuid);
+    field(turnReceipt,'conversation',{pattern:'^cnv_[A-Za-z0-9]+$',maxLength:128});
+    field(turnReceipt,'agent',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$',maxLength:64});
+    field(turnReceipt,'job',{pattern:'^job_[A-Za-z0-9]+$',maxLength:128});
+    rules(turnReceipt,implies(eq('state','STARTED'),present('job')),implies(eq('state','FINISHED'),present('job')));
+  }
+  const actingOpened=resolve(graph,graph.results['acting.context.open']);
+  field(actingOpened,'context',canonicalUuid);
+  field(actingOpened,'subject',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'});
+  field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
     const title = shape.title ?? '';
     if (shape.properties?.mode && shape.properties?.metadata && !shape.properties?.scope) field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});
@@ -722,6 +741,17 @@ export function constrain(graph) {
       field(s, 'revision', { pattern: uuid });
     if (s.properties?.requestId) field(s, 'requestId', { pattern: uuid });
   };
+  // Apply operation-specific bounds after common identifier defaults; they are narrower.
+  for (const op of ['acting.turn.start','acting.turn.receipt']) {
+    const s=resolve(graph,graph.inputs[op]);
+    if (op==='acting.turn.start' || op==='acting.turn.receipt') field(s,'requestId',canonicalUuid);
+    if (op==='acting.turn.start') {
+      field(s,'agent',{pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$',maxLength:64});
+      field(s,'task',{minLength:1,maxLength:65536,maxUtf8Bytes:65536,nonblank:true,noNul:true});
+      field(s,'conversation',{pattern:'^cnv_[A-Za-z0-9]+$',maxLength:128});
+    }
+
+  }
   annotatePush(push);
   return graph;
 }

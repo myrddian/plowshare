@@ -124,6 +124,7 @@ class FrameShapeTest {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       FrameAreas.servicesNeeded().forEach(service -> mockBean(context, service));
       mockBean(context, io.aeyer.plowshare.server.access.ProjectAuthorization.class);
+      mockBean(context, ActingRequests.class);
       FrameAreas.declared().forEach(context::register);
       context.register(FrameRoutingConfig.class);
       context

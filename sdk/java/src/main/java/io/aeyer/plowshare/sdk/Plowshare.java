@@ -280,6 +280,14 @@ public final class Plowshare implements AutoCloseable {
 
   /** Internal transport boundary. Public consumers use validated operation facades. */
   Reply request(String type, Map<String, ?> payload) throws IOException {
+    return requestActing(type, payload, null);
+  }
+
+  Reply requestActing(
+      String type,
+      Map<String, ?> payload,
+      io.aeyer.plowshare.protocol.ActingContext.Selection selection)
+      throws IOException {
     Objects.requireNonNull(payload, "payload");
     if (type == null || !type.matches("[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+"))
       throw new IllegalArgumentException("a dotted frame type is required");
@@ -288,7 +296,11 @@ public final class Plowshare implements AutoCloseable {
     String frame =
         JSON.writeValueAsString(
             new Envelope(
-                id, type, Envelope.CURRENT_VERSION, new java.util.LinkedHashMap<>(payload)));
+                id,
+                type,
+                Envelope.CURRENT_VERSION,
+                new java.util.LinkedHashMap<>(payload),
+                selection));
     int bytes = frame.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     if (bytes
         > (packets == null

@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Where a set of agent definitions is read from, when "a directory" is not the answer.
@@ -46,6 +47,22 @@ public interface DefinitionSource {
    *     frontmatter
    * @param origin what a refusal about this definition should name
    * @param text the whole file, frontmatter and body
+   * @param provenance assigned by the loader; an origin string is never evidence of trust
    */
-  record Definition(String name, String origin, String text) {}
+  record Definition(String name, String origin, String text, Provenance provenance) {
+    public Definition {
+      Objects.requireNonNull(provenance, "provenance");
+    }
+
+    /** Authored files and channel content cannot claim installed-release provenance. */
+    public Definition(String name, String origin, String text) {
+      this(name, origin, text, Provenance.AUTHORED);
+    }
+  }
+
+  /** Loader-supplied provenance, independent of paths, names and authored frontmatter. */
+  enum Provenance {
+    AUTHORED,
+    BUNDLED
+  }
 }

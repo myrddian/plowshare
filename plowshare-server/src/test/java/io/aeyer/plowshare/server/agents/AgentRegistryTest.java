@@ -2116,8 +2116,8 @@ class AgentRegistryTest {
   void the_conversation_folder_is_harness_only_and_holds_no_tools() {
     var registry =
         new AgentRegistry(
-            AgentRegistry.load(
-                Path.of("src/main/resources/agents"), BoundTools.boundByThisServer()));
+            io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+                BoundTools.boundByThisServer()));
     // assertDoesNotThrow and not assertNotNull, which is what this line was
     // and which could never have fired: AgentRegistry.get throws on a miss
     // and has no null to return, so the message under it described a failure

@@ -75,6 +75,16 @@ server.on('upgrade', (request, socket, head) => {
                             payload:{code:'NOT_FOUND',said:`no handler is registered for type "${sent.type}"`,payload:{accessToken:'must-not-escape'}}}));
                         return;
                     }
+                    if(session.endsWith('/acting-selection')) {
+                        assert.equal(sent.type,'conversation.turns');
+                        assert.deepEqual(sent.payload,{conversation:'fixture'});
+                        const count=(counts.get(session)??0)+1;
+                        counts.set(session,count);
+                        if(count<=2) assert.deepEqual(sent.actingFor,{context:'00000000-0000-0000-0000-00000000000'+count});
+                        else { assert.equal(count,3); assert.equal(Object.hasOwn(sent,'actingFor'),false); }
+                        ws.send(JSON.stringify({id:sent.id,type:sent.type,protocol_version:fixture.protocolVersion,payload:{code:'OK',payload:[]}}));
+                        return;
+                    }
                     assert.equal(sent.type, 'project.list')
                     assert.equal(typeof sent.id, 'string')
                     if (session.startsWith('typed-')) {

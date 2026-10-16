@@ -1,3 +1,8 @@
+import {
+  actingOptions,
+  type RequestOptions,
+  type ActingSelection,
+} from './acting.ts';
 import { isCode } from './codes.ts';
 import type { Code } from './codes.ts';
 
@@ -46,6 +51,7 @@ export interface Envelope {
   readonly type: string;
   readonly protocol_version: string;
   readonly payload: unknown;
+  readonly actingFor?: ActingSelection;
 }
 
 /**
@@ -108,11 +114,17 @@ export function isAnswer(frame: unknown): frame is Record<string, unknown> {
 }
 
 /** The frame this client puts on the wire for one request. */
-export function asking(id: string, type: string, payload: unknown): Envelope {
+export function asking(
+  id: string,
+  type: string,
+  payload: unknown,
+  options?: RequestOptions,
+): Envelope {
   return {
     id,
     type,
     protocol_version: CURRENT_VERSION,
+    ...actingOptions(options),
     // `{}` rather than an omitted key when a caller has nothing to send: the
     // server hands `Envelope.payload()` to a handler that reads fields off
     // it, and a null map there is a different thing to be wrong about than

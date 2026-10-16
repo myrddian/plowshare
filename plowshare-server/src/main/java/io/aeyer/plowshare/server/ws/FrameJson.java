@@ -51,6 +51,7 @@ public final class FrameJson {
   public static ObjectMapper reading() {
     return new ObjectMapper(
         com.fasterxml.jackson.core.JsonFactory.builder()
+            .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .streamReadConstraints(
                 com.fasterxml.jackson.core.StreamReadConstraints.builder()
                     .maxStringLength(io.aeyer.plowshare.protocol.RelayPort.MAX_TEXT_BYTES)

@@ -93,6 +93,7 @@ public final class WorkspaceApplicationPolicy implements ApplicationPolicy {
     validateRouting(body.get("routing"));
     var service =
         io.aeyer.plowshare.server.applications.ApplicationServiceManifest.declaration(text);
+    io.aeyer.plowshare.server.acting.ActingManifest.read(text, project);
     Map<String, ProjectRole> grants = new HashMap<>();
     service.ifPresent(value -> grants.put(value.handle(), ProjectRole.valueOf(value.role())));
     JsonNode access = body.get("access");

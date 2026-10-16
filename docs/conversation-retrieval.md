@@ -156,12 +156,12 @@ remain (40 entries, bounded source text). The distinction between learned
 memory, verbatim historical entries and surviving summaries is preserved.
 
 Search, navigation and historical evidence reading are explicitly granted to
-interlocutor, Farnsworth and Daedalus. Interlocutor needs earlier discussion;
-Farnsworth needs prior engineering evidence; Daedalus needs historical runs for
+interlocutor, Farnsworth and the conversation diagnostician. Interlocutor needs earlier discussion;
+Farnsworth needs prior engineering evidence; the diagnostician needs historical runs for
 diagnosis. Other agents do not receive automatic grants. Runtime schema/grant
 checks and an actual scripted runtime loop validate availability and source use.
 
-Daedalus's independent diagnosis verifier also has scoped `conversation_trajectory`
+The diagnostician's independent diagnosis verifier also has scoped `conversation_trajectory`
 reading so it can check cited historical entries without a workspace. It receives
 neither search nor memory-navigation grants.
 

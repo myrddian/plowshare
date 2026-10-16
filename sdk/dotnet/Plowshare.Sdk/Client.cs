@@ -78,21 +78,24 @@ public sealed class Client : IAsyncDisposable
         return new Client(ws, http, session, deadline);
     }
 
-    internal async Task<Reply<TResponse>> RequestTypedAsync<TRequest, TResponse>(string operation, TRequest request, CancellationToken cancellationToken)
+    internal async Task<Reply<TResponse>> RequestTypedAsync<TRequest, TResponse>(string operation, TRequest request, CancellationToken cancellationToken, RequestOptions? options = null)
     {
         // Conversion happens before acquiring the writer or creating pending work.
         var body = Codec.Input(operation, request);
-        var outcome = await RequestWireAsync(operation, body, cancellationToken);
+        var outcome = await RequestWireAsync(operation, body, cancellationToken, options);
         if (outcome.Code is not ("OK" or "CREATED" or "ACCEPTED" or "NO_CONTENT"))
             return new Reply<TResponse>(outcome.Code, outcome.Said, default!);
         try { var result = Codec.Result<TResponse>(operation, outcome.Payload); Codec.CorrelateDeployment(operation, body, outcome.Payload); return new Reply<TResponse>(outcome.Code, outcome.Said, result); }
         catch (JsonException) { throw new TransportException(Delivery.InvalidResponse, "Unreadable response; outcome is unknown"); }
     }
 
-    private async Task<WireOutcome> RequestWireAsync(string operation, JsonElement body, CancellationToken cancellationToken)
+    private async Task<WireOutcome> RequestWireAsync(string operation, JsonElement body, CancellationToken cancellationToken, RequestOptions? options)
     {
         var id = Guid.NewGuid().ToString();
-        var wire = JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body });
+        if (options is not null) ArgumentNullException.ThrowIfNull(options.ActingFor);
+        var wire = options is null
+            ? JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body })
+            : JsonSerializer.SerializeToUtf8Bytes(new { id, type = operation, protocol_version = Protocol.Version, payload = body, actingFor = new { context = options.ActingFor.Context.ToString() } });
         if (wire.Length == 0 || wire.Length > (packets is null ? 1048576 : Packets.MaxMessage)) throw new TransportException(Delivery.NotSubmitted, "Encoded request exceeds negotiated allowance");
         using var reservation = packets?.ReserveOutgoing(wire.Length);
         var answer = new TaskCompletionSource<WireOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -191,3 +194,7 @@ public sealed class Client : IAsyncDisposable
         socket.Dispose(); http.Dispose(); lifetime.Dispose();
     }
 }
+
+/// <summary>Explicit selection on one request; never changes the socket's actor.</summary>
+public sealed record ActingSelection(Guid Context);
+public sealed record RequestOptions(ActingSelection ActingFor);

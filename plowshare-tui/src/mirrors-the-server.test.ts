@@ -1011,14 +1011,14 @@ describe('the envelope this client speaks is the envelope the server checks', ()
     );
   });
 
-  it('has the four fields Envelope.java declares and no more', () => {
-    // `id`, `type`, `protocolVersion`, `payload`. A fifth is a wire change,
-    // and this client reading four of five would ignore it in silence.
+  it('matches the common envelope including optional request authority', () => {
+    // The shared SDK carries actingFor per request. Ordinary TUI calls omit it.
     expect(componentsOf(java('Envelope.java'), 'Envelope')).toEqual([
       'id',
       'type',
       'protocolVersion',
       'payload',
+      'actingFor',
     ]);
   });
 

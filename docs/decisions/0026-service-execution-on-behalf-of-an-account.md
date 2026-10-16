@@ -1,14 +1,23 @@
 # ADR 0026: Service execution on behalf of an account
 
-Status: proposed. Drafted for discussion; implementation is not authorized.
-Changing core requires the separate platform authorization described in
-[ADR 0001](0001-integration-boundary.md).
+Status: proposed beyond the five authorized implementation slices: typed authority
+and permission policy; declarations and consent persistence; socket-bound acting
+contexts and synchronous turn-history reads; retained-authority Personal
+conversations and agent turns; standard synchronous tools and child-agent authority
+propagation. Broader effects, operation adoption and
+client consent-management UX remain later slices. This is separately
+scoped platform work under [ADR 0001](0001-integration-boundary.md).
 
 This is not agent delegation. `agent_run`, `calls:` and
 [ADR 0011](0011-application-scoped-agent-delegation.md) concern one agent starting
 another inside an already admitted identity. This decision concerns which account
 an authenticated Application may act for. It defines a general platform
 capability available to external integrations through the public SDKs.
+
+The [implementation map](../account-delegation-implementation-map.md) traces the
+proposal to current code owners, remaining contract decisions, implementation
+progress and verification steps. Its remaining plan is not an implementation
+approval for later slices.
 
 ## Platform problem
 
@@ -195,6 +204,70 @@ every person. Eligibility is managed by server administrators through
 and on every later recheck. Removing an account or rule ends that use immediately,
 without redeploying.
 
+### Internal consent lifecycle implemented
+
+The current server implements the declaration/consent slice through typed internal
+`ActingTokens` and `ActingRepository` contracts. It does not yet expose the proposed
+wire token/eligibility operations. The context slice below exposes proof exchange
+and one delegated read. `plowshare.acting.enabled` defaults to false.
+
+An issue request explicitly supplies a VIEWER/CONTRIBUTOR ceiling, ordinary project
+subset, Personal flag, expiry of 1–365 days, optional external subject label and
+request UUID. The human subject comes from authenticated direct authority, never
+the request. The issuer must currently be eligible, and every requested scope must
+fit the active grant and current permissions. Personal requires its owner's access
+and explicit grant consent; it does not give the Application Personal membership.
+The external subject is a retained integration label, not account authentication.
+
+Each mutation and its metadata receipt/audit commit in one transaction, serialized
+with Application activation and service-account changes. Receipts are readable only
+by their original authenticated human submitter, including after grant withdrawal
+or when acting is disabled. Reusing a UUID with changed fields refuses. Repeating
+an issue never returns a credential; reconcile its receipt, then revoke or create a
+new request explicitly. Revocation is available to the token owner or a server
+administrator even when acting is disabled. Token listings return the owner's
+latest 256 metadata records, including expired/revoked records.
+
+Declarations commit with the source head. Removed grants remain inert for history;
+rollback reads the newly active source's declarations. Token projects and
+eligibility membership rules use project row identities, preventing a same-named
+replacement project from inheriting old consent. Application credential rotation
+keeps the exact retained service principal and therefore its consent bindings.
+Permission checks still re-read current grants, eligibility, accounts and token
+state. These records do not authorize effects by themselves.
+
+### Socket context and first delegated read implemented
+
+`acting.context.open` accepts the separately provisioned acting-token proof on an
+already authenticated Application socket. The server verifies the exact actor,
+Application/grant, active human, eligibility, expiry, current project membership and
+Personal consent, then retains only bounded authority metadata. Opening a context
+never changes the socket's actor or another request's subject.
+
+The reply contains `{context, subject, expiresAt}`. Contexts last at most five
+minutes, never beyond token expiry; limits are 64 per physical connection and 8,192
+per server. They are bound to actor, session and physical connection. Disconnect,
+reconnect, displacement, explicit `acting.context.close` or expiry ends their use.
+Accepted and refused proof exchanges and explicit closes have metadata-only audit
+records; credentials and digests are excluded. Malformed transport fields refuse
+before the exchange capability runs.
+
+Only `conversation.turns` currently supports top-level
+`actingFor: {context: <canonical UUID>}`. Its strict payload contains exactly the
+conversation ID. Scope comes from the owning conversation, never a submitted
+project or messaging routing context. The read checks current authority before
+and after loading history, refuses global/foreign Personal scope and relocation,
+and checks context liveness again before returning data. Closed, malformed,
+unknown or foreign selections never fall back to the actor. Requests without the
+field keep the normal service path. Other operations refuse delegated selection.
+
+Java, TypeScript/Node, Python, Go and .NET provide typed proof exchange and
+immutable per-request selection on shared connections. These context operations
+require a persistent connection; they are not one-shot CLI commands. The SDKs
+never reconnect or retry under a fallback identity. The synchronous response may
+finish delivery after its read completes; this slice grants no background-work
+lease or push subscription under subject authority.
+
 ## Subject proof
 
 ### Verifier contract
@@ -256,19 +329,20 @@ The person creates an acting token in their own signed-in session:
 ```text
 acting.token.issue {
   application, grant, externalSubject?,
-  projects: [subset], personal: bool, expiresInDays: 1..365, requestId
+  ceiling: VIEWER|CONTRIBUTOR, projects: [subset], personal: bool,
+  expiresInDays: 1..365, requestId
 }
 ```
 
 - It is refused unless the person is eligible for the grant, the grant accepts
-  `acting-token`, and the requested projects and Personal flag are within the
-  grant. The person may choose less than the grant allows, never more.
+  `acting-token`, and the requested role, projects and Personal flag are within the
+  grant and current account permissions. The person may choose less than the grant allows, never more.
 - The response reveals a credential beginning with `psa_` once. It remains usable
   until expiry or revocation; the server stores its digest only.
 - The token is bound to that Application and grant. Presented by any other actor,
   it is refused and audited.
 - The person lists and revokes their tokens from any client under **Connected
-  services**. Administrators can revoke but never issue them.
+  services**. Administrators can revoke but cannot issue on another person's behalf.
 
 The person provisions the credential directly into the integration's private
 credential configuration, separate from its Application token and public routing

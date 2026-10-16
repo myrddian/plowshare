@@ -323,3 +323,59 @@ registration, including its original journal fence for reconciliation.
 `ProviderManagementClient`, private redacted recovery bookmarks, safe credential
 entry and initial CLI/TUI/desktop/console controls. It uses the existing socket
 and owning receipts; native MCP transports and host lifetime remain separate work.
+
+## Acting contexts and retained Personal turns
+
+The Application keeps its own authenticated connection. A separately provisioned
+acting token is exchanged through `acting.context.open`; its typed request carries
+`application`, `grant` and `proof: {kind: "acting-token", credential}`. Keep that
+credential in private integration configuration. The reply contains `context`,
+`subject` and `expiresAt`, with no reusable credential material. The server setting
+`plowshare.acting.enabled` must be enabled explicitly.
+
+`conversation.turns`, `acting.turn.start`, `acting.turn.receipt`, and the retained
+turn's `job.status` / `job.cancel` support delegated selection. Select a context
+on each request; omit the selection for an ordinary Application request:
+
+| SDK | Per-request selection on the existing connection |
+| --- | --- |
+| Java | `new ActingClient(connection).turns(new ActingContext.Selection(context), conversation)` |
+| TypeScript | `client.request('conversation.turns', {conversation}, {actingFor: {context}})` |
+| Node | The shared TypeScript SDK or session `ask` accepts the same third options argument. |
+| Python | `client.request(ConversationTurnsRequest(conversation=conversation), acting_for=ActingSelection(context))` |
+| Go | `selected, err := WithActingContext(ctx, contextID)`, then `client.ConversationTurns(selected, request)` |
+| .NET | `client.ConversationTurnsAsync(request, options: new RequestOptions(new ActingSelection(contextGuid)))` |
+
+Open/close require a persistent connection and are not one-shot CLI commands.
+Contexts last at most five minutes, are bound to the physical socket, and end on
+close, disconnect or expiry. Reconnecting requires a new explicit exchange. Invalid
+selections and unsupported delegated operations refuse; callers must not drop the
+selection and retry as the Application. Current grants, consent, eligibility and
+account permissions are rechecked for every read.
+
+`acting.turn.start` requires a caller-owned UUID `requestId`, a `task`, and an
+exported `agent` whose capabilities retain authority. Omit `conversation` to open
+the subject's Personal conversation;
+include a previously bound conversation for another turn. Retain the UUID before
+submission. The receipt names the conversation, concrete agent, admission state
+and nullable job ID. Recover lost responses using `acting.turn.receipt({requestId})`;
+never automatically replay the mutation. Pending or UNCERTAIN receipts after a
+restart do not authorize resubmission. Java exposes `ActingClient.start` and
+`receipt`; the generated Python/Go/.NET operations and shared TypeScript operations
+carry the same contracts and per-request selection.
+
+Closing a context or disconnecting does not cancel admitted work. Its retained
+Personal authority is rechecked before execution, after model queueing and before
+accepting output; revoking consent prevents further effects. Reconnect and exchange
+a fresh context to read a receipt, history or job, or explicitly cancel the job.
+Current and retained authority must both permit the read/cancellation. Existing
+conversation budgets and human/SYSTEM accounting remain separate from authority.
+Standard synchronous tools and child agents use the existing agent grants, hooks,
+resource checks, file-provider fences and command environment gate. Tool arguments
+cannot widen the admitted Personal scope; file providers receive no client session.
+New approval continuations, information-processing jobs, dynamic/external tools,
+skills, orchestration, implicit recall, streamed subscriptions and automatic folds
+remain closed until their consumers retain authority. See the
+[supported execution capabilities](account-delegation-implementation-map.md#fifth-slice-standard-tool-checks-and-child-agents).
+Human-facing token management and external identity linking remain later work; see
+[ADR 0026](decisions/0026-service-execution-on-behalf-of-an-account.md).

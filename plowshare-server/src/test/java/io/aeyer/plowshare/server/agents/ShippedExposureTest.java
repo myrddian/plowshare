@@ -38,7 +38,8 @@ class ShippedExposureTest {
   private static final Path SHIPPED = Path.of("src/main/resources/agents");
 
   private static Map<String, AgentDefinition> shipped() {
-    return AgentRegistry.load(SHIPPED, BoundTools.boundByThisServer());
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+        BoundTools.boundByThisServer());
   }
 
   /**
@@ -295,8 +296,8 @@ class ShippedExposureTest {
    *
    * <p>Every member is a real {@link JobRuntime} run whose input a caller composes — the five
    * summarisers {@code Summariser} feeds, {@code promotion_judge} {@code Curator} feeds, {@code
-   * diagnosis_verifier} Daedalus hands claims, {@code research_critic}, which the {@code
-   * deep_research} conductor hands its numbered findings and their sources, and {@code
+   * diagnosis_verifier} the conversation diagnostician hands claims, {@code research_critic}, which
+   * the {@code deep_research} conductor hands its numbered findings and their sources, and {@code
    * test_designer}, which a phase conductor hands a phase's slice of a spec and that phase's plan.
    * A task string typed at {@code POST /v1/agents/&#123;name&#125;/runs} would be doing that
    * caller's job by hand.
@@ -317,6 +318,7 @@ class ShippedExposureTest {
             "information_tag_grouper",
             "promotion_judge",
             "diagnosis_verifier",
+            "conversation_diagnostician",
             "research_analyst",
             "research_critic",
             "test_designer"),

@@ -141,7 +141,8 @@ public final class ClasspathDefinitions implements DefinitionSource {
                 + " This jar is damaged.",
             unreadable);
       }
-      definitions.add(new Definition(name, "the shipped definition `" + name + "`", text));
+      definitions.add(
+          new Definition(name, "the shipped definition `" + name + "`", text, Provenance.BUNDLED));
     }
   }
 }

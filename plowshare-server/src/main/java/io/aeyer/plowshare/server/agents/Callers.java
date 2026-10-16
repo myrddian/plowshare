@@ -120,7 +120,10 @@ public final class Callers implements WorkCallers, AgentDelegates, ConversationD
     // Admission is fresh even when the parent already holds a tool schema or resolver cache.
     access.requireSession(session, account);
     access.requireWork(home.project(), account);
-    return resolver.forCaller(delegateCaller(home, session, account)).find(name);
+    return resolver
+        .forCaller(delegateCaller(home, session, account))
+        .find(name)
+        .map(definition -> AgentExposure.requireAvailable(definition, account));
   }
 
   private DefinitionResolver.Caller delegateCaller(Home home, String session, String account) {
@@ -227,18 +230,16 @@ public final class Callers implements WorkCallers, AgentDelegates, ConversationD
    * same package this class reaches from below it.
    */
   public AgentDefinition requireAgent(String name, DefinitionResolver.Caller caller) {
-    return RequestedAgent.toRun(
-        resolver.forCaller(caller),
-        () -> resolver.forCaller(caller.withoutSession()).exportedNames(),
-        name);
+    return AgentExposure.requireAvailable(
+        RequestedAgent.toRun(resolver.forCaller(caller), () -> exportedFor(caller), name),
+        caller.handle());
   }
 
   /** Approval continuations name the recorded concrete agent, even when it also bears an alias. */
   public AgentDefinition requirePinnedAgent(String name, DefinitionResolver.Caller caller) {
-    return RequestedAgent.toContinue(
-        resolver.forCaller(caller),
-        () -> resolver.forCaller(caller.withoutSession()).exportedNames(),
-        name);
+    return AgentExposure.requireAvailable(
+        RequestedAgent.toContinue(resolver.forCaller(caller), () -> exportedFor(caller), name),
+        caller.handle());
   }
 
   /**
@@ -247,10 +248,16 @@ public final class Callers implements WorkCallers, AgentDelegates, ConversationD
    * gates running and not reading.
    */
   public AgentDefinition readAgent(String name, DefinitionResolver.Caller caller) {
-    return RequestedAgent.toRead(
-        resolver.forCaller(caller),
-        () -> resolver.forCaller(caller.withoutSession()).exportedNames(),
-        name);
+    return AgentExposure.requireAvailable(
+        RequestedAgent.toRead(resolver.forCaller(caller), () -> exportedFor(caller), name),
+        caller.handle());
+  }
+
+  private java.util.Set<String> exportedFor(DefinitionResolver.Caller caller) {
+    var registry = resolver.forCaller(caller.withoutSession());
+    return registry.exportedNames().stream()
+        .filter(name -> AgentExposure.availableTo(registry.get(name), caller.handle()))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 
   /**

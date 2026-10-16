@@ -21,7 +21,9 @@ class ScheduleReaderDefinitionTest {
   private static final Path SHIPPED = Path.of("src/main/resources/agents");
 
   private static AgentDefinition shipped() {
-    return new AgentRegistry(AgentRegistry.load(SHIPPED, BoundTools.boundByThisServer()))
+    return new AgentRegistry(
+            io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+                BoundTools.boundByThisServer()))
         .get("schedule_reader");
   }
 

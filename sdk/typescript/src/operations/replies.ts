@@ -51,6 +51,15 @@ export interface ContextCount {
   readonly gaps: readonly string[];
 }
 /** All one-shot WS payload contracts. Raw refusal diagnostics remain inside the wire transport. */
+/** Receipt evidence survives disconnect/restart; a pending receipt never authorizes a replay. */
+export interface ActingTurnReceipt {
+  readonly requestId: string;
+  readonly conversation: string;
+  readonly agent: string;
+  readonly state: 'ADMITTED' | 'STARTED' | 'FINISHED' | 'UNCERTAIN';
+  readonly job: string | null;
+}
+
 export interface Replies
   extends
     MessagingReplies,
@@ -62,6 +71,14 @@ export interface Replies
     AdministrativeReplies,
     ConversationReplies,
     InspectionReplies {
+  'acting.context.open': {
+    readonly context: string;
+    readonly subject: string;
+    readonly expiresAt: string;
+  };
+  'acting.context.close': Readonly<Record<string, never>>;
+  'acting.turn.start': ActingTurnReceipt;
+  'acting.turn.receipt': ActingTurnReceipt;
   'conversation.follow': void;
   'job.stream': void;
   'outgoing.advertise': void;

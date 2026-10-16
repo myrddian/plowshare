@@ -1639,7 +1639,11 @@ public class AgentsConfig {
       resolved.put(entry.getKey(), sampled);
     }
     return new AgentRegistry.Loaded(
-        resolved, loaded.disabled(), loaded.withheldEdges(), loaded.withheldTools());
+        resolved,
+        loaded.disabled(),
+        loaded.withheldEdges(),
+        loaded.withheldTools(),
+        loaded.systemNames());
   }
 
   /**

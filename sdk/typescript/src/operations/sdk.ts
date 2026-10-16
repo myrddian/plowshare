@@ -1,3 +1,5 @@
+import type { RequestOptions } from '../binding/acting.ts';
+export type { RequestOptions, ActingSelection } from '../binding/acting.ts';
 import {
   decodeMetadataValidation,
   type MetadataValidationResult,
@@ -194,12 +196,15 @@ export class Plowshare {
   async request<K extends Operation>(
     type: K,
     payload: Payloads[K],
+    options?: RequestOptions,
   ): Promise<Reply<K>> {
     const checked = decodePayload(type, payload);
     // The generic API preserves pairing; the mapped request union requires a
     // narrow compiler assertion when passed to the existing lifecycle decoder.
     const result = await dispatch(
-      this.connection,
+      {
+        ask: (operation, body) => this.connection.ask(operation, body, options),
+      },
       request(type, checked) as Request,
     );
     if (result.kind === 'invalid-response')

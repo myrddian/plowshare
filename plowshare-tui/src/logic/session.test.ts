@@ -157,7 +157,6 @@ import {
   CD_COMMAND,
   COMMANDS,
   CONVERSATIONS_COMMAND,
-  DIAGNOSE_COMMAND,
   HELP_COMMAND,
   EARLIER_COMMAND,
   HERE_COMMAND,
@@ -1333,29 +1332,8 @@ describe('what a line typed at the prompt is, before it is an utterance', () => 
     expect(typed(HELP_COMMAND)).toEqual({ kind: 'help' });
   });
 
-  it('reads a diagnosis with an explicit target or leaves the current target to the view', () => {
-    expect(typed(DIAGNOSE_COMMAND)).toEqual({ kind: 'diagnose' });
-    expect(typed(`${DIAGNOSE_COMMAND} cnv_123`)).toEqual({
-      kind: 'diagnose',
-      conversation: 'cnv_123',
-    });
-    expect(typed(`${DIAGNOSE_COMMAND} -- why did it loop?`)).toEqual({
-      kind: 'diagnose',
-      question: 'why did it loop?',
-    });
-    expect(typed(`${DIAGNOSE_COMMAND} cnv_123 -- why did it loop?`)).toEqual({
-      kind: 'diagnose',
-      conversation: 'cnv_123',
-      question: 'why did it loop?',
-    });
-    expect(typed(`${DIAGNOSE_COMMAND} --`)).toEqual({
-      kind: 'usage',
-      command: DIAGNOSE_COMMAND,
-    });
-    expect(typed(`${DIAGNOSE_COMMAND} cnv_123 without-a-delimiter`)).toEqual({
-      kind: 'usage',
-      command: DIAGNOSE_COMMAND,
-    });
+  it('does not route the retired diagnose command to an agent', () => {
+    expect(typed('/diagnose')).toEqual({ kind: 'unknown', named: '/diagnose' });
   });
 
   it('refuses a command it does not know rather than sending it as a question', () => {
@@ -1723,7 +1701,7 @@ describe('/help, which is the first thing anybody types and was refused', () => 
     expect(COMMANDS).toContain(HELP_COMMAND);
     expect(COMMANDS).toContain('/commands');
     expect(COMMANDS).toContain('/skills');
-    expect(COMMANDS).toHaveLength(41);
+    expect(COMMANDS).toHaveLength(40);
   });
 
   it('says what a line that is not a command is', () => {
