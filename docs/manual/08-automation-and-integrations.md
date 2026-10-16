@@ -54,8 +54,10 @@ typed request/response, not a custom HTTP route added by guessing server interna
 A connector should map the external user's authority, project, input and reply
 destination explicitly. Keep credentials in private configuration, separate
 external caller identity from the Plowshare account, and retain durable work
-handles. Discord or another chat transport could be an adapter, but this repository
-does not thereby ship that connector or its identity/permission policy.
+handles. The [Discord adapter](../../integrations/discord/README.md) uses one scoped
+Application-owned service token, an explicit Discord user allowlist and
+channel-to-project/bot routes within its scoped project.
+Its users remain external participants; it supplies no linked-human execution.
 
 ## A2A receiving
 

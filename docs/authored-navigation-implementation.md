@@ -1,7 +1,7 @@
 # Authored navigation and reference-policy implementation plan
 
 Status: local implementation delivered, 15 October 2026. The user authorised
-the documented recommendations. [ADR 0026](decisions/0026-document-navigation-and-reference-policy.md)
+the documented recommendations. [ADR 0028](decisions/0028-document-navigation-and-reference-policy.md)
 records the adopted choices; [the usage guide](authored-navigation.md) describes
 operations and activation. The schema baseline is
 `49fdab28834cdecf61b2f3cfe279ecdedce1247a`. Review/integration/publication remain separate.
@@ -256,4 +256,6 @@ inference, arbitrary metadata querying, a relation-type registry, global private
 document enumeration, real-time collaboration, new editor grants, portable bundle
 export/import or a general licence/classification engine. Existing or future
 exports must enforce policy; a complete interchange feature remains separate.
-The current schema milestone still needs its own review/integration/publication.
+The schema and navigation integration review is recorded in the
+[authored knowledge implementation plan](authored-knowledge-implementation.md#main-integration-review--16-october-2026).
+Publication and deployment remain separate from local verification.

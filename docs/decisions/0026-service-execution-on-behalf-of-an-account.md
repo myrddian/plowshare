@@ -1,4 +1,4 @@
-# ADR 0024: Service execution on behalf of an account
+# ADR 0026: Service execution on behalf of an account
 
 Status: proposed. Drafted for discussion; implementation is not authorized.
 Changing core requires the separate platform authorization described in
@@ -7,7 +7,8 @@ Changing core requires the separate platform authorization described in
 This is not agent delegation. `agent_run`, `calls:` and
 [ADR 0011](0011-application-scoped-agent-delegation.md) concern one agent starting
 another inside an already admitted identity. This decision concerns which account
-an authenticated Application may act for.
+an authenticated Application may act for. It defines a general platform
+capability available to external integrations through the public SDKs.
 
 ## Platform problem
 
@@ -16,19 +17,22 @@ token principal `@service/<token UUID>`. Authorization, ownership, conversations
 memory and accounting all follow that identity. There is no way to express
 "this Application performs this request for that account".
 
-A chat bridge shows the gap. A Discord, Teams or iMessage adapter receives
-messages from several people and should let each of them talk to their own bot,
-with their own Personal space, project roles, conversations and memory. Today the
-adapter has two options, and both fail:
+An external integration can serve both ordinary external users and people who
+also have a Plowshare account. Ordinary external users can use the integration's
+own bounded service identity. A Plowshare user may additionally want their own
+Personal space, project roles, conversations and memory. This can arise in a chat
+bridge, a support portal, a workflow connector or another external Application.
+Discord illustrates a capability available to any such integration.
+For that personal access, today's alternatives are insufficient:
 
-- **Run everything as the adapter's service principal.** Every chat user shares
+- **Run everything as the adapter's service principal.** Every external user shares
   one authority, one conversation owner and one memory scope. Service tokens
   cannot reach Personal space. Plowshare cannot tell which person asked for what.
-  The A2A receiver's external client aliases follow this model; it suits a public
-  entry point, not a personal assistant.
-- **Hold each person's own credential.** The adapter becomes full impersonation:
-  all of the account's authority, every session, no attribution, and a single
-  compromised adapter exposes every linked account.
+  The A2A receiver's external client aliases follow this model; it remains useful
+  for ordinary external users but does not provide a person's own account scope.
+- **Hold each person's unrestricted login credential.** The adapter becomes full
+  impersonation: all of the account's authority, every session, no attribution,
+  and a single compromised adapter exposes every linked account.
 
 The same shape appears in [ADR 0019](0019-mcp-provider-hosting.md), gap 3:
 Application calls require caller and provider identity equality, and a separate
@@ -52,13 +56,41 @@ and enforce the intersection on every later permission check.
 
 ## Decision
 
-Acting for an account needs three things, each owned by a different party:
+### Two ways to use the same integration
+
+The integration authenticates to Plowshare with its own Application token. The
+Application and acting-context flow remain separate: a person's acting token is
+additional authority for a specific subject, not a replacement Application login.
+
+| User | Execution and authority |
+| --- | --- |
+| Ordinary external user without a Plowshare account | Requests run under the integration's service identity, within its permissions, the Application's granted capabilities and the selected execution context's restrictions. An external alias identifies the caller but grants no additional access. |
+| Plowshare user who provisions an acting token | The same authenticated integration opens an acting context for that account. Requests using that context can reach the subject's explicitly permitted scopes, including Personal, within the acting grant and token limits. |
+
+An integration may constrain an ordinary external user to specific resources or
+operations. For example, a Discord bridge may pin a user to a specific conversation
+with an agent. That routing restriction narrows what the user can do; it does not
+confer ownership of the conversation or access to a Plowshare account. An external
+identity, channel, resource ID or choice of agent cannot itself open an acting
+context. The authority model does not depend on a chat channel, conversation or
+interactive session with an external user.
+
+The initial personal setup is direct provisioning: the Plowshare account owner
+places their acting token in the integration's private credential configuration.
+A personal bridge is one example. The token is not sent through an external
+message or stored as ordinary user content. An integration may be configured for
+one account; an integration serving multiple people must keep each person's
+credential, context and request routing separate.
+
+### Authority for an acting context
+
+Acting for a Plowshare account needs three parts with distinct ownership:
 
 | Part | Owner | Answers |
 | --- | --- | --- |
 | **Actor**: the Application's owned service identity | Server administrator, through deployment | Who is asking? |
 | **Grant**: a named declaration in `plowshare.json` with an eligibility list | Server administrator, through deployment; eligibility through grant management | What may this Application ever do for anyone, and for whom? |
-| **Subject proof**: evidence that a specific person is present and consents | The person, or a trusted ticket system acting for them | For whom is this request, and did they agree? |
+| **Subject proof**: evidence of a specific account's delegated consent and its limits | The person, or a trusted ticket system acting for them | For whom may this request run, and with what delegated permissions? |
 
 Authority only ever narrows. For a server project, effective role is
 
@@ -72,6 +104,16 @@ min(subject's current role,
 and the subject must be on the grant's eligibility list. It is never a union.
 The last term lets a project manager remove the Application from a project without
 touching any grant or proof.
+
+Personal access is a separate, explicit capability: the acting grant and the
+subject's proof must both permit it, and the subject must be enabled and eligible.
+The Application service account does not gain Personal membership. The server
+admits access to that subject's Personal scope through the acting context while
+retaining the Application as actor. This supplies access unavailable in the
+ordinary external-user path without widening the Application's own identity.
+For server projects, the intersection above still applies; a person's token does
+not bypass the Application service account's project ceiling. Conversation,
+agent and tool restrictions continue to apply wherever relevant in either path.
 
 ### One invariant for every proof kind
 
@@ -92,6 +134,14 @@ acting grants, because their identity is not tied atomically to the manifest
 that declares the grant. Token rotation keeps the principal and therefore its
 grants and proofs.
 
+The integration's Application token authenticates the socket and supplies the
+actor's own permissions. The user's acting token authenticates the subject's
+delegation and supplies its permission limits when opening an acting context. In
+that sense the user's token carries both AUTH and PERMS for their delegated
+account access; it does not authenticate the socket as a different Application
+or grant the integration an unrestricted human session. Both credentials remain
+at the integration, including at the bridge when the consumer is a chat bridge.
+
 ## Grant declaration
 
 Grants are declared in the Application's root manifest, beside `service`:
@@ -99,11 +149,11 @@ Grants are declared in the Application's root manifest, beside `service`:
 ```json
 {
   "version": 1,
-  "name": "chat-bridge",
-  "service": { "handle": "chat-bridge", "role": "CONTRIBUTOR" },
+  "name": "external-integration",
+  "service": { "handle": "external-integration", "role": "CONTRIBUTOR" },
   "acting": [
     {
-      "grant": "chat-users",
+      "grant": "account-users",
       "ceiling": "CONTRIBUTOR",
       "personal": true,
       "proofs": ["acting-token"]
@@ -176,14 +226,28 @@ except the actor it was bound to.
 
 ### Identity links
 
-The verifier maps an external identity to a Plowshare account through one
-identity-link record: `{account, kind, issuer, externalSubject}`. The first slice
-writes links of kind `acting-token`, with the issuer being the Application and the
-external subject naming the person on the external channel, for example
-`discord:123456789`. Future verifiers add links of their own kind to the same
-record, created only by the account owner or by an administrator-configured
-mapping rule. A missing or ambiguous link is a refusal; there is no fallback by
-handle or email.
+An acting token identifies its issuing Plowshare account directly. An integration
+configured for that account does not need an external identity-link record
+to establish the subject. Administrators manage eligibility, but do not need to
+manually map an external user for this personal setup.
+
+External user routing is a separate responsibility. When an integration accepts
+external requests, it must authenticate the external caller and apply an explicit
+configured binding before choosing a person's credential or acting context. Even
+an integration configured for one account must restrict which callers can use its
+owner's delegation. Possession of an external user ID or knowledge of a resource
+ID is not proof of control of that identity. Ordinary users cannot select another
+person's context or inherit the integration owner's token.
+
+If an external identity link is recorded, it has the shape
+`{account, kind, issuer, externalSubject}`. For `acting-token`, the issuer is the
+Application and the optional external subject identifies the external user. The
+account owner establishes that association during provisioning. Self-service
+identity linking for a shared integration remains separate design work. A missing
+required binding or an ambiguous binding is refused, with no fallback by handle,
+email or another person's context. Future federated verifiers may require links
+of their own kind, created only by the account owner or an
+administrator-configured mapping rule.
 
 ### First proof kind: acting token
 
@@ -199,39 +263,57 @@ acting.token.issue {
 - It is refused unless the person is eligible for the grant, the grant accepts
   `acting-token`, and the requested projects and Personal flag are within the
   grant. The person may choose less than the grant allows, never more.
-- The response returns a one-time credential beginning with `psa_`. The server
-  stores its digest only.
+- The response reveals a credential beginning with `psa_` once. It remains usable
+  until expiry or revocation; the server stores its digest only.
 - The token is bound to that Application and grant. Presented by any other actor,
   it is refused and audited.
 - The person lists and revokes their tokens from any client under **Connected
   services**. Administrators can revoke but never issue them.
 
-The person then gives the credential to the integration, for example by pasting it
-into a direct message to the bridge. That channel may retain it indefinitely,
-which actor binding makes acceptable: the credential grants nothing to anyone who
-lacks the Application's own token.
+The person provisions the credential directly into the integration's private
+credential configuration, separate from its Application token and public routing
+settings. The credential is held at the integration and passed only to
+Plowshare's proof exchange. For a bridge, this means provisioning directly to
+the bridge, never through a Discord DM, channel or agent conversation. Other
+integrations likewise keep it out of ordinary external messages, tickets,
+documents and request content. Credentials must not appear in manifest source,
+conversation history, ordinary configuration summaries or logs.
+
+Actor binding means the acting token alone is insufficient without the bound
+Application's authentication. The integration intentionally holds both
+credentials and is trusted to exercise the delegated permissions until expiry or
+revocation. The acting token records continuing consent; it does not prove the
+person is present for each later request.
 
 ## Using a proof
 
-The integration exchanges a proof for an **acting context** once, then refers to
-the context on each request:
+After authenticating with its Application token, the integration exchanges a
+person's proof for an **acting context** once, then refers to the context on each
+request for that person:
 
 ```text
 acting.context.open {
-  grant: "chat-users",
+  grant: "account-users",
   proof: { kind: "acting-token", credential: "psa_…" }
 }
 → { context: UUID, account, effective: {projects, personal}, validUntil }
 ```
 
 Requests then carry `actingFor: {"context": "<UUID>"}`. Requests without
-`actingFor` keep today's behaviour under the actor's own identity.
+`actingFor` keep today's behaviour under the actor's own identity, including the
+ordinary external-user path. An invalid or expired acting context is a refusal;
+the integration must not silently drop `actingFor` and retry under its service
+identity.
 
 - A context belongs to the authenticated socket session that opened it, and
-  closing that session ends it. The SDK's shared connection can hold contexts for
-  many people at once.
+  closing that session ends it. The SDK's shared connection can hold contexts
+  for many people at once.
 - `validUntil` is the earlier of the proof's validity and a server maximum.
 - Proof credentials cross the wire once per context, not once per request.
+- An integration configured for one account normally uses one subject context. A
+  shared integration may use several, but opening a context for one person does
+  not authorize other external users or change the socket's Application
+  identity.
 
 The exchange is the only operation that sees proof material. Federated kinds later
 arrive at this same operation with a different `proof.kind` and produce the same
@@ -245,6 +327,8 @@ The first implementation refuses, whatever the ceilings allow:
   including issuing acting tokens;
 - managing grants, eligibility or identity links;
 - owner-only information controls: finalization, sharing, deletion and tags;
+- content-type management: creating type versions, activation and deprecation;
+- explicitly clearing a resource's content type (`clear` typing mode);
 - project membership changes;
 - approvals, which stay a direct human action;
 - creating schedules or triggers.
@@ -252,6 +336,23 @@ The first implementation refuses, whatever the ceilings allow:
 Approvals and schedules are deliberate follow-ups, not oversights. Approving
 through a chat bridge is useful, but it lets a compromised adapter approve
 anything within the subject's authority. That needs its own decision.
+
+### Typed information under an acting context
+
+The [authored knowledge design](../authored-knowledge-design.md) proposes content
+types and metadata-only revisions. Type management is refused above, consistent
+with that design's rule that model tools cannot manage types and service
+credentials gain no administrative authority.
+
+Typed admissions and `information.content.revise` are permitted in `inherit` and
+`set` modes, within the effective role. The subject owns the resource, and a
+metadata-only revision makes no model call, fetches nothing and spends no
+allowance. The revision records the acting record as its revising actor, so
+history shows the change came through the Application. `clear` is refused because
+it discards a resource's declared structure; it stays a direct owner action.
+
+If that design changes its owner or processing rules before acceptance, this
+section follows it.
 
 ## Ownership and attribution
 
@@ -280,7 +381,8 @@ rechecks:
 - the subject account is enabled and still has the access being used;
 - the grant is still declared by the active revision and accepts the proof kind;
 - the subject is still eligible;
-- the actor token is still valid and its service account still holds its grant;
+- the actor's Application token is still valid and, for server-project access,
+  its service account still holds the required project grant;
 - the proof itself, according to its `recheck` rule.
 
 | Recheck rule | Meaning | Kinds |
@@ -314,7 +416,15 @@ creates no durable state and can simply be repeated.
 | Server | Grant, eligibility, acting-token, identity-link and acting-record persistence; a verifier registry with one `acting-token` verifier; the intersection check; acting rechecks in existing permission paths; actor attribution on work, usage and audit records |
 | SDKs | All six SDKs expose the acting operations and a typed `actingFor` option on a shared connection |
 | CLI, TUI, desktop, web console | Acting-token issuance and **Connected services** for each account; eligibility management for administrators |
-| Integrations | None required. The A2A receiver keeps its alias model. Chat bridges and a future MCP executor can adopt acting contexts as SDK consumers. |
+| Integrations | Adoption is optional for any external integration consuming the public SDKs. Existing service-only consumers, including the A2A receiver's alias model, keep their current behavior. Chat bridges, support portals, workflow connectors and a future MCP executor can adopt acting contexts without protocol-specific authority rules. |
+
+Integration adoption keeps Application authentication for both user paths. An
+integration configured for one account adds private acting-token provisioning and
+subject-context routing through the public SDK. A shared integration additionally
+needs external identity linking and user isolation; the first slice does not
+require an administrator-managed external user directory or an external-message
+credential delivery flow. Each adapter owns its external authentication and
+routing; the server owns account admission, permissions and durable lifecycle.
 
 ### What a later ticket system adds
 
@@ -361,9 +471,9 @@ ownership.
 - **Short-lived delegated tokens per subject.** Equivalent authority, but an
   adapter serving many people would need one socket and one renewal loop per
   subject.
-- **Building federation first.** It would block the chat-bridge case on a much
-  larger trust decision, while Discord and iMessage have no enterprise identity
-  provider and need acting tokens regardless.
+- **Building federation first.** It would block direct provisioning to external
+  integrations on a much larger trust decision. Acting tokens support integrations
+  whose users do not share an enterprise identity provider.
 
 ## Verification
 
@@ -373,6 +483,23 @@ ownership.
 - **Personal:** usable only when the grant and the proof both allow it.
 - **Actor binding:** an acting token presented by another Application, or for
   another grant, is refused and audited.
+- **Provisioning and authentication:** the integration retains its Application
+  login; an acting token alone cannot authenticate as the Application. Direct
+  personal provisioning opens the issuing account's context without an external
+  link; neither credential is exposed through ordinary external user content,
+  history, summaries or logs.
+- **Two user paths:** ordinary external users stay within service permissions,
+  Application grants and conversation/agent restrictions, with no Personal access.
+  A Plowshare user's valid context enables only their allowed scopes. Pinning a
+  conversation never grants account ownership or additional authority.
+- **Routing isolation:** missing or ambiguous required external bindings and
+  attempts to use another person's context are refused. An unapproved external
+  caller cannot use the configured account owner's token. Invalid delegated
+  requests never retry under the service identity or another subject.
+- **Integration independence:** exercise both user paths through a chat-bridge
+  fixture and a non-chat integration fixture using the same public SDK contracts.
+  Admission, permission intersections, ownership and revocation must not depend
+  on Discord identifiers, channel metadata or a conversation being present.
 - **Manifest:** an invalid declaration fails deployment; removal or narrowing takes
   effect at activation; rollback never revives a wider grant; a manifest cannot
   name an unconfigured trust root.
@@ -385,7 +512,8 @@ ownership.
 - **Refused operations:** each refused family returns the policy refusal and an
   audit record.
 - **Attribution:** ownership, trajectories, usage and audit carry subject, actor,
-  grant, proof kind and external subject; historical rows read as direct.
+  grant and proof kind, plus the external subject when configured; historical
+  rows read as direct.
 - **Receipts:** lost-reply recovery and refusal of changed resubmissions for every
   acting mutation.
 - **Real PostgreSQL tests** for concurrent issue and revoke, and for acting
@@ -400,3 +528,7 @@ ownership.
 - Whether ADR 0019's separate MCP executor should adopt acting contexts or keep
   its credential-subject model.
 - Which federated kind comes first, and who may create its identity links.
+- How a shared integration proves control of an external identity during
+  self-service linking. Direct token provisioning to an integration configured for
+  one account does not depend on that ceremony and does not send credentials
+  through ordinary external messages or user content.

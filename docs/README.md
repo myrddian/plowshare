@@ -21,8 +21,9 @@
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Document navigation usage](authored-navigation.md) — relationships, paths and policy administration.
-- [Document navigation and reference policy](decisions/0026-document-navigation-and-reference-policy.md) (proposed)
-- [Authored navigation implementation plan](authored-navigation-implementation.md) (proposed)
+- [Document navigation and reference policy](decisions/0028-document-navigation-and-reference-policy.md) — implemented locally; release is separate.
+- [Authored navigation implementation plan](authored-navigation-implementation.md)
 - [Model usage and pricing configuration](model-usage-accounting.md)
+- [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

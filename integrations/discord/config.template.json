@@ -1,0 +1,20 @@
+{
+  "origin": "https://plowshare.example.invalid",
+  "serviceTokenEnvironment": "PLOWSHARE_DISCORD_SERVICE_TOKEN",
+  "discordTokenEnvironment": "DISCORD_BOT_TOKEN",
+  "stateDirectory": "/absolute/path/to/private/discord-state",
+  "allowedUserIds": ["100000000000000003"],
+  "routes": [
+    {
+      "guildId": "100000000000000001",
+      "channelId": "100000000000000002",
+      "project": "discord",
+      "bot": "discord_assistant",
+      "requireMention": true
+    }
+  ],
+  "notifications": [],
+  "pollMs": 2000,
+  "requestTimeoutMs": 30000,
+  "maxRecords": 500
+}

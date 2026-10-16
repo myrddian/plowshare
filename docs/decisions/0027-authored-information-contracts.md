@@ -1,4 +1,4 @@
-# ADR 0025: Authored information contracts and metadata-only processing
+# ADR 0027: Authored information contracts and metadata-only processing
 
 Status: accepted and implemented for the first milestone. Verification is recorded
 in the [implementation plan](../authored-knowledge-implementation.md); deployment

@@ -2,13 +2,13 @@
 
 Status: proposed design. Updated: 16 October 2026.
 
-[ADR 0025](decisions/0025-authored-information-contracts.md) records the accepted
+[ADR 0027](decisions/0027-authored-information-contracts.md) records the accepted
 first-milestone contracts, and the [implementation plan](authored-knowledge-implementation.md)
 records its delivery and verification. The [usage guide](authored-information.md)
 describes the implemented content types and metadata-only workflow. The wider
 knowledge direction remains proposed; deployment is a separate action.
 
-[ADR 0026](decisions/0026-document-navigation-and-reference-policy.md) and the
+[ADR 0028](decisions/0028-document-navigation-and-reference-policy.md) and the
 [navigation implementation plan](authored-navigation-implementation.md) record
 the locally implemented navigation milestone: document resolution, relationships, paths and configurable
 reference policy. The [navigation guide](authored-navigation.md) describes the local
@@ -19,7 +19,7 @@ Develop Plowshare's information system into a knowledge base for agents, with pe
 
 Schema-defined content types are the first implementation milestone in that direction. A content type defines structured metadata, such as the severity and affected services of an incident report. Each typed information revision retains its exact type version and validated metadata. The document body, source bytes, evidence coordinates and processing lifecycle remain part of the existing information model.
 
-The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare information capability with its own ownership and lifecycle. The first milestone implements schemas; ADR 0026 defines the locally implemented relationships and policy-aware backlinks. Collaborative editing, editor-grant expansion and real-time coauthoring are outside this roadmap. VOIDcore integration remains a separate decision.
+The model takes inspiration from VOIDcore's authored documents and facet navigation; it is a Plowshare information capability with its own ownership and lifecycle. The first milestone implements schemas; ADR 0028 defines the locally implemented relationships and policy-aware backlinks. Collaborative editing, editor-grant expansion and real-time coauthoring are outside this roadmap. VOIDcore integration remains a separate decision.
 
 ## Purpose and boundaries
 
@@ -126,7 +126,7 @@ Enforcement must use current server-administrator status and current project rol
 
 For example, a project may default to content-locked/reference-visible documents with no ordinary-link propagation, while allowing individual documents to require hidden references and propagation. Another project may mandate those stronger restrictions for every document. These are project choices rather than one global navigation behaviour. Personal documents need an explicit account/platform policy baseline and the same controlled document override rules.
 
-Cross-project links evaluate both documents' applicable policies. A source project's permissive defaults cannot bypass a target document's required propagation or disclosure restrictions; source-side constraints may further restrict the result. Policy changes require the administrator/project-manager authority above, are auditable, and are rechecked on subsequent reads. These are server-owned policy settings, separate from schema metadata, tag labels and client display preferences. ADR 0026 and the navigation guide specify the implemented defaults, allowed combinations, optimistic concurrency and refusal of policy widening without a release workflow. The policy-changing roles above remain the authority boundary.
+Cross-project links evaluate both documents' applicable policies. A source project's permissive defaults cannot bypass a target document's required propagation or disclosure restrictions; source-side constraints may further restrict the result. Policy changes require the administrator/project-manager authority above, are auditable, and are rechecked on subsequent reads. These are server-owned policy settings, separate from schema metadata, tag labels and client display preferences. ADR 0028 and the navigation guide specify the implemented defaults, allowed combinations, optimistic concurrency and refusal of policy widening without a release workflow. The policy-changing roles above remain the authority boundary.
 
 When the applicable policy requires propagation, an explicit reference creates a required access-policy dependency. If A references restricted B, reading A requires both A's own authority and satisfaction of B's applicable restrictions. If C references A, those restrictions also constrain C. Hiding just the link is insufficient in this mode: a source whose required dependency cannot be satisfied is itself unavailable, with its discoverability governed by the applicable visibility policy. A visible-reference policy without ordinary-link propagation may instead leave A readable while B's content remains locked.
 
@@ -141,7 +141,7 @@ All modes retain these invariants:
 - **Propagation is enforced consistently where required.** Browsing, search, retrieval, model reads, history, sharing and export apply the required dependency closure before disclosure. Unresolved dependencies and exhausted evaluation bounds fail closed; cycles require bounded evaluation rather than recursive grants.
 - **Navigation policy cannot release derived content.** Existing retained input/evidence dependencies still constrain reports and other derived outputs, even when ordinary links may remain visible without propagation. Hiding or removing a rendered link cannot release protected information already retained in the source body. Removing a relationship is not automatic declassification; authorised release and historical restriction handling need their own rules.
 
-Plowshare already constrains derived outputs through retained information inputs, including uncited inputs. Policy-controlled discovery and propagation for live authored references are implemented as a separate platform milestone under ADR 0026. They cover cross-project evaluation, policy changes, atomic relationship admission and historical retention while keeping ordinary relationships distinct from evidence citations.
+Plowshare already constrains derived outputs through retained information inputs, including uncited inputs. Policy-controlled discovery and propagation for live authored references are implemented as a separate platform milestone under ADR 0028. They cover cross-project evaluation, policy changes, atomic relationship admission and historical retention while keeping ordinary relationships distinct from evidence citations.
 
 ### Internal navigation paths
 
@@ -178,7 +178,7 @@ Both cases recheck current access. An unavailable, withdrawn, deleted or inacces
 
 Breadcrumbs record the journey, including relationship and filter steps. Returning to an earlier breadcrumb restores that step's selection; removing a facet broadens the relevant selection without changing document relationships. Saved views retain useful navigation steps and filters, referencing stable identities rather than relying on displayed names. Reopening a saved view reevaluates it against current records and permissions; it is not a frozen result set or an access grant.
 
-ADR 0026 implements these navigation requirements in the local `document-navigation-v1` capability. Document-set views identify members by resource UUID and show one entry per document, opening its latest current revision unless an exact revision was explicitly selected. Existing catalogue operations that enumerate or count revisions retain their contracts; document-level navigation requires an explicit projection rather than silently changing revision counts. The initial schema milestone supplies exact type/version filtering and existing facets. Saved-path persistence and explicit relationship traversal use the separate contracts described in the navigation guide. General custom-metadata fields such as severity or status do not become queryable facets simply because a schema declares them.
+ADR 0028 implements these navigation requirements in the local `document-navigation-v1` capability. Document-set views identify members by resource UUID and show one entry per document, opening its latest current revision unless an exact revision was explicitly selected. Existing catalogue operations that enumerate or count revisions retain their contracts; document-level navigation requires an explicit projection rather than silently changing revision counts. The initial schema milestone supplies exact type/version filtering and existing facets. Saved-path persistence and explicit relationship traversal use the separate contracts described in the navigation guide. General custom-metadata fields such as severity or status do not become queryable facets simply because a schema declares them.
 
 Plowshare's current scopes, project membership, explicit sharing and information collections remain authoritative, further constrained by reference dependencies where the applicable policy requires propagation. Borrowing facet navigation does not create VOIDcore's single public pool or remove Plowshare's access boundaries. Saved views and collections can organise a reader's experience without becoming the only permitted location of a document. Every traversal and reopened path rechecks content access, reference visibility and any required propagated restrictions. Counts, backlinks and suggested refinements must respect the applicable live discovery policy, with content reads enforcing their additional access rules. No view may expose fields or identities that its policy protects.
 
@@ -439,8 +439,8 @@ The broader destination is an information and knowledge system for agents, with 
 | Stage | Result | Scope |
 | --- | --- | --- |
 | Schema-defined content types | Documents have optional validated metadata, a discoverable semantic type and admission, reading and metadata maintenance | Detailed implementation milestone below, including safe metadata-only processing |
-| Information navigation | Browse retained knowledge through internal navigation paths, facet steps, breadcrumbs and saved views | Local implementation under ADR 0026; internal paths and account-owned saved views; publication remains separate |
-| Authored relationships | Add explicit relationship traversal to internal paths, with cross-references, project/document policy-controlled visibility and propagation, and permission-aware backlinks distinct from evidence citations | Local implementation under ADR 0026, including project defaults/constraints, document overrides, live/pinned targets and retained cross-project obligations; authorised release remains deferred |
+| Information navigation | Browse retained knowledge through internal navigation paths, facet steps, breadcrumbs and saved views | Local implementation under ADR 0028; internal paths and account-owned saved views; publication remains separate |
+| Authored relationships | Add explicit relationship traversal to internal paths, with cross-references, project/document policy-controlled visibility and propagation, and permission-aware backlinks distinct from evidence citations | Local implementation under ADR 0028, including project defaults/constraints, document overrides, live/pinned targets and retained cross-project obligations; authorised release remains deferred |
 | Agent workflow validation and release | Verify ingestion, metadata classification, discovery, relationship traversal, agent consumption and retained provenance together | Local end-to-end acceptance passes with scripted models; see the [validation record](authored-knowledge-implementation.md#full-agent-workflow-validation--16-october-2026); review, integration and release remain separate |
 | Portable interchange | Readable Markdown exports and structured bundles support external authoring and authorised revision admission | Optional follow-on public export/import contracts; the current schema design preserves the necessary data |
 

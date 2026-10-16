@@ -5,12 +5,16 @@ import { tmpdir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
+import { scopedStateFile } from 'plowshare-client-node/connections';
 
 const temporary = await realpath(await mkdtemp(join(tmpdir(), 'plowshare-projects-smoke-')));
 const folders = ['Research', 'Writing'].map(name => join(temporary, name));
 for (const folder of folders) { await mkdir(folder); await writeFile(join(folder, 'notes.md'), folder.endsWith('Research') ? 'Research notes' : 'Writing notes'); }
+// Discovery must pass an ordinary sibling checkout named plowshare, and the workspace
+// must allow a new folder's project to reach server authorization before it is listed.
+await mkdir(join(temporary, 'plowshare'));
 const config = join(temporary, 'config'); const profile = join(temporary, 'profile');
-const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'), PLOWSHARE_DESKTOP_PROFILE: profile, PLOWSHARE_DESKTOP_CONFIG: config };
+const env = { ...process.env, PLOWSHARE_CONFIG_DIR: config, PLOWSHARE_DESKTOP_PROFILE: profile, PLOWSHARE_DESKTOP_CONFIG: config };
 delete env.ELECTRON_RUN_AS_NODE;
 await mkdir('build/smoke', { recursive: true });
 const fixture = await protocolFixture({ rotateTokens: true });
@@ -68,7 +72,8 @@ try {
   await page.screenshot({ path: 'build/smoke/projects.png' });
   await page.locator('[data-project-toggle="Writing"]').click();
   await expect(page.locator('[data-project-toggle="Writing"]')).toHaveAttribute('aria-expanded', 'false');
-  const document = JSON.parse(await readFile(join(config, 'desktop-projects.json'), 'utf8'));
+  const projectsFile = await scopedStateFile(fixture.base, 'fixture', config, 'desktop-projects.json');
+  const document = JSON.parse(await readFile(projectsFile, 'utf8'));
   assert.equal(document.projects.length, 2);
   assert.ok(document.projects.every(row => row.server === fixture.base && row.account === 'fixture' && row.enabled));
   assert.ok(!JSON.stringify(document).includes('fixture-password') && !JSON.stringify(document).includes('fixture-refresh'));
@@ -110,9 +115,9 @@ try {
   assert.match((await state(page)).projectFolders.find(row => row.name === 'Writing').error, /ENOENT/);
   assert.equal((await state(page)).projectFolders.find(row => row.name === 'Writing').path, folders[1]);
   // A lost local configuration can be recovered from the server's machine/path pair.
-  await page.locator('[data-project=""]').click();
+  await page.locator('button[data-project="Empty workspace"]').click();
   await app.close(); app = undefined;
-  await rm(join(config, 'desktop-projects.json'));
+  await rm(projectsFile);
   fixture.addServerProject({ name: 'Research', machine: claims.find(row => row.project === 'Research').machine, workspace: folders[0] });
   fixture.addServerProject({ name: 'Remote project', machine: 'another-computer', workspace: folders[0] });
   fixture.addServerProject({ name: 'Server project', workspace: folders[0] });
@@ -151,7 +156,7 @@ try {
     await page.locator('#inspector-close').click();
   }
   assert.deepEqual(fixture.liveFileClaims.map(row => row.project), ['Research']);
-  const recovered = JSON.parse(await readFile(join(config, 'desktop-projects.json'), 'utf8'));
+  const recovered = JSON.parse(await readFile(projectsFile, 'utf8'));
   assert.deepEqual(recovered.projects.map(row => row.name), ['Research']);
   assert.equal(fixture.loginCount(), 1, 'All fresh-process project restorations reuse the original login.');
   console.log('Projects smoke passed: independent clients/jobs/files, collapsible navigation, recorded machine/path recovery, refresh rotation, restart restoration, pause, isolated loss and missing-folder handling.');

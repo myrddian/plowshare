@@ -1,4 +1,4 @@
-# ADR 0026: Document navigation and configurable reference policy
+# ADR 0028: Document navigation and configurable reference policy
 
 Status: accepted implementation contract, 15 October 2026. The next-milestone
 recommendations were adopted for local implementation. See the

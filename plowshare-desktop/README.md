@@ -387,8 +387,11 @@ window permissions, compact layout and polling lifetime. Screenshots are in
 
 The sidebar has a **Projects** section. Use its **+** button to add a folder;
 its `.plowshare/project` marker supplies the server project name, or its folder
-name creates a project. Conversations sit under their project. Selecting a
-project changes the view while other projects and their jobs keep running.
+name creates a project. Conversations sit under their project. Choosing a
+new folder allows the server to authorize and register its file claim even before
+the project appears in the account listing. Saved folders and ordinary navigation
+still require an available project; they do not restore revoked access.
+Selecting a project changes the view while other projects and their jobs keep running.
 The project tree is the only sidebar project selector. Its chevrons expand or
 collapse groups independently of the selected chat; expansion is remembered per
 account. Search temporarily reveals groups without changing their saved expansion.

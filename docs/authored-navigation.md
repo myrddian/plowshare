@@ -6,7 +6,7 @@ paths. Documents retain resource UUIDs across immutable body revisions. Paths ar
 selections, not HTTP URLs, directories or canonical document names.
 
 The implementation is local source work until separately reviewed, integrated and
-deployed. [ADR 0026](decisions/0026-document-navigation-and-reference-policy.md)
+deployed. [ADR 0028](decisions/0028-document-navigation-and-reference-policy.md)
 records the contract and [the implementation plan](authored-navigation-implementation.md)
 tracks verification.
 
