@@ -1,3 +1,4 @@
+import type { ImportRecovery } from './import-recovery-contract.ts';
 import type { NativeCommandResult } from 'plowshare-mcp-integration';
 import type {
   ManagementOperation,
@@ -690,7 +691,8 @@ export type Request =
   | { action: 'native-mcp'; command: string }
   | ProviderManagementCall
   | { action: 'provider-management-pending' }
-  | { action: 'provider-management-recover'; intent: ManagementIntent };
+  | { action: 'provider-management-recover'; intent: ManagementIntent }
+  | { action: 'information-import-recovery-save'; recovery: ImportRecovery };
 export interface Reply {
   nativeMcp?: NativeCommandResult;
   providerManagement?: ManagementValue;

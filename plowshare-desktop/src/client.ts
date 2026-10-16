@@ -1,3 +1,4 @@
+import { decodeMetadataValidation } from 'plowshare-client-ts/operations/information-content';
 import {
   NativeHostCommands,
   NativeMcpSessions,
@@ -88,6 +89,7 @@ import {
   readingLogTail,
   readingLogBefore,
   listingMyApprovals,
+  listingAsked,
   answeringApproval,
 } from 'plowshare-client-ts/operations/session';
 import {
@@ -116,6 +118,7 @@ import type {
   Reply,
   Request,
   Conversation,
+  Approval,
 } from './shared.ts';
 import { demoState, demoAnswer } from './demo.ts';
 
@@ -794,6 +797,14 @@ export class DesktopClient {
           }
         : {
             code: answer.code,
+            ...(answer.code === 'VALIDATION_FAILED' &&
+            request.type.startsWith('information.') &&
+            [
+              'INFORMATION_METADATA_INVALID',
+              'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
+            ].includes(answer.said ?? '')
+              ? { metadataValidation: decodeMetadataValidation(answer.payload) }
+              : {}),
             ...(answer.said === undefined ? {} : { said: answer.said }),
           };
     });
@@ -1810,6 +1821,8 @@ export class DesktopClient {
       )
         await this.catchUp(conversation);
     }
+    await this.refresh();
+    this.emit();
   }
   private syncFollows(): Promise<void> {
     if (this.followFlight) return this.followFlight;
@@ -2219,6 +2232,10 @@ export class DesktopClient {
       )
     )
       throw new Error('Choose a workflow granted to this agent.');
+    if (!conversation.project)
+      throw new Error(
+        'Select an explicit project or Personal conversation before starting a workflow.',
+      );
     text(input.text, 'workflow request');
     if (
       typeof input.requestId !== 'string' ||
@@ -2354,9 +2371,7 @@ export class DesktopClient {
     if (this.usage.push(value)) return;
     const event = fieldsOf(value);
     if (event['kind'] === 'inbox.changed')
-      void this.refresh()
-        .then(() => this.emit())
-        .catch(() => {});
+      this.background(this.refresh().then(() => this.emit()));
     if (typeof event['job'] !== 'string') {
       if (this.options.accountActivity !== false) {
         this.activity.push(value);
@@ -2400,7 +2415,7 @@ export class DesktopClient {
       job.phase = 'thinking';
       job.tool = undefined;
     }
-    if (event['kind'] === 'ended') this.readJob(id).catch(() => {});
+    if (event['kind'] === 'ended') this.background(this.readJob(id));
     this.emit();
   }
   private poll(id: string) {
@@ -2489,6 +2504,9 @@ export class DesktopClient {
       job.detail = ended?.detail;
       clearInterval(this.timers.get(id));
       this.timers.delete(id);
+      // A fast completion can stop polling before its first approval read. The durable
+      // outcome is sufficient to discover questions even if no Inbox push arrives.
+      if (ending === 'AWAITING') await this.refresh();
       if (job.conversation) {
         await this.history(job.conversation);
         this.background(
@@ -2517,13 +2535,36 @@ export class DesktopClient {
     flight.promise = (async () => {
       do {
         flight.dirty = false;
-        const listed = approvalsOf(ok(await this.send(listingMyApprovals())));
-        if (!listed)
-          throw new Error(
-            'The server returned an unreadable approval listing.',
-          );
+        // Attended command questions belong to their conversation and have no
+        // pinned account recipient. Account-only reads find background questions
+        // but omit those foreground requests. Read both through their owning APIs.
+        const conversations = new Set([
+          ...this.views.values(),
+          ...this.state.jobs
+            .filter(
+              (job) =>
+                job.ending === 'AWAITING' &&
+                inspectionConversation(this.state, job.conversation),
+            )
+            .map((job) => job.conversation),
+        ]);
+        const pages = await Promise.all(
+          [listingMyApprovals(), ...[...conversations].map(listingAsked)].map(
+            async (request) => {
+              const rows = approvalsOf(ok(await this.send(request)));
+              if (!rows)
+                throw new Error(
+                  'The server returned an unreadable approval listing.',
+                );
+              return rows;
+            },
+          ),
+        );
+        const listed = new Map<string, Approval>();
+        for (const rows of pages)
+          for (const row of rows) listed.set(row.id, row);
         if (generation === this.generation && this.state.connected)
-          this.state.approvals = listed;
+          this.state.approvals = [...listed.values()];
       } while (
         flight.dirty &&
         generation === this.generation &&

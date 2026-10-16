@@ -2,7 +2,8 @@
 
 This is the adapter profile for [ADR 0019](decisions/0019-mcp-provider-hosting.md).
 The [reusable outbound HTTP integration](../integrations/mcp/README.md) implements
-the shared-schema tools profile. Native STDIO hosting remains separate work.
+the shared-schema tools profile. [Native HTTP/STDIO hosting](native-mcp-hosting.md)
+uses the same direct client; only explicit server sharing uses Relay.
 
 ## Protocol selection and transport
 
@@ -119,11 +120,17 @@ unknown call or an uncertain result publication.
 ## Results and capabilities
 
 Render supported output as bounded JSON text in the existing `ToolResult`:
-ordered text content, optional typed structured data, upstream `isError` and the
-selected protocol. Preserve text and absent versus explicit null; validate against
-the pinned supported output schema where supplied. The encoded result envelope
-must fit the existing 32,768-unit limit. No coercion, truncation or implicit resource
-fetch is permitted.
+ordered text content, optional typed structured data and upstream `isError`.
+The selected profile governs decoding. Preserve text and absent versus explicit null; validate against
+the pinned supported output schema where supplied. The integration's encoded
+result text must fit 16,384 UTF-16 units and UTF-8 bytes (or its lower configured
+budget), and the complete provider result envelope must fit 32,768 UTF-16 units.
+No coercion, truncation or implicit resource fetch is permitted.
+
+The [authority manual](mcp-tool-authority.md) defines existing grants, hook checks
+and retained evidence. Upstream hints never select credentials or waive authority.
+The command approval gate does not provide per-call human approval for arbitrary
+MCP tools; do not claim that unsupported workflow from an annotation or hook `ask`.
 
 | Observation | Provider state and meaning |
 | --- | --- |
@@ -171,3 +178,12 @@ The probe adds no runtime dependency or database schema. Later platform services
 use mocked interfaces by default, with focused PostgreSQL opt-in only for introduced
 persistence invariants. Adapter acceptance must use public SDKs against a configured
 server, including separate host/container deployments.
+
+Current independent integration fixtures are run through
+`./gradlew :plowshare-mcp-integration:check`; the installed-consumer check repeats
+them against packed public SDKs. HTTPS fixtures retain hostname/certificate
+verification, with a public test certificate trusted only by the spawned test
+process. No runtime TLS bypass is added. The [acceptance runbook](mcp-interoperability.md)
+documents configured server setup and evidence that still needs a real organization
+endpoint. The design probe above is historical profile evidence, not a substitute
+for that acceptance.

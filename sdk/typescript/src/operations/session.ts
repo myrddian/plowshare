@@ -692,10 +692,8 @@ export function listingProjects(): Ask<typeof PROJECT_LIST> {
 /**
  * The frame that asks for one home's conversations.
  *
- * <b>An empty payload for the global tier, and not `{ project: null }`</b> —
- * {@link opening}'s ruling, and {@code RequestedHome.in} reads an absent field
- * and a null identically anyway, so the null would be this client stating
- * something it was never asked.
+ * Global history is selected explicitly with `{ project: null }`. This is a
+ * read-only scope; starting work requires a named project and cannot inherit Personal.
  *
  * <p><b>The lifecycle is not named either, which is a decision and not an
  * omission.</b> {@code RequestedLifecycle} reads an absent one as {@code ACTIVE}
@@ -709,7 +707,7 @@ export function listingConversations(
 ): Ask<typeof CONVERSATION_LIST> {
   return {
     type: CONVERSATION_LIST,
-    payload: project === undefined ? {} : { project },
+    payload: { project: project ?? null },
   };
 }
 
@@ -858,14 +856,14 @@ export function readingLogBefore(
 /**
  * The frame that asks which conversation this agent is still having.
  *
- * <b>The agent is required and the tier is not</b>, which is the shape of the
+ * <b>The agent is required</b>, which is the shape of the
  * question: "which conversation" has no answer without somebody to ask it
  * about, and the server refuses a payload that names none rather than answering
  * "you have none yet" — on the strength of which this client would open a
  * second one every time it started.
  *
- * <p>An empty tier is the global one and never `{ project: null }`, on {@link
- * opening}'s ruling.
+ * <p>Global history is selected explicitly with `{ project: null }`; this does
+ * not authorize a new conversation without a project.
  */
 export function continuing(
   agent: string,
@@ -873,7 +871,7 @@ export function continuing(
 ): Ask<typeof CONVERSATION_LATEST> {
   return {
     type: CONVERSATION_LATEST,
-    payload: project === undefined ? { agent } : { agent, project },
+    payload: { agent, project: project ?? null },
   };
 }
 

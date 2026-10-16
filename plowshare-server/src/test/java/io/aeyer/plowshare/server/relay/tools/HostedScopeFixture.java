@@ -227,6 +227,10 @@ final class HostedScopeFixture {
   }
 
   void catalogue(Binding b, Instant time) {
+    catalogue(b, time, CATALOGUE);
+  }
+
+  void catalogue(Binding b, Instant time, String catalogue) {
     head.set(
         new RelayLogRepository.Head(
             head.get().position() + 1,
@@ -241,6 +245,6 @@ final class HostedScopeFixture {
                         time,
                         null,
                         null,
-                        new RelayPayload.Text(CATALOGUE))))));
+                        new RelayPayload.Text(catalogue))))));
   }
 }

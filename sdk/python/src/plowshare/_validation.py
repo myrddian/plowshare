@@ -107,6 +107,35 @@ def _application_files(value: list[object] | tuple[object, ...]) -> bool:
 def check(schema: dict[str, object], value: object) -> None:
     if value is None:
         return
+    if schema.get("portableGraph"):
+        from ._interchange import check as interchange_check
+
+        interchange_check(value, cast(str, schema["portableGraph"]))
+    if schema.get("portablePath"):
+        from ._interchange import path as portable_path
+
+        if not portable_path(value):
+            raise ValueError("Unsafe portable path")
+    if "maxJsonBytes" in schema and len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ) > cast(int, schema["maxJsonBytes"]):
+        raise ValueError("JSON value exceeds byte bound")
+    if schema.get("schemaInstance"):
+        from .tool_schemas import decode_tool_value
+
+        decode_tool_value(value)
+    if schema.get("documentSchema"):
+        from .tool_schemas import decode_tool_schema, validate_tool_schema
+
+        validate_tool_schema(decode_tool_schema(value))
+    if schema.get("navigationSteps"):
+        if not isinstance(value, list) or not value or len(value) > 32:
+            raise ValueError("Path needs 1..32 steps")
+        for index, step in enumerate(value):
+            if not isinstance(step, dict) or (step.get("kind") == "scope") != (
+                index == 0
+            ):
+                raise ValueError("Path starts with its only scope")
     invalid = False
     if isinstance(value, str):
         length = len(value.encode("utf-16-le", errors="surrogatepass")) // 2

@@ -69,10 +69,11 @@ public final class InformationStageHooks implements InformationLifecycle.Gates, 
       inputs.bind(
           log,
           new InformationContext(
-              lease.owner(),
-              project == null
-                  ? InformationContext.Selection.personal()
-                  : InformationAccess.projectSelection(lease.owner(), project)),
+                  lease.owner(),
+                  project == null
+                      ? InformationContext.Selection.personal()
+                      : InformationAccess.projectSelection(lease.owner(), project))
+              .withView(true),
           List.of(lease.revision()));
       // Retained usage stays immutable. A legacy user-owned pipeline gets a new log for future
       // work, with the same owner, source binding, allowance and hook snapshot policy.

@@ -1,3 +1,9 @@
+import { PrivateImportRecoveryFiles } from './import-recovery-files.ts';
+import type { ImportRecoveryFiles } from './import-recovery-files.ts';
+import {
+  decodeImportRecovery,
+  recoveryContext,
+} from './import-recovery-contract.ts';
 import { applicationFiles } from 'plowshare-client-node/applications';
 import { FileStores } from 'plowshare-client-node/filestores';
 import { errorMessage } from 'plowshare-client-ts/binding/values';
@@ -36,6 +42,8 @@ import type { DesktopState, ActivityView, WorkspaceRoute } from './shared.ts';
 import { webAddress } from './renderer/markdown.ts';
 import { desktopProfile } from './profile.ts';
 
+const importRecoveryFiles: ImportRecoveryFiles =
+  new PrivateImportRecoveryFiles();
 const rendererUrl = 'plowshare://app/index.html';
 const applicationIcon = join(
   __dirname,
@@ -683,6 +691,43 @@ background(
       if (library) {
         if (request?.action === 'bootstrap')
           return { state: client.state, libraryScreen: library[0] };
+        if (request.action === 'information-import-recovery-save') {
+          if (library[0] !== 'library')
+            throw new Error('Open Library for import recovery.');
+          const recovery = decodeImportRecovery(request.recovery);
+          const currentContext = () =>
+            recoveryContext(
+              JSON.stringify([
+                client.state.base,
+                client.state.handle,
+                client.state.mode,
+              ]),
+              recovery.scope,
+            );
+          const requireContext = () => {
+            if (
+              !client.state.connected ||
+              client.state.mode !== 'live' ||
+              currentContext() !== recovery.context
+            )
+              throw new Error(
+                'The connection or account changed. Review this import again.',
+              );
+          };
+          requireContext();
+          const choice = await dialog.showSaveDialog(window!, {
+            title: 'Save import recovery file before submitting',
+            defaultPath: `knowledge-import-${recovery.requestId}.recovery.json`,
+            filters: [{ name: 'JSON recovery file', extensions: ['json'] }],
+          });
+          if (choice.canceled || !choice.filePath)
+            throw new Error(
+              'Recovery file was not saved. Import was not submitted.',
+            );
+          requireContext();
+          await importRecoveryFiles.save(choice.filePath, recovery);
+          return { state: client.state };
+        }
         if (request?.action === 'information') {
           if (library[0] !== 'library')
             throw new Error('Open Library for documents and reports.');

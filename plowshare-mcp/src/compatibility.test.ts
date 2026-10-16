@@ -37,8 +37,25 @@ const fixture = JSON.parse(
   }[];
 };
 
-await test('the 35-tool menu, schemas, order, initialization and notification silence match Java', async () => {
-  assert.deepEqual(tools, fixture.toolsList.result.tools);
+await test('the 35-tool menu preserves the legacy contract except explicit runtime scope', async () => {
+  assert.deepEqual(
+    tools.filter(
+      (tool) => !['agent_run', 'conversation_list'].includes(tool.name),
+    ),
+    fixture.toolsList.result.tools.filter(
+      (tool) =>
+        !['agent_run', 'conversation_list'].includes(
+          String(record(tool)['name']),
+        ),
+    ),
+  );
+  const run = tools.find((tool) => tool.name === 'agent_run');
+  assert.ok(run);
+  assert.deepEqual(run.inputSchema.required, ['agent', 'task', 'project']);
+  assert.match(run.description, /Select the project explicitly/);
+  const listing = tools.find((tool) => tool.name === 'conversation_list');
+  assert.ok(listing);
+  assert.deepEqual(listing.inputSchema.required, ['project']);
   assert.equal(tools.length, 35);
   const unused: Backend = {
     invoke: async () => {
@@ -67,7 +84,7 @@ await test('the 35-tool menu, schemas, order, initialization and notification si
       JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
       unused,
     ),
-    fixture.toolsList,
+    { ...record(fixture.toolsList), result: { tools } },
   );
   assert.deepEqual(
     await respond(
@@ -125,6 +142,18 @@ for (const item of fixture.cases)
       },
     };
     const actual = await respond(JSON.stringify(item.request), backend);
+    const params = record(record(item.request)['params']);
+    const args = record(params['arguments']);
+    if (
+      ['agent_run', 'conversation_list'].includes(String(params['name'])) &&
+      args['project'] == null &&
+      item.backendCalls.length > 0
+    ) {
+      assert.equal(record(actual?.result)['isError'], true);
+      assert.match(JSON.stringify(actual?.result), /project/);
+      assert.equal(cursor, 0);
+      return;
+    }
     // Two reviewed transport migrations: WS codes retain their names, and
     // connection failures are redacted/unknown rather than native HTTP errors.
     const expected = structuredClone(item.response);
@@ -231,4 +260,54 @@ await test('information facets forwards the requested project scope and filter e
     JSON.stringify(facets),
   );
   assert.deepEqual(calls, [['information.facets', payload]]);
+});
+
+await test('model type reads force published versions and refuse management or draft discovery', async () => {
+  const calls: unknown[] = [];
+  const backend: Backend = {
+    invoke: async (type, payload) => {
+      calls.push([type, payload]);
+      throw new Error('fixture stop after dispatch');
+    },
+    runSession: () => null,
+    root: async () => {
+      throw new Error('unexpected root');
+    },
+  };
+  const scope = { kind: 'personal' };
+  const version = '00000000-0000-4000-8000-000000000001';
+  for (const operation of ['types.get', 'types.validate']) {
+    const payload = {
+      scope,
+      view: 'content-types-v1',
+      version,
+      publishedOnly: false,
+      ...(operation === 'types.validate' ? { metadata: {} } : {}),
+    };
+    await assert.rejects(
+      call(backend, 'information', { operation, payload }),
+      /fixture stop/,
+    );
+    assert.deepEqual(calls.at(-1), [
+      `information.${operation}`,
+      { ...payload, publishedOnly: true },
+    ]);
+  }
+  await assert.rejects(
+    call(backend, 'information', {
+      operation: 'types.list',
+      payload: { scope, view: 'content-types-v1', drafts: true },
+    }),
+    /published types only/,
+  );
+  for (const operation of [
+    'types.version.create',
+    'types.activate',
+    'types.deprecate',
+  ])
+    await assert.rejects(
+      call(backend, 'information', { operation, payload: { scope } }),
+      /unsupported model information operation/,
+    );
+  assert.equal(calls.length, 2);
 });

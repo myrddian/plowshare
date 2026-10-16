@@ -13,7 +13,86 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+// Approval reasons are optional on the server, including ordinary local commands.
+const approvalQuestion = {id:'approval-fixture',conversation:'conversation-fixture',askedIn:'conversation-fixture',agent:'worker',side:'local',command:['echo','fixture'],cwd:'/fixture',reason:null,state:'asked',scope:null,prefix:null,defaultPrefix:['echo'],createdAt:'2026-10-17T00:00:00Z',answeredAt:null,commands:null,judged:null};
+for (const reason of [null, '', 'Review the command']) result('approval.list',{approvals:[{...approvalQuestion,reason}]},true);
+for (const reason of [false, 1, [], {}]) result('approval.list',{approvals:[{...approvalQuestion,reason}]},false);
+
 const receipt = '11111111-1111-1111-1111-111111111111';
+
+const portableBody=Buffer.from('Hello 🔎\r\n');
+const portableHash=createHash('sha256').update(portableBody).digest('hex');
+const portableDescriptor={resource:receipt,revision:receipt,ordinal:1,sourceName:'source.md',title:'Source',path:'documents/source.md',mediaType:'text/markdown',contentHash:portableHash,tags:['billing'],provenance:{owner:'owner',kind:'source',createdAt:'2026-10-16T00:00:00Z',sourceHash:portableHash,dependencies:[],evidence:[]}};
+const portableBundle={format:'plowshare-information-bundle/1',id:receipt,documents:[{descriptor:portableDescriptor,bytesBase64:portableBody.toString('base64')}],relationships:[],relationshipCoverage:'included-endpoints-only'};
+const portablePlan={bundle:portableBundle,destinations:[{resource:receipt,name:'imported/source.md',mode:'create'}],types:[],reuse:[],restoreRelationships:false};
+const portableImport={scope:{kind:'personal'},requestId:receipt,plan:portablePlan};
+input('information.interchange.import',portableImport,true);
+const portableEditedPin={...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,sourceHash:'0'.repeat(64)}}}],relationships:[{source:receipt,target:receipt,pinnedRevision:receipt,relation:'reference'}]};
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:portableEditedPin,restoreRelationships:true}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:portableEditedPin,restoreRelationships:false}},true);
+
+const portableNext='22222222-2222-4222-8222-222222222222';
+const reusedBundle={...portableBundle,documents:[...portableBundle.documents,{descriptor:{...portableDescriptor,revision:portableNext,ordinal:2,path:'documents/next.md',provenance:{...portableDescriptor.provenance,dependencies:[receipt]}},bytesBase64:portableBody.toString('base64')}]};
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:reusedBundle,destinations:[{resource:receipt,name:'imported/source.md',mode:'revise',expectedRevision:portableNext}],reuse:[{foreignRevision:receipt,localRevision:receipt}]}},true);
+
+const portableReadable={format:portableBundle.format,path:portableDescriptor.path,representation:'original_markdown',markdown:portableBody.toString('utf8'),textHash:portableHash,sidecar:portableDescriptor};
+result('information.interchange.readable',portableReadable,true);
+result('information.interchange.readable',{...portableReadable,textHash:'0'.repeat(64)},false);
+for(const markdown of ['', ' \r\n', '\uFEFF# Safety 🔎\r\n', 'é e\u0301 漢字']) {
+  const textHash=createHash('sha256').update(markdown,'utf8').digest('hex');
+  result('information.interchange.readable',{...portableReadable,markdown,textHash},true);
+  result('information.interchange.readable',{...portableReadable,markdown,textHash:'0'.repeat(64)},false);
+}
+result('information.interchange.export',portableBundle,true);
+input('information.interchange.export',{scope:{kind:'personal'},revisions:[receipt]},true);
+for(const revisions of [[],['bad'],Array(17).fill(receipt),[receipt,receipt]]) input('information.interchange.export',{scope:{kind:'personal'},revisions},false);
+for(const path of ['/absolute.md','../source.md','safe/../source.md','safe//source.md','safe/CON.md','safe/.git/config','safe/nul','file.','safe/']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{...portableBundle.documents[0],descriptor:{...portableDescriptor,path}}]}}},false);
+for(const bytesBase64 of ['', 'QQ','QR==','QQ==\n']) input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:portableDescriptor,bytesBase64}]}}},false);
+for(const changed of [{destinations:[]},{destinations:[{resource:receipt,name:'source.md',mode:'revise'}]},{destinations:[{resource:receipt,name:'source.md',mode:'create',expectedRevision:receipt}]},{reuse:[{foreignRevision:'bad',localRevision:receipt}]},{reuse:[{foreignRevision:receipt,localRevision:receipt}],destinations:[]},{restoreRelationships:'yes'}]) input('information.interchange.import',{...portableImport,plan:{...portablePlan,...changed}},false);
+input('information.interchange.import',{...portableImport,scope:{kind:'shared'}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,permissions:['admin']}},false);
+input('information.interchange.import',{...portableImport,plan:{...portablePlan,bundle:{...portableBundle,documents:[{descriptor:{...portableDescriptor,provenance:{...portableDescriptor.provenance,dependencies:['22222222-2222-4222-8222-222222222222']}},bytesBase64:portableBody.toString('base64')}]}}},false);
+
+const navScope={kind:'personal'};
+const navPolicy={ownerOnly:false,referenceHidden:true,propagate:true};
+const navSettings={defaults:navPolicy,mandatory:{ownerOnly:false,referenceHidden:false,propagate:false},allowOverrides:true,referenceLabel:'Restricted document'};
+const navSave={scope:navScope,requestId:receipt,id:receipt,expectedVersion:0,label:'Billing',path:{steps:[{kind:'scope',scope:navScope},{kind:'document',target:{resource:receipt}}]}};
+input('information.views.save',navSave,true);
+for(const changed of [{expectedVersion:-1},{expectedVersion:1.5},{id:'short'},{path:{steps:[]}},{path:{steps:Array(33).fill({kind:'scope',scope:navScope})}},{path:{steps:[{kind:'document',target:{resource:receipt}}]}},{path:{steps:[{kind:'scope',scope:navScope},{kind:'scope',scope:navScope}]}},{path:{steps:[{kind:'scope',scope:navScope},{kind:'traverse',relation:'../private',direction:'outgoing'}]}},{label:'x'.repeat(121)},{extra:true}])input('information.views.save',{...navSave,...changed},false);
+input('information.documents.list',{scope:navScope},true);
+input('information.documents.list',{scope:navScope,relation:'runbook'},false);
+input('information.documents.list',{scope:navScope,limit:101},false);
+input('information.documents.get',{scope:navScope,target:{resource:receipt,revision:receipt}},true);
+input('information.documents.get',{scope:navScope,target:{resource:receipt,revision:null}},false);
+input('information.documents.get',{scope:navScope,target:{resource:'short'}},false);
+const navSet={scope:navScope,requestId:receipt,target:{kind:'platform'},expectedVersion:0,settings:navSettings,reason:'Initial policy'};
+input('information.policy.set',navSet,true);
+input('information.policy.set',{...navSet,target:{kind:'project'}},false);
+input('information.policy.set',{...navSet,settings:{...navSettings,defaults:{ownerOnly:false}}},false);
+input('information.policy.set',{...navSet,settings:{...navSettings,referenceLabel:'x'.repeat(121)}},false);
+input('information.relationships.create',{scope:navScope,requestId:receipt,source:receipt,target:{resource:receipt},relation:'runbook',expectedSourceRevision:receipt},true);
+input('information.relationships.remove',{scope:navScope,requestId:receipt,relationship:receipt,expectedVersion:0},false);
+result('information.documents.get',{kind:'locked',resource:receipt,label:'Approved label'},true);
+result('information.documents.get',{kind:'unavailable'},true);
+result('information.documents.get',{kind:'locked',resource:receipt},false);
+result('information.documents.get',{kind:'readable'},false);
+
+const authored={scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,expectedRevision:receipt,typing:{mode:'inherit',metadata:{severity:null}}};
+input('information.content.revise',authored,true);
+for(const change of [{view:'foreign-profile'},{typing:{mode:'clear',metadata:{}}},{typing:{mode:'set',version:receipt}},{typing:{mode:'inherit',metadata:[]}},{typing:{mode:'inherit',metadata:{secret:'x'.repeat(4097)}}}])input('information.content.revise',{...authored,...change},false);
+input('information.retry',{scope:{kind:'personal'},view:'content-types-v1',revision:receipt,requestId:receipt,stages:['derive','embed']},true);
+input('information.retry',{scope:{kind:'personal'},view:'content-types-v1',revision:receipt,requestId:receipt,stages:['embed','embed']},false);
+input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',description:'',schema:{type:'object',properties:{severity:{type:'string'}},required:['severity'],additionalProperties:false}},true);
+input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',schema:{type:'object','$ref':'https://schemas.example/type'}},false);
+for (const key of ['__proto__','prototype','constructor']) {
+ input('information.content.revise',{...authored,typing:{mode:'inherit',metadata:{nested:{[key]:'value'}}}},false);
+ input('information.types.version.create',{scope:{kind:'personal'},view:'content-types-v1',requestId:receipt,slug:'incident',label:'Incident',schema:{type:'object',properties:{[key]:{type:'string'}}}},false);
+}
+let nested={leaf:'value'};
+for(let i=0;i<31;i++)nested={nested};
+input('information.types.validate',{scope:{kind:'personal'},view:'content-types-v1',version:receipt,metadata:nested},true);
+for(let i=0;i<2;i++)nested={nested};
+input('information.types.validate',{scope:{kind:'personal'},view:'content-types-v1',version:receipt,metadata:nested},false);
 
 const providerDefinition={"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null};
 const providerConnection={"connection": "11111111-1111-1111-1111-111111111111", "project": "app", "revision": "11111111-1111-1111-1111-111111111111", "enabled": true, "deleted": false, "definition": {"name": "Fixture", "endpoint": "https://provider.example/mcp", "authentication": "API_KEY", "apiKeyHeader": "X-API-Key", "oauth": null}};
@@ -137,6 +216,17 @@ input('schedule.list',{project:'fixture'},true);
 input('schedule.files',{project:null},false);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',includeShared:false}},true);
 input('document.detail',{document:receipt,scope:{kind:'project',project:'fixture',extra:true}},false);
+// Explicit project or existing conversation: omission/null must never choose Personal implicitly.
+for (const operation of ['conversation.open','conversation.list','conversation.latest','orchestration.start','agent.run']) {
+  const base = operation === 'agent.run' ? {agent:'fixture',task:'work'} :
+    operation === 'conversation.latest' ? {agent:'fixture'} :
+    operation === 'orchestration.start' ? {agent:'fixture',definition:'workflow',request:'work',requestId:receipt} : {};
+  input(operation,base,false);
+  input(operation,{...base,project:null},['conversation.list','conversation.latest'].includes(operation));
+  input(operation,{...base,project:'fixture'},true);
+  input(operation,{...base,project:'personal:66697874757265'},true);
+}
+input('agent.run',{agent:'fixture',task:'work',conversation:'cnv_fixture'},true);
 input('project.list', {}, true);
 input('project.list', { future: 1 }, false);
 for (const job of ['job_fixture', '', '  '])

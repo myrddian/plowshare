@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 249,
+    "registeredRequestFrames": 276,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 236,
-    "headlessCliOneShotFrames": 226,
+    "headlessCliRequestFrames": 263,
+    "headlessCliOneShotFrames": 253,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 249,
+    "typedRequestFrames": 276,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -1446,6 +1446,33 @@
         "frame": "information.list",
         "serverSource": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
         "frames": [
+          "information.interchange.capabilities",
+          "information.interchange.export",
+          "information.interchange.readable",
+          "information.interchange.import",
+          "information.interchange.origin",
+          "information.navigation.capabilities",
+          "information.documents.list",
+          "information.documents.facets",
+          "information.documents.get",
+          "information.relationships.list",
+          "information.relationships.create",
+          "information.relationships.remove",
+          "information.policy.get",
+          "information.policy.set",
+          "information.views.list",
+          "information.views.get",
+          "information.views.save",
+          "information.views.delete",
+          "information.types.capabilities",
+          "information.types.list",
+          "information.types.get",
+          "information.types.validate",
+          "information.content.get",
+          "information.content.revise",
+          "information.types.version.create",
+          "information.types.activate",
+          "information.types.deprecate",
           "information.upload",
           "information.acquire",
           "information.list",
@@ -3936,7 +3963,102 @@
       ]
     },
     {
+      "frame": "information.content.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.content.revise",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
       "frame": "information.delete",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.documents.facets",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.documents.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.documents.list",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -4061,6 +4183,110 @@
       "typescriptConstants": [],
       "desktopConsumer": false,
       "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.interchange.capabilities",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/information-interchange.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.interchange.export",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/information-interchange.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.interchange.import",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/import-recovery-contract.ts",
+        "plowshare-desktop/src/renderer/information-interchange.ts"
+      ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.interchange.origin",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.interchange.readable",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": true,
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/renderer/information-interchange.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -4202,7 +4428,64 @@
       ]
     },
     {
+      "frame": "information.navigation.capabilities",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
       "frame": "information.outline",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.policy.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.policy.set",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -4300,6 +4583,63 @@
     },
     {
       "frame": "information.refresh",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.relationships.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.relationships.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.relationships.remove",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -4508,6 +4848,139 @@
       ]
     },
     {
+      "frame": "information.types.activate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.capabilities",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.deprecate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.validate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.types.version.create",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
       "frame": "information.unexclude",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
@@ -4566,6 +5039,82 @@
     },
     {
       "frame": "information.upload",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.views.delete",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.views.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.views.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/information.ts",
+          "function": "InformationClient.call"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": [
+        "information"
+      ]
+    },
+    {
+      "frame": "information.views.save",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java",
       "typescriptBuilders": [
         {
@@ -7755,9 +8304,54 @@
             "MigrationPayload",
             "MigrationLog",
             "MigrationEntry",
-            "MigrationJob"
+            "MigrationJob",
+            "InformationContentCapabilities",
+            "InformationTypeIdentity",
+            "InformationTypeContract",
+            "InformationTypeVersion",
+            "InformationTypeVersions",
+            "InformationContentBinding",
+            "InformationProjectionReuse",
+            "InformationContentView",
+            "MetadataValidationIssue",
+            "MetadataValidationResult",
+            "ReferencePolicy",
+            "ReferencePolicySettings",
+            "ReferencePolicyView",
+            "DocumentTarget",
+            "CurrentDocument",
+            "DocumentRelationship",
+            "DocumentConnection",
+            "NavigationPath",
+            "SavedNavigationView",
+            "NavigationChanged",
+            "NavigationCapabilities",
+            "PortableEvidence",
+            "PortableOriginReference",
+            "PortableProvenance",
+            "PortableDescriptor",
+            "PortableDocument",
+            "PortableLink",
+            "PortableBundle",
+            "PortableTypeMapping",
+            "PortableReuse",
+            "PortableImportPlan",
+            "PortableMapping",
+            "PortableImported",
+            "PortableOrigin",
+            "PortableReadable",
+            "PortableCapabilities"
           ],
           "operations": [
+            "information.types.capabilities",
+            "information.types.list",
+            "information.types.get",
+            "information.types.validate",
+            "information.types.version.create",
+            "information.types.activate",
+            "information.types.deprecate",
+            "information.content.get",
+            "information.content.revise",
             "information.await",
             "information.upload",
             "information.acquire",
@@ -7797,7 +8391,25 @@
             "information.migration.inspect",
             "information.migration.release",
             "information.inventory",
-            "information.acquisitions"
+            "information.acquisitions",
+            "information.navigation.capabilities",
+            "information.documents.list",
+            "information.documents.facets",
+            "information.documents.get",
+            "information.relationships.list",
+            "information.relationships.create",
+            "information.relationships.remove",
+            "information.policy.get",
+            "information.policy.set",
+            "information.views.list",
+            "information.views.get",
+            "information.views.save",
+            "information.views.delete",
+            "information.interchange.capabilities",
+            "information.interchange.export",
+            "information.interchange.readable",
+            "information.interchange.origin",
+            "information.interchange.import"
           ],
           "fixtures": "test-support/contracts/ws-information-fixtures.json"
         },
@@ -7903,13 +8515,23 @@
           "information.allowance",
           "information.ask",
           "information.await",
+          "information.content.get",
+          "information.content.revise",
           "information.delete",
+          "information.documents.facets",
+          "information.documents.get",
+          "information.documents.list",
           "information.events",
           "information.evidence.read",
           "information.evidence.record",
           "information.exclude",
           "information.facets",
           "information.finalise",
+          "information.interchange.capabilities",
+          "information.interchange.export",
+          "information.interchange.import",
+          "information.interchange.origin",
+          "information.interchange.readable",
           "information.inventory",
           "information.link",
           "information.list",
@@ -7917,12 +8539,18 @@
           "information.migration.inspect",
           "information.migration.list",
           "information.migration.release",
+          "information.navigation.capabilities",
           "information.outline",
+          "information.policy.get",
+          "information.policy.set",
           "information.rank",
           "information.read",
           "information.rebuild",
           "information.record.report",
           "information.refresh",
+          "information.relationships.create",
+          "information.relationships.list",
+          "information.relationships.remove",
           "information.replace",
           "information.restore",
           "information.retry",
@@ -7933,10 +8561,21 @@
           "information.symbols",
           "information.tags",
           "information.tags.groups",
+          "information.types.activate",
+          "information.types.capabilities",
+          "information.types.deprecate",
+          "information.types.get",
+          "information.types.list",
+          "information.types.validate",
+          "information.types.version.create",
           "information.unexclude",
           "information.unlink",
           "information.unshare",
           "information.upload",
+          "information.views.delete",
+          "information.views.get",
+          "information.views.list",
+          "information.views.save",
           "information.withdraw",
           "job.cancel",
           "job.limits",
@@ -8054,7 +8693,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 226,
+        "count": 253,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -8066,9 +8705,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 249 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 276 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "236 WS operations: 226 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "263 WS operations: 253 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",
@@ -8205,6 +8844,33 @@
   "informationSystem": {
     "implementation": "docs/information-system.md",
     "operations": [
+      "information.interchange.capabilities",
+      "information.interchange.export",
+      "information.interchange.readable",
+      "information.interchange.import",
+      "information.interchange.origin",
+      "information.navigation.capabilities",
+      "information.documents.list",
+      "information.documents.facets",
+      "information.documents.get",
+      "information.relationships.list",
+      "information.relationships.create",
+      "information.relationships.remove",
+      "information.policy.get",
+      "information.policy.set",
+      "information.views.list",
+      "information.views.get",
+      "information.views.save",
+      "information.views.delete",
+      "information.types.capabilities",
+      "information.types.list",
+      "information.types.get",
+      "information.types.validate",
+      "information.content.get",
+      "information.content.revise",
+      "information.types.version.create",
+      "information.types.activate",
+      "information.types.deprecate",
       "information.upload",
       "information.acquire",
       "information.list",

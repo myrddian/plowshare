@@ -65,7 +65,25 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
 
   public AcquisitionRepository.Status submit(
       InformationContext context, UUID request, String url, String name, String session) {
+    return submit(context, request, url, name, session, null, null);
+  }
+
+  public AcquisitionRepository.Status submit(
+      InformationContext context,
+      UUID request,
+      String url,
+      String name,
+      String session,
+      UUID expectedRevision,
+      io.aeyer.plowshare.protocol.InformationContent.Typing typing) {
     access.requireWork(context);
+    if (expectedRevision != null && typing == null)
+      throw new CallerFault("expectedRevision requires explicit typing");
+    if (typing != null
+        && (expectedRevision == null
+            || context.corpus() == InformationContext.Corpus.CODE
+            || io.aeyer.plowshare.protocol.DocumentType.classify(name, null).isCode()))
+      throw new CallerFault("Typed refresh requires a document revision");
     if (context.selection().scope() == InformationContext.Scope.SHARED)
       throw new CallerFault("acquire into a personal or project namespace");
     if (request == null || url == null || url.isBlank() || name == null || name.isBlank())
@@ -78,15 +96,29 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
             ? "code"
             : "documents";
     String identity = json(Arrays.asList(context.selection(), url, name));
+    if (typing != null)
+      identity +=
+          json(
+              Arrays.asList(
+                  expectedRevision,
+                  typing.mode(),
+                  typing.version(),
+                  typing.metadata() == null
+                      ? null
+                      : io.aeyer.plowshare.protocol.SchemaCodec.fingerprint(typing.metadata())));
     String fingerprint =
         InformationCatalogue.sha256(
             (corpus.equals("code") ? identity + corpus : identity)
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var prior = repository.prior(context.account(), request, fingerprint);
+    if (prior.isPresent()) return status(context, prior.get());
     UUID id =
         work.inTransaction(
-            () ->
-                repository.submit(
-                    context, request, fingerprint, url, name, session, total, corpus));
+            () -> {
+              var intent = catalogue.acquisitionIntent(context, name, expectedRevision, typing);
+              return repository.submit(
+                  context, request, fingerprint, url, name, session, total, corpus, intent);
+            });
     return status(context, id);
   }
 
@@ -156,8 +188,19 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                       : InformationAccess.projectSelection(account, project))
               .withCorpus(
                   io.aeyer.plowshare.server.information.InformationContext.Corpus.valueOf(
-                      row.status().corpus().toUpperCase(Locale.ROOT)));
+                      row.status().corpus().toUpperCase(Locale.ROOT)))
+              .withView(true);
       access.requireWork(context);
+      if (row.status().revisionId() == null) {
+        var current =
+            catalogue.acquisitionIntent(
+                context,
+                row.status().sourceName(),
+                row.intent() == null ? null : row.intent().expectedRevision(),
+                row.intent() == null ? null : row.intent().typing());
+        if (!Objects.equals(current, row.intent()))
+          throw new CallerFault("Acquisition typing candidate changed");
+      }
       String log = row.log();
       if (log == null) {
         Home home = project == null ? Home.global() : Home.of(project);
@@ -201,7 +244,16 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                       1,
                       "acquire",
                       row.status().attempt(),
-                      row.status().url()));
+                      row.status().url(),
+                      row.intent() == null
+                          ? null
+                          : new io.aeyer.plowshare.protocol.InformationContent.Candidate(
+                              row.intent().expectedRevision(),
+                              row.intent().typing(),
+                              row.intent().binding(),
+                              "automatic",
+                              null,
+                              List.of())));
       Hooks hooks = Hooks.chain(run.forModel(null), configured);
       var shown = new StageShown("acquire", "acquire", 0, 1);
       Gate pre = hooks.stagePre(hookContext, new StageStart(shown, null, null));
@@ -238,7 +290,8 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                           fetched.mediaType(),
                           fetched.finalUrl(),
                           row.session(),
-                          row.status().allowanceTotal());
+                          row.status().allowanceTotal(),
+                          row.intent());
                   inputs.bind(processingLog, context, List.of(admitted.revision()));
                   repository.admitted(row, admitted.revision());
                   return admitted.revision();
@@ -257,7 +310,16 @@ public final class InformationAcquisitions implements AutoCloseable, UsageAware 
                       1,
                       "acquire",
                       row.status().attempt(),
-                      retained.sourceUri())),
+                      retained.sourceUri(),
+                      row.intent() == null
+                          ? null
+                          : new io.aeyer.plowshare.protocol.InformationContent.Candidate(
+                              row.intent().expectedRevision(),
+                              row.intent().typing(),
+                              row.intent().binding(),
+                              "automatic",
+                              null,
+                              List.of()))),
               new StageDone(shown, "original response bytes retained", null));
       work.inTransaction(
           () -> {

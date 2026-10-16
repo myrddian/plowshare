@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.Objects;
 
 /**
@@ -27,11 +28,15 @@ public final class InformationAccess {
   }
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
+    // A run's Personal home is a server-owned workspace project, while its retained information
+    // belongs to the account namespace. Require the exact owner before mapping either address.
+    String project = PersonalSpaces.resolveAddress(home.project(), account);
+    PersonalSpaces.requireOwn(project, account);
+    boolean personal = home.isGlobal() || PersonalSpaces.name(account).equals(project);
     return resolve(
-        account,
-        home.isGlobal()
-            ? InformationContext.Selection.personal()
-            : projectSelection(account, home.project()));
+            account,
+            personal ? InformationContext.Selection.personal() : projectSelection(account, project))
+        .withView(true);
   }
 
   /** Internal project contexts must not accidentally include the server's shared catalogue. */

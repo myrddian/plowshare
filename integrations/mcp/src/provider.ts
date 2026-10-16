@@ -9,6 +9,7 @@ import type {
   HostedToolCredential,
   HostedToolRegistration,
   RegisteredTool,
+  ToolDeclaration,
   ToolCall,
   ToolJournal,
   ToolResult,
@@ -29,6 +30,7 @@ import { DEFAULT_LIMITS, PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
 import type { McpLimits } from './settings.ts';
 import { contractHash, declaration } from './codec.ts';
 import { McpToolClient } from './tool-client.ts';
+import { validateMcpInvocation } from './invocation.ts';
 import type { CataloguePublicationIntent } from './journal.ts';
 
 export type ProviderConnection = Pick<Plowshare, 'request'>;
@@ -165,17 +167,20 @@ export class McpProvider {
           'Duplicate or oversized MCP catalogue for server provider publication',
         );
       const tools = Object.freeze(
-        snapshot.map((tool) => ({
-          declaration: declaration(
+        snapshot.map((tool) => {
+          const offered = declaration(
             tool,
             binding.definition.prefix,
             options.protocol,
             context,
             options.timeoutSeconds,
             limits,
-          ),
-          handler: (call: ToolCall) => provider.execute(tool, call),
-        })),
+          );
+          return {
+            declaration: offered,
+            handler: (call: ToolCall) => provider.execute(tool, offered, call),
+          };
+        }),
       );
       if (
         new Set(tools.map((tool) => tool.declaration.name)).size !==
@@ -251,16 +256,15 @@ export class McpProvider {
       next.value === this.credential.value
     );
   }
-  private async execute(tool: McpTool, call: ToolCall): Promise<ToolResult> {
+  private async execute(
+    tool: McpTool,
+    offered: ToolDeclaration,
+    call: ToolCall,
+  ): Promise<ToolResult> {
     if (!this.active || this.busy)
       return rejected(
         'MCP context is unavailable or already executing. No upstream call was sent.',
       );
-    if (
-      call.project !== this.registration.binding.project ||
-      call.provider !== this.registration.binding.route.provider
-    )
-      return rejected('Foreign MCP invocation. No upstream call was sent.');
     const remaining = Math.min(
       Date.parse(call.deadline) - Date.now(),
       this.options.timeoutSeconds * 1000,
@@ -270,6 +274,22 @@ export class McpProvider {
     this.busy = true;
     const signal = AbortSignal.any([this.stop, AbortSignal.timeout(remaining)]);
     try {
+      try {
+        const binding = this.registration.binding;
+        await validateMcpInvocation(
+          {
+            project: binding.project,
+            provider: binding.route.provider,
+            account: binding.owner,
+          },
+          offered,
+          call,
+        );
+      } catch {
+        return rejected(
+          'MCP invocation did not match its owner, route or offered contract. No upstream call was sent.',
+        );
+      }
       let credential: HostedToolCredential;
       try {
         credential = await withinDeadline(

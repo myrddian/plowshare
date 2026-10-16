@@ -24,7 +24,9 @@ val mcpIntegrationTest by tasks.registering(Exec::class) {
     workingDir = projectDir
     dependsOn(mcpIntegrationBuild)
     inputs.dir("build/mcp").withPathSensitivity(PathSensitivity.RELATIVE)
-    commandLine("node", "--test", "build/mcp/config.test.js", "build/mcp/codec.test.js", "build/mcp/session.test.js", "build/mcp/provider.test.js", "build/mcp/journal.test.js", "build/mcp/runner.test.js", "build/mcp/native-host.test.js", "build/mcp/native-bridge.test.js")
+    inputs.dir("src/fixtures").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("scripts/test.mjs").withPathSensitivity(PathSensitivity.RELATIVE)
+    commandLine("node", "scripts/test.mjs")
 }
 tasks.named("assemble") { dependsOn(mcpIntegrationBuild) }
 tasks.named("check") { dependsOn(mcpIntegrationTest) }

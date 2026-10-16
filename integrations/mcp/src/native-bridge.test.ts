@@ -13,6 +13,7 @@ import { canonicalToolSchema } from 'plowshare-client-ts/operations/tool-schemas
 import { object } from './codec.ts';
 import { nativeFixture } from './native.test-support.ts';
 import type { ToolScopeConnect } from 'plowshare-client-ts/operations/tool-scopes';
+import type { ToolCall } from 'plowshare-client-ts';
 const scope: ToolScopeConnect = {
   project: 'fixture',
   scope: 'laptop',
@@ -22,6 +23,68 @@ const scope: ToolScopeConnect = {
   grants: ['*'],
   leaseSeconds: 30,
 };
+
+await test('native sharing handlers reject a foreign caller or contract without invoking the local MCP tool', async () => {
+  const fixture = await nativeFixture();
+  const host = await NativeMcpHost.start(
+    fixture.config,
+    fixture.config.owner,
+    new NativeMcpSessions({ NATIVE_SELECTED: 'one' }),
+    true,
+  );
+  try {
+    const binding = {
+      project: fixture.config.project,
+      provider: 'shared-route',
+      account: fixture.config.owner.account,
+    };
+    assert.throws(() =>
+      host.registeredTools({ ...binding, account: 'another-user' }),
+    );
+    const tool = host.registeredTools(binding)[0];
+    assert.ok(tool?.declaration.inputSchema);
+    const call: ToolCall = {
+      schema: 'plowshare-tool/2',
+      schemaFingerprint: createHash('sha256')
+        .update(canonicalToolSchema(tool.declaration.inputSchema))
+        .digest('hex'),
+      invocationId: '11111111-1111-1111-1111-111111111111',
+      project: binding.project,
+      provider: binding.provider,
+      account: binding.account,
+      tool: tool.declaration.name,
+      run: 'run',
+      call: 'call',
+      deadline: new Date(Date.now() + 2000).toISOString(),
+      arguments: { values: [{ name: 'from-server' }] },
+    };
+    for (const invalid of [
+      { ...call, account: 'another-user' },
+      { ...call, project: 'another-project' },
+      { ...call, provider: 'another-route' },
+      { ...call, tool: 'native_another_tool' },
+      { ...call, schema: 'plowshare-tool/1' },
+      { ...call, schemaFingerprint: '0'.repeat(64) },
+      { ...call, arguments: { values: [{ name: 1 }] } },
+    ]) {
+      assert.equal((await tool.handler(invalid)).state, 'REJECTED');
+      assert.equal(
+        (await fixture.seen()).filter((row) => row.method === 'tools/call')
+          .length,
+        0,
+      );
+    }
+    assert.equal((await tool.handler(call)).state, 'COMPLETED');
+    assert.equal(
+      (await fixture.seen()).filter((row) => row.method === 'tools/call')
+        .length,
+      1,
+    );
+  } finally {
+    await host.close();
+    await fixture.close();
+  }
+});
 for (const lost of [false, true]) {
   await test(`optional server bridge ${lost ? 'lost metadata' : 'serving'}: only cross-process calls use scopes/Relay and the effect remains direct`, async () => {
     const fixture = await nativeFixture(),
@@ -42,7 +105,7 @@ for (const lost of [false, true]) {
       project: 'fixture',
       provider: 'scanner',
       tool: tool.name,
-      account: 'caller',
+      account: fixture.config.owner.account,
       run: 'run',
       call: 'call',
       deadline: new Date(Date.now() + 2000).toISOString(),

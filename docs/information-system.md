@@ -28,6 +28,16 @@ from general memory/digest export, and their model tools cannot write findings t
 the shared board. This is a document dependency policy, not universal data-loss
 prevention for every explicitly authorized file/command extension.
 
+## Authored metadata
+
+[Authored information](authored-information.md) adds scoped immutable schema versions and
+validated metadata on document revisions. Supporting clients select
+`view:"content-types-v1"`; metadata-only revisions retain explicit processing authority,
+compatible owned projection copies and separate body-producer/reviser attribution.
+New bodies still use the normal information pipeline. See the usage guide for type
+management, complete metadata edits, bounded errors, exact type/version facets and
+rollback configuration.
+
 ## Faceted navigation and tags
 
 `information.list`, `information.facets`, `information.search` and
@@ -219,7 +229,8 @@ not refire transition hooks. Pre-commit evaluations after a crash are not promis
 exactly once.
 
 `context.document` exposes operation, resource/revision (nullable before allocation),
-generation, stage, attempt and optional source URI. The enclosing context supplies
+generation, stage, attempt and optional source URI. Authored transitions additionally
+include the validated typing candidate and exact reuse manifest identity. The enclosing context supplies
 log/project/origin. Information logs use `submission`, so a hook restricted to
 `orchestration` alone will not run for them. Java and TypeScript contract/script
 fixtures cover this extension without changing orchestration payload semantics.
@@ -227,10 +238,10 @@ fixtures cover this extension without changing orchestration payload semantics.
 ## Controls and adapters
 
 The canonical [operation list](../plowshare-protocol/src/main/java/io/aeyer/plowshare/protocol/frames/InformationOperations.java)
-is registered by `InformationFrames`; all 34 controls have a neutral TypeScript
+is registered by `InformationFrames`; all registered controls have a neutral TypeScript
 socket adapter and Java socket transport. TUI `/information` and the standalone
 information command preserve JSON and quoted project names. The headless TypeScript
-CLI accepts all 34 controls as `information <operation> '<JSON payload>'` with an
+CLI accepts all registered controls as `information <operation> '<JSON payload>'` with an
 explicit `scope` in the payload. Source/report admission receipts remain pending;
 `--wait information ask` waits only for the returned document-answer job.
 Java consumers use the public SDK’s typed information client. The MCP `information` tool offers the

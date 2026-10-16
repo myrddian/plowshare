@@ -1,5 +1,9 @@
 import type { RequestOptions } from '../binding/acting.ts';
 export type { RequestOptions, ActingSelection } from '../binding/acting.ts';
+import {
+  decodeMetadataValidation,
+  type MetadataValidationResult,
+} from './information-content.ts';
 export type {
   HostedToolDefinition,
   HostedToolBinding,
@@ -130,6 +134,7 @@ export const OPERATIONS: readonly Operation[] = Object.freeze(
 
 /** Refusals carry checked status/detail, never an unvalidated server payload. */
 export interface RefusedReply {
+  readonly metadataValidation?: MetadataValidationResult;
   readonly kind: 'refused';
   readonly outcome: { readonly code: Code; readonly said?: string };
 }
@@ -211,6 +216,18 @@ export class Plowshare {
     if (result.kind === 'refused')
       return {
         kind: 'refused',
+        ...(code === 'VALIDATION_FAILED' &&
+        type.startsWith('information.') &&
+        [
+          'INFORMATION_METADATA_INVALID',
+          'INFORMATION_VALIDATION_BUDGET_EXHAUSTED',
+        ].includes(said ?? '')
+          ? {
+              metadataValidation: decodeMetadataValidation(
+                result.outcome.payload,
+              ),
+            }
+          : {}),
         outcome: { code, ...(said === undefined ? {} : { said }) },
       };
     let decoded: Replies[K];

@@ -75,7 +75,7 @@ def build():
                 'Headless CLI uses JSON payloads and WS field names; legacy positional/flag grammar is not retained. --server and --url select the explicit server origin, --root replaces --workspace, and global options may precede or follow the command.',
                 'JSON mode returns structured Outcomes with raw fields and incomplete/refused outcomes. Human project listings group Applications and Projects and omit filesystem paths; --json preserves the project.list reply.',
                 'Java exits 0 success, 1 incomplete/nonanswered, 2 usage/refusal/unavailable. TS exits 0 success, 1 refusal/unavailable job ending, 2 usage/auth bootstrap, 3 accepted/running/cancelling, 4 incomplete/nonanswered, 5 unknown/deadline/protocol.',
-                'Global scope is explicit with --global or JSON project:null; blank project is refused. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.',
+                'Setup/memory global scope uses --global or JSON project:null; blank project is refused. Runtime starts require an explicit project or an existing conversation; omission/null never selects Personal through the SDK. Do not rely on inherited PLOWSHARE_PROJECT in migration scripts.',
                 'One memory.read per invocation replaces Java multi-id reads; no implicit provenance defaults for JSON writes/resolutions.',
                 'Auth/bootstrap stays HTTP; operational reads, mutations and observers are WS. Existing sync Git bytes retain their documented HTTP transport.',
                 'PDF/image conversion is server-side; clients stream bytes and read cached text windows.',

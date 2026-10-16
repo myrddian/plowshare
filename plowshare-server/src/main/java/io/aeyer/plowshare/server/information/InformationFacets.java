@@ -14,13 +14,43 @@ public record InformationFacets(
     String documentAuthor,
     String when,
     String subtype,
-    String search) {
+    String search,
+    UUID contentType,
+    UUID contentTypeVersion,
+    Boolean untyped) {
   public static final InformationFacets NONE =
       new InformationFacets(null, List.of(), List.of(), null, null, null, null, null, null);
   public static final List<String> NAMES =
       List.of("kind", "tags", "autoTag", "tagGroup", "author", "documentAuthor", "when", "subtype");
 
+  public InformationFacets(
+      String kind,
+      List<String> tags,
+      List<String> autoTag,
+      String tagGroup,
+      String author,
+      String documentAuthor,
+      String when,
+      String subtype,
+      String search) {
+    this(
+        kind,
+        tags,
+        autoTag,
+        tagGroup,
+        author,
+        documentAuthor,
+        when,
+        subtype,
+        search,
+        null,
+        null,
+        null);
+  }
+
   public InformationFacets {
+    if (Boolean.TRUE.equals(untyped) && (contentType != null || contentTypeVersion != null))
+      throw new CallerFault("untyped conflicts with type filters");
     kind = text(kind, "kind");
     if (kind != null && !List.of("source", "report").contains(kind))
       throw new CallerFault("kind must be source or report");

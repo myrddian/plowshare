@@ -31,7 +31,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     row.replaceAll(
         (key, value) ->
             value instanceof java.sql.Timestamp time ? time.toInstant().toString() : value);
-    for (String key : List.of("tags", "autoTag", "tagGroups", "details"))
+    for (String key : List.of("tags", "autoTag", "tagGroups", "details", "contentType"))
       if (row.get(key) != null
           && !(row.get(key) instanceof List<?> || row.get(key) instanceof Map<?, ?>))
         try {
@@ -83,7 +83,8 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   public boolean readable(InformationContext context, UUID revision) {
     var args = new ArrayList<Object>(selectionArgs(context));
     args.add(revision);
-    return !jdbc.queryForList(SELECT + " WHERE " + READABLE + " AND r.id=?", args.toArray())
+    return !jdbc.queryForList(
+            SELECT + " WHERE " + readableSql(context) + " AND r.id=?", args.toArray())
         .isEmpty();
   }
 
@@ -198,7 +199,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       selected =
           new InformationSql.Filter(selected.sql() + " AND r.id=ANY(CAST(? AS uuid[]))", args);
     }
-    return facetCounts(selected);
+    return facetCounts(selected, context.typedView());
   }
 
   public List<Information.Revision> list(
@@ -234,7 +235,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (kind != null) args.add(kind);
     args.addAll(facets.arguments());
     return new io.aeyer.plowshare.server.information.InformationSql.Filter(
-        READABLE
+        readableSql(context)
             + " AND r.document_type=? AND NOT r.excluded"
             + (kind == null ? "" : " AND q.kind=?")
             + " AND NOT EXISTS(SELECT 1 FROM information_reports report WHERE report.revision_id=r.id AND report.status NOT IN ('draft','final')) AND "
@@ -243,15 +244,21 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
   }
 
   private Information.Facets facetCounts(
-      io.aeyer.plowshare.server.information.InformationSql.Filter selected) {
+      io.aeyer.plowshare.server.information.InformationSql.Filter selected, boolean typedView) {
     String from =
         " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE "
             + selected.sql();
     var counts = new java.util.LinkedHashMap<String, List<Information.FacetCount>>();
     var more = new java.util.LinkedHashMap<String, Boolean>();
-    for (String name : InformationFacets.NAMES) {
+    var names = new ArrayList<>(InformationFacets.NAMES);
+    if (typedView) names.addAll(List.of("contentType", "contentTypeVersion"));
+    for (String name : names) {
       String expression =
           switch (name) {
+            case "contentType" ->
+                "(SELECT v.type_id::text FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version WHERE c.revision_id=r.id AND NOT c.redacted)";
+            case "contentTypeVersion" ->
+                "(SELECT c.type_version::text FROM information_revision_content c WHERE c.revision_id=r.id AND NOT c.redacted)";
             case "kind" -> "q.kind";
             case "author" -> "q.owner_handle";
             case "documentAuthor" ->
@@ -314,13 +321,16 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     if (context.selection().scope() == InformationContext.Scope.SHARED) return List.of();
     return jdbc
         .queryForList(
-            "SELECT r.id,r.resource_id,r.ordinal,q.source_name,q.source_name AS title,q.kind,q.tags,r.document_type,r.document_subtype,r.availability,r.excluded,r.generation,r.created_at,r.allowance_total,r.allowance_spent"
-                + " FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id WHERE q.owner_handle=?"
-                + " AND ((?::text IS NULL AND q.project_id IS NULL) OR q.project_id=(SELECT id FROM projects WHERE name=?)) AND r.document_type=? ORDER BY r.created_at DESC,r.id OFFSET ? LIMIT ?",
+            SELECT
+                + " WHERE q.owner_handle=?"
+                + " AND ((?::text IS NULL AND q.project_id IS NULL) OR q.project_id=(SELECT id FROM projects WHERE name=?)) AND r.document_type=? AND "
+                + InformationSql.content(context, "r").sql()
+                + " ORDER BY r.created_at DESC,r.id OFFSET ? LIMIT ?",
             context.account(),
             project,
             project,
             context.corpus().documentType(),
+            context.typedView(),
             offset,
             limit)
         .stream()
@@ -340,7 +350,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             "SELECT e.sequence,e.revision_id,e.generation,e.stage,e.action,e.detail,e.recorded_at,r.document_type,r.document_subtype"
                 + " FROM information_events e JOIN information_revisions r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
-                + READABLE
+                + readableSql(context)
                 + " AND r.document_type=? AND e.sequence>? ORDER BY e.sequence LIMIT ?",
             args.toArray());
     long cursor =
@@ -355,7 +365,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     List<Map<String, Object>> found =
         jdbc.queryForList(
             "SELECT e.id,e.revision_id,e.paragraph_id,e.start_offset,e.end_offset,e.quote,e.locator,e.created_at FROM information_evidence e JOIN information_revisions r ON r.id=e.revision_id JOIN information_resources q ON q.id=r.resource_id WHERE "
-                + READABLE
+                + readableSql(context)
                 + " AND e.id=?",
             args.toArray());
     if (found.isEmpty()) throw absent();
@@ -559,15 +569,11 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
         context.selection().project(),
         context.selection().includeShared(),
-        context.account(),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().project(),
-        context.account(),
-        context.account(),
-        context.selection().scope().name().toLowerCase(java.util.Locale.ROOT),
-        context.selection().project(),
-        context.selection().includeShared());
+        context.typedView());
+  }
+
+  private static String readableSql(InformationContext context) {
+    return READABLE + " AND " + InformationSql.content(context, "r").sql();
   }
 
   private static final String SELECT =
@@ -581,17 +587,12 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
           + " AS \"documentAuthorSource\","
           + InformationFacetSql.visibleGroups("r", "q")
           + " AS \"tagGroups\",CASE WHEN q.tag_groups_manual THEN 'manual' ELSE 'automatic' END AS \"tagGroupsSource\","
+          + "(SELECT jsonb_build_object('type',v.type_id,'version',v.id,'ordinal',v.ordinal,'slug',t.slug,'label',t.label,'definitionHash',v.definition_hash) FROM information_revision_content c JOIN information_content_type_versions v ON v.id=c.type_version JOIN information_content_types t ON t.id=v.type_id WHERE c.revision_id=r.id) AS \"contentType\",CASE WHEN r.processing_policy='explicit_only' THEN r.processing_policy END AS \"processingPolicy\","
           + "(SELECT report.status FROM information_reports report WHERE report.revision_id=r.id) AS report_status FROM information_revisions r JOIN information_resources q ON q.id=r.resource_id";
-  // Pending sources have no corpus row yet; ownership and project admission still apply.
-  // Dependencies always require live permission.
+  // The central predicate also admits an authenticated pending source owner. A separate owner
+  // fallback would bypass live document policy and retained reference obligations.
   private static final String READABLE =
-      "r.availability='active' AND (information_readable(r.id,?,?,?,?) OR ("
-          + "NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id) AND q.owner_handle=? AND q.namespace<>'legacy'"
-          + " AND ((q.project_id IS NULL AND ?='personal') OR (q.project_id IS NOT NULL AND ?='project'"
-          + " AND EXISTS(SELECT 1 FROM projects p JOIN project_members m ON m.project_id=p.id"
-          + " WHERE p.id=q.project_id AND p.name=? AND m.handle=?)))"
-          + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
-          + " AND NOT information_readable(i.input_revision,?,?,?,?))))";
+      "r.availability='active' AND information_readable(r.id,?,?,?,?)";
 
   public void event(
       UUID revision, long generation, String actor, String stage, String action, String detail) {
@@ -704,6 +705,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
             name);
     UUID resource;
     if (resources.isEmpty()) {
+      if (write.expectedRevision() != null) throw new CallerFault("INFORMATION_REVISION_CONFLICT");
       resource = UUID.randomUUID();
       Long project =
           context.selection().project() == null
@@ -726,6 +728,21 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
       if (!kind.equals(resources.getFirst().get("kind")))
         throw new CallerFault("this name already belongs to a different resource kind");
       resource = (UUID) resources.getFirst().get("id");
+      UUID head =
+          jdbc.queryForObject(
+              "SELECT id FROM information_revisions WHERE resource_id=? ORDER BY ordinal DESC LIMIT 1",
+              UUID.class,
+              resource);
+      boolean typed =
+          Boolean.TRUE.equals(
+              jdbc.queryForObject(
+                  "SELECT EXISTS(SELECT 1 FROM information_revision_content WHERE revision_id=?)",
+                  Boolean.class,
+                  head));
+      if (typed && !write.typingExplicit()) throw new CallerFault("INFORMATION_TYPING_REQUIRED");
+      if ((write.typingExplicit() || write.expectedRevision() != null)
+          && !Objects.equals(head, write.expectedRevision()))
+        throw new CallerFault("INFORMATION_REVISION_CONFLICT");
     }
     int ordinal =
         jdbc.queryForObject(
@@ -735,7 +752,7 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
     UUID revision = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO information_revisions(id,resource_id,ordinal,title,media_type,source_uri,"
-            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            + "content_hash,byte_size,source_bytes,allowance_total,caller_session,document_type,document_subtype,starting_revision,revised_by,processing_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         revision,
         resource,
         ordinal,
@@ -748,7 +765,21 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         modelAllowance,
         session,
         documentType.type(),
-        documentType.subtype());
+        documentType.subtype(),
+        write.expectedRevision(),
+        write.typingExplicit() ? context.account() : null,
+        write.processingPolicy());
+    if (write.binding() != null) {
+      var binding = write.binding();
+      jdbc.update(
+          "INSERT INTO information_revision_content(revision_id,type_version,profile,definition_hash,metadata_hash,metadata) VALUES(?,?,?,?,?,CAST(? AS jsonb))",
+          revision,
+          binding.contract().version(),
+          binding.contract().profile(),
+          binding.contract().definitionHash(),
+          binding.metadataHash(),
+          io.aeyer.plowshare.protocol.SchemaCodec.compactJson(binding.metadata()));
+    }
     for (String stage : STAGES)
       jdbc.update(
           "INSERT INTO information_steps(revision_id,generation,stage,state)" + " VALUES(?,1,?,?)",
@@ -859,6 +890,17 @@ public final class JdbcInformationCatalogueRepository implements InformationCata
         revision,
         previous);
     if (state.equals("deleted")) {
+      jdbc.update(
+          "UPDATE information_reuse_preparations prepared SET payload=payload-'binding' WHERE payload->'manifest'->>'revision'=? OR EXISTS(SELECT 1 FROM information_write_gates gate WHERE gate.account=prepared.actor AND gate.request_id=prepared.request_id AND gate.response->>'revision'=?)",
+          revision.toString(),
+          revision.toString());
+      jdbc.update(
+          "UPDATE information_acquisitions SET content_intent=jsonb_set(jsonb_set(content_intent,'{binding}', 'null'::jsonb),'{typing,metadata}', '{}'::jsonb),state=CASE WHEN state IN ('queued','running') THEN 'blocked' ELSE state END,error='Retained typing origin deleted',token=NULL,lease_until=NULL WHERE content_intent IS NOT NULL AND (revision_id=? OR content_intent->>'expectedRevision'=?)",
+          revision,
+          revision.toString());
+      jdbc.update(
+          "UPDATE information_revision_content SET metadata='{}'::jsonb,redacted=true WHERE revision_id=? AND NOT redacted",
+          revision);
       jdbc.update(
           "UPDATE information_revisions SET source_bytes=NULL,extracted_text=NULL,document_author=NULL,document_author_source=NULL,document_author_evidence=NULL,auto_tag_groups='{}'::jsonb,tag_groups_input_tags='[]'::jsonb,tag_groups_generated=false WHERE id=?",
           revision);

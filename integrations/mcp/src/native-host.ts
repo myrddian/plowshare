@@ -17,17 +17,18 @@ import type {
   ToolResult,
   ToolJournal,
   ToolCall,
-  ToolReceipt,
   RegisteredTool,
+  ToolBinding,
 } from 'plowshare-client-ts';
 import { createHash } from 'node:crypto';
 import type { McpSession } from './contracts.ts';
 import { rejected, unknownResult } from './contracts.ts';
 import { contractHash, declaration } from './codec.ts';
-import { FileToolJournal, uuid } from './journal.ts';
+import { FileToolJournal, uuid, recoverInterrupted } from './journal.ts';
 import { HttpMcpSessions } from './session.ts';
 import { openStdio } from './stdio.ts';
 import { McpToolClient } from './tool-client.ts';
+import { validateMcpInvocation } from './invocation.ts';
 import { decodeNativeConfig, nativeEnvironment } from './native-config.ts';
 import type { NativeMcpConfig, NativeOwner } from './native-config.ts';
 
@@ -174,7 +175,7 @@ export class NativeMcpHost {
     private readonly sessions: NativeSessions,
     private readonly historicalRequests: ReadonlyMap<
       string,
-      { receipt: ToolReceipt; journal: ToolJournal }
+      { request: string; journal: ToolJournal }
     >,
     private readonly finish: () => void,
     private readonly finished: Promise<void>,
@@ -221,7 +222,7 @@ export class NativeMcpHost {
           throw new Error('Native recovery archive exceeds operator budget');
         const historicalRequests = new Map<
           string,
-          { receipt: ToolReceipt; journal: ToolJournal }
+          { request: string; journal: ToolJournal }
         >();
         for (const file of files) {
           const journal = await FileToolJournal.open(
@@ -239,13 +240,16 @@ export class NativeMcpHost {
             )
               throw new Error('Foreign native SDK journal');
             const prior = historicalRequests.get(receipt.invocationId);
-            if (
-              prior !== undefined &&
-              prior.receipt.request !== receipt.request
-            )
+            if (prior !== undefined && prior.request !== receipt.request)
               throw new Error('Conflicting native SDK archive identity');
-            historicalRequests.set(receipt.invocationId, { receipt, journal });
+            historicalRequests.set(receipt.invocationId, {
+              request: receipt.request,
+              journal,
+            });
           }
+          // The exclusive host lock proves no former process can still own these receipts.
+          // Validate their owner first, then record interruption before opening any new session.
+          await recoverInterrupted(journal);
         }
         const session = await sessions.open(config, signal);
         let host: NativeMcpHost | undefined;
@@ -395,7 +399,7 @@ export class NativeMcpHost {
     });
     const call: ToolCall = decodeToolCall(request);
     const historical = this.historicalRequests.get(call.invocationId);
-    if (historical !== undefined && historical.receipt.request !== request)
+    if (historical !== undefined && historical.request !== request)
       throw new Error(
         'Native invocation belongs to a retained different context; inspect its original SDK receipt',
       );
@@ -486,8 +490,16 @@ export class NativeMcpHost {
   }
   /** Optional server bridge handlers call this direct layer. Their SDK ToolProvider owns execution
    * intent/receipts; invoking a handler without such an owner is not an authorized client workflow.
+   * The binding must be the route returned on that owner's sharing socket; retain a private copy
+   * so later caller mutation cannot widen the handler's route.
    */
-  registeredTools(): readonly RegisteredTool[] {
+  registeredTools(binding: ToolBinding): readonly RegisteredTool[] {
+    if (
+      binding.project !== this.config.project ||
+      binding.account !== this.config.owner.account
+    )
+      throw new Error('Native sharing route belongs to another owner');
+    const route = Object.freeze({ ...binding });
     return this.tools.map((declaration, index) => ({
       declaration,
       handler: async (call: ToolCall) => {
@@ -508,6 +520,14 @@ export class NativeMcpHost {
             this.controller.signal,
             AbortSignal.timeout(remaining),
           ]);
+          try {
+            await validateMcpInvocation(route, declaration, call);
+            signal.throwIfAborted();
+          } catch {
+            return rejected(
+              'Native MCP invocation did not match its owner, route or offered contract. No call was sent.',
+            );
+          }
           try {
             this.sessions.validate?.(this.config);
             await this.client.refresh(signal);

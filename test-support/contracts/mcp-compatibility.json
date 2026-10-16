@@ -499,7 +499,7 @@
           "properties" : {
             "operation" : {
               "type" : "string",
-              "enum" : [ "acquire", "acquisitions", "ask", "await", "events", "evidence.read", "evidence.record", "facets", "inventory", "list", "outline", "rank", "read", "record.report", "search", "status", "symbols", "upload" ]
+              "enum" : [ "acquire", "acquisitions", "ask", "await", "content.get", "content.revise", "events", "evidence.read", "evidence.record", "facets", "inventory", "list", "outline", "rank", "read", "record.report", "search", "status", "symbols", "types.capabilities", "types.get", "types.list", "types.validate", "upload" ]
             },
             "payload" : {
               "type" : "object"

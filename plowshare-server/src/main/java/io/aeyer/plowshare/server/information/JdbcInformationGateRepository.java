@@ -50,10 +50,15 @@ public final class JdbcInformationGateRepository implements InformationGateRepos
     if (fingerprint == null
         || !fingerprint.matches("[a-f0-9]{64}")
         || !Set.of(
+                "interchange.import",
                 "intake",
                 "evidence.record",
                 "record.report",
                 "migration.release",
+                "types.version.create",
+                "types.activate",
+                "types.deprecate",
+                "content.revise",
                 "migration.adopt")
             .contains(operation)) throw new IllegalArgumentException("invalid gate identity");
     jdbc.queryForObject(

@@ -50,6 +50,7 @@ function fixture(nativeSessions?: NativeSessions) {
   });
   type HistoryReply = () => Outcome;
   let approvalRows: unknown[] = [];
+  const conversationApprovalRows = new Map<string, unknown[]>();
   let onApproval: () => Outcome | Promise<Outcome> = () => ({ code: 'OK' });
   let onInformation: (
     type: string,
@@ -163,7 +164,16 @@ function fixture(nativeSessions?: NativeSessions) {
           if (type === 'approval.list')
             return onApprovals
               ? onApprovals()
-              : { code: 'OK', payload: { approvals: approvalRows } };
+              : {
+                  code: 'OK',
+                  payload: {
+                    approvals:
+                      typeof payload.conversation === 'string'
+                        ? (conversationApprovalRows.get(payload.conversation) ??
+                          [])
+                        : approvalRows,
+                  },
+                };
           if (type === 'approval.answer') return onApproval();
           if (type === 'inbox.list')
             return { code: 'OK', payload: { items: [], unread: 0 } };
@@ -237,6 +247,9 @@ function fixture(nativeSessions?: NativeSessions) {
     },
     approvals: (value: typeof approvalRows) => {
       approvalRows = value;
+    },
+    conversationApprovals: (conversation: string, rows: unknown[]) => {
+      conversationApprovalRows.set(conversation, rows);
     },
     answer: (value: typeof onApproval) => {
       onApproval = value;
@@ -351,6 +364,107 @@ await test('an Inbox change discovers approvals from another client without an a
   assert.equal(
     f.calls.some((call) => call.type === 'agent.run'),
     false,
+  );
+});
+
+await test('opening a conversation discovers foreground approvals absent from the account listing', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire({ id: 'background', conversation: 'second' })]);
+  f.conversationApprovals('first', [approvalWire({ id: 'foreground' })]);
+  await connect(f.client);
+  assert.deepEqual(
+    f.client.state.approvals.map((row) => row.id),
+    ['background'],
+  );
+  await f.client.followView('chat', 'first');
+  assert.deepEqual(f.client.state.approvals.map((row) => row.id).sort(), [
+    'background',
+    'foreground',
+  ]);
+  assert.ok(
+    f.calls.some(
+      (call) =>
+        call.type === 'approval.list' && call.payload.conversation === 'first',
+    ),
+  );
+  assert.equal(
+    f.calls.some((call) =>
+      ['approval.answer', 'agent.run'].includes(call.type),
+    ),
+    false,
+  );
+});
+
+await test('approval refresh combines distinct open conversations and removes closed-view questions', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.conversationApprovals('first', [approvalWire({ id: 'chat' })]);
+  f.conversationApprovals('second', [
+    approvalWire({ id: 'trajectory', conversation: 'second' }),
+  ]);
+  await connect(f.client);
+  await f.client.followView('chat', 'first');
+  await f.client.followView('trajectory', 'second');
+  assert.deepEqual(f.client.state.approvals.map((row) => row.id).sort(), [
+    'chat',
+    'trajectory',
+  ]);
+  await f.client.followView('trajectory');
+  assert.deepEqual(
+    f.client.state.approvals.map((row) => row.id),
+    ['chat'],
+  );
+});
+
+await test('a run ending AWAITING discovers a command without a reason before polling stops', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Task',
+  });
+  f.conversationApprovals('first', [approvalWire({ reason: null })]);
+  f.status(() => ({
+    code: 'OK',
+    payload: {
+      id: 'job-one',
+      state: 'DONE',
+      outcome: {
+        ending: 'AWAITING',
+        answered: false,
+        text: 'Approve running echo fixture in /fixture on the server side? [approval-one]',
+      },
+    },
+  }));
+  // No Inbox push: the durable job outcome must also discover the pending decision.
+  f.push({ job: 'job-one', kind: 'ended', ending: 'AWAITING' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(present(f.client.state.jobs[0]).ending, 'AWAITING');
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.equal(f.client.state.approvals[0]?.reason, undefined);
+  assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 1);
+  assert.equal(
+    f.calls.some((call) => call.type === 'approval.answer'),
+    false,
+  );
+});
+
+await test('an unreadable approval push reports its refresh failure and preserves pending requests', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  f.approvals([approvalWire()]);
+  await connect(f.client);
+  f.rawApprovals(() => ({ code: 'OK', payload: {} }));
+  f.push({ kind: 'inbox.changed', unread: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.client.state.approvals[0]?.id, 'approval-one');
+  assert.match(
+    f.client.state.backgroundError ?? '',
+    /unreadable approval.list/,
   );
 });
 
@@ -1860,6 +1974,12 @@ await test('direct workflow starts check the agent grant, preserve the request k
     f.calls.some((call) => call.type === 'orchestration.start'),
     false,
   );
+  await assert.rejects(f.client.dispatch(input), /explicit project/);
+  f.client.state.conversations = f.client.state.conversations.map((row) => ({
+    ...row,
+    project: 'repo',
+  }));
+  f.client.state.agents['repo'] = f.client.state.agents[''] ?? [];
   let finish!: (answer: Outcome) => void;
   f.workflow(
     () =>
@@ -1883,6 +2003,7 @@ await test('direct workflow starts check the agent grant, preserve the request k
     {
       agent: 'bot',
       definition: 'research',
+      project: 'repo',
       request: 'Original\nquestion',
       requestId: input.requestId,
     },

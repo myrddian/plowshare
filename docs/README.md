@@ -8,8 +8,8 @@
 - [CLI](../plowshare-cli/README.md)
 - [MCP server](../plowshare-mcp/README.md)
 - [Shared tool schemas](tool-schemas.md)
-- [MCP client design and implementation plan](mcp-client-design.md) (proposed)
-- [MCP client management and local-host workflows](mcp-client-workflows.md) (design)
+- [MCP client design and implementation plan](mcp-client-design.md)
+- [MCP client management and local-host workflows](mcp-client-workflows.md)
 - [Desktop](../plowshare-desktop/README.md)
 - [TypeScript client](../sdk/typescript/README.md)
 - [Node client](../sdk/node/README.md)
@@ -19,7 +19,16 @@
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
+- [Authored knowledge implementation plan](authored-knowledge-implementation.md)
+- [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
+- [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
+- [Document navigation usage](authored-navigation.md) — relationships, paths and policy administration.
+- [Document navigation and reference policy](decisions/0028-document-navigation-and-reference-policy.md) — implemented locally; release is separate.
+- [Authored navigation implementation plan](authored-navigation-implementation.md)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
+- [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)
+- [MCP cancellation and recovery](mcp-recovery.md)
+- [MCP interoperability and test instance](mcp-interoperability.md)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

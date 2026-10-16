@@ -438,6 +438,16 @@ const ANSWER = [
  * surfaces are wrong in the same way.
  */
 const EVERY_PROJECT: readonly unknown[] = [
+  // Human accounts advertise Personal; the UI selects that returned identity explicitly.
+  {
+    name: 'personal:736f6d656f6e65',
+    kind: 'personal',
+    workspace: '/personal',
+    machine: null,
+    lent: [],
+    exclusions: [],
+    members: ['someone'],
+  },
   {
     name: 'plowshare',
     workspace: '/srv/plowshare',
@@ -2616,7 +2626,24 @@ function talkingTo(
   };
 }
 
+/** Some setup/archive cases deliberately exercise a server without a runnable Personal home. */
+function globalSetup(fake: Fake): void {
+  fake.script('project.list', { code: 'OK', payload: EVERY_PROJECT.slice(1) });
+}
+
 describe('the whole stack, over a real socket, against a scripted Plowshare', () => {
+  it('refuses fresh work when neither a project nor Personal is selected', async () => {
+    const fake = await scriptedPlowshare([]);
+    globalSetup(fake);
+    const prompt = scripted(['Start work']);
+    await converse(talkingTo(fake, prompt));
+    expect(prompt.said.join('\n')).toContain('Select a project or Personal');
+    expect(
+      fake.heard.frames.some((frame) =>
+        ['conversation.open', 'agent.run'].includes(frame.type),
+      ),
+    ).toBe(false);
+  });
   it('discovers Personal as its runnable default and carries it into every conversation request', async () => {
     const fake = await scriptedPlowshare(['answer-first']);
     const personal = 'personal:736f6d656f6e65';
@@ -2646,6 +2673,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
   });
   it('runs all direct memory verbs and conversation search over WS without an agent turn', async () => {
     const fake = await scriptedPlowshare([]);
+    globalSetup(fake);
     const retrieval = (
       JSON.parse(
         await readFile(
@@ -2785,6 +2813,7 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
 
   it('runs both retrieval paths over the signed-in socket without selecting an agent or opening a conversation', async () => {
     const fake = await scriptedPlowshare([]);
+    globalSetup(fake);
     fake.script('conversation.search', {
       code: 'OK',
       payload: {
@@ -3542,7 +3571,9 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
     // reads an absent field as. A payload of nulls would say something this
     // client was never asked.
     expect(fake.heard.frames[3]?.payload).toEqual({});
-    expect(fake.heard.frames[4]?.payload).toEqual({});
+    expect(fake.heard.frames[4]?.payload).toEqual({
+      project: 'personal:736f6d656f6e65',
+    });
 
     // WHAT A PERSON SEES. The projects by the name they chose, and the
     // conversations by title with the id beside it.
@@ -3687,7 +3718,10 @@ describe('the whole stack, over a real socket, against a scripted Plowshare', ()
       'job.status',
       'conversation.trajectory',
     ]);
-    expect(fake.heard.frames[3]?.payload).toEqual({ agent: 'aristoxenus' });
+    expect(fake.heard.frames[3]?.payload).toEqual({
+      agent: 'aristoxenus',
+      project: 'personal:736f6d656f6e65',
+    });
     expect(fake.heard.frames[4]?.payload).toEqual({ conversation: CONTINUING });
     expect(fake.heard.frames[5]?.payload).toEqual(tailOf(CONTINUING));
     expect(fake.heard.frames[6]?.payload).toEqual({
@@ -4685,6 +4719,7 @@ describe('a run that stops to ask a person before a command runs', () => {
 
   it('revokes an approval, and says approvals need a project where there is none', async () => {
     const fake = await scriptedPlowshare([]);
+    globalSetup(fake);
     fake.script('approval.revoke', {
       code: 'OK',
       payload: { id: 'apr_1', revoked: true },
@@ -5364,6 +5399,7 @@ describe('scheduling out of one sentence, saved only on a yes', () => {
 
   it('shows the whole proposal and saves a monitored file on a y', async () => {
     const fake = await scheduling();
+    globalSetup(fake);
     const prompt = scripted([SENTENCE, 'y']);
     await converse(inSydney(fake, prompt));
     const said = prompt.said.join('\n');

@@ -284,7 +284,18 @@ export async function dispatch(
   transport: Transport,
   asked: Request,
 ): Promise<Result> {
-  return resultOf(asked, await transport.ask(asked.type, asked.payload));
+  // Direct callers may construct a request without the command parser. Enforce destination
+  // selection here too, before delegating lifetime and I/O to their transport.
+  const checked = [
+    'agent.run',
+    'conversation.open',
+    'conversation.list',
+    'conversation.latest',
+    'orchestration.start',
+  ].includes(asked.type)
+    ? decodeRequest(asked.type, asked.payload)
+    : asked;
+  return resultOf(checked, await transport.ask(checked.type, checked.payload));
 }
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */

@@ -24,6 +24,7 @@ const pyField = (s) =>
     'global',
     'async',
     'await',
+    'if', 'else', 'not', 'for', 'while', 'def', 'return', 'lambda', 'try', 'except', 'finally', 'with', 'pass', 'yield', 'and', 'or', 'del', 'assert', 'import', 'raise', 'nonlocal', 'break', 'continue',
     'None',
     'True',
     'False',

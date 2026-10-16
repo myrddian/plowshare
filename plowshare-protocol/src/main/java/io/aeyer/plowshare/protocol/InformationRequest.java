@@ -11,6 +11,78 @@ public sealed interface InformationRequest {
 
   String operation();
 
+  record InterchangeCapabilities(Selection selection) implements InformationRequest {
+    public InterchangeCapabilities {
+      interchangeSelection(selection);
+    }
+
+    public String operation() {
+      return "interchange.capabilities";
+    }
+  }
+
+  record InterchangeExport(Selection selection, List<UUID> revisions)
+      implements InformationRequest {
+    public InterchangeExport {
+      interchangeSelection(selection);
+      revisions = List.copyOf(revisions);
+      if (revisions.isEmpty()
+          || revisions.size() > InformationInterchange.MAX_DOCUMENTS
+          || new HashSet<>(revisions).size() != revisions.size())
+        throw new IllegalArgumentException("Select 1–16 distinct exact revisions");
+    }
+
+    public String operation() {
+      return "interchange.export";
+    }
+  }
+
+  record InterchangeReadable(Selection selection, UUID revision) implements InformationRequest {
+    public InterchangeReadable {
+      interchangeSelection(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    public String operation() {
+      return "interchange.readable";
+    }
+  }
+
+  record InterchangeImport(
+      Selection selection, UUID requestId, InformationInterchange.ImportPlan plan)
+      implements InformationRequest {
+    public InterchangeImport {
+      interchangeSelection(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(plan);
+      if (selection.scope().kind().equals("shared"))
+        throw new IllegalArgumentException("Import requires an owned destination scope");
+    }
+
+    public String operation() {
+      return "interchange.import";
+    }
+  }
+
+  record InterchangeOrigin(Selection selection, UUID revision) implements InformationRequest {
+    public InterchangeOrigin {
+      interchangeSelection(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    public String operation() {
+      return "interchange.origin";
+    }
+  }
+
+  private static void interchangeSelection(Selection selection) {
+    Objects.requireNonNull(selection);
+    if (!selection.corpus().equals("documents") || selection.filter() != null)
+      throw new IllegalArgumentException("Interchange selects exact document revisions");
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record Scope(String kind, String project, Boolean includeShared) {
     public Scope {
       if (!Set.of("personal", "project", "shared").contains(kind))
@@ -28,9 +100,23 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Selection(Scope scope, String corpus, FacetFilter filter) {
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record Selection(Scope scope, String corpus, FacetFilter filter, String view) {
+    public Selection(Scope scope, String corpus, FacetFilter filter) {
+      this(scope, corpus, filter, null);
+    }
+
     public Selection {
       Objects.requireNonNull(scope, "scope");
+      if (view != null && !InformationContent.VIEW.equals(view))
+        throw new IllegalArgumentException("unsupported information view");
+      if (filter != null
+          && (filter.contentType() != null
+              || filter.contentTypeVersion() != null
+              || filter.untyped() != null)
+          && !InformationContent.VIEW.equals(view))
+        throw new IllegalArgumentException("type filters require supporting view");
       if (corpus == null) corpus = "documents";
       if (!Set.of("code", "documents").contains(corpus))
         throw new IllegalArgumentException("unsupported information corpus");
@@ -41,6 +127,8 @@ public sealed interface InformationRequest {
     }
   }
 
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
   record FacetFilter(
       String kind,
       List<String> tags,
@@ -50,8 +138,38 @@ public sealed interface InformationRequest {
       String documentAuthor,
       String when,
       String subtype,
-      String search) {
+      String search,
+      UUID contentType,
+      UUID contentTypeVersion,
+      Boolean untyped) {
+    public FacetFilter(
+        String kind,
+        List<String> tags,
+        List<String> autoTag,
+        String tagGroup,
+        String author,
+        String documentAuthor,
+        String when,
+        String subtype,
+        String search) {
+      this(
+          kind,
+          tags,
+          autoTag,
+          tagGroup,
+          author,
+          documentAuthor,
+          when,
+          subtype,
+          search,
+          null,
+          null,
+          null);
+    }
+
     public FacetFilter {
+      if (Boolean.TRUE.equals(untyped) && (contentType != null || contentTypeVersion != null))
+        throw new IllegalArgumentException("untyped conflicts with type filters");
       if (kind != null && !Set.of("source", "report").contains(kind))
         throw new IllegalArgumentException("kind must be source or report");
       tags = InformationRequest.tags(tags == null ? List.of() : tags);
@@ -118,9 +236,26 @@ public sealed interface InformationRequest {
       UUID requestId,
       String name,
       String text,
-      UUID revision)
+      UUID revision,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public Admission(
+        AdmissionAction action,
+        Selection selection,
+        UUID requestId,
+        String name,
+        String text,
+        UUID revision) {
+      this(action, selection, requestId, name, text, revision, null, null);
+    }
+
     public Admission {
+      authored(selection, expectedRevision, typing);
+      if (typing != null
+          && action != AdmissionAction.UPLOAD
+          && !Objects.equals(expectedRevision, revision))
+        throw new IllegalArgumentException("expectedRevision must match revised revision");
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(action, "action");
       Objects.requireNonNull(requestId, "requestId");
@@ -143,9 +278,26 @@ public sealed interface InformationRequest {
       UUID requestId,
       String url,
       String name,
-      UUID revision)
+      UUID revision,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public Acquisition(
+        AcquisitionAction action,
+        Selection selection,
+        UUID requestId,
+        String url,
+        String name,
+        UUID revision) {
+      this(action, selection, requestId, url, name, revision, null, null);
+    }
+
     public Acquisition {
+      authored(selection, expectedRevision, typing);
+      if (action == AcquisitionAction.ACQUIRE && typing != null
+          || typing != null && !Objects.equals(expectedRevision, revision))
+        throw new IllegalArgumentException(
+            "typed acquisition only refreshes its expected revision");
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(action, "action");
       Objects.requireNonNull(requestId, "requestId");
@@ -356,9 +508,24 @@ public sealed interface InformationRequest {
       List<UUID> inputs,
       List<UUID> evidence,
       UUID feedback,
-      InformationReportDetails details)
+      InformationReportDetails details,
+      UUID expectedRevision,
+      InformationContent.Typing typing)
       implements InformationRequest {
+    public ReportRecord(
+        Selection selection,
+        UUID requestId,
+        String name,
+        String text,
+        List<UUID> inputs,
+        List<UUID> evidence,
+        UUID feedback,
+        InformationReportDetails details) {
+      this(selection, requestId, name, text, inputs, evidence, feedback, details, null, null);
+    }
+
     public ReportRecord {
+      authored(selection, expectedRevision, typing);
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(requestId, "requestId");
       name = ContractValues.text(name, "name", 1024, true);
@@ -371,6 +538,158 @@ public sealed interface InformationRequest {
     @Override
     public String operation() {
       return "record.report";
+    }
+  }
+
+  record ContentCapabilities(Selection selection) implements InformationRequest {
+    public ContentCapabilities {
+      Objects.requireNonNull(selection);
+    }
+
+    @Override
+    public String operation() {
+      return "types.capabilities";
+    }
+  }
+
+  record ContentRead(Selection selection, UUID revision) implements InformationRequest {
+    public ContentRead {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(revision);
+    }
+
+    @Override
+    public String operation() {
+      return "content.get";
+    }
+  }
+
+  record ContentRevise(
+      Selection selection, UUID requestId, UUID expectedRevision, InformationContent.Typing typing)
+      implements InformationRequest {
+    public ContentRevise {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(expectedRevision);
+      Objects.requireNonNull(typing);
+    }
+
+    @Override
+    public String operation() {
+      return "content.revise";
+    }
+  }
+
+  record TypeList(Selection selection, Boolean drafts, Integer limit, Integer offset)
+      implements InformationRequest {
+    public TypeList {
+      Objects.requireNonNull(selection);
+      page(limit, offset, 100);
+    }
+
+    @Override
+    public String operation() {
+      return "types.list";
+    }
+  }
+
+  record TypeRead(Selection selection, UUID version, UUID attachedRevision, Boolean publishedOnly)
+      implements InformationRequest {
+    public TypeRead(Selection selection, UUID version, UUID attachedRevision) {
+      this(selection, version, attachedRevision, null);
+    }
+
+    public TypeRead {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(version);
+    }
+
+    @Override
+    public String operation() {
+      return "types.get";
+    }
+  }
+
+  record TypeDraft(
+      Selection selection,
+      UUID requestId,
+      UUID type,
+      Long expectedControlRevision,
+      String slug,
+      String label,
+      String description,
+      SchemaDefinition schema,
+      SchemaValue.ObjectValue presentation)
+      implements InformationRequest {
+    public TypeDraft {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      if (type == null) {
+        InformationContent.slug(slug);
+        label = InformationContent.text(label, "label", 120, true);
+        description = InformationContent.text(description, "description", 4096, false);
+      } else if (slug != null || label != null || description != null)
+        throw new IllegalArgumentException("existing type identity is immutable");
+      DocumentMetadata.definition(schema);
+      presentation =
+          DocumentMetadata.presentation(
+              schema, presentation == null ? DocumentMetadata.empty() : presentation);
+      if ((type != null) != (expectedControlRevision != null)
+          || expectedControlRevision != null && expectedControlRevision < 1)
+        throw new IllegalArgumentException("existing type needs expected control revision");
+    }
+
+    @Override
+    public String operation() {
+      return "types.version.create";
+    }
+  }
+
+  record TypeTransition(
+      Selection selection,
+      UUID requestId,
+      UUID version,
+      long expectedControlRevision,
+      boolean activate)
+      implements InformationRequest {
+    public TypeTransition {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(version);
+      if (expectedControlRevision < 1)
+        throw new IllegalArgumentException("positive control revision required");
+    }
+
+    @Override
+    public String operation() {
+      return activate ? "types.activate" : "types.deprecate";
+    }
+  }
+
+  record TypeValidate(
+      Selection selection,
+      UUID version,
+      UUID attachedRevision,
+      SchemaValue.ObjectValue metadata,
+      Boolean publishedOnly)
+      implements InformationRequest {
+    public TypeValidate(
+        Selection selection,
+        UUID version,
+        UUID attachedRevision,
+        SchemaValue.ObjectValue metadata) {
+      this(selection, version, attachedRevision, metadata, null);
+    }
+
+    public TypeValidate {
+      Objects.requireNonNull(selection);
+      Objects.requireNonNull(version);
+      metadata = DocumentMetadata.instance(metadata);
+    }
+
+    @Override
+    public String operation() {
+      return "types.validate";
     }
   }
 
@@ -451,9 +770,15 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Retry(Selection selection, UUID revision, UUID acquisition, UUID requestId)
+  record Retry(
+      Selection selection, UUID revision, UUID acquisition, UUID requestId, List<String> stages)
       implements InformationRequest {
+    public Retry(Selection selection, UUID revision, UUID acquisition, UUID requestId) {
+      this(selection, revision, acquisition, requestId, null);
+    }
+
     public Retry {
+      stages = processingStages(stages);
       Objects.requireNonNull(selection, "selection");
       new Reference(revision, acquisition);
       if (revision != null) Objects.requireNonNull(requestId, "requestId");
@@ -465,9 +790,15 @@ public sealed interface InformationRequest {
     }
   }
 
-  record Rebuild(Selection selection, UUID revision, UUID requestId, String stage)
+  record Rebuild(
+      Selection selection, UUID revision, UUID requestId, String stage, List<String> stages)
       implements InformationRequest {
+    public Rebuild(Selection selection, UUID revision, UUID requestId, String stage) {
+      this(selection, revision, requestId, stage, null);
+    }
+
     public Rebuild {
+      stages = processingStages(stages);
       Objects.requireNonNull(selection, "selection");
       Objects.requireNonNull(revision, "revision");
       Objects.requireNonNull(requestId, "requestId");
@@ -577,6 +908,263 @@ public sealed interface InformationRequest {
     public String operation() {
       return "migration.adopt";
     }
+  }
+
+  record NavigationCapabilities(Selection selection) implements InformationRequest {
+    public NavigationCapabilities {
+      navigation(selection);
+    }
+
+    public String operation() {
+      return "navigation.capabilities";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record DocumentList(
+      Selection selection,
+      UUID relatedTo,
+      String relation,
+      String direction,
+      Integer limit,
+      Integer offset)
+      implements InformationRequest {
+    public DocumentList {
+      navigation(selection);
+      page(limit, offset, 100);
+      if (relatedTo == null && (relation != null || direction != null))
+        throw new IllegalArgumentException("traversal needs a source");
+      if (relation != null) InformationNavigation.relation(relation);
+      if (direction != null) InformationNavigation.direction(direction);
+    }
+
+    public String operation() {
+      return "documents.list";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record DocumentFacets(Selection selection, UUID relatedTo, String relation, String direction)
+      implements InformationRequest {
+    public DocumentFacets {
+      navigation(selection);
+      if (relatedTo == null && (relation != null || direction != null))
+        throw new IllegalArgumentException("traversal needs a source");
+      if (relation != null) InformationNavigation.relation(relation);
+      if (direction != null) InformationNavigation.direction(direction);
+    }
+
+    public String operation() {
+      return "documents.facets";
+    }
+  }
+
+  record DocumentGet(Selection selection, InformationNavigation.Target target)
+      implements InformationRequest {
+    public DocumentGet {
+      navigation(selection);
+      Objects.requireNonNull(target);
+    }
+
+    public String operation() {
+      return "documents.get";
+    }
+  }
+
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  record RelationshipList(
+      Selection selection,
+      UUID resource,
+      String direction,
+      String relation,
+      UUID otherResource,
+      Integer limit,
+      Integer offset)
+      implements InformationRequest {
+    public RelationshipList {
+      navigation(selection);
+      Objects.requireNonNull(resource);
+      InformationNavigation.direction(direction);
+      if (relation != null) InformationNavigation.relation(relation);
+      page(limit, offset, 100);
+    }
+
+    public String operation() {
+      return "relationships.list";
+    }
+  }
+
+  record RelationshipCreate(
+      Selection selection,
+      UUID requestId,
+      UUID source,
+      InformationNavigation.Target target,
+      String relation,
+      UUID expectedSourceRevision)
+      implements InformationRequest {
+    public RelationshipCreate {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(source);
+      Objects.requireNonNull(target);
+      Objects.requireNonNull(expectedSourceRevision);
+      InformationNavigation.relation(relation);
+    }
+
+    public String operation() {
+      return "relationships.create";
+    }
+  }
+
+  record RelationshipRemove(
+      Selection selection, UUID requestId, UUID relationship, Long expectedVersion)
+      implements InformationRequest {
+    public RelationshipRemove {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(relationship);
+      control(expectedVersion, false);
+    }
+
+    public String operation() {
+      return "relationships.remove";
+    }
+  }
+
+  record NavigationPolicyGet(Selection selection, InformationNavigation.PolicyTarget target)
+      implements InformationRequest {
+    public NavigationPolicyGet {
+      navigation(selection);
+      Objects.requireNonNull(target);
+    }
+
+    public String operation() {
+      return "policy.get";
+    }
+  }
+
+  record NavigationPolicySet(
+      Selection selection,
+      UUID requestId,
+      InformationNavigation.PolicyTarget target,
+      Long expectedVersion,
+      InformationNavigation.PolicySettings settings,
+      String reason)
+      implements InformationRequest {
+    public NavigationPolicySet {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(target);
+      control(expectedVersion, true);
+      Objects.requireNonNull(settings);
+      reason = ContractValues.text(reason, "reason", 4096, true);
+    }
+
+    public String operation() {
+      return "policy.set";
+    }
+  }
+
+  record NavigationViews(Selection selection) implements InformationRequest {
+    public NavigationViews {
+      navigation(selection);
+    }
+
+    public String operation() {
+      return "views.list";
+    }
+  }
+
+  record NavigationViewGet(Selection selection, UUID id) implements InformationRequest {
+    public NavigationViewGet {
+      navigation(selection);
+      Objects.requireNonNull(id);
+    }
+
+    public String operation() {
+      return "views.get";
+    }
+  }
+
+  record NavigationViewSave(
+      Selection selection,
+      UUID requestId,
+      UUID id,
+      Long expectedVersion,
+      String label,
+      InformationNavigation.Path path)
+      implements InformationRequest {
+    public NavigationViewSave {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(id);
+      control(expectedVersion, true);
+      label = ContractValues.identity(label, "label", 120);
+      Objects.requireNonNull(path);
+    }
+
+    public String operation() {
+      return "views.save";
+    }
+  }
+
+  record NavigationViewDelete(Selection selection, UUID requestId, UUID id, Long expectedVersion)
+      implements InformationRequest {
+    public NavigationViewDelete {
+      navigation(selection);
+      Objects.requireNonNull(requestId);
+      Objects.requireNonNull(id);
+      control(expectedVersion, false);
+    }
+
+    public String operation() {
+      return "views.delete";
+    }
+  }
+
+  private static void navigation(Selection selection) {
+    Objects.requireNonNull(selection);
+    if (!"documents".equals(selection.corpus()))
+      throw new IllegalArgumentException("document navigation requires documents corpus");
+  }
+
+  private static void control(Long version, boolean create) {
+    if (version == null || version < (create ? 0 : 1) || version > 9007199254740990L)
+      throw new IllegalArgumentException("invalid expected version");
+  }
+
+  private static void authored(
+      Selection selection, UUID expected, InformationContent.Typing typing) {
+    if (expected != null && typing == null)
+      throw new IllegalArgumentException("expectedRevision requires explicit typing");
+    if (typing != null
+        && (!InformationContent.VIEW.equals(selection.view())
+            || !"documents".equals(selection.corpus())))
+      throw new IllegalArgumentException("typed writes require the supporting document view");
+  }
+
+  private static List<String> processingStages(List<String> stages) {
+    if (stages == null) return null;
+    if (stages.isEmpty()
+        || stages.size() > 7
+        || stages.stream().distinct().count() != stages.size()
+        || stages.stream()
+            .anyMatch(
+                stage ->
+                    !Set.of(
+                            "extract",
+                            "derive",
+                            "embed",
+                            "summarise",
+                            "summary_embed",
+                            "autoTag",
+                            "tagGroups")
+                        .contains(stage)))
+      throw new IllegalArgumentException("invalid selected processing stages");
+    return List.copyOf(stages);
   }
 
   private static void page(Integer limit, Integer offset, int maximum) {

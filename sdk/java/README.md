@@ -18,6 +18,15 @@ use an existing authenticated `Plowshare` connection. Wire JSON parsing stays in
 the SDK; application callers consume validated immutable DTOs. Information and
 orchestration input codecs reject unsupported fields and malformed nested values.
 
+Runtime admission requires an explicit destination. Pass a non-null project to
+`openConversation`, `uploadImage`, fresh `AgentClient.Run` work
+and `OrchestrationClient.start`. To continue an existing conversation, supply its
+ID and omit the project; conflicting selectors fail locally. Personal clients
+must deliberately select their own Personal project identity. External systems
+use a configured named project and an Application/service credential.
+`conversations(null)` explicitly reads Global history and cannot create work. See
+[explicit execution scope](../../docs/sdks.md#explicit-execution-scope).
+
 `Plowshare.connect(origin, token, timeout, Consumer<ServerPush>)` accepts typed push
 notifications. The generic wire request API is package-private. Missing required
 values, malformed replies and foreign receipt identities are errors; primitive

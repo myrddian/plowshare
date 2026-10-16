@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
  * Reads the owner and registered home together, without exposing rows to the authorization layer.
  */
 @Repository
-public final class JdbcConversationContextRepository implements ConversationContextRepository {
+public class JdbcConversationContextRepository implements ConversationContextRepository {
   private final JdbcTemplate jdbc;
 
   public JdbcConversationContextRepository(JdbcTemplate jdbc) {

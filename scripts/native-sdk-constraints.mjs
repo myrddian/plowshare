@@ -226,9 +226,14 @@ export function constrain(graph) {
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
       field(s, 'type', {pattern:'^(MANAGED|DISJOINT)$'});
     }
+    // SDK admission requires an explicit runtime destination; wire defaults remain server-owned.
+    if (['conversation.open', 'orchestration.start'].includes(op))
+      rules(s, present('project'));
+    if (['conversation.list', 'conversation.latest'].includes(op)) rules(s, {has:'project'});
     if (op === 'agent.run')
       rules(
         s,
+        or(present('conversation'), present('project')),
         implies(eq('newConversation', true), absent('conversation')),
         implies(present('conversation'), absent('project')),
         implies(
@@ -269,8 +274,44 @@ export function constrain(graph) {
           absent('project', 'maxModelCalls', 'maxTurns'),
         ),
       );
+    if (['information.navigation.capabilities','information.documents.list','information.documents.facets','information.documents.get','information.relationships.list','information.relationships.create','information.relationships.remove','information.policy.get','information.policy.set','information.views.list','information.views.get','information.views.save','information.views.delete'].includes(op)) {
+      if(s.properties?.target) {
+        const target=resolve(graph,s.properties.target);
+        for(const variant of target.anyOf??[s.properties.target]) field(resolve(graph,variant),'resource',{pattern:uuid});
+      }
+      field(s,'expectedVersion',integer(['information.relationships.remove','information.views.delete'].includes(op)?1:0,9007199254740990));
+      field(s,'limit',integer(1,100));
+      for(const key of ['resource','source','id','relationship','relatedTo','otherResource','expectedSourceRevision']) field(s,key,{pattern:uuid});
+      field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+      field(s,'reason',{...text(4096),nonblank:true});
+      if(['information.documents.list','information.documents.facets'].includes(op)) rules(s,implies(or(present('relation'),present('direction')),present('relatedTo')));
+    }
+    if (op.startsWith('information.interchange.')) {
+      field(s,'revisions',{minItems:1,maxItems:16,uniqueItems:true,element:canonicalUuid});
+      field(s,'revision',canonicalUuid); field(s,'requestId',canonicalUuid);
+      add(s,{maxJsonBytes:8388608});
+      if(op==='information.interchange.import') rules(s,not(eq('scope.kind','shared')));
+    }
     if (op.startsWith('information.')) {
       field(s, 'waitMs', { maximum: 30000 });
+      for (const key of ['expectedRevision', 'version', 'type', 'attachedRevision']) field(s, key, canonicalUuid);
+      field(s, 'expectedControlRevision', integer(1,9007199254740991));
+      field(s, 'stages', {minItems:1,maxItems:7,uniqueItems:true});
+      field(s, 'metadata', {schemaInstance:true, maxJsonBytes:16384});
+      field(s, 'presentation', {schemaInstance:true, maxJsonBytes:8192});
+      field(s, 'schema', {documentSchema:true, maxJsonBytes:65536});
+      field(s, 'slug', {pattern:'^[a-z](?:[a-z0-9-]{0,62}[a-z0-9])?$', minLength:1,maxLength:64});
+      field(s, 'label', {minLength:1,maxLength:120,nonblank:true});
+      // Empty descriptions are valid; override the generic nonblank text constraint.
+      field(s, 'description', {...text(4096), nonblank:false});
+      if (s.properties.filter) rules(s, implies(or(present('filter.contentType'),present('filter.contentTypeVersion'),present('filter.untyped')),eq('view','content-types-v1')),implies(eq('filter.untyped',true),absent('filter.contentType','filter.contentTypeVersion')));
+      if (s.properties.typing) rules(s, implies(present('typing'),eq('view','content-types-v1')),implies(present('expectedRevision'),present('typing')));
+      if (op==='information.types.version.create') rules(s,
+        {eq:[present('type'),present('expectedControlRevision')]},
+        implies(present('type'),absent('slug','label','description')),
+        implies(not(present('type')),and(present('slug'),present('label'))));
+      if (op==='information.acquire') rules(s, absent('typing','expectedRevision'));
+      if (op==='information.refresh') rules(s, implies(present('typing'), {eq:[g('revision'),g('expectedRevision')]}));
       field(s, 'sources', { minItems: 1, maxItems: 100 });
       for (const k of [
         'tags',
@@ -356,6 +397,18 @@ export function constrain(graph) {
   field(actingOpened,'expiresAt',instant);
   for (const shape of Object.values(graph.$defs)) {
     const title = shape.title ?? '';
+    if (shape.properties?.mode && shape.properties?.metadata && !shape.properties?.scope) field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});
+    if (title === 'InformationTypeContract') {
+      for(const key of ['type','version'])field(shape,key,canonicalUuid);
+      field(shape,'ordinal',integer(1)); field(shape,'label',text(120,1));field(shape,'description',text(4096));
+      field(shape,'definitionHash',{pattern:'^[a-f0-9]{64}$'});
+      field(shape,'schema',{documentSchema:true,maxJsonBytes:65536});field(shape,'presentation',{schemaInstance:true,maxJsonBytes:8192});
+    }
+    if (title === 'InformationContentBinding') {field(shape,'metadata',{schemaInstance:true,maxJsonBytes:16384});field(shape,'metadataHash',{pattern:'^[a-f0-9]{64}$'});}
+    if (title === 'InformationTypeVersion') {field(shape,'controlRevision',integer(1,9007199254740991));field(shape,'createdAt',instant);}
+    if (title === 'InformationContentView') {field(shape,'revision',canonicalUuid);field(shape,'startingRevision',canonicalUuid);field(shape,'reused',{maxItems:7});field(shape,'authorisedStages',{maxItems:7,uniqueItems:true});}
+    if (title === 'MetadataValidationResult') field(shape,'issues',{maxItems:32});
+    if (title === 'SchemaObject') add(shape,{maxProperties:1024,keyPattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
     if (shape.properties?.source && shape.properties?.subject && shape.properties?.state)
       field(shape, 'source', { ...portName, maxLength: 1024 });
     if (title.startsWith('Relay')) {
@@ -579,6 +632,37 @@ export function constrain(graph) {
           '^(?:ANSWERED|TURN_CAP|CALL_BUDGET|CANCELLED|STUCK|UNAVAILABLE|SUB_AGENT_FAILED|SESSION_GONE|AWAITING)?$',
       });
     }
+    if (title?.startsWith('Portable')) {
+      for(const key of ['resource','revision','id','source','target','pinnedRevision','foreignResource','foreignRevision','foreignVersion','localVersion','localRevision','expectedRevision','bundle']) if(p[key] && stringShape(p[key])) field(s,key,canonicalUuid);
+      for(const key of ['manifestHash','contentHash','textHash','sourceHash']) field(s,key,{pattern:'^[a-f0-9]{64}$',maxLength:64});
+      if(p.path) field(s,'path',{portablePath:true,maxLength:240});
+      if(title==='PortableDescriptor') {
+        add(s,{portableGraph:'descriptor'}); field(s,'ordinal',integer(1));field(s,'sourceName',text(1024,1));field(s,'title',text(32768));
+        field(s,'mediaType',{maxLength:256,pattern:'^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+(?:;[ -~]{1,128})?$'});
+        field(s,'tags',{maxItems:32,element:{...identity,maxLength:64}});
+      }
+      if(title==='PortableProvenance') {
+        field(s,'owner',identity); field(s,'createdAt',instant);field(s,'producer',text(1024,1));field(s,'producerDefinitionHash',{pattern:'^[a-f0-9]{64}$',maxLength:64});rules(s,implies(present('producerDefinitionHash'),present('producer')));
+        field(s,'sourceHash',{pattern:'^[a-f0-9]{64}$',maxLength:64}); field(s,'dependencies',{maxItems:16,uniqueItems:true,element:canonicalUuid}); field(s,'evidence',{maxItems:64});
+      }
+      if(title==='PortableEvidence') {
+        field(s,'start',integer()); field(s,'end',integer(1)); field(s,'quote',{...text(65536),nonblank:true}); field(s,'locator',text(4096)); rules(s,{gt:[g('end'),g('start')]});
+      }
+      if(title==='PortableBundle') {add(s,{portableGraph:'bundle',maxJsonBytes:8388608}); field(s,'documents',{minItems:1,maxItems:16}); field(s,'relationships',{maxItems:64});}
+      if(title==='PortableImportPlan') {add(s,{portableGraph:'plan',maxJsonBytes:8388608}); field(s,'destinations',{minItems:1,maxItems:16}); field(s,'types',{maxItems:16}); field(s,'reuse',{maxItems:16});}
+      if(title==='PortableDestination') field(s,'name',{...identity,maxLength:1024});
+      if(title==='PortableDocument') field(s,'bytesBase64',{minLength:4,maxLength:2796204,pattern:'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$'});
+      if(title==='PortableLink') field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+      if(title==='PortableImported') field(s,'mappings',{minItems:1,maxItems:16});
+      if(title==='PortableReadable') {add(s,{portableGraph:'readable'});field(s,'markdown',text(2097152));}
+    }
+    if (title === 'NavigationPath') field(s,'steps',{minItems:1,maxItems:32,navigationSteps:true});
+    if (title === 'ReferencePolicySettings') field(s,'referenceLabel',{...identity,maxLength:120});
+    if (['CurrentDocument','DocumentTarget','DocumentRelationship','NavigationChanged','SavedNavigationView'].includes(title)) {
+      for(const key of ['resource','revision','source','target','pinnedRevision','id']) if(p[key] && stringShape(p[key])) field(s,key,{pattern:uuid});
+    }
+    if(title==='DocumentRelationship' || p.kind && p.relation) field(s,'relation',{pattern:'^[a-z][a-z0-9_-]{0,63}$',maxLength:64});
+    if(title==='SavedNavigationView') field(s,'label',{...identity,maxLength:120});
     if (title === 'IncomingSource') {
       const parts = resolve(graph, s.properties.parts);
       const part = resolve(graph, parts.items);

@@ -1,3 +1,14 @@
+import type { InterchangeReplies } from './information-interchange.ts';
+import type { NavigationReplies } from './information-navigation.ts';
+import { isNavigationOperation } from './information-navigation.ts';
+import type {
+  InformationContentCapabilities,
+  InformationTypeVersions,
+  InformationTypeVersion,
+  InformationTypeContract,
+  InformationContentView,
+  MetadataValidationResult,
+} from './information-content.ts';
 import { decodeReply } from './schema.ts';
 import type {
   InformationRevision,
@@ -59,12 +70,16 @@ export type InformationFacetName =
   | 'author'
   | 'documentAuthor'
   | 'when'
-  | 'subtype';
+  | 'subtype'
+  | 'contentType'
+  | 'contentTypeVersion';
 export interface InformationFacetValue {
   readonly value: string;
   readonly count: number;
 }
 export interface InformationFacetValues {
+  readonly contentType?: readonly InformationFacetValue[];
+  readonly contentTypeVersion?: readonly InformationFacetValue[];
   readonly kind: readonly InformationFacetValue[];
   readonly tags: readonly InformationFacetValue[];
   readonly autoTag: readonly InformationFacetValue[];
@@ -75,6 +90,8 @@ export interface InformationFacetValues {
   readonly subtype: readonly InformationFacetValue[];
 }
 export interface InformationFacetMore {
+  readonly contentType?: boolean;
+  readonly contentTypeVersion?: boolean;
   readonly kind: boolean;
   readonly tags: boolean;
   readonly autoTag: boolean;
@@ -213,7 +230,17 @@ export interface InformationFence {
   readonly complete: boolean;
   readonly outcomes: readonly InformationAwaitOutcome[];
 }
-export interface InformationReplies {
+export interface InformationReplies
+  extends NavigationReplies, InterchangeReplies {
+  'information.types.capabilities': InformationContentCapabilities;
+  'information.types.list': InformationTypeVersions;
+  'information.types.get': InformationTypeContract;
+  'information.types.validate': MetadataValidationResult;
+  'information.types.version.create': InformationTypeVersion;
+  'information.types.activate': InformationTypeVersion;
+  'information.types.deprecate': InformationTypeVersion;
+  'information.content.get': InformationContentView;
+  'information.content.revise': InformationAdmission;
   'information.await': InformationFence;
   'information.upload': InformationAdmission;
   'information.acquire': InformationTicket;
@@ -257,6 +284,35 @@ export interface InformationReplies {
 }
 export type InformationFrame = keyof InformationReplies;
 export const INFORMATION_FRAMES = [
+  'information.interchange.capabilities',
+  'information.interchange.export',
+  'information.interchange.readable',
+  'information.interchange.import',
+  'information.interchange.origin',
+
+  'information.navigation.capabilities',
+  'information.documents.list',
+  'information.documents.facets',
+  'information.documents.get',
+  'information.relationships.list',
+  'information.relationships.create',
+  'information.relationships.remove',
+  'information.policy.get',
+  'information.policy.set',
+  'information.views.list',
+  'information.views.get',
+  'information.views.save',
+  'information.views.delete',
+
+  'information.types.capabilities',
+  'information.types.list',
+  'information.types.get',
+  'information.types.validate',
+  'information.types.version.create',
+  'information.types.activate',
+  'information.types.deprecate',
+  'information.content.get',
+  'information.content.revise',
   'information.upload',
   'information.acquire',
   'information.list',
@@ -357,6 +413,9 @@ function legacyInformationReply(
     return undefined;
   const value = outcome.payload,
     verb = type.slice('information.'.length);
+  if (isNavigationOperation(verb) || verb.startsWith('interchange.'))
+    return value;
+  if (verb.startsWith('types.') || verb.startsWith('content.')) return value;
   if (verb === 'rank') return retrievalReply('document.rank', value);
   if (['list', 'inventory', 'acquisitions'].includes(verb)) {
     return isList(value) &&

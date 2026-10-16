@@ -7,6 +7,9 @@ retained-authority Personal turns, and standard synchronous tools with child-age
 proposed beyond that scope. Broader effect capabilities and client consent
 management remain separate slices.
 
+The unpublished acting migrations use V149–V151 after integration with current main;
+SQL contents are unchanged by the renumbering.
+
 Original audit baseline: merged main
 `9f772f55e5779b2061a6a407de55b7d2e06bfa28`. Existing code references describe
 that snapshot. The slice sections record the new internal implementation
@@ -80,7 +83,7 @@ external user's identity.
 [ActingRepository](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/ActingRepository.java)
 and its JDBC implementation own normalized grants, eligibility rules, SHA-256
 credential digests, token project bindings, receipts and successful lifecycle audit.
-[V143](../plowshare-server/src/main/resources/db/migration/V143__acting_grants_and_tokens.sql)
+[V149](../plowshare-server/src/main/resources/db/migration/V149__acting_grants_and_tokens.sql)
 adds their tables. Deployment activates declarations in the same transaction as the
 source head, after owned identity activation. Removed declarations become inert;
 reads join the active source revision. Membership eligibility and project consent
@@ -143,7 +146,7 @@ global work or another subject's Personal space. Context liveness is checked aga
 before returning the response. It creates no jobs, model calls, subscriptions or
 durable work. Ordinary requests keep their original actor path.
 
-[V144](../plowshare-server/src/main/resources/db/migration/V144__acting_context_audit.sql)
+[V150](../plowshare-server/src/main/resources/db/migration/V150__acting_context_audit.sql)
 adds metadata-only proof-exchange audit. Admission waits for its successful audit
 write; audit/storage errors propagate. Refused well-formed proofs record no subject,
 secret or digest. Explicit closes audit their retained metadata. Transport syntax
@@ -168,7 +171,7 @@ Validation passed for the completed slice: `format`, `formatCheck` and
 `./gradlew check --max-workers=2`, including 5,579 default server tests and all 136
 acting cases. The selected
 `ApplicationDeploymentPersistenceTest.actingProofExchangeAuditContainsOnlyMetadata`
-case passed with `-PfullDb`; it verifies V144 and actual proof/audit row mapping.
+case passed with `-PfullDb`; it verifies V150 and actual proof/audit row mapping.
 `./gradlew sdkCheck --max-workers=2` verifies generated contracts, strict native
 builds, DTO fixtures, race tests and shared transport conformance. These checks
 cover the first synchronous read; they do not establish delegated agent execution
@@ -186,7 +189,7 @@ Personal definitions without a bridge session or client filesystem.
 `PersonalActingWork` reserves the UUID under the consent transaction's shared lock,
 commits the owning conversation and authority binding, then submits through the
 existing `Turn`, `JobStore` and `JobRuntime`. It never substitutes the subject for
-the transport actor. Migration V145 retains Application/actor/subject/grant/proof
+the transport actor. Migration V151 retains Application/actor/subject/grant/proof
 metadata and a Personal project **row identity**. Receipts and binding tombstones
 survive history deletion, so forgetting a conversation cannot make its request
 UUID executable again. Tasks and credentials are absent from these metadata tables.
@@ -266,7 +269,7 @@ source/ownership changes, revocation, real turn/runtime cancellation, budget and
 accounting retention, ordinary grant/hook enforcement, rewritten resource IDs,
 resource scope changes, file-provider identity and child execution. The real model
 queue boundary and a Java SDK/socket admission/reconnect path are also tested.
-Two focused PostgreSQL cases from the durable-admission slice verify V145,
+Two focused PostgreSQL cases from the durable-admission slice verify V151,
 persisted mappings, concurrent admission, rollback and receipt survival after
 physical history deletion. This tool-propagation slice changes no SQL/schema.
 
@@ -523,7 +526,7 @@ slice. No server API may trust a submitted external identity as account authorit
    permission matrix checks each independent ceiling and refusal. There is no
    request routing in this slice; persistence follows in step 2.
 2. **Declarations and consent lifecycle.** Implemented internally as described
-   above, including new migration V143 and source-head activation. Public wire
+   above, including new migration V149 and source-head activation. Public wire
    operations, context proof verification and client adoption remain later work.
 3. **One complete synchronous request path.** Implemented for `conversation.turns`,
    including context exchange, strict metadata, live scope checks and SDK selection.

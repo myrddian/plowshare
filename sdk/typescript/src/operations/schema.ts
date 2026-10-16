@@ -1,3 +1,4 @@
+import { interchangeProblem } from './interchange-validation.ts';
 import { validateHostedReply } from './hosted-tool-scopes.ts';
 import { validateProviderCredentialReply } from './provider-credentials.ts';
 import {
@@ -72,12 +73,12 @@ function decode(
   if (schema.$ref !== undefined) {
     const target = definitions[schema.$ref.replace('#/$defs/', '')];
     if (target === undefined) return fail();
-    return decode(target, value, input, path, depth + 1, definitions);
+    return decode(target, value, input, path, depth, definitions);
   }
   if (schema.anyOf !== undefined) {
     for (const variant of schema.anyOf) {
       try {
-        return decode(variant, value, input, path, depth + 1, definitions);
+        return decode(variant, value, input, path, depth, definitions);
       } catch {
         /* A union accepts exactly one of its complete declared shapes. */
       }
@@ -204,6 +205,8 @@ export function decodePayload<K extends Operation>(
   type: K,
   value: unknown,
 ): Payloads[K] {
+  const portableFailure = interchangeProblem(type, value);
+  if (portableFailure) throw new Error(portableFailure);
   const schema = OPERATION_SCHEMAS.inputs[type];
   if (schema === undefined) throw new Error('unknown Plowshare operation');
   // This assertion is confined to the generated, recursively validated boundary.
@@ -211,7 +214,10 @@ export function decodePayload<K extends Operation>(
   if (!object(decoded)) throw new Error('operation payload must be an object');
   const failure =
     problem(type, decoded) ??
-    (Object.hasOwn(SHAPES, type)
+    // Relay's complete domain validation already ran in problem(). The schema
+    // above enforced field names and types; repeating command validation would
+    // synchronously rescan up to 50 MiB of text on the client's event loop.
+    (Object.hasOwn(SHAPES, type) && !type.startsWith('relay.')
       ? commandProblem(type as keyof ExtendedPayloads, decoded)
       : undefined);
   if (failure !== undefined) throw new Error(failure);
@@ -229,6 +235,7 @@ export function decodeRequest(type: string, value: unknown): Request {
 }
 
 function acceptsNull(schema: Schema): boolean {
+  // Count JSON nesting, not trusted generated graph indirections.
   if (schema.$ref) {
     const target = OPERATION_SCHEMAS.$defs[schema.$ref.replace('#/$defs/', '')];
     if (!target) throw new Error('Missing generated reply definition.');
@@ -254,6 +261,8 @@ export function decodeReply<K extends keyof Replies>(
     throw new Error('Invalid FileStore catalogue');
   validateActingReply(type, decoded);
   validateProviderCredentialReply(type, decoded);
+  const portableFailure = interchangeProblem(type, decoded, true);
+  if (portableFailure) throw new Error(portableFailure);
   validateHostedReply(type, decoded);
   validateRelayReply(type, decoded);
   validateSwarmReply(type, decoded);

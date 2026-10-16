@@ -110,6 +110,102 @@ public final class SchemaCodec {
     return fingerprint(schema, false);
   }
 
+  /** Corrected canonical instance identity, without historical tool-invocation compatibility. */
+  public static String fingerprint(SchemaValue value) {
+    SchemaValue.validate(value);
+    return digest(canonical(instanceWire(value), false));
+  }
+
+  /** Pins profile, definition and immutable presentation as one document contract. */
+  public static String documentFingerprint(
+      SchemaDefinition schema, String profile, SchemaValue.ObjectValue presentation) {
+    if (profile == null || profile.isBlank() || profile.length() > 120)
+      throw new IllegalArgumentException("Invalid document profile");
+    SchemaValue.validate(presentation);
+    return digest(canonical(List.of(profile, wire(schema), instanceWire(presentation)), false));
+  }
+
+  /** Compact JSON belongs to this serialization boundary; services retain only typed instances. */
+  public static String compactJson(SchemaValue value) {
+    SchemaValue.validate(value);
+    return compact(instanceWire(value));
+  }
+
+  public static String compactJson(SchemaDefinition schema) {
+    return compact(wire(schema));
+  }
+
+  private static Object instanceWire(SchemaValue value) {
+    return switch (value) {
+      case SchemaValue.Null ignored -> null;
+      case SchemaValue.Text text -> text.value();
+      case SchemaValue.Number number -> number.value();
+      case SchemaValue.Truth truth -> truth.value();
+      case SchemaValue.Array array ->
+          array.values().stream().map(SchemaCodec::instanceWire).toList();
+      case SchemaValue.ObjectValue object -> {
+        var result = new LinkedHashMap<String, Object>();
+        object.values().forEach((key, entry) -> result.put(key, instanceWire(entry)));
+        yield result;
+      }
+    };
+  }
+
+  private static String digest(String tokens) {
+    try {
+      return java.util.HexFormat.of()
+          .formatHex(
+              java.security.MessageDigest.getInstance("SHA-256")
+                  .digest(tokens.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException unavailable) {
+      throw new IllegalStateException(unavailable);
+    }
+  }
+
+  private static String compact(Object value) {
+    if (value == null) return "null";
+    if (value instanceof Boolean || value instanceof Number) return value.toString();
+    if (value instanceof String text) {
+      var result = new StringBuilder("\"");
+      for (int index = 0; index < text.length(); index++) {
+        char character = text.charAt(index);
+        switch (character) {
+          case '"' -> result.append("\\\"");
+          case '\\' -> result.append("\\\\");
+          case '\b' -> result.append("\\b");
+          case '\f' -> result.append("\\f");
+          case '\n' -> result.append("\\n");
+          case '\r' -> result.append("\\r");
+          case '\t' -> result.append("\\t");
+          default -> {
+            if (character < 32)
+              result.append(String.format(java.util.Locale.ROOT, "\\u%04x", (int) character));
+            else result.append(character);
+          }
+        }
+      }
+      return result.append('"').toString();
+    }
+    if (value instanceof List<?> list)
+      return "["
+          + list.stream()
+              .map(SchemaCodec::compact)
+              .collect(java.util.stream.Collectors.joining(","))
+          + "]";
+    if (value instanceof Map<?, ?> map)
+      return "{"
+          + map.entrySet().stream()
+              .map(
+                  entry -> {
+                    if (!(entry.getKey() instanceof String key))
+                      throw new IllegalArgumentException("Invalid JSON key");
+                    return compact(key) + ":" + compact(entry.getValue());
+                  })
+              .collect(java.util.stream.Collectors.joining(","))
+          + "}";
+    throw new IllegalArgumentException("Invalid JSON value");
+  }
+
   /**
    * Checks the exact offered schema against canonical or historical Java token ordering. The legacy
    * hash is validation-only: retained requests are never rewritten and new calls use {@link

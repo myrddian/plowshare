@@ -5826,6 +5826,13 @@ export async function converse(talking: Talking): Promise<void> {
           continue;
         }
         if (now.conversation === undefined) {
+          if (now.project === undefined) {
+            show(
+              'client',
+              'Select a project or Personal before starting a conversation.',
+            );
+            continue;
+          }
           const start = opening(now.project);
           const first = await connection.ask(start.type, start.payload);
           const made = opened(first);

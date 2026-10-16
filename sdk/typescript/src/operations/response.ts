@@ -1,4 +1,5 @@
 import type { RequestOptions } from '../binding/acting.ts';
+import type { MetadataValidationResult } from './information-content.ts';
 import type { Code } from '../binding/codes.ts';
 import type { Operation, Payloads } from './direct.ts';
 import type { Replies } from './replies.ts';
@@ -53,6 +54,7 @@ export interface ApplicationAnswer<K extends Operation = Operation> {
   readonly code: string;
   readonly said?: string;
   readonly payload?: Replies[K];
+  readonly metadataValidation?: MetadataValidationResult;
 }
 
 /** Application-facing outcome: the owning adapter has decoded its operation DTO. */
@@ -60,6 +62,7 @@ export interface CheckedAnswer<K extends Operation = Operation> {
   readonly code: Code;
   readonly said?: string;
   readonly payload?: Replies[K];
+  readonly metadataValidation?: MetadataValidationResult;
 }
 /** Existing socket owners expose only known operations and decoded outcomes.
  * The adapter validates operation/payload pairing before I/O. */

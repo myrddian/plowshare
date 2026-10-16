@@ -68,6 +68,18 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     return store == Store.DOCUMENTS ? "s.summary IS NOT NULL" : "true";
   }
 
+  // Global maintenance is automatic work. Explicit owner repairs use source()/publish() only
+  // inside the information worker's selected-stage lease and its live authority fences.
+  private static String automaticInformation(Store store) {
+    return switch (store) {
+      case CHUNKS ->
+          " AND NOT EXISTS(SELECT 1 FROM information_revisions information_revision WHERE information_revision.id=parent.document_id AND information_revision.processing_policy='explicit_only')";
+      case DOCUMENTS ->
+          " AND NOT EXISTS(SELECT 1 FROM information_revisions information_revision WHERE information_revision.id=s.id AND information_revision.processing_policy='explicit_only')";
+      default -> "";
+    };
+  }
+
   private static String text(Store store) {
     return switch (store) {
       case MEMORIES -> "s.summary || E'\\n' || s.scope";
@@ -248,6 +260,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
             + joins(store)
             + " WHERE "
             + eligible(store)
+            + automaticInformation(store)
             + " AND NOT ("
             + ready(target, store)
             + ")"

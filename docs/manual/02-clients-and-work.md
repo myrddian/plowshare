@@ -97,6 +97,12 @@ that displayed request; do not reuse another run's approval key. Declining,
 leaving an approval for later and granting a request have different effects.
 Hooks and access checks can still deny work that a person approved.
 
+Desktop reads pending approvals from both the signed-in account and each open
+conversation. Foreground command questions belong to their conversation and may
+not appear in the account-wide listing. Opening or refreshing that conversation
+rediscovers its pending requests without submitting another agent turn. A run
+ending `AWAITING` also refreshes its conversation's questions.
+
 The inbox holds durable deliveries and read receipts. Opening the application or
 seeing an unread count is not proof that an item was read. Open the item to read
 its actual result, and inspect its source work when more context is needed.
@@ -114,6 +120,11 @@ without deleting the server's project, conversation or retained knowledge.
 Git-backed synchronization is a separate explicit mode. Attaching files does not
 enable it. Resolve a conflict using the reviewed file and conflict state; a stale
 preview is not permission to overwrite a changed file.
+
+For a source checkout, run `./gradlew :plowshare-tui:assemble` before
+`./bin/plowshare-talk`. This installs the TUI dependencies and builds its linked
+SDK and native MCP runtime packages. Run it again after pulling dependency changes;
+the launcher reports this remedy when a required runtime package is missing.
 
 ### Named connections
 

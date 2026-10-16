@@ -1,3 +1,6 @@
+import { interchangeProblem } from './interchange-validation.ts';
+import { isNavigationOperation } from './information-navigation.ts';
+import { navigationPayloadProblem } from './navigation-validation.ts';
 import { hostedProblem, isHostedOperation } from './hosted-tool-scopes.ts';
 import { providerCredentialProblem } from './provider-credentials.ts';
 import { identityProblem } from './application-identities.ts';
@@ -70,6 +73,14 @@ export function problem(
       ? undefined
       : 'Invalid acting proof exchange';
   }
+  if (type.startsWith('information.interchange.'))
+    return interchangeProblem(type, payload);
+  if (isNavigationOperation(type) && type in SHAPES)
+    return navigationPayloadProblem(
+      type,
+      payload,
+      SHAPES[type as keyof ExtendedPayloads][0],
+    );
   if (
     type.startsWith('provider.connection.') ||
     type.startsWith('provider.credential.')
@@ -447,6 +458,92 @@ export const SHAPES: Record<
   ],
   'conversation.context.snapshot': [['conversation', 'agent'], ['measure']],
   'conversation.context.count': [['conversation', 'agent'], []],
+  'information.interchange.capabilities': [['scope'], []],
+  'information.interchange.export': [['scope', 'revisions'], []],
+  'information.interchange.readable': [['scope', 'revision'], []],
+  'information.interchange.origin': [['scope', 'revision'], []],
+  'information.interchange.import': [['scope', 'requestId', 'plan'], []],
+  'information.navigation.capabilities': [['scope'], []],
+  'information.documents.list': [
+    ['scope'],
+    ['filter', 'relatedTo', 'relation', 'direction', 'limit', 'offset'],
+  ],
+  'information.documents.facets': [
+    ['scope'],
+    ['filter', 'relatedTo', 'relation', 'direction'],
+  ],
+  'information.documents.get': [['scope', 'target'], []],
+  'information.relationships.list': [
+    ['scope', 'resource', 'direction'],
+    ['relation', 'otherResource', 'limit', 'offset'],
+  ],
+  'information.relationships.create': [
+    [
+      'scope',
+      'requestId',
+      'source',
+      'target',
+      'relation',
+      'expectedSourceRevision',
+    ],
+    [],
+  ],
+  'information.relationships.remove': [
+    ['scope', 'requestId', 'relationship', 'expectedVersion'],
+    [],
+  ],
+  'information.policy.get': [['scope', 'target'], []],
+  'information.policy.set': [
+    ['scope', 'requestId', 'target', 'expectedVersion', 'settings', 'reason'],
+    [],
+  ],
+  'information.views.list': [['scope'], []],
+  'information.views.get': [['scope', 'id'], []],
+  'information.views.save': [
+    ['scope', 'requestId', 'id', 'expectedVersion', 'label', 'path'],
+    [],
+  ],
+  'information.views.delete': [
+    ['scope', 'requestId', 'id', 'expectedVersion'],
+    [],
+  ],
+  'information.types.capabilities': [['scope'], ['view']],
+  'information.types.list': [
+    ['scope', 'view'],
+    ['drafts', 'limit', 'offset'],
+  ],
+  'information.types.get': [
+    ['scope', 'view', 'version'],
+    ['attachedRevision', 'publishedOnly'],
+  ],
+  'information.types.validate': [
+    ['scope', 'view', 'version', 'metadata'],
+    ['attachedRevision', 'publishedOnly'],
+  ],
+  'information.types.version.create': [
+    ['scope', 'view', 'requestId', 'schema'],
+    [
+      'type',
+      'expectedControlRevision',
+      'slug',
+      'label',
+      'description',
+      'presentation',
+    ],
+  ],
+  'information.types.activate': [
+    ['scope', 'view', 'requestId', 'version', 'expectedControlRevision'],
+    [],
+  ],
+  'information.types.deprecate': [
+    ['scope', 'view', 'requestId', 'version', 'expectedControlRevision'],
+    [],
+  ],
+  'information.content.get': [['scope', 'view', 'revision'], []],
+  'information.content.revise': [
+    ['scope', 'view', 'requestId', 'expectedRevision', 'typing'],
+    [],
+  ],
   'information.upload': [['scope', 'requestId', 'name', 'text'], []],
   'information.acquire': [['scope', 'requestId', 'url'], ['name']],
   'information.facets': [['scope'], ['kind', 'filter']],
@@ -827,10 +924,32 @@ export function commandProblem(
     allowed = [
       ...required,
       ...optional,
-      ...(type.startsWith('information.') ? ['corpus'] : []),
+      ...(type.startsWith('information.')
+        ? [
+            'corpus',
+            'view',
+            ...([
+              'information.upload',
+              'information.acquire',
+              'information.refresh',
+              'information.revise',
+              'information.replace',
+              'information.record.report',
+            ].includes(type)
+              ? ['expectedRevision', 'typing']
+              : []),
+            ...(['information.retry', 'information.rebuild'].includes(type)
+              ? ['stages']
+              : []),
+          ]
+        : []),
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (type.startsWith('information.interchange.'))
+    return interchangeProblem(type, body);
+  if (isNavigationOperation(type))
+    return navigationPayloadProblem(type, body, required);
   if (
     [
       'application.deploy',
@@ -1165,6 +1284,27 @@ export function commandProblem(
     return 'choose maxTurns or noTurnCap:true';
   if (body['noBudget'] === true && 'maxModelCalls' in body)
     return 'choose maxModelCalls or noBudget:true';
+  // Read-only Global selection is explicit null; omission is not a scope choice.
+  if (
+    ['conversation.list', 'conversation.latest'].includes(type) &&
+    (!Object.hasOwn(body, 'project') ||
+      (typeof body['project'] === 'string' &&
+        body['project'] !== body['project'].trim()))
+  )
+    return 'Choose an explicit project or project:null for Global history';
+  // Runtime destinations must be chosen by the caller, never inferred from its bearer.
+  // An existing conversation is itself an explicit scope and owns its project.
+  if (
+    ['conversation.open', 'orchestration.start'].includes(type) ||
+    (type === 'agent.run' && body['conversation'] == null)
+  ) {
+    if (
+      typeof body['project'] !== 'string' ||
+      body['project'].trim() === '' ||
+      body['project'] !== body['project'].trim()
+    )
+      return 'Choose an explicit project or an existing conversation';
+  }
   if (type === 'agent.run' && body['newConversation'] === true) {
     if (body['conversation'] != null)
       return 'newConversation cannot be combined with a conversation id';
