@@ -6,6 +6,65 @@ controls server management; granting that role does not automatically grant acce
 to another account's Personal space. Server administrators have Manager access to
 ordinary server projects; private client projects keep their client ownership boundary.
 
+## Information feature switches
+
+Authored content and document-navigation writes are **enabled by default**.
+Authentication, project roles, service-token scope ceilings, document access,
+reference visibility/propagation and model-tool grants continue to determine which
+operations each caller may perform. Enabling a feature never grants authority.
+
+The shipped [application.yml](../plowshare-server/src/main/resources/application.yml)
+lists both startup controls with comments. Operators can override them in a private
+Spring configuration overlay or through the environment variables below. They apply
+across the server, require a server restart to change, and are not user/project
+settings or live configuration commands. They remain available for incident
+response or a controlled suspension of new writes.
+
+| Property | Environment variable | Default | Effect of explicit `false` |
+| --- | --- | --- | --- |
+| `plowshare.information.content-types-enabled` | `PLOWSHARE_INFORMATION_CONTENT_TYPES_ENABLED` | `true` | Refuses schema-version creation/activation/deprecation, metadata-only revisions, admissions with explicit typing directives and all portable imports |
+| `plowshare.information.navigation-writes-enabled` | `PLOWSHARE_INFORMATION_NAVIGATION_WRITES_ENABLED` | `true` | Refuses relationship creation/removal, reference-policy changes and saved-view creation/update/deletion |
+
+Both switches must be on to restore relationships during portable import.
+Import with `restoreRelationships:false` requires only authored-content writes.
+The switches do not trigger processing or change model allowances. Ordinary
+untyped ingestion and legacy revision/collection operations retain their contracts.
+
+For example, this private overlay suspends graph writes while leaving authored
+content available:
+
+```yaml
+plowshare:
+  information:
+    content-types-enabled: true
+    navigation-writes-enabled: false
+```
+
+Turning either switch off preserves retained content, bindings, links and views.
+Authorized reads, navigation resolution, evidence/input dependency checks, export,
+metadata-only processing fences and stored access obligations remain enforced.
+It does not remove links, declassify a document, stop unrelated processing or make
+an older binary safe against newer retained state. Re-enabling resumes operation
+availability under current authority; clients must reconcile uncertain submissions
+rather than replay them automatically.
+
+Reference policy is a separate decision. Defaults are existing content authority,
+hidden references and propagation; project managers/server administrators can
+initialise the intended project policy within mandatory constraints. Incurred
+obligations can survive unlinking, and this release has no general release or
+declassification workflow. See [navigation policy](authored-navigation.md#configure-policy).
+
+**Upgrade behavior:** older builds defaulted navigation writes off. With this
+build, an installation that has no explicit override starts with writes on. An
+existing explicit `false` stays off. Operators who intend to keep writes suspended
+must retain that override before upgrading. Installing a new binary/configuration
+is separate from changing an already running server.
+
+Clients can inspect effective availability with authenticated
+`information.types.capabilities` (`typedWrites`) and
+`information.navigation.capabilities` (`writesEnabled`) in their allowed scope.
+Capabilities report operation availability, not permission to write every document.
+
 ## First administrator
 
 The first server start prints a temporary `admin` login with a random password.

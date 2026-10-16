@@ -47,6 +47,20 @@ database URL is PostgreSQL JDBC configuration, and provider URLs/model IDs must
 match what the configured service actually serves. Private local overlays stay
 outside tracked source and packaged images.
 
+## Information features
+
+Authored content and navigation writes default on. Both still enforce account,
+project, service-token and document authority. Operators can suspend new writes
+server-wide with `plowshare.information.content-types-enabled=false` or
+`plowshare.information.navigation-writes-enabled=false`; changing these startup
+settings requires a restart. Turning them off retains read enforcement and stored
+access obligations. The navigation switch does not choose a reference policy.
+
+The [information feature switch reference](../server-administration.md#information-feature-switches)
+lists defaults, environment variables, affected operations, import dependencies
+and upgrade behavior. The shipped `application.yml` also documents both settings.
+Existing explicit overrides survive the change from navigation's earlier off default.
+
 ## Models, pools and budgets
 
 Model classes such as `fast` or `reasoning` bind logical behavior to actual wire

@@ -118,6 +118,9 @@ refused. A matching imported source name never overrides this explicit choice.
 
 Restored links map to local resource UUIDs; pins map to exact local revisions.
 Sources must be imported resources, and navigation writes must be enabled.
+Both information switches default on within existing authority; see the
+[configuration reference](server-administration.md#information-feature-switches)
+for operator suspension, environment overrides and retained read behavior.
 A pinned target must retain its original exported bytes. If that file was edited,
 omit restoration or include the unchanged pinned revision; a pin cannot silently
 change meaning during import.

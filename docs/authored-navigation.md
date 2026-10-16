@@ -13,10 +13,14 @@ tracks verification.
 ## Enable writes
 
 The server configuration `plowshare.information.navigation-writes-enabled` defaults
-to `false`. Reads and capability probing are available; enabling this setting admits
-new relationship, policy and saved-view writes. Turning writes off later retains
-all read enforcement and stored obligations. Do not roll back to a binary that
-cannot enforce these records.
+to `true`. Relationship, policy and saved-view writes are available within the
+caller's existing permissions and scopes. Operators can set it to `false` to suspend
+those writes across the server; reads, capability probing and enforcement of
+stored obligations remain active. The switch does not select a reference policy
+or release inherited restrictions. Changing it requires a server restart. See
+[information feature switches](server-administration.md#information-feature-switches)
+for both switches, environment overrides, affected operations and upgrade behavior.
+Do not roll back to a binary that cannot enforce the retained records.
 
 Before adding references, a server administrator or project manager should inspect
 and initialise the applicable project policy. The initial baseline uses existing
