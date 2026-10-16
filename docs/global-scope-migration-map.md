@@ -35,7 +35,7 @@ and symbols at that revision; target behavior is proposed.
 | Project memory recall and survey | Both `Archive.search` paths append Global hits and missing-embedding counts; recall also updates usage counters on returned memories in [Archive](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/Archive.java) | Query only the admitted scope and explicitly authorized published selections; preserve bounded result counts and usage accounting |
 | Ordinary Application recall | [ProjectAuthorization.require](../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/ProjectAuthorization.java) refuses explicit Global service-token work; [MemoryRecallHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/MemoryRecallHandler.java) calls the archive, which adds Global internally | Apply scope policy to actual internal query targets. Retained acting currently does not support the `memory_recall` tool, so this finding is about the ordinary service-token path |
 | Digest navigation | [Navigator.walk](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Navigator.java) explicitly tries the requested home then Global | No cross-scope retry; include other corpora only through an authorized explicit selection |
-| Curation publication | [Passes.start](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/curator/Passes.java) requires a project; [Curator.promote](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/curator/Curator.java) approves confident rulings; [PromotionQueue.approve](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/PromotionQueue.java) calls `Archive.promote`, which creates a Global memory and supersedes its origin | Preserve analysis/proposals, but require authorized source release and destination publication. Personal has no exclusion in the current promotion path |
+| Curation publication | [Passes.start](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/curator/Passes.java) requires a project; [Curator.promote](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/curator/Curator.java) approves confident rulings; [PromotionQueue.approve](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/PromotionQueue.java) calls `Archive.promote`, which creates a Global memory and supersedes its origin | Preserve analysis/proposals, but require authorized source release and human ADMIN publication into the explicit Global memory collection. Personal has no exclusion in the current promotion path |
 | Curation trigger | Production callers of `Passes.start` are [AgentController](../plowshare-server/src/main/java/io/aeyer/plowshare/server/api/AgentController.java) and [AgentCurateHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/AgentCurateHandler.java); no automatic nightly registration was found | Treat the issue as publication authority exercised by an explicit request, not automatic leakage after every write |
 | Digest job ownership | [Digests.start](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Digests.java) retains the requested home inside its closure but uses `JobStore.submit(name, work)`, which assigns Global | Persist the actual owning scope and admission. Normal successful digest outcomes contain counts/status; scope still governs visibility and cancellation |
 | Definition failure recovery | [DefinitionResolver.forCaller/readProject](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/DefinitionResolver.java) returns the boot set for missing projects and ordinary merge failures; [OrchestrationResolver.resolve](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/OrchestrationResolver.java) can recover to inherited definitions | Resolve intended identity first; refuse unknown/unavailable authoritative tiers. Preserve the existing Application definition merge refusal |
@@ -61,6 +61,11 @@ project/resource scope and refuses Global work.
 | Outgoing send/advertise/claim | Account-bound null project | Resolve an explicit owning scope and retain account ownership |
 | Retained acting turn | Explicit acting context and subject Personal authority | Preserve explicit actor/subject admission and supported capability limits |
 
+The target Global collection admits memories and derived retrieval/index views
+only. Human ADMIN authority over that collection is required for publication and
+content/lifecycle administration. Ordinary resource publication remains separate;
+shared documents do not become Global memories or SYSTEM resources.
+
 The precise list/selection defaults require review before implementation. A read
 may offer an explicit authorized aggregate selection without adopting the same
 default as a mutation. The common invariant is that omission cannot select server
@@ -71,6 +76,10 @@ authority, published content or a fallback registry.
 Global conversation resume is refused by
 [Callers.requireConversationProject](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Callers.java)
 and [ConversationResumeHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationResumeHandler.java).
+Current source still supports legacy null-project conversation reads. This is not
+evidence that any such rows exist in a running deployment. The target model has
+no Global conversation scope: create/resume/list/search selections refuse it,
+and any historical rows require explicit migration classification.
 Board opening, messaging and commands require project context. A Global local
 filesystem is refused; the legacy remote-provider path checks the submitting
 owner's session in [AgentsConfig](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentsConfig.java).
@@ -105,8 +114,9 @@ record and retained provenance instead:
 | --- | --- |
 | Project and Personal resources | Map to the continuing explicit scope; preserve resource/revision identities, membership and history |
 | Proven server configuration and internal channel state | Map to server-administration scope under explicit SYSTEM control |
-| Proven deliberately shared memories/documents | Record an explicit legacy publication scope/audience; do not make them internal SYSTEM resources or automatically import them into every project |
-| Null-project conversations and jobs | Preserve their IDs and content with restricted legacy scope; recover a narrower owning scope only from authoritative records |
+| Proven deliberately shared memories | Classify for the explicit Global memory collection and retain audience/provenance; new publication decisions require human ADMIN and source authority |
+| Proven deliberately shared documents | Preserve their independent information publication policy/audience; do not merge them into Global memories or SYSTEM resources |
+| Null-project conversations and jobs, if present | Preserve their IDs and content with restricted legacy scope; recover a narrower owning scope only from authoritative records; never admit them into the memory-only Global collection |
 | Misclassified digest jobs | Use durable original project evidence where available; do not infer ownership from a job name or an in-memory closure that no longer exists |
 | Null-project outgoing rows | Preserve account ownership and original receipt/request identities; select an explicit migrated scope without resending work |
 | Historical model usage | Retain original attribution and billing facts. Add linkage/mapping where justified, never relabel historical SYSTEM or unattributed usage as a new account |
@@ -134,7 +144,8 @@ the complete substrate remains under design.
    and admission invariants in ADR 0030. Record changes to ADRs 0025/0026/0028
    explicitly rather than silently superseding them.
 2. **Bound the immediate exposure paths.** Give digest jobs their real scope;
-   separate curation assessment from publication authority; stop hidden Global
+   require human ADMIN for Global memory publication; keep curation assessment
+   separate from that decision; stop hidden Global
    query/navigation expansion and refuse failed authoritative definition tiers.
    Keep internal workers functioning. Each behavioral change needs a reviewed
    public selection/default contract before client cutover.
@@ -185,6 +196,13 @@ Default mocked/fake tests should cover:
   restarts and receipt reads; uncertain effects are never replayed.
 - Curation analysis remains usable while unauthorized publication refuses; derived
   output policies and source/destination audiences are checked independently.
+- Global admits memories and derived retrieval/index views only; every Global
+  conversation selection refuses. Historical null-project rows, if present,
+  retain identity and restricted access until classified, without guessed ownership.
+- Global publication/content/lifecycle actions require human ADMIN over the
+  collection plus source-release authority. Agents can propose but cannot approve
+  their own publication; forced MANAGER does not override that rule. Read/use
+  bookkeeping cannot be used to acquire content or audience mutation authority.
 - Trusted classification/aliases remain protected; authored namesakes remain
   ordinary; internal workers and ordinary explicitly available shipped bots work.
 - Account-owned outgoing receipts and claims remain isolated during scope migration.

@@ -296,13 +296,55 @@ Document processing retains its existing no-tools/no-delegation capability ceili
 
 ## Splitting Global
 
+### Global memory collection
+
+Retain Global as an explicit UUID-backed collection of deliberately published
+memories. Global and SYSTEM are separate concepts: Global identifies published
+knowledge; SYSTEM identifies root ownership, a locked executor account and its
+intrinsic role. Global has its own scope identity, admitted resource kinds,
+audience and administrative grants. It is not an alias for server administration
+or a default destination for work without a project.
+
+The initial Global collection admits memories and their derived retrieval/index
+views only. Conversations cannot be created, resumed, listed or searched with
+Global as their owning scope. Conversations and runs belong in Personal, a
+project or another explicitly supported execution scope. A conversation may
+consult authorized Global memories without belonging to Global. Maintenance
+jobs retain their administrative owning scope and a bounded Global-memory target;
+they do not introduce a general Global job/conversation namespace.
+
+Creating, promoting, editing, retiring or otherwise administering a Global memory
+requires a human ADMIN grant covering the memory collection and the relevant
+action. Publishing from Personal or a project also requires authorized source
+release and compliance with retained input restrictions. A server ADMIN role held
+elsewhere does not automatically supply either grant. MANAGER, CONTRIBUTOR and
+agents, including forced MANAGER agents, cannot independently publish to Global.
+Curator can assess and propose; it cannot approve its own Global publication.
+The server may carry out a specifically authorized administrative effect under
+its retained admission without assigning ADMIN to the performing agent.
+
+Read access is a separate explicit audience/read grant. The name Global does not
+automatically grant every human, tenant, Application or run access or import its
+memories into every recall. Bounded use counters and derived index maintenance
+may follow an authorized read/maintenance contract; that bookkeeping does not
+grant authority to change memory content, lifecycle or audience.
+
+Existing shared documents remain governed by their own information publication
+policies and are not renamed into Global. Any future non-memory Global resource
+kind needs an explicit purpose, admission policy and action/audience decision.
+Resource-kind admission is a scope property enforced through generic contracts,
+not a special SYSTEM-name permission branch.
+
+### Destinations for existing meanings
+
 | Existing Global meaning | Proposed destination |
 | --- | --- |
 | Server/internal execution context conflated with scope | Locked SYSTEM account, SYSTEM role and explicit workload grants |
 | Server configuration and internal Relay topics | Explicit server-administration scope and scoped administration grants |
 | Internal worker definitions | SYSTEM-controlled definition registry with trusted provenance and worker lookup |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
-| Knowledge visible across projects | Published resources with an explicit audience and discoverable selections |
+| Memories deliberately published across projects | Explicit Global memory collection with human ADMIN publication and separately granted reads |
+| Other published knowledge such as shared documents | Its own published-resource policy and audience, separate from Global memories |
 | A user's work with no selected project | Explicit Personal scope selected at admission where the operation permits that default |
 | Account-owned outgoing work | Explicit owning scope plus account ownership and original receipt lifecycle |
 | Historic null-project rows | Explicit migration classification, with legacy shared data separated from server configuration |
@@ -324,6 +366,7 @@ Curation continues to assess project knowledge and may propose release. A model'
 judgment that a claim is generally useful is not publication permission. Promoting
 a Personal or project memory to a broader audience requires authorized source
 release and destination publication, with provenance and retained input policies.
+For Global memories, the destination action is specifically human ADMIN authority.
 
 ## Consequences and boundaries
 
@@ -354,7 +397,9 @@ All schema changes belong in new Flyway migrations after separate authorization.
    forced MANAGER exceptions for agents, and emergency recovery. Agent ADMIN
    rejection and the default CONTRIBUTOR ceiling are fixed proposal requirements.
 4. Define publication audiences and release authority, especially for Personal
-   content, derived outputs and existing server-shared material.
+   content, derived outputs and existing server-shared material. Global memory
+   publication requires human ADMIN; read audiences and authority for other
+   published resource kinds remain separate decisions.
 5. Specify explicit catalogue availability, instruction imports and operation
    defaults; keep shipped ordinary bots usable without implicit authority.
 6. Review legacy classification and the coordinated server/SDK/client cutover.

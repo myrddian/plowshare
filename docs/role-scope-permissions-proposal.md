@@ -50,7 +50,7 @@ text as the same capability.
 | --- | --- | --- |
 | Server administration | Enabled human server-admin account; specific operation/service gates | Explicit server-administration scope; ADMIN grants named control actions |
 | Internal server Relay | `Relay.SystemScope.SERVER`, separate from project topics | Explicit server scope; no implicit project/tenant data coverage |
-| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | Classify into server configuration, explicit published resources or restricted legacy history; retire as an active default |
+| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | Retain an explicit memory-only Global collection; move other meanings to server configuration, separate publication policies or restricted legacy history; no Global conversations |
 | Ordinary project | Project row/name, live project roles and resource-derived project resolution | Explicit project scope with scoped role grants |
 | Application project | Ordinary project roles plus active manifest, execution identity, placement and source rules | Same project role vocabulary with additional Application boundaries |
 | Personal execution workspace | Account-owned private project/union | Explicit Personal scope with fixed owner control; no ordinary membership sharing |
@@ -215,6 +215,33 @@ use the separate current checkout/provider/session fences.
 
 ## Publication and account ownership overlays
 
+### Global memory permissions
+
+Global is a proposed explicit memory collection, separate from the SYSTEM account,
+SYSTEM role, server-administration scope and shared-document catalogue. Its
+initial admitted kinds are memories and their derived retrieval/index views.
+
+| Global memory action | ADMIN | MANAGER | CONTRIBUTOR | READER |
+| --- | --- | --- | --- | --- |
+| Read explicitly selected published memories | Separate audience/read grant | Audience/read grant | Audience/read grant | Audience/read grant |
+| Propose a candidate from an authorized source | Source data/work grant | Source work authority | Source work authority | No |
+| Create/promote/edit/retire a Global memory or change its audience | Human ADMIN action over this collection, with source Release where applicable | No | No | No |
+| Create/resume/list/search Global conversations | No | No | No | No |
+| Treat shared documents or server configuration as Global memories | No | No | No | No |
+
+Curator may submit a proposal but cannot approve its own publication. A forced
+MANAGER agent cannot acquire a Global publication action. An authorized server
+executor can apply a retained human administrative decision without granting its
+agent ADMIN. Read counters and derived index maintenance remain bounded
+bookkeeping, separate from content/lifecycle/audience administration. Maintenance
+jobs have an explicit administrative owning scope and Global-memory targets.
+
+The following general publication matrix applies to other resource publication
+policies. Its Release cells do not weaken the human ADMIN rule for Global memory.
+Adding non-memory kinds to Global requires a separate scope/policy decision.
+
+### Other publication and owner controls
+
 | Resource or action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
 | Read explicitly published information | Audience/data grant | Audience grant | Audience grant | Audience grant |
@@ -283,7 +310,8 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
    behavior with explicit control and data grants. Review and migrate grants;
    do not silently widen existing private content access.
 2. **Publication:** define the source-release and destination/audience actions
-   and who may issue them. The Release cells deliberately do not assign these
+   and who may issue them. Global memory administration/publication is human ADMIN
+   only, with source authority still required. Other Release cells deliberately do not assign these
    rights automatically to every editor or manager. Preserve authorized export
    and existing publication/input/reference restrictions.
 3. **Management through files:** classify executable hooks, manifests, routing,
