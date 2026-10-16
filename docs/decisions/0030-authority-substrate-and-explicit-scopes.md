@@ -350,9 +350,36 @@ Curator can assess and propose; it cannot approve its own Global publication.
 The server may carry out a specifically authorized administrative effect under
 its retained admission without assigning ADMIN to the performing agent.
 
-Read access is a separate explicit audience/read grant. The name Global does not
-automatically grant every human, tenant, Application or run access or import its
-memories into every recall. Bounded use counters and derived index maintenance
+Read access is a separate explicit audience/read grant for eligible direct-human
+or admitted internal work. External SDK integrations are ineligible for Global,
+including Applications, service-token integrations, provider/client-tool workers
+and requests acting for a human subject. Neither an explicit project grant,
+manifest scope, provider assignment nor a forced MANAGER exception can override
+that restriction. An external request cannot invoke internal SYSTEM work as a
+proxy for Global access.
+
+This exclusion covers project discovery, explicit UUID/name selection, resource-ID
+reads, recall, navigation, publication, tool bindings and indirect retrieval views.
+Project-scoped external work must not append Global memories or retry Global when
+its own scope has no match. Omitted/null selections never become Global. Curation
+under external authority cannot consult Global neighbors or approve publication;
+any later human administrative publication is a separate authorized admission.
+
+External denotes the authenticated integration/acting authority, not which SDK
+language or package the client uses. Supported human clients may use the SDK
+without becoming external integrations. Enforce eligibility from trusted principal
+and admission provenance, never client-supplied names or a claimed first-party
+flag. If the transport admits indistinguishable human credentials from external
+clients, a reliable client-origin distinction requires its own authentication
+contract; SDK use or a User-Agent string cannot establish one.
+
+The Global project's admitted principal/workload kinds carry this restriction
+through generic scope policy. A project representation with a normal UUID must
+not accidentally enable external access merely because the old null-project
+service-token refusal no longer matches.
+
+The name Global does not automatically grant any human, tenant or run access or
+import its memories into every recall. Bounded use counters and derived index maintenance
 may follow an authorized read/maintenance contract; that bookkeeping does not
 grant authority to change memory content, lifecycle or audience.
 
@@ -411,7 +438,8 @@ visible and cannot bypass role/scope restrictions.
 For example, `get_date` needs no private data target but still needs an admitted
 capability. `memory_read` can be an installed platform capability while each call
 resolves and authorizes the requested memory's project. Reading a Global memory
-requires the Global project's audience/read authority. The tool's availability
+requires eligible direct-human/internal authority and the Global project's
+audience/read grant; external SDK integrations cannot acquire it. The tool's availability
 never supplies that authority or widens a project's recall implicitly.
 
 Current built-ins are registered through `AgentsConfig` and collected in

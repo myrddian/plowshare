@@ -69,6 +69,15 @@ authority over that project is required for publication and
 content/lifecycle administration. Ordinary resource publication remains separate;
 shared documents do not become Global memories or SYSTEM resources.
 
+External SDK integrations receive no Global access, including discovery, explicit
+project selection, memory IDs, implicit recall/navigation, publication and tool
+scope bindings. This includes acting requests whose subject is human: the external
+actor remains ineligible. Preserve eligible direct-human/internal use under its
+own grants. The fixed-UUID Global project needs an explicit principal/workload
+eligibility policy; the current service-token null-project refusal is insufficient
+once Global is represented as a normal project. No SDK-library/client-name check
+can substitute for trusted authenticated authority provenance.
+
 Built-in tools available across projects remain in the installed platform catalogue, not
 inside the Global memory project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
 separates registered names from offered capabilities; [ScopedTools](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedTools.java)
@@ -224,6 +233,10 @@ Default mocked/fake tests should cover:
 - A platform tool available in multiple projects still requires an agent/workflow
   grant and target/action authority. Its catalogue entry creates no Global-memory
   read permission and no cross-project provider/credential authority.
+- External SDK integrations cannot discover/select/read/write Global, gain it
+  through an acting human subject or bind tools there. Project recall/navigation
+  cannot append/retry Global or use a SYSTEM worker as a proxy. Test the fixed UUID,
+  aliases, resource IDs, projections and omitted/null scope under the same policy.
 - Global publication/content/lifecycle actions require human ADMIN over the
   collection plus source-release authority. Agents can propose but cannot approve
   their own publication; forced MANAGER does not override that rule. Read/use

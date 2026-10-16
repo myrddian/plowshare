@@ -222,6 +222,14 @@ UUIDs, separate from the SYSTEM account, SYSTEM role, server-administration scop
 and shared-document catalogue. Its
 initial admitted kinds are memories and their derived retrieval/index views.
 
+The matrix below applies only to eligible direct-human or explicitly admitted
+internal work. External SDK integrations, Applications, service-token integrations
+and provider/client-tool workers have no Global access at any role. Acting for a
+human does not change the external actor's exclusion. No explicit role grant,
+forced MANAGER, provider assignment, SDK tool call or internal-worker proxy can
+override it. Direct-human client use of an SDK library is not by itself an external
+integration identity; eligibility follows trusted authentication/admission provenance.
+
 | Global memory action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
 | Read explicitly selected published memories | Separate audience/read grant | Audience/read grant | Audience/read grant | Audience/read grant |
@@ -229,6 +237,7 @@ initial admitted kinds are memories and their derived retrieval/index views.
 | Create/promote/edit/retire a Global memory or change its audience | Human ADMIN action over this collection, with source Release where applicable | No | No | No |
 | Create/resume/list/search Global conversations | No | No | No | No |
 | Treat shared documents or server configuration as Global memories | No | No | No | No |
+| Grant an external SDK integration Global discovery/read/write/tool-binding access | No | No | No | No |
 
 Curator may submit a proposal but cannot approve its own publication. A forced
 MANAGER agent cannot acquire a Global publication action. An authorized server
@@ -291,6 +300,9 @@ offering; role, actual target scope and other capability restrictions govern
 invocation. External tools retain explicit owner/project/provider/agent assignments
 and credential subjects, even when configuration is reused by several projects.
 The current contracts require concrete projects, not a project-less wildcard grant.
+The proposed Global project is not an eligible external execution/tool-binding
+project despite having a concrete UUID. External project retrieval cannot include
+Global implicitly or acquire it through an acting subject or a retained view.
 
 Current ordinary service tokens may have effective MANAGER project ceilings;
 current acting scopes explicitly reject MANAGER and only support VIEWER or
