@@ -1,3 +1,4 @@
+import type { RequestOptions } from '../binding/acting.ts';
 import type { MetadataValidationResult } from './information-content.ts';
 import type { Code } from '../binding/codes.ts';
 import type { Operation, Payloads } from './direct.ts';
@@ -70,5 +71,6 @@ export interface OperationTransport {
     this: void,
     type: K,
     payload: Payloads[K],
+    options?: RequestOptions,
   ): Promise<CheckedAnswer>;
 }

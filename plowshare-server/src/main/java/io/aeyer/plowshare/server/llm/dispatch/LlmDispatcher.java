@@ -170,6 +170,7 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Completion complete(ChatRequest request) {
+    request.authorization().require();
     ChatRequest filtered = filtering.input(request, () -> false);
     Routing routing = route(filtered.specifier(), Lane.CHAT);
     Sampling sampling = carried(routing, filtered.sampling());
@@ -180,6 +181,7 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.specifier(),
             Lane.CHAT,
             filtered.attribution());
+    observer = InferenceObserver.authorized(observer, filtered.authorization());
     if (routing.pool().automaticCounting())
       preflight(
           observer,
@@ -266,6 +268,7 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private Completion stream(
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
+    request.authorization().require();
     ChatRequest filtered = filtering.input(request, abandoned);
     Routing routing = route(filtered.specifier(), Lane.CHAT);
     Sampling sampling = carried(routing, filtered.sampling());
@@ -276,6 +279,7 @@ public final class LlmDispatcher implements AutoCloseable {
             filtered.specifier(),
             Lane.CHAT,
             filtered.attribution());
+    observer = InferenceObserver.authorized(observer, filtered.authorization());
     if (routing.pool().automaticCounting())
       preflight(
           observer,
@@ -825,6 +829,7 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   public Completion streamOn(
       String pool, ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
+    request.authorization().require();
     ChatRequest filtered = filtering.input(request, abandoned);
     LlmPool named =
         pools.stream()
@@ -840,6 +845,7 @@ public final class LlmDispatcher implements AutoCloseable {
     InferenceObserver observer =
         accounting.begin(
             named.name(), wireModel, filtered.specifier(), Lane.CHAT, filtered.attribution());
+    observer = InferenceObserver.authorized(observer, filtered.authorization());
     if (named.automaticCounting())
       preflight(
           observer, routing, () -> named.countChat(wireModel, filtered.withSampling(sampling)));

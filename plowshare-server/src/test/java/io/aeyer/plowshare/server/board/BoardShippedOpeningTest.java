@@ -9,7 +9,6 @@ import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import io.aeyer.plowshare.server.swarm.DispatcherPools;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -48,19 +47,12 @@ class BoardShippedOpeningTest {
   @TempDir Path root;
 
   private AgentRegistry shipped() throws Exception {
-    Path merged = Files.createDirectories(root.resolve("definitions"));
-    for (String folder : List.of("agents", "bots")) {
-      try (var files = Files.list(Path.of("src/main/resources", folder))) {
-        for (Path file : files.filter(path -> path.toString().endsWith(".md")).toList()) {
-          Files.copy(file, merged.resolve(file.getFileName()));
-        }
-      }
-    }
-    return AgentRegistry.of(merged, BoundTools.boundByThisServer());
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.registry(
+        BoundTools.boundByThisServer());
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"farnsworth", "aristoxenus", "daedalus", "interlocutor"})
+  @ValueSource(strings = {"farnsworth", "aristoxenus", "interlocutor"})
   void shipped_chat_definitions_open_the_default_swarm_and_receive_its_resolution(String name)
       throws Exception {
     BoardFixture fixture = new BoardFixture(source);

@@ -87,9 +87,12 @@ public final class FrameRouter {
    * setting, one mapper here is enough.
    */
   private static final ObjectMapper JSON =
-      FrameJson.reading().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+      FrameJson.reading()
+          .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
   private final Map<String, FrameHandler> handlers;
+  private final ActingRequests acting;
 
   /**
    * @param handlers every type this router knows, keyed by the dotted discriminator a frame's
@@ -99,6 +102,11 @@ public final class FrameRouter {
    * @throws NullPointerException if {@code handlers} is null, or holds a null key or a null handler
    */
   public FrameRouter(Map<String, FrameHandler> handlers) {
+    this(handlers, null);
+  }
+
+  public FrameRouter(Map<String, FrameHandler> handlers, ActingRequests acting) {
+    this.acting = acting;
     handlers.keySet().forEach(FrameTypes::requireWellFormed);
     this.handlers = Map.copyOf(handlers);
   }
@@ -178,7 +186,13 @@ public final class FrameRouter {
           Code.NOT_FOUND, "no handler is registered for type \"" + request.type() + "\"");
     }
     try {
-      if (authorization != null)
+      if (request.actingFor() != null) {
+        if (acting == null) throw new CallerFault("Acting request admission is unavailable");
+        return acting.route(request.type(), request.payload(), request.actingFor(), asking);
+      }
+      if (authorization != null
+          && !Set.of(FrameTypes.ACTING_CONTEXT_OPEN, FrameTypes.ACTING_CONTEXT_CLOSE)
+              .contains(request.type()))
         authorization.require(
             request.type(),
             io.aeyer.plowshare.server.access.AccessRequestDecoder.decode(
@@ -223,6 +237,11 @@ public final class FrameRouter {
     }
   }
 
+  /** Release temporary subject contexts on physical connection teardown. */
+  public void disconnected(String connection) {
+    if (acting != null) acting.disconnected(connection);
+  }
+
   /**
    * Parses {@code rawFrame} into an {@link Envelope} first, so the two failures a handler never
    * gets a chance to cause — a frame that will not parse at all, and one naming the wrong {@code
@@ -240,9 +259,21 @@ public final class FrameRouter {
   public Outcome route(String rawFrame, Asking asking) {
     Envelope request;
     try {
-      request = JSON.readValue(rawFrame, Envelope.class);
+      var body = JSON.readTree(rawFrame);
+      if (body != null && body.has("actingFor")) {
+        var selection = body.get("actingFor");
+        if (!selection.isObject()
+            || selection.size() != 1
+            || !selection.path("context").isTextual())
+          throw new CallerFault("Specify exactly actingFor.context");
+        ActingFrames.uuid(selection.get("context").textValue());
+      }
+      request = JSON.treeToValue(body, Envelope.class);
     } catch (IOException notAFrame) {
       return refuse(notAFrame);
+    } catch (RuntimeException invalidSelection) {
+      var fault = Faults.of(invalidSelection);
+      return Outcome.failed(fault.code(), fault.detail());
     }
     if (request == null) {
       // Measured the same way FileChannelHandler measured it for its own
@@ -278,7 +309,8 @@ public final class FrameRouter {
       return "that frame parsed to nothing rather than to an envelope — the JSON literal"
           + " \"null\", or an empty body";
     }
-    String detail = cause.getMessage() == null ? cause.toString() : cause.getMessage();
-    return "this server could not read that frame as " + Envelope.CURRENT_VERSION + ": " + detail;
+    // Parser diagnostics can quote malformed credential tokens. A transport refusal must never
+    // echo proof material into a caller's diagnostic stream.
+    return "this server could not read that frame as " + Envelope.CURRENT_VERSION;
   }
 }

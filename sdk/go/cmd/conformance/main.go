@@ -48,6 +48,16 @@ func main() {
 		check(err == nil, "connect failed")
 		return client
 	}
+	selected := open("acting-selection")
+	for _, id := range []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"} {
+		actingCtx, err := plowshare.WithActingContext(ctx, id)
+		check(err == nil, "invalid acting context selection")
+		_, err = selected.ConversationTurns(actingCtx, plowshare.ConversationTurnsRequest{Conversation: "fixture"})
+		check(err == nil, "selected request failed")
+	}
+	_, err = selected.ConversationTurns(ctx, plowshare.ConversationTurnsRequest{Conversation: "fixture"})
+	check(err == nil, "ordinary request inherited acting selection")
+	selected.Close()
 	client := open("multiplex")
 	type result struct {
 		reply plowshare.Reply[[]plowshare.ProjectViewDto]

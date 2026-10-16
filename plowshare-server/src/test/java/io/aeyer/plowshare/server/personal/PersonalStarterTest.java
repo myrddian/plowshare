@@ -40,6 +40,7 @@ class PersonalStarterTest {
     assertTrue(personal.refused().isEmpty(), personal.refused().toString());
     assertEquals(
         Set.of(
+            "diagnose-conversation",
             "personal-capture",
             "personal-process-inbox",
             "personal-recall",
@@ -52,10 +53,14 @@ class PersonalStarterTest {
         new AgentDefinition(
             "worker", "Worker", "reasoning", List.of(), List.of(), List.of(), 4, 8, "Role");
     assertTrue(personal.granted(worker).isEmpty());
-    assertEquals(7, personal.granted(worker.withSkills(List.of("*"))).size());
+    assertEquals(8, personal.granted(worker.withSkills(List.of("*"))).size());
     for (var skill : personal.skills().values()) {
       assertTrue(skill.definition().agentVisible());
-      assertEquals(SkillDefinition.Mode.DIRECT, skill.definition().mode());
+      assertEquals(
+          skill.definition().name().equals("diagnose-conversation")
+              ? SkillDefinition.Mode.NEW
+              : SkillDefinition.Mode.DIRECT,
+          skill.definition().mode());
       var references =
           Pattern.compile("references/[a-z-]+\\.md").matcher(skill.definition().instructions());
       while (references.find())
@@ -71,9 +76,11 @@ class PersonalStarterTest {
         otherProject.skills().values().stream()
             .allMatch(skill -> skill.definition().agentVisible()));
     assertTrue(otherProject.granted(worker).isEmpty());
-    assertTrue(
-        resolver.forCaller(new Caller(11L, null, "bob")).skills().values().stream()
-            .noneMatch(skill -> skill.definition().agentVisible()));
+    var otherAccount = resolver.forCaller(new Caller(11L, null, "bob"));
+    assertEquals(Set.of("diagnose-conversation"), otherAccount.skills().keySet());
+    assertEquals(
+        io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.SHIPPED,
+        otherAccount.skills().get("diagnose-conversation").definition().tier());
     String rules = Files.readString(root.resolve("Resources/AGENTS.md"));
     assertTrue(rules.contains("In another project"));
     assertTrue(rules.contains("preserve user"));

@@ -145,6 +145,24 @@ export interface AdministrativePayloads {
 
 /** Persistent observer/presence operations are typed for platform adapters, not one-shot commands. */
 export interface BoundPayloads {
+  'acting.context.open': {
+    readonly application: string;
+    readonly grant: string;
+    readonly proof: {
+      readonly kind: 'acting-token';
+      readonly credential: string;
+    };
+  };
+  'acting.context.close': { readonly context: string };
+  /** Requires per-request actingFor; recover uncertain delivery through acting.turn.receipt. */
+  'acting.turn.start': {
+    readonly requestId: string;
+    readonly agent: string;
+    readonly task: string;
+    readonly conversation?: string;
+  };
+  'acting.turn.receipt': { readonly requestId: string };
+
   'incoming.catalog': { readonly project: string; readonly agent: string };
   'incoming.receive': {
     readonly project: string;
@@ -214,6 +232,10 @@ export interface BoundPayloads {
   };
 }
 export const BOUND_OPERATIONS = {
+  'acting.context.open': 'physical-connection-subject-context',
+  'acting.context.close': 'physical-connection-subject-context',
+  'acting.turn.start': 'selected-Personal-authority',
+  'acting.turn.receipt': 'selected-Personal-authority',
   'incoming.catalog': 'persistent inbound adapter',
   'incoming.receive': 'persistent inbound adapter',
   'incoming.status': 'persistent inbound adapter',

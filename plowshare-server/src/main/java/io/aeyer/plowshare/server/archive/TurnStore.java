@@ -96,7 +96,7 @@ import org.springframework.jdbc.core.RowMapper;
  * ReasonLog.forMemory} gives about the same situation: a store that can only be written is a table
  * nothing can answer from.
  */
-public final class TurnStore {
+public final class TurnStore implements TurnHistoryRepository {
 
   private static final Logger log = LoggerFactory.getLogger(TurnStore.class);
 
@@ -423,6 +423,7 @@ public final class TurnStore {
    *
    * @throws ValidationException if the conversation id cannot be named
    */
+  @Override
   public List<TurnRecord> forConversation(String conversationId) {
     String conversation = ConversationStore.named(conversationId);
     return ArchiveUnavailableException.translating(

@@ -114,6 +114,40 @@ validated at startup, and new runtime snapshots apply the same model/tool/graph 
 Classpath resources belong to the installed release. Existing admitted work keeps its
 normal pinned definition; editing a file does not change a running workflow.
 
+## Operator diagnostics and SYSTEM workers
+
+The bundled `conversation_diagnostician` is a private, delegable agent with
+`is-system: true`, `bot: false` and `exported: false`. Main agents with the skill
+grant can invoke the model-visible `diagnose-conversation` skill, which selects
+this worker with `mode: NEW`. Each invocation gets a separate durable child log
+and fresh context; the harness supplies the invoking conversation id as routing
+metadata, not copied conversation history. An explicit target id overrides that
+default. The independent `diagnosis_verifier` checks the final draft before it
+returns to the main agent. The dedicated TUI `/diagnose` command has been removed.
+
+`is-system` defaults to false and is accepted only from installed classpath
+resources; authored global, project, Personal, Application and client definitions
+cannot declare the key. Typed provenance is independent of the descriptive origin
+string. User-authored namesakes remain ordinary definitions. An explicit operator
+override is authored content too and keeps the ordinary classification default.
+
+Application service identities and retained acting requests cannot invoke the
+SYSTEM worker, including through skills, aliases, delegation or a human-owned
+conversation. The skill checks the request actor in addition to resolving the
+conversation owner. This classification grants no permissions, changes no
+workspace grants and does not select SYSTEM accounting.
+
+This exposure rule is enforced at discovery and request admission, rather than in
+the shared execution loop. Internal SYSTEM work, including Scribe, Curator,
+Learner, document workers and digest processing, keeps its existing execution and
+accounting paths. A refused acting request must not change the shared runtime's
+permissions. Existing worker-specific capability ceilings remain in force.
+
+Automatic folds and independent background consumers are currently paused inside
+retained acting turns until they can retain the originating authority. They remain
+available for ordinary internal work. SYSTEM accounting does not turn a delegated
+request into an unrestricted internal request.
+
 ## The layers of authority
 
 | Layer | What it controls |

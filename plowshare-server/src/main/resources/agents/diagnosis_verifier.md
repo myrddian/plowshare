@@ -2,7 +2,7 @@
 name: diagnosis_verifier
 description: |
   Independently checks concrete filesystem, source, symbol, and configuration
-  claims for Daedalus. It reads current project files and cited historical
+  claims for the conversation diagnostician. It reads current project files and cited historical
   entries independently, and reports evidence without re-diagnosing the incident.
 model: reasoning
 tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, conversation_trajectory]

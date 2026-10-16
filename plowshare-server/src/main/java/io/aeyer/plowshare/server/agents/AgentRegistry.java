@@ -113,6 +113,7 @@ public final class AgentRegistry {
   private static final String MAX_TURNS = "max-turns";
   private static final String MAX_MODEL_CALLS = "max-model-calls";
   private static final String EXPORTED = "exported";
+  private static final String IS_SYSTEM = "is-system";
   private static final String DELEGABLE = "delegable";
   private static final String VISION = "vision";
   private static final String BOT = "bot";
@@ -180,6 +181,10 @@ public final class AgentRegistry {
    * {@code bot}'s reason: an open set would drop {@code announces-inbox: true} in silence and a bot
    * would never learn its speaker had mail, with its own file saying otherwise.
    *
+   * <p>{@code is-system} defaults false and is reserved for bundled definitions. Provenance is
+   * assigned by the source loader; a name, path or authored origin cannot confer it. This flag
+   * restricts external exposure without granting runtime authority or changing usage attribution.
+   *
    * <p>{@code board} grants a bot permission to open project board topics. It requires {@code bot:
    * true}, because the resolution returns to that bot's person's conversation.
    */
@@ -201,6 +206,7 @@ public final class AgentRegistry {
           MAX_TURNS,
           MAX_MODEL_CALLS,
           EXPORTED,
+          IS_SYSTEM,
           DELEGABLE,
           VISION,
           BOT,
@@ -317,6 +323,7 @@ public final class AgentRegistry {
   private final AgentGuidance guidance;
   private final Map<String, List<AgentDefinition>> aliases;
   private final Map<String, String> disabled;
+  private final Set<String> systemNames;
   private final Map<String, String> withheldEdges;
   private final Map<String, String> withheldTools;
 
@@ -333,6 +340,9 @@ public final class AgentRegistry {
    * unable to say which happened, and "disabled, because X" — as against "served, minus X" — is the
    * whole of what this mechanism buys over a boot failure.
    *
+   * <p>{@code systemNames} retains trusted classification when graph/model checks disable a parsed
+   * SYSTEM definition, so discovery does not reintroduce it as a disabled entry.
+   *
    * <p>Every value is a sentence naming the file and the fault — the same sentence the strict
    * loader would have thrown — so an operator reads the same words whichever way the server treated
    * it.
@@ -341,9 +351,16 @@ public final class AgentRegistry {
       Map<String, AgentDefinition> enabled,
       Map<String, String> disabled,
       Map<String, String> withheldEdges,
-      Map<String, String> withheldTools) {
+      Map<String, String> withheldTools,
+      Set<String> systemNames) {
 
     public Loaded {
+      var classified = new TreeSet<>(Objects.requireNonNull(systemNames, "systemNames"));
+      enabled.values().stream()
+          .filter(AgentDefinition::isSystem)
+          .map(AgentDefinition::name)
+          .forEach(classified::add);
+      systemNames = Set.copyOf(classified);
       enabled =
           Collections.unmodifiableMap(
               new LinkedHashMap<>(Objects.requireNonNull(enabled, "enabled")));
@@ -356,6 +373,15 @@ public final class AgentRegistry {
       withheldTools =
           Collections.unmodifiableMap(
               new LinkedHashMap<>(Objects.requireNonNull(withheldTools, "withheldTools")));
+    }
+
+    /** Preserve trusted classification when later model checks disable a definition. */
+    public Loaded(
+        Map<String, AgentDefinition> enabled,
+        Map<String, String> disabled,
+        Map<String, String> withheldEdges,
+        Map<String, String> withheldTools) {
+      this(enabled, disabled, withheldEdges, withheldTools, Set.of());
     }
 
     /**
@@ -391,7 +417,7 @@ public final class AgentRegistry {
       }
       Map<String, String> refused = new LinkedHashMap<>(disabled);
       refused.put(name, reason);
-      return new Loaded(remaining, refused, withheldEdges, withheldTools);
+      return new Loaded(remaining, refused, withheldEdges, withheldTools, systemNames);
     }
   }
 
@@ -454,11 +480,19 @@ public final class AgentRegistry {
     defined.addAll(AgentAliases.families(copy).keySet());
     requireValidSet(copy, defined);
     this.byName = copy;
+    this.systemNames = loaded.systemNames();
     this.guidance = Objects.requireNonNull(guidance, "guidance");
     this.aliases = AgentAliases.families(copy);
     this.disabled = Collections.unmodifiableMap(new TreeMap<>(loaded.disabled()));
     this.withheldEdges = Collections.unmodifiableMap(new TreeMap<>(loaded.withheldEdges()));
     this.withheldTools = Collections.unmodifiableMap(new TreeMap<>(loaded.withheldTools()));
+  }
+
+  /**
+   * Resolved aliases use their selected definition; disabled rows retain trusted classification.
+   */
+  public boolean isSystem(String name) {
+    return find(name).map(AgentDefinition::isSystem).orElse(systemNames.contains(name));
   }
 
   private static void requireKeysAreNames(Map<String, AgentDefinition> byName) {
@@ -822,6 +856,7 @@ public final class AgentRegistry {
     Objects.requireNonNull(source, "source");
     Objects.requireNonNull(knownTools, "knownTools");
 
+    Set<String> systemNames = new TreeSet<>();
     Map<String, AgentDefinition> enabled = new LinkedHashMap<>();
     Map<String, String> disabled = new LinkedHashMap<>();
     Map<String, String> withheldEdges = new LinkedHashMap<>();
@@ -846,6 +881,7 @@ public final class AgentRegistry {
         disabled.put(stem, bad.getMessage());
         continue;
       }
+      if (definition.isSystem()) systemNames.add(definition.name());
       if (!droppedTools.isEmpty()) {
         if (required.test(definition.name())) {
           // The rung above: any fault on an agent this code depends on
@@ -928,7 +964,7 @@ public final class AgentRegistry {
           tool.getKey(),
           tool.getValue());
     }
-    return new Loaded(enabled, disabled, withheldEdges, withheldTools);
+    return new Loaded(enabled, disabled, withheldEdges, withheldTools, systemNames);
   }
 
   /**
@@ -1103,6 +1139,11 @@ public final class AgentRegistry {
     String prompt = String.join("\n", lines.subList(close + 1, lines.size())).strip();
 
     Map<String, Object> keys = frontmatterOf(entry, frontmatter, extraKeys, refusedKeys);
+    boolean isSystem = requireBoolean(entry, keys, IS_SYSTEM, false);
+    if (keys.containsKey(IS_SYSTEM) && entry.provenance() != DefinitionSource.Provenance.BUNDLED) {
+      throw new IllegalStateException(
+          refusal(entry) + " 'is-system' is reserved for bundled definitions");
+    }
     Map<String, Object> extras = new LinkedHashMap<>();
     for (String extra : extraKeys) {
       if (keys.containsKey(extra)) {
@@ -1240,7 +1281,8 @@ public final class AgentRegistry {
             entry.origin(),
             alias,
             guidance,
-            dynamic),
+            dynamic,
+            isSystem),
         Collections.unmodifiableMap(new LinkedHashMap<>(extras)));
   }
 
@@ -2266,7 +2308,8 @@ public final class AgentRegistry {
         caller.origin(),
         caller.alias(),
         caller.guidance(),
-        caller.dynamic());
+        caller.dynamic(),
+        caller.isSystem());
   }
 
   /**

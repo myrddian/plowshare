@@ -259,6 +259,7 @@ export function decodeReply<K extends keyof Replies>(
   ) as unknown as Replies[K];
   if (type === 'filestore.list' && !fileStoreCatalogCheck(decoded))
     throw new Error('Invalid FileStore catalogue');
+  validateActingReply(type, decoded);
   validateProviderCredentialReply(type, decoded);
   const portableFailure = interchangeProblem(type, decoded, true);
   if (portableFailure) throw new Error(portableFailure);
@@ -290,4 +291,47 @@ export function decodeContract(
   input = true,
 ): JsonValue | undefined {
   return decode(schema, value, input, name, 0, definitions);
+}
+
+function validateActingReply(type: string, value: unknown): void {
+  if (type === 'acting.turn.start' || type === 'acting.turn.receipt') {
+    if (
+      !object(value) ||
+      typeof value['requestId'] !== 'string' ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(
+        value['requestId'],
+      ) ||
+      typeof value['conversation'] !== 'string' ||
+      value['conversation'].length > 128 ||
+      !/^cnv_[A-Za-z0-9]+$/.test(value['conversation']) ||
+      typeof value['agent'] !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value['agent']) ||
+      typeof value['state'] !== 'string' ||
+      !['ADMITTED', 'STARTED', 'FINISHED', 'UNCERTAIN'].includes(
+        value['state'],
+      ) ||
+      (value['job'] !== null &&
+        (typeof value['job'] !== 'string' ||
+          value['job'].length > 128 ||
+          !/^job_[A-Za-z0-9]+$/.test(value['job']))) ||
+      ((value['state'] === 'STARTED' || value['state'] === 'FINISHED') &&
+        value['job'] === null)
+    )
+      throw new Error('Invalid acting turn receipt');
+  }
+  if (type === 'acting.context.open') {
+    if (
+      !object(value) ||
+      typeof value['context'] !== 'string' ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value['context']) ||
+      typeof value['subject'] !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value['subject']) ||
+      typeof value['expiresAt'] !== 'string' ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(
+        value['expiresAt'],
+      ) ||
+      !Number.isFinite(Date.parse(value['expiresAt']))
+    )
+      throw new Error('Invalid acting context reply');
+  }
 }

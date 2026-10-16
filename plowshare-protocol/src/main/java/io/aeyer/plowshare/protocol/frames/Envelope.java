@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * One frame on the WebSocket wire, in either direction: {@code { id, type, protocol_version,
- * payload }}, per spec §3.1.
+ * payload, actingFor? }}, per spec §3.1 and ADR 0026.
  *
  * <h2>Why this lives in {@code plowshare-protocol} and not in {@code ws/}</h2>
  *
@@ -44,9 +44,9 @@ import java.util.Objects;
  * change regardless of whether the name was reserved in advance, so the reservation buys an agreed
  * name and nothing else; {@link #protocolVersion} is what actually handles the break, and it is
  * already here. VoidCore reserved {@code seq} and {@code mac} for per-message session
- * authentication; this design has no per-message authentication to reserve for, because auth
- * happens once, before the socket exists (§2), and no frame authenticates. Add them when there is a
- * concrete v2 that needs them — not before, and not as insurance.
+ * authentication. Application login happens before the socket exists. The separate acting-context
+ * exchange proves bounded subject consent; later frames carry only a typed context reference, never
+ * per-message login or bearer material.
  *
  * <h2>{@link #payload} is a {@code Map<String, Object>}, not a {@code JsonNode}</h2>
  *
@@ -73,13 +73,19 @@ import java.util.Objects;
  * @param payload the frame's own data, in the shape its {@link #type} defines. Decoded a second
  *     time by whichever {@code FrameHandler} claims this {@link #type}; this record does not
  *     interpret it
+ * @param actingFor optional immutable subject-context selection on this request; it never changes
+ *     the socket actor. The server refuses malformed, foreign, expired or unsupported selections.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Envelope(
     String id,
     String type,
     @JsonProperty("protocol_version") String protocolVersion,
-    Map<String, Object> payload) {
+    Map<String, Object> payload,
+    io.aeyer.plowshare.protocol.ActingContext.Selection actingFor) {
+  public Envelope(String id, String type, String protocolVersion, Map<String, Object> payload) {
+    this(id, type, protocolVersion, payload, null);
+  }
 
   /**
    * The only protocol version this build speaks. Spec §3.1: exact, because this layer is a

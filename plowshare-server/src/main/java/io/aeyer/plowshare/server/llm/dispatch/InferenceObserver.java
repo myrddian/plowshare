@@ -35,6 +35,55 @@ public interface InferenceObserver {
         }
       };
 
+  /** Invoked inside the worker's failure boundary, after queueing and before transport. */
+  default void beforeDispatch() {}
+
+  /** Adds authorization without changing accounting attribution, including SYSTEM processing. */
+  static InferenceObserver authorized(InferenceObserver delegate, CallAuthorization authority) {
+    return new InferenceObserver() {
+      @Override
+      public boolean enabled() {
+        return delegate.enabled();
+      }
+
+      @Override
+      public void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount count) {
+        delegate.preflight(count);
+      }
+
+      @Override
+      public void queued() {
+        delegate.queued();
+      }
+
+      @Override
+      public void started() {
+        delegate.started();
+      }
+
+      @Override
+      public void beforeDispatch() {
+        authority.require();
+        delegate.beforeDispatch();
+      }
+
+      @Override
+      public Attempt attempt() {
+        return delegate.attempt();
+      }
+
+      @Override
+      public void finished(CallLifecycle outcome) {
+        delegate.finished(outcome);
+      }
+
+      @Override
+      public InferenceCapture capture() {
+        return delegate.capture();
+      }
+    };
+  }
+
   default void preflight(io.aeyer.plowshare.server.llm.counting.PromptCount count) {}
 
   boolean enabled();

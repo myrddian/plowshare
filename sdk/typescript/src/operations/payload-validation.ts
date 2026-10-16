@@ -21,6 +21,58 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (type === 'acting.turn.start' || type === 'acting.turn.receipt') {
+    if (
+      typeof payload['requestId'] !== 'string' ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(
+        payload['requestId'],
+      )
+    )
+      return 'Invalid acting request UUID';
+    if (type === 'acting.turn.receipt') return undefined;
+    return typeof payload['agent'] === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(payload['agent']) &&
+      typeof payload['task'] === 'string' &&
+      payload['task'].trim().length > 0 &&
+      utf8Length(payload['task']) <= 65536 &&
+      !payload['task'].includes(String.fromCharCode(0)) &&
+      (payload['conversation'] === undefined ||
+        (typeof payload['conversation'] === 'string' &&
+          payload['conversation'].length <= 128 &&
+          /^cnv_[A-Za-z0-9]+$/.test(payload['conversation'])))
+      ? undefined
+      : 'Invalid acting turn';
+  }
+  if (type === 'acting.context.close') {
+    return typeof payload['context'] === 'string' &&
+      /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(payload['context'])
+      ? undefined
+      : 'Invalid acting context';
+  }
+  if (type === 'acting.context.open') {
+    const app = payload['application'],
+      grant = payload['grant'],
+      proof = fields(payload['proof']);
+    return typeof app === 'string' &&
+      app.length > 0 &&
+      app.length <= 256 &&
+      app === app.trim() &&
+      !Array.from(app).some(
+        (char) =>
+          char.charCodeAt(0) < 32 ||
+          (char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159),
+      ) &&
+      !/^(?:personal:|Personal:|client:)/.test(app) &&
+      typeof grant === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(grant) &&
+      proof !== undefined &&
+      Object.keys(proof).length === 2 &&
+      proof['kind'] === 'acting-token' &&
+      typeof proof['credential'] === 'string' &&
+      /^psa_[0-9a-f]{48}$/.test(proof['credential'])
+      ? undefined
+      : 'Invalid acting proof exchange';
+  }
   if (type.startsWith('information.interchange.'))
     return interchangeProblem(type, payload);
   if (isNavigationOperation(type) && type in SHAPES)

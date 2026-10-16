@@ -20,6 +20,8 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
 
   private final io.aeyer.plowshare.server.applications.ApplicationIdentities identities;
 
+  private final io.aeyer.plowshare.server.acting.ActingRepository acting;
+
   public JdbcApplicationDeploymentStore(
       JdbcTemplate jdbc,
       UnitOfWork work,
@@ -34,6 +36,17 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
       ServerProjects projects,
       io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
       io.aeyer.plowshare.server.applications.ApplicationIdentities identities) {
+    this(jdbc, work, projects, schedules, identities, null);
+  }
+
+  public JdbcApplicationDeploymentStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ServerProjects projects,
+      io.aeyer.plowshare.server.events.ScheduleDefinitionStore schedules,
+      io.aeyer.plowshare.server.applications.ApplicationIdentities identities,
+      io.aeyer.plowshare.server.acting.ActingRepository acting) {
+    this.acting = acting;
     this.identities = identities;
     this.jdbc = jdbc;
     this.work = work;
@@ -162,6 +175,15 @@ public final class JdbcApplicationDeploymentStore implements ApplicationDeployme
             scheduleOwner =
                 identities.activate(
                     account, mutation.project(), source.declaration(), source.principal());
+          }
+          if (acting != null) {
+            var source = mutation.identity();
+            if (source == null)
+              throw new CallerFault("Deployment needs validated acting declarations");
+            acting.activate(
+                mutation.project(), release.release().revision(), source.acting(), account);
+          } else if (mutation.identity() != null && !mutation.identity().acting().isEmpty()) {
+            throw new CallerFault("Acting grant persistence is unavailable");
           }
           // Only new sources acquire the declared owner. Updates never transfer historical
           // schedules.

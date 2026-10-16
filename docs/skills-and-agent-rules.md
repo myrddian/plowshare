@@ -135,6 +135,21 @@ guessing a name and calling `skill_run`. Automatic selection also needs a
 configured context mode. A skill without one needs an explicit command with
 `--mode` until its author configures the mode.
 
+## Conversation diagnostics
+
+The bundled `diagnose-conversation` skill is model-visible and selects the private
+SYSTEM agent `conversation_diagnostician` with `mode: NEW`. A main agent with the
+skill grant can request diagnosis using a target conversation id and a focused
+question. With no explicit target, the worker uses the invoking conversation id
+supplied by the harness. It reads persisted evidence in the same authorized scope;
+parent reasoning and chat history are not automatically copied into its context.
+
+The worker retains read-only filesystem access and its independent
+`diagnosis_verifier`. Its verified result returns to the calling agent. It is not
+a selectable bot or public run endpoint, and a skill does not bypass its
+Application/acting restriction. An explicit `/skill:diagnose-conversation` uses
+the same skill path; the dedicated TUI `/diagnose` command has been removed.
+
 ## Execution
 
 An agent or Bot with a declared skill grant receives `skill_run` and `skill_read`

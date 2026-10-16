@@ -39,7 +39,8 @@ class InterlocutorDefinitionTest {
   private static final String REVIEWER = "code_reviewer";
 
   private static Map<String, AgentDefinition> shippedSet() {
-    return AgentRegistry.load(SHIPPED, BoundTools.boundByThisServer());
+    return io.aeyer.plowshare.server.agents.ShippedDefinitions.agents(
+        BoundTools.boundByThisServer());
   }
 
   private static AgentDefinition shipped() {

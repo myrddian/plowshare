@@ -1904,6 +1904,22 @@ public final class Compaction {
 
   /** One turn's transcript, and the one number the conversation takes back from it. */
   public final class TurnTranscript implements Transcript {
+    private Runnable retainedAuthority = () -> {};
+    private String retainedSubject;
+    private boolean confined;
+
+    /**
+     * Set before job admission. Confined turns never launch background folds, log hooks, citations
+     * or follower delivery; those independent consumers do not yet carry delegated authority.
+     */
+    public void confine(Runnable check, String subject) {
+      if (subject == null || subject.isBlank())
+        throw new IllegalArgumentException("Subject required");
+      retainedSubject = subject;
+      retainedAuthority = Objects.requireNonNull(check);
+      retainedAuthority.run();
+      confined = true;
+    }
 
     private final String conversationId;
     private final AgentDefinition definition;
@@ -2198,6 +2214,7 @@ public final class Compaction {
      */
     @Override
     public List<ChatMessage> before() {
+      retainedAuthority.run();
       try {
         List<TurnRecord> spoken = turns.forConversation(conversationId);
         // Settled here because this is the one place that has already
@@ -2599,6 +2616,7 @@ public final class Compaction {
      */
     @Override
     public int stepEnded(List<ChatMessage> history, int openedAt) {
+      if (confined) return openedAt;
       try {
         int measured = lastPrompt;
         if (measured == 0) {
@@ -2942,6 +2960,9 @@ public final class Compaction {
 
     /** The final summary only, under the pool's streaming timeout bounds. */
     private Completion summarisingCall(AgentDefinition folding, List<ChatMessage> asked) {
+      if (confined)
+        throw new IllegalStateException("Acting turns do not admit background model work");
+      retainedAuthority.run();
       return models.streamFold(
           JobRuntime.requestFor(folding, asked).withAttribution(foldUsage(folding)),
           Deltas.DISCARDING);
@@ -3062,6 +3083,7 @@ public final class Compaction {
      * like.
      */
     public void foldWhenTheTurnIsOver() {
+      if (confined) return;
       if (!folding.add(conversationId)) {
         log.debug(
             "conversation {}: a fold is already in flight, so the one this turn"
@@ -3112,6 +3134,30 @@ public final class Compaction {
      */
     @Override
     public Transcript delegate(AgentDefinition callee, Home home, String openedBy) {
+      if (confined) {
+        retainedAuthority.run();
+        RetainedAgent.require(callee);
+        // A delegated child must have a durable parent link. Unlike ordinary best-effort log
+        // creation, failure cannot fall back to an unbound transcript. Log stages/background
+        // consumers remain absent until they accept retained authority themselves.
+        if (conversations == null)
+          throw new IllegalStateException("Child conversation store required");
+        String id =
+            conversations
+                .log(
+                    Origin.DELEGATION,
+                    home,
+                    callee.name(),
+                    conversationId,
+                    null,
+                    retainedSubject,
+                    openedBy)
+                .id();
+        TurnTranscript child =
+            new TurnTranscript(id, callee, null, Speaker.harness(), Origin.DELEGATION);
+        child.confine(retainedAuthority, retainedSubject);
+        return child;
+      }
       return logFor(
           Origin.DELEGATION, home, callee, conversationId, null, Speaker.harness(), null, openedBy);
     }
@@ -3170,7 +3216,7 @@ public final class Compaction {
     @Override
     public void closed(String utterance, Outcome outcome) {
       writeBackWhatWasSpent();
-      if (outcome.ending() == Outcome.Ending.ANSWERED) {
+      if (!confined && outcome.ending() == Outcome.Ending.ANSWERED) {
         // ANSWERED only, and the other branch is why: every other ending
         // puts the runtime's own sentence into `outcome.text()`, and a
         // citation read out of a harness sentence would be one the agent
@@ -3197,7 +3243,7 @@ public final class Compaction {
         // turn's answer, untimed for the reason the branch below gives -- the loop records
         // no answer for this ending, since the text is a tool's and not a model's reply.
         record(LoggedEntry.answer(outcome.text(), List.of()));
-      } else {
+      } else if (outcome.ending() != Outcome.Ending.ANSWERED) {
         record(LoggedEntry.attemptFailed(outcome.ending(), outcome.failureText()));
         // The runtime's own sentence, and it is deliberately untimed: it
         // names an ending and lists the tools the run called, and no
@@ -3230,7 +3276,7 @@ public final class Compaction {
       // AFTER THE TURN'S ENTRIES AND ITS ROW, AND BEFORE THE FOLD: every entry this turn
       // wrote is committed, and this runs on the job's own thread before JobStore.finish
       // publishes `ended` — so a client streaming this turn is told before it hears it end.
-      told();
+      if (!confined) told();
       foldWhenTheTurnIsOver();
       // log.close, last: a machine log takes no more turns once its run ends on anything
       // but AWAITING, which a person's answer continues (spec 2026-09-28-hooks-reach-the-log

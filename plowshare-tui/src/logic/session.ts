@@ -131,7 +131,6 @@ import {
   COMMANDS,
   CONVERSATIONS_COMMAND,
   FIRE_COMMAND,
-  DIAGNOSE_COMMAND,
   EARLIER_COMMAND,
   FIRINGS_COMMAND,
   HELP_COMMAND,
@@ -1113,12 +1112,6 @@ export type Typed =
    * takes it.
    */
   | { readonly kind: 'earlier' }
-  /** Ask Daedalus to inspect an explicit conversation, or the current one when absent. */
-  | {
-      readonly kind: 'diagnose';
-      readonly conversation?: string;
-      readonly question?: string;
-    }
   /**
    * What this client can do, which is the first thing anybody types.
    *
@@ -1707,9 +1700,7 @@ export function typed(
       ? { kind: 'usage', command: CANCEL_COMMAND }
       : { kind: 'cancelRun', id: argument, ask: cancellingRun(argument) };
   }
-  if (word === DIAGNOSE_COMMAND) {
-    return diagnosis(argument);
-  }
+
   if (word === HERE_COMMAND) {
     return argument === ''
       ? { kind: 'here' }
@@ -1919,34 +1910,6 @@ function decisionIn(text: string): Decision | undefined {
     default:
       return undefined;
   }
-}
-
-/**
- * What follows {@code /diagnose}: an optional id, then an optional question
- * behind {@code --}. The delimiter keeps a sentence from being mistaken for a
- * conversation id and leaves the question's spaces exactly as the person wrote
- * them after trimming its edges.
- */
-function diagnosis(argument: string): Typed {
-  if (argument === '') {
-    return { kind: 'diagnose' };
-  }
-  if (argument === '--') {
-    return { kind: 'usage', command: DIAGNOSE_COMMAND };
-  }
-  const current = argument.match(/^--\s+(.+)$/s);
-  if (current !== null) {
-    return { kind: 'diagnose', question: current[1]!.trim() };
-  }
-  const named = argument.match(/^(\S+)(?:\s+--\s+(.+))?$/s);
-  if (named === null) {
-    return { kind: 'usage', command: DIAGNOSE_COMMAND };
-  }
-  const conversation = named[1]!;
-  const question = named[2]?.trim();
-  return question === undefined
-    ? { kind: 'diagnose', conversation }
-    : { kind: 'diagnose', conversation, question };
 }
 
 /**

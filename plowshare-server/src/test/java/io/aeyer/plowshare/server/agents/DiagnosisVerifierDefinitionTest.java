@@ -10,12 +10,13 @@ import io.aeyer.plowshare.server.files.Scope;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** The clean-context verifier Daedalus uses for claims about project reality. */
+/**
+ * The clean-context verifier the conversation diagnostician uses for claims about project reality.
+ */
 class DiagnosisVerifierDefinitionTest {
 
   private static AgentDefinition shipped() {
-    return AgentRegistry.of(ShippedDefinitions.asOneSet(), BoundTools.boundByThisServer())
-        .get("diagnosis_verifier");
+    return ShippedDefinitions.registry(BoundTools.boundByThisServer()).get("diagnosis_verifier");
   }
 
   @Test
