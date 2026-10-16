@@ -21,5 +21,6 @@
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
 - [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)
+- [MCP cancellation and recovery](mcp-recovery.md)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

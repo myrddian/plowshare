@@ -4,6 +4,90 @@ import { HttpMcpSessions } from './session.ts';
 import { DEFAULT_LIMITS } from './settings.ts';
 import { McpWire, rawTool } from './wire.test-support.ts';
 import type { McpProtocol } from './contracts.ts';
+import { McpToolClient } from './tool-client.ts';
+import { setTimeout as pause } from 'node:timers/promises';
+import { withinDeadline } from './contracts.ts';
+
+for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
+  for (const stop of ['abort', 'close'] as const) {
+    await test(`${protocol}: HTTP ${stop} ends a submitted wait as UNKNOWN and closes its response without replay`, async () => {
+      const wire = new McpWire(protocol);
+      await wire.start();
+      const session = await new HttpMcpSessions().open(
+        {
+          protocol,
+          policy: {
+            endpoint: wire.endpoint,
+            allowHttp: true,
+            allowPrivateNetwork: true,
+            timeoutMs: 2000,
+          },
+        },
+        AbortSignal.timeout(2000),
+      );
+      const client = await McpToolClient.discover(
+        session,
+        AbortSignal.timeout(2000),
+      );
+      const controller = new AbortController();
+      try {
+        const tool = client.tools[0];
+        assert.ok(tool);
+        controller.abort();
+        assert.equal(
+          (
+            await client.invoke(
+              tool.name,
+              { values: [{ name: 'before' }] },
+              controller.signal,
+            )
+          ).state,
+          'REJECTED',
+        );
+        assert.equal(
+          wire.seen.filter((row) => row.method === 'tools/call').length,
+          0,
+        );
+        const submitted = new Promise<void>((resolve) => {
+          wire.onCall = resolve;
+        });
+        const effect = new AbortController();
+        wire.mode = 'hang';
+        const pending = client.invoke(
+          tool.name,
+          { values: [{ name: 'after' }] },
+          effect.signal,
+        );
+        await withinDeadline(() => submitted, AbortSignal.timeout(1000));
+        if (stop === 'abort') effect.abort();
+        else await client.close();
+        const outcome = await pending;
+        assert.equal(outcome.state, 'UNKNOWN');
+        assert.match(outcome.text, /Cancellation requested/);
+        assert.equal(
+          (
+            await client.invoke(
+              tool.name,
+              { values: [] },
+              new AbortController().signal,
+            )
+          ).state,
+          'REJECTED',
+        );
+        const deadline = Date.now() + 1000;
+        while (wire.abortedCalls === 0 && Date.now() < deadline) await pause(5);
+        assert.equal(wire.abortedCalls, 1);
+        assert.equal(
+          wire.seen.filter((row) => row.method === 'tools/call').length,
+          1,
+        );
+      } finally {
+        await client.close();
+        await wire.close();
+      }
+    });
+  }
+}
 
 for (const protocol of ['2026-07-28', '2025-11-25'] satisfies McpProtocol[]) {
   await test(`${protocol}: independent HTTP negotiation, nested arguments and isolated credentials/sessions`, async () => {

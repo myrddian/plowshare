@@ -222,7 +222,10 @@ abort physical HTTP requests and response streams; process shutdown stops intake
 aborts in-flight requests, attempts catalogue withdrawal and stops worker renewal.
 The SDK WebSocket request timeout also bounds a pending credential or publication
 request. The worker lease expires on shutdown; there is no invented unregister
-operation. Core cancellation propagation remains separate work.
+operation. Immediate server-run cancellation propagation remains a separate public
+capability gap; the worker retains its original deadline. The
+[cancellation and recovery manual](../../docs/mcp-recovery.md) distinguishes local
+abort, server waiting, late verified results and unsupported delivery-only recovery.
 
 ToolProvider saves SDK receipts before execution and result submission. The private
 directory uses an exclusive binding lock, atomic private files and file/directory
@@ -235,8 +238,11 @@ user content.
 
 Uncertain result publication is read-only reconciled. Recovery under an unchanged
 catalogue uses the SDK's existing executing/ready/publishing rules and never
-reexecutes a retained invocation. Retired executing/ready receipts remain retained
-for inspection; the adapter does not invent result authority for them. Archive
+reexecutes a retained invocation. Startup records interrupted `executing` receipts
+as `ready`/`UNKNOWN` under the exclusive lock, preserving their request and original
+worker fence. Known ready results remain unchanged. Retired ready receipts stay
+retained for inspection: the public SDK has no result-delivery-only pass, and the
+adapter never polls retired tools or invents result authority for them. Archive
 settled state deliberately before the bounds of 1,000 receipts per catalogue,
 the configured recovery archive bound (128 by default) or 2 MiB per private file
 are reached. A full archive refuses a new generation before saving it. Lowering

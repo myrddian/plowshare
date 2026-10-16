@@ -18,11 +18,15 @@ import {
   decodeToolSchema,
   validateToolSchema,
 } from 'plowshare-client-ts/operations/tool-schemas';
-import { FileToolJournal, durablePrivateWrite } from './journal.ts';
+import {
+  FileToolJournal,
+  durablePrivateWrite,
+  recoverInterrupted,
+} from './journal.ts';
 import { object, text } from './codec.ts';
 import { rejected } from './contracts.ts';
 import { MAX_TOOL_NAME_LENGTH } from 'plowshare-client-ts/operations/relay-tools';
-import { PROVIDER_CATALOGUE_TOOL_LIMIT } from './settings.ts';
+import { PROVIDER_CATALOGUE_TOOL_LIMIT, LIMIT_CEILINGS } from './settings.ts';
 import type { ProviderConnection } from './provider.ts';
 
 export interface RecoveryCatalogue {
@@ -65,7 +69,7 @@ function declaration(source: unknown): ToolDeclaration {
   validateToolSchema(inputSchema);
   return Object.freeze({
     name: text(raw.name, MAX_TOOL_NAME_LENGTH),
-    description: text(raw.description, 1024),
+    description: text(raw.description, LIMIT_CEILINGS.maxDescriptionLength),
     parameters: [],
     timeoutSeconds: raw.timeoutSeconds,
     inputSchema,
@@ -154,7 +158,10 @@ export class FileRecoveryCatalogues implements RecoveryCatalogues {
     await durablePrivateWrite(file, catalogue);
   }
 }
-/** Read-only SDK reconciliation for every retained generation. Never poll an old catalogue or open MCP. */
+/** Server reconciliation is read-only; local interrupted receipts become ready/UNKNOWN under the
+ * caller's exclusive binding lock. Never poll an old catalogue, publish its result or open MCP.
+ * Retired ready results require an explicit future SDK delivery-only capability, not poll().
+ */
 export async function reconcileCatalogues(
   connection: ProviderConnection,
   catalogues: RecoveryCatalogues,
@@ -182,6 +189,7 @@ export async function reconcileCatalogues(
       catalogue.registration,
     );
     verified += await provider.reconcile();
+    await recoverInterrupted(journal);
   }
   return verified;
 }
