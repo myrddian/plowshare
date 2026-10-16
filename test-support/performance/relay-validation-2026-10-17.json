@@ -1,0 +1,109 @@
+{
+  "date": "2026-10-17",
+  "runtime": {
+    "node": "v26.7.0",
+    "architecture": "arm64"
+  },
+  "baselineCommit": "631af41ec711357befb6b303dec0df6678be8056",
+  "benchmarkCommand": "node --experimental-strip-types scripts/relay-validation-benchmark.mjs",
+  "workload": {
+    "clients": 4,
+    "messagesPerClient": 12,
+    "rawBytesPerMessage": 5242880,
+    "characters": [
+      "ASCII x",
+      "U+00E9",
+      "U+1F600",
+      "U+0001"
+    ],
+    "start": "all clients released by one readiness barrier"
+  },
+  "before": {
+    "concurrency": 4,
+    "bytes": 5242880,
+    "iterations": 3,
+    "results": [
+      {
+        "requests": 12,
+        "elapsedMs": 406.23866699999996
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 398.25025
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 398.914958
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 392.76491699999997
+      }
+    ]
+  },
+  "after": {
+    "concurrency": 4,
+    "bytes": 5242880,
+    "iterations": 3,
+    "results": [
+      {
+        "requests": 12,
+        "elapsedMs": 68.210083
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 62.900959
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 66.73766700000002
+      },
+      {
+        "requests": 12,
+        "elapsedMs": 63.705208
+      }
+    ]
+  },
+  "originalFailure": {
+    "test": "Relay topic port reply boundaries > bounds raw UTF-8 bytes rather than UTF-16 units or escaped JSON",
+    "elapsedMs": 5298,
+    "timeoutMs": 5000
+  },
+  "diagnosis": {
+    "introducedRelayBoundaryCommit": "d69ef28cec7b16dfdd4e3bcee9eda12ce873748e",
+    "textValidationPassesBefore": 2,
+    "textValidationPassesAfter": 1,
+    "baselineCpuProfilePercentInUtf8Length": 62.8,
+    "profiledBoundaryWorkload": "The original four 50 MiB accepted/oversized publication cases and three invalid Unicode/NUL cases, using Node assert for the assertions."
+  },
+  "limits": [
+    "CPU codec workload only; excludes network and PostgreSQL latency.",
+    "Local before/after measurements, not a production capacity benchmark.",
+    "Validation remains synchronous; maximum-size payloads still use the client event loop.",
+    "Existing byte ceilings, Unicode rejection and the test timeout remain unchanged."
+  ],
+  "profiledBoundaryMs": {
+    "before": 1772.387041,
+    "after": 410.228958
+  },
+  "normalParallelCheckBoundaryMs": 2182,
+  "databaseVerification": {
+    "testsPassed": 6,
+    "burst": {
+      "simultaneousSubmissions": 64,
+      "distinctEventIdentities": 32,
+      "assertions": [
+        "Every duplicate pair returns the same committed publication receipt.",
+        "Exactly 32 committed positions, ordered contiguously from 1 through 32.",
+        "Every admitted identity appears exactly once."
+      ]
+    },
+    "additionalAssertions": [
+      "Concurrent duplicate publication admits one event.",
+      "Competing consumer workers have one owner while another group is independent.",
+      "Stale ownership cannot advance a successor offset or claim.",
+      "Concurrent admission retains one set of delivery identities.",
+      "Competing workers cannot claim the same branch."
+    ]
+  }
+}

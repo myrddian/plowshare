@@ -3411,7 +3411,7 @@ type ApprovalViewDto struct {
 	Id            string                      `json:"id"`
 	Judged        TierDtoProject              `json:"judged"`
 	Prefix        IncomingSourceDtoExtensions `json:"prefix"`
-	Reason        string                      `json:"reason"`
+	Reason        TierDtoProject              `json:"reason"`
 	Scope         TierDtoProject              `json:"scope"`
 	Side          string                      `json:"side"`
 	State         string                      `json:"state"`

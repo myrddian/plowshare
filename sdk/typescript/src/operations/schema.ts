@@ -214,7 +214,10 @@ export function decodePayload<K extends Operation>(
   if (!object(decoded)) throw new Error('operation payload must be an object');
   const failure =
     problem(type, decoded) ??
-    (Object.hasOwn(SHAPES, type)
+    // Relay's complete domain validation already ran in problem(). The schema
+    // above enforced field names and types; repeating command validation would
+    // synchronously rescan up to 50 MiB of text on the client's event loop.
+    (Object.hasOwn(SHAPES, type) && !type.startsWith('relay.')
       ? commandProblem(type as keyof ExtendedPayloads, decoded)
       : undefined);
   if (failure !== undefined) throw new Error(failure);

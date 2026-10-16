@@ -5,13 +5,17 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import java.util.stream.LongStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -427,6 +431,51 @@ class JdbcRelayRepositoryTest {
       assertEquals(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
       assertEquals(2, repository.append(topic, draft("two"), T0).position());
     }
+  }
+
+  @Test
+  void many_publishers_keep_committed_positions_contiguous_and_duplicate_receipts_identical()
+      throws Exception {
+    int publishers = 32;
+    var ready = new CountDownLatch(publishers * 2);
+    var start = new CountDownLatch(1);
+    var expectedEvents = new HashSet<String>();
+    repository.subscribe(a, Relay.Start.OLDEST_RETAINED, T0);
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var receipts = new ArrayList<Future<Relay.Publication>>();
+      for (int index = 0; index < publishers; index++) {
+        String event = "concurrent-" + index;
+        expectedEvents.add(event);
+        // All 64 callers wait at the same gate. Every logical publisher has two
+        // simultaneous submissions of the same identity, mixed with other identities.
+        for (int duplicate = 0; duplicate < 2; duplicate++) {
+          receipts.add(
+              threads.submit(
+                  () -> {
+                    ready.countDown();
+                    await(start);
+                    return repository.append(topic, draft(event), T0);
+                  }));
+        }
+      }
+      try {
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+      } finally {
+        start.countDown();
+      }
+      for (int index = 0; index < receipts.size(); index += 2) {
+        assertEquals(
+            receipts.get(index).get(10, TimeUnit.SECONDS),
+            receipts.get(index + 1).get(10, TimeUnit.SECONDS));
+      }
+    }
+    var publications = repository.read(a, 100).publications();
+    assertEquals(
+        LongStream.rangeClosed(1, publishers).boxed().toList(),
+        publications.stream().map(Relay.Publication::position).toList());
+    assertEquals(
+        expectedEvents,
+        new HashSet<>(publications.stream().map(p -> p.event().eventId()).toList()));
   }
 
   @Test

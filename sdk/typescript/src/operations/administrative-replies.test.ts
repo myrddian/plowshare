@@ -185,6 +185,46 @@ describe('complete administrative WS replies', () => {
       }),
     ).toBeUndefined();
   });
+  it('accepts absent command explanations while rejecting malformed reasons', async () => {
+    const original = fixtures['approval.list'];
+    if (!object(original.payload) || !isList(original.payload.approvals))
+      throw new Error('approval fixture missing');
+    const approval = original.payload.approvals[0];
+    if (!object(approval)) throw new Error('approval row missing');
+    for (const reason of [null, '', 'Review the command']) {
+      const outcome = {
+        code: 'OK' as const,
+        payload: { approvals: [{ ...approval, reason }] },
+      };
+      const result = await dispatch(
+        {
+          async ask() {
+            return outcome;
+          },
+        },
+        request('approval.list', { mine: true }),
+      );
+      expect(result.kind).toBe('completed');
+      expect(result.outcome.payload).toEqual(outcome.payload);
+    }
+    for (const reason of [false, 1, [], {}]) {
+      const outcome = {
+        code: 'OK' as const,
+        payload: { approvals: [{ ...approval, reason }] },
+      };
+      await expect(
+        dispatch(
+          {
+            async ask() {
+              return outcome;
+            },
+          },
+          request('approval.list', { mine: true }),
+        ),
+      ).resolves.toMatchObject({ kind: 'invalid-response' });
+    }
+  });
+
   it('preserves busy/conductor approval decisions without inventing jobs', async () => {
     for (const busy of [true, false]) {
       const outcome: Outcome = {
@@ -312,7 +352,7 @@ describe('complete administrative WS replies', () => {
         'ApprovalView',
         'server/ws/ApprovalFrames',
         'View',
-        ['scope', 'prefix', 'answeredAt', 'commands', 'judged'],
+        ['reason', 'scope', 'prefix', 'answeredAt', 'commands', 'judged'],
       ],
       [
         'ApprovalListed',

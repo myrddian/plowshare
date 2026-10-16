@@ -132,7 +132,7 @@ export const approvalWire = (
   side: 'server',
   command: ['echo', 'fixture'],
   cwd: '/fixture',
-  reason: '',
+  reason: null,
   state: 'asked',
   scope: null,
   prefix: null,

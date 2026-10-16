@@ -122,6 +122,7 @@ export async function protocolFixture(options = {}) {
   }
   const unreadInbox = () => inbox.filter(item => !readInbox.has(item.id));
   const approvals = [approvalWire({ id: 'fixture-approval', conversation: 'fixture-first', agent: 'fixture-bot', command: ['echo','fixture approval'] })];
+  const conversationOnlyApprovals = new Set(options.foregroundApprovals ? ['fixture-approval'] : []);
   let socket;
   let logins = 0;
   let setupPending = options.setup === true;
@@ -548,7 +549,7 @@ export async function protocolFixture(options = {}) {
         }
         case 'orchestration.caps': result.payload={...administrative[frame.type].payload,project:payload.project}; break;
         case 'job.cancel': { const job = jobs.get(payload.job); finish(job, 'CANCELLED'); result.payload = { id: job.id, conversation: job.conversation, state: 'DONE', outcome: job.outcome }; break; }
-        case 'approval.list': result.payload = { approvals:payload.project?standingApprovals:approvals }; break;
+        case 'approval.list': result.payload = { approvals: payload.project ? standingApprovals : payload.conversation ? approvals.filter(row => row.conversation === payload.conversation) : approvals.filter(row => !conversationOnlyApprovals.has(row.id)) }; break;
         case 'approval.revoke': {
           const index=standingApprovals.findIndex(row=>row.id===payload.id);
           if(index>=0)standingApprovals.splice(index,1);result.payload={id:payload.id,revoked:index>=0};break;
@@ -678,6 +679,14 @@ export async function protocolFixture(options = {}) {
     addConversation(row, bot) {
       conversations.push(conversationWire(row.id, row)); entries.set(row.id, []);
       if (bot) botLatest.set(JSON.stringify([row.project, bot]), row.id);
+    },
+    awaitApproval(id) {
+      const job = [...jobs.values()].findLast(row => !row.outcome);
+      if (!job) throw new Error('No active fixture run');
+      approvals.push(approvalWire({ id, conversation: job.conversation, agent: 'fixture-bot', side: 'local' }));
+      conversationOnlyApprovals.add(id);
+      // No Inbox notification: the durable ending must trigger discovery itself.
+      finish(job, 'AWAITING', `Approve running echo fixture in /fixture on the local side? [${id}]`);
     },
     queueApproval(id, conversation = 'fixture-first', legacy = false) {
       const row = approvalWire({ id, conversation, agent: 'fixture-bot', command: ['echo', id], cwd: '/fixture', reason: 'Review this exact request.' });
