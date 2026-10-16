@@ -19,6 +19,7 @@ import type {
   ToolCall,
   ToolReceipt,
   RegisteredTool,
+  ToolBinding,
 } from 'plowshare-client-ts';
 import { createHash } from 'node:crypto';
 import type { McpSession } from './contracts.ts';
@@ -28,6 +29,7 @@ import { FileToolJournal, uuid } from './journal.ts';
 import { HttpMcpSessions } from './session.ts';
 import { openStdio } from './stdio.ts';
 import { McpToolClient } from './tool-client.ts';
+import { validateMcpInvocation } from './invocation.ts';
 import { decodeNativeConfig, nativeEnvironment } from './native-config.ts';
 import type { NativeMcpConfig, NativeOwner } from './native-config.ts';
 
@@ -486,8 +488,16 @@ export class NativeMcpHost {
   }
   /** Optional server bridge handlers call this direct layer. Their SDK ToolProvider owns execution
    * intent/receipts; invoking a handler without such an owner is not an authorized client workflow.
+   * The binding must be the route returned on that owner's sharing socket; retain a private copy
+   * so later caller mutation cannot widen the handler's route.
    */
-  registeredTools(): readonly RegisteredTool[] {
+  registeredTools(binding: ToolBinding): readonly RegisteredTool[] {
+    if (
+      binding.project !== this.config.project ||
+      binding.account !== this.config.owner.account
+    )
+      throw new Error('Native sharing route belongs to another owner');
+    const route = Object.freeze({ ...binding });
     return this.tools.map((declaration, index) => ({
       declaration,
       handler: async (call: ToolCall) => {
@@ -508,6 +518,14 @@ export class NativeMcpHost {
             this.controller.signal,
             AbortSignal.timeout(remaining),
           ]);
+          try {
+            await validateMcpInvocation(route, declaration, call);
+            signal.throwIfAborted();
+          } catch {
+            return rejected(
+              'Native MCP invocation did not match its owner, route or offered contract. No call was sent.',
+            );
+          }
           try {
             this.sessions.validate?.(this.config);
             await this.client.refresh(signal);

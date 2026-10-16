@@ -58,7 +58,11 @@ export class NativeProviderBridge {
         route.prefix !== scope.prefix
       )
         throw new Error('Foreign native provider scope');
-      const tools = host.registeredTools();
+      const tools = host.registeredTools({
+        project: route.project,
+        provider: route.provider,
+        account: route.account,
+      });
       const identity = await nodeToolHost.sha256(
         toolDeploymentConfig(
           {

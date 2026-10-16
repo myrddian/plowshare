@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.agents;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
@@ -326,6 +328,67 @@ class HookedRunTest {
   }
 
   // --- tool.pre / tool.post ----------------------------------------------------------
+
+  @Test
+  void dynamically_offered_provider_tools_use_the_same_deny_and_redaction_hooks() throws Exception {
+    for (boolean deny : List.of(true, false)) {
+      Probe external = new Probe("mcp_external");
+      Scripted model =
+          new Scripted()
+              .then(() -> asking(new ToolCall("c1", "mcp_external", "{}")))
+              .then(() -> answer("ok"));
+      JobRuntime runtime = runtime(model);
+      var scopes = mock(ScopedTools.class);
+      when(scopes.tools(any(), anyString(), nullable(String.class), any(), nullable(String.class)))
+          .thenReturn(List.of(external));
+      runtime.useScopedTools(scopes);
+      runtime.useHooks(
+          new Hooks() {
+            @Override
+            public ToolPre toolPre(HookContext context, String name, String arguments) {
+              assertEquals("mcp_external", name);
+              return deny
+                  ? new ToolPre(
+                      arguments,
+                      "Provider policy refused",
+                      List.of(record("provider", Stage.TOOL_PRE, HookRecord.DENY)))
+                  : ToolPre.allowed(arguments);
+            }
+
+            @Override
+            public ToolPost toolPost(
+                HookContext context, String name, String arguments, String result) {
+              return new ToolPost(
+                  "Redacted provider result",
+                  List.of(record("provider", Stage.TOOL_POST, HookRecord.REDACT)));
+            }
+          });
+      Recorded log = new Recorded();
+      runtime.run(
+          agent("contrarian").withTools(List.of()).withDynamic(true),
+          "Use the assigned provider",
+          Home.of("fixture"),
+          Budget.of(20),
+          () -> false,
+          null,
+          JobWatch.UNWATCHED,
+          log,
+          TurnCap.none(),
+          List.of(),
+          "alice");
+      assertEquals(deny ? List.of() : List.of("{}"), external.seen);
+      String result =
+          model.sent.get(1).stream()
+              .filter(message -> message.role() == ChatMessage.Role.TOOL)
+              .map(ChatMessage::content)
+              .findFirst()
+              .orElseThrow();
+      assertTrue(
+          result.contains(deny ? "Provider policy refused" : "Redacted provider result"), result);
+      assertFalse(result.contains("hunter2"));
+      assertTrue(log.kinds().contains(EntryKind.HOOK));
+    }
+  }
 
   @Test
   void a_denied_call_never_runs_and_the_model_is_told_why() throws Exception {

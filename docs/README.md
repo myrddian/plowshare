@@ -20,5 +20,6 @@
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Model usage and pricing configuration](model-usage-accounting.md)
 - [MCP identities and accounting policy](mcp-accounting-policy.md) (proposed decision)
+- [MCP tool grants, hooks and invocation evidence](mcp-tool-authority.md)
 - [JavaScript orchestrations](scripted-orchestrations.md)
 - [Using the research workflow](scripted-research.md)

@@ -143,7 +143,7 @@ export function invocation(tool: string): ToolCall {
     project: 'fixture',
     provider: routedProvider,
     tool,
-    account: 'original-caller',
+    account: registration.binding.owner,
     run: id,
     call: secondId,
     deadline: '2099-01-01T00:00:00Z',
