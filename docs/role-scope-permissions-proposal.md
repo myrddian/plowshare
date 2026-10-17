@@ -146,7 +146,7 @@ below, an Application project. No column permits acting outside the grant's scop
 | Export currently readable content to the requesting principal | Data grant | Allowed | Allowed | Allowed |
 | Create a conversation (`CONVERSATION_CREATE`, included in `EXECUTION`) | Explicit execution/data grant | Allowed in a supporting scope | Allowed in a supporting scope | No |
 | Invoke model inference (`RUN_MODEL`, included in `EXECUTION`) | Explicit execution/data grant | Allowed within retained limits | Allowed within retained limits | No |
-| Run an agent, skill, orchestration or board | Required execution and capability grants | Allowed with required action/tool grants | Allowed with required action/tool grants | No |
+| Run an agent, skill, orchestration or board | Required action and capability grants | Allowed with required action/tool grants | Allowed with required action/tool grants | No |
 | Post messages, receive admitted external work, send outgoing work | Data grant | Allowed | Allowed | No |
 | Write/update content, memories and permitted ordinary metadata | Data grant | Allowed | Allowed | No |
 | Start paid document processing, digest or curation assessment | Data grant | Allowed | Allowed | No |
@@ -390,6 +390,15 @@ can hold READ/WRITE/EXECUTION there, retained to a bounded internal task. Human
 Global ADMIN has READ/WRITE/control, not implicit EXECUTION; GLOBAL_READ supplies
 only read authority. Resource owner, executor, initiating actor and sponsor stay
 separate even when the same scope is used for storage and processing.
+
+Non-model work is authorized by its actual actions, with no EXECUTE_JOB permission.
+Scripts, tool-only jobs, CPU stages and scheduled/Relay-triggered work check READ
+for resource reads, WRITE or the relevant control action for changes,
+CONVERSATION_CREATE when creating a conversation and RUN_MODEL when invoking
+inference. Queueing or CPU work alone does not require RUN_MODEL or the whole
+EXECUTION bundle. Existing tool, filesystem/provider, Relay, schedule and lifecycle
+restrictions remain effective; executor authority, sandbox and configured operation
+budget are retained. See [non-model action checks](decisions/0030-authority-substrate-and-explicit-scopes.md#non-model-work-and-action-based-authorization).
 
 Roles, including Application roles, map to common scoped action grants. Ordinary
 knowledge READ/WRITE authorization replaces exact-owner equality checks;

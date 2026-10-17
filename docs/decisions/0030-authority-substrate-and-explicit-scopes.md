@@ -372,6 +372,31 @@ The actions remain independently checkable even when granted together through
 the bundle. Neither action grants tools, input access, output publication or
 administrative control.
 
+### Non-model work and action-based authorization
+
+Authorize an operation by the actions it actually performs. There is no separate
+`EXECUTE_JOB` permission. Scripts, tool-only jobs, CPU stages, scheduled maintenance
+and Relay-triggered processing use the executor's applicable account authority,
+restricted by the retained operation sandbox and existing domain controls.
+
+Resource reads require READ; resource changes require WRITE or the applicable
+management/control action. Creating a conversation requires CONVERSATION_CREATE;
+any inference requires RUN_MODEL. Merely queueing work, running CPU computation
+or invoking a permitted non-model tool does not require RUN_MODEL or the entire
+EXECUTION bundle. An operation that later creates a conversation or calls a model
+must check that action at its owning boundary; earlier admission is not a bypass.
+
+EXECUTION remains the convenience bundle of CONVERSATION_CREATE and RUN_MODEL,
+not a blanket prerequisite for every background task. Tools, filesystem/provider
+access, Relay routes, schedule controls, lifecycle and cancellation retain their
+existing capability mechanisms. A timer/message or job record supplies no new
+account authority. Operations retain their configured budgets and effect receipts
+where applicable; non-model work does not acquire model-spending authority merely
+because it is a job. This introduces neither tool-level account RBAC nor a new
+general execution permission.
+
+### Inference and service authority
+
 `RUN_MODEL` covers all model inference, including chat/generation, summarisation,
 embeddings, reranking, model-based validation and inference performed by hooks,
 preparation stages or other side calls. The same action applies whether the

@@ -275,6 +275,13 @@ Default mocked/fake tests should cover:
   requires a retained scoped principal grant and applicable workload validation. An empty
   conversation need not invoke or charge a model. Later turns, children and async
   model work recheck authority rather than reusing only conversation admission.
+- Non-model work checks its actual resource/control actions with no EXECUTE_JOB
+  permission. Scripts, tool-only/CPU jobs, scheduled maintenance and Relay-triggered
+  processing need applicable READ/WRITE/control authority and existing capabilities,
+  not an unconditional EXECUTION gate. CONVERSATION_CREATE and RUN_MODEL apply when
+  those actions occur. Preserve executor identity, operation sandbox, configured
+  budgets, lifecycle/receipts and tool/file/provider/Relay restrictions. See
+  [non-model action checks](decisions/0030-authority-substrate-and-explicit-scopes.md#non-model-work-and-action-based-authorization).
 - RUN_MODEL covers all inference, including embeddings, reranking, model-based
   validators and hook/preparation side calls. Declared SYSTEM services use their
   existing authority bounded by the operation; callers need permission for the

@@ -413,7 +413,7 @@ Model-call allowance, capacity routing and monetary reservations are distinct.
 | Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
 | Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
 | Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; operation-budget sponsorship remains independent of permission |
-| Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
+| Non-model execution | Settled: check the actions actually performed, with no EXECUTE_JOB permission. Tool-only/CPU/scheduled/Relay work needs applicable resource/control authority and existing capability fences; CREATE or RUN_MODEL applies only when that action occurs. EXECUTION is a convenience bundle, not a universal job gate |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
 | Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without fresh per-task account grants, and the operation pays through its configured budget. Map each workflow's trigger, inputs/outputs, sandbox, budget binding and private logs; detailed pool/reservation mechanics remain implementation design |
 | Operation-budget lifecycle | Settled: conversation compaction uses its conversation budget; project/Application preparation uses scope processing budgets; Global/maintenance uses configured deployment budgets; read-side inference uses its search-operation budget. Retain binding and usage across queue/recovery, without creator/SYSTEM fallback or historical cost relabeling |
@@ -463,8 +463,9 @@ librarian read path needs these decisions:
    adoption, existing role compatibility and narrow retained admissions. Disk,
    old job/log and historical accounting classification must preserve identities.
 
-Broader CPU/tool-only work, optional public SYSTEM-workflow continuation and
-general curation transfers can remain separately scoped decisions. They must not
+Mapping broader CPU/tool-only consumers to the adopted action checks, optional
+public SYSTEM-workflow continuation and general curation transfers can remain
+separately scoped work. They must not
 be silently inferred from this first knowledge-processing slice. Any rollout of
 deployment-wide reading must enforce the settled authenticated audience and its
 source-release/private-resource boundaries. First-class tenant entities remain
@@ -538,6 +539,11 @@ Focused mocked/fake acceptance coverage should include:
   RUN_MODEL can request authorized search with bounded SYSTEM-service inference;
   the same caller cannot invoke arbitrary model work or expand the service's
   targets/tools. Queue-time checks retain executor authority, sandbox and limits.
+- Non-model scripts, tool-only jobs, CPU stages and scheduled/Relay-triggered
+  operations check their actual READ/WRITE/control actions without EXECUTE_JOB or
+  an unconditional EXECUTION gate. Creating a conversation or later calling a
+  model still checks CREATE/RUN_MODEL; existing tool/file/provider/route and
+  lifecycle restrictions remain in force. Timers/messages confer no new authority.
 - Operation-specific budget bindings survive queueing, creator access removal and
   recovery. Compaction, scoped preparation, Global maintenance and semantic search
   use their configured operation budget sources; missing/exhausted budgets prevent
