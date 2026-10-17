@@ -49,7 +49,11 @@ A permitted retrieval read may consume its admitted query-embedding allowance.
 READER does not thereby gain permission to start an independent agent, processing
 pipeline, digest or curation job. Classify model-directed navigation separately
 from a bounded retrieval read rather than treating every operation that returns
-text as the same capability.
+text as the same capability. With `RUN_MODEL` now explicit, the exact treatment of
+read-side query embeddings is an open decision: either separately authorize that
+bounded action or define a read-service sponsorship contract. This paragraph is
+not an implicit exemption from execution admission or a grant of unrestricted
+model spending to `GLOBAL_READ` holders.
 
 ## Scopes and boundaries present today
 
@@ -122,7 +126,9 @@ below, an Application project. No column permits acting outside the grant's scop
 | Discover/read permitted content, conversations, memories, definitions and status | Data grant | Allowed | Allowed | Allowed |
 | Read another principal's private context or owner-only receipt | No | No | No | No |
 | Export currently readable content to the requesting principal | Data grant | Allowed | Allowed | Allowed |
-| Open a conversation; run an agent, skill, orchestration or board | Data grant | Allowed | Allowed | No |
+| Create a conversation (`CONVERSATION_CREATE`, included in `EXECUTION`) | Explicit execution/data grant | Allowed in a supporting scope | Allowed in a supporting scope | No |
+| Invoke model inference (`RUN_MODEL`, included in `EXECUTION`) | Explicit execution/data grant | Allowed within retained limits | Allowed within retained limits | No |
+| Run an agent, skill, orchestration or board | Required execution and capability grants | Allowed with required action/tool grants | Allowed with required action/tool grants | No |
 | Post messages, receive admitted external work, send outgoing work | Data grant | Allowed | Allowed | No |
 | Write/update content, memories and permitted ordinary metadata | Data grant | Allowed | Allowed | No |
 | Start paid document processing, digest or curation assessment | Data grant | Allowed | Allowed | No |
@@ -318,6 +324,14 @@ from reading another owner's secrets or replaying their mutation. Shared audienc
 and owner-only records must retain independent live checks.
 
 ## Application and independent capability restrictions
+
+`EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`; scope workload support
+is mandatory in addition to principal grants. Global account knowledge never
+supports either action, including for ADMIN and SYSTEM. Ordinary project/Personal
+execution can read admitted Global knowledge without moving the run there. Model
+preparation of Global-owned knowledge must execute in another supporting scope
+under explicit input/output and administrative authority. No read role supplies
+execution or model-spending permission.
 
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and

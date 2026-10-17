@@ -4,6 +4,8 @@ Status: architecture proposal and source map, 17 October 2026. No implementation
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
 The [role and scope permission matrices](role-scope-permissions-proposal.md)
 separate current operation gates from proposed action bundles and scope overlays.
+The [segmented impact report](authority-substrate-impact-report.md) assesses
+compatibility, assumptions, missing decisions and the no-Global-execution rule.
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners
@@ -243,6 +245,13 @@ the complete substrate remains under design.
 
 Default mocked/fake tests should cover:
 
+- `EXECUTION` includes `CONVERSATION_CREATE` and `RUN_MODEL`; each action still
+  requires destination workload support and a retained principal grant. An empty
+  conversation need not invoke or charge a model. Later turns, children and async
+  model work recheck authority rather than reusing only conversation admission.
+- Global knowledge refuses execution for every role/principal, including ADMIN
+  and SYSTEM. Model preparation runs in another execution-capable owning scope
+  with admitted Global inputs/outputs; reading Global does not rehome the work.
 - SYSTEM cannot be assigned through any role/grant, agent configuration, inheritance,
   delegation, execution profile or operator/recovery path. Authorized scoped human
   ADMIN grants remain usable; agents cannot receive ADMIN. Trusted agent

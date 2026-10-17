@@ -33,6 +33,8 @@ records the source baseline, reusable contracts, gaps and proposed work sequence
 The [role and scope permission matrices](../role-scope-permissions-proposal.md)
 map current enforcement to proposed ADMIN, MANAGER, CONTRIBUTOR and READER actions,
 including owner-only controls and agent ceilings.
+The [impact report](../authority-substrate-impact-report.md) records a segmented
+server scan, compatibility consequences and unresolved implementation decisions.
 This decision extends the authority model of [ADR 0026](0026-service-execution-on-behalf-of-an-account.md)
 and must preserve the independent accounting concerns of
 [ADR 0025](0025-service-account-attribution-and-spending-pools.md).
@@ -222,10 +224,42 @@ checks. Preserve the current separate Application login and acting-context flow.
 
 ## Execution authority and general checkpoints
 
+### EXECUTION and scope workload support
+
+Define `EXECUTION` as a permission bundle containing `CONVERSATION_CREATE` and
+`RUN_MODEL`. The first authorizes creating a conversation in its destination;
+the second authorizes model inference under retained scope, capability and budget
+limits. Creating an empty conversation does not by itself spend model allowance.
+The actions remain independently checkable even when granted together through
+the bundle. Neither action grants tools, input access, output publication or
+administrative control.
+
+Admission requires both the destination's supported workload/action policy and
+the executor's valid action grant. Ordinary project and Personal scopes can
+support execution; granted human/Application authority determines who may use it.
+Resolve a contextual default to a concrete destination before evaluating either
+condition. Recheck `RUN_MODEL` for later turns, model-directed child work and
+asynchronous admissions under the retained ceiling rather than relying only on
+the original conversation-create check.
+
+The `GLOBAL_ACCOUNT` knowledge scope does not support execution. No account role,
+including ADMIN or SYSTEM, can enable `CONVERSATION_CREATE`, `RUN_MODEL` or the
+`EXECUTION` bundle there. This is a mandatory resource/workload property, not a
+missing role assignment that a stronger role can override. Agents may read Global
+knowledge while executing in another admitted scope; knowledge ownership does
+not become execution ownership. Any model-based preparation/maintenance of
+Global-owned knowledge needs a separate execution-capable owning scope, explicit
+input/output targets and the appropriate human administrative admission or an
+explicit operator-authorized maintenance policy with retained bounds. This does
+not require a new interactive approval for every stage of already admitted work.
+
+### General authorization checkpoints
+
 Conceptually, an operation is allowed only when all of these conditions hold:
 
 ```text
 valid live grant provenance
+AND the destination supports the requested workload/action
 AND the required action is granted
 AND the actual resource and destination are within admitted scope
 AND actor and subject restrictions permit the operation
@@ -387,6 +421,8 @@ alternate scope. The same reserved UUID on another installation does not transfe
 grants or trust.
 
 Every authenticated human, Application and service principal holds `GLOBAL_READ`.
+Authentication must remain current and the principal active; role membership
+never bypasses account disable, token expiry/revocation or credential rotation.
 Agents use the roles of their retained execution authority; a definition cannot
 mint an independent identity or acquire ADMIN. Holding this read role does not
 make every resource readable: the resource's policy must authorize `GLOBAL_READ`.
