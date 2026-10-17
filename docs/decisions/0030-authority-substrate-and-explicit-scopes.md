@@ -395,6 +395,36 @@ where applicable; non-model work does not acquire model-spending authority merel
 because it is a job. This introduces neither tool-level account RBAC nor a new
 general execution permission.
 
+### Existing operation controls and WRITE
+
+Where an operation already exposes a lifecycle control, authorization follows
+WRITE on its applicable scoped target plus that control's existing eligibility
+and lifecycle rules. There is no additional `CONTROL_EXECUTION` permission.
+CONTRIBUTOR/MANAGER can use supported controls covered by their scoped WRITE;
+`created_by` supplies no special control entitlement. READER may inspect permitted
+status through READ, but receives no mutation authority from that role.
+
+This is a permission mapping, not authorization to create missing capabilities.
+It introduces no generic operation ACL/registry, cancellation service, job
+pause/resume API, SDK operation or durable resume machinery. Audit each existing
+control against its owning resource/scope; if the control is absent, record that
+fact rather than infer or implement it. Domain-specific subject/receipt checks,
+Application bindings, state transitions and uncertainty handling remain intact.
+
+Verified examples illustrate the limits of the mapping:
+
+| Existing control | Capability to preserve |
+| --- | --- |
+| [job.cancel](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/JobCancelHandler.java) | Requests that an eligible job stop at a boundary; it does not promise an immediate kill or completed cancellation |
+| [schedule.pause](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/SchedulePauseHandler.java) | Pauses/resumes a schedule through its existing authority rules; it does not establish pause/resume of an already running job |
+
+Changing permissions or schedule definitions remains access/configuration
+management. Resuming supported work that performs new protected actions still
+requires those actions and current operation validity; WRITE control alone does
+not supply RUN_MODEL or other execution authority. For independent SYSTEM work,
+explicit cancellation/invalidation applies only through supported lifecycle
+controls; loss of the creator's access remains insufficient to stop valid work.
+
 ### Inference and service authority
 
 `RUN_MODEL` covers all model inference, including chat/generation, summarisation,
@@ -509,7 +539,7 @@ the operation, invalidate its checkpoints or prevent its queued/recovered work.
 Execution still checks SYSTEM's authority, the retained operation sandbox, the
 applicable document/revision generation and availability, required inputs,
 lifecycle policy, cancellation and resource/budget limits. Withdrawal/deletion,
-generation invalidation, explicit operation cancellation or other invalidation
+generation invalidation, cancellation through a supported lifecycle control or other invalidation
 must fence affected work and obsolete output commits through the owning lifecycle.
 The worker cannot bypass those conditions merely because it runs as SYSTEM.
 Source permissions are evaluated for the actual SYSTEM operation and its policy,

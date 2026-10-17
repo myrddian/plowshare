@@ -282,6 +282,12 @@ Default mocked/fake tests should cover:
   those actions occur. Preserve executor identity, operation sandbox, configured
   budgets, lifecycle/receipts and tool/file/provider/Relay restrictions. See
   [non-model action checks](decisions/0030-authority-substrate-and-explicit-scopes.md#non-model-work-and-action-based-authorization).
+- Existing operation controls map to scoped WRITE plus their owning lifecycle/
+  eligibility rules, with no CONTROL_EXECUTION or created_by privilege. Preserve
+  job.cancel as a stop request and schedule.pause as schedule pause/resume. Do not
+  infer generic running-job pause/resume, universal cancellation, operation ACLs
+  or new SDK controls from the permission mapping; absent capabilities remain
+  absent. See [existing control boundaries](decisions/0030-authority-substrate-and-explicit-scopes.md#existing-operation-controls-and-write).
 - RUN_MODEL covers all inference, including embeddings, reranking, model-based
   validators and hook/preparation side calls. Declared SYSTEM services use their
   existing authority bounded by the operation; callers need permission for the

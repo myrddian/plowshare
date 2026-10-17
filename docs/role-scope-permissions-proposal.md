@@ -150,12 +150,12 @@ below, an Application project. No column permits acting outside the grant's scop
 | Post messages, receive admitted external work, send outgoing work | Data grant | Allowed | Allowed | No |
 | Write/update content, memories and permitted ordinary metadata | Data grant | Allowed | Allowed | No |
 | Start paid document processing, digest or curation assessment | Data grant | Allowed | Allowed | No |
-| Cancel/control eligible work in the project | Data grant | Allowed | Allowed | No |
+| Use an existing lifecycle control on eligible work | Scoped WRITE plus existing control rules | WRITE plus existing control rules | WRITE plus existing control rules | No |
 | Change a resource's lifecycle, delete or invalidate it | Data grant | Allowed where domain permits | Allowed where domain permits | No |
 | Define agents, orchestrations, permitted hooks/instructions or local routing | Control action if named in ADMIN grant | Allowed | No | No |
 | Manage project content-type definitions and activation | Control action if named in ADMIN grant | Allowed | No | No |
 | Author/sync project schedules and trigger definitions | Control action if named in ADMIN grant | Allowed | No | No |
-| Pause/resume existing work schedules | Data/control action as explicitly granted | Allowed within source/control rules | Owner or admitted Application executor | No |
+| Pause/resume an existing schedule through its supported control | Scoped WRITE plus source/control rules | WRITE plus source/control rules | WRITE plus existing owner/admitted Application executor eligibility | No |
 | Change Relay retention/topic policy or operate control state | Control action if named in ADMIN grant | Allowed | No | No |
 | Publish/consume/ack admitted project Relay work | Data grant | Allowed with route/topic authority | Allowed with route/topic authority | No |
 | Inspect ordinary project membership | Control metadata grant | Allowed | Allowed | Allowed |
@@ -174,6 +174,15 @@ input restrictions or domain lifecycle. Managers can manage project work without
 acquiring arbitrary approvals, OAuth connections or Personal content. Bulk
 destructive maintenance needs its separately named action and lifecycle rather
 than an assumption that every content-edit role includes it.
+
+Operation control maps to scoped WRITE plus the supported control's existing
+eligibility/lifecycle rules; no CONTROL_EXECUTION permission is introduced.
+created_by supplies no control privilege. This does not create missing controls
+or a generic operation ACL: job.cancel is a stop request, while schedule.pause
+pauses/resumes a schedule, not an already running job. Preserve Application/subject
+and receipt boundaries; schedule definition and access changes remain management
+actions. Absent pause/resume/cancel capabilities are recorded as absent and are
+not implementation requirements of this proposal. See [existing operation controls](decisions/0030-authority-substrate-and-explicit-scopes.md#existing-operation-controls-and-write).
 
 Export to a principal who already has body-read authority is a disclosure to that
 principal. Publishing a copy to a new audience is a separate release. The server

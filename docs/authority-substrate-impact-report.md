@@ -354,6 +354,16 @@ boundaries. A membership snapshot or prior approval is not a perpetual RUN_MODEL
 grant. Preserve existing receipt reconciliation and do not recover by relaunching
 work whose first admission may already have committed.
 
+Operation-control authority maps to WRITE plus each existing control's domain
+rules, with no CONTROL_EXECUTION permission. [JobCancelHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/JobCancelHandler.java)
+uses the current job eligibility lookup and requests cancellation; it does not
+promise immediate termination. [SchedulePauseHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/SchedulePauseHandler.java)
+supports schedule pause/resume, with [Application control authority](../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/ApplicationScheduleControlAuthority.java)
+preserved. These do not establish generic running-job pause/resume or direct
+cancellation of every document-processing operation. Map verified controls only;
+missing controls remain absent, not a new implementation requirement, and this
+proposal does not assume a generic operation ACL/resource registry exists.
+
 ### 12. Built-in accounts and ADMIN grants need lifecycle migration
 
 [V111:1](../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql)
@@ -414,6 +424,7 @@ Model-call allowance, capacity routing and monetary reservations are distinct.
 | Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
 | Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; operation-budget sponsorship remains independent of permission |
 | Non-model execution | Settled: check the actions actually performed, with no EXECUTE_JOB permission. Tool-only/CPU/scheduled/Relay work needs applicable resource/control authority and existing capability fences; CREATE or RUN_MODEL applies only when that action occurs. EXECUTION is a convenience bundle, not a universal job gate |
+| Existing operation control | Settled: supported lifecycle controls use scoped WRITE plus existing domain eligibility/state rules, with no CONTROL_EXECUTION. Verify controls individually; job.cancel and schedule.pause do not imply generic job pause/resume, universal cancellation or a new operation ACL/registry. Missing capabilities stay out of implementation scope |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
 | Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without fresh per-task account grants, and the operation pays through its configured budget. Map each workflow's trigger, inputs/outputs, sandbox, budget binding and private logs; detailed pool/reservation mechanics remain implementation design |
 | Operation-budget lifecycle | Settled: conversation compaction uses its conversation budget; project/Application preparation uses scope processing budgets; Global/maintenance uses configured deployment budgets; read-side inference uses its search-operation budget. Retain binding and usage across queue/recovery, without creator/SYSTEM fallback or historical cost relabeling |
@@ -544,6 +555,10 @@ Focused mocked/fake acceptance coverage should include:
   an unconditional EXECUTION gate. Creating a conversation or later calling a
   model still checks CREATE/RUN_MODEL; existing tool/file/provider/route and
   lifecycle restrictions remain in force. Timers/messages confer no new authority.
+- Existing lifecycle controls require WRITE plus their own domain rules, without
+  CONTROL_EXECUTION or creator privilege. READER status access grants no mutation.
+  Preserve cancellation-request and schedule-control semantics; do not invent
+  missing job pause/resume/cancel surfaces, operation ACLs or restart capabilities.
 - Operation-specific budget bindings survive queueing, creator access removal and
   recovery. Compaction, scoped preparation, Global maintenance and semantic search
   use their configured operation budget sources; missing/exhausted budgets prevent
