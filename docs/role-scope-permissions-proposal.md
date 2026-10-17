@@ -401,6 +401,13 @@ The selected conversation inputs and bound read/write tools limit this task's
 reachable content and output destinations. Those capability bindings enforce the
 sandbox; they are not new per-task account READ/WRITE grants or new RBAC tool roles.
 
+An independently admitted SYSTEM operation continues while its document and
+operation remain valid even if the creator/initiator loses project access or
+READ/WRITE. Current SYSTEM authority, operation bounds, document generation/
+availability, required inputs, cancellation and budgets remain enforced. Result,
+status, log and notification disclosure still requires the recipient's current
+access. Delegated user work retains its live acting checks. See [SYSTEM continuation policy](decisions/0030-authority-substrate-and-explicit-scopes.md#system-processing-validity-and-creator-access-changes).
+
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and
 FileStore grants. A host FileStore VIEWER grant is needed for direct source read;

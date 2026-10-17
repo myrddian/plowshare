@@ -412,6 +412,38 @@ parent authority; independently admitted platform services have their own explic
 purpose, input/output and spending contracts. Exact service sponsorship remains
 to be specified before implementation.
 
+### SYSTEM processing validity and creator access changes
+
+Once an authorized trigger has admitted an independent SYSTEM processing
+operation, its continuation depends on the document and operation remaining
+valid, not on the creator or initiating user retaining access. Removing that
+user's project membership, WRITE or READ permission does not by itself cancel
+the operation, invalidate its checkpoints or prevent its queued/recovered work.
+`created_by` remains provenance and is not a continuing authorization dependency.
+
+Execution still checks SYSTEM's authority, the retained operation sandbox, the
+applicable document/revision generation and availability, required inputs,
+lifecycle policy, cancellation and resource/budget limits. Withdrawal/deletion,
+generation invalidation, explicit operation cancellation or other invalidation
+must fence affected work and obsolete output commits through the owning lifecycle.
+The worker cannot bypass those conditions merely because it runs as SYSTEM.
+Source permissions are evaluated for the actual SYSTEM operation and its policy,
+not by impersonating the creator or renewing the creator's former access.
+
+Persist the authorized trigger and bounded operation identity for queueing and
+recovery. Continuing work retains its input/output limits; it neither replays
+completed effects nor silently expands the sandbox. Results are stored only in
+the permitted destination under its current policy. Continued processing grants
+no result, status, log or notification access to a user who has lost the required
+read authority; disclosure checks the actual recipient's current permissions.
+
+This independence applies to declared SYSTEM services, not ordinary work acting
+on behalf of a user. Delegated user work continues to require its live acting
+authority. Existing document processing instead checks legacy owner membership
+and input eligibility at claim/renew/checkpoint boundaries; replacing that creator/
+owner dependency with SYSTEM-operation validity is required migration work, not
+current runtime behavior.
+
 ### General authorization checkpoints
 
 Conceptually, an operation is allowed only when all of these conditions hold:

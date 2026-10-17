@@ -290,6 +290,12 @@ Default mocked/fake tests should cover:
   but can reach only supplied inputs and bound tool targets. Attempts to supply
   another conversation/output identifier are refused by the capability binding;
   no per-compaction account grant or new tool RBAC is required.
+- Admitted SYSTEM processing continues across creator/initiator access removal
+  while the document and operation remain valid, including queue/recovery paths.
+  Document withdrawal, invalid generation or cancelled operation fences affected
+  commits; current recipient access still governs results/logs/notifications.
+  Replace legacy owner-access processing gates without weakening those lifecycle
+  fences or ordinary delegated-user revocation checks. See [continuation policy](decisions/0030-authority-substrate-and-explicit-scopes.md#system-processing-validity-and-creator-access-changes).
 - Application and human role helpers resolve to common scoped grants. ADMIN writes
   Global knowledge through WRITE/control authority while retaining GLOBAL_ACCOUNT
   ownership and the initiating human's audit identity.

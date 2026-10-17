@@ -183,6 +183,16 @@ would break that workflow; silently lending SYSTEM to an arbitrary denied run
 would defeat authorization. Specify the service trigger, inputs/outputs and
 spending contract without changing ordinary child-delegation ceilings.
 
+The target also makes admitted SYSTEM processing independent of the creator's
+continued access. Current [processing authorization:19](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationProcessingRepository.java)
+requires an active legacy owner with project membership/access; [renewal and checkpoint checks:239](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationProcessingRepository.java)
+repeat that dependency and input checks. Losing the owner's access can therefore
+fence processing today. Replace that dependency with SYSTEM authority, retained
+operation bounds and current document/operation validity. Preserve generation,
+availability, input, cancellation and budget fences. A former creator's inability
+to read results must not cancel otherwise valid SYSTEM preparation or disclose
+those results back to that creator. See the [adopted continuation policy](decisions/0030-authority-substrate-and-explicit-scopes.md#system-processing-validity-and-creator-access-changes).
+
 ### 5. Reuse chat dispatch authorization; extend authority carriage
 
 [ChatRequest.java:88](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/ChatRequest.java)
@@ -395,6 +405,7 @@ bill the Global owner by implication or make private processing logs public.
 | SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
+| SYSTEM continuation versus creator revocation | Settled: an admitted independent SYSTEM operation continues while the document and operation remain valid, despite creator/initiator access removal. Replace legacy owner-access lease checks, preserve operation fences and current recipient disclosure checks; delegated user work still needs live acting authority |
 | Global write control | Replace exact-owner mutation authorization with common actions; ordinary reads already support membership/shared audiences. Specify control/release actions and audit |
 | Legacy owner/creator and ownerOnly migration | Settled: created_by is provenance and grants no permissions. Existing owner_handle/ownerOnly semantics must be reconciled into explicit scope/root-policy grants and any mandatory audience restrictions, preserving actual creation evidence; never substitute caller == created_by or silently remove mandatory policy |
 | Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
@@ -497,6 +508,11 @@ Focused mocked/fake acceptance coverage should include:
   READ/WRITE/EXECUTION grants; GLOBAL_ACCOUNT retains ownership and worker logs
   stay private. Authorized writes trigger only declared bounded processing, never
   arbitrary SYSTEM prompts or tool work.
+- Removing the creator/initiator's membership or READ/WRITE does not stop an
+  otherwise valid admitted SYSTEM operation, including queued/recovered work.
+  Document/operation invalidation fences obsolete commits; the former creator
+  cannot read results/logs or receive content notifications without current access.
+  Delegated user work still refuses when its live acting authority is revoked.
 - Human, Application/service and supported retained-acting reads work through list,
   direct revision, schema attachment, relationships, jobs and export; GLOBAL_READ
   supplies no mutation or execution authority and no private-resource disclosure.
