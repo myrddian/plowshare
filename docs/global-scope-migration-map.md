@@ -58,7 +58,8 @@ project/resource scope and refuses Global work.
 
 | Operation family | Current omission | Proposed selection rule |
 | --- | --- | --- |
-| Conversation open, ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the authenticated account's explicit Personal scope where this default is supported |
+| Conversation open | Personal through production `PersonalSpaces` wiring | Require an explicit conversation-capable project reference; clients may resolve Personal before submitting. Null/omitted/account-valued targets refuse |
+| Ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the authenticated account's explicit Personal scope where this operation permits a default; conversation creation has the stricter explicit-project rule |
 | Conversation list/latest/search | Global through `RequestedHome` | Use the documented authorized selection, never an omitted server/shared scope |
 | Memory index/recall/write, proposal listing, digest/navigation | Global through `RequestedHome` | Resolve a permitted explicit work/corpus scope; do not append shared data automatically |
 | Information/document selection | Personal plus shared for human defaults | Unscoped search selects all readable knowledge within admitted ceilings; project selection narrows the read set, independently of ownership |
@@ -66,8 +67,8 @@ project/resource scope and refuses Global work.
 | Retained acting turn | Explicit acting context and subject Personal authority | Preserve explicit actor/subject admission and supported capability limits |
 
 The target separates `GLOBAL_ACCOUNT` ownership from the `GLOBAL_READ` role.
-Global is a fixed-identity knowledge project/scope associated with the built-in
-account, admitting memories, documents and derived retrieval/index views. Its
+Global is an ownership account, not a project. Its explicit fixed-identity account
+knowledge scope admits memories, documents and derived retrieval/index views. Its
 resources authorize `GLOBAL_READ`; human ADMIN manages them. Account and read-role
 UUIDs must also be reserved separately before implementation. Bootstrap never
 regenerates any of these identities.
@@ -87,7 +88,9 @@ The general read role never overrides narrower token/acting ceilings, mandatory
 policy or retained-input obligations. Unsupported consumers must gain an explicit
 read-target contract before use, not an account-only authorization fallback.
 Current service-token Personal/Shared refusals need a deliberate public-read
-contract migration; replacing null with a project UUID alone cannot supply it.
+contract migration. Account knowledge targets need typed contracts distinct from
+project targets; replacing null with an account UUID in a project parameter is
+invalid.
 
 Unscoped Library search is proposed to search all readable information within
 admitted authority; scoped search narrows that selection. Current omitted
@@ -96,7 +99,7 @@ Search scope, owner/home, read-role authorization and execution authority remain
 separate. No empty-search fallback silently adds another corpus.
 
 Built-in tools available across projects remain in the installed platform catalogue, not
-inside the Global knowledge project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
+inside the Global account knowledge scope. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
 separates registered names from offered capabilities; [ScopedTools](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedTools.java)
 and [ApplicationToolRegistry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/ApplicationToolRegistry.java)
 add live project/provider tools under their own grants. Reuse these owners for
@@ -109,7 +112,7 @@ already the owning capability. `SessionToolScopes` handles interactive bindings;
 `CombinedToolScopeConnections`. Their concrete project, owner, agent and provider
 bindings are retained. Broadly reusable configuration does not imply a current
 project-less wildcard grant. The Global migration must preserve this mechanism,
-not rehome external tools or their credentials into SYSTEM or the Global Project.
+not rehome external tools or their credentials into SYSTEM or the Global account.
 
 The precise list/selection defaults require review before implementation. A read
 may offer an explicit authorized aggregate selection without adopting the same
@@ -124,7 +127,12 @@ and [ConversationResumeHandler](../plowshare-server/src/main/java/io/aeyer/plows
 Current source still supports legacy null-project conversation reads. This is not
 evidence that any such rows exist in a running deployment. The target model has
 no Global conversation scope: create/resume/list/search selections refuse it,
-and any historical rows require explicit migration classification.
+and any historical rows require explicit migration classification. The proposed
+conversation-create boundary also rejects null/omitted project inputs instead of
+silently choosing Personal. Clients can resolve the caller's Personal project and
+submit its explicit reference. `GLOBAL_ACCOUNT` is not a conversation project;
+account provisioning must not create a Personal conversation/workspace for this
+knowledge ownership identity.
 Board opening, messaging and commands require project context. A Global local
 filesystem is refused; the legacy remote-provider path checks the submitting
 owner's session in [AgentsConfig](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/AgentsConfig.java).
@@ -275,10 +283,17 @@ Default mocked/fake tests should cover:
   but only resources authorizing that role become generally readable. Authorizing
   it on a user/project resource retains ownership/home and requires an authorized
   audience change; it grants no write or administrative action.
-- The built-in Global project and scope have the same reserved UUIDs on every
-  startup/installation; existing ordinary projects named global keep their own
-  identities. `GLOBAL_ACCOUNT` and `GLOBAL_READ` also have distinct fixed registry
-  UUIDs. Missing built-in records never cause a replacement UUID or fallback.
+- `GLOBAL_ACCOUNT`, its account knowledge scope and `GLOBAL_READ` have distinct
+  fixed registry UUIDs on every startup/installation. No Global project is created;
+  existing ordinary projects named global retain their ordinary identities and
+  workload rules. Missing built-in records never create replacement identities.
+- Conversation creation rejects null, omitted, blank, unknown and account-valued
+  project references before effects. Explicit authorized ordinary/Personal project
+  references work. A client Personal default sends the actual project reference;
+  `GLOBAL_READ` and an account UUID cannot establish a conversation home.
+- Account-owned memory/document read targets remain distinct from conversation
+  project targets across server, SDK and clients; Global reads require no fake
+  project, null sentinel, account impersonation or implicit execution home.
 - A platform tool available in multiple projects still requires an agent/workflow
   grant and target/action authority. Its catalogue entry creates no knowledge
   read permission and no cross-project provider/credential authority.

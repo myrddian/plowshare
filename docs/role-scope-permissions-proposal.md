@@ -57,7 +57,7 @@ text as the same capability.
 | --- | --- | --- |
 | Server administration | Enabled human server-admin account; specific operation/service gates | Explicit server-administration scope; ADMIN grants named control actions |
 | Internal server Relay | `Relay.SystemScope.SERVER`, separate from project topics | Explicit server scope; no implicit project/tenant data coverage |
-| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | `GLOBAL_ACCOUNT` owns an admin-managed knowledge Project with fixed identities; `GLOBAL_READ` grants general reading independently of ownership; no Global conversations |
+| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | `GLOBAL_ACCOUNT` owns admin-managed knowledge in a non-project account scope; `GLOBAL_READ` grants general reading independently of ownership; no Global conversations |
 | Ordinary project | Project row/name, live project roles and resource-derived project resolution | Explicit project scope with scoped role grants |
 | Application project | Ordinary project roles plus active manifest, execution identity, placement and source rules | Same project role vocabulary with additional Application boundaries |
 | Personal execution workspace | Account-owned private project/union | Explicit Personal scope with fixed owner control; no ordinary membership sharing |
@@ -234,7 +234,8 @@ use the separate current checkout/provider/session fences.
 ### GLOBAL_ACCOUNT ownership and GLOBAL_READ permissions
 
 `GLOBAL_ACCOUNT` is the immediate owner of administrator-managed memories,
-documents and derived knowledge views in the fixed-identity Global project/scope.
+documents and derived knowledge views in its fixed-identity account knowledge scope.
+Global is not a project and supplies no conversation or execution home.
 SYSTEM remains the root authority. `GLOBAL_READ` is a separate defined read role
 held by every authenticated human, Application and service principal. A resource
 must authorize that role before possession supplies general read access.
@@ -259,6 +260,7 @@ ownership, contribution, management, execution or policy-change rights.
 | Authorize `GLOBAL_READ` on a resource owned elsewhere | Separate source audience/release authority | Same independent authority | Same independent authority | No authority from reading alone |
 | Transfer another account's resource into `GLOBAL_ACCOUNT` | Human destination ADMIN plus authorized source transfer/release | No destination authority | No destination authority | No |
 | Create/resume/list/search Global-owned conversations or attach executable tools there | No | No | No | No |
+| Create a conversation with null/omitted project or a `GLOBAL_ACCOUNT` UUID in the project field | No | No | No | No |
 
 Curator may propose but cannot approve its own Global mutation. Read counters and
 index maintenance remain bounded bookkeeping, separate from content, lifecycle,
@@ -279,6 +281,13 @@ Unscoped Library search is proposed to search the admitted readable set across
 Personal, projects and Global/general-read resources. Project scope narrows the
 selection. Neither selection supplies additional authority or silently widens on
 empty results. A read role never grants model jobs, credentials or tool invocation.
+Conversation creation requires an explicit conversation-capable project reference,
+including Personal when desired. The current omitted-project Personal default is
+to be removed from that server boundary; client conveniences resolve Personal and
+send its actual project reference. Knowledge ownership and `GLOBAL_READ` do not
+supply project work authority. Existing ordinary projects named global remain
+ordinary projects, distinguished by typed identity and policy.
+
 The following matrix governs other publication and owner controls without
 weakening the human ADMIN rule for Global-owned resources.
 
@@ -332,8 +341,8 @@ offering; role, actual target scope and other capability restrictions govern
 invocation. External tools retain explicit owner/project/provider/agent assignments
 and credential subjects, even when configuration is reused by several projects.
 The current contracts require concrete projects, not a project-less wildcard grant.
-The proposed Global project is a knowledge home, not an external execution or
-tool-binding project. SDK reads can include Global/general-read knowledge through
+The Global account knowledge scope is not a project, external execution home or
+tool-binding target. SDK reads can include Global/general-read knowledge through
 an admitted read selection; they do not acquire Global write or provider authority.
 Current service-token Shared refusals and unsupported acting consumers require
 an explicit public-read contract migration before supporting those reads.

@@ -305,7 +305,7 @@ Document processing retains its existing no-tools/no-delegation capability ceili
 ### Deployment definitions and SYSTEM worker resolution
 
 Deployment is the installation's administrator-controlled configuration layer,
-separate from the Global knowledge Project. Bundled resources supply release
+separate from Global account-owned knowledge. Bundled resources supply release
 defaults; deployment definitions supply validated additions and permitted
 overrides. Their presence in the server data directory does not select an
 execution account. Ordinary bots resolved from either source run under the
@@ -357,7 +357,7 @@ permission scope.
 | Concept | Meaning | Does not grant |
 | --- | --- | --- |
 | `GLOBAL_ACCOUNT` | Built-in account owning administrator-managed knowledge, including the installed manual | SYSTEM execution, root authority or an identity callers impersonate to read |
-| Global project/scope | Explicit knowledge home associated with `GLOBAL_ACCOUNT`, containing memories, documents and their derived retrieval views | Conversations, agent-run homes, workspaces or provider-tool bindings |
+| Account knowledge scope | Explicit non-project home for `GLOBAL_ACCOUNT` memories, documents and derived retrieval views | A project identity, conversations, agent-run homes, workspaces or provider-tool bindings |
 | `GLOBAL_READ` | Defined read role held by every authenticated principal; a resource authorizes that role to make itself generally readable | Ownership, editing, administration, publication or unrestricted execution |
 
 `GLOBAL_ACCOUNT` is distinct from SYSTEM. SYSTEM remains the authority root;
@@ -366,30 +366,31 @@ resources retain their actual author, reviser and provenance. Ordinary bots and
 Application agents continue running under their admitted accounts, never by
 logging in or switching executor to `GLOBAL_ACCOUNT` to read its material.
 
-Retain the proposed fixed Global project and scope identities. The account and
-read role also require separate fixed, reserved UUIDs in the reviewed identity
-registry; their exact values remain to be assigned before implementation. None
-are generated at runtime or recreated with fresh identities on startup.
+Global is an account, not a built-in project. This supersedes the earlier Global
+project proposal. Keep the account, its knowledge scope and `GLOBAL_READ` role as
+separate fixed reserved UUID identities; no identity is generated at runtime or
+replaced on startup. The earlier proposed Global project identity is withdrawn;
+there is no placeholder project row to preserve the old null-project meaning.
 
 | Entity | Reserved UUID |
 | --- | --- |
 | `GLOBAL_ACCOUNT` | Separate fixed registry value to be assigned |
 | `GLOBAL_READ` role | Separate fixed registry value to be assigned |
-| Global project | `00000000-0000-0000-0000-000000000004` |
-| Global project scope | `00000000-0000-0000-0000-000000000005` |
+| Global account knowledge scope | `00000000-0000-0000-0000-000000000005` |
 
-Bootstrap materializes the built-in account, role, project, scope and ordinary
+Bootstrap materializes the account, role, account-knowledge scope and ordinary
 policy bindings idempotently. Lookup by reserved identity identifies a record;
 it never bypasses permission evaluation. Existing ordinary projects named
-`global` retain their own identities. Missing built-in records refuse rather than
-manufacturing a null project, replacement UUID or alternate scope. The same
-reserved UUID on another installation does not transfer grants or trust.
+`global` retain their identities and ordinary project behavior. Missing built-in
+records refuse rather than manufacturing a null project, replacement UUID or
+alternate scope. The same reserved UUID on another installation does not transfer
+grants or trust.
 
 Every authenticated human, Application and service principal holds `GLOBAL_READ`.
 Agents use the roles of their retained execution authority; a definition cannot
 mint an independent identity or acquire ADMIN. Holding this read role does not
 make every resource readable: the resource's policy must authorize `GLOBAL_READ`.
-The Global knowledge scope supplies that read authorization for its admitted
+The Global account knowledge scope supplies that read authorization for its admitted
 resources through explicit descendant coverage and mandatory policy checks.
 Resources owned by other accounts can authorize the same role without changing
 owner or moving into Global. No per-reader ownership transfer is involved.
@@ -398,7 +399,7 @@ For example:
 
 | Resource | Immediate owner/home | Read authorization | Management |
 | --- | --- | --- | --- |
-| Installed manual | `GLOBAL_ACCOUNT` / Global | `GLOBAL_READ` | Human ADMIN with authority over Global |
+| Installed manual | `GLOBAL_ACCOUNT` / account knowledge scope | `GLOBAL_READ` | Human ADMIN with authority over Global |
 | Generally readable project document | Its existing account / project | Resource authorizes `GLOBAL_READ` | Existing owner/controller grants |
 | Private project document | Its existing account / project | Ordinary project/resource grants; no `GLOBAL_READ` authorization | Existing owner/controller grants |
 
@@ -455,11 +456,36 @@ output cannot release its private dependencies. Deployment-wide general reading
 is an explicit audience policy, not evidence that tenant fences may be ignored;
 its exact mapping to future tenant entities remains to be specified.
 
-Global admits knowledge resources, not conversation or execution homes.
-Conversations/runs retain Personal or project ownership while consulting admitted
-knowledge. Maintenance jobs retain administrative ownership and explicit knowledge
-targets. Deployment definitions and internal SYSTEM worker resolution remain
-separate from this knowledge scope.
+The Global account knowledge scope admits knowledge resources, not conversation
+or execution homes. Creating this ownership account does not provision a Personal
+conversation project or workspace for it. Maintenance jobs retain administrative
+ownership and explicit knowledge targets. Deployment definitions and internal
+SYSTEM worker resolution remain separate from this knowledge scope.
+
+### Explicit conversation project contract
+
+Conversation creation requires an explicit, authorized, conversation-capable
+project reference, including the caller's Personal project when desired.
+`conversation_start(null, "HELLO")` is invalid in the proposed contract. Omitted,
+blank, unknown or account-valued project inputs also refuse before creating a
+conversation or admitting work. A `GLOBAL_ACCOUNT` UUID is an account identifier,
+not a project reference, and cannot become a conversation home. A read role,
+including `GLOBAL_READ`, supplies no conversation creation authority.
+
+Clients may select Personal as a user-interface default, but must resolve and
+submit its actual project reference. This changes the current production behavior
+where `ConversationOpenHandler` delegates an omitted project to
+`PersonalSpaces.home` and receives the caller's Personal project. Tightening the
+conversation contract requires coordinated server, SDK and client changes; the
+ownership redesign alone does not make existing null calls invalid.
+
+An ordinary project whose display name is `global` remains an ordinary project;
+validate reference kind and supported workload policy, not a name blacklist.
+Knowledge lookup uses an explicit account-knowledge or project-resource target,
+while conversation creation accepts only conversation-capable project targets.
+The current project-only `Home`/memory contracts need a typed replacement or
+extension so account-owned memories do not recreate Global through a null project.
+Existing resource identities, scopes, provenance and receipts survive migration.
 
 Current Information `shared` is an owner-controlled per-revision visibility flag,
 not either proposed built-in identity. Review proven shared audiences for
@@ -476,7 +502,7 @@ null-project document as Global-owned. All of this remains proposal-only.
 For MCP and client-provided tools, reuse the existing provider scopes, catalogue
 and Relay invocation mechanism. This proposal introduces no replacement tool
 catalogue, global provider runtime or new common tool-grant bundle. A tool
-configuration intended for broad reuse is separate from the Global knowledge Project
+configuration intended for broad reuse is separate from Global account-owned knowledge
 and does not become SYSTEM-owned credential material.
 
 Interactive providers attach through `tool.scope.connect/list/disconnect` and
@@ -493,7 +519,7 @@ provide a project-less server-wide wildcard grant. If a client calls reusable
 configuration global, that describes configuration breadth rather than authority
 over every project. Materialize only authorized assignments in the intended scopes.
 A future convenience for selecting multiple projects must reuse these bindings
-and checks, not attach provider tools to the Global knowledge Project.
+and checks, not attach provider tools to the Global account knowledge scope.
 
 The [provider scope contract](../tool-scopes.md),
 [hosted scope contract](../hosted-tool-scopes.md) and
@@ -502,7 +528,7 @@ the existing external-tool mechanism from built-in registration below.
 
 Built-in platform tools belong to the SYSTEM-controlled installed capability catalogue,
 administered under the server configuration scope. They do not belong to the
-Global knowledge project and are not imported from it. Tool installation/availability,
+Global account knowledge scope and are not imported from it. Tool installation/availability,
 agent capability grants and invocation authority are separate decisions:
 
 | Layer | Meaning |
@@ -519,10 +545,10 @@ visible and cannot bypass role/scope restrictions.
 
 For example, `get_date` needs no private data target but still needs an admitted
 capability. `memory_read` can be an installed platform capability while each call
-resolves and authorizes the requested memory's project. Reading a Global memory
-requires eligible direct-human/internal authority and the Global project's
-audience/read grant; external SDK integrations cannot acquire it. The tool's availability
-never supplies that authority or widens a project's recall implicitly.
+resolves the requested memory's typed knowledge target and checks live read
+authority. A memory owned by `GLOBAL_ACCOUNT` can authorize `GLOBAL_READ`, including
+for an SDK/Application reader within its admitted targets. Tool availability
+supplies neither that read grant nor a broader recall selection.
 
 Current built-ins are registered through `AgentsConfig` and collected in
 `JobRuntime`; `knownTools` validates installed names, while `offeredTo` builds a
@@ -548,7 +574,7 @@ leases, schemas and uncertain-effect receipts.
 | Operator-authored deployment defaults and overrides | Deployment configuration over bundled resources, managed through server-administration scope; no automatic SYSTEM execution |
 | Internal worker definitions | Trusted worker-purpose binding resolved only from deployment overrides and bundled resources; SYSTEM execution remains bounded by task admission |
 | Ordinary shipped bots, skills and orchestrations | Installed catalogue with explicit availability/import/default policy |
-| Administrator-managed memories and documents | `GLOBAL_ACCOUNT` owning a fixed-identity Global knowledge Project; human ADMIN manages, `GLOBAL_READ` permits reads |
+| Administrator-managed memories and documents | `GLOBAL_ACCOUNT` owning resources in an explicit account knowledge scope; human ADMIN manages, `GLOBAL_READ` permits reads |
 | MCP/client tools configured for broad reuse | Existing provider scopes, owner/project/agent assignments and Relay lifecycle; no new Global tool registry |
 | Built-in tools available across eligible projects | Installed capability catalogue plus admitted definition/workflow grants; invocation remains scoped |
 | Generally readable resources owned elsewhere, including legacy Shared documents | Authorize `GLOBAL_READ` while preserving immediate ownership/home and retained input policy |
