@@ -382,7 +382,7 @@ bill the Global owner by implication or make private processing logs public.
 | Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
 | Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
 | Default public role versus individual exceptions | Every authenticated principal holds GLOBAL_READ; specify resource-level withdrawal/mandatory constraints and support for intentionally excluding a principal without confusing role membership with resource authorization |
-| Tenant isolation | Deployment-wide general reading crosses potential tenant boundaries; define first-class tenant membership and which resources may authorize that audience |
+| Tenant isolation and release | Global's audience is settled: all currently authenticated, active principals in the deployment, across project/Application and future tenant boundaries. Preserve private scoped access and source-release/input/reference restrictions; define future tenant mappings separately, without reinterpreting Global as tenant-local |
 | Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
 | Global schema/type registry | Current type management is Personal/Project-scoped; decide where Global-owned typed documents get immutable schemas and how attached access/import behaves |
 | Curation outcome | Choose general-read grant, copy or ownership transfer; define supersession/ID consequences and human approval separately from model assessment |
@@ -419,7 +419,9 @@ librarian read path needs these decisions:
 Broader CPU/tool-only work, optional public SYSTEM-workflow continuation and
 general curation transfers can remain separately scoped decisions. They must not
 be silently inferred from this first knowledge-processing slice. Any rollout of
-deployment-wide reading still needs the tenant/audience boundary it will enforce.
+deployment-wide reading must enforce the settled authenticated audience and its
+source-release/private-resource boundaries. First-class tenant entities remain
+separate design work; they must preserve this deployment-wide audience.
 
 ## What can be reused
 

@@ -80,6 +80,11 @@ UUIDs must also be reserved separately before implementation. Bootstrap never
 regenerates any of these identities.
 
 Every authenticated human, Application and service principal holds `GLOBAL_READ`.
+This audience is deployment-wide, including across project/Application and future
+tenant boundaries. Scoped permissions on private resources remain independent;
+source-release and retained input/reference policy must prevent private material
+from leaking through general-read content or derived views. See the
+[deployment-wide audience decision](decisions/0030-authority-substrate-and-explicit-scopes.md#deployment-wide-audience-and-isolation).
 A resource authorizes that role to grant general reading. A resource owned elsewhere
 can do so without entering `GLOBAL_ACCOUNT` or transferring control. SDK readers
 are eligible through the same public read contracts as CLI/TUI/GUI readers; the

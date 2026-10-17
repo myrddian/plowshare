@@ -33,6 +33,12 @@ role to permit general reading; possession grants no access to private resources
 that do not authorize it. It is separate from the ordinary project role hierarchy,
 from `GLOBAL_ACCOUNT` ownership and from ADMIN management.
 
+That audience spans the deployment, including principals in different projects,
+Applications or future tenants. It does not expand their scoped membership,
+write, control or execution permissions. Only resources authorizing that audience
+are generally readable; private dependencies and related resources keep their
+own access/release restrictions. See the [deployment-wide isolation boundary](decisions/0030-authority-substrate-and-explicit-scopes.md#deployment-wide-audience-and-isolation).
+
 In the proposed tables, **Allowed** means the role supplies the action, subject
 to those restrictions. **Data grant** means ADMIN alone does not supply it.
 **Owner** identifies an owning/control relationship whose authority must map to

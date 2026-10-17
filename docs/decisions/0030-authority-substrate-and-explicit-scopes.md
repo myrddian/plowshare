@@ -526,6 +526,37 @@ resources through explicit descendant coverage and mandatory policy checks.
 Resources owned by other accounts can authorize the same role without changing
 owner or moving into Global. No per-reader ownership transfer is involved.
 
+### Deployment-wide audience and isolation
+
+Global's audience is deployment-wide. Every currently authenticated, active
+principal in the deployment holds `GLOBAL_READ`, including humans, Applications
+and service accounts associated with different projects or future tenants.
+Authorizing that role on a resource deliberately permits this cross-boundary
+read audience. Global is not a tenant-local library. The same reserved identities
+on another deployment establish no cross-deployment access or trust.
+
+This audience does not expand project/Application membership, Personal access,
+write/control grants or execution scope. Projects and Applications retain their
+own scoped permissions. A generally readable project document does not make its
+project's conversations, other documents, members or configuration readable.
+Retained task selections and token/acting ceilings can still narrow supported
+reads; role membership does not silently widen an existing admission.
+
+The remaining isolation boundary is release into that audience. Moving/copying
+private content into Global, authorizing `GLOBAL_READ` elsewhere, or publishing a
+derived summary requires the relevant source-release and audience authority.
+SYSTEM's ability to read or process an input is not authority to disclose it.
+Consumed-input and reference restrictions remain effective, including across
+search snippets, counts, metadata, exports and related-resource traversal.
+Private processing logs and credentials do not inherit the knowledge audience.
+
+Future tenant policy must represent deployment-wide knowledge as an explicitly
+supported audience while keeping tenant-private resources isolated. A tenant
+that requires its resources never to reach that audience needs an enforced
+release restriction or a separate deployment. General-read publication authority
+and revision inheritance remain separate decisions; deployment-wide role
+membership alone supplies neither.
+
 For example:
 
 | Resource | Immediate owner/home | Read authorization | Management |
@@ -587,8 +618,9 @@ Read counters and derived index maintenance follow bounded read/maintenance
 contracts without granting content mutation. Lifecycle, mandatory tenant policy,
 consumed-input and reference restrictions still apply: a generally readable
 output cannot release its private dependencies. Deployment-wide general reading
-is an explicit audience policy, not evidence that tenant fences may be ignored;
-its exact mapping to future tenant entities remains to be specified.
+is the explicit cross-boundary audience defined above; it does not expose other
+tenant/project resources or replace source-release restrictions. Future tenant
+entities must preserve this distinction.
 
 The Global account owns knowledge; it does not become a login/executor or gain a
 Personal workspace. Its scope can host SYSTEM processing authorized through
@@ -786,8 +818,10 @@ All schema changes belong in new Flyway migrations after separate authorization.
 
 ## Decisions required before implementation
 
-1. Define first-class tenant membership, Personal tenancy and cross-tenant sharing,
-   including the mapping for existing accounts/projects and server administrators.
+1. Define first-class tenant membership and Personal tenancy when introducing
+   tenant entities, including existing account/project and administrator mappings.
+   Global's deployment-wide authenticated read audience is settled; tenant-private
+   access and authority to release into that audience remain explicit boundaries.
 2. Assign the reserved identity registry and decide UUID introduction alongside
    existing keys; specify the minimum durable grant and execution records.
 3. Approve action sets and delegation rights for ADMIN/MANAGER/CONTRIBUTOR/READER,
