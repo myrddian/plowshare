@@ -7,7 +7,11 @@ separate current operation gates from proposed action bundles and scope overlays
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners
-and symbols at that revision; target behavior is proposed.
+and symbols at that revision; target behavior is proposed. Main through
+`269854a7c5bcc5f7080bc04de01ea8ccce46eaa7` is now merged into this branch;
+PR #74 enables existing information feature defaults and PR #75 fixes admitted-turn
+test completion. Neither changes the audited Global/Shared ownership or selection
+contracts below.
 
 ## Existing authority foundations
 
@@ -57,32 +61,42 @@ project/resource scope and refuses Global work.
 | Conversation open, ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the authenticated account's explicit Personal scope where this default is supported |
 | Conversation list/latest/search | Global through `RequestedHome` | Use the documented authorized selection, never an omitted server/shared scope |
 | Memory index/recall/write, proposal listing, digest/navigation | Global through `RequestedHome` | Resolve a permitted explicit work/corpus scope; do not append shared data automatically |
-| Information/document selection | Personal plus shared for human defaults | Select Personal and explicitly requested published audiences independently |
+| Information/document selection | Personal plus shared for human defaults | Unscoped search selects all readable knowledge within admitted ceilings; project selection narrows the read set, independently of ownership |
 | Outgoing send/advertise/claim | Account-bound null project | Resolve an explicit owning scope and retain account ownership |
 | Retained acting turn | Explicit acting context and subject Personal authority | Preserve explicit actor/subject admission and supported capability limits |
 
-The target Global collection is a built-in Project with a fixed reserved project
-UUID and scope UUID, recorded in ADR 0030. Those identities are materialized
-idempotently rather than generated at runtime or regenerated on startup. Its
-policy admits memories and derived retrieval/index views only. Human ADMIN
-authority over that project is required for publication and
-content/lifecycle administration. Ordinary resource publication remains separate;
-shared documents do not become Global memories or SYSTEM resources.
+The target separates `GLOBAL_ACCOUNT` ownership from the `GLOBAL_READ` role.
+Global is a fixed-identity knowledge project/scope associated with the built-in
+account, admitting memories, documents and derived retrieval/index views. Its
+resources authorize `GLOBAL_READ`; human ADMIN manages them. Account and read-role
+UUIDs must also be reserved separately before implementation. Bootstrap never
+regenerates any of these identities.
 
-External SDK integrations receive no Global access, including discovery, explicit
-project selection, memory IDs, implicit recall/navigation, publication and tool
-scope bindings. This includes acting requests whose subject is human: the external
-actor remains ineligible. Only the CLI, TUI and GUI are eligible interactive Global
-clients; human ADMIN management and audience-limited reads retain their own grants.
-Internal work retains bounded server admission. A generic human login in an
-external application does not by itself establish approved-client eligibility.
-The fixed-UUID Global project needs an explicit principal/workload
-eligibility policy; the current service-token null-project refusal is insufficient
-once Global is represented as a normal project. No SDK-library/client-name check
-can substitute for trusted authenticated authority provenance.
+Every authenticated human, Application and service principal holds `GLOBAL_READ`.
+A resource authorizes that role to grant general reading. A resource owned elsewhere
+can do so without entering `GLOBAL_ACCOUNT` or transferring control. SDK readers
+are eligible through the same public read contracts as CLI/TUI/GUI readers; the
+former blanket external exclusion is superseded. Administrative Global mutations
+remain human ADMIN actions through CLI/TUI/GUI, with exact scope/source authority.
+Tool bindings, executable definitions, conversations and agent-run homes do not
+become part of Global knowledge.
+
+A librarian Application can retain an admitted read selection spanning its own
+project and general-read knowledge while keeping writes confined to its project.
+The general read role never overrides narrower token/acting ceilings, mandatory
+policy or retained-input obligations. Unsupported consumers must gain an explicit
+read-target contract before use, not an account-only authorization fallback.
+Current service-token Personal/Shared refusals need a deliberate public-read
+contract migration; replacing null with a project UUID alone cannot supply it.
+
+Unscoped Library search is proposed to search all readable information within
+admitted authority; scoped search narrows that selection. Current omitted
+information selection is still Personal plus Shared, not all readable projects.
+Search scope, owner/home, read-role authorization and execution authority remain
+separate. No empty-search fallback silently adds another corpus.
 
 Built-in tools available across projects remain in the installed platform catalogue, not
-inside the Global memory project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
+inside the Global knowledge project. [JobRuntime.knownTools/offeredTo](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
 separates registered names from offered capabilities; [ScopedTools](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ScopedTools.java)
 and [ApplicationToolRegistry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/ApplicationToolRegistry.java)
 add live project/provider tools under their own grants. Reuse these owners for
@@ -138,7 +152,7 @@ but is not evidence that the proposed SYSTEM account/admission model exists.
 
 The proposed worker-purpose contract restricts internal definition discovery to
 authorized deployment overrides followed by bundled defaults. Project, Personal,
-client-session, Application and Global-memory sources cannot supply a SYSTEM
+client-session, Application and Global-knowledge sources cannot supply a SYSTEM
 worker. An invalid authoritative override refuses; only absence permits the
 bundled default. A deployment summarizer override remains deployment-authored
 while its admitted internal task still runs under SYSTEM, with unchanged scope
@@ -164,9 +178,9 @@ record and retained provenance instead:
 | --- | --- |
 | Project and Personal resources | Map to the continuing explicit scope; preserve resource/revision identities, membership and history |
 | Proven server configuration and internal channel state | Map to server-administration scope under explicit SYSTEM control |
-| Proven deliberately shared memories | Classify for the explicit Global memory collection and retain audience/provenance; new publication decisions require human ADMIN and source authority |
-| Proven deliberately shared documents | Preserve their independent information publication policy/audience; do not merge them into Global memories or SYSTEM resources |
-| Null-project conversations and jobs, if present | Preserve their IDs and content with restricted legacy scope; recover a narrower owning scope only from authoritative records; never admit them into the memory-only Global collection |
+| Proven administrator-managed memories | Classify for `GLOBAL_ACCOUNT` / Global knowledge with `GLOBAL_READ`; preserve provenance and require human ADMIN plus source authority for transfers |
+| Proven deliberately shared documents | Review `GLOBAL_READ` authorization without changing owner/home; admitting previously excluded SDK/service readers is an explicit audience expansion. An intended Global-owned manual also needs an authorized ownership/home migration |
+| Null-project conversations and jobs, if present | Preserve their IDs and content with restricted legacy scope; recover a narrower owning scope only from authoritative records; never admit them into the Global knowledge collection |
 | Misclassified digest jobs | Use durable original project evidence where available; do not infer ownership from a job name or an in-memory closure that no longer exists |
 | Null-project outgoing rows | Preserve account ownership and original receipt/request identities; select an explicit migrated scope without resending work |
 | Historical model usage | Retain original attribution and billing facts. Add linkage/mapping where justified, never relabel historical SYSTEM or unattributed usage as a new account |
@@ -194,14 +208,15 @@ the complete substrate remains under design.
    and admission invariants in ADR 0030. Record changes to ADRs 0025/0026/0028
    explicitly rather than silently superseding them.
 2. **Bound the immediate exposure paths.** Give digest jobs their real scope;
-   require human ADMIN for Global memory publication; keep curation assessment
+   require human ADMIN for Global-owned knowledge management; keep curation assessment
    separate from that decision; stop hidden Global
    query/navigation expansion and refuse failed authoritative definition tiers.
    Keep internal workers functioning. Each behavioral change needs a reviewed
    public selection/default contract before client cutover.
 3. **Introduce explicit identities and root grants.** Add durable scope mappings,
-   the locked SYSTEM account/role, administrative grants and auditable grant
-   provenance. Enforce agent role ceilings and record any explicit forced MANAGER
+   the locked SYSTEM account/role, distinct `GLOBAL_ACCOUNT` and `GLOBAL_READ`
+   identities, administrative grants and auditable grant provenance. Enforce
+   agent role ceilings and record any explicit forced MANAGER
    exception. Preserve existing IDs and last-manager/recovery invariants.
 4. **Carry bounded execution authority through consumers.** Extend the existing
    retained-authority model across ordinary jobs, schedules, orchestration,
@@ -252,27 +267,40 @@ Default mocked/fake tests should cover:
   restarts and receipt reads; uncertain effects are never replayed.
 - Curation analysis remains usable while unauthorized publication refuses; derived
   output policies and source/destination audiences are checked independently.
-- Global admits memories and derived retrieval/index views only; every Global
-  conversation selection refuses. Historical null-project rows, if present,
-  retain identity and restricted access until classified, without guessed ownership.
+- Global admits memories, documents and derived retrieval views, with human ADMIN
+  management under `GLOBAL_ACCOUNT`. Conversations and execution homes remain
+  excluded. Historical null-project rows retain identity and restricted access
+  until classified, without guessed ownership.
+- `GLOBAL_READ` is held by authenticated humans and Application/service principals,
+  but only resources authorizing that role become generally readable. Authorizing
+  it on a user/project resource retains ownership/home and requires an authorized
+  audience change; it grants no write or administrative action.
 - The built-in Global project and scope have the same reserved UUIDs on every
   startup/installation; existing ordinary projects named global keep their own
-  identities. Missing built-in records never cause a replacement UUID or fallback.
+  identities. `GLOBAL_ACCOUNT` and `GLOBAL_READ` also have distinct fixed registry
+  UUIDs. Missing built-in records never cause a replacement UUID or fallback.
 - A platform tool available in multiple projects still requires an agent/workflow
-  grant and target/action authority. Its catalogue entry creates no Global-memory
+  grant and target/action authority. Its catalogue entry creates no knowledge
   read permission and no cross-project provider/credential authority.
-- External SDK integrations cannot discover/select/read/write Global, gain it
-  through an acting human subject or bind tools there. Project recall/navigation
-  cannot append/retry Global or use a SYSTEM worker as a proxy. Test the fixed UUID,
-  aliases, resource IDs, projections and omitted/null scope under the same policy.
-- CLI/TUI/GUI Global admissions still require the human's actual role/audience
-  grant. External human-login clients, claimed first-party labels and CLI proxies
-  cannot acquire Global eligibility; verify the trusted session/admission contract
-  before asserting that the transport enforces this distinction.
-- Global publication/content/lifecycle actions require human ADMIN over the
-  collection plus source-release authority. Agents can propose but cannot approve
-  their own publication; forced MANAGER does not override that rule. Read/use
-  bookkeeping cannot be used to acquire content or audience mutation authority.
+- SDK/Application librarians can discover/read Global and other `GLOBAL_READ`
+  resources through supported public read operations, within retained read targets,
+  token/acting ceilings, lifecycle and input/reference constraints. Private resources
+  remain unavailable, including through IDs, counts, facets and navigation.
+- A librarian with project write authority and project-plus-general-read authority
+  cannot mutate Global, obtain ADMIN, bind tools there or change its executor.
+  Acting for a human and forced MANAGER do not add Global write authority.
+- CLI/TUI/GUI Global management requires human ADMIN over the target plus source
+  release where applicable. Agents can propose; a bounded executor may carry out
+  an admitted administrative effect. Read bookkeeping supplies no content or
+  audience mutation authority.
+- Unscoped search enumerates only admitted readable information; project-scoped
+  search cannot broaden on an empty result. Omitted mutation/execution scope never
+  becomes Global, and a read grant never changes resource ownership.
+- Legacy Shared mapping preserves owner, revision IDs and retained dependencies;
+  expansion to previously excluded Application/service readers requires an
+  authorized audience decision, not a blind visibility conversion.
+  The manual's move to `GLOBAL_ACCOUNT` is an explicit ownership/home transition,
+  not a side effect of converting its old Shared visibility to `GLOBAL_READ`.
 - Trusted classification/aliases remain protected; authored namesakes remain
   ordinary; internal workers and ordinary explicitly available shipped bots work.
 - Account-owned outgoing receipts and claims remain isolated during scope migration.
@@ -289,3 +317,8 @@ definition resolution, skills, curation and digest submission. The console asset
 build was excluded after an unrelated TypeScript dependency failure. No database
 tests ran. This is baseline evidence for existing behavior, not validation of the
 proposed substrate or a successful legacy-data migration.
+
+After the main merge, 28 focused non-database cases passed across
+`InformationFeatureConfigTest`, `DocumentNavigationTest`, `InformationAccessTest`
+and `AdmittedTurnTest`. This validates feature defaults and existing boundary
+behavior, not the proposed `GLOBAL_ACCOUNT`/`GLOBAL_READ` model.

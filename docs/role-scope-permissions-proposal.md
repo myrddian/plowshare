@@ -8,8 +8,9 @@ This is the action-level companion to
 [Global scope migration map](global-scope-migration-map.md). It maps the scopes
 and permission owners in the current implementation, then proposes permissions
 for ADMIN, MANAGER, CONTRIBUTOR and READER. Runtime source baseline:
-`efddb12a0cfd28c6aa1464f01b884d15597102d5`; the subsequent proposal commits change
-documentation only.
+`efddb12a0cfd28c6aa1464f01b884d15597102d5`, refreshed through merged main
+`269854a7c5bcc5f7080bc04de01ea8ccce46eaa7` for information feature defaults.
+The authority-substrate changes described here remain documentation only.
 
 ## Rules for reading the matrices
 
@@ -25,6 +26,12 @@ MANAGER includes ordinary CONTRIBUTOR and READER actions inside its scope;
 CONTRIBUTOR includes ordinary READER actions. Resource ownership, ACLs, mandatory
 policy, source/destination permission, retained execution ceilings, tool/file
 grants and lifecycle constraints can still refuse any action.
+
+`GLOBAL_READ` is an additional defined read role held by every authenticated
+principal, including Application/service accounts. A resource authorizes that
+role to permit general reading; possession grants no access to private resources
+that do not authorize it. It is separate from the ordinary project role hierarchy,
+from `GLOBAL_ACCOUNT` ownership and from ADMIN management.
 
 In the proposed tables, **Allowed** means the role supplies the action, subject
 to those restrictions. **Data grant** means ADMIN alone does not supply it.
@@ -50,13 +57,13 @@ text as the same capability.
 | --- | --- | --- |
 | Server administration | Enabled human server-admin account; specific operation/service gates | Explicit server-administration scope; ADMIN grants named control actions |
 | Internal server Relay | `Relay.SystemScope.SERVER`, separate from project topics | Explicit server scope; no implicit project/tenant data coverage |
-| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | Built-in memory-only Global Project with fixed reserved project/scope UUIDs; move other meanings to server configuration, separate publication policies or restricted legacy history; no Global conversations |
+| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | `GLOBAL_ACCOUNT` owns an admin-managed knowledge Project with fixed identities; `GLOBAL_READ` grants general reading independently of ownership; no Global conversations |
 | Ordinary project | Project row/name, live project roles and resource-derived project resolution | Explicit project scope with scoped role grants |
 | Application project | Ordinary project roles plus active manifest, execution identity, placement and source rules | Same project role vocabulary with additional Application boundaries |
 | Personal execution workspace | Account-owned private project/union | Explicit Personal scope with fixed owner control; no ordinary membership sharing |
 | Personal information | Account namespace and document/resource ownership | Same person's Personal authority, with resource-specific controls preserved; not a second public project |
 | Private client project | `client:` identity tied to authenticated account and physical client session | Session-bound scope; roles cannot substitute for the required session |
-| Shared information | `Selection(SHARED)` and publication visibility; human selections can include it | Explicit publication audience and corpus selection, not an administrative role or automatic project import |
+| Shared information | `Selection(SHARED)` and publication visibility; human selections can include it | Map proven general-read audience to `GLOBAL_READ` while preserving owner/home; separate search selection from resource authority |
 | Individual document/resource | Resource/revision IDs, owner, policy, retained input/reference restrictions | Resource grants/ACLs constrained by owning scope and mandatory policy |
 | Account-owned operations | Session, approval, inbox, credential connection, schedule, outgoing work or receipt owner | Owner/action overlays on explicit scope; not one universal account-wide work bucket |
 | FileStore and filesystem | Alias grants, admitted writable areas, exclusions and provider/session fences | Independent capability boundary intersecting role/scope authority |
@@ -190,7 +197,7 @@ there run under the admitted user's account. A trusted internal SYSTEM worker
 resolves only authorized Deployment overrides and bundled defaults, retaining its
 SYSTEM executor and bounded task authority when its definition is overridden.
 That resolution excludes project, Personal, client-session, Application and
-Global-memory sources. Managing the override does not assign SYSTEM to its author
+Global-knowledge sources. Managing the override does not assign SYSTEM to its author
 or make the worker callable as SYSTEM through the user catalogue.
 
 ## Personal and private client scope matrix
@@ -224,51 +231,56 @@ use the separate current checkout/provider/session fences.
 
 ## Publication and account ownership overlays
 
-### Global memory permissions
+### GLOBAL_ACCOUNT ownership and GLOBAL_READ permissions
 
-Global is a proposed built-in memory Project with fixed reserved project/scope
-UUIDs, separate from the SYSTEM account, SYSTEM role, server-administration scope
-and shared-document catalogue. Its
-initial admitted kinds are memories and their derived retrieval/index views.
+`GLOBAL_ACCOUNT` is the immediate owner of administrator-managed memories,
+documents and derived knowledge views in the fixed-identity Global project/scope.
+SYSTEM remains the root authority. `GLOBAL_READ` is a separate defined read role
+held by every authenticated human, Application and service principal. A resource
+must authorize that role before possession supplies general read access.
 
-The matrix below applies only to eligible human work through the CLI, TUI or GUI,
-or explicitly admitted internal work. These are the only interactive Global
-clients; human ADMIN management still requires actual collection/action authority.
-External SDK integrations, Applications, service-token integrations
-and provider/client-tool workers have no Global access at any role. Acting for a
-human does not change the external actor's exclusion. No explicit role grant,
-forced MANAGER, provider assignment, SDK tool call or internal-worker proxy can
-override it. The CLI/TUI/GUI may use SDK libraries internally, but an arbitrary
-external client using human credentials is not thereby eligible. Client names,
-User-Agent strings and CLI proxies do not establish the required trusted
-authentication/admission provenance.
+Global knowledge supplies that authorization through explicit scope/descendant
+coverage. Another account's resource may authorize `GLOBAL_READ` without changing
+its owner/home or becoming admin-managed Global content. The role grants no
+ownership, contribution, management, execution or policy-change rights.
 
-| Interactive entry point | Global eligibility |
-| --- | --- |
-| Plowshare CLI | Eligible human admission; ADMIN manages, reads require their audience grant |
-| Plowshare TUI | Same human admission, role and audience requirements |
-| Plowshare GUI | Same human admission, role and audience requirements |
-| External SDK application, including a human acting subject or generic human login | Ineligible |
+| Entry point / principal | General-read knowledge | Global-owned knowledge management |
+| --- | --- | --- |
+| Human through CLI/TUI/GUI | Read resources authorizing `GLOBAL_READ`, within admission and policy | Human ADMIN grant covering Global and the action |
+| SDK Application / service principal | Same read-role evaluation and public read contracts, within credential/admission ceilings | No authority from `GLOBAL_READ` or project roles |
+| Agent, including an Application librarian | Retained executor/actor/subject read authority, supported tools and admitted inputs | Propose only; no ADMIN grant, including with forced MANAGER |
+| Bounded internal executor | Explicitly admitted targets/actions and mandatory policy | May apply an admitted human ADMIN effect without assigning ADMIN to an agent |
 
-| Global memory action | ADMIN | MANAGER | CONTRIBUTOR | READER |
+| Global knowledge action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
-| Read explicitly selected published memories | Separate audience/read grant | Audience/read grant | Audience/read grant | Audience/read grant |
+| Read resources authorizing `GLOBAL_READ` | Through `GLOBAL_READ` or separate data authority | Same | Same | Same |
 | Propose a candidate from an authorized source | Source data/work grant | Source work authority | Source work authority | No |
-| Create/promote/edit/retire a Global memory or change its audience | Human ADMIN action over this collection, with source Release where applicable | No | No | No |
-| Create/resume/list/search Global conversations | No | No | No | No |
-| Treat shared documents or server configuration as Global memories | No | No | No | No |
-| Grant an external SDK integration Global discovery/read/write/tool-binding access | No | No | No | No |
+| Create/edit/move/retire a `GLOBAL_ACCOUNT` resource or change its policy | Human ADMIN over Global and the action; source Release where applicable | No | No | No |
+| Authorize `GLOBAL_READ` on a resource owned elsewhere | Separate source audience/release authority | Same independent authority | Same independent authority | No authority from reading alone |
+| Transfer another account's resource into `GLOBAL_ACCOUNT` | Human destination ADMIN plus authorized source transfer/release | No destination authority | No destination authority | No |
+| Create/resume/list/search Global-owned conversations or attach executable tools there | No | No | No | No |
 
-Curator may submit a proposal but cannot approve its own publication. A forced
-MANAGER agent cannot acquire a Global publication action. An authorized server
-executor can apply a retained human administrative decision without granting its
-agent ADMIN. Read counters and derived index maintenance remain bounded
-bookkeeping, separate from content/lifecycle/audience administration. Maintenance
-jobs have an explicit administrative owning scope and Global-memory targets.
+Curator may propose but cannot approve its own Global mutation. Read counters and
+index maintenance remain bounded bookkeeping, separate from content, lifecycle,
+ownership or audience changes. Administrative jobs retain their own owning scope
+and explicit knowledge targets. Draft/final and processing readiness remain
+independent of Global ownership and general reading.
 
-The following general publication matrix applies to other resource publication
-policies. Its Release cells do not weaken the human ADMIN rule for Global memory.
-Adding non-memory kinds to Global requires a separate scope/policy decision.
+The manual can be owned by `GLOBAL_ACCOUNT`, read through `GLOBAL_READ` and
+maintained by human ADMIN. A project document can instead keep its original owner
+and merely authorize `GLOBAL_READ`. Existing Shared revisions do not automatically
+change owner; a manual ownership/home migration must be separately authorized.
+The issuer matrix for general-read grants on non-Global resources remains to be
+specified, including tenant and retained input/reference restrictions. Converting
+legacy Shared to `GLOBAL_READ` also admits previously excluded Application/service
+readers, so migration requires an explicit authorized audience decision.
+
+Unscoped Library search is proposed to search the admitted readable set across
+Personal, projects and Global/general-read resources. Project scope narrows the
+selection. Neither selection supplies additional authority or silently widens on
+empty results. A read role never grants model jobs, credentials or tool invocation.
+The following matrix governs other publication and owner controls without
+weakening the human ADMIN rule for Global-owned resources.
 
 ### Other publication and owner controls
 
@@ -320,9 +332,11 @@ offering; role, actual target scope and other capability restrictions govern
 invocation. External tools retain explicit owner/project/provider/agent assignments
 and credential subjects, even when configuration is reused by several projects.
 The current contracts require concrete projects, not a project-less wildcard grant.
-The proposed Global project is not an eligible external execution/tool-binding
-project despite having a concrete UUID. External project retrieval cannot include
-Global implicitly or acquire it through an acting subject or a retained view.
+The proposed Global project is a knowledge home, not an external execution or
+tool-binding project. SDK reads can include Global/general-read knowledge through
+an admitted read selection; they do not acquire Global write or provider authority.
+Current service-token Shared refusals and unsupported acting consumers require
+an explicit public-read contract migration before supporting those reads.
 
 Current ordinary service tokens may have effective MANAGER project ceilings;
 current acting scopes explicitly reject MANAGER and only support VIEWER or
@@ -353,9 +367,11 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
    behavior with explicit control and data grants. Review and migrate grants;
    do not silently widen existing private content access.
 2. **Publication:** define the source-release and destination/audience actions
-   and who may issue them. Global memory administration/publication is human ADMIN
-   only, with source authority still required. Other Release cells deliberately do not assign these
-   rights automatically to every editor or manager. Preserve authorized export
+   and who may issue them. `GLOBAL_ACCOUNT` resource administration is human ADMIN
+   only, with source authority still required for transfers. `GLOBAL_READ` grants
+   general reading without ownership transfer; specify its audience-change issuers
+   independently. Other Release cells do not assign those rights to every editor
+   or manager. Preserve authorized export
    and existing publication/input/reference restrictions.
 3. **Management through files:** classify executable hooks, manifests, routing,
    definitions and security-relevant configuration as management actions even
