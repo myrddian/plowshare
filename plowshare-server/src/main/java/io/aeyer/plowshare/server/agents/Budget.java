@@ -112,6 +112,16 @@ public final class Budget {
     }
   }
 
+  /** Stable source evidence; an unbound allowance can continue only as this same live object. */
+  public String reference() {
+    claiming.lock();
+    try {
+      return conversation == null ? "budget:" + identity : conversation;
+    } finally {
+      claiming.unlock();
+    }
+  }
+
   private final AtomicInteger spent = new AtomicInteger();
   private final Runnable charge;
   private final ReentrantLock claiming = new ReentrantLock();

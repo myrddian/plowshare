@@ -1582,32 +1582,22 @@ public final class JobRuntime {
     }
     if (operation == null && operations != null)
       operation =
-          operations.admit(
+          OperationExecution.admit(
+              operations,
               ownerOf(callerHandle, sessionId, transcript.conversationId()),
               home,
-              definition.nativeOnly()
-                  ? java.util.Set.of(
-                      io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                      io.aeyer.plowshare.server.access.AuthorityAction.WRITE)
-                  : java.util.Set.of(
-                      io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                      io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
-                      io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL));
+              definition,
+              transcript.conversationId(),
+              transcript.origin(),
+              budget);
     if (operation != null) {
-      var required =
-          definition.nativeOnly()
-              ? java.util.Set.of(
-                  io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                  io.aeyer.plowshare.server.access.AuthorityAction.WRITE)
-              : java.util.Set.of(
-                  io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                  io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
-                  io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL);
-      if (!operation.actions().containsAll(required)
+      if (!operation.actions().containsAll(OperationExecution.actions(definition))
+          || !operation.home().equals(home)
           || !operation
               .executor()
               .equals(ownerOf(callerHandle, sessionId, transcript.conversationId())))
         throw new CallerFault("Operation does not authorize this executor's actual actions");
+      operations.require(operation);
     }
     if (!confined)
       return execute(
@@ -1659,6 +1649,48 @@ public final class JobRuntime {
         callerHandle,
         incoming,
         operation);
+  }
+
+  /** Validate before opening any delegated log, then bind the exact child before execution. */
+  void requireChild(
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission parent,
+      AgentDefinition callee,
+      Home home) {
+    if (operations == null) return; // Immutable isolated runtime fixtures only.
+    if (systemWork != null
+        || parent == null
+        || !parent.home().equals(home)
+        || !parent
+            .actions()
+            .contains(io.aeyer.plowshare.server.access.AuthorityAction.CONVERSATION_CREATE)
+        || !parent.actions().containsAll(OperationExecution.actions(callee)))
+      throw new CallerFault("Delegation exceeds its retained parent envelope");
+    operations.require(parent);
+  }
+
+  io.aeyer.plowshare.server.access.OperationAuthority.Admission childOperation(
+      io.aeyer.plowshare.server.access.OperationAuthority.Admission parent,
+      String parentConversation,
+      Transcript child,
+      AgentDefinition callee,
+      Home home,
+      Budget budget) {
+    if (operations == null) return parent;
+    requireChild(parent, callee, home);
+    if (child.conversationId() == null
+        || parentConversation == null
+        || child.conversationId().equals(parentConversation))
+      throw new CallerFault("Delegation requires its own durable child conversation");
+    var operation = operations.derive(parent, OperationExecution.childActions(parent, callee));
+    operations.bind(
+        new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
+            child.conversationId(),
+            callee.name(),
+            operation,
+            parentConversation,
+            budget.reference(),
+            OperationExecution.fingerprint(callee)));
+    return operation;
   }
 
   private void requireOperationTool(

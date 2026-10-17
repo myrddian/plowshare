@@ -1,7 +1,8 @@
 # Slice 11: Orchestration and agent-child authority lineage
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented for supported consumers in this branch, 18 October 2026,
+under explicit authorization. No new public API or deployment. Nested/model-started
+orchestration allowances remain an explicit unsupported sharing contract below.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -64,16 +65,99 @@ match the eventual change:
 
 **PostgreSQL justification:** Conditional: selected tagged persistence tests for changed durable lineage, start receipts or transactional recovery. Policy/delegate behavior stays mocked.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+The implementation evidence below distinguishes completed checks from the original
+planned matrix. Existing fixture links do not imply every test is non-database.
+Unsupported consumers remain refused, with no uncertain-effect replay.
 
 ## Specification required before implementation
 
-Specify each existing independent consumer's retained-authority contract; a consumer lacking one remains refused rather than dropping to ambient account authority.
+The [retained-lineage specification](11-lineage-authority-specification.md) was
+recorded before enforcement. It classifies independent roots, synchronous children,
+resumption and the missing nested-orchestration budget contract. A consumer lacking
+a supported retained contract remains refused instead of using ambient authority.
 
 ## Rollout and rollback
 
 Preserve parent/child records, request IDs and budgets. Incompatible continuations stop new effects and use existing authorized receipt/status recovery.
+
+
+## Implementation and activation limits
+
+V159 adds immutable parent-admission edges and conversation envelopes to the existing
+operation records. Envelopes retain agent identity/capability fingerprints, executor,
+exact scope, parent conversation, at-most-CONTRIBUTOR actions and original budget
+source. Repositories own atomic writes, ancestry locks/constraints, bounded reads and
+idempotent binding checks. Historical conversation IDs do not prevent deletion;
+deleted or moved retained inputs/output/budget conversations refuse new effects.
+No old conversation is automatically adopted or granted replacement authority.
+
+Independent orchestration roots retain admission inside the existing start-receipt
+transaction. First turns, queued work, later conductor turns and failed-root resume
+use that envelope. Every job gets a new child admission linked to the original
+ceiling; it cannot replace its supporting grants. The conductor uses its retained
+executor rather than its log custodian. Existing account-owned failed-root resume,
+WRITE and lifecycle restrictions remain independent eligibility checks. Original
+request/resume receipts suppress duplicates, including after interrupted starts.
+
+Synchronous agent/skill/review/native-script children check the parent's actions
+before log creation, acquire distinct retained child conversations and share the
+existing Budget object/source and cancellation. Actual native/model actions remain
+separate: a native child needs no inference action for its own CPU work and can
+continue with its original zero-call allowance. A declared native intermediary
+can pass on an already-retained RUN_MODEL ceiling; it cannot acquire one from
+ambient grants. Management actions and forced MANAGER exceptions do not propagate. A
+changed capability declaration under the same agent name refuses continuation;
+existing budget/turn-limit controls do not replace its source or capability ceiling.
+Acting proofs and explicit calls/file/provider/tool capabilities remain additional
+bounds. SYSTEM model-only work cannot enter this ordinary delegation path.
+
+Slice 10's new Relay orchestration-start fence is removed for independent roots:
+they now enter the same retained owning start API. Original uncertainty/receipt
+inspection remains read-only, and missing receipts never trigger replacement work.
+
+Two existing consumers remain explicitly bounded gaps:
+
+- Nested or model-triggered orchestration starts currently create fresh independent
+  allowances. They cannot satisfy the retained parent-budget rule. Such starts
+  refuse before creating a conversation; this slice adds no budget subdivision,
+  reservation ledger or allocation API. Direct independent user/event/Relay roots
+  retain their existing configured allowance. Caller-conversation launches,
+  including existing bound/slash launches that use that shape, are conservatively
+  refused until a supported explicit budget contract distinguishes them.
+- A synchronous child with an allowance lacking a durable conversation source
+  retains that live Budget identity. It cannot resume using a fresh lease/object
+  after approval or restart. A retained non-conversation lease/recovery contract
+  must be supported before that continuation is enabled.
+
+These gaps are not resolved by granting more account authority or selecting SYSTEM.
+The embedding/search budget gap from slices 07–08 is unchanged. Slices 12–14 remain
+outside this implementation.
+
+## Verification evidence
+
+Mocked policy/runtime tests cover parent/child scope and action ceilings, missing
+ancestry, replacement-grant refusal, builtin SYSTEM rejection, unchanged claim
+identity/ordinals and budget, executor-versus-custodian separation, capability
+changes on resume, current authority before recovery receipts, and unsupported
+child-orchestration refusal. Existing acting/calls/cancellation/uncertainty suites
+remain regression owners. PostgreSQL tests exercise V159 retention, exact supporting
+grants, immutable bindings, concurrent original start keys, restart reads and late
+start rollback in the existing transaction.
+
+- `./gradlew format` and focused policy/runtime/recovery tests passed.
+- `./gradlew formatCheck check` passed on the final source with 5,802 default
+  server tests, zero failures and zero skips, including the affected client,
+  integration, formatting and Javadoc checks in that task.
+- `./gradlew :plowshare-server:test -PfullDb --tests '*OperationRecordsPersistenceTest'`
+  passed all 10 selected PostgreSQL tests on the final source. No full database
+  suite or database-backed deployment smoke test was run.
+- `git diff --check` passed. No deployment, public API/schema catalogue change or
+  client/SDK feature-parity claim is included.
+
+
+The native delegate continuation guard predates native-only execution in source
+snapshot `d38d55f4943f180dfbe7d4d9ff2249e2a8902874`. Commit
+`261126ab1fa18d6b9b2b1f27d9c32709b59f05c4` introduced the zero-call native contract
+and adjusted the ordinary Turn paths; the delegated continuation still used the
+old unconditional model-budget guard. Slice 11 applies the same actual-action rule
+at that child boundary and tests preservation of its zero-call source.

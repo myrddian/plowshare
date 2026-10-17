@@ -669,10 +669,13 @@ public final class AgentRunTool implements AgentTool {
     // not hold the callee's noise -- that is the whole justification for
     // delegation -- and a separate conversation makes it structural: a
     // separate log, a separate projection, and no filter anywhere that could
-    // be got wrong. `delegate` never throws, so a child that could not be
-    // given a log runs without one, which is exactly what every child did
-    // before this line existed.
+    // be got wrong. Isolated fixture transcripts can still return NONE. A production
+    // authority-bound runtime requires its own durable child link and refuses before
+    // model execution if opening that log failed.
+    runtime.requireChild(operation, callee, home);
     Transcript child = transcript.delegate(callee, home, openedBy);
+    var childOperation =
+        runtime.childOperation(operation, transcript.conversationId(), child, callee, home, budget);
     if (prepareChild != null) prepareChild.accept(child);
     // The record's delegation lines (spec 2026-09-28 §2), on the caller's conversation: the
     // record follows the caller's run, and the child's own lines are its conversation's.
@@ -747,7 +750,7 @@ public final class AgentRunTool implements AgentTool {
             .map(note -> framed + "\n\n" + note)
             .orElse(framed);
     Outcome outcome =
-        operation != null
+        childOperation != null
             ? runtime.runOperation(
                 callee,
                 handed,
@@ -761,7 +764,7 @@ public final class AgentRunTool implements AgentTool {
                 pictures,
                 callerHandle,
                 false,
-                operation)
+                childOperation)
             : callerHandle == null
                 ? runtime.run(
                     callee,

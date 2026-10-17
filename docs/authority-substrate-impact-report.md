@@ -1,19 +1,21 @@
 # Authority substrate and Global impact report
 
 Status: source-grounded impact assessment, updated 18 October 2026. Separately
-authorized slices 01–10 are implemented in this branch: project READ/WRITE,
+authorized slices 01–11 are implemented in this branch: project READ/WRITE,
 explicit identities and scoped RBAC, knowledge home/provenance and current-root
 audiences, retained operation/inference authority and budgets, bounded SYSTEM
-services, scheduling, and Relay/message integration. SYSTEM processing no longer
+services, scheduling, Relay/message integration, and retained independent
+orchestration roots plus synchronous agent children. SYSTEM processing no longer
 depends on its creator retaining access; ordinary execution uses its actual bound
 account. No new public APIs or deployment are included.
 
 This is not a complete cutover. Configured embedding/search operation allowances
-remain missing; production inference without supported evidence refuses. New Relay
-orchestration starts are explicitly fenced until slice 11 supplies retained grant
-and child lineage; original receipts can still be inspected without replay.
-Slices 11–14 remain proposed and unauthorized, including remaining orchestration,
-acting, client-contract and integrated legacy migration work.
+remain missing; production inference without supported evidence refuses.
+Independent Relay orchestration roots now use retained lineage. Nested/model-triggered
+orchestration starts still refuse: their existing fresh allowances do not retain a parent budget.
+Non-conversation child allowances cannot resume under replacement leases. Original
+receipts remain inspectable without replay. Slices 12–14 remain proposed and
+unauthorized, including acting, client-contract and integrated legacy migration.
 
 Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
 ownerOnly reconciliation, live filtering for every revision, and explicit general
@@ -50,8 +52,8 @@ Global tier now has an explicit scope mapping; this does not activate Global
 access or SYSTEM processing. Slice 05 now implements the root audience; slice 06
 implements ordinary retained execution. Slices 07–08 add dispatch/budget evidence
 and bounded SYSTEM processing. Slices 09–10 bind scheduled/message executors and
-recheck Relay effects without replacing route/provider capabilities. Slices 11–14
-remain proposed.
+recheck Relay effects without replacing route/provider capabilities. Slice 11 adds
+immutable orchestration/child authority and budget lineage for supported consumers. Slices 12–14 remain proposed.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
 the listed ordinary catalogue/content/import/relationship owner-mutation checks.
@@ -557,15 +559,17 @@ proceed. A later slice must resolve the relevant gap before exposing that behavi
 | Advanced ACL facilities | Resource-specific ACLs fit the substrate, but arbitrary denies, nested groups and new management interfaces are not assumed or required. RBAC helpers remain the routine path, and GLOBAL_READ has no individual exclusions. |
 | Detailed spending-pool mechanics | Operation sponsorship is settled. Pool configuration, reservation/settlement races and migration remain separate technical work under ADR 0025. |
 
-Concrete activation limits after slice 10:
+Concrete activation limits after slice 11:
 
 - Embedding/search query, write and repair calls need an explicitly configured
   operation-budget source. The dispatcher refuses unclassified calls; slices
   07–08 do not supply an invented allowance or wallet. This branch is not ready
   for deployment-wide activation of those paths.
-- New Relay orchestration starts require slice 11's retained authority lineage.
-  Original owning receipts remain read-only reconciliation evidence, never a
-  reason to repeat the start.
+- Independent Relay orchestration roots now retain authority. Nested/model-started
+  orchestration allowances still require a supported parent-budget contract, and
+  non-conversation child leases cannot be replaced on resume. Existing caller-log
+  launch shapes are conservatively refused where that distinction is absent.
+  Original receipts are reconciliation evidence, never a reason to repeat a start.
 - Slice 06's ordinary retained target envelope admits only its exact execution
   home. Explicit Global/cross-project memory tool references refuse under
   `PinnedOperationAuthority.requireTargets`; slice 05's standalone knowledge

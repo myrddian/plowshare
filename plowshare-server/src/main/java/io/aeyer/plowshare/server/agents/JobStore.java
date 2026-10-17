@@ -203,6 +203,20 @@ public final class JobStore implements AutoCloseable, EventRuns {
 
   private io.aeyer.plowshare.server.access.OperationAuthority operations;
 
+  /** Harness continuation uses retained execution identity, never conversation custody. */
+  public String retainedExecutor(String conversation) {
+    if (operations == null) return null; // Isolated legacy stores only.
+    var bound =
+        operations
+            .conversation(conversation)
+            .orElseThrow(
+                () ->
+                    new io.aeyer.plowshare.server.faults.CallerFault(
+                        "Missing retained execution lineage"));
+    operations.require(bound.admission());
+    return bound.admission().executor();
+  }
+
   /** Focused execution fixture with mandatory operation authority. */
   public JobStore(
       io.aeyer.plowshare.server.access.OperationAuthority operations, JobRuntime runtime) {
@@ -874,17 +888,14 @@ public final class JobStore implements AutoCloseable, EventRuns {
         operations == null
             ? null
             : Objects.requireNonNull(
-                operations.admit(
+                OperationExecution.admit(
+                    operations,
                     callerHandle,
                     home,
-                    definition.nativeOnly()
-                        ? java.util.Set.of(
-                            io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                            io.aeyer.plowshare.server.access.AuthorityAction.WRITE)
-                        : java.util.Set.of(
-                            io.aeyer.plowshare.server.access.AuthorityAction.READ,
-                            io.aeyer.plowshare.server.access.AuthorityAction.WRITE,
-                            io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL)));
+                    definition,
+                    conversation,
+                    conversationOrigin,
+                    budget));
     return start(
         definition.name(),
         home,

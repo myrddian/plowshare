@@ -42,6 +42,9 @@ import org.junit.jupiter.api.Test;
 
 /** Recovery behavior through repositories and a model-free conductor; no PostgreSQL. */
 class OrchestrationResumptionTest {
+  private final io.aeyer.plowshare.server.access.OperationAuthority operations =
+      mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+  private io.aeyer.plowshare.server.access.OperationAuthority.Admission envelope;
   private final OrchestrationStore store = mock(OrchestrationStore.class);
   private final ConversationStore conversations = mock(ConversationStore.class);
   private final ConductorVoice voice = mock(ConductorVoice.class);
@@ -121,7 +124,8 @@ class OrchestrationResumptionTest {
             3,
             access,
             recovery,
-            scripts);
+            scripts,
+            operations);
     engine.useResumeListener(
         (run, requestId) -> {
           assertEquals(OrchestrationState.RUNNING, store.find(run.id()).orElseThrow().state());
@@ -132,7 +136,41 @@ class OrchestrationResumptionTest {
     running = run(OrchestrationState.RUNNING, null);
     when(store.find(ask.id())).thenReturn(Optional.of(failed));
     var conversation = mock(ConversationRecord.class);
-    when(conversation.budget()).thenReturn(Budget.of(40));
+    var budget = Budget.of(40);
+    budget.bindConversation("cnv_conductor", claim -> {});
+    when(conversation.budget()).thenReturn(budget);
+    when(conversation.home()).thenReturn(io.aeyer.plowshare.protocol.Home.of("project"));
+    when(conversation.agent()).thenReturn("retryable");
+    var account = new io.aeyer.plowshare.server.access.AuthorityIds.AccountId(UUID.randomUUID());
+    envelope =
+        new io.aeyer.plowshare.server.access.OperationAuthority.Admission(
+            UUID.randomUUID(),
+            "owner",
+            account,
+            new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(UUID.randomUUID()),
+            io.aeyer.plowshare.protocol.Home.of("project"),
+            io.aeyer.plowshare.server.access.GrantRecipient.account(account),
+            List.of(
+                new io.aeyer.plowshare.server.access.OperationAuthority.Support(
+                    io.aeyer.plowshare.server.access.AuthorityAction.RUN_MODEL,
+                    UUID.randomUUID())));
+    when(operations.conversation("cnv_conductor"))
+        .thenReturn(
+            Optional.of(
+                new io.aeyer.plowshare.server.access.OperationAuthority.Conversation(
+                    "cnv_conductor",
+                    "retryable",
+                    envelope,
+                    null,
+                    "cnv_conductor",
+                    io.aeyer.plowshare.server.agents.OperationExecution.fingerprint(
+                        io.aeyer.plowshare.server.agents.OrchestrationRegistry.parsePinned(
+                                "retryable",
+                                "test",
+                                SOURCE,
+                                Set.of(),
+                                OrchestrationDefinition.Tier.PROJECT)
+                            .conductor()))));
     when(conversations.find("cnv_conductor")).thenReturn(Optional.of(conversation));
     when(recovery.claim(ask.id(), "owner", ask.requestId(), Instant.EPOCH))
         .thenAnswer(
@@ -246,5 +284,45 @@ class OrchestrationResumptionTest {
     callback.get().accept(new Outcome(Outcome.Ending.ANSWERED, "recovered result", 1, 1, ""));
     verify(scripts).executed("cnv_conductor", 4, "recovered result");
     verify(voice).speak(eq("cnv_conductor"), any(), anyString(), eq("session"), isNull(), any());
+  }
+
+  @Test
+  void missing_retained_authority_cannot_be_repaired_by_the_current_executor() {
+    when(operations.conversation("cnv_conductor")).thenReturn(Optional.empty());
+    assertThrows(CallerFault.class, () -> engine.resume(ask, "owner"));
+    verifyNoInteractions(recovery, voice, scripts, recorder);
+    verify(operations, never()).admit(any(), any(), any());
+  }
+
+  @Test
+  void revocation_is_checked_before_even_a_known_recovery_receipt_is_disclosed() {
+    when(recovery.received(ask.id(), "owner", ask.requestId())).thenReturn(true);
+    doThrow(new CallerFault("Original support revoked")).when(operations).require(envelope);
+    assertThrows(CallerFault.class, () -> engine.resume(ask, "owner"));
+    verifyNoInteractions(recovery, voice, scripts, recorder);
+    verify(operations, never()).admit(any(), any(), any());
+  }
+
+  @Test
+  void child_orchestration_cannot_mint_an_independent_allowance_under_parent_authority() {
+    var definition = mock(OrchestrationDefinition.class);
+    for (String parent : java.util.Arrays.asList(null, "parent-run")) {
+      var start =
+          new Orchestrations.Start(
+              definition,
+              io.aeyer.plowshare.protocol.Home.of("project"),
+              "task",
+              null,
+              "caller-conversation",
+              "caller-agent",
+              "owner",
+              null,
+              parent,
+              parent == null ? 0 : 1);
+      assertThrows(CallerFault.class, () -> engine.start(start));
+    }
+    verify(operations, never()).admit(any(), any(), any());
+    verify(store, never()).insert(any());
+    verifyNoInteractions(voice, scripts, recorder);
   }
 }

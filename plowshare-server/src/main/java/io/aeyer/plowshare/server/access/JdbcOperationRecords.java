@@ -45,6 +45,119 @@ public final class JdbcOperationRecords implements OperationRecords {
   }
 
   @Override
+  public void retainChild(OperationAuthority.Admission admission, UUID parent) {
+    transactions.executeWithoutResult(
+        status -> {
+          retain(admission);
+          if (jdbc.update(
+                  "INSERT INTO operation_admission_parents(child,parent) SELECT ?,id FROM operation_admissions WHERE id=? AND sealed",
+                  admission.id(),
+                  parent)
+              != 1) throw new IllegalStateException("Retained parent required");
+        });
+  }
+
+  @Override
+  public Optional<UUID> parent(UUID id) {
+    return jdbc
+        .query(
+            "SELECT parent FROM operation_admission_parents WHERE child=?",
+            (rs, n) -> rs.getObject(1, UUID.class),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public Optional<OperationAuthority.Admission> find(UUID id) {
+    return jdbc
+        .query(
+            "SELECT * FROM operation_admissions WHERE id=? AND sealed",
+            (rs, n) ->
+                new OperationAuthority.Admission(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("executor_handle"),
+                    new AuthorityIds.AccountId(rs.getObject("executor", UUID.class)),
+                    new AuthorityIds.ScopeId(rs.getObject("scope", UUID.class)),
+                    io.aeyer.plowshare.protocol.Home.of(rs.getString("project_name")),
+                    GrantRecipient.account(
+                        new AuthorityIds.AccountId(rs.getObject("source_account", UUID.class))),
+                    jdbc.query(
+                        "SELECT action,grant_id FROM operation_admission_support WHERE operation=? ORDER BY action,grant_id",
+                        (support, index) ->
+                            new OperationAuthority.Support(
+                                AuthorityAction.valueOf(support.getString(1)),
+                                support.getObject(2, UUID.class)),
+                        id)),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public Optional<OperationAuthority.Conversation> conversation(String id) {
+    return jdbc
+        .query(
+            "SELECT * FROM operation_conversations WHERE conversation=?",
+            (rs, n) ->
+                new OperationAuthority.Conversation(
+                    rs.getString("conversation"),
+                    rs.getString("agent"),
+                    find(rs.getObject("operation", UUID.class))
+                        .orElseThrow(
+                            () -> new IllegalStateException("Missing conversation admission")),
+                    rs.getString("parent_conversation"),
+                    rs.getString("budget_conversation"),
+                    rs.getString("capabilities")),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public List<AccessRequest.Resource> targets(UUID operation) {
+    var targets =
+        jdbc.query(
+            "SELECT conversation,parent_conversation,budget_conversation FROM operation_conversations WHERE operation=?",
+            (rs, n) ->
+                java.util.stream.Stream.of(rs.getString(1), rs.getString(2), rs.getString(3))
+                    .filter(Objects::nonNull)
+                    .filter(id -> !id.startsWith("budget:"))
+                    .distinct()
+                    .map(
+                        id ->
+                            new AccessRequest.Resource(
+                                ResourceScopeRepository.Kind.CONVERSATION, id))
+                    .toList(),
+            operation);
+    return targets.stream().flatMap(List::stream).distinct().toList();
+  }
+
+  @Override
+  public void bind(OperationAuthority.Conversation bound) {
+    transactions.executeWithoutResult(
+        status -> {
+          jdbc.update(
+              "INSERT INTO operation_conversations(conversation,agent,operation,parent_conversation,budget_conversation,capabilities) VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO NOTHING",
+              bound.id(),
+              bound.agent(),
+              bound.admission().id(),
+              bound.parent(),
+              bound.budget(),
+              bound.capabilities());
+          var stored = conversation(bound.id()).orElseThrow();
+          // Supporting rows have a stable semantic set, independent of JDBC enumeration order.
+          if (!stored.id().equals(bound.id())
+              || !stored.agent().equals(bound.agent())
+              || !stored.admission().id().equals(bound.admission().id())
+              || !Objects.equals(stored.parent(), bound.parent())
+              || !stored.budget().equals(bound.budget())
+              || !stored.capabilities().equals(bound.capabilities()))
+            throw new IllegalStateException("Conversation authority cannot be rebound");
+        });
+  }
+
+  @Override
   public void started(UUID operation, String job) {
     if (job == null || job.isBlank() || job.length() > 1024)
       throw new IllegalArgumentException("Existing job identity required");

@@ -328,7 +328,7 @@ class WorkRelayReceiverTest {
   }
 
   @Test
-  void unconverted_orchestrations_refuse_new_work_but_keep_original_receipt_inspection() {
+  void independent_orchestrations_use_the_owning_start_receipt_and_keep_original_inspection() {
     var request = request("orchestration.start", null, null);
     var definition = mock(OrchestrationDefinition.class);
     var run = mock(OrchestrationRecord.class);
@@ -336,14 +336,28 @@ class WorkRelayReceiverTest {
     when(run.conductorConversation()).thenReturn("cnv_fixture");
     when(grants.granted(any(), any(), any(), any(), any()))
         .thenReturn(Map.of("review", definition));
+    when(executions.begin(request)).thenReturn(true);
+    when(starts.start(any(), eq(request.identity()), anyString())).thenReturn(run);
+    var receiver = receiver("orchestration.start");
     assertEquals(
-        "receiver.retained-orchestration.unsupported",
-        assertThrows(
-                RelayReceiver.Refused.class,
-                () -> receiver("orchestration.start").dispatch(request))
-            .code());
-    verify(executions, never()).begin(any());
-    verifyNoInteractions(jobs, starts);
+        new RelayReceiver.Settled(
+            new RelayDeliveries.Accepted(
+                new RelayDeliveries.Receipt("orchestration", "orc_fixture"))),
+        receiver.dispatch(request));
+    verify(starts)
+        .start(
+            argThat(
+                start ->
+                    start.callerHandle().equals("operator")
+                        && start.callerConversation() == null
+                        && start.parent() == null),
+            eq(request.identity()),
+            anyString());
+    verify(executions)
+        .accepted(
+            request, new RelayDeliveries.Receipt("orchestration", "orc_fixture"), "cnv_fixture");
+    verifyNoInteractions(jobs);
+    clearInvocations(starts);
     when(runs.find("orc_fixture")).thenReturn(Optional.of(run));
     when(runs.startReceipt("operator", request.identity()))
         .thenReturn(

@@ -68,8 +68,90 @@ public final class PinnedOperationAuthority implements OperationAuthority {
   }
 
   @Override
+  public Optional<Conversation> conversation(String id) {
+    return records.conversation(id);
+  }
+
+  @Override
+  public void bind(Conversation conversation) {
+    requireTargets(
+        conversation.admission(),
+        conversation.admission().home(),
+        List.of(
+            new AccessRequest.Resource(
+                ResourceScopeRepository.Kind.CONVERSATION, conversation.id())));
+    if (!Set.of(
+            AuthorityAction.READ,
+            AuthorityAction.WRITE,
+            AuthorityAction.CONVERSATION_CREATE,
+            AuthorityAction.RUN_MODEL)
+        .containsAll(conversation.admission().actions())) throw denied();
+    if (conversation.parent() != null) {
+      if (records.parent(conversation.admission().id()).isEmpty()) throw denied();
+      requireTargets(
+          conversation.admission(),
+          conversation.admission().home(),
+          List.of(
+              new AccessRequest.Resource(
+                  ResourceScopeRepository.Kind.CONVERSATION, conversation.parent())));
+    }
+    records.bind(conversation);
+    require(conversation.admission());
+  }
+
+  @Override
+  public Admission derive(Admission parent, Set<AuthorityAction> actions) {
+    require(parent);
+    if (actions.isEmpty()
+        || !parent.actions().containsAll(actions)
+        || !Set.of(
+                AuthorityAction.READ,
+                AuthorityAction.WRITE,
+                AuthorityAction.CONVERSATION_CREATE,
+                AuthorityAction.RUN_MODEL)
+            .containsAll(actions)) throw denied();
+    var child =
+        new Admission(
+            UUID.randomUUID(),
+            parent.executor(),
+            parent.account(),
+            parent.scope(),
+            parent.home(),
+            parent.source(),
+            parent.support().stream().filter(item -> actions.contains(item.action())).toList());
+    records.retainChild(child, parent.id());
+    require(child);
+    return child;
+  }
+
+  @Override
   public void require(Admission admission) {
-    if (!identities.account(admission.executor()).id().equals(admission.account())) throw denied();
+    var visited = new HashSet<UUID>();
+    for (int depth = 0; ; depth++) {
+      if (depth >= 64 || !visited.add(admission.id())) throw denied();
+      requireOwn(admission);
+      for (var resource : records.targets(admission.id())) {
+        var targets = resources.projects(resource);
+        if (targets.size() != 1 || !admission.home().project().equals(targets.getFirst()))
+          throw denied();
+      }
+      var parent = records.parent(admission.id());
+      if (parent.isEmpty()) return;
+      var ancestor = records.find(parent.get()).orElseThrow(PinnedOperationAuthority::denied);
+      if (!ancestor.executor().equals(admission.executor())
+          || !ancestor.account().equals(admission.account())
+          || !ancestor.scope().equals(admission.scope())
+          || !ancestor.home().equals(admission.home())
+          || !ancestor.source().equals(admission.source())
+          || !ancestor.support().containsAll(admission.support())) throw denied();
+      admission = ancestor;
+    }
+  }
+
+  private void requireOwn(Admission admission) {
+    var executor = identities.account(admission.executor());
+    if (executor.kind() == IdentityRepository.AccountKind.BUILTIN
+        || !executor.id().equals(admission.account())) throw denied();
     var scope = identities.project(admission.home().project());
     if (!scope.id().equals(admission.scope())) throw denied();
     var source =

@@ -1,7 +1,7 @@
 # Authority substrate implementation roadmap
 
-Status: implementation roadmap, updated 18 October 2026. Slices 01–10 have been
-explicitly authorized and implemented in this branch. Slices 11–14 remain proposed
+Status: implementation roadmap, updated 18 October 2026. Slices 01–11 have been
+explicitly authorized and implemented in this branch. Slices 12–14 remain proposed
 and unauthorized. This roadmap does not authorize their execution.
 
 ## Count and scope
@@ -21,11 +21,14 @@ The original runtime source baseline was main
 as documentation in `8f57b54`. This branch implements the project foundation,
 identities and scoped roles (01–03), knowledge homes and current-root policy
 (04–05), retained execution/inference and bounded SYSTEM services (06–08), and
-scheduling plus Relay/message integration (09–10). See each slice's document for
-verification and limits. This is not a complete platform cutover: configured
-embedding/search operation budgets remain missing, and new Relay orchestration
-starts are fenced pending slice 11's retained lineage. Production embeddings
-without supported budget evidence refuse rather than acquiring an implicit source.
+scheduling plus Relay/message integration (09–10), followed by retained independent
+orchestration roots and synchronous agent children (11). See each slice's document
+for verification and limits. This is not a complete platform cutover: configured
+embedding/search operation budgets remain missing, and nested/model-triggered
+orchestration starts remain refused without a supported parent-budget sharing
+contract. Independent Relay roots now use slice 11's retained lineage. Production
+embeddings without supported budget evidence refuse instead of acquiring an implicit
+source.
 This roadmap inventories source owners;
 it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 
@@ -136,7 +139,7 @@ For future implementation:
    retained-state fixtures for the affected slice. New Flyway migrations only;
    never rewrite a shipped migration or relabel historical usage as new authority.
 
-The slice 01–10 documents record implementation checks. The original roadmap
+The slice 01–11 documents record implementation checks. The original roadmap
 planning task ran no Java, PostgreSQL, SDK or live integration tests; its
 documentation checks are distinct from implementation verification.
 
@@ -163,7 +166,7 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-Slices 01–10 are implemented under subsequent explicit requests; slices 11–14
+Slices 01–11 are implemented under subsequent explicit requests; slices 12–14
 remain proposed and unauthorized.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or

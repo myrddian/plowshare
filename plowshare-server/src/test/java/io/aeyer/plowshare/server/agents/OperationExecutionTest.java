@@ -22,6 +22,7 @@ class OperationExecutionTest {
     var authority = mock(OperationAuthority.class);
     var admission = mock(OperationAuthority.Admission.class);
     when(admission.executor()).thenReturn("alice");
+    when(admission.home()).thenReturn(Home.of("one"));
     when(admission.actions())
         .thenReturn(
             Set.of(
@@ -76,6 +77,7 @@ class OperationExecutionTest {
     var authority = mock(OperationAuthority.class);
     var admission = mock(OperationAuthority.Admission.class);
     when(admission.executor()).thenReturn("alice");
+    when(admission.home()).thenReturn(Home.of("one"));
     when(admission.actions())
         .thenReturn(
             Set.of(

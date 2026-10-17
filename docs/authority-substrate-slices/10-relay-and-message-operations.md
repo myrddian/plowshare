@@ -1,8 +1,9 @@
 # Slice 10: Relay and message-triggered operation authority
 
 Status: implemented in this branch, 18 October 2026, under explicit authorization.
-No new public API or deployment. New Relay orchestration starts remain fenced
-pending slice 11's retained authority lineage; original receipts remain inspectable.
+No new public API or deployment. Slice 11 now supersedes this slice's temporary
+independent Relay orchestration-start fence with retained owning-API admission;
+original receipts remain inspectable.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -113,3 +114,8 @@ are unchanged.
 `format` and the focused tests passed. Repository-wide `formatCheck check` passed
 with 5,785 default server tests, zero failures and zero skips. These checks prove
 source/test behavior, not a live deployment or the remaining cutover slices.
+
+
+Slice 11 supersedes the temporary independent Relay orchestration-start fence above
+with retained owning-API admission. Its separate nested/model-start budget limits
+remain documented in [slice 11](11-orchestration-and-agent-lineage.md).

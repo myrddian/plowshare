@@ -94,4 +94,88 @@ class PinnedOperationAuthorityTest {
             policy.admit(
                 "alice", Home.of("personal:bob"), Set.of(AuthorityAction.CONVERSATION_CREATE)));
   }
+
+  @Test
+  void children_retain_the_exact_parent_grants_and_cannot_inherit_management_actions() {
+    for (var action :
+        Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL))
+      when(authority.allowsUsing(recipient, target, action, grant)).thenReturn(true);
+    var parent =
+        policy.admit(
+            "alice",
+            Home.of("one"),
+            Set.of(
+                AuthorityAction.READ,
+                AuthorityAction.WRITE,
+                AuthorityAction.RUN_MODEL,
+                AuthorityAction.CONVERSATION_CREATE));
+    doAnswer(
+            call -> {
+              OperationAuthority.Admission child = call.getArgument(0);
+              when(records.parent(child.id())).thenReturn(Optional.of(parent.id()));
+              return null;
+            })
+        .when(records)
+        .retainChild(any(), eq(parent.id()));
+    when(records.find(parent.id())).thenReturn(Optional.of(parent));
+    var child =
+        policy.derive(
+            parent, Set.of(AuthorityAction.READ, AuthorityAction.WRITE, AuthorityAction.RUN_MODEL));
+    assertNotEquals(parent.id(), child.id());
+    assertEquals(parent.executor(), child.executor());
+    assertEquals(parent.scope(), child.scope());
+    assertEquals(parent.source(), child.source());
+    assertTrue(parent.support().containsAll(child.support()));
+    verify(records).retainChild(child, parent.id());
+    for (var action :
+        Set.of(
+            AuthorityAction.ADMINISTER,
+            AuthorityAction.MANAGE_ACCESS,
+            AuthorityAction.MANAGE_SCOPE,
+            AuthorityAction.SET_AUDIENCE))
+      assertThrows(CallerFault.class, () -> policy.derive(parent, Set.of(action)));
+    // An ancestor action not used by the leaf still constrains the whole tree.
+    when(authority.allowsUsing(recipient, target, AuthorityAction.CONVERSATION_CREATE, grant))
+        .thenReturn(false);
+    assertThrows(CallerFault.class, () -> policy.require(child));
+    verify(grants, times(1)).live(recipient);
+  }
+
+  @Test
+  void missing_and_cyclic_parent_evidence_never_falls_back_to_ambient_authority() {
+    var admitted =
+        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    UUID unknown = UUID.randomUUID();
+    when(records.parent(admitted.id())).thenReturn(Optional.of(unknown));
+    assertThrows(CallerFault.class, () -> policy.require(admitted));
+    when(records.parent(admitted.id())).thenReturn(Optional.of(admitted.id()));
+    when(records.find(admitted.id())).thenReturn(Optional.of(admitted));
+    assertThrows(CallerFault.class, () -> policy.require(admitted));
+  }
+
+  @Test
+  void builtin_system_identity_cannot_be_minted_as_an_ordinary_child() {
+    var parent = policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    when(identities.account("alice"))
+        .thenReturn(
+            new IdentityRepository.Account(
+                account, "alice", IdentityRepository.AccountKind.BUILTIN, true));
+    assertThrows(CallerFault.class, () -> policy.derive(parent, parent.actions()));
+    verify(records, never()).retainChild(any(), any());
+  }
+
+  @Test
+  void missing_or_relocated_retained_input_refuses_even_when_grants_remain_live() {
+    var admitted =
+        policy.admit("alice", Home.of("one"), Set.of(AuthorityAction.CONVERSATION_CREATE));
+    var target =
+        new AccessRequest.Resource(ResourceScopeRepository.Kind.CONVERSATION, "retained-input");
+    when(records.targets(admitted.id())).thenReturn(List.of(target));
+    when(resources.projects(target)).thenReturn(List.of("one"));
+    assertDoesNotThrow(() -> policy.require(admitted));
+    when(resources.projects(target)).thenReturn(List.of());
+    assertThrows(CallerFault.class, () -> policy.require(admitted));
+    when(resources.projects(target)).thenReturn(List.of("other"));
+    assertThrows(CallerFault.class, () -> policy.require(admitted));
+  }
 }

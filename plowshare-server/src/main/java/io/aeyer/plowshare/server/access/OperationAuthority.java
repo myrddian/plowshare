@@ -43,6 +43,42 @@ public interface OperationAuthority {
     }
   }
 
+  /** A durable execution envelope; provenance and the budget owner are never inferred on resume. */
+  record Conversation(
+      String id,
+      String agent,
+      Admission admission,
+      String parent,
+      String budget,
+      String capabilities) {
+    public Conversation {
+      if (id == null
+          || id.isBlank()
+          || agent == null
+          || agent.isBlank()
+          || budget == null
+          || budget.isBlank()
+          || id.length() > 1024
+          || agent.length() > 1024
+          || budget.length() > 1024
+          || (parent != null && (parent.isBlank() || parent.length() > 1024)))
+        throw new IllegalArgumentException("Bound conversation, agent and budget required");
+      Objects.requireNonNull(admission);
+      if (capabilities == null || !capabilities.matches("[0-9a-f]{64}"))
+        throw new IllegalArgumentException("Retained capability fingerprint required");
+      if (id.equals(parent)) throw new IllegalArgumentException("A child cannot parent itself");
+    }
+  }
+
+  /** Reads immutable evidence only; callers must still recheck live authority. */
+  Optional<Conversation> conversation(String id);
+
+  /** Attaches an existing conversation exactly once; a different binding is never substituted. */
+  void bind(Conversation conversation);
+
+  /** Narrows a retained parent, preserving exact supporting grants and immutable ancestry. */
+  Admission derive(Admission parent, Set<AuthorityAction> actions);
+
   /** Resolves and retains exact supporting grants; never changes account or home on refusal. */
   Admission admit(String executor, Home home, Set<AuthorityAction> actions);
 

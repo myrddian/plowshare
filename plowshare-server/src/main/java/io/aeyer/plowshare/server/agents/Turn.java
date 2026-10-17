@@ -606,6 +606,9 @@ public final class Turn {
       Budget given,
       Speaker speaker,
       Consumer<Outcome> ended) {
+    String retainedExecutor = jobs.retainedExecutor(child);
+    if (retainedExecutor != null && !retainedExecutor.equals(callerHandle))
+      throw new Refused("A delegation cannot replace its retained executor");
     Objects.requireNonNull(callee, "callee");
     Objects.requireNonNull(ended, "ended");
     ConversationRecord delegate =
@@ -664,7 +667,7 @@ public final class Turn {
       Budget budget = external[0] == null ? conductor.budget() : external[0].budget();
       if (external[0] == null)
         automaticLimits.budget(conductor.id(), budget, callee, sessionId, Transcript.NONE);
-      if (budget.exhausted()) {
+      if (!callee.nativeOnly() && budget.exhausted()) {
         throw new Refused(
             "conversation "
                 + conductor.id()
@@ -778,6 +781,7 @@ public final class Turn {
       Integer maxModelCalls,
       Consumer<Outcome> alsoEnded,
       Speaker source) {
+    String executor = jobs.retainedExecutor(conversation);
     Objects.requireNonNull(conductor, "conductor");
     Objects.requireNonNull(alsoEnded, "alsoEnded");
     // No turn cap: TurnCap.chosen falls back to the conductor's own
@@ -801,7 +805,9 @@ public final class Turn {
         record -> requireConductor(record, conductor),
         false,
         Objects.requireNonNull(source, "source"),
-        null);
+        null,
+        null,
+        executor);
   }
 
   /**

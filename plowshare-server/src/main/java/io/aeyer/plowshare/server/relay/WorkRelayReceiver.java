@@ -73,10 +73,6 @@ public final class WorkRelayReceiver implements RelayReceiver {
     resolve(request);
     if (!RelayEffectBound.inspecting(request)) {
       RelayEffectBound.next(history, request.delivery().publication(), maximum);
-      if (receiver.equals("orchestration.start")
-          && executions
-              .find(request.access().account(), request.access().projectId(), request.identity())
-              .isEmpty()) requireRetainedFamily();
     }
   }
 
@@ -130,14 +126,6 @@ public final class WorkRelayReceiver implements RelayReceiver {
     callers.requireSession(resolved.session(), account);
   }
 
-  private void requireRetainedFamily() {
-    // The owning orchestration API has receipts, but retained grant/child lineage is slice 11.
-    // Do not start an unconverted consumer or synthesize authority from its publisher/creator.
-    // Inspection below remains available for original receipts and never starts replacement work.
-    if (receiver.equals("orchestration.start"))
-      throw new Refused("receiver.retained-orchestration.unsupported");
-  }
-
   public boolean handlesScript() {
     return receiver.equals("script.run");
   }
@@ -153,7 +141,6 @@ public final class WorkRelayReceiver implements RelayReceiver {
             request.access().account(), request.access().projectId(), request.identity());
     if (known.isPresent()) return accepted(known.get().receipt());
     var causation = RelayEffectBound.next(history, request.delivery().publication(), maximum);
-    requireRetainedFamily();
     if (!executions.begin(request)) return new Uncertain("execution-intent-without-receipt");
     requireResolved(request, resolved);
     String message = RelayRouteCodec.event(request.delivery().publication());
