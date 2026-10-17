@@ -292,6 +292,36 @@ public final class Turn {
         null);
   }
 
+  /** Existing scheduled work keeps its event speaker while admitting its actual executor. */
+  public String speakForExecutor(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      String executor) {
+    if (executor == null || executor.isBlank()) throw new Refused("An event executor is required");
+    Objects.requireNonNull(definition);
+    Objects.requireNonNull(speaker);
+    Objects.requireNonNull(ended);
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        null,
+        ended,
+        Turn::requireSpeakable,
+        true,
+        speaker,
+        null,
+        null,
+        executor);
+  }
+
   /**
    * The harness delivering its own words into a person's conversation — never a person's own, and
    * never incoming.
@@ -906,6 +936,36 @@ public final class Turn {
       Speaker speaker,
       Budget given,
       RunAdmission admission) {
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        admissible,
+        incoming,
+        speaker,
+        given,
+        admission,
+        null);
+  }
+
+  private String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> admissible,
+      boolean incoming,
+      Speaker speaker,
+      Budget given,
+      RunAdmission admission,
+      String executor) {
     ConversationRecord record =
         conversations
             .find(conversation)
@@ -1033,9 +1093,11 @@ public final class Turn {
                   ended,
                   TurnCap.chosen(turnCap, record.turnCap(), definition),
                   List.of(),
-                  speaker.kind() == Speaker.Kind.PERSON
-                      ? speaker.name()
-                      : conversations.ownerOf(id).orElse(null),
+                  executor != null
+                      ? executor
+                      : speaker.kind() == Speaker.Kind.PERSON
+                          ? speaker.name()
+                          : conversations.ownerOf(id).orElse(null),
                   incoming)
               : jobs.submitAdmitted(
                   definition,

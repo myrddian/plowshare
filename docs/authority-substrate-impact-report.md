@@ -8,7 +8,8 @@ READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
 and retained ordinary operation authority (06) are implemented in this branch.
 Slice 07 adds mandatory dispatcher evidence and retained call claims. SYSTEM/consumer
 slice 08 now classifies bounded SYSTEM services and removes creator-access gates
-from valid processing. Schedule/Relay cutovers (09–10) are authorized next; configured embedding/search allowances are
+from valid processing. Slice 09 now pins the scheduled executor and actual conversation work action.
+Relay/message cutover (10) is authorized next; configured embedding/search allowances are
 a concrete activation gap, and unclassified production calls refuse.
 remaining orchestration/acting/contract cutovers remain later work.
 

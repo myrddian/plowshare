@@ -1,7 +1,7 @@
 # Slice 09: Scheduled and cron operation authority
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented on this branch, 18 October 2026, under explicit authorization.
+No new public API, scheduler, lifecycle control or deployment.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -77,3 +77,27 @@ Classify actual actions for each existing firing family and preserve existing de
 ## Rollout and rollback
 
 Fence incompatible firings and retain leases/receipts. Never manufacture a replacement firing/request identity or replay uncertain work to obtain new authority.
+
+## Implementation and verification
+
+The [pre-enforcement firing specification](09-scheduled-authority-specification.md)
+classifies existing action families, execution identity and recovery. Targeted
+firings now require conversation WRITE/work authority and explicitly pass their
+trigger executor into common admission. The event remains the speaker; conversation
+creator/custodian supplies no authority. Registered managed sources cannot replace
+their execution principal. Conversation-targeted work retains the existing shared
+allowance; untargeted work keeps configured event/worker limits.
+
+Existing Application execution-account/manager control, definition-management and
+registered-source checks are reused. Firing -> job -> retained admission -> call
+claim/source correlation uses existing receipts plus slices 06–08 records. Missing
+receipts/unsupported recovered authority remain held/refused, without replay or
+manufactured identities. Existing scheduled-message receipt semantics are unchanged.
+
+Focused mocked tests passed for executor-versus-creator separation, unchanged
+allowance, missing executor, READ/revocation refusal, registered-principal mismatch
+and Application control behavior. `formatCheck check` passed with 5,773 default
+server tests. The unchanged timing-sensitive MCP credential test failed once under
+parallel check load; all 100 MCP integration tests then passed in isolation and the
+full check passed. No TypeScript implementation was changed. No PostgreSQL run was
+needed: this slice changes no firing, receipt or budget persistence predicate.
