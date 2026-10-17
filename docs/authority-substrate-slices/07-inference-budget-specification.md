@@ -63,10 +63,13 @@ one-call allowance or SYSTEM wallet. This is a recorded activation gap, not a
 claim that semantic search remains available during partial rollout.
 
 The proposed [follow-on slice 15](15-semantic-query-budgets-and-read-authority.md)
-now scopes the document-query portion: explicit configuration, retained allowance
-and a closed SYSTEM read-service purpose on existing supported consumers. It is
-planning only; memory recall, ask/deliberation and independent repair remain
-separate, and no query path is activated by that document.
+now scopes shared SYSTEM embedding execution: preparation keeps its current
+source, and initial search consumers supply a configured search-operation
+allowance and retained query-purpose evidence. Scope/read/write policy and budget
+ownership remain with each consumer; embedding adds no account role or separate
+permission system. It is planning only; memory recall, ask/deliberation and
+independent repair activation remain separate, and no query path is activated by
+that document.
 
 Slice 08 binds actual conversation allowances to repository-backed pre-dispatch
 spend, including background compaction. Stale recovered counters cannot spend the

@@ -1,4 +1,4 @@
-# Follow-on slice 15: Semantic-query budgets and read authority
+# Follow-on slice 15: SYSTEM embedding foundation and initial search consumers
 
 Status: proposed implementation scope, 18 October 2026. Planning only, requested
 after the bounded slice 14 completion. No runtime, configuration, schema, SDK or
@@ -12,10 +12,21 @@ and the [role matrix](../role-scope-permissions-proposal.md): read-side inferenc
 uses the search service's configured operation budget; a READER may request the
 service without receiving arbitrary RUN_MODEL authority.
 
+Clarification agreed after the first draft: semantic embedding is a shared SYSTEM
+foundation, not a document-specific permission or execution service. This revision
+supersedes the draft's `DOCUMENT_QUERY` purpose and document-owned query-budget
+configuration. The first consumer rollout remains bounded; the foundation must
+also serve existing preparation and be reusable by memory and other admitted
+operations without another embedding permission system.
+
 ## Outcome and dependencies
 
-Restore the existing supported document query-embedding paths through retained,
-bounded SYSTEM search authority and an explicitly configured per-query allowance.
+Establish shared, bounded SYSTEM embedding execution over the existing dispatcher,
+then connect the existing preparation path and selected document-search consumers.
+Each consumer supplies its admitted operation, scope/validity binding and retained
+operation-budget source. The foundation neither grants the caller RUN_MODEL nor
+chooses a payer or resource audience. Initial search adoption adds the missing
+configured search-operation allowance and retained query admission.
 Keep current caller selection, root/input/privacy filtering, result shapes,
 ranking, coverage and retained-input obligations. Missing or exhausted allowance,
 invalid authority or an uncertain submitted attempt must never become a successful
@@ -23,8 +34,9 @@ empty search or an automatic redispatch.
 
 **Depends on:** implemented slices 07–08, 13 and the
 [slice 14 completion](14-completion-plan.md). Reuse their dispatch/claim and
-embedding validation contracts; do not lend document-preparation authority to a
-query. Implementation needs a subsequent explicit instruction.
+embedding validation contracts. Sharing execution machinery does not allow a
+claim from one operation to be reused by another. Implementation needs a
+subsequent explicit instruction.
 
 ## Source findings
 
@@ -34,7 +46,8 @@ query. Implementation needs a subsequent explicit instruction.
 | [DocumentFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/DocumentFrames.java), [InformationFrames](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/InformationFrames.java), [DocumentController](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/api/DocumentController.java) | Existing authenticated selection and response contracts reach the same retrieval service. Information search/rank accept their existing corpus/filter/view context. The explicit Global account selector still refuses these operations. |
 | [InformationTool](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/InformationTool.java), [DocumentTools](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/DocumentTools.java), [JobRuntime](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java) | Run-bound tools derive their reader from the server-owned home/account and record consumed inputs. Runtime composition has the parent admission, cancellation and call identity; the tools do not currently carry a query allowance. Bind the search service internally rather than exposing authority or payer fields to model arguments. |
 | [DispatchingEmbeddingClient](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/DispatchingEmbeddingClient.java), [DispatchingDualEmbeddings](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/DispatchingDualEmbeddings.java) | Unbound query requests have attribution but no retained claim. The preparation-scoped dual client explicitly rejects queries. Dual retrieval captures one active corpus slot and batches stance's query/negation together; preparation's two-slot write behavior is not query behavior. |
-| [SystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/SystemOperations.java), [BoundSystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/BoundSystemOperations.java) | No declared query purpose exists. Embedding claim carriage permits DOCUMENT_PREPARATION only. The immutable SYSTEM evidence table also allowlists purposes in V158. A Java enum change alone cannot activate this path. |
+| [SystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/SystemOperations.java), [BoundSystemOperations](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/access/BoundSystemOperations.java) | No declared query purpose exists. Embedding claim carriage permits DOCUMENT_PREPARATION only. Extend the shared SYSTEM machinery with bounded query-operation evidence rather than constructing a document-specific embedding authority. The immutable SYSTEM evidence table also allowlists purposes in V158. A Java enum change alone cannot activate this path. |
+| [BoundPreparationEmbeddings](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/BoundPreparationEmbeddings.java), [EmbeddingAuthorization](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/EmbeddingAuthorization.java) | Preparation already binds exact model/input, retained allowance, lease/generation and output targets. Its permit combines dispatch authorization with preparation publication checkpoints. Reuse the dispatch portion through the foundation; keep publication/lease semantics with the preparation consumer. |
 | [JdbcInferenceAdmissions](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/JdbcInferenceAdmissions.java), [Budget](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Budget.java) | Existing operation/source binding, unique source/ordinal, one submission and accounting correlation are reusable. They do not configure or supply a query allowance. `Budget.retained` can restore a persisted identity/counter, but is not itself persistence. |
 | [DocumentStore](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/DocumentStore.java), [JdbcEmbeddingWorkRepository](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/embedding/JdbcEmbeddingWorkRepository.java) | Scoped SQL applies current selection/root/input policy before ranking/paging; the dual read fences its captured profile. Preserve both independently of SYSTEM inference authority. |
 | [DocumentsProperties](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/DocumentsProperties.java) | Ingest and ask allowances exist, but neither is a search budget. Token ceilings, embedding batch size and queue capacity cannot substitute. |
@@ -46,30 +59,55 @@ counts actual dispatcher requests; it does not assume every read is free or add
 a lexical-only optimization. Model failures retain their existing explicit error
 semantics; they do not trigger an unrequested fallback to lexical results.
 
-## Supported boundary
+## Shared foundation and consumer responsibilities
+
+| Responsibility | Owner |
+| --- | --- |
+| Authenticate the requester; authorize the requested search, recall, preparation or other operation; select permitted inputs/targets | The consuming operation, using current scoped RBAC/resource and lifecycle checks. No new embedding role or tool-level ACL. |
+| Resolve and retain the configured budget source and operation validity | The consuming operation's admission. Search uses its configured search-operation source; preparation keeps its retained revision allowance. The foundation never creates an allowance because it received an embedding request. |
+| Perform the exact admitted embedding batch under SYSTEM RUN_MODEL authority | One shared internal embedding execution capability over the existing legacy/dual clients and dispatcher. It validates the operation binding, task mode, model/profile, final inputs, claim and live validity. It exposes no tools, arbitrary model execution or document-reader interface. |
+| Filter and disclose search/recall results; publish prepared vectors | The consumer's existing read policy or fenced writer. Returning a vector does not authorize a resource read, mutation, audience change or output publication. |
+
+The internal contract accepts a typed admitted operation and embedding task,
+including QUERY versus DOCUMENT preprocessing. These are input/purpose boundaries,
+not account permissions. Closed operation-purpose evidence remains useful for
+sandboxing and audit; it must not become a separate role/grant system per feature.
+Keep model/profile resolution in its existing owner and claim persistence in
+specialist repositories. Do not add a second provider runtime, generic execution
+framework or externally callable embedding endpoint.
+
+## Initial consumer boundary
 
 | Entry point | Planned treatment |
 | --- | --- |
+| Existing document preparation | Use the shared execution contract through its existing operation adapter. Preserve the revision allowance, exact lease/generation/targets, pending-claim replay fence and atomic publication. This is a reuse/refactoring boundary, not a new preparation capability or budget. |
 | Existing `information.search` and `information.rank` | Bind one search operation to the admitted Personal/Project/Shared selection, corpus, facets/view and optional revision. Preserve existing defaults, limits and payloads. |
 | Existing `document.search`, `document.retrieve`, `document.rank`, `document.stance` and their current HTTP equivalents | Use the same internal admission and allowance capability through the authenticated scoped reader. Preserve each surface's existing selectors; do not add HTTP scope fields or SDK methods. |
 | Existing `information_read` search/rank and `document_search` agent tools | Bind the service at runtime composition to the existing executor/subject, retained run, call identity, home, cancellation and result-input ledger. Recheck parent validity and existing target limits; model arguments cannot select another account, budget or scope. |
 | Internal `within` calls from ask/deliberation | Remain fenced unless supplied a separately supported binding. Do not silently create a standalone search allowance inside an existing ask job. Ask-stage budgeting and that consumer's authority/lifecycle are separate work. |
 | Global-held publicly readable documents | Discoverable only through an existing supported Shared/includeShared path and current GLOBAL_READ policy. No new `scope.kind=account` search support, global conversation or Global execution grant. |
+| Memory recall and other embedding consumers | The same foundation is available for later admission adapters. Activation still needs that consumer's supported scope, lifetime, budget and read/write contract; this plan does not activate them merely because shared execution exists. |
 
 The information surface already supports code as a corpus. Preserve its existing
 slot choice and filters where the requested operation is supported; do not add
 new code navigation or infer prose summary/stance support for code. Existing
 syntax outline/symbol reads remain independent of query inference.
 
-## Proposed budget contract
+## Initial search consumer's proposed budget contract
 
-Add one explicit deployment configuration for this document search service:
-`plowshare.documents.query-budget` (proposed environment spelling
-`PLOWSHARE_DOCUMENT_QUERY_BUDGET`). This is a model-call allowance per admitted
-logical query, not a monetary pool or an allowance per document/vector/result.
+Add one explicit configuration for the admitted semantic-search operation,
+provisionally `plowshare.embeddings.search-budget` (environment spelling
+`PLOWSHARE_SEMANTIC_SEARCH_BUDGET`). The search admission adapter reads it;
+the foundation does not. This replaces the draft's document-specific key and
+applies consistently across the initial frame/HTTP/tool search consumers.
+It is a model-call allowance per admitted logical query, not a monetary pool,
+a universal embedding allowance or an allowance per document/vector/result.
+Preparation continues using its existing source; later consumers must explicitly
+bind their own supported operation source rather than inherit this setting.
 
 - Absent/zero means query inference is disabled with a clear configuration
-  refusal when dispatch would be required. Negative or malformed values fail
+  refusal when search dispatch would be required. It does not disable preparation
+  or another independently admitted consumer. Negative or malformed values fail
   configuration validation. No implicit one-call fallback or unlimited value.
 - A positive configured integer is captured once at query admission. Current
   successful single-query and batched-stance paths need one actual embedding
@@ -94,8 +132,11 @@ logical query, not a monetary pool or an allowance per document/vector/result.
 
 ## Authority, targets and disclosure
 
-Declare one closed internal purpose, provisionally `DOCUMENT_QUERY`, for query
-embedding only. SYSTEM retains its intrinsic authority; no agent receives the
+Extend existing SYSTEM operation evidence with a closed read-query purpose,
+provisionally `SEMANTIC_QUERY`, used by admitted search consumers. Preserve
+DOCUMENT_PREPARATION evidence for that operation; both use the same embedding
+foundation. Purpose identifies and constrains the operation, not a separate
+permission to embed. SYSTEM retains its intrinsic authority; no agent receives the
 SYSTEM role and no caller gains ADMIN, WRITE, CONVERSATION_CREATE or RUN_MODEL.
 The initiator/acting subject remains distinct from the actual executor and budget.
 
@@ -138,18 +179,22 @@ was independently filtered.
 
 ## Smallest implementation and reuse
 
-1. Define a narrow internal query-admission/allowance interface and immutable DTOs.
-   Separate direct authenticated requests from run-bound requests explicitly.
-   Bind it to scoped retrieval copies at the existing composition boundaries;
-   an unbound production reader must not silently gain a standalone allowance.
+1. Define one narrow internal SYSTEM embedding execution contract with typed
+   operation/task bindings. Extract/reuse the existing preparation dispatch
+   authorization through it; leave source selection, lease/target checks and
+   publication checkpoints in the preparation adapter. Add the search admission
+   adapter, separating direct authenticated and run-bound requests explicitly.
+   Bind it to scoped retrieval copies at existing composition boundaries; an
+   unbound production reader must not silently gain a standalone allowance.
 2. Add the validated configuration and capture it at admission. Add a specialist
    query repository only for the missing retained source/counter, immutable query
    binding and bounded attempt lifetime. Reuse `Budget.retained`,
    `SystemOperationRecords`, `operation_inference_budgets`, `inference_admissions`
    and existing accounting correlations. No duplicate inference/cost ledger.
-3. Extend the closed purpose allowlist and embedding claim carriage for the query
-   purpose. Query authorization must be distinct from preparation's writable
-   target/publication permit; possession of one must never enable the other.
+3. Extend the existing closed purpose allowlist and shared embedding claim carriage
+   for SEMANTIC_QUERY. Both consumer adapters use the same execution checks;
+   claims remain bound to their operation/source and exact batch. A query binding
+   cannot be exchanged for preparation's writable target/publication permit.
    Reject chat/stream authorization for the query purpose as well; adding the
    enum must not make existing generic SYSTEM chat carriage a second dispatch lane.
    Reuse exact request validation, tokenizer limits and dispatcher queue checks.
@@ -157,8 +202,9 @@ was independently filtered.
    inference claim before provider submission. Rechecks consume no extra claim.
    Reuse the unique source/ordinal and one-submission constraints. Closing or
    invalidating an attempt prevents further claims without erasing spending.
-5. Carry the binding through both legacy and dual query clients. Pin the selected
-   active profile once, use its query preprocessing, and reuse captured vectors
+5. Carry the shared execution binding through both legacy and dual clients for
+   preparation and query tasks, preserving each adapter's boundaries. Pin the
+   selected active profile once, use its query preprocessing, and reuse captured vectors
    inside `dualRead` without another dispatch. Preserve the profile's fenced
    database read; a raced activation refuses rather than re-embedding silently.
 6. Wire the existing frame/HTTP/tool consumers listed above and their final
@@ -224,6 +270,13 @@ Use mocks/fakes by default for the new policy service and both embedding clients
   input dependencies, with no model-selectable authority or budget fields. Ask,
   archive recall, preparation, repair and chat/stream dispatch cannot borrow a
   query permit.
+- Foundation tests exercise preparation and query adapters through the same
+  execution contract. No caller/account embedding grant is needed or accepted.
+  Changing operation, budget source, task mode, profile or final input cannot
+  reuse a claim; the foundation cannot mint a budget or publish stored vectors.
+  Retain slice 14's preparation success, exhaustion, creator-independent work,
+  withdrawal, uncertain replay and publication-race coverage in both embedding
+  modes. Missing search configuration must not disable valid preparation.
 - Queue revocation, withdrawal, profile activation races and provider failures
   preserve incurred spending, refuse stale output and never repeat dispatch.
   New records/logs expose no raw private query/source text.
@@ -258,7 +311,9 @@ results and limits in this document before declaring completion.
 
 ## Exclusions and rollout
 
-No memory/passage/archive recall or writes, independent embedding maintenance,
+The shared foundation is not limited to documents. Its initial adoption excludes
+activation of memory/passage/archive recall or writes, independent embedding
+maintenance,
 ask/deliberation budgeting, new reranker/model navigation, Global account search
 selector, type registry, group/tenant/ACL editor, broader acting targets, nested
 orchestration allocation, transient-child recovery, monetary reservation/spending
@@ -268,9 +323,10 @@ no new role or per-tool RBAC layer.
 Keep other inference consumers fenced until their own declared purpose/source
 contracts exist. Existing compatibility and curation gates remain. Ship configuration
 documentation with an explicit enablement choice; do not silently activate query
-spending for every existing deployment. Setting the query budget to zero fences
-new inference without deleting prior evidence. No data move, credential issuance,
-deployment, old-binary rollback or live schema migration is authorized here.
+spending for every existing deployment. Setting the search budget to zero fences
+new search inference without disabling the foundation, preparation or deleting
+prior evidence. No data move, credential issuance, deployment, old-binary rollback
+or live schema migration is authorized here.
 
 ## Planning verification
 

@@ -129,11 +129,12 @@ Do not automatically increase limits, reset spending or change historical costs.
 These gaps do not block the bounded Global document path. They still prevent a
 claim that all affected platform consumers are available or fully cut over.
 
-The document-query portion is now scoped separately in proposed
+The shared SYSTEM embedding foundation and initial search adoption are scoped in proposed
 [follow-on slice 15](15-semantic-query-budgets-and-read-authority.md). That plan
-does not activate a consumer or change slice 14's completed boundary. Memory
-recall, ask/deliberation, independent repair and the other budget gaps remain
-outside that follow-on.
+reuses preparation's current operation budget and fences; it does not activate
+a consumer or change slice 14's completed outcome. Memory recall, ask/deliberation,
+independent repair and the other budget gaps remain outside its initial consumer
+rollout, although they can reuse the shared foundation with supported bindings.
 
 ## Verification and acceptance
 

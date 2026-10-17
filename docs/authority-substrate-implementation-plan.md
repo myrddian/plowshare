@@ -6,7 +6,8 @@ implemented for their documented supported paths. Slice 14 includes the
 explicit Global document destination and preparation embeddings charged to the
 existing processing budget. Other budget gaps and broader rollout remain deferred.
 The separately requested [follow-on slice 15](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md)
-now scopes document semantic-query budgets and read authority. It is planning
+now scopes a shared SYSTEM embedding foundation and initial search consumers.
+Consumer permissions, disclosure and budget ownership stay separate. It is planning
 only; those consumers remain fenced until implementation and verification.
 
 ## Count and scope
@@ -61,7 +62,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 12 | [Account acting delegation and action ceilings](authority-substrate-slices/12-account-acting-delegation.md) | 03, 06, 07 | Map the existing Application-on-behalf-of-user flow to common actions while preserving separate actor/subject proof and the currently supported target/operation set. |
 | 13 | [Existing API, scope-selection and client contract cutover](authority-substrate-slices/13-existing-contract-and-client-cutover.md) | 05, 08, 09, 10, 11, 12 | Expose the migrated semantics only through verified existing supported operations, coordinating affected contracts without requiring SDK/client parity or creating new APIs. |
 | 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
-| 15 (planning only) | [Semantic-query budgets and read authority](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Bind existing supported document query embeddings to a configured search-operation allowance and bounded SYSTEM purpose, preserving current reader and run sandboxes. Memory/repair/ask and other deferred consumers remain separate. |
+| 15 (planning only) | [SYSTEM embedding foundation and initial search consumers](authority-substrate-slices/15-semantic-query-budgets-and-read-authority.md) | 07, 08, 13, 14 | Share bounded SYSTEM embedding execution across existing preparation and initial document-search consumers. Each operation supplies its scope, validity and budget; readers gain no embedding permission. Memory/repair/ask activation and other deferred consumers remain separate. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -187,8 +188,9 @@ supported Global document route and shared preparation allowance. The historical
 retains classification and compatibility-removal gates. Completing this bounded
 path does not enable deferred budget consumers or establish unrestricted
 platform-wide cutover.
-Slice 15 is documented planning only. Its proposed configuration, retained query
-source and closed SYSTEM purpose need a subsequent implementation instruction;
+Slice 15 is documented planning only. Its shared embedding foundation, initial
+search configuration/source and closed query-purpose evidence need a subsequent
+implementation instruction;
 no current search availability follows from the plan.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
