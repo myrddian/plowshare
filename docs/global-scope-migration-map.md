@@ -73,6 +73,11 @@ project/resource scope and refuses Global work.
 | Retained acting turn | Explicit acting context and subject Personal authority | Preserve explicit actor/subject admission and supported capability limits |
 
 The target separates `GLOBAL_ACCOUNT` ownership from the `GLOBAL_READ` role.
+For ordinary knowledge, account ownership here means administrative home/scope;
+`created_by` separately records original creation provenance and grants no
+permissions. Do not blindly rename legacy owner columns: reconcile their current
+namespace/control meaning, scoped grants and available creation evidence. See
+[created-by provenance and scoped control](decisions/0030-authority-substrate-and-explicit-scopes.md#created-by-provenance-and-scoped-control).
 Global is an ownership account, not a project. Its explicit fixed-identity account
 knowledge scope admits memories, documents and derived retrieval/index views. Its
 resources authorize `GLOBAL_READ`; human ADMIN manages them. Account and read-role

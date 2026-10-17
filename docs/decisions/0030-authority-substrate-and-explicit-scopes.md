@@ -62,6 +62,34 @@ by its account under the Personal policy. A project's resources remain controlle
 under that project's grants. Ultimate ownership must not erase those distinctions
 or rewrite authored attribution to SYSTEM.
 
+### Created-by provenance and scoped control
+
+For ordinary documents/knowledge, use `created_by` for the initial creating
+account's historical provenance. It is not an owner permission or an entitlement
+to READ, WRITE, delete, execute or manage access. Revision authorship and retained
+actor/subject attribution remain separate facts; an Application acting for a
+human must not collapse those identities into a misleading single author field.
+
+Control comes from scoped grants and the root document's current policy. A human
+creating content in an Application's area is recorded as its creator under the
+applicable attribution contract, but exercises that area's WRITE grant. Losing
+the grant can remove access even though `created_by` remains unchanged. A new
+revision, move or audience change does not rewrite original creation provenance.
+
+References in this proposal to knowledge's owning account/home describe its
+account association and administrative scope, not another authorization shortcut.
+`GLOBAL_ACCOUNT` identifies the administered knowledge home; it is not substituted
+for the account that actually created a document. SYSTEM's root authority remains
+grant provenance. Neither relationship supplies an implicit creator privilege.
+Existing Personal isolation, credential subjects, sessions, consent, receipts and
+other specialized account-bound contracts retain their own explicit boundaries.
+
+Legacy `owner_handle` fields mix namespace/control and authorization in current
+code. Do not blindly rename them to `created_by` or infer original authorship from
+the current home. Preserve available creation/audit evidence and explicitly map
+the resource scope and grants independently; unresolved provenance must not be
+invented or used to grant access.
+
 Tenant identity is explicit in the target architecture. Existing project and
 Personal membership do not constitute a first-class tenant model in the audited
 contracts. Tenant boundaries must be specified before implementation; project
@@ -139,10 +167,10 @@ An Application role maps to the same scoped action evaluator used for humans and
 SYSTEM work; it cannot authorize an action by a separate role-name shortcut.
 
 For ordinary knowledge resources, replace actor-equals-owner authorization with
-explicit READ, WRITE and relevant control/release grants. Ownership remains a
-resource fact and can seed ordinary owner grants; it is not an additional equality
-guard that prevents an authorized administrator from writing another account's
-resource. The acting account, owning account, author and grant issuer remain
+explicit READ, WRITE and relevant control/release grants. `created_by` records
+provenance and never seeds permission merely because it matches the caller.
+Creation-time grants must come from the explicit scope/root-policy contract.
+The acting account, account home, creator, reviser and grant issuer remain
 distinct. Credential subjects, private sessions, consent and retained input rules
 continue to impose their own explicit restrictions.
 
@@ -490,8 +518,9 @@ permission scope.
 | `GLOBAL_READ` | Defined read role held by every authenticated principal; a resource authorizes that role to make itself generally readable | Ownership, editing, administration, publication or unrestricted execution |
 
 `GLOBAL_ACCOUNT` is distinct from SYSTEM. SYSTEM remains the authority root;
-`GLOBAL_ACCOUNT` is the immediate owner of this administered knowledge. Its
-resources retain their actual author, reviser and provenance. Ordinary bots and
+`GLOBAL_ACCOUNT` is the account home for this administered knowledge. Its
+resources retain their actual `created_by`, author, reviser and provenance; the
+Global home is not a replacement creator or an implicit permission. Ordinary bots and
 Application agents continue running under their admitted accounts, never by
 logging in or switching executor to `GLOBAL_ACCOUNT` to read its material.
 
@@ -830,6 +859,9 @@ decision: existing ordinary reads already support project/shared audiences, whil
 that explicit privacy setting uses owner equality. Map it deliberately to the
 new grant/policy model without silently removing mandatory restrictions or
 assuming scoped ADMIN/SYSTEM READ automatically passes the old SQL predicate.
+The target must not translate it into `caller == created_by`: creator provenance
+supplies no read entitlement. Any required restricted audience must be represented
+by explicit grants/policy, with legacy eligibility deliberately reconciled.
 
 ## Consequences and boundaries
 

@@ -23,7 +23,7 @@ Proposed ADMIN provides scoped administrative control. It does not automatically
 include private content access or execution. A human administrator can also hold
 a separate READER, CONTRIBUTOR or MANAGER grant for the relevant data scope.
 MANAGER includes ordinary CONTRIBUTOR and READER actions inside its scope;
-CONTRIBUTOR includes ordinary READER actions. Resource ownership, ACLs, mandatory
+CONTRIBUTOR includes ordinary READER actions. Resource scope, ACLs, mandatory
 policy, source/destination permission, retained execution ceilings, tool/file
 grants and lifecycle constraints can still refuse any action.
 
@@ -41,10 +41,13 @@ own access/release restrictions. See the [deployment-wide isolation boundary](de
 
 In the proposed tables, **Allowed** means the role supplies the action, subject
 to those restrictions. **Data grant** means ADMIN alone does not supply it.
-**Owner** identifies an owning/control relationship whose authority must map to
-explicit grants for ordinary knowledge resources. It is not a permanent
-actor-equals-owner requirement blocking scoped administrative READ/WRITE. Other
-account-owned session/credential/receipt contracts retain their subject checks. **Release** requires explicit source-release and destination/audience
+**Owner** in legacy/domain descriptions identifies an account/control relationship;
+ordinary knowledge authority must map to explicit scoped grants. The target uses
+`created_by` for original creation provenance, with no implicit permissions or
+automatic creator grant. Current root-document policy controls revision access;
+moving/editing a document does not change its original creator. See [created-by provenance](decisions/0030-authority-substrate-and-explicit-scopes.md#created-by-provenance-and-scoped-control).
+Other account-owned session/credential/receipt contracts retain their subject
+checks. **Release** requires explicit source-release and destination/audience
 authority beyond ordinary edit permission. **Human** means the action remains
 human-only even for an agent with forced MANAGER.
 
@@ -376,8 +379,9 @@ only read authority. Resource owner, executor, initiating actor and sponsor stay
 separate even when the same scope is used for storage and processing.
 
 Roles, including Application roles, map to common scoped action grants. Ordinary
-knowledge READ/WRITE authorization replaces exact-owner equality checks; ownership
-and attribution remain stored facts. Other resource policies, source release,
+knowledge READ/WRITE authorization replaces exact-owner equality checks;
+`created_by` is provenance, and account home/actor attribution remain distinct.
+Other resource policies, source release,
 private sessions and credential subjects continue to constrain the action.
 Authorized writes/reads may trigger a declared SYSTEM processing service under
 its own scoped authority, without lending the caller SYSTEM execution or

@@ -59,8 +59,10 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
   execute bounded Global work. GLOBAL_READ grants READ only; Global ADMIN supplies
   READ/WRITE/control without implicit EXECUTION. No reserved-ID allow branch.
 - Role/Application-role helpers use that common substrate. Ordinary knowledge
-  READ/WRITE checks replace actor-equals-owner authorization, retaining ownership,
-  author, actor and source/input policy independently.
+  READ/WRITE checks replace actor-equals-owner authorization. `created_by` records
+  original creation provenance with no implicit rights; account home, revision
+  author, actor and source/input policy remain independent. Legacy owner columns
+  cannot be blindly renamed into creator provenance.
 - Omitted execution targets resolve to the admitted Application/project itself,
   or a direct human's Personal project. Missing/ambiguous context refuses. No
   ordinary default may choose Global. SYSTEM processing can explicitly select
@@ -385,7 +387,7 @@ bill the Global owner by implication or make private processing logs public.
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
 | Global write control | Replace exact-owner mutation authorization with common actions; ordinary reads already support membership/shared audiences. Specify control/release actions and audit |
-| Effective ownerOnly policy | V147 still explicitly tests owner equality when ownerOnly=true. Decide whether this is an overriding audience restriction, a controller grant policy, or invalid for general-read content; defaults are false but configured mandatory policies must not be silently removed |
+| Legacy owner/creator and ownerOnly migration | Settled: created_by is provenance and grants no permissions. Existing owner_handle/ownerOnly semantics must be reconciled into explicit scope/root-policy grants and any mandatory audience restrictions, preserving actual creation evidence; never substitute caller == created_by or silently remove mandatory policy |
 | Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
 | Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
 | Default public role versus individual exceptions | Every authenticated principal holds GLOBAL_READ; specify resource-level withdrawal/mandatory constraints and support for intentionally excluding a principal without confusing role membership with resource authorization |
@@ -498,6 +500,9 @@ Focused mocked/fake acceptance coverage should include:
 - Human ADMIN writes a Global-owned resource through scoped action grants without
   impersonating Global or becoming its owner; Application roles use the same
   evaluator rather than separate authority logic.
+- A creator who loses scoped access cannot recover READ/WRITE/control through
+  created_by. Content updates and authorized scope moves preserve original
+  creation provenance; Application/Global home is not substituted as creator.
 - Shared-to-general-read authorization and ownership transfer have separate
   receipts; promotion, IDs, supersession and audience expansion are intentional.
 - Built-in accounts cannot log in, become acting subjects, receive Personal
