@@ -862,9 +862,30 @@ audited independently of immutable historical content/provenance.
 CLI, TUI, GUI, SDK Applications and service principals can discover/read
 Global-owned and other `GLOBAL_READ`-authorized knowledge through supported public
 read operations. This supersedes the earlier SDK/first-party-only read boundary.
-Human ADMIN management remains available through CLI/TUI/GUI under administrative
-grants. An SDK Application or agent does not gain Global write authority from its
+Human ADMIN management uses existing APIs under administrative grants, independent
+of the client used. An SDK Application or agent does not gain Global write authority from its
 read role, from acting for a human, or by proxying an internal worker.
+
+### Account authorization and client coverage
+
+Authorization depends on the authenticated account, scoped role/actions and
+applicable policy, not whether a request comes from CLI, TUI, GUI, an SDK or a
+client-name string. A human with ADMIN over Global can perform an existing Global
+management operation through an existing API that supports it, subject to its
+domain controls. CLI/TUI/GUI are interfaces, not a security allowlist. A human
+using an SDK does not become an Application/service principal merely by using
+that library, and using a first-party client does not confer ADMIN on a service.
+
+Authorization eligibility and interface coverage are separate. This decision
+does not assert that any SDK exposes every client operation, require SDK/client
+feature parity, add new APIs/SDK methods, or create a first-party attestation
+mechanism. SDK coverage of management operations remains unverified unless
+specifically inspected. An unavailable SDK/client convenience or missing API
+remains a capability gap, not an implementation requirement inferred from this
+permission policy. Shared-contract compatibility updates apply only to affected
+existing supported surfaces; they do not mandate expanding feature coverage.
+
+### Supported read selection and retained limits
 
 The role and resource read grant supply authority; a request/task's admitted read
 selection and token/acting ceilings can further restrict it. A librarian Application

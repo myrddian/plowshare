@@ -45,6 +45,9 @@ the findings and sampled the protocol/client boundary:
 This is an implementation/test-source scan, not proof about live rows, installed
 manual ownership, deployment configuration or restored-backup compatibility.
 Client/native SDK coverage is an impact inventory, not a complete client audit.
+The adopted account/role authorization rule does not assert SDK/client feature
+parity or require new APIs/SDK methods. Management coverage remains unverified
+unless individually inspected; unsupported surfaces remain capability gaps.
 
 ## Adopted requirements assessed
 
@@ -442,7 +445,7 @@ Model-call allowance, capacity routing and monetary reservations are distinct.
 | Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
 | Global schema/type registry | Current type management is Personal/Project-scoped; decide where Global-owned typed documents get immutable schemas and how attached access/import behaves |
 | Curation outcome | Choose general-read grant, copy or ownership transfer; define supersession/ID consequences and human approval separately from model assessment |
-| Administration through SDK | Human ADMIN remains the write authority. Clarify whether CLI/TUI/GUI are supported management surfaces or a security allowlist: a shared SDK package/client label cannot prove first-party identity |
+| Administration and interface coverage | Settled: account/scoped role and policy determine authority, independently of client. Human Global ADMIN can use existing management APIs; CLI/TUI/GUI are not a security allowlist. No new APIs/SDK methods or feature-parity requirement follows, and SDK management coverage remains unverified unless inspected |
 | Compatibility and rollback | Define mixed-version refusal, coordinated generated contracts, retained-work migration and a rollback that can still enforce new grants/reference records |
 
 Existing role/token/manifest declarations can be preserved through an explicit,
@@ -577,6 +580,10 @@ Focused mocked/fake acceptance coverage should include:
 - Human ADMIN writes a Global-owned resource through scoped action grants without
   impersonating Global or becoming its owner; Application roles use the same
   evaluator rather than separate authority logic.
+- The same authenticated human with Global ADMIN is evaluated by account/actions
+  through an existing supported management API regardless of client label. Client
+  choice cannot elevate another principal. This does not assume every SDK/client
+  exposes that API or require new endpoints, methods or feature parity.
 - A creator who loses scoped access cannot recover READ/WRITE/control through
   created_by. Content updates and authorized scope moves preserve original
   creation provenance; Application/Global home is not substituted as creator.

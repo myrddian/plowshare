@@ -94,7 +94,10 @@ A resource authorizes that role to grant general reading. A resource owned elsew
 can do so without entering `GLOBAL_ACCOUNT` or transferring control. SDK readers
 are eligible through the same public read contracts as CLI/TUI/GUI readers; the
 former blanket external exclusion is superseded. Administrative Global mutations
-remain human ADMIN actions through CLI/TUI/GUI, with exact scope/source authority.
+remain human ADMIN actions through existing supporting APIs, independently of
+client, with exact scope/source authority. This does not assert SDK/client parity
+or require new APIs/methods; unverified/missing SDK management coverage remains a
+capability gap. See [account authorization and interface coverage](decisions/0030-authority-substrate-and-explicit-scopes.md#account-authorization-and-client-coverage).
 Tool bindings, executable definitions, conversations and agent-run homes do not
 become part of Global knowledge.
 
@@ -399,10 +402,13 @@ Default mocked/fake tests should cover:
 - A librarian with project write authority and project-plus-general-read authority
   cannot mutate Global, obtain ADMIN, bind tools there or change its executor.
   Acting for a human and forced MANAGER do not add Global write authority.
-- CLI/TUI/GUI Global management requires human ADMIN over the target plus source
+- Global management through an existing supporting API requires human ADMIN over the target plus source
   release where applicable. Agents can propose; a bounded executor may carry out
   an admitted administrative effect. Read bookkeeping supplies no content or
   audience mutation authority.
+- Account/scoped role and policy determine authorization independently of client.
+  No client-name/SDK-package allowlist, new API/SDK method or feature-parity
+  requirement is inferred. SDK management coverage stays unverified unless checked.
 - Unscoped search enumerates only admitted readable information; project-scoped
   search cannot broaden on an empty result. Omitted mutation/execution scope never
   becomes Global, and a read grant never changes resource ownership.

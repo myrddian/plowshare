@@ -282,10 +282,17 @@ ownership, contribution, management, execution or policy-change rights.
 
 | Entry point / principal | General-read knowledge | Global-owned knowledge management |
 | --- | --- | --- |
-| Human through CLI/TUI/GUI | GLOBAL_READ or explicit scoped READ | Global ADMIN supplies scoped READ/WRITE/control; no implicit EXECUTION |
+| Human through an existing supported API/client | GLOBAL_READ or explicit scoped READ | Global ADMIN supplies scoped READ/WRITE/control independently of client; no implicit EXECUTION |
 | SDK Application / service principal | Same read-role evaluation and public read contracts, within credential/admission ceilings | No authority from `GLOBAL_READ` or project roles |
 | Ordinary agent under user/Application authority, including a librarian | Retained executor/actor/subject read authority, supported tools and admitted inputs | No Global WRITE/EXECUTION from GLOBAL_READ; no ADMIN grant, including with forced MANAGER |
 | SYSTEM under bounded processing admission | Scoped READ over admitted Global inputs | Scoped WRITE/EXECUTION for the declared worker purpose; no SYSTEM role assignment to its agent |
+
+These rows distinguish principal authority, not SDK feature coverage. Human
+Global ADMIN may use existing management APIs regardless of client; no API or SDK
+method is added by this policy. SDK support for all client operations is neither
+asserted nor required, and missing interfaces remain gaps. A client label cannot
+grant/refuse authority otherwise supplied by the account and applicable policy.
+See [account authorization and client coverage](decisions/0030-authority-substrate-and-explicit-scopes.md#account-authorization-and-client-coverage).
 
 | Global knowledge action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
