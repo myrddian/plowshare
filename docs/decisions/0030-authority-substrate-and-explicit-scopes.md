@@ -426,7 +426,7 @@ permission scope.
 | Concept | Meaning | Does not grant |
 | --- | --- | --- |
 | `GLOBAL_ACCOUNT` | Built-in account owning administrator-managed knowledge, including the installed manual | SYSTEM execution, root authority or an identity callers impersonate to read |
-| Account knowledge scope | Explicit non-project home for `GLOBAL_ACCOUNT` memories, documents and derived retrieval views | A project identity, conversations, agent-run homes, workspaces or provider-tool bindings |
+| Account knowledge scope | Explicit non-project home for `GLOBAL_ACCOUNT` memories, documents and derived retrieval views | A project identity, caller execution merely through ownership/readability, a workspace or provider-tool binding; SYSTEM processing needs its scoped grants |
 | `GLOBAL_READ` | Defined read role held by every authenticated principal; a resource authorizes that role to make itself generally readable | Ownership, editing, administration, publication or unrestricted execution |
 
 `GLOBAL_ACCOUNT` is distinct from SYSTEM. SYSTEM remains the authority root;
@@ -692,9 +692,19 @@ Curation continues to assess project knowledge and may propose release. A model'
 judgment that a claim is generally useful is not publication permission. Promoting
 a Personal or project memory to a broader audience requires authorized source
 release and destination publication, with provenance and retained input policies.
-For resources entering `GLOBAL_ACCOUNT`, the destination action requires human ADMIN
-authority. Authorizing `GLOBAL_READ` elsewhere preserves ownership and requires
-its own authorized audience change.
+Initial human admission/ownership transfer into `GLOBAL_ACCOUNT` uses the Global
+ADMIN helper's destination control actions plus source release. Authorized SYSTEM
+summary/index maintenance uses bounded worker WRITE and its declared output grant;
+it does not require fresh human approval for each derived write. Curation must
+declare whether it proposes audience change, copy or ownership transfer, with
+the appropriate control/release policy. Authorizing `GLOBAL_READ` elsewhere
+preserves ownership and requires its own authorized audience change.
+
+The current configurable `ownerOnly` read predicate is a distinct migration
+decision: existing ordinary reads already support project/shared audiences, while
+that explicit privacy setting uses owner equality. Map it deliberately to the
+new grant/policy model without silently removing mandatory restrictions or
+assuming scoped ADMIN/SYSTEM READ automatically passes the old SQL predicate.
 
 ## Consequences and boundaries
 

@@ -127,10 +127,13 @@ Global conversation resume is refused by
 [Callers.requireConversationProject](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Callers.java)
 and [ConversationResumeHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationResumeHandler.java).
 Current source still supports legacy null-project conversation reads. This is not
-evidence that any such rows exist in a running deployment. The target replaces these blanket gates with scoped action checks: ordinary
-readers have no Global execution grant, while admitted SYSTEM workers can process
-there. Private worker logs are not generally readable knowledge. Historical rows
-require explicit classification rather than assuming that every null is public. Omitted/null
+evidence that any such rows exist in a running deployment. Public Global resume
+refusal can remain: internal SYSTEM summarization does not use that public route.
+Any future controlled continuation API needs its own scoped action/exposure
+contract. Ordinary readers have no Global execution grant; admitted SYSTEM workers
+can process there. Private worker logs are not generally readable knowledge.
+Historical rows require classification rather than treating every null as public.
+Omitted/null
 conversation targets use admitted Application/project context, or Personal for a
 direct human without project context. Resolve the effective project before effects;
 missing/ambiguous context refuses instead of choosing Global. Preserve the existing

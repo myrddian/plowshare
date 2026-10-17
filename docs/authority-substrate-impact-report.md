@@ -20,6 +20,14 @@ and mandatory separate-processing-scope workaround. The source findings remain:
 project/null homes conflate several meanings, exact-owner APIs block scoped admin
 writes, and common grants are not carried across all model/admission paths.
 
+Rechecked against the corrected model at proposal commit `af89b7f`, using the same
+three server segments. No runtime has broken because this remains documentation
+only. The compatibility findings describe what fails if the new identities or
+grants are enabled against unchanged contracts. Missing action checks and optional
+new defaults are capability gaps, not evidence that existing explicit-project
+workflows are broken. No new runtime, wholesale role replacement, mandatory token
+reissuance or processing-scope relocation follows from this design.
+
 Runtime baseline: main `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`, merged into this
 proposal branch. PR #74 enables existing information features by default; PR #75
 fixes test completion timing. Neither implements the new authority model.
@@ -62,7 +70,24 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
 - Deployment overrides and bundles supply SYSTEM worker definitions; project or
   client namesakes cannot select the worker or acquire SYSTEM authority.
 
-## What breaks under a naive cutover
+## Compatibility classification
+
+| Area | Classification | Minimum consequence under the corrected model |
+| --- | --- | --- |
+| Global account knowledge through project/null fields | Representation incompatibility | Add typed account/resource scope and stable mappings; preserve ordinary project contracts |
+| Global ADMIN writing another account's knowledge | Authorization incompatibility | Migrate exact-owner mutation checks to scoped action authority while retaining owner/actor/audit |
+| SDK/Application general reading | Authorization incompatibility | Coordinate Java, SQL and supported retained read sources; a role assignment alone is insufficient |
+| Existing roles, manifests and project tokens | Reusable inputs plus compatibility decision | Map current roles to common actions deliberately; do not discard them or put GLOBAL_READ into the ordered enum |
+| CREATE/RUN_MODEL separation | New capability gap | Introduce action checks using existing admission/dispatch seams; current CONTRIBUTOR combines work actions |
+| Omitted Application conversation/run target | Optional new admission behavior | Human Personal and explicit Application/project requests already work; select a trusted Application binding for omission |
+| Global summarization/preparation | Reuse with grant integration | Keep processing in Global under bounded SYSTEM grants; no new execution scope is inherently needed |
+| Public Global conversation resume | Separate API/exposure decision | Existing user-facing refusal can remain; internal summarization does not use that entry point |
+| Existing Shared audience | Deliberate policy/data migration | Preserve ownership; admitting formerly excluded service readers is an explicit audience expansion |
+| Implicit server-admin MANAGER | Deliberate compatibility policy | Decide explicit replacement grants; removing this privilege is not a prerequisite to unrelated Global reads |
+| Digest job recorded with default Global home | Existing persistence mismatch | Store its real scope/admission; do not reconstruct authority from a vanished worker closure |
+| Disk, accounting and legacy rows | Classification/identity extension | Preserve existing lifecycles, IDs, private records and costs; do not move/relabel everything called global |
+
+## Contracts and capability gaps requiring attention
 
 ### 1. Project-only scopes cannot express the new ownership model
 
@@ -80,7 +105,7 @@ calling it the account preserves the ambiguity. Introduce typed targets and
 explicit mappings, preserving existing memory/resource IDs and provenance. A
 normal project named global must remain a normal project.
 
-### 2. EXECUTION is not expressible as a new enum position
+### 2. Existing role checks do not independently represent execution actions
 
 [ProjectRole.java:4](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java)
 has ordinal VIEWER/CONTRIBUTOR/MANAGER roles.
@@ -95,11 +120,16 @@ Adding GLOBAL_READ to the ordered enum risks implying write/manage access. Addin
 only an EXECUTION flag at conversation-open misses resume, turns and standalone
 model work. Define action grants and mandatory destination workload support,
 then classify each admission and retained continuation. An empty open needs
-CREATE; a first model turn needs RUN_MODEL too. Existing Global resume refusal
-must be replaced with scoped action evaluation for authorized SYSTEM work,
-while preserving refusal for ordinary readers and protecting private logs.
+CREATE; a first model turn needs RUN_MODEL too. Existing project roles can remain
+compatibility helpers mapped to those actions. Adding an enum value alone does
+not supply that model.
 
-### 3. Application-relative default routing does not exist yet
+The existing user-facing Global conversation resume refusal can remain. Internal
+SYSTEM summarization runs without that public entry point; enabling controlled
+continuation through it is a separate API/exposure decision. Scoped internal
+processing admission must not accidentally expose worker logs to ordinary callers.
+
+### 3. Ordinary omitted-target Application routing needs a new resolver
 
 [Asking.java:15](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/Asking.java)
 deliberately carries no implicit project.
@@ -110,7 +140,9 @@ refuses ordinary service operations lacking an explicit/resource-derived project
 [PersonalSpaces.java:85](../plowshare-server/src/main/java/io/aeyer/plowshare/server/personal/PersonalSpaces.java)
 defaults humans to Personal but refuses service Personal provisioning at line 103.
 
-The human default can stay. Applications need a trusted admitted execution-project
+The human default and explicit Application project requests can stay. Application
+identity/project binding already exists; ordinary conversation/run omission does
+not consult it. That convenience needs a trusted admitted execution-project
 binding resolved before authorization. Generic multi-project service credentials
 cannot choose their first project or infer a destination from an account name.
 Preserve explicit resource ownership and retained acting targets over defaults.
@@ -140,7 +172,7 @@ would break that workflow; silently lending SYSTEM to an arbitrary denied run
 would defeat authorization. Specify the service trigger, inputs/outputs and
 spending contract without changing ordinary child-delegation ceilings.
 
-### 5. RUN_MODEL needs a lower enforcement seam than agent admission
+### 5. Reuse chat dispatch authorization; extend authority carriage
 
 [ChatRequest.java:88](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/ChatRequest.java)
 defaults ordinary callers to the no-op
@@ -331,9 +363,13 @@ bill the Global owner by implication or make private processing logs public.
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
 | Processing/log scope and service sponsorship | SYSTEM can process within Global through scoped grants; define authorized triggers, exact inputs/outputs, sponsor and private logs without lending execution to callers |
+| SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
-| Global write control | Replace exact-owner authorization with common READ/WRITE/control grants; specify transfer/release actions, audit and Java/SQL migration |
+| Global write control | Replace exact-owner mutation authorization with common actions; ordinary reads already support membership/shared audiences. Specify control/release actions and audit |
+| Effective ownerOnly policy | V147 still explicitly tests owner equality when ownerOnly=true. Decide whether this is an overriding audience restriction, a controller grant policy, or invalid for general-read content; defaults are false but configured mandatory policies must not be silently removed |
+| Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
+| Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
 | Default public role versus individual exceptions | Every authenticated principal holds GLOBAL_READ; specify resource-level withdrawal/mandatory constraints and support for intentionally excluding a principal without confusing role membership with resource authorization |
 | Tenant isolation | Deployment-wide general reading crosses potential tenant boundaries; define first-class tenant membership and which resources may authorize that audience |
 | Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
@@ -342,25 +378,64 @@ bill the Global owner by implication or make private processing logs public.
 | Administration through SDK | Human ADMIN remains the write authority. Clarify whether CLI/TUI/GUI are supported management surfaces or a security allowlist: a shared SDK package/client label cannot prove first-party identity |
 | Compatibility and rollback | Define mixed-version refusal, coordinated generated contracts, retained-work migration and a rollback that can still enforce new grants/reference records |
 
-No existing token, Application manifest or client label is assumed to grant the
-new actions automatically. Public read does not make consumed private inputs
-public; retained dependencies and reference obligations remain mandatory.
+Existing role/token/manifest declarations can be preserved through an explicit,
+reviewed compatibility mapping to actions over their already authorized scopes.
+This does not require reissuing every credential or widening old retained tasks.
+New Global read sources and any changed ADMIN rights need intentional policy.
+Client labels establish no authority. Public read does not release consumed
+private inputs; retained dependencies and reference obligations still apply.
 
-## Preserve the useful boundaries already present
+### Minimum decisions for the first end-to-end cutover
 
-- Resource-derived scopes are checked in addition to request selection. A payload
-  cannot rehome a conversation, memory or job by naming another project.
-- Personal privacy, live service-token owner membership and acting proof checks
-  remain independent of broad public reading. Resource READ/WRITE policy may change
-  from owner-equality to scoped grants without weakening these separate fences.
-- Information predicates apply before totals, ranking, paging, metadata and export.
-  Withdrawal and input/reference obligations constrain current and saved outputs.
-- Provider tools retain explicit owner/project/agent/credential assignments, Relay
-  receipts and uncertainty handling. GLOBAL_READ grants no provider capability.
-- Retained execution never widens because an account later receives another grant;
-  historical receipts, accounting and uncertain external effects keep their IDs.
-- Metadata-only revisions keep their model-free save/reuse contract. A new read or
-  execution vocabulary must not schedule paid work merely to save metadata.
+The larger table is not a requirement to redesign every subsystem before making
+progress. The first working Global ADMIN upload, SYSTEM preparation and SDK
+librarian read path needs these decisions:
+
+1. **Typed targets and identity mapping:** account knowledge versus project scopes,
+   owner versus executor, and fixed built-in IDs alongside existing keys.
+2. **Role-to-action compatibility:** which existing grants supply READ, WRITE,
+   CREATE and RUN_MODEL; Global ADMIN has control/write without implicit execution.
+3. **Declared SYSTEM service admission:** which authorized upload/read triggers
+   which worker, its scoped grants, inputs/outputs, sponsor/budget and private logs.
+4. **Effective read policy:** GLOBAL_READ resource/revision inheritance, supported
+   Application/acting read targets, ownerOnly semantics and retained input rules.
+5. **Built-in lifecycle:** noninteractive SYSTEM/Global capabilities, no accidental
+   Personal provisioning, current credential validity and safe grant issuance.
+6. **Cutover policy:** legacy Shared audience expansion and manual ownership
+   adoption, existing role compatibility and narrow retained admissions. Disk,
+   old job/log and historical accounting classification must preserve identities.
+
+Broader CPU/tool-only work, optional public SYSTEM-workflow continuation and
+general curation transfers can remain separately scoped decisions. They must not
+be silently inferred from this first knowledge-processing slice. Any rollout of
+deployment-wide reading still needs the tenant/audience boundary it will enforce.
+
+## What can be reused
+
+These are existing mechanisms to extend behind their typed contracts, not claims
+that they already implement the complete substrate.
+
+| Existing mechanism | Reuse and limit |
+| --- | --- |
+| [ApplicationServiceManifest:21](../plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/ApplicationServiceManifest.java), [Application activation:56](../plowshare-server/src/main/java/io/aeyer/plowshare/server/applications/JdbcApplicationIdentityRepository.java) and [live role resolution:129](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) | Applications already declare a role, bind an exact project and receive ordinary service-token scopes. Map those role helpers to common actions; no second Application permission engine or wholesale manifest rewrite |
+| [ProjectRole:4](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java) and [membership mutation:208](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/JdbcProjectMembers.java) | Preserve role-facing helpers, transactional grant changes, audit and last-manager checks while introducing the action mapping |
+| [LiveActingAuthorization:28](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/LiveActingAuthorization.java) | Reuse actor/subject proof, Application identity, current consent/membership and narrowing ceilings; extend read targets deliberately instead of dropping the proof model |
+| [JobRuntime retained admission:215](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java) and [JobStore admitted submission:762](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobStore.java) | Keep checks around steps, tools, inference and disclosure, plus receipt-before-start ordering; generalize from supported retained turns to common actions |
+| [Chat dispatch:172](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/LlmDispatcher.java) and [beforeDispatch:64](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/InferenceObserver.java) | Live callback checks already exist for chat dispatch variants, including after queueing. Supply actual grant authority where requests currently default DIRECT; embeddings need equivalent carriage if required by their action policy |
+| [Information lifecycle:148](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationLifecycle.java) and [Summariser.forRevision:310](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/Summariser.java) | Keep claims, generation fences, lease renewal, pre/post gates, budgets/checkpoints and the separately supplied home/owner/parent fields. Attach SYSTEM grants; processing can remain in Global |
+| [Shared transition:830](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java) | Existing audience changes preserve owner/home. Reuse that distinction and receipts for GLOBAL_READ migration without treating it as ownership transfer |
+| [InformationSql:10](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationSql.java), [reference composition:147](../plowshare-server/src/main/resources/db/migration/V147__document_navigation_policy.sql) and [InformationJobs:46](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationJobs.java) | Reuse filtering before paging/counts, retained-input/reference obligations and current disclosure checks; adapt their target vocabulary rather than bypass predicates |
+| [Metadata-only revisions:501](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationCatalogue.java) and [projection reuse:461](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationProjectionRepository.java) | Preserve immutable revision IDs, explicit_only processing and compatible committed output reuse. Saving metadata must not acquire a new model-execution requirement or schedule paid work |
+| [Curator proposals:810](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/curator/Curator.java) | Keep durable proposal/settlement machinery; decide whether the approved action is general-read authorization, copy or transfer and check its specific authority |
+| [SYSTEM model-only ceiling:8](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/SystemModelTasks.java) and [deployment snapshots:35](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/ReloadingGlobalAgents.java) | Keep restricted worker capabilities, deployment/bundle lookup and invalid-replacement refusal. Scoped EXECUTION must not turn a model-only worker into an arbitrary tool agent |
+| [Processing usage ownership:19](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/UsageOwners.java) and [durable inference accounting:107](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/accounting/DurableInferenceAccounting.java) | Preserve executor/source-access/billing distinctions and attempts recorded before transport. Add identity mappings without rebuilding accounting or relabelling historical spend |
+| [Relay recovery:119](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/WorkRelayReceiver.java) and [provider invocation:130](../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/tools/ProjectRelayToolInvocations.java) | Preserve owning receipts, correlation, deadlines and read-only uncertainty reconciliation. A new role must never replay effects or grant provider capabilities |
+
+Personal privacy, resource-derived scopes, active-account/token revocation,
+private sessions, log/input disclosure policy and ordinary filesystem fences
+remain separate restrictions. Owner-equality mutation checks can change without
+removing these boundaries. GLOBAL_READ applies to intended knowledge resources,
+not every log, prompt, receipt or accounting row sharing a scope.
 
 ## Suggested implementation order and future proof
 
@@ -416,7 +491,11 @@ None of those properties is established by this source scan.
 
 ## Verification performed
 
-The source scans were read-only. This task changes only the
+The three server segments were rechecked against the corrected scoped-grant model,
+including a parent review of Application role binding, user-facing Global resume
+fences, summarizer home/owner parameters and the queue-time chat callback. Findings
+were classified as contract incompatibilities, new capability gaps, policy choices
+or existing mechanisms to reuse. The source scans were read-only. This task changes only the
 proposal, source map, permission matrix, report and documentation index. Document
 structure, local links and diff whitespace are checked before commit. No runtime
 or database tests were newly run for these documentation changes.
