@@ -65,8 +65,13 @@ performs bounded query embedding/reranking. The reader gains no arbitrary
 RUN_MODEL, agent, processing-pipeline, digest or curation-job authority. Supplied
 inputs and tools cannot expand the service's declared scope. Model-based
 navigation must likewise have an explicit operation contract. Each inference
-path retains admission and dispatch checks; spending allowance, payer and
-accounting remain independent of permission and are not settled by this rule.
+path retains admission and dispatch checks. The operation pays from its configured
+budget, resolved and retained at admission; SYSTEM and created_by are not implicit
+payers. Compaction uses the conversation budget, project/Application preparation
+uses its scope's processing budget, Global/maintenance uses a configured deployment
+budget, and read-side inference uses its search-operation budget. Queue/recovery
+preserves the binding and usage; no silent payer/pool fallback is permitted.
+Budgets/accounting remain independent of permission. See [operation-specific budgets](decisions/0030-authority-substrate-and-explicit-scopes.md#operation-specific-budgets-and-accounting).
 
 ## Scopes and boundaries present today
 

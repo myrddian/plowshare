@@ -281,7 +281,15 @@ Default mocked/fake tests should cover:
   requested operation, not its internal inference. Authorized READER semantic
   search succeeds through bounded service inference without allowing arbitrary
   model work or widening targets/tools. Queue/dispatch paths enforce the actual
-  executor and operation limits. Billing/spending-pool policy remains separate.
+  executor and operation limits. The operation pays through its configured budget,
+  independently of SYSTEM execution and creator provenance.
+- Conversation compaction uses its conversation budget; project/Application
+  preparation uses its scope processing budget; Global/maintenance uses configured
+  deployment budgets; read-side inference uses its search-operation budget. Retain
+  the admitted budget binding and usage through queues/recovery without silent
+  payer/pool changes. Missing/exhausted budgets prevent further inference while
+  receipts and incurred costs remain preserved. No historical attribution is
+  relabeled. See [operation budget policy](decisions/0030-authority-substrate-and-explicit-scopes.md#operation-specific-budgets-and-accounting).
 - Global SYSTEM processing succeeds under explicit scoped READ/WRITE/EXECUTION
   grants and bounded task admission. GLOBAL_READ holders cannot create/run/write;
   human Global ADMIN READ/WRITE/control supplies no implicit execution. No name/UUID

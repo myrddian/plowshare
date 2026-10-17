@@ -70,7 +70,8 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
   and side calls. Declared SYSTEM services use existing SYSTEM authority inside
   the operation sandbox; their caller needs the requested operation's permission,
   not internal RUN_MODEL. Authorized READER search can therefore use bounded
-  service-side inference. Payer/spending-pool policy remains separate.
+  service-side inference. The operation pays from its configured budget, not
+  implicitly from SYSTEM or the creator; accounting remains separate from authority.
 - Role/Application-role helpers use that common substrate. Ordinary knowledge
   READ/WRITE checks replace actor-equals-owner authorization. `created_by` records
   original creation provenance with no implicit rights; account home, revision
@@ -214,7 +215,8 @@ model dispatch outside a normal conversational turn. A gate only in JobRuntime
 misses them. Apply the adopted all-inference RUN_MODEL action to the actual
 executor, including SYSTEM services with operation bounds; carry retained
 authorization to queued work and recheck before effects. Non-inference counting
-and spending/sponsorship contracts remain separate classifications. Do
+remains a separate classification; apply operation-specific budget sponsorship
+independently of account permission. Do
 not treat an attribution record or positive budget as permission.
 
 Concrete side-call owners include
@@ -396,6 +398,11 @@ currently forbids an account handle on SYSTEM attribution; this is an accounting
 classification, not the proposed SYSTEM login identity. Preserve historical
 sponsor/cost facts while adding executor/owner mappings. Reading Global must not
 bill the Global owner by implication or make private processing logs public.
+The adopted [operation budget policy](decisions/0030-authority-substrate-and-explicit-scopes.md#operation-specific-budgets-and-accounting)
+adds an explicit operation-to-configured-budget binding retained through queues
+and recovery. Preserve existing attribution/attempt records while adding that
+binding; SYSTEM execution or creator provenance must not silently select a payer.
+Model-call allowance, capacity routing and monetary reservations are distinct.
 
 ## Assumptions and decisions still uncovered
 
@@ -405,10 +412,11 @@ bill the Global owner by implication or make private processing logs public.
 | Built-in identity lifecycle | Reserve SYSTEM/Global/role/scope UUIDs; specify collisions, bootstrap, disable/delete/recovery, credential refusal and acting-subject rules |
 | Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
 | Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
-| Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; payer/pool policy remains separate |
+| Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; operation-budget sponsorship remains independent of permission |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
-| Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without issuing fresh per-task account grants. Define each workflow's trigger, inputs/outputs, sandbox, sponsor and private logs; billing policy remains unspecified |
+| Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without fresh per-task account grants, and the operation pays through its configured budget. Map each workflow's trigger, inputs/outputs, sandbox, budget binding and private logs; detailed pool/reservation mechanics remain implementation design |
+| Operation-budget lifecycle | Settled: conversation compaction uses its conversation budget; project/Application preparation uses scope processing budgets; Global/maintenance uses configured deployment budgets; read-side inference uses its search-operation budget. Retain binding and usage across queue/recovery, without creator/SYSTEM fallback or historical cost relabeling |
 | SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
@@ -530,6 +538,11 @@ Focused mocked/fake acceptance coverage should include:
   RUN_MODEL can request authorized search with bounded SYSTEM-service inference;
   the same caller cannot invoke arbitrary model work or expand the service's
   targets/tools. Queue-time checks retain executor authority, sandbox and limits.
+- Operation-specific budget bindings survive queueing, creator access removal and
+  recovery. Compaction, scoped preparation, Global maintenance and semantic search
+  use their configured operation budget sources; missing/exhausted budgets prevent
+  further inference without switching payer. Preserve incurred costs/receipts and
+  historical attribution; a budget balance is not permission to infer or replay.
 - Removing public authorization or withdrawing a required input stops future
   disclosure, including saved views, delayed work, references and message delivery.
 - Publishing to a group does not grant GLOBAL_READ. Current root-document

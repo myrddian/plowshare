@@ -394,8 +394,9 @@ text cannot turn that operation into arbitrary SYSTEM inference or enlarge its
 read/write reach. This reuses operation admission and capability fences rather
 than adding tool-level RBAC. Executor authority and operation validity are
 checked at dispatch/effect boundaries, including after queueing. Accounting
-attribution, who pays and the configured spending pool remain separate decisions;
-neither READ nor SYSTEM identity supplies an unlimited spending allowance.
+attribution and budget sponsorship remain separate from permission, under the
+operation-specific budget policy below. Neither READ nor SYSTEM identity supplies
+an unlimited spending allowance.
 
 Admission requires both the destination's supported workload/action policy and
 the executor's valid action grant. Ordinary project and Personal scopes can
@@ -434,8 +435,42 @@ the caller need not acquire RUN_MODEL or
 SYSTEM authority to upload a document. A denied arbitrary run must not be
 silently rerouted to SYSTEM. Ordinary delegated children remain bounded by their
 parent authority; independently admitted platform services have their own explicit
-purpose, input/output and spending contracts. Exact billing/spending-pool policy remains
-to be specified before implementation.
+purpose, input/output and spending contracts. The operation budget supplies the
+spending authority independently of the executor account.
+
+### Operation-specific budgets and accounting
+
+The operation pays through its explicitly admitted budget. SYSTEM is the executor,
+not an implicit payer, and `created_by`/the initiating user is not a default debit
+target. The server resolves the operation's configured budget source at admission
+and retains its identity and applicable limits with that operation.
+
+| Operation | Configured budget source |
+| --- | --- |
+| Conversation compaction | The conversation's configured budget |
+| Project/Application document processing | That scope's configured processing budget |
+| Global knowledge preparation or deployment maintenance | A configured deployment budget for the operation |
+| Read-side inference, including query embedding/reranking | The search service's configured operation budget |
+
+Different operations can use explicitly configured shared budget sources; this
+does not require a new spending pool or ledger for every task. Budget assignment
+uses the authorized operation contract, not an arbitrary caller-supplied payer.
+Queueing, continuation and recovery retain that budget binding and recorded usage;
+they do not silently switch to SYSTEM, the creator or another available pool.
+Any budget change needs an explicit authorized lifecycle action. Missing,
+exhausted or invalid spending authority prevents additional inference under the
+budget policy; existing receipts/checkpoints and incurred costs remain recorded.
+Creator access removal alone does not change the operation's budget binding.
+
+Keep executor, initiator/subject, creator provenance, operation identity, budget
+source and accounting attribution distinct. Retain inference attempt/cost records
+without replaying uncertain work or assigning unknown costs a fabricated value.
+Existing model-call allowance, inference capacity pools and monetary spending
+reservations remain distinct controls, as described by [ADR 0025](0025-service-account-attribution-and-spending-pools.md).
+This decision assigns operation sponsorship; detailed pool configuration,
+reservation mechanics and migration still require separately authorized design
+and implementation. Historical SYSTEM/owner accounting is preserved, not relabeled
+as a new budget or creator charge.
 
 ### SYSTEM processing validity and creator access changes
 
