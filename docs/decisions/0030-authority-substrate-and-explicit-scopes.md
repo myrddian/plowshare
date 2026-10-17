@@ -237,6 +237,66 @@ subject authority, Application manifest grants, consent/proof limits and admitte
 scope. SYSTEM's root lineage does not let an Application bypass any of those
 checks. Preserve the current separate Application login and acting-context flow.
 
+### Account delegation: Application acting for a user
+
+Account delegation is the service-account/Application acting-context flow from
+[ADR 0026](0026-service-execution-on-behalf-of-an-account.md), not an agent calling
+a child through `calls:`. Reuse that existing proof and admission mechanism;
+express its current coarse role ceilings as scoped action ceilings in the common
+substrate. No global DELEGATE role or copy of the user's roles is required.
+
+| Existing acting concept | Mapping to the proposed substrate |
+| --- | --- |
+| Actor | Authenticated Application/service principal making the request; remains distinct in audit |
+| Subject | User whose permitted authority is exercised; not an identity the actor acquires |
+| Application binding and manifest grant | Establish that this active Application may request this class of delegated work, within its declared ceiling |
+| Subject proof/consent | Authorizes this actor to act for this subject within specified scopes/actions and expiry; revocation stays live |
+| Acting-token and context ceilings | Narrow the current subject authority and Application capability; never expand either or widen an already admitted task |
+| Project target | Requires the subject's scoped actions and the actor's applicable project authority, within proof/manifest/admission limits |
+| Subject Personal target | Requires explicit Personal delegation plus the subject's own actions. Do not give the Application ordinary Personal membership or require it as a workaround |
+| Retained execution admission | Records actor, subject, proof/grant references, concrete target, actions and supported read inputs; rechecks them at protected effects/disclosure |
+
+For Discord, the actor is the Discord Application and the subject is the user
+talking to their bot. The selected Personal/project target remains explicit in the
+acting context. A proposed new conversational turn may require READ/WRITE on its
+permitted conversation/input resources, CONVERSATION_CREATE if opening a new
+conversation, and RUN_MODEL for inference. The admitted action set is only what
+that operation needs and all live ceilings permit. The service does not acquire
+the user's ADMIN role, arbitrary Personal resources or authority over every
+project the user can access.
+
+The current implementation distinguishes ActingPermission.READ (VIEWER) and WORK
+(CONTRIBUTOR); other semantic categories refuse. The proposed mapping is:
+
+| Current gate | Target action treatment |
+| --- | --- |
+| READ | Required resource/receipt READ within the selected, supported acting target |
+| WORK opening a conversation and starting a turn | Check the required conversation WRITE, CONVERSATION_CREATE and RUN_MODEL independently; EXECUTION bundles the latter two |
+| WORK on an existing conversation | Check the required conversation WRITE and RUN_MODEL; creating the conversation is not repeated merely to append a turn |
+| Cancellation/status/receipt recovery | Apply their supported control/read contract to the original admitted work; preserve original request/receipt identities |
+| Owner/admin/grant/credential/membership and unclassified categories | Remain refused until individually classified and explicitly supported; a new action mapping does not expose them automatically |
+
+This mapping describes the target, not a claim that the current API accepts new
+action lists or arbitrary delegated WRITE. The existing transport only admits
+conversation turns, acting turn start/receipt and job status/cancel. Its retained
+turn implementation is currently Personal-scoped; Project/Personal policy targets
+exist, but general delegated project work and Global read sources are not thereby
+implemented. New operations/read sources need an explicit supported contract.
+
+Consent to use the subject's bounded authority is not a resource ACL change.
+Using an acting context does not require MANAGE_ACCESS on every request or make
+the actor a permanent role recipient. Issuing/revoking proof stays within its
+existing subject-consent lifecycle; changing resource roles/ACLs remains separate
+access management. A Global read role still needs supported admitted read targets;
+it must not silently widen an existing Personal-only acting admission.
+
+Preserve separate Application authentication and subject proof, active-account
+checks, live narrowing, expiry/revocation, exact Personal isolation and durable
+admission recovery. Invalid/unsupported acting authority refuses; never strip the
+acting context and retry as the service account or SYSTEM. Agent tool definitions,
+`calls:`, provider bindings, budgets and file fences remain their existing bounded
+capability mechanisms, not new account-role permissions.
+
 ## Execution authority and general checkpoints
 
 ### EXECUTION and scope workload support

@@ -331,6 +331,32 @@ and owner-only records must retain independent live checks.
 
 ## Application and independent capability restrictions
 
+### Acting on behalf of a user
+
+The [account-delegation mapping in ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md#account-delegation-application-acting-for-a-user)
+maps the existing actor/subject, manifest, consent/proof and retained-ceiling model
+to scoped actions. An Application acting for a user does not receive the user's
+role. Project requests retain both actor and subject project limits; explicit
+subject-Personal delegation retains its owner boundary without granting Personal
+membership to the Application.
+
+| Delegated operation | Proposed required actions, within every applicable ceiling |
+| --- | --- |
+| Read supported history/status/receipt | READ of the permitted resource and retained input set |
+| Open a new conversation and invoke its bot/agent | Required WRITE plus CONVERSATION_CREATE and RUN_MODEL |
+| Append a model-backed turn | Required conversation WRITE plus RUN_MODEL |
+| Change a resource's roles/audience | Separate MANAGE_ACCESS/control authority; not implied by consent to ordinary bot interaction |
+
+Current ActingPermission.READ/WORK and VIEWER/CONTRIBUTOR ceilings are coarse
+inputs to this future action mapping. Their other semantic categories currently
+refuse. Supported transport operations remain closed, and current retained turns
+are Personal-only. The mapping does not enable arbitrary delegated information
+writes, project work, tools or Global reads by declaration alone. Preserve proof
+expiry/revocation, original receipts and refusal without service-account fallback.
+Account delegation and agent-to-agent delegation remain separate contracts.
+
+### Execution and existing bounded capabilities
+
 `EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`, checked as scoped
 actions for the executing account. Global has no blanket execution ban: SYSTEM
 can hold READ/WRITE/EXECUTION there, retained to a bounded internal task. Human

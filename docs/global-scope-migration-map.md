@@ -6,6 +6,10 @@ The [role and scope permission matrices](role-scope-permissions-proposal.md)
 separate current operation gates from proposed action bundles and scope overlays.
 The [segmented impact report](authority-substrate-impact-report.md) assesses
 compatibility, assumptions, missing decisions and scoped execution grants.
+The [account-delegation action mapping](decisions/0030-authority-substrate-and-explicit-scopes.md#account-delegation-application-acting-for-a-user)
+preserves the existing Application/subject proof flow while translating coarse
+acting READ/WORK ceilings into supported scoped actions; it is distinct from
+child-agent delegation and does not enable unsupported acting APIs.
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners

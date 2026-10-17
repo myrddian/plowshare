@@ -237,6 +237,17 @@ supported read-source admission without loosening the execution home, actor/subj
 consent, private Personal isolation or existing live-proof checks. Existing strict
 Personal admissions must not silently expand after a role change.
 
+The [explicit account-delegation mapping](decisions/0030-authority-substrate-and-explicit-scopes.md#account-delegation-application-acting-for-a-user)
+now records the intended action translation. Current
+[ActingPermission.java:9](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/ActingPermission.java)
+and [LiveActingAuthorization.java:98](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/LiveActingAuthorization.java)
+admit READ/WORK through VIEWER/CONTRIBUTOR; they do not yet carry independent
+WRITE, CREATE or RUN_MODEL grants. Reuse actor/subject proof and target-specific
+checks, replacing only the coarse action ceiling through an explicit compatibility
+contract. Personal delegation deliberately requires no actor Personal membership;
+project delegation still intersects actor and subject project authority. Subject
+consent does not turn ordinary bot interaction into resource access management.
+
 ### 8. Shared conversion and Global ownership transfer are different migrations
 
 [JdbcInformationCatalogueRepository.java:830](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java)
