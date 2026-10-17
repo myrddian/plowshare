@@ -172,7 +172,7 @@ class DigestFramesTest {
   /** Both surfaces submit the same pass and answer 202 with the same handle. */
   @Test
   void both_surfaces_start_the_same_digest_pass() throws Exception {
-    when(jobs.submit(eq(Digests.AGENT), any())).thenReturn("job_9");
+    when(jobs.submit(eq(Digests.AGENT), any(Home.class), any())).thenReturn("job_9");
 
     String asked =
         """
@@ -184,7 +184,7 @@ class DigestFramesTest {
     // comes back is a handle to poll.
     assertEquals(Code.ACCEPTED, outcome.code());
     FrameParity.assertSameAnswer(http, outcome);
-    verify(jobs, times(2)).submit(eq(Digests.AGENT), any());
+    verify(jobs, times(2)).submit(eq(Digests.AGENT), eq(Home.of("payments")), any());
   }
 
   /**
@@ -205,7 +205,7 @@ class DigestFramesTest {
 
     assertEquals(Code.BAD_REQUEST, outcome.code());
     FrameParity.assertSameRefusal(http, outcome);
-    verify(jobs, never()).submit(anyString(), any());
+    verify(jobs, never()).submit(anyString(), any(Home.class), any());
   }
 
   // --- the surface's own rules ---------------------------------------------
@@ -214,7 +214,7 @@ class DigestFramesTest {
   void every_type_in_this_area_ignores_a_field_this_build_has_never_heard_of() throws Exception {
     when(navigator.navigate(any(), anyString(), any(), any()))
         .thenReturn(new Navigator.Result("root", List.of(), "text", true, 0));
-    when(jobs.submit(eq(Digests.AGENT), any())).thenReturn("job_9");
+    when(jobs.submit(eq(Digests.AGENT), any(Home.class), any())).thenReturn("job_9");
 
     for (Map.Entry<String, String> each : representativePayloads().entrySet()) {
       FrameParity.assertUnknownFieldsAreIgnored(router, each.getKey(), each.getValue());

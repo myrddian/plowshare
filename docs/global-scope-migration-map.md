@@ -1,7 +1,11 @@
 # Global scope migration map
 
-Status: architecture proposal and baseline source map, 17 October 2026.
-Slices 01–05 are implemented in this branch; runtime/client cutovers remain proposed.
+Status: baseline source map with implementation annotations, updated 18 October 2026.
+Slices 01–13 are implemented in this branch. Slice 14 completes classification
+and rehearsal for supported paths; final cutover is blocked. See the
+[cutover specification](authority-substrate-slices/14-cutover-specification.md) for
+retained null locators, restricted legacy data and unsupported Global admission.
+The detailed baseline below is historical unless an implementation record supersedes it.
 Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
 The [role and scope permission matrices](role-scope-permissions-proposal.md)
 separate current operation gates from proposed action bundles and scope overlays.

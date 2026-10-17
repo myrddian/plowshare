@@ -16,9 +16,9 @@ remain missing; production inference without supported evidence refuses.
 Independent Relay orchestration roots now use retained lineage. Nested/model-triggered
 orchestration starts still refuse: their existing fresh allowances do not retain a parent budget.
 Non-conversation child allowances cannot resume under replacement leases. Original
-receipts remain inspectable without replay. Slice 14 remains proposed and
-unauthorized for integrated legacy migration. Existing contract selectors are now
-cut over only where the current operation can safely express the target. Acting
+receipts remain inspectable without replay. Slice 14 implements its safe
+classification/rehearsal subset; final Global cutover remains blocked. Existing
+contract selectors are now cut over only where the current operation can safely express the target. Acting
 now intersects scoped actions with its retained proof; additional Global sources
 and general project acting execution remain unsupported.
 
@@ -65,7 +65,11 @@ Personal confinement and original receipt recovery.
 [Slice 13](authority-substrate-slices/13-existing-contract-and-client-cutover.md)
 adds strict authenticated defaults, explicit selector validation, scoped document
 reader admission and existing audience controls. Missing Global destination/source
-selectors remain refused. Slice 14 remains proposed.
+selectors remain refused. Slice 14 now records the [classification and retained-state
+proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md#implementation-record-18-october-2026).
+Final cutover remains incomplete; no Global account intake or absent budget
+contract was added. Historical null jobs are preserved rather than assigned
+invented authority; new digest jobs persist the selected home.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
 the listed ordinary catalogue/content/import/relationship owner-mutation checks.

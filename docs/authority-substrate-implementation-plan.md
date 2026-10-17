@@ -1,8 +1,9 @@
 # Authority substrate implementation roadmap
 
 Status: implementation roadmap, updated 18 October 2026. Slices 01–13 have been
-explicitly authorized and implemented in this branch. Slice 14 remains proposed
-and unauthorized. This roadmap does not authorize its execution.
+explicitly authorized and implemented in this branch. Slice 14 is authorized and
+partially implemented: classification/rehearsal and digest attribution are complete;
+final cutover is blocked by the documented unsupported Global admission route.
 
 ## Count and scope
 
@@ -168,8 +169,10 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-Slices 01–13 are implemented under subsequent explicit requests; slice 14
-remains proposed and unauthorized.
+Slices 01–13 are implemented under subsequent explicit requests. Slice 14 has
+implemented its safe subset; its [cutover specification](authority-substrate-slices/14-cutover-specification.md)
+records why the full migration remains incomplete. No new capability or permissive
+fallback was added to close the missing Global route.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

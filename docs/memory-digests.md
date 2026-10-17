@@ -24,6 +24,13 @@ or an explicitly incomplete higher digest. Retired memories are labelled as
 historical. Partial source excerpts name the conversation and turn range needed
 to read further.
 
+A project digest job records its selected project on its durable job row. After
+restart, that row retains attribution and counters; it does not recreate the
+worker or grant permission to resume. Older null-project jobs retain their
+original evidence because their lost closures cannot establish a project. The
+archive Global tier is distinct from an ordinary project named `global` and from
+the deployment directory.
+
 ## Fold and retention
 
 Migration V29 installs an entry trigger: inserting a fold summary writes its

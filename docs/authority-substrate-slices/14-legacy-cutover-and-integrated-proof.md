@@ -1,7 +1,8 @@
 # Slice 14: Legacy classification, cutover and integrated migration proof
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: authorized implementation subset completed, 18 October 2026; final cutover
+blocked. The implementation request authorizes this slice only. No new public
+capability or deployment is included.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -66,7 +67,7 @@ match the eventual change:
 
 **PostgreSQL justification:** Required for final migration/constraint and real policy SQL proof. Select the relevant tagged tests and a controlled fixture/rehearsal; whole-suite DB or live deployment needs its own breadth justification/authorization.
 
-These are future checks, not tests run for this planning document. Add mocked
+These are acceptance requirements, with performed checks recorded below. Add mocked
 boundary/authorization tests for new behavior; existing suite links do not imply
 every test is non-database. Follow the shared roadmap's focused-test, formatting
 and check requirements. Completion requires the outcome and negative/recovery
@@ -79,3 +80,110 @@ All predecessor slices need evidence for their affected paths; no final rehearsa
 ## Rollout and rollback
 
 Specify tested reader/writer compatibility and safe refusal before removing adapters. Preserve new grants, receipts, policy/provenance and costs; never restore a binary/state combination that broadens access. This plan does not authorize backup restoration or deployment.
+
+
+## Implementation record, 18 October 2026
+
+The [cutover specification](14-cutover-specification.md) was recorded before
+changing enforcement. Final cutover is **incomplete**: no existing upload selector
+admits a document into Global account custody. The manual installer can publish
+Personal-held chapters through existing share operations, but this is not Global
+home adoption. No missing operation, SDK method, Global impersonation, permissive
+default or production migration was introduced. No new Flyway version or disk
+layout was needed for the implemented subset; predecessor migrations remain
+append-only and compatibility locators remain in place.
+
+### Implemented changes and consolidated classification
+
+- Digest jobs now use the existing `submit(name, home, work)` overload. The old
+  call retained the project only inside its worker closure; the mismatch is
+  present in the earliest available snapshot, `cd7f68a`. New project jobs retain
+  their actual home; old null jobs are preserved without guessing authority.
+- DataLayout's contract now distinguishes physical `global/` deployment files
+  from Global account custody, public audience and SYSTEM execution. A retained
+  tree test proves definition, private export, project export and marker bytes
+  survive reinitialization without a rename or new account directory.
+- A synthetic V151-to-current migration rehearsal retains historical jobs,
+  conversations, source bytes, request receipts, formation evidence and monetary
+  accounting rows. It verifies fixed built-ins, an ordinary project named
+  `global`, restricted orphan scopes, creator evidence, explicit memory home,
+  tombstones, root policies and database refusal of invalid home/provenance/history
+  rewrites. Reopening repositories and rerunning Flyway preserve the evidence.
+- The same rehearsal exercises existing authenticated-context frame handlers with
+  real repositories and policy SQL: a contributor cannot publish; a manager can
+  publish/unpublish all revisions; a service principal reads only the explicitly
+  published audience; recovered mutation receipts do not repeat the transition.
+  Creator membership loss does not rewrite custody or recover control. A malformed
+  Global upload selector refuses before creating any resource, including for ADMIN.
+  This is in-process public-handler coverage, not a live SDK/session acceptance run.
+
+The classification preserves unknown manual/legacy homes as quarantined, consistent
+historical Shared as human-only LEGACY_SHARED, mixed audiences as HOME with review,
+and private roots under their retained privacy ceiling. No historical Shared flag
+or deployment path automatically becomes GLOBAL_READ. Existing raw corpus rows
+without logical roots retain their human-only legacy policy; no home adoption or
+universal service publication is inferred.
+
+### Reuse and audit findings
+
+V152–V159 already own identity/grant mappings, provenance, root audience history,
+operation claims, SYSTEM purpose evidence and child lineage. They were exercised
+rather than replaced by another migration registry. Normal management still uses
+scoped RBAC helpers; no ACL editor or new permission is added.
+
+Memory recall and digest source safety reuse `information_memory_safe`,
+`information_digest_safe` and production `protectInformation` wiring. Private
+input logs cannot reappear through archive search, digest roots or source spans.
+The selected policy tests also verify private-input inheritance and the existing
+migration release audit. These safety predicates deliberately narrow archive
+availability; they do not grant a generic cross-project information selection.
+
+Curation keeps model proposals, explicit source MANAGER release plus human Global
+ADMIN destination checks, and the existing copy/retire receipt flow. A model's
+provenance label cannot supply release authority. The scoped admission tests and
+queue regressions cover refusals and settlement ordering; they do not constitute
+new proof of concurrent grant revocation versus promotion commit. Do not remove
+that path's compatibility checks or claim full cutover on this evidence.
+
+### Verification record
+
+- New `AuthorityCutoverRehearsalTest`: synthetic upgrade, real policy SQL, public
+  handler refusals/publication, retained evidence and repository reconstruction.
+- New `DurableJobsTest.digest_job_keeps_its_selected_home_after_the_worker_closure_is_gone`:
+  real job persistence distinguishes project/ordinary `global`/Global-tier homes;
+  reopened runtime has no old handle and does not repeat the worker.
+- Eighteen selected PostgreSQL cases passed across ServiceInformationProcessing,
+  KnowledgeScopePersistence, RootDocumentPolicyMigration, MemoryStore,
+  AuthoredInformationPersistence, OperationRecordsPersistence and
+  InferenceAdmissionPersistence. They cover creator-independent SYSTEM renewal,
+  private logs, invalidated inputs/operations, immutable scopes/budgets, stale
+  claims, concurrent single submission and known receipt recovery.
+- Three selected DocumentPolicies PostgreSQL cases passed for restricted archive
+  and digest sources, audited migration release, and inherited private log inputs.
+- `./gradlew format formatCheck check` passed after the final Java/test changes: 5838 server tests, zero failures/errors/skips, plus the root client,
+  architecture, Javadoc and contract checks. Documentation links and diff whitespace
+  passed. SDK protocols/catalogues were unchanged; no regeneration was needed.
+
+PostgreSQL was required for migration/constraint/policy SQL, retained accounting,
+job reconstruction and claim concurrency. Only the named tagged tests ran with
+`-PfullDb`; no full database suite, dockerSmoke, production data, tokens, model
+provider, SDK network acceptance or deployment was exercised. Repository/tree
+reconstruction is a retained-state simulation, not a live process rollout.
+
+### Remaining cutover and rollback gates
+
+1. A separately authorized existing-contract decision is needed for Global-owned
+   document admission/manual adoption. The current API cannot express it. This
+   slice does not add that capability or silently rehome a published manual.
+2. Semantic embedding/search operation budgets, parent-conversation orchestration
+   budget allocation and restart of transient child budgets retain their documented
+   refusals. No fresh allowance is substituted for retained work.
+3. Full Global ADMIN admission → bounded SYSTEM preparation → configured inference
+   allowance → human/service read acceptance cannot be claimed without the first
+   gate and its negative/recovery proof. Exact consumer and revocation/commit proof
+   remains required before removing any compatibility adapter.
+4. No live tenant inventory, legacy manual custody decision, old-binary rollout or
+   production process restart was performed. Do not deploy a pre-substrate binary
+   onto this schema: old writers can omit required evidence or meet intentional
+   write fences. Preserve grants, receipts, policies, creator evidence and costs;
+   no reverse migration or restore is authorized by this implementation.
