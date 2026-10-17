@@ -131,6 +131,21 @@ reserved-ID allow branches or null-owner exemptions through services and tools.
 
 ## Roles, ACLs and delegation
 
+The substrate authorizes an authenticated account/principal to perform an action
+on an explicit scope/resource under a live grant. Roles are named, reviewable
+bundles over those primitives. ADMIN, MANAGER, CONTRIBUTOR, READER, GLOBAL_READ and
+Application-facing roles are policy helpers, not independent authorization engines.
+An Application role maps to the same scoped action evaluator used for humans and
+SYSTEM work; it cannot authorize an action by a separate role-name shortcut.
+
+For ordinary knowledge resources, replace actor-equals-owner authorization with
+explicit READ, WRITE and relevant control/release grants. Ownership remains a
+resource fact and can seed ordinary owner grants; it is not an additional equality
+guard that prevents an authorized administrator from writing another account's
+resource. The acting account, owning account, author and grant issuer remain
+distinct. Credential subjects, private sessions, consent and retained input rules
+continue to impose their own explicit restrictions.
+
 Retain the familiar role model, with explicit action sets:
 
 | Role | Proposed purpose |
@@ -242,16 +257,36 @@ condition. Recheck `RUN_MODEL` for later turns, model-directed child work and
 asynchronous admissions under the retained ceiling rather than relying only on
 the original conversation-create check.
 
-The `GLOBAL_ACCOUNT` knowledge scope does not support execution. No account role,
-including ADMIN or SYSTEM, can enable `CONVERSATION_CREATE`, `RUN_MODEL` or the
-`EXECUTION` bundle there. This is a mandatory resource/workload property, not a
-missing role assignment that a stronger role can override. Agents may read Global
-knowledge while executing in another admitted scope; knowledge ownership does
-not become execution ownership. Any model-based preparation/maintenance of
-Global-owned knowledge needs a separate execution-capable owning scope, explicit
-input/output targets and the appropriate human administrative admission or an
-explicit operator-authorized maintenance policy with retained bounds. This does
-not require a new interactive approval for every stage of already admitted work.
+Global is governed by the same account/scope/action grants. This supersedes the
+earlier blanket rule that Global could never support execution. SYSTEM has scoped
+READ, WRITE and EXECUTION authority for bounded Global processing; a task retains
+only its admitted purpose, resources, actions, tools and budget. No equality check
+against SYSTEM's name/UUID supplies an authorization bypass.
+
+| Executing principal and binding | Global knowledge authority |
+| --- | --- |
+| Ordinary human/Application with GLOBAL_READ | READ of resources authorizing that role; no WRITE or EXECUTION from this role |
+| Human with ADMIN over Global | Scoped READ/WRITE/control actions; EXECUTION is not implied |
+| SYSTEM under an admitted Global-processing grant | Required READ/WRITE, CONVERSATION_CREATE and RUN_MODEL within the task's retained limits |
+| GLOBAL_ACCOUNT as resource owner | Ownership itself supplies no execution identity or grant |
+
+The information summarizer can execute as SYSTEM within the explicit Global
+scope, read an admitted document and write its permitted derived summary. The
+document stays owned by GLOBAL_ACCOUNT; the executor, initiating actor, sponsor
+and private log authority are recorded separately. There is no obligation to
+invent another operational scope solely to avoid a blanket Global prohibition.
+Private worker conversations, prompts and intermediate results do not inherit
+GLOBAL_READ merely because processing occurs in the Global scope. General-read
+authorization applies to the intended knowledge resources and projections.
+
+An authorized human write may trigger a separately authorized SYSTEM processing
+service. Admit that declared workflow using both the caller's permitted trigger
+and SYSTEM's scoped worker grants; the caller need not acquire RUN_MODEL or
+SYSTEM authority to upload a document. A denied arbitrary run must not be
+silently rerouted to SYSTEM. Ordinary delegated children remain bounded by their
+parent authority; independently admitted platform services have their own explicit
+purpose, input/output and spending contracts. Exact service sponsorship remains
+to be specified before implementation.
 
 ### General authorization checkpoints
 
@@ -439,13 +474,16 @@ For example:
 | Generally readable project document | Its existing account / project | Resource authorizes `GLOBAL_READ` | Existing owner/controller grants |
 | Private project document | Its existing account / project | Ordinary project/resource grants; no `GLOBAL_READ` authorization | Existing owner/controller grants |
 
-Creating, editing, moving into/out of, retiring or changing the policy of a
-`GLOBAL_ACCOUNT` resource requires human ADMIN authority covering Global and the
-specific action. ADMIN held elsewhere is insufficient. Moving or copying private
-material into Global also requires source release and retained input permissions.
-Curator and other agents may propose; even forced MANAGER cannot approve their
-own Global mutation. A bounded server executor can apply an admitted human ADMIN
-decision without assigning ADMIN or SYSTEM to the performing agent.
+The human Global ADMIN helper supplies scoped READ/WRITE and the named control
+actions for creating, editing, moving, retiring and managing Global knowledge.
+ADMIN held elsewhere is insufficient. These actions authorize the administrator
+without requiring actor equality with GLOBAL_ACCOUNT. SYSTEM processing uses its
+own scoped WRITE grant for admitted derived outputs; it does not need a human role
+or impersonate the resource owner. Moving/copying private material or changing
+its audience additionally requires source release and retained input permissions.
+Curator or another worker cannot approve a release/ownership transfer merely by
+having WRITE or a forced MANAGER exception. The administrative and processing
+role helpers must map those distinct actions explicitly.
 
 Granting `GLOBAL_READ` access to an otherwise private resource changes its
 audience. It requires the existing controller's authorized audience/release action
@@ -492,11 +530,11 @@ output cannot release its private dependencies. Deployment-wide general reading
 is an explicit audience policy, not evidence that tenant fences may be ignored;
 its exact mapping to future tenant entities remains to be specified.
 
-The Global account knowledge scope admits knowledge resources, not conversation
-or execution homes. Creating this ownership account does not provision a Personal
-conversation project or workspace for it. Maintenance jobs retain administrative
-ownership and explicit knowledge targets. Deployment definitions and internal
-SYSTEM worker resolution remain separate from this knowledge scope.
+The Global account owns knowledge; it does not become a login/executor or gain a
+Personal workspace. Its scope can host SYSTEM processing authorized through
+ordinary scoped grants. Processing logs remain private unless their own policy
+authorizes disclosure. Deployment definitions and internal SYSTEM worker lookup
+remain separate from knowledge ownership.
 
 ### Conversation context routing
 
@@ -525,16 +563,19 @@ preserves the current direct-human Personal convenience rather than removing it.
 default; Application/project-relative routing still requires an explicit source
 and coordinated server/SDK/client contract before claiming implementation.
 
-`GLOBAL_ACCOUNT` is an account identifier, not a conversation project. It has no
-execution home and cannot be selected explicitly, reached by default or used as a
-fallback. An absent Personal/Application/project destination refuses instead of
-routing into Global. `GLOBAL_READ` may permit reading knowledge during a task;
-it never permits running or storing that conversation under Global. An ordinary
-project whose display name is `global` retains its own ordinary identity and
-workload policy; enforce typed references rather than a name blacklist.
+`GLOBAL_ACCOUNT` is an account identifier, not a project reference or executor.
+Ordinary user/Application context defaults never select its scope. GLOBAL_READ
+supplies no conversation creation or model-run action there; ADMIN management
+supplies no implicit execution either. An explicitly admitted SYSTEM worker can
+select Global as an internal processing scope with the required scoped action
+grants, including CONVERSATION_CREATE for its private worker log where needed.
+An account UUID in a project-only API parameter remains invalid; typed internal
+and public contracts must distinguish scope and account identifiers. An ordinary
+project named global retains its own project identity and policy.
 
 Knowledge lookup uses an explicit account-knowledge or project-resource target,
-while conversation creation resolves a conversation-capable project target.
+while ordinary user/Application conversation creation resolves its authorized
+project target. Internal SYSTEM log creation uses its explicitly granted scope.
 The current project-only `Home`/memory contracts need a typed replacement or
 extension so account-owned memories do not recreate Global through a null project.
 Existing resource identities, scopes, provenance and receipts survive migration.

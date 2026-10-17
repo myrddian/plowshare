@@ -35,8 +35,10 @@ from `GLOBAL_ACCOUNT` ownership and from ADMIN management.
 
 In the proposed tables, **Allowed** means the role supplies the action, subject
 to those restrictions. **Data grant** means ADMIN alone does not supply it.
-**Owner** requires the exact authenticated owner or a separately supported
-delegation. **Release** requires explicit source-release and destination/audience
+**Owner** identifies an owning/control relationship whose authority must map to
+explicit grants for ordinary knowledge resources. It is not a permanent
+actor-equals-owner requirement blocking scoped administrative READ/WRITE. Other
+account-owned session/credential/receipt contracts retain their subject checks. **Release** requires explicit source-release and destination/audience
 authority beyond ordinary edit permission. **Human** means the action remains
 human-only even for an agent with forced MANAGER.
 
@@ -61,7 +63,7 @@ model spending to `GLOBAL_READ` holders.
 | --- | --- | --- |
 | Server administration | Enabled human server-admin account; specific operation/service gates | Explicit server-administration scope; ADMIN grants named control actions |
 | Internal server Relay | `Relay.SystemScope.SERVER`, separate from project topics | Explicit server scope; no implicit project/tenant data coverage |
-| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | `GLOBAL_ACCOUNT` owns admin-managed knowledge in a non-project account scope; `GLOBAL_READ` grants general reading independently of ownership; no Global conversations |
+| Legacy Global | Null project in `Home`, memories, conversations and jobs; shared setup and inherited data | `GLOBAL_ACCOUNT` owns knowledge; ordinary read/control roles and bounded SYSTEM processing use explicit scoped grants; no implicit user/Application execution |
 | Ordinary project | Project row/name, live project roles and resource-derived project resolution | Explicit project scope with scoped role grants |
 | Application project | Ordinary project roles plus active manifest, execution identity, placement and source rules | Same project role vocabulary with additional Application boundaries |
 | Personal execution workspace | Account-owned private project/union | Explicit Personal scope with fixed owner control; no ordinary membership sharing |
@@ -241,7 +243,8 @@ use the separate current checkout/provider/session fences.
 
 `GLOBAL_ACCOUNT` is the immediate owner of administrator-managed memories,
 documents and derived knowledge views in its fixed-identity account knowledge scope.
-Global is not a project and supplies no conversation or execution home.
+Global is not a project or executor account. SYSTEM may execute internal
+processing in its scope under scoped grants; ordinary readers cannot.
 SYSTEM remains the root authority. `GLOBAL_READ` is a separate defined read role
 held by every authenticated human, Application and service principal. A resource
 must authorize that role before possession supplies general read access.
@@ -253,23 +256,25 @@ ownership, contribution, management, execution or policy-change rights.
 
 | Entry point / principal | General-read knowledge | Global-owned knowledge management |
 | --- | --- | --- |
-| Human through CLI/TUI/GUI | Read resources authorizing `GLOBAL_READ`, within admission and policy | Human ADMIN grant covering Global and the action |
+| Human through CLI/TUI/GUI | GLOBAL_READ or explicit scoped READ | Global ADMIN supplies scoped READ/WRITE/control; no implicit EXECUTION |
 | SDK Application / service principal | Same read-role evaluation and public read contracts, within credential/admission ceilings | No authority from `GLOBAL_READ` or project roles |
-| Agent, including an Application librarian | Retained executor/actor/subject read authority, supported tools and admitted inputs | Propose only; no ADMIN grant, including with forced MANAGER |
-| Bounded internal executor | Explicitly admitted targets/actions and mandatory policy | May apply an admitted human ADMIN effect without assigning ADMIN to an agent |
+| Ordinary agent under user/Application authority, including a librarian | Retained executor/actor/subject read authority, supported tools and admitted inputs | No Global WRITE/EXECUTION from GLOBAL_READ; no ADMIN grant, including with forced MANAGER |
+| SYSTEM under bounded processing admission | Scoped READ over admitted Global inputs | Scoped WRITE/EXECUTION for the declared worker purpose; no SYSTEM role assignment to its agent |
 
 | Global knowledge action | ADMIN | MANAGER | CONTRIBUTOR | READER |
 | --- | --- | --- | --- | --- |
-| Read resources authorizing `GLOBAL_READ` | Through `GLOBAL_READ` or separate data authority | Same | Same | Same |
+| Read Global knowledge | Scoped READ in the Global ADMIN helper, plus input policy | GLOBAL_READ or separate scoped READ | Same | Same |
 | Propose a candidate from an authorized source | Source data/work grant | Source work authority | Source work authority | No |
 | Create/edit/move/retire a `GLOBAL_ACCOUNT` resource or change its policy | Human ADMIN over Global and the action; source Release where applicable | No | No | No |
 | Authorize `GLOBAL_READ` on a resource owned elsewhere | Separate source audience/release authority | Same independent authority | Same independent authority | No authority from reading alone |
 | Transfer another account's resource into `GLOBAL_ACCOUNT` | Human destination ADMIN plus authorized source transfer/release | No destination authority | No destination authority | No |
-| Create/resume/list/search Global-owned conversations or attach executable tools there | No | No | No | No |
-| Create a conversation under `GLOBAL_ACCOUNT`, explicitly or through context fallback | No | No | No | No |
+| Create/run a Global worker conversation through these human/Application role bindings alone | No implicit EXECUTION | No | No | No |
+| Inspect private SYSTEM processing conversations/prompts through GLOBAL_READ | No | No | No | No |
+| Attach external provider tools merely because Global knowledge is readable | No | No | No | No |
 
-Curator may propose but cannot approve its own Global mutation. Read counters and
-index maintenance remain bounded bookkeeping, separate from content, lifecycle,
+Curator may propose but cannot approve a release/ownership transfer merely from
+having SYSTEM WRITE. Source release and destination policy remain required.
+Read counters and index maintenance remain bounded bookkeeping, separate from content, lifecycle,
 ownership or audience changes. Administrative jobs retain their own owning scope
 and explicit knowledge targets. Draft/final and processing readiness remain
 independent of Global ownership and general reading.
@@ -295,8 +300,9 @@ guessing or selecting Global. Invalid explicit targets do not default. Knowledge
 ownership and `GLOBAL_READ` supply no project work authority. Existing ordinary
 projects named global retain their ordinary typed identity and workload policy.
 
-The following matrix governs other publication and owner controls without
-weakening the human ADMIN rule for Global-owned resources.
+The following matrix governs other publication and owner controls. Human
+administration of Global knowledge uses scoped ADMIN actions; SYSTEM derived
+processing uses explicit worker WRITE authority with source/output restrictions.
 
 ### Other publication and owner controls
 
@@ -325,13 +331,21 @@ and owner-only records must retain independent live checks.
 
 ## Application and independent capability restrictions
 
-`EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`; scope workload support
-is mandatory in addition to principal grants. Global account knowledge never
-supports either action, including for ADMIN and SYSTEM. Ordinary project/Personal
-execution can read admitted Global knowledge without moving the run there. Model
-preparation of Global-owned knowledge must execute in another supporting scope
-under explicit input/output and administrative authority. No read role supplies
-execution or model-spending permission.
+`EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`, checked as scoped
+actions for the executing account. Global has no blanket execution ban: SYSTEM
+can hold READ/WRITE/EXECUTION there, retained to a bounded internal task. Human
+Global ADMIN has READ/WRITE/control, not implicit EXECUTION; GLOBAL_READ supplies
+only read authority. Resource owner, executor, initiating actor and sponsor stay
+separate even when the same scope is used for storage and processing.
+
+Roles, including Application roles, map to common scoped action grants. Ordinary
+knowledge READ/WRITE authorization replaces exact-owner equality checks; ownership
+and attribution remain stored facts. Other resource policies, source release,
+private sessions and credential subjects continue to constrain the action.
+Authorized writes/reads may trigger a declared SYSTEM processing service under
+its own scoped authority, without lending the caller SYSTEM execution or
+silently rescuing a denied arbitrary run. Define service budgets and inputs/outputs
+separately from ordinary child-agent authority.
 
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and
@@ -356,8 +370,8 @@ offering; role, actual target scope and other capability restrictions govern
 invocation. External tools retain explicit owner/project/provider/agent assignments
 and credential subjects, even when configuration is reused by several projects.
 The current contracts require concrete projects, not a project-less wildcard grant.
-The Global account knowledge scope is not a project, external execution home or
-tool-binding target. SDK reads can include Global/general-read knowledge through
+The Global account knowledge scope is not a project or provider-tool binding
+target. SYSTEM processing there requires scoped execution grants. SDK reads can include Global/general-read knowledge through
 an admitted read selection; they do not acquire Global write or provider authority.
 Current service-token Shared refusals and unsupported acting consumers require
 an explicit public-read contract migration before supporting those reads.
@@ -391,8 +405,9 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
    behavior with explicit control and data grants. Review and migrate grants;
    do not silently widen existing private content access.
 2. **Publication:** define the source-release and destination/audience actions
-   and who may issue them. `GLOBAL_ACCOUNT` resource administration is human ADMIN
-   only, with source authority still required for transfers. `GLOBAL_READ` grants
+   and who may issue them. Human `GLOBAL_ACCOUNT` resource administration uses
+   scoped ADMIN READ/WRITE/control actions; SYSTEM derived processing uses bounded
+   worker grants. Source authority is still required for transfers. `GLOBAL_READ` grants
    general reading without ownership transfer; specify its audience-change issuers
    independently. Other Release cells do not assign those rights to every editor
    or manager. Preserve authorized export

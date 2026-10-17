@@ -5,7 +5,7 @@ Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md).
 The [role and scope permission matrices](role-scope-permissions-proposal.md)
 separate current operation gates from proposed action bundles and scope overlays.
 The [segmented impact report](authority-substrate-impact-report.md) assesses
-compatibility, assumptions, missing decisions and the no-Global-execution rule.
+compatibility, assumptions, missing decisions and scoped execution grants.
 
 Source baseline: `efddb12a0cfd28c6aa1464f01b884d15597102d5`, merged main
 containing account-delegation PR #73. Source links below identify current owners
@@ -61,7 +61,7 @@ project/resource scope and refuses Global work.
 | Operation family | Current omission | Proposed selection rule |
 | --- | --- | --- |
 | Conversation open | Personal through production `PersonalSpaces` wiring | Omission routes to the admitted Application/project itself, otherwise to a direct human caller's Personal project; missing/ambiguous context refuses, never Global |
-| Ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the admitted context and authorized explicit effective scope where this operation permits a default; never choose Global for execution |
+| Ordinary agent run, direct orchestration start | Personal through production `PersonalSpaces` wiring | Resolve the admitted context/default, then check scoped execution grants; ordinary omission does not select Global. SYSTEM processing selects its scope explicitly |
 | Conversation list/latest/search | Global through `RequestedHome` | Use the documented authorized selection, never an omitted server/shared scope |
 | Memory index/recall/write, proposal listing, digest/navigation | Global through `RequestedHome` | Resolve a permitted explicit work/corpus scope; do not append shared data automatically |
 | Information/document selection | Personal plus shared for human defaults | Unscoped search selects all readable knowledge within admitted ceilings; project selection narrows the read set, independently of ownership |
@@ -127,9 +127,10 @@ Global conversation resume is refused by
 [Callers.requireConversationProject](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/Callers.java)
 and [ConversationResumeHandler](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationResumeHandler.java).
 Current source still supports legacy null-project conversation reads. This is not
-evidence that any such rows exist in a running deployment. The target model has
-no Global conversation scope: create/resume/list/search selections refuse it,
-and any historical rows require explicit migration classification. Omitted/null
+evidence that any such rows exist in a running deployment. The target replaces these blanket gates with scoped action checks: ordinary
+readers have no Global execution grant, while admitted SYSTEM workers can process
+there. Private worker logs are not generally readable knowledge. Historical rows
+require explicit classification rather than assuming that every null is public. Omitted/null
 conversation targets use admitted Application/project context, or Personal for a
 direct human without project context. Resolve the effective project before effects;
 missing/ambiguous context refuses instead of choosing Global. Preserve the existing
@@ -246,12 +247,19 @@ the complete substrate remains under design.
 Default mocked/fake tests should cover:
 
 - `EXECUTION` includes `CONVERSATION_CREATE` and `RUN_MODEL`; each action still
-  requires destination workload support and a retained principal grant. An empty
+  requires a retained scoped principal grant and applicable workload validation. An empty
   conversation need not invoke or charge a model. Later turns, children and async
   model work recheck authority rather than reusing only conversation admission.
-- Global knowledge refuses execution for every role/principal, including ADMIN
-  and SYSTEM. Model preparation runs in another execution-capable owning scope
-  with admitted Global inputs/outputs; reading Global does not rehome the work.
+- Global SYSTEM processing succeeds under explicit scoped READ/WRITE/EXECUTION
+  grants and bounded task admission. GLOBAL_READ holders cannot create/run/write;
+  human Global ADMIN READ/WRITE/control supplies no implicit execution. No name/UUID
+  allow branch or owner-equality check substitutes for the action evaluator.
+- Authorized user knowledge writes can trigger a separately admitted SYSTEM worker
+  with declared inputs/outputs and spending limits. The user does not receive
+  SYSTEM/RUN_MODEL authority, and denied arbitrary execution is not auto-escalated.
+- Application and human role helpers resolve to common scoped grants. ADMIN writes
+  Global knowledge through WRITE/control authority while retaining GLOBAL_ACCOUNT
+  ownership and the initiating human's audit identity.
 - SYSTEM cannot be assigned through any role/grant, agent configuration, inheritance,
   delegation, execution profile or operator/recovery path. Authorized scoped human
   ADMIN grants remain usable; agents cannot receive ADMIN. Trusted agent
@@ -286,8 +294,8 @@ Default mocked/fake tests should cover:
 - Curation analysis remains usable while unauthorized publication refuses; derived
   output policies and source/destination audiences are checked independently.
 - Global admits memories, documents and derived retrieval views, with human ADMIN
-  management under `GLOBAL_ACCOUNT`. Conversations and execution homes remain
-  excluded. Historical null-project rows retain identity and restricted access
+  management under `GLOBAL_ACCOUNT`. SYSTEM worker processing/logs use explicit
+  scope/action grants and remain separately private. Historical null-project rows retain identity and restricted access
   until classified, without guessed ownership.
 - `GLOBAL_READ` is held by authenticated humans and Application/service principals,
   but only resources authorizing that role become generally readable. Authorizing
@@ -304,7 +312,8 @@ Default mocked/fake tests should cover:
   targets and ceilings do not change when resolving defaults.
 - Explicit blank, unknown, unavailable or account-valued conversation project
   references refuse without defaulting. Supported authorized project targets work.
-  `GLOBAL_READ` and a `GLOBAL_ACCOUNT` UUID cannot establish an execution home.
+  GLOBAL_READ supplies no execution; an account UUID in a project-only field is
+  invalid. Trusted SYSTEM processing selects the typed Global scope explicitly.
 - Account-owned memory/document read targets remain distinct from conversation
   project targets across server, SDK and clients; Global reads require no fake
   project, null sentinel, account impersonation or implicit execution home.

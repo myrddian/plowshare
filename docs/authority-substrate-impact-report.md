@@ -10,11 +10,15 @@ the [migration map](global-scope-migration-map.md) and
 ## Result and audit boundaries
 
 The proposed separation is viable, but it is a coordinated authority and ownership
-migration, not a Global rename. The biggest compatibility issue is that current
-code uses the same project-or-null home for knowledge ownership, execution, logs
-and some accounting. Enforcing the new rule at only the conversation endpoint
-would leave other model paths unchanged; enforcing it everywhere before splitting
-those responsibilities would break document preparation and internal workers.
+migration, not a Global rename. The revised substrate checks account, scope and
+action; roles, including Application roles, are helpers over those grants. SYSTEM
+can process Global knowledge through scoped READ/WRITE/EXECUTION authority, while
+GLOBAL_READ and human ADMIN write/control bindings do not imply execution.
+
+This assessment supersedes its earlier universal Global-execution prohibition
+and mandatory separate-processing-scope workaround. The source findings remain:
+project/null homes conflate several meanings, exact-owner APIs block scoped admin
+writes, and common grants are not carried across all model/admission paths.
 
 Runtime baseline: main `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7`, merged into this
 proposal branch. PR #74 enables existing information features by default; PR #75
@@ -42,13 +46,17 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
 - `GLOBAL_READ` is held by authenticated humans, Applications and service
   principals; resources authorize it independently of ownership. Read grants do
   not grant publication, execution or unrestricted model spending.
-- `EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`. Both remain
-  independently checkable. Scope workload support and admitted principal grants
-  are required. Global knowledge never supports either action, including for
-  ADMIN or SYSTEM.
+- `EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`, independently
+  checked as grants to the executing account over the resolved scope. SYSTEM can
+  execute bounded Global work. GLOBAL_READ grants READ only; Global ADMIN supplies
+  READ/WRITE/control without implicit EXECUTION. No reserved-ID allow branch.
+- Role/Application-role helpers use that common substrate. Ordinary knowledge
+  READ/WRITE checks replace actor-equals-owner authorization, retaining ownership,
+  author, actor and source/input policy independently.
 - Omitted execution targets resolve to the admitted Application/project itself,
   or a direct human's Personal project. Missing/ambiguous context refuses. No
-  route, fallback, resume or worker admission may execute in Global.
+  ordinary default may choose Global. SYSTEM processing can explicitly select
+  the typed Global scope under retained grants.
 - Resource ownership, execution destination, authorized read sources, output
   destinations, actor/subject and sponsor are separate facts.
 - Deployment overrides and bundles supply SYSTEM worker definitions; project or
@@ -88,7 +96,8 @@ only an EXECUTION flag at conversation-open misses resume, turns and standalone
 model work. Define action grants and mandatory destination workload support,
 then classify each admission and retained continuation. An empty open needs
 CREATE; a first model turn needs RUN_MODEL too. Existing Global resume refusal
-is useful but is not a universal execution gate.
+must be replaced with scoped action evaluation for authorized SYSTEM work,
+while preserving refusal for ordinary readers and protecting private logs.
 
 ### 3. Application-relative default routing does not exist yet
 
@@ -106,7 +115,7 @@ binding resolved before authorization. Generic multi-project service credentials
 cannot choose their first project or infer a destination from an account name.
 Preserve explicit resource ownership and retained acting targets over defaults.
 
-### 4. Global execution refusal currently breaks knowledge preparation
+### 4. SYSTEM processing needs scoped authority, not a Global-wide ban
 
 [InformationWriteGates.java:108](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationWriteGates.java)
 and [InformationStageHooks.java:56](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationStageHooks.java)
@@ -117,12 +126,19 @@ follow the same pattern.
 [Deliberation.java:303](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/Deliberation.java)
 uses Information selection to choose a document-question execution home.
 
-Simply enforcing no Global execution breaks uploads/preparation, document
-questions and potentially administrative write hooks. Personal documents use
-these paths too: a Global processing log does not prove Global-owned content.
-Give processing/logs a separate executable owning scope, explicit resource inputs,
-Global output targets and sponsor. Do not create an exception granting execution
-inside Global to SYSTEM workers.
+These paths are not inherently invalid because their processing scope is Global.
+SYSTEM can receive scoped EXECUTION and required READ/WRITE grants there; there
+is no mandatory move to a new operational scope. They still need explicit typed
+targets, executor and retained action authority. Personal documents also use
+these null paths, so their execution/log location does not prove Global knowledge
+ownership. Preserve distinct input owner, execution scope, initiating actor,
+sponsor, output grants and private log policy.
+
+An authorized human upload can trigger a declared SYSTEM service under its own
+worker grants. Requiring the human's RUN_MODEL grant for every internal service
+would break that workflow; silently lending SYSTEM to an arbitrary denied run
+would defeat authorization. Specify the service trigger, inputs/outputs and
+spending contract without changing ordinary child-delegation ceilings.
 
 ### 5. RUN_MODEL needs a lower enforcement seam than agent admission
 
@@ -157,9 +173,11 @@ uses that contract for managed operations;
 [PortableInformation.java:336](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/PortableInformation.java)
 requires the same ownership on replacement imports.
 
-A human ADMIN cannot currently maintain a Global-owned manual just by receiving
-a grant. Separate owning principal from authorized controller and actual actor,
-retain source-release/input policy, and record the human action. Logging in as
+The target explicitly replaces this owner-equality gate with scoped READ/WRITE
+and control grants. A Global ADMIN can then maintain the manual while its owner
+remains GLOBAL_ACCOUNT and the human remains the actual actor. The present APIs
+need migration to evaluate those grants, preserve source/input restrictions and
+record the human action. Logging in as
 Global, rewriting the author, or making all owners ADMIN would defeat the design.
 
 ### 7. Universal read needs coordinated Java, SQL and retained admission changes
@@ -224,7 +242,7 @@ effect. Decide what curation proposes and who can approve it. Recall also
 read telemetry/index maintenance must not require granting readers content-edit
 rights or permit them to change audience/claims.
 
-### 10. Durable jobs cannot retain an implicit Global execution home
+### 10. Durable jobs need explicit scope and retained grants
 
 [Digests.java:137](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Digests.java)
 captures the requested home in a closure but submits through an overload that
@@ -311,10 +329,11 @@ bill the Global owner by implication or make private processing logs public.
 | Read grants on revisions versus resources | Existing Shared is per revision; decide inheritance to future revisions, drafts, grant removal and author-controlled general-read issuance |
 | Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
-| Processing execution home and log privacy | Choose an execution-capable destination for Global preparation/maintenance; define executor, sponsor, input/output grants and who can inspect logs |
+| Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
+| Processing/log scope and service sponsorship | SYSTEM can process within Global through scoped grants; define authorized triggers, exact inputs/outputs, sponsor and private logs without lending execution to callers |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
-| Global write control | Define generic owner/controller/admin authority and transfer/release actions; role names alone cannot override exact-owner storage contracts |
+| Global write control | Replace exact-owner authorization with common READ/WRITE/control grants; specify transfer/release actions, audit and Java/SQL migration |
 | Default public role versus individual exceptions | Every authenticated principal holds GLOBAL_READ; specify resource-level withdrawal/mandatory constraints and support for intentionally excluding a principal without confusing role membership with resource authorization |
 | Tenant isolation | Deployment-wide general reading crosses potential tenant boundaries; define first-class tenant membership and which resources may authorize that audience |
 | Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
@@ -331,8 +350,9 @@ public; retained dependencies and reference obligations remain mandatory.
 
 - Resource-derived scopes are checked in addition to request selection. A payload
   cannot rehome a conversation, memory or job by naming another project.
-- Personal exact ownership, live service-token owner membership and acting proof
-  checks remain independent of broad public reading.
+- Personal privacy, live service-token owner membership and acting proof checks
+  remain independent of broad public reading. Resource READ/WRITE policy may change
+  from owner-equality to scoped grants without weakening these separate fences.
 - Information predicates apply before totals, ranking, paging, metadata and export.
   Withdrawal and input/reference obligations constrain current and saved outputs.
 - Provider tools retain explicit owner/project/agent/credential assignments, Relay
@@ -347,10 +367,12 @@ public; retained dependencies and reference obligations remain mandatory.
 These are review dependencies, not authorization to implement:
 
 1. Settle the decision table, typed target/action contracts and identity lifecycle.
-2. Establish explicit owner/controller and separate processing execution admission
-   behind existing repositories/services; prove parity before changing defaults.
-3. Add scope workload support and CREATE/RUN_MODEL checks to every owning admission
-   and model dispatch path, including queued and non-conversational work.
+2. Map role/Application-role helpers to common account/scope/action grants and
+   migrate resource READ/WRITE authorization away from actor-equals-owner checks.
+   Keep owner/actor attribution and mandatory input policies.
+3. Add CREATE/RUN_MODEL checks to every owning admission and model dispatch path,
+   including queued and non-conversational work. Give SYSTEM bounded Global worker
+   grants and explicit service-trigger admission before replacing blanket gates.
 4. Introduce Global ownership and general-read policy across Java, SQL, retained
    consumers and public contracts together; preserve narrow legacy admissions.
 5. Classify database and disk records, review audience expansion, migrate the
@@ -358,18 +380,24 @@ These are review dependencies, not authorization to implement:
 
 Focused mocked/fake acceptance coverage should include:
 
-- Empty conversation creation without inference, first turn/standalone model work
-  without RUN_MODEL refused, and Global execution refused for all roles before
-  rows/hooks/budget effects; later-turn/child/queued revocation is rechecked.
+- Empty conversation creation without inference; first turn/standalone model work
+  without RUN_MODEL refused. GLOBAL_READ and human Global ADMIN without execution
+  cannot create/run there; bounded SYSTEM EXECUTION succeeds. Check actions before
+  effects and recheck later-turn/child/queued revocation without identity bypasses.
 - Human omission routes Personal; admitted Application omission routes itself;
   ambiguous/missing or invalid explicit context refuses without Global fallback.
-- Global manual preparation runs elsewhere with bounded inputs/output/admin
-  approval, while Global owns only the knowledge and private logs remain private.
+- Global manual preparation executes as SYSTEM within its admitted scope and
+  READ/WRITE/EXECUTION grants; GLOBAL_ACCOUNT retains ownership and worker logs
+  stay private. Authorized writes trigger only declared bounded processing, never
+  arbitrary SYSTEM prompts or tool work.
 - Human, Application/service and supported retained-acting reads work through list,
   direct revision, schema attachment, relationships, jobs and export; GLOBAL_READ
   supplies no mutation or execution authority and no private-resource disclosure.
 - Removing public authorization or withdrawing a required input stops future
   disclosure, including saved views, delayed work, references and message delivery.
+- Human ADMIN writes a Global-owned resource through scoped action grants without
+  impersonating Global or becoming its owner; Application roles use the same
+  evaluator rather than separate authority logic.
 - Shared-to-general-read authorization and ownership transfer have separate
   receipts; promotion, IDs, supersession and audience expansion are intentional.
 - Built-in accounts cannot log in, become acting subjects, receive Personal
