@@ -80,7 +80,10 @@ public class ActingConfig {
 
   @Bean
   public ActingAuthorization actingAuthorization(
-      ActingRepository repository, ProjectMembers members) {
-    return new LiveActingAuthorization(repository, members, Clock.systemUTC());
+      ActingRepository repository,
+      ProjectMembers members,
+      io.aeyer.plowshare.server.access.IdentityRepository identities,
+      io.aeyer.plowshare.server.access.ScopedAuthority actions) {
+    return new LiveActingAuthorization(repository, members, Clock.systemUTC(), identities, actions);
   }
 }

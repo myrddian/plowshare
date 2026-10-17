@@ -1,7 +1,7 @@
 # Slice 12: Account acting delegation and action ceilings
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented for the existing acting consumers in this branch,
+18 October 2026, under explicit authorization. No new public API or deployment.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -65,16 +65,72 @@ match the eventual change:
 
 **PostgreSQL justification:** Conditional: only changed persistent proof/admission/receipt records justify selected tagged PostgreSQL tests. Live policy and retained-tool behavior use mocks/fakes.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+The implementation evidence below distinguishes completed checks from the original
+planned matrix. Existing suite links do not imply every test is non-database.
+Unsupported paths remain explicit, with no uncertain-effect replay.
 
 ## Specification required before implementation
 
-List supported operations and targets explicitly. Global/project read-source expansion requires a separately reviewed supported contract and remains a gap here.
+The [acting authority specification](12-acting-authority-specification.md) was
+recorded before enforcement. It lists every supported operation and target.
+Global/additional project read-source expansion requires a separately reviewed
+supported contract and remains a gap here.
 
 ## Rollout and rollback
 
 Retain proofs and admitted ceilings; never strip acting context to make an old consumer run. Preserve current authorized receipt reads without replay.
+
+
+## Implementation and activation limits
+
+`LiveActingAuthorization` now requires live scoped actions in addition to the
+existing actor credentials, human subject, Application manifest/eligibility,
+proof expiry/revocation and admitted role ceiling. READ maps to substrate READ;
+WORK maps to WRITE. Internal creation and inference classifications map separately
+to CONVERSATION_CREATE and RUN_MODEL. Project policy checks both accounts, using
+the service token's owning grant while retaining the token's current role ceiling.
+Personal policy checks only the exact subject's Personal scope and ownership;
+consent creates no Application membership or role assignment.
+
+`PersonalActingWork` checks the actual supported model agent's READ/WRITE/RUN_MODEL
+requirements before opening or recording new work. New conversations and declared
+synchronous child capability additionally require CONVERSATION_CREATE. A turn in
+an existing bound conversation does not need creation unless its agent can create
+children. Cancellation keeps WRITE and the existing job/lifecycle contract, without
+requiring inference; its returned job view separately checks delegated READ before
+and after the effect. Receipt/status/history reads keep READ and their existing
+proof/resource correlations. An original retry returns its receipt without
+re-resolving an agent or replaying an uncertain submission.
+
+Queued work, tools, child agents and disclosure retain the fixed admitted action
+requirements and live acting check. Slice 06/11 operation admissions independently
+pin the subject executor and supporting grants; they never replace the acting
+proof. Existing standard tool/calls/provider/filesystem fences, shared allowance,
+usage settlement and private-output checks are reused unchanged. No proof,
+admission, receipt, budget or database schema changed.
+
+The five existing transport operations remain the complete whitelist. General
+project acting execution, additional Global sources, independent background work,
+Relay, schedules, information processing, orchestrations, approvals, native/scripted
+agents and new consent/client capabilities remain unsupported under acting
+requests. Direct-consumer support from earlier slices does not enable delegated
+use. No new API or SDK parity commitment is included. Slices 13–14 remain proposed.
+
+## Verification evidence
+
+- All 205 focused acting, admitted-turn and retained-execution tests passed using
+  mocks/fakes, including live scoped action refusal, actor/subject intersections,
+  Personal isolation, immutable admitted ceilings, post-inference revocation with
+  incurred usage preserved, cancellation, resource relocation, synchronous child
+  checks, invalid-context no-fallback and uncertain receipt recovery.
+- No PostgreSQL tests were run: existing proof/admission/receipt persistence is
+  unchanged. Existing tagged database fixtures were updated for the mandatory
+  policy dependencies and compiled with the default tests; that is not a claim
+  that those database-backed scenarios were executed.
+- `./gradlew format formatCheck check` passed on the final source: 5,830
+  default server tests, zero failures and zero skips, plus the client/integration,
+  Javadoc and formatting checks in that task. This includes the two added
+  cancellation-disclosure regressions: READ before the effect and after it,
+  independently of WRITE and without creation/inference authority.
+- `git diff --check` and the slice documents' local-link checks passed. No live
+  Application integration, push or deployment was run.
