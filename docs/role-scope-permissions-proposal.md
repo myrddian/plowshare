@@ -289,6 +289,11 @@ The manual can be owned by `GLOBAL_ACCOUNT`, read through `GLOBAL_READ` and
 maintained by human ADMIN. A project document can instead keep its original owner
 and merely authorize `GLOBAL_READ`. Existing Shared revisions do not automatically
 change owner; a manual ownership/home migration must be separately authorized.
+Publishing to a group/project does not grant GLOBAL_READ. All revisions inherit
+the root document's current permissions, represented by its most current revision;
+historical/pinned reads cannot recover a removed audience grant. Content WRITE
+does not authorize a permission change through a new revision. Lifecycle and
+input/reference restrictions remain additional checks. See [root-document permissions](decisions/0030-authority-substrate-and-explicit-scopes.md#publication-audience-and-root-document-permissions).
 The issuer matrix for general-read grants on non-Global resources remains to be
 specified, including tenant and retained input/reference restrictions. Converting
 legacy Shared to `GLOBAL_READ` also admits previously excluded Application/service

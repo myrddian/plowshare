@@ -93,6 +93,14 @@ remain human ADMIN actions through CLI/TUI/GUI, with exact scope/source authorit
 Tool bindings, executable definitions, conversations and agent-run homes do not
 become part of Global knowledge.
 
+Publication is independent of audience: publishing to a group/project does not
+grant GLOBAL_READ. Document revisions inherit the logical root document's current
+permissions, represented by its most current revision; old/pinned revisions do
+not preserve revoked historical access. Reconcile existing per-revision Shared
+policies explicitly into this root policy without unioning old audiences. Keep
+content WRITE separate from permission changes and retain lifecycle/input checks.
+See the [root-document permission decision](decisions/0030-authority-substrate-and-explicit-scopes.md#publication-audience-and-root-document-permissions).
+
 A librarian Application can retain an admitted read selection spanning its own
 project and general-read knowledge while keeping writes confined to its project.
 The general read role never overrides narrower token/acting ceilings, mandatory

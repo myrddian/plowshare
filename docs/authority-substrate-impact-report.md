@@ -257,6 +257,13 @@ This can inform GLOBAL_READ authorization, but does not authorize an ownership
 transfer. Admitting previously excluded Application/service readers also expands
 the old audience and needs an explicit migration policy.
 
+The target now adopts live root-document permissions, represented by the most
+current revision, for all revision reads. Publication can remain group/project
+scoped and does not imply GLOBAL_READ. Per-revision Shared flags therefore need
+explicit reconciliation into the root policy; unioning historical audiences would
+widen access. Historical/pinned reads must use the current root permissions while
+preserving revision lifecycle and input/reference restrictions.
+
 The [manual installer:306](../scripts/install-manual.mjs) publishes from the human
 account's Personal namespace and verifies Shared reads. The
 [manual reader:21](../plowshare-desktop/src/manual.ts) finds a unique shared chapter.
@@ -369,7 +376,7 @@ bill the Global owner by implication or make private processing logs public.
 | Scope kind and account knowledge representation | Define typed account/project/execution targets and stable mappings, rather than reuse project/null or account handles as project names |
 | Built-in identity lifecycle | Reserve SYSTEM/Global/role/scope UUIDs; specify collisions, bootstrap, disable/delete/recovery, credential refusal and acting-subject rules |
 | Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
-| Read grants on revisions versus resources | Existing Shared is per revision; decide inheritance to future revisions, drafts, grant removal and author-controlled general-read issuance |
+| Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; the root document's current permissions govern its revisions, including historical/pinned reads. Reconcile existing per-revision Shared audiences and define atomic policy-version enforcement; lifecycle/draft eligibility and audience-change issuance remain separate |
 | Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
@@ -408,7 +415,8 @@ librarian read path needs these decisions:
    CREATE and RUN_MODEL; Global ADMIN has control/write without implicit execution.
 3. **Declared SYSTEM service admission:** which authorized upload/read triggers
    which worker, its scoped grants, inputs/outputs, sponsor/budget and private logs.
-4. **Effective read policy:** GLOBAL_READ resource/revision inheritance, supported
+4. **Effective read policy:** implement the adopted current root-document policy
+   across revisions and group/project/general-read audiences; settle supported
    Application/acting read targets, ownerOnly semantics and retained input rules.
 5. **Built-in lifecycle:** noninteractive SYSTEM/Global capabilities, no accidental
    Personal provisioning, current credential validity and safe grant issuance.
@@ -483,6 +491,10 @@ Focused mocked/fake acceptance coverage should include:
   supplies no mutation or execution authority and no private-resource disclosure.
 - Removing public authorization or withdrawing a required input stops future
   disclosure, including saved views, delayed work, references and message delivery.
+- Publishing to a group does not grant GLOBAL_READ. Current root-document
+  permissions govern new and historical/pinned revisions; removing an audience
+  blocks subsequent old-revision reads. Content-only updates cannot widen access,
+  and changing document permissions cannot bypass retained-input restrictions.
 - Human ADMIN writes a Global-owned resource through scoped action grants without
   impersonating Global or becoming its owner; Application roles use the same
   evaluator rather than separate authority logic.

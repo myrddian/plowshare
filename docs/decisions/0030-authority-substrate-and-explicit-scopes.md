@@ -553,9 +553,8 @@ Private processing logs and credentials do not inherit the knowledge audience.
 Future tenant policy must represent deployment-wide knowledge as an explicitly
 supported audience while keeping tenant-private resources isolated. A tenant
 that requires its resources never to reach that audience needs an enforced
-release restriction or a separate deployment. General-read publication authority
-and revision inheritance remain separate decisions; deployment-wide role
-membership alone supplies neither.
+release restriction or a separate deployment. Authority to choose an audience
+remains a separate decision; deployment-wide role membership alone supplies none.
 
 For example:
 
@@ -584,6 +583,40 @@ control over the original. The detailed issuer matrix for non-Global audience
 changes remains a separate decision. Draft/final, excluded, withdrawn, deleted
 and processing readiness remain independent lifecycle properties; a Global home
 is not a finalisation or processing command.
+
+### Publication, audience and root-document permissions
+
+Publishing does not imply `GLOBAL_READ`. A document can be published to an
+authorized group or project audience and remain unreadable to other authenticated
+principals. Deployment-wide reading requires the document's policy to authorize
+`GLOBAL_READ` explicitly or through its explicit Global knowledge-scope coverage.
+Finalising/publishing content and changing its permitted audience are separate
+effects; publication within an existing audience does not itself widen access.
+This specifies audience semantics, not a new arbitrary-group management engine.
+
+The logical root document is the authority for its document permissions. Its
+current authoritative policy, as represented by its most current revision,
+governs access to its revisions. Revisions inherit that live policy; they do not
+retain independent historical audience grants. A new content revision inherits
+the document's permissions unless an independently authorized policy change is
+also made. Ordinary content WRITE must not change access simply by writing a new
+revision that includes different permission fields.
+
+An explicit historical/pinned revision read still checks the root document's
+current permissions, current group/role eligibility and mandatory restrictions.
+Removing a reader/group or `GLOBAL_READ` therefore stops subsequent reads of old
+revisions too. Granting root access makes revisions eligible under that policy,
+but does not bypass their lifecycle, retained-input or reference restrictions.
+Revision selection and publication state remain separate from permission
+inheritance; an old revision is not an authorization fallback. A referenced
+document is a separate root with its own policy, not a revision inheriting the
+source document's permissions.
+
+Existing per-revision Shared visibility is a compatibility gap against this
+root-policy model. Migration must reconcile inconsistent revision audiences
+explicitly rather than union old grants or choose an older permissive policy.
+The current root policy must be resolved consistently before disclosure and
+audited independently of immutable historical content/provenance.
 
 ### Library, SDK reads and admitted search
 
