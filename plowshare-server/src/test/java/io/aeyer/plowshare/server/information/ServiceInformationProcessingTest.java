@@ -204,7 +204,7 @@ class ServiceInformationProcessingTest {
         "scopeRemoved",
         "applicationWithdrawn"
       })
-  void withdrawnAuthorityRefusesRenewalCheckpointAndExpiredLeaseReclaim(String change) {
+  void formerCreatorAuthorityDoesNotControlSystemRenewalCheckpointOrReclaim(String change) {
     UUID revision = retained(PRINCIPAL, project);
     Lease lease = claim(revision);
     assertTrue(repository.renew(lease));
@@ -230,24 +230,21 @@ class ServiceInformationProcessingTest {
                   ApplicationPolicy.Kind.APPLICATION, Map.of("reader", ProjectRole.CONTRIBUTOR)));
       default -> fail("unknown withdrawal fixture");
     }
-    assertFalse(repository.renew(lease));
-    assertThrows(
-        StaleLease.class,
-        () ->
-            work.inTransaction(
-                () -> {
-                  repository.requireLease(lease);
-                  repository.extracted(
-                      revision,
-                      new Extracted(
-                          "Late", "fixture", "Late write", List.of(), Extracted.NOT_CONVERTED));
-                  return null;
-                }));
-    assertNull(repository.readRevision(revision).extractedText());
+    assertTrue(repository.renew(lease));
+    work.inTransaction(
+        () -> {
+          repository.requireLease(lease);
+          repository.extracted(
+              revision,
+              new Extracted(
+                  "Retained", "fixture", "Retained write", List.of(), Extracted.NOT_CONVERTED));
+          return null;
+        });
+    assertEquals("Retained write", repository.readRevision(revision).extractedText());
     jdbc.update(
         "UPDATE information_steps SET lease_until=now()-interval '1 second' WHERE revision_id=? AND stage='extract'",
         revision);
-    assertTrue(work.inTransaction(() -> repository.candidate(revision, false).isEmpty()));
+    assertTrue(work.inTransaction(() -> repository.candidate(revision, false).isPresent()));
   }
 
   @Test
@@ -266,33 +263,21 @@ class ServiceInformationProcessingTest {
   }
 
   @Test
-  void deniedApplicationDoesNotStarveOtherProjectsOrPersonalWorkAndCanResume() {
-    UUID denied = retained(PRINCIPAL, project);
-    UUID allowed = retained("reader", null);
+  void applicationWithdrawalDoesNotChangePreviouslyAdmittedSystemWork() {
+    UUID projectWork = retained(PRINCIPAL, project), personal = retained("reader", null);
     boundary.set(
         new ApplicationPolicy.Boundary(
             ApplicationPolicy.Kind.APPLICATION, Map.of("reader", ProjectRole.CONTRIBUTOR)));
-    assertEquals(
-        allowed,
-        work.inTransaction(
-            () -> repository.candidate(null, false).orElseThrow().lease().revision()));
-    assertEquals("pending", state(denied, "extract"));
-    boundary.set(
-        new ApplicationPolicy.Boundary(
-            ApplicationPolicy.Kind.APPLICATION, Map.of("worker", ProjectRole.CONTRIBUTOR)));
-    assertEquals(denied, claim(denied).revision());
+    assertEquals(projectWork, claim(projectWork).revision());
+    assertEquals(personal, claim(personal).revision());
   }
 
   @Test
-  void deniedHumanProjectDoesNotHideTheSameAccountsPersonalWork() {
-    UUID denied = retained("reader", project), personal = retained("reader", null);
-    boundary.set(
-        new ApplicationPolicy.Boundary(
-            ApplicationPolicy.Kind.APPLICATION, Map.of("worker", ProjectRole.CONTRIBUTOR)));
-    assertEquals(
-        personal,
-        work.inTransaction(
-            () -> repository.candidate(null, false).orElseThrow().lease().revision()));
+  void formerHumanMembershipDoesNotChangeProjectOrPersonalSystemWork() {
+    UUID projectWork = retained("reader", project), personal = retained("reader", null);
+    jdbc.update("DELETE FROM project_members WHERE handle='reader'");
+    assertEquals(projectWork, claim(projectWork).revision());
+    assertEquals(personal, claim(personal).revision());
   }
 
   @Test
@@ -332,7 +317,7 @@ class ServiceInformationProcessingTest {
   }
 
   @Test
-  void serviceCannotProcessPersonalOrUnscopedProjectSources() {
+  void unknownPersonalHomeIsRefusedButCreatorTokenScopeDoesNotGateRegisteredSystemWork() {
     UUID personal = retained(PRINCIPAL, null);
     Long other = jdbc.queryForObject("SELECT id FROM projects WHERE name='other'", Long.class);
     jdbc.update(
@@ -340,7 +325,7 @@ class ServiceInformationProcessingTest {
         other);
     UUID unscoped = retained(PRINCIPAL, other);
     assertTrue(work.inTransaction(() -> repository.candidate(personal, false).isEmpty()));
-    assertTrue(work.inTransaction(() -> repository.candidate(unscoped, false).isEmpty()));
+    assertTrue(work.inTransaction(() -> repository.candidate(unscoped, false).isPresent()));
   }
 
   @Test
@@ -390,6 +375,132 @@ class ServiceInformationProcessingTest {
         });
   }
 
+  @Test
+  void systemEvidenceIsImmutableAndWithdrawalStillFencesOutput() {
+    UUID revision = retained("reader", project);
+    Lease lease = claim(revision);
+    var scope = repository.home(revision);
+    UUID root =
+        jdbc.queryForObject(
+            "SELECT id FROM authority_grants WHERE provenance='ROOT_POLICY'", UUID.class);
+    var evidence =
+        new io.aeyer.plowshare.server.access.SystemOperationRecords.Envelope(
+            UUID.randomUUID(),
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.DOCUMENT_PREPARATION,
+            scope,
+            root,
+            "worker",
+            "model",
+            "a".repeat(64));
+    var records = new io.aeyer.plowshare.server.access.JdbcSystemOperationRecords(jdbc);
+    records.retain(evidence);
+    new io.aeyer.plowshare.server.access.JdbcSystemOperationRecords(jdbc).require(evidence);
+    assertThrows(
+        org.springframework.dao.DataAccessException.class,
+        () -> jdbc.update("UPDATE system_operations SET model='other' WHERE id=?", evidence.id()));
+    jdbc.update("UPDATE information_revisions SET availability='withdrawn' WHERE id=?", revision);
+    assertFalse(repository.renew(lease));
+    assertThrows(
+        StaleLease.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  repository.requireLease(lease);
+                  return null;
+                }));
+  }
+
+  @Test
+  void conversationClaimsPersistBeforeDispatchAndStaleRecoveredReadersCannotDoubleSpend() {
+    var store = new ConversationStore(jdbc);
+    var budget = io.aeyer.plowshare.server.agents.Budget.of(2);
+    var row = store.open(io.aeyer.plowshare.protocol.Home.of("automation"), budget, null, "reader");
+    var stale = store.find(row.id()).orElseThrow().budget();
+    var first = budget.tryClaim().orElseThrow();
+    assertEquals(row.id(), first.conversation());
+    assertEquals(1, store.find(row.id()).orElseThrow().budget().spent());
+    assertThrows(ArchiveException.class, stale::tryClaim);
+    var recovered = store.find(row.id()).orElseThrow().budget();
+    var last = recovered.tryClaim().orElseThrow();
+    assertEquals(2, last.ordinal());
+    assertTrue(store.find(row.id()).orElseThrow().budget().exhausted());
+    var admission =
+        new io.aeyer.plowshare.server.llm.dispatch.InferenceBinding(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            last.budget(),
+            last.ordinal(),
+            last.limit(),
+            last.conversation());
+    var records = new io.aeyer.plowshare.server.llm.accounting.JdbcInferenceAdmissions(jdbc);
+    records.retain(admission);
+    records.require(admission);
+    assertEquals(
+        row.id(),
+        jdbc.queryForObject(
+            "SELECT source_conversation FROM operation_inference_budgets WHERE operation_id=?",
+            String.class,
+            admission.operation()));
+  }
+
+  @Test
+  void aRevokedCreatorDoesNotPreventPrivateSystemPipelineLogCreation() {
+    UUID revision = retained(PRINCIPAL, project);
+    Lease lease = claim(revision);
+    jdbc.update("UPDATE service_tokens SET revoked_at=now() WHERE id=?", token);
+    jdbc.update("DELETE FROM project_members WHERE handle='worker'");
+    var identities = new io.aeyer.plowshare.server.access.JdbcIdentityRepository(jdbc);
+    var grants = new io.aeyer.plowshare.server.access.JdbcScopedGrantRepository(jdbc);
+    ApplicationPolicy applications = ignored -> boundary.get();
+    var authority =
+        new io.aeyer.plowshare.server.access.LiveScopedAuthority(
+            grants,
+            applications,
+            new io.aeyer.plowshare.server.access.ApplicationGrantLineage(grants, applications),
+            identities);
+    var system =
+        new io.aeyer.plowshare.server.access.BoundSystemOperations(
+            identities,
+            grants,
+            authority,
+            new io.aeyer.plowshare.server.access.JdbcSystemOperationRecords(jdbc),
+            new io.aeyer.plowshare.server.access.OperationInference(
+                org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.OperationAuthority.class),
+                new io.aeyer.plowshare.server.llm.accounting.JdbcInferenceAdmissions(jdbc)));
+    var ordinary =
+        org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.OperationAuthority.class);
+    org.mockito.Mockito.when(
+            ordinary.admit(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new IllegalStateException("creator has no execution grant"));
+    var conversations = new ConversationStore(jdbc, ordinary);
+    var access = new InformationAccess(new EffectiveProjectPermissions(members));
+    var catalogue = InformationFixtures.catalogue(jdbc, work, access, Clock.systemUTC());
+    var inputs = new InformationJobs(new JdbcJobInformationRepository(jdbc), access);
+    var stages =
+        new InformationStageHooks(
+            new JdbcInformationStageRepository(jdbc),
+            catalogue,
+            conversations,
+            io.aeyer.plowshare.server.agents.LogStages.NONE,
+            inputs,
+            io.aeyer.plowshare.server.hooks.Hooks.NONE,
+            io.aeyer.plowshare.server.harness.Harness.NONE,
+            () -> null,
+            system,
+            repository);
+    assertFalse(work.inTransaction(() -> stages.before(lease)).isDenied());
+    String log =
+        jdbc.queryForObject(
+            "SELECT processing_log FROM information_revisions WHERE id=?", String.class, revision);
+    assertNotNull(log);
+    assertEquals(PRINCIPAL, conversations.ownerOf(log).orElseThrow());
+    assertFalse(inputs.logAllowed(log, PRINCIPAL));
+    org.mockito.Mockito.verifyNoInteractions(ordinary);
+  }
+
   void metadataReady(UUID revision, String stage) {
     jdbc.update("UPDATE information_revisions SET extracted_text='Evidence' WHERE id=?", revision);
     jdbc.update("UPDATE information_steps SET state='ready' WHERE revision_id=?", revision);
@@ -405,7 +516,7 @@ class ServiceInformationProcessingTest {
 
   @ParameterizedTest
   @ValueSource(strings = {"autoTag", "tagGroups"})
-  void withdrawnMetadataPageDoesNotStarveAnAuthorizedSource(String stage) {
+  void creatorWithdrawalDoesNotRemoveRetainedSystemMetadataFromTheQueue(String stage) {
     for (int index = 0; index < 100; index++) {
       UUID denied = retained(PRINCIPAL, project);
       metadataReady(denied, stage);
@@ -419,6 +530,11 @@ class ServiceInformationProcessingTest {
         work.inTransaction(
             () ->
                 stage.equals("autoTag") ? repository.sweepUntagged() : repository.sweepTagGroups());
-    assertEquals(List.of(new InformationProcessingRepository.Queued(allowed, 1, "reader")), queued);
+    assertEquals(100, queued.size());
+    var next =
+        work.inTransaction(
+            () ->
+                stage.equals("autoTag") ? repository.sweepUntagged() : repository.sweepTagGroups());
+    assertEquals(List.of(new InformationProcessingRepository.Queued(allowed, 1, "reader")), next);
   }
 }

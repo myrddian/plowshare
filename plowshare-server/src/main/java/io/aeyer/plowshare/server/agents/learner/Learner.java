@@ -67,15 +67,12 @@ import org.slf4j.LoggerFactory;
  *
  * <h2>It is infrastructure</h2>
  *
- * <p>The owner's rule: "budget and things shouldn't be an agent thing — that's the system, anything
- * 'infra' … should not be in that context going to the LLM". So:
+ * <p>The learner is a bounded SYSTEM service over a selected historical window:
  *
  * <ul>
- *   <li><b>Its own budget, not the conversation's.</b> It spends no {@code Budget} at all — the
- *       same correction the fold already took, for the same reason: a conversation whose allowance
- *       is nearly gone must not stop being mined, and a person must not pay out of their own
- *       allowance for a pass they did not ask for and are not told about. What it does hold is
- *       {@link #BUDGET}, which bounds only how long it waits to <em>start</em>.
+ *   <li><b>Its own configured allowance.</b> Production consults claim from the deployed worker's
+ *       model-call configuration and retain that operation evidence. {@link #BUDGET} remains a
+ *       queue deadline, not a spending allowance. Creator access does not provide SYSTEM authority.
  *   <li><b>Its runs are {@code diagnostic} entries.</b> Those carry role NULL and are refused a
  *       role by {@code entries_role_matches_kind}, so they cannot reach a model by construction. A
  *       conversation is never told a learner ran over it.
@@ -203,6 +200,36 @@ public final class Learner implements Learning, UsageAware {
    */
   private volatile LogGrowth growth = LogGrowth.NONE;
 
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public Learner(
+      LlmDispatcher dispatcher,
+      EntryStore entries,
+      ConversationStore conversations,
+      Archive archive,
+      Scribe scribe,
+      Supplier<AgentRegistry> agents,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, entries, conversations, archive, scribe, agents);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.LEARNING,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public Learner(
       LlmDispatcher dispatcher,
       EntryStore entries,
@@ -322,14 +349,18 @@ public final class Learner implements Learning, UsageAware {
     try {
       Completion completion =
           dispatcher.complete(
-              JobRuntime.requestFor(
-                      definition,
-                      List.of(
-                          ChatMessage.system(definition.prompt()),
-                          ChatMessage.user(rendered(window))))
-                  .withBudget(BUDGET)
-                  .withAttribution(
-                      owner.forOperation(UsageAttribution.Operation.LEARNING, definition.name())));
+              authorize(
+                  definition,
+                  window.home(),
+                  JobRuntime.requestFor(
+                          definition,
+                          List.of(
+                              ChatMessage.system(definition.prompt()),
+                              ChatMessage.user(rendered(window))))
+                      .withBudget(BUDGET)
+                      .withAttribution(
+                          owner.forOperation(
+                              UsageAttribution.Operation.LEARNING, definition.name()))));
       answer = completion.content();
     } catch (LlmSaturatedException busy) {
       // Debug and not warn, unlike the two below. A pool with no lane

@@ -88,7 +88,29 @@ public final class Budget {
   private final java.util.UUID identity = java.util.UUID.randomUUID();
 
   /** Immutable evidence of one successful claim, including its ceiling at claim time. */
-  public record Claim(java.util.UUID budget, int ordinal, Integer limit) {}
+  public record Claim(java.util.UUID budget, int ordinal, Integer limit, String conversation) {
+    public Claim(java.util.UUID budget, int ordinal, Integer limit) {
+      this(budget, ordinal, limit, null);
+    }
+  }
+
+  private String conversation;
+  private java.util.function.Consumer<Claim> persistClaim;
+
+  /** The repository binds the durable allowance owner once; children retain the same binding. */
+  public void bindConversation(String id, java.util.function.Consumer<Claim> persist) {
+    Objects.requireNonNull(id);
+    Objects.requireNonNull(persist);
+    claiming.lock();
+    try {
+      if (conversation != null && !conversation.equals(id))
+        throw new IllegalStateException("Budget cannot change its durable owner");
+      conversation = id;
+      if (persistClaim == null) persistClaim = persist;
+    } finally {
+      claiming.unlock();
+    }
+  }
 
   private final AtomicInteger spent = new AtomicInteger();
   private final Runnable charge;
@@ -265,8 +287,10 @@ public final class Budget {
       if (spent.get() == Integer.MAX_VALUE)
         throw new IllegalStateException("Model allowance counter exhausted");
       if (charge != null) charge.run();
-      int ordinal = spent.incrementAndGet();
-      return java.util.Optional.of(new Claim(identity, ordinal, ceiling));
+      var claim = new Claim(identity, spent.get() + 1, ceiling, conversation);
+      if (persistClaim != null) persistClaim.accept(claim);
+      spent.incrementAndGet();
+      return java.util.Optional.of(claim);
     } finally {
       claiming.unlock();
     }

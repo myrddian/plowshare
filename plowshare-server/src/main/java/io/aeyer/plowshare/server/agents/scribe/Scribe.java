@@ -73,9 +73,9 @@ import org.slf4j.LoggerFactory;
  * <h2>What it is not</h2>
  *
  * <p>Not a job. It makes exactly one model call and has no turn loop, so {@link
- * AgentDefinition#maxTurns()} and {@link AgentDefinition#maxModelCalls()} are not read here; the
- * file carries {@code 1} for each because that is what is true of it. Running it through {@code
- * JobRuntime} would give it a tool layer, which is the one thing it must not have.
+ * AgentDefinition#maxTurns()} does not drive a loop. Production consults claim the worker's
+ * configured {@link AgentDefinition#maxModelCalls()} allowance under bounded SYSTEM authority. The
+ * request remains tool-free and cannot acquire a runtime tool layer.
  *
  * <h2>The cost, which is one embedding call and used to be two</h2>
  *
@@ -201,6 +201,33 @@ public final class Scribe implements UsageAware {
    *     this in yet must file writes flat rather than fail them. A supplier that yields null is
    *     that state, and {@code no_registry_wired_falls_back_to_new} is what pins it.
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public Scribe(
+      LlmDispatcher dispatcher,
+      Archive archive,
+      Supplier<AgentRegistry> agents,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, archive, agents);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.SCRIBE,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public Scribe(LlmDispatcher dispatcher, Archive archive, Supplier<AgentRegistry> agents) {
     this(dispatcher, archive, agents, BUDGET);
   }
@@ -318,11 +345,15 @@ public final class Scribe implements UsageAware {
     try {
       completion =
           dispatcher.complete(
-              JobRuntime.requestFor(
-                      definition, conversation(definition, proposal, home, candidates))
-                  .withBudget(budget)
-                  .withAttribution(
-                      owner.forOperation(UsageAttribution.Operation.REVIEW, definition.name())));
+              authorize(
+                  definition,
+                  home,
+                  JobRuntime.requestFor(
+                          definition, conversation(definition, proposal, home, candidates))
+                      .withBudget(budget)
+                      .withAttribution(
+                          owner.forOperation(
+                              UsageAttribution.Operation.REVIEW, definition.name()))));
     } catch (LlmSaturatedException busy) {
       // Ahead of LlmException, which it extends. Saturation is the one
       // failure here that is about load rather than about the box, and it

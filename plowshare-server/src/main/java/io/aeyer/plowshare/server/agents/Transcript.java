@@ -122,6 +122,9 @@ public interface Transcript {
   /** Attach a validated immutable snapshot to this turn, including its later async fold. */
   default void accounted(UsageAttribution owner) {}
 
+  /** Retain the actual shared operation allowance for bounded internal compaction. */
+  default void spending(Budget budget) {}
+
   /** Immutable parent execution captured by a delegation's caller. */
   default UsageAttribution parentUsage() {
     return UsageAttribution.LEGACY;

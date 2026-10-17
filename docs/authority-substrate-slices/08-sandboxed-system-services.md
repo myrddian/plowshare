@@ -1,7 +1,8 @@
 # Slice 08: Sandboxed SYSTEM services and independent processing
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented for classified existing model-only services on this branch,
+18 October 2026, under explicit authorization. Missing configured embedding/search
+allowances remain an activation gap. No new public API or deployment.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -78,3 +79,45 @@ Specify each existing purpose's trigger, executor, input/output bindings, budget
 ## Rollout and rollback
 
 Retain SYSTEM operation identity, bounds, stage receipts and costs. An older owner-dependent worker cannot resume new operations; reconcile/hold them instead of changing executor or replaying stages.
+
+## Implementation and verification
+
+The [purpose specification](08-system-purpose-specification.md) records trigger,
+executor, input/output, budget and disclosure boundaries. `SystemOperations`
+retains a purpose, exact scope, original intrinsic root grant, worker/model and
+input-binding digest in V158. It issues no SYSTEM grant. Model-only requests cannot
+change home/model/materialized inputs or acquire tools. Runtime views preserve
+configured worker hooks and exclude user/project agent-rule injection.
+
+Preparation/tagging/grouping now use the persisted knowledge home and existing
+lease/generation/input fences independently of creator credentials or membership.
+Processing-stage checks use operation validity; user-facing document asks retain
+caller disclosure gates. Internal pipeline logs use explicit SYSTEM CREATE proof
+while retaining original private custody and input selections. Former-creator log
+reads remain refused. Paid checkpoints still require a valid operation.
+
+Compaction and skill handoff retain the actual shared conversation allowance.
+Conversation claims persist before dispatch with a conditional ordinal update; a
+stale recovered reader cannot spend twice. Budget-source identity is retained in
+inference records. Receipt identifiers survive source deletion without blocking
+that lifecycle, and a recreated project name cannot repair old authority.
+
+Existing Scribe, Learner, digest/navigation, curation, advisor, validator, command
+judge and schedule-reader calls use explicit bounded SYSTEM service authority and
+their existing configured/supplied allowances. Definition lookup remains through
+deployment/bundle suppliers. Usage attribution remains metadata, with historical
+records unchanged. Generic SYSTEM work recovery is not introduced: the owning
+stage/receipt must establish validity; input digests do not reconstruct permission.
+
+`./gradlew format formatCheck check` passed with 5,769 default server tests.
+Selected PostgreSQL checks passed: 4 admission/deletion cases, 21 processing/private
+log/allowance cases, 2 inference-claim cases and 95 conversation-store cases (122
+total). Focused mocks/fake transports cover root-grant loss, operation invalidity,
+input/home/model confinement, forbidden tools, independent creator authority and
+retained worker hooks. Native zero-call allowance and old explicit-cleanup fixtures
+were updated to the current schema/contracts after locating their introducing
+commits. No live service or model provider was exercised.
+
+Embedding query/write/repair still have no configured operation-call allowance.
+Production dispatch refuses them pending that decision; token limits and queue
+timeouts are not substituted. Complete deployment activation is not claimed.

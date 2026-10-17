@@ -44,9 +44,14 @@ public class DigestConfig {
       LlmDispatcher dispatcher,
       ObjectProvider<Compaction> logs,
       MemoryProperties properties,
-      LlmProperties llmProperties) {
+      LlmProperties llmProperties,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new DigestModel(
-        dispatcher, logs::getObject, properties, () -> llmProperties.systemSpecifier("memory"));
+        dispatcher,
+        logs::getObject,
+        properties,
+        () -> llmProperties.systemSpecifier("memory"),
+        system);
   }
 
   @Bean

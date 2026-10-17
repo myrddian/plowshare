@@ -7,7 +7,8 @@ with role/agent ceilings (03), and knowledge home/provenance with scoped
 READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
 and retained ordinary operation authority (06) are implemented in this branch.
 Slice 07 adds mandatory dispatcher evidence and retained call claims. SYSTEM/consumer
-cutovers (08–10) are authorized next; configured embedding/search allowances are
+slice 08 now classifies bounded SYSTEM services and removes creator-access gates
+from valid processing. Schedule/Relay cutovers (09–10) are authorized next; configured embedding/search allowances are
 a concrete activation gap, and unclassified production calls refuse.
 remaining orchestration/acting/contract cutovers remain later work.
 
@@ -45,7 +46,8 @@ Its [predicate inventory](authority-substrate-slices/04-knowledge-write-specific
 distinguishes converted checks from retained restrictions. The existing archive
 Global tier now has an explicit scope mapping; this does not activate Global
 access or SYSTEM processing. Slice 05 now implements the root audience; slice 06
-implements ordinary retained execution. Slices 07–10 are authorized next; 11–14
+implements ordinary retained execution. Slices 07–08 add dispatch/budget evidence
+and bounded SYSTEM processing. Slices 09–10 are authorized next; 11–14
 remain proposed.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces

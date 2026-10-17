@@ -50,6 +50,32 @@ public final class StuckTrapFactory implements HarnessHookFactory, AutoCloseable
    *     Compaction}'s reason for its folder: an operator editing the file should get the edit, not
    *     the boot's copy
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public StuckTrapFactory(
+      LlmDispatcher dispatcher,
+      Supplier<AgentDefinition> definition,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, definition);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.STUCK_ADVISOR,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public StuckTrapFactory(LlmDispatcher dispatcher, Supplier<AgentDefinition> definition) {
     this.dispatcher = dispatcher;
     this.definition = definition;
@@ -89,7 +115,8 @@ public final class StuckTrapFactory implements HarnessHookFactory, AutoCloseable
   }
 
   /**
-   * One advisor call: the agent's prompt, the brief, no tools, no allowance spent.
+   * One advisor call: the agent's prompt and materialized brief, with no tools, under its
+   * configured operation allowance.
    *
    * <p><b>Streamed, though nothing reads the deltas.</b> A non-streaming call cannot be stopped, so
    * a consult the run abandoned would go on holding an inference slot — and on a pool with one chat
@@ -103,12 +130,15 @@ public final class StuckTrapFactory implements HarnessHookFactory, AutoCloseable
     AgentDefinition advisor = definition.get();
     Completion said =
         dispatcher.stream(
-            ChatRequest.of(
-                    specifier,
-                    List.of(ChatMessage.system(advisor.prompt()), ChatMessage.user(brief)))
-                .withSampling(advisor.sampling())
-                .withAttribution(
-                    owner.forOperation(UsageAttribution.Operation.HOOK_MODEL, advisor.name())),
+            authorize(
+                advisor,
+                io.aeyer.plowshare.protocol.Home.global(),
+                ChatRequest.of(
+                        specifier,
+                        List.of(ChatMessage.system(advisor.prompt()), ChatMessage.user(brief)))
+                    .withSampling(advisor.sampling())
+                    .withAttribution(
+                        owner.forOperation(UsageAttribution.Operation.HOOK_MODEL, advisor.name()))),
             Deltas.DISCARDING,
             abandoned);
     return advice(said);

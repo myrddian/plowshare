@@ -61,12 +61,13 @@ public interface InformationProcessingRepository {
 
   void start(Lease lease, String expected);
 
-  /** Extend only a current lease whose owner and inputs remain authorized. */
+  /** Extend only a current SYSTEM operation lease whose retained inputs remain valid. */
   boolean renew(Lease lease);
 
   /**
-   * Checks current principal authority (including service scope and Application grants), dependency
-   * readability and the lease token while locking revision and stage. Throws StaleLease on loss.
+   * Checks live SYSTEM authority, retained input availability, generation and the lease token while
+   * locking revision and stage. Creator access is not processing authority. Throws StaleLease on
+   * loss.
    */
   void requireLease(Lease lease);
 
@@ -77,6 +78,9 @@ public interface InformationProcessingRepository {
   boolean groupingEligible(UUID revision);
 
   Revision readRevision(UUID revision);
+
+  /** Exact persisted knowledge home, never inferred from creator or legacy null project. */
+  io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home(UUID revision);
 
   String projectName(Long id);
 

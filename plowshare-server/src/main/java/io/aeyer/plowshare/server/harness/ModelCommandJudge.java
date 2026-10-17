@@ -60,6 +60,32 @@ public final class ModelCommandJudge implements CommandJudge, AutoCloseable, Usa
    * @param definition the {@code command_judge} agent, resolved per consult, so an operator's edit
    *     to the file reaches the next one
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Production consults have explicit SYSTEM authority and a configured operation allowance. */
+  public ModelCommandJudge(
+      LlmDispatcher dispatcher,
+      Supplier<AgentDefinition> definition,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, definition);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
+  private io.aeyer.plowshare.server.llm.dispatch.ChatRequest authorize(
+      AgentDefinition definition,
+      io.aeyer.plowshare.protocol.Home home,
+      io.aeyer.plowshare.server.llm.dispatch.ChatRequest request) {
+    return system == null
+        ? request
+        : system.authorize(
+            io.aeyer.plowshare.server.access.SystemOperations.Purpose.COMMAND_JUDGE,
+            home,
+            definition,
+            request,
+            io.aeyer.plowshare.server.agents.Budget.of(definition.maxModelCalls()),
+            () -> {});
+  }
+
   public ModelCommandJudge(LlmDispatcher dispatcher, Supplier<AgentDefinition> definition) {
     this(dispatcher, definition, TIMEOUT);
   }
@@ -85,11 +111,15 @@ public final class ModelCommandJudge implements CommandJudge, AutoCloseable, Usa
     }
     AgentDefinition judge = definition.get();
     ChatRequest request =
-        ChatRequest.of(
-                judge.model(),
-                List.of(ChatMessage.system(judge.prompt()), ChatMessage.user(brief(commands))))
-            .withSampling(judge.sampling())
-            .withAttribution(owner.forOperation(UsageAttribution.Operation.REVIEW, judge.name()));
+        authorize(
+            judge,
+            io.aeyer.plowshare.protocol.Home.global(),
+            ChatRequest.of(
+                    judge.model(),
+                    List.of(ChatMessage.system(judge.prompt()), ChatMessage.user(brief(commands))))
+                .withSampling(judge.sampling())
+                .withAttribution(
+                    owner.forOperation(UsageAttribution.Operation.REVIEW, judge.name())));
     CompletableFuture<Completion> call = new CompletableFuture<>();
     calls.execute(
         () -> {

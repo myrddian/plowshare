@@ -7,6 +7,11 @@ public interface CallAuthorization {
 
   void require();
 
+  /** Internal SYSTEM calls additionally bind the materialized request; never sent on the wire. */
+  default void requireRequest(ChatRequest request) {
+    require();
+  }
+
   /** Explicit allowance evidence, absent for unclassified compatibility calls. */
   default InferenceBinding binding() {
     return null;
@@ -20,6 +25,12 @@ public interface CallAuthorization {
       @Override
       public void require() {
         original.require();
+        other.require();
+      }
+
+      @Override
+      public void requireRequest(ChatRequest request) {
+        original.requireRequest(request);
         other.require();
       }
 

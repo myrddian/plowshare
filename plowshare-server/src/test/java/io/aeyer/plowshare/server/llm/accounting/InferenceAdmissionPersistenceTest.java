@@ -39,7 +39,7 @@ class InferenceAdmissionPersistenceTest {
     restarted.require(b);
     assertThrows(IllegalStateException.class, () -> restarted.submitted(b));
     assertThrows(
-        DataAccessException.class,
+        IllegalStateException.class,
         () ->
             records.retain(
                 new InferenceBinding(UUID.randomUUID(), b.operation(), UUID.randomUUID(), 2, 2)));

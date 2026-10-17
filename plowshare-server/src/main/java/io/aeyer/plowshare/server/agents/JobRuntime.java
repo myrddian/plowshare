@@ -233,6 +233,24 @@ public final class JobRuntime {
     this.inferenceCalls = Objects.requireNonNull(inferenceCalls);
   }
 
+  private io.aeyer.plowshare.server.access.SystemOperations.Work systemWork;
+
+  /** Internal model-only view; caller provenance never supplies SYSTEM authority. */
+  public JobRuntime forSystemWork(io.aeyer.plowshare.server.access.SystemOperations.Work work) {
+    Objects.requireNonNull(work).require();
+    JobRuntime copy =
+        retainedCopy(
+            (home, resources) -> {
+              work.require();
+              if (!work.home().equals(home) || !resources.isEmpty())
+                throw new CallerFault("SYSTEM model work cannot acquire resources");
+            });
+    copy.systemWork = work;
+    copy.harness = harness; // Preserve configured worker hooks inside the model-only envelope.
+    copy.admittedAuthority = work::require;
+    return copy;
+  }
+
   private boolean confined;
   private Runnable admittedAuthority = () -> {};
   private String admittedSubject;
@@ -295,6 +313,7 @@ public final class JobRuntime {
     retained.retainedResources = authority;
     retained.operations = operations;
     retained.inferenceCalls = inferenceCalls;
+    retained.systemWork = systemWork;
     retained.runUsage = runUsage;
     retained.hooks = hooks;
     retained.environments = environments;
@@ -1537,6 +1556,30 @@ public final class JobRuntime {
       String callerHandle,
       boolean incoming,
       io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+    if (systemWork != null) {
+      systemWork.requireTask(home, definition, userPrompt);
+      SystemModelTasks.requireModelOnly(definition);
+      if (operation != null
+          || sessionId != null
+          || incoming
+          || !images.isEmpty()
+          || !systemWork.home().equals(home))
+        throw new CallerFault("SYSTEM model work cannot change its execution envelope");
+      return execute(
+          definition,
+          userPrompt,
+          home,
+          budget,
+          cancelled,
+          null,
+          watch,
+          transcript,
+          cap,
+          images,
+          callerHandle,
+          false,
+          null);
+    }
     if (operation == null && operations != null)
       operation =
           operations.admit(
@@ -1667,6 +1710,7 @@ public final class JobRuntime {
     if (operation != null) operations.requireTargets(operation, home, List.of());
     if (confined) RetainedAgent.require(definition);
     String owner = ownerOf(callerHandle, sessionId, transcript.conversationId());
+    transcript.spending(budget);
     RunUsage tracking = runUsage;
     Transcript ownedTranscript =
         tracking == RunUsage.NONE
@@ -1674,7 +1718,8 @@ public final class JobRuntime {
             : tracking.start(home, transcript, definition.name(), owner);
     // Rules attach to the current executor, never by copying a parent's role prefix.
     // A refused rules file ends the run before it can make model calls or mutate files.
-    definition = withAgentRules(definition, home, sessionId, transcript.conversationId(), owner);
+    if (systemWork == null)
+      definition = withAgentRules(definition, home, sessionId, transcript.conversationId(), owner);
     requireSystemModelCapabilities(definition, ownedTranscript);
     Rerouting route = new Rerouting(definition, ownedTranscript);
     Pacing pacing = new Pacing(ticker);
@@ -2666,20 +2711,23 @@ public final class JobRuntime {
         completion =
             streamed(
                 slot,
-                requiring(
-                    route
-                        .requestFor(history)
-                        .withAttribution(usageFor(transcript, definition, steps + 1))
-                        .withAuthorization(
-                            operation == null
-                                ? io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT
-                                : inferenceCalls == null
-                                    ? () -> operations.require(operation)
-                                    : inferenceCalls.claimed(operation, claimed.orElseThrow()))
-                        .withTools(forced ? withTheWayOut(schemas) : schemas),
-                    extras,
-                    schemas,
-                    forced),
+                systemRequest(
+                    requiring(
+                        route
+                            .requestFor(history)
+                            .withAttribution(usageFor(transcript, definition, steps + 1))
+                            .withAuthorization(
+                                operation == null
+                                    ? io.aeyer.plowshare.server.llm.dispatch.CallAuthorization
+                                        .DIRECT
+                                    : inferenceCalls == null
+                                        ? () -> operations.require(operation)
+                                        : inferenceCalls.claimed(operation, claimed.orElseThrow()))
+                            .withTools(forced ? withTheWayOut(schemas) : schemas),
+                        extras,
+                        schemas,
+                        forced),
+                    claimed.orElseThrow()),
                 timed.timing(
                     informationStream(
                         watch.streaming() ? watching(watch) : DISCARDS,
@@ -4842,6 +4890,12 @@ public final class JobRuntime {
     // A dependent answer is delivered whole after its final permission check. No database IO on the
     // delta sink thread.
     return informationInputs != null && informationInputs.hasInputs(log) ? Deltas.DISCARDING : sink;
+  }
+
+  private ChatRequest systemRequest(ChatRequest request, Budget.Claim claim) {
+    return systemWork == null
+        ? request
+        : request.withAuthorization(systemWork.claimed(request, claim));
   }
 
   private Completion streamed(

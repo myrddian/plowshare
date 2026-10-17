@@ -342,6 +342,32 @@ public final class ConversationStore {
       Budget owned,
       String owner,
       String openedBy) {
+    return logInternal(origin, home, agent, parent, owned, owner, openedBy, null);
+  }
+
+  /** Internal SYSTEM log creation preserves the original custodian and private disclosure rules. */
+  public ConversationRecord logSystem(
+      Origin origin,
+      Home home,
+      String agent,
+      String parent,
+      Budget owned,
+      String owner,
+      String openedBy,
+      io.aeyer.plowshare.server.access.SystemOperations.Work work) {
+    Objects.requireNonNull(work).requireLog(home, agent);
+    return logInternal(origin, home, agent, parent, owned, owner, openedBy, work);
+  }
+
+  private ConversationRecord logInternal(
+      Origin origin,
+      Home home,
+      String agent,
+      String parent,
+      Budget owned,
+      String owner,
+      String openedBy,
+      io.aeyer.plowshare.server.access.SystemOperations.Work system) {
     Objects.requireNonNull(origin, "origin");
     if (origin == Origin.TURN) {
       throw new IllegalArgumentException(
@@ -391,7 +417,9 @@ public final class ConversationStore {
     // about their own turns; one agent's run is capped by TurnCap.from(its
     // definition), resolved where the run is started, and a column here
     // would be a second answer to a question that already has one.
-    if (operations != null && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
+    if (system == null
+        && operations != null
+        && (origin == Origin.SUBMISSION || origin == Origin.EVENT))
       operations.admit(
           owner,
           home,
@@ -478,18 +506,20 @@ public final class ConversationStore {
     // named by the first thing said in it, and nothing has been said in this
     // one yet -- `nameFromFirstTurn` is what fills the column, from
     // `TurnStore.record`, and until it runs the null here is exactly true.
-    return new ConversationRecord(
-        id,
-        home,
-        origin,
-        state == null ? null : ConversationLifecycle.ACTIVE,
-        parent,
-        agent,
-        at,
-        null,
-        readBudget(total, spent, budgetLifted),
-        readBack(cap, lifted),
-        null);
+    if (budget != null) bindBudget(id, budget);
+    return withBoundBudget(
+        new ConversationRecord(
+            id,
+            home,
+            origin,
+            state == null ? null : ConversationLifecycle.ACTIVE,
+            parent,
+            agent,
+            at,
+            null,
+            readBudget(total, spent, budgetLifted),
+            readBack(cap, lifted),
+            null));
   }
 
   /**
@@ -509,7 +539,32 @@ public final class ConversationStore {
                     "SELECT " + COLUMNS + FROM_CONVERSATIONS + " WHERE c.id = ?",
                     ROW_MAPPER,
                     wanted));
-    return found.isEmpty() ? Optional.empty() : Optional.of(found.get(0));
+    return found.isEmpty() ? Optional.empty() : Optional.of(withBoundBudget(found.get(0)));
+  }
+
+  private ConversationRecord withBoundBudget(ConversationRecord record) {
+    if (record.budget() != null) bindBudget(record.id(), record.budget());
+    return record;
+  }
+
+  private void bindBudget(String id, Budget budget) {
+    budget.bindConversation(
+        id,
+        claim -> {
+          // Persist before transport, under the Budget's claim/limit lock. The expected ordinal
+          // refuses concurrent stale readers rather than lending the same call twice after restart.
+          int changed =
+              jdbc.update(
+                  "UPDATE conversations SET budget_total=?,budget_lifted=?,budget_spent=? WHERE id=? AND budget_spent=?",
+                  claim.limit(),
+                  claim.limit() == null,
+                  claim.ordinal(),
+                  id,
+                  claim.ordinal() - 1);
+          if (changed != 1)
+            throw new ArchiveException(
+                "Conversation allowance changed; reconcile the original operation");
+        });
   }
 
   /** The account a hook's notify reaches, or empty for a log nobody owns (decision 8). */
@@ -840,7 +895,10 @@ public final class ConversationStore {
     String wanted = named(id);
     return ArchiveUnavailableException.translating(
         "read the root of a conversation tree",
-        () -> jdbc.query(ROOT_OF, ROW_MAPPER, wanted).stream().findFirst());
+        () ->
+            jdbc.query(ROOT_OF, ROW_MAPPER, wanted).stream()
+                .findFirst()
+                .map(this::withBoundBudget));
   }
 
   public Optional<ConversationLifecycle> lifecycleOf(String id) {

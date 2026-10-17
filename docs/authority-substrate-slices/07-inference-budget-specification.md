@@ -45,7 +45,7 @@ not reconstructed from created_by or accounting metadata.
 
 Dispatcher inventory: chat complete, stream, streamFold, streamOn and embedding;
 direct owners are JobRuntime, Compaction (including skill handoff), Scribe, Learner, DigestModel, StuckTrapFactory,
-ModelCallValidator, ModelCommandJudge, DispatchingEmbeddingClient and DispatchingDualEmbeddings (through EmbeddingDispatch). Token
+ModelCallValidator, ModelCommandJudge, ScheduleReader, DispatchingEmbeddingClient and DispatchingDualEmbeddings (through EmbeddingDispatch). Token
 counting is preflight metadata, not RUN_MODEL execution. Input/output security
 filters must preserve evidence and cannot create authority.
 
@@ -56,3 +56,8 @@ explicit evidence remain refused. A configured search/deployment budget mechanis
 requires a subsequent explicit decision; this implementation adds no implicit
 one-call allowance or SYSTEM wallet. This is a recorded activation gap, not a
 claim that semantic search remains available during partial rollout.
+
+Slice 08 binds actual conversation allowances to repository-backed pre-dispatch
+spend, including background compaction. Stale recovered counters cannot spend the
+same ordinal. Source conversation identity is retained with the budget evidence;
+processing retains its existing revision spend callback. Neither is a new payer.

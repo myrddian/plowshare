@@ -27,6 +27,18 @@ public final class DigestModel implements UsageAware {
    * the call rather than frozen at construction — {@code LlmProperties} is a bean and the binding
    * is configuration, and a constructor-time copy would make a rebind silently ineffective.
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  public DigestModel(
+      LlmDispatcher dispatcher,
+      Supplier<Compaction> logs,
+      MemoryProperties properties,
+      Supplier<String> specifier,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(dispatcher, logs, properties, specifier);
+    this.system = java.util.Objects.requireNonNull(system);
+  }
+
   public DigestModel(
       LlmDispatcher dispatcher,
       Supplier<Compaction> logs,
@@ -42,6 +54,7 @@ public final class DigestModel implements UsageAware {
     private final Transcript trace;
     private final Budget budget;
     private final UsageAttribution owner;
+    private io.aeyer.plowshare.server.access.SystemOperations.Work systemWork;
     private String result = "System memory operation did not complete";
     private Outcome.Ending ending = Outcome.Ending.STUCK;
 
@@ -134,7 +147,22 @@ public final class DigestModel implements UsageAware {
         && trace.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED) {
       trace.accounted(owned);
     }
-    return new Operation(trace, budget, owned);
+    var operation = new Operation(trace, budget, owned);
+    if (system != null)
+      operation.systemWork =
+          system.admit(
+              io.aeyer.plowshare.server.access.SystemOperations.Purpose.MEMORY_DIGEST,
+              home,
+              definition,
+              String.valueOf(trace.conversationId()),
+              () -> {});
+    return operation;
+  }
+
+  private ChatRequest authorized(Operation operation, ChatRequest request, Budget.Claim claim) {
+    return operation.systemWork == null
+        ? request
+        : request.withAuthorization(operation.systemWork.claimed(request, claim));
   }
 
   private String call(
@@ -144,7 +172,10 @@ public final class DigestModel implements UsageAware {
       String evidence,
       Home home,
       Budget budget) {
-    if (!budget.trySpend()) throw new IllegalStateException("System memory allowance exhausted");
+    var claim =
+        budget
+            .tryClaim()
+            .orElseThrow(() -> new IllegalStateException("System memory allowance exhausted"));
     AgentDefinition definition =
         new AgentDefinition(
             role,
@@ -165,11 +196,14 @@ public final class DigestModel implements UsageAware {
       trace.record(LoggedEntry.utterance(evidence, Speaker.harness()));
       Completion result =
           dispatcher.complete(
-              JobRuntime.requestFor(
-                      definition,
-                      List.of(ChatMessage.system(instruction), ChatMessage.user(evidence)))
-                  .withAttribution(
-                      operation.owner.forOperation(operation.owner.operation(), role)));
+              authorized(
+                  operation,
+                  JobRuntime.requestFor(
+                          definition,
+                          List.of(ChatMessage.system(instruction), ChatMessage.user(evidence)))
+                      .withAttribution(
+                          operation.owner.forOperation(operation.owner.operation(), role)),
+                  claim));
       if ("length".equals(result.finishReason()))
         throw new IllegalStateException("Memory model output was truncated");
       String answer = result.content();

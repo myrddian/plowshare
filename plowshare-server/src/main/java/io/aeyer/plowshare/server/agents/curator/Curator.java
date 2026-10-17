@@ -218,6 +218,21 @@ public final class Curator {
    *     boot whose wiring has not landed, and {@link #pass} reports that rather than promoting
    *     anything.
    */
+  private io.aeyer.plowshare.server.access.SystemOperations system;
+
+  /** Existing maintenance rulings use root authority with fixed materialized evidence. */
+  public Curator(
+      Archive archive,
+      ProposalStore proposals,
+      PromotionQueue queue,
+      JobRuntime runtime,
+      Supplier<AgentRegistry> agents,
+      Compaction logs,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    this(archive, proposals, queue, runtime, agents, logs);
+    this.system = Objects.requireNonNull(system);
+  }
+
   public Curator(
       Archive archive,
       ProposalStore proposals,
@@ -391,8 +406,18 @@ public final class Curator {
       // A curator pass is started by a nightly tick or by POST /v1/curate
       // and has no client machine behind it, so its rulings get the
       // server's own filesystems: a smaller set, not an empty capability.
+      JobRuntime execution =
+          system == null
+              ? runtime
+              : runtime.forSystemWork(
+                  system.admit(
+                      io.aeyer.plowshare.server.access.SystemOperations.Purpose.MEMORY_CURATION,
+                      home,
+                      judge,
+                      task,
+                      () -> {}));
       Outcome ruling =
-          runtime.run(judge, task, home, budget, cancelled, null, JobWatch.UNWATCHED, log);
+          execution.run(judge, task, home, budget, cancelled, null, JobWatch.UNWATCHED, log);
       log.closed(task, ruling);
       tally.spent(ruling);
       switch (ruling.ending()) {

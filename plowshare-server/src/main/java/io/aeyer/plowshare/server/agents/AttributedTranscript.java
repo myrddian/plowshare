@@ -25,6 +25,11 @@ public record AttributedTranscript(
   }
 
   @Override
+  public void spending(Budget budget) {
+    delegate.spending(budget);
+  }
+
+  @Override
   public void startedAs(String job) {
     delegate.startedAs(job);
   }

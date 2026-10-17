@@ -193,6 +193,7 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   public Completion complete(ChatRequest request) {
+    request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, () -> false);
     boundary.require(filtered.authorization());
@@ -297,6 +298,7 @@ public final class LlmDispatcher implements AutoCloseable {
 
   private Completion stream(
       ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
+    request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, abandoned);
     boundary.require(filtered.authorization());
@@ -870,6 +872,7 @@ public final class LlmDispatcher implements AutoCloseable {
    */
   public Completion streamOn(
       String pool, ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
+    request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
     ChatRequest filtered = filtering.input(request, abandoned);
     boundary.require(filtered.authorization());

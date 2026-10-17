@@ -500,7 +500,11 @@ public final class InformationLifecycle implements AutoCloseable {
                             repository.spend(lease.revision());
                             return null;
                           }));
-          Summariser pass = cascade.forRevision(writer, home, lease.owner(), row.processingLog());
+          Summariser pass =
+              cascade
+                  .forRevision(writer, home, lease.owner(), row.processingLog())
+                  .withSystemValidity(fence)
+                  .withSystemScope(() -> repository.home(lease.revision()));
           if (stages != null) pass.withStages(stages.forLease(lease, fence));
           Outcome outcome = pass.summarise(lease.revision(), row.title(), budget, cancelled);
           if (outcome.detail().equals("document.stage.denied"))
@@ -531,7 +535,11 @@ public final class InformationLifecycle implements AutoCloseable {
                             repository.spend(lease.revision());
                             return null;
                           }));
-          var pass = tagger.forRevision(writer, home, lease.owner(), row.processingLog());
+          var pass =
+              tagger
+                  .forRevision(writer, home, lease.owner(), row.processingLog())
+                  .withSystemValidity(fence)
+                  .withSystemScope(() -> repository.home(lease.revision()));
           if (stages != null) pass.withStages(stages.forLease(lease, fence));
           String source = row.extractedText();
           String content = source;
@@ -589,7 +597,11 @@ public final class InformationLifecycle implements AutoCloseable {
                             repository.spend(lease.revision());
                             return null;
                           }));
-          var pass = grouper.forRevision(writer, home, lease.owner(), row.processingLog());
+          var pass =
+              grouper
+                  .forRevision(writer, home, lease.owner(), row.processingLog())
+                  .withSystemValidity(fence)
+                  .withSystemScope(() -> repository.home(lease.revision()));
           if (stages != null) pass.withStages(stages.forLease(lease, fence));
           var groups =
               pass.tagGroups(

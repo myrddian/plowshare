@@ -321,7 +321,8 @@ public class InformationConfig {
       @Qualifier("projectHooks") ObjectProvider<Hooks> projectHooks,
       @Qualifier("localHooks") ObjectProvider<Hooks> localHooks,
       ObjectProvider<io.aeyer.plowshare.server.embedding.DualEmbeddings> dualProvider,
-      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers) {
+      ObjectProvider<io.aeyer.plowshare.server.embedding.EmbeddingTokenizers> embeddingTokenizers,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     var dual = dualProvider.getIfAvailable();
     var counters = embeddingTokenizers.getIfAvailable();
     var chunkTokenizer = counters == null ? tokenizer : counters.documents();
@@ -365,7 +366,9 @@ public class InformationConfig {
                 projectHooks.getIfAvailable(() -> Hooks.NONE),
                 localHooks.getIfAvailable(() -> Hooks.NONE)),
             harness.getIfAvailable(() -> Harness.NONE),
-            GlobalAgentSnapshots.supply(globals, agents));
+            GlobalAgentSnapshots.supply(globals, agents),
+            system,
+            processing);
     gates.useUsageOwners(
         usageOwners.getIfAvailable(
             () -> io.aeyer.plowshare.server.llm.accounting.UsageOwners.NONE));

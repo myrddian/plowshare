@@ -34,7 +34,12 @@ public final class OperationInference implements InferenceCalls {
     authority.require();
     var binding =
         new InferenceBinding(
-            UUID.randomUUID(), operation, claim.budget(), claim.ordinal(), claim.limit());
+            UUID.randomUUID(),
+            operation,
+            claim.budget(),
+            claim.ordinal(),
+            claim.limit(),
+            claim.conversation());
     records.retain(binding);
     return new CallAuthorization() {
       @Override

@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.information;
 
 import io.aeyer.plowshare.server.archive.ProjectMembers;
-import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.documents.Extracted;
 import io.aeyer.plowshare.server.information.InformationLifecycle.*;
 import java.time.*;
@@ -12,22 +11,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcInformationProcessingRepository implements InformationProcessingRepository {
   private final JdbcTemplate jdbc;
   private final Clock clock;
-  private final ProjectMembers members;
 
-  // Token principals retain ownership; their owner's membership and credential ceiling determine
-  // authority. Ordinary processing retains the existing explicit-membership requirement.
-  private static final String OWNER_AUTHORIZED =
-      "account_active(q.owner_handle) AND ((q.project_id IS NULL AND q.owner_handle NOT LIKE '@service/%')"
-          + " OR (q.project_id IS NOT NULL AND ((q.owner_handle LIKE '@service/%' AND"
-          + " service_project_role((SELECT name FROM projects WHERE id=q.project_id),q.owner_handle) IS NOT NULL)"
-          + " OR (q.owner_handle NOT LIKE '@service/%' AND EXISTS(SELECT 1 FROM project_members m"
-          + " WHERE m.project_id=q.project_id AND m.handle=q.owner_handle)))))"
-          + " AND information_reference_readable(r.id,q.owner_handle,(SELECT name FROM projects WHERE id=q.project_id))";
+  // Independent SYSTEM processing uses live intrinsic authority and retained input validity.
+  // The creator is retained for provenance/private log custody, never as execution authority.
+  private static final String SYSTEM_OPERATION_VALID = "information_system_processing_valid(r.id)";
 
   private record Authority(String owner, String project) {}
 
   private boolean authorized(Authority authority) {
-    return authority.project() == null || members.mayUse(authority.project(), authority.owner());
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT information_system_scope_valid(?)", Boolean.class, authority.project()));
   }
 
   private Authority authority(Lease lease) {
@@ -38,7 +32,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
       JdbcTemplate jdbc, Clock clock, ProjectMembers members) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.clock = Objects.requireNonNull(clock);
-    this.members = Objects.requireNonNull(members);
+    Objects.requireNonNull(members);
   }
 
   private OffsetDateTime now() {
@@ -71,12 +65,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + " AND prior.stage IN ('extract','derive') AND prior.state IN ('ready','skipped'))=2"
                 + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                 + " AND "
-                + OWNER_AUTHORIZED
-                + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id))"
-                + " OR information_readable(r.id,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
-                + " (SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,"
-                + " q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
+                + SYSTEM_OPERATION_VALID);
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='autoTag'",
@@ -104,11 +93,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                 + ")) AND s.state IN ('skipped','ready')"
                 + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                 + " AND "
-                + OWNER_AUTHORIZED
-                + " AND ((q.namespace<>'legacy' AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.id=r.id)) OR information_readable(r.id,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id AND NOT information_readable(i.input_revision,q.owner_handle,"
-                + " CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,(SELECT p.name FROM projects p WHERE p.id=q.project_id),q.owner_handle NOT LIKE '@service/%'))");
+                + SYSTEM_OPERATION_VALID);
     for (var candidate : candidates) {
       jdbc.update(
           "UPDATE information_steps SET state='pending',error=NULL,fingerprint=NULL,finished_at=NULL WHERE revision_id=? AND generation=? AND stage='tagGroups'",
@@ -174,7 +159,7 @@ public final class JdbcInformationProcessingRepository implements InformationPro
                   + " WHERE r.availability='active' AND r.generation=s.generation AND q.owner_handle IS NOT NULL"
                   + " AND NOT EXISTS(SELECT 1 FROM information_acquisitions a WHERE a.revision_id=r.id AND a.state<>'succeeded')"
                   + " AND "
-                  + OWNER_AUTHORIZED
+                  + SYSTEM_OPERATION_VALID
                   + " AND "
                   + PROCESSING_AUTHORIZED
                   + " AND (s.state='pending' OR (s.state='running' AND s.lease_until<?))"
@@ -241,12 +226,9 @@ public final class JdbcInformationProcessingRepository implements InformationPro
     return jdbc.update(
             "UPDATE information_steps s SET lease_until=? FROM information_revisions r,information_resources q"
                 + " WHERE r.id=s.revision_id AND q.id=r.resource_id AND "
-                + OWNER_AUTHORIZED
+                + SYSTEM_OPERATION_VALID
                 + " AND "
                 + PROCESSING_AUTHORIZED
-                + " AND NOT EXISTS(SELECT 1 FROM information_inputs i WHERE i.derived_revision=r.id"
-                + " AND NOT information_readable(i.input_revision,q.owner_handle,CASE WHEN q.project_id IS NULL THEN 'personal' ELSE 'project' END,"
-                + " (SELECT name FROM projects WHERE id=q.project_id),q.owner_handle NOT LIKE '@service/%'))"
                 + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
                 + " AND r.availability='active' AND r.generation=s.generation AND s.revision_id=?"
                 + " AND s.generation=? AND s.stage=? AND s.lease_token=? AND s.state='running' AND s.lease_until>=?",
@@ -264,21 +246,11 @@ public final class JdbcInformationProcessingRepository implements InformationPro
   public void requireLease(Lease lease) {
 
     if (!authorized(authority(lease))) throw new StaleLease();
-    String selectedProject = projectName(lease.project());
-    if (jdbc.queryForObject(
-            "SELECT count(*) FROM information_inputs WHERE derived_revision=? AND NOT information_readable(input_revision,?,?,?,?)",
-            Integer.class,
-            lease.revision(),
-            lease.owner(),
-            selectedProject == null ? "personal" : "project",
-            selectedProject,
-            !ServiceCredentials.principal(lease.owner()))
-        != 0) throw new StaleLease();
     List<UUID> valid =
         jdbc.query(
             "SELECT r.id FROM information_revisions r JOIN information_steps s ON s.revision_id=r.id JOIN information_resources q ON q.id=r.resource_id"
                 + " WHERE "
-                + OWNER_AUTHORIZED
+                + SYSTEM_OPERATION_VALID
                 + " AND "
                 + PROCESSING_AUTHORIZED
                 + " AND q.owner_handle=? AND q.project_id IS NOT DISTINCT FROM ?"
@@ -293,6 +265,17 @@ public final class JdbcInformationProcessingRepository implements InformationPro
             lease.token(),
             now());
     if (valid.isEmpty()) throw new StaleLease();
+  }
+
+  @Override
+  public io.aeyer.plowshare.server.access.AuthorityIds.ScopeId home(UUID revision) {
+    var id =
+        jdbc.queryForObject(
+            "SELECT q.home_scope_id FROM information_resources q JOIN information_revisions r ON r.resource_id=q.id WHERE r.id=?",
+            UUID.class,
+            revision);
+    if (id == null) throw new StaleLease();
+    return new io.aeyer.plowshare.server.access.AuthorityIds.ScopeId(id);
   }
 
   public void finish(Lease lease, String state, String detail) {

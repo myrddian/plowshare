@@ -96,6 +96,21 @@ class OperationRecordsPersistenceTest {
   }
 
   @Test
+  void retained_evidence_does_not_block_project_deletion_or_adopt_a_recreated_name() {
+    var admitted = admit();
+    jdbc.update("DELETE FROM projects WHERE name='one'");
+    assertEquals(
+        admitted.scope().value(),
+        jdbc.queryForObject(
+            "SELECT scope FROM operation_admissions WHERE id=?", UUID.class, admitted.id()));
+    jdbc.update("INSERT INTO projects(name) VALUES('one')");
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) SELECT id,'alice','CONTRIBUTOR' FROM projects WHERE name='one'");
+    assertThrows(CallerFault.class, () -> policy.require(admitted));
+    assertDoesNotThrow(() -> admit());
+  }
+
+  @Test
   void support_failure_rolls_back_and_history_cannot_be_widened() {
     var good = admit();
     var bad =

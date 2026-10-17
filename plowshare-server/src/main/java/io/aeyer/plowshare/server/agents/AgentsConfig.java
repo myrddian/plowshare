@@ -1743,8 +1743,9 @@ public class AgentsConfig {
       LlmDispatcher dispatcher,
       Archive archive,
       ObjectProvider<AgentRegistry> agents,
-      ObjectProvider<GlobalAgentDefinitions> globals) {
-    return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents));
+      ObjectProvider<GlobalAgentDefinitions> globals,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
+    return new Scribe(dispatcher, archive, GlobalAgentSnapshots.supply(globals, agents), system);
   }
 
   /**
@@ -1763,14 +1764,16 @@ public class AgentsConfig {
       JobRuntime runtime,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      Compaction compaction) {
+      Compaction compaction,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new Curator(
         archive,
         proposals,
         queue,
         runtime,
         GlobalAgentSnapshots.supply(globals, agents),
-        compaction);
+        compaction,
+        system);
   }
 
   /**
@@ -1890,7 +1893,8 @@ public class AgentsConfig {
       ObjectProvider<Learning> learning,
       ObjectProvider<Citing> citing,
       ObjectProvider<io.aeyer.plowshare.server.agents.digests.Digester> digester,
-      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> tokenizer) {
+      ObjectProvider<io.aeyer.plowshare.server.llm.tokens.Tokenizer> tokenizer,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     Compaction compaction =
         new Compaction(
             models,
@@ -1918,7 +1922,8 @@ public class AgentsConfig {
             // Through a provider for `learning`'s reason exactly: a
             // deployment with no corpus configuration is a running server,
             // and one whose turns close as they always did.
-            citing.getIfAvailable(() -> Citing.NONE));
+            citing.getIfAvailable(() -> Citing.NONE),
+            system);
     // What counts a step's results when a fold inside a turn is decided: the server's one
     // Tokenizer (spec 2026-09-30-fold-at-60-and-80 §1). LlmConfig always defines one.
     tokenizer.ifAvailable(compaction::useTokenizer);
@@ -1947,14 +1952,16 @@ public class AgentsConfig {
       Scribe scribe,
       ObjectProvider<AgentRegistry> agents,
       ObjectProvider<GlobalAgentDefinitions> globals,
-      ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests) {
+      ObjectProvider<io.aeyer.plowshare.server.archive.DigestStore> digests,
+      io.aeyer.plowshare.server.access.SystemOperations system) {
     return new Learner(
             models,
             entries,
             conversations,
             archive,
             scribe,
-            GlobalAgentSnapshots.supply(globals, agents))
+            GlobalAgentSnapshots.supply(globals, agents),
+            system)
         .withProvenance(digests.getIfAvailable());
   }
 }

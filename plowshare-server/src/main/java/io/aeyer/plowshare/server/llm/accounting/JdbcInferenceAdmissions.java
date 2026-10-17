@@ -25,9 +25,18 @@ public final class JdbcInferenceAdmissions implements InferenceAdmissions {
     transactions.executeWithoutResult(
         status -> {
           jdbc.update(
-              "INSERT INTO operation_inference_budgets(operation_id,budget_id) VALUES(?,?) ON CONFLICT(operation_id) DO NOTHING",
+              "INSERT INTO operation_inference_budgets(operation_id,budget_id,source_conversation) VALUES(?,?,?) ON CONFLICT(operation_id) DO NOTHING",
               b.operation(),
-              b.budget());
+              b.budget(),
+              b.conversation());
+          if (!Boolean.TRUE.equals(
+              jdbc.queryForObject(
+                  "SELECT EXISTS(SELECT 1 FROM operation_inference_budgets WHERE operation_id=? AND budget_id=? AND source_conversation IS NOT DISTINCT FROM ?)",
+                  Boolean.class,
+                  b.operation(),
+                  b.budget(),
+                  b.conversation())))
+            throw new IllegalStateException("Operation cannot replace its allowance source");
           jdbc.update(
               "INSERT INTO inference_admissions(id,operation_id,budget_id,ordinal,call_limit) VALUES(?,?,?,?,?)",
               b.id(),
@@ -52,13 +61,14 @@ public final class JdbcInferenceAdmissions implements InferenceAdmissions {
   public void require(InferenceBinding b) {
     Boolean present =
         jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM inference_admissions WHERE id=? AND operation_id=? AND budget_id=? AND ordinal=? AND call_limit IS NOT DISTINCT FROM ?)",
+            "SELECT EXISTS(SELECT 1 FROM inference_admissions a JOIN operation_inference_budgets b USING(operation_id,budget_id) WHERE a.id=? AND operation_id=? AND budget_id=? AND ordinal=? AND call_limit IS NOT DISTINCT FROM ? AND source_conversation IS NOT DISTINCT FROM ?)",
             Boolean.class,
             b.id(),
             b.operation(),
             b.budget(),
             b.ordinal(),
-            b.limit());
+            b.limit(),
+            b.conversation());
     if (!Boolean.TRUE.equals(present))
       throw new IllegalStateException("Missing retained inference claim");
   }
