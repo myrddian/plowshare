@@ -156,7 +156,8 @@ below, an Application project. No column permits acting outside the grant's scop
 | Issue scoped ADMIN grants to humans | Explicit issuing/delegation authority | No | No | No |
 | Force an agent's MANAGER exception | Human with explicit exception-issuing authority | Human with explicit exception-issuing authority | No | No |
 | Manage permitted local document/reference policy | Human control authority | Human within platform limits | No | No |
-| Share/publish to another scope or a broader audience; broaden a resource ACL | Release | Release | Release | No |
+| Change a managed document's reader groups or grant/remove GLOBAL_READ | Scoped access-management authority | Allowed as resource MANAGER/DRI; no additional ADMIN approval | No | No |
+| Copy/move content to another scope | Source/destination authority | Source/destination authority | Source/destination authority; no audience management from CONTRIBUTOR | No |
 | Restrict/revoke a grant the actor controls | Explicit grant-control authority | Explicit grant-control authority | Owner only where policy permits | No |
 | Provision/move/remove server project storage or change mandatory workspace fences | Explicit infrastructure ADMIN authority | No | No | No |
 | View access-control audit for the scope | Named audit action | Allowed | No by default | No by default |
@@ -275,7 +276,7 @@ ownership, contribution, management, execution or policy-change rights.
 | Read Global knowledge | Scoped READ in the Global ADMIN helper, plus input policy | GLOBAL_READ or separate scoped READ | Same | Same |
 | Propose a candidate from an authorized source | Source data/work grant | Source work authority | Source work authority | No |
 | Create/edit/move/retire a `GLOBAL_ACCOUNT` resource or change its policy | Human ADMIN over Global and the action; source Release where applicable | No | No | No |
-| Authorize `GLOBAL_READ` on a resource owned elsewhere | Separate source audience/release authority | Same independent authority | Same independent authority | No authority from reading alone |
+| Authorize `GLOBAL_READ` on a resource outside GLOBAL_ACCOUNT | Scoped resource access-management authority | Allowed on managed resources; no separate ADMIN approval | No authority from CONTRIBUTOR | No authority from reading alone |
 | Transfer another account's resource into `GLOBAL_ACCOUNT` | Human destination ADMIN plus authorized source transfer/release | No destination authority | No destination authority | No |
 | Create/run a Global worker conversation through these human/Application role bindings alone | No implicit EXECUTION | No | No | No |
 | Inspect private SYSTEM processing conversations/prompts through GLOBAL_READ | No | No | No | No |
@@ -297,9 +298,13 @@ the root document's current permissions, represented by its most current revisio
 historical/pinned reads cannot recover a removed audience grant. Content WRITE
 does not authorize a permission change through a new revision. Lifecycle and
 input/reference restrictions remain additional checks. See [root-document permissions](decisions/0030-authority-substrate-and-explicit-scopes.md#publication-audience-and-root-document-permissions).
-The issuer matrix for general-read grants on non-Global resources remains to be
-specified, including tenant and retained input/reference restrictions. Converting
-legacy Shared to `GLOBAL_READ` also admits previously excluded Application/service
+The resource MANAGER/DRI chooses its audience, including GLOBAL_READ, through
+scoped access-management authority without a separate expansion grant or ADMIN
+approval. Scope limits the resources managed, not the reader audience selected.
+Mandatory and retained input/reference restrictions remain effective; managing
+the derived document does not grant control over private dependencies. See the
+[resource-manager audience decision](decisions/0030-authority-substrate-and-explicit-scopes.md#resource-manager-responsibility-for-audience-changes).
+Converting legacy Shared to `GLOBAL_READ` also admits previously excluded Application/service
 readers, so migration requires an explicit authorized audience decision.
 
 Unscoped Library search is proposed to search the admitted readable set across
@@ -325,7 +330,8 @@ processing uses explicit worker WRITE authority with source/output restrictions.
 | Read explicitly published information | Audience/data grant | Audience grant | Audience grant | Audience grant |
 | Discover unpublished/private resources through a published selection | No | No | No | No |
 | Edit the source of a published resource | Separate source data grant and controller permission | Source/controller permission | Source/controller permission | No |
-| Choose a broader publication audience or copy into another scope | Release | Release | Release | No |
+| Change a managed document's read audience, including GLOBAL_READ | Scoped access-management authority | Allowed as resource MANAGER/DRI | No | No |
+| Copy/move into another scope | Source/destination authority | Source/destination authority | Source/destination authority; no implied audience change | No |
 | Import permitted material into a project | Destination data grant | Destination write plus source/input permissions | Destination write plus source/input permissions | No |
 | Read own inbox, outgoing status, mutation receipts and private context | Owner | Owner | Owner | Owner for read-only operations |
 | Send/claim/report/cancel own outgoing work | Owner plus data/action grant | Owner plus work authority | Owner plus work authority | No |
@@ -470,10 +476,10 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
    and who may issue them. Human `GLOBAL_ACCOUNT` resource administration uses
    scoped ADMIN READ/WRITE/control actions; SYSTEM derived processing uses existing
    SYSTEM authority restricted by an operation sandbox. Source authority is still
-   required for transfers. `GLOBAL_READ` grants
-   general reading without ownership transfer; specify its audience-change issuers
-   independently. Other Release cells do not assign those rights to every editor
-   or manager. Preserve authorized export
+   required for transfers. The resource MANAGER/DRI can grant/remove GLOBAL_READ
+   through access management without additional expansion authority or ADMIN
+   approval; CONTRIBUTOR cannot. This preserves home and created_by. Mandatory
+   and private dependency restrictions still apply. Preserve authorized export
    and existing publication/input/reference restrictions.
 3. **Management through files:** classify executable hooks, manifests, routing,
    definitions and security-relevant configuration as management actions even

@@ -340,6 +340,11 @@ Default mocked/fake tests should cover:
   but only resources authorizing that role become generally readable. Authorizing
   it on a user/project resource retains ownership/home and requires an authorized
   audience change; it grants no write or administrative action.
+- The resource MANAGER/DRI may choose group/project/general-read audiences and
+  grant/remove GLOBAL_READ without an extra expansion grant or ADMIN approval.
+  CONTRIBUTOR has no audience-management authority. Home/created_by and private
+  dependency restrictions remain intact; this does not authorize Global-account
+  management or unrelated-resource changes. See [manager audience authority](decisions/0030-authority-substrate-and-explicit-scopes.md#resource-manager-responsibility-for-audience-changes).
 - `GLOBAL_ACCOUNT`, its account knowledge scope and `GLOBAL_READ` have distinct
   fixed registry UUIDs on every startup/installation. No Global project is created;
   existing ordinary projects named global retain their ordinary identities and

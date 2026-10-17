@@ -397,7 +397,7 @@ bill the Global owner by implication or make private processing logs public.
 | Scope kind and account knowledge representation | Define typed account/project/execution targets and stable mappings, rather than reuse project/null or account handles as project names |
 | Built-in identity lifecycle | Reserve SYSTEM/Global/role/scope UUIDs; specify collisions, bootstrap, disable/delete/recovery, credential refusal and acting-subject rules |
 | Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
-| Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; the root document's current permissions govern its revisions, including historical/pinned reads. Reconcile existing per-revision Shared audiences and define atomic policy-version enforcement; lifecycle/draft eligibility and audience-change issuance remain separate |
+| Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
 | Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
@@ -407,6 +407,7 @@ bill the Global owner by implication or make private processing logs public.
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
 | SYSTEM continuation versus creator revocation | Settled: an admitted independent SYSTEM operation continues while the document and operation remain valid, despite creator/initiator access removal. Replace legacy owner-access lease checks, preserve operation fences and current recipient disclosure checks; delegated user work still needs live acting authority |
 | Global write control | Replace exact-owner mutation authorization with common actions; ordinary reads already support membership/shared audiences. Specify control/release actions and audit |
+| Managed-resource audience authority | Settled: MANAGER/DRI may change its resource's reader groups and grant/remove GLOBAL_READ through access management, without a separate expansion grant or ADMIN approval. Preserve mandatory/private-dependency restrictions; Global-account management and scope transfers retain their separate controls |
 | Legacy owner/creator and ownerOnly migration | Settled: created_by is provenance and grants no permissions. Existing owner_handle/ownerOnly semantics must be reconciled into explicit scope/root-policy grants and any mandatory audience restrictions, preserving actual creation evidence; never substitute caller == created_by or silently remove mandatory policy |
 | Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
 | Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
@@ -522,6 +523,10 @@ Focused mocked/fake acceptance coverage should include:
   permissions govern new and historical/pinned revisions; removing an audience
   blocks subsequent old-revision reads. Content-only updates cannot widen access,
   and changing document permissions cannot bypass retained-input restrictions.
+- A resource MANAGER/DRI can grant/remove GLOBAL_READ without separate expansion
+  authority or ADMIN approval, preserving home/created_by. CONTRIBUTOR cannot
+  change that audience, and manager authority over one resource cannot change
+  unrelated/private source permissions or Global-account administration.
 - Human ADMIN writes a Global-owned resource through scoped action grants without
   impersonating Global or becoming its owner; Application roles use the same
   evaluator rather than separate authority logic.

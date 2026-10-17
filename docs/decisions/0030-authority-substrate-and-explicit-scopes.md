@@ -47,7 +47,7 @@ and must preserve the independent accounting concerns of
 | Root ownership | Establishes SYSTEM as the ultimate authority over the platform | Everyday body-read access for an administrator or worker |
 | Tenant | Identifies an administrative isolation boundary containing explicitly associated scopes | Membership in every project or access to Personal data |
 | Resource scope | Identifies where a resource belongs: server administration, a tenant, Personal or a project | Permission to read all resources in that scope |
-| Resource control | Identifies who may administer a resource within parent constraints | Permission to widen its audience arbitrarily |
+| Resource control | Identifies who manages a resource's permissions, including choosing GLOBAL_READ, within mandatory constraints | Authority over unrelated resources or private dependencies |
 | Role | Names a defined bundle of actions | Authority without a scoped grant |
 | Grant | Authorizes a principal or supported group, records its issuer, scope, actions and delegation ceiling | Authority greater than its issuing grant |
 | Resource ACL | Holds explicit grants over a particular resource | A bypass of tenant, execution or mandatory policy restrictions |
@@ -215,7 +215,7 @@ Retain the familiar role model, with explicit action sets:
 | --- | --- |
 | SYSTEM | Intrinsic root authority of the locked SYSTEM account; never assignable or delegable |
 | ADMIN | Delegated administration for human users within the scope and actions of their grants; never granted to an agent |
-| MANAGER | Manage a scope's membership and permitted local configuration |
+| MANAGER | Manage a scope's membership, permitted local configuration and managed resources' permissions/audiences, including GLOBAL_READ |
 | CONTRIBUTOR | Perform permitted work and modify resources within a scope |
 | READER | Read permitted resources within a scope |
 | GLOBAL_READ | Read resources whose policy explicitly authorizes this role; every authenticated principal holds it, independently of resource ownership |
@@ -650,8 +650,9 @@ Private processing logs and credentials do not inherit the knowledge audience.
 Future tenant policy must represent deployment-wide knowledge as an explicitly
 supported audience while keeping tenant-private resources isolated. A tenant
 that requires its resources never to reach that audience needs an enforced
-release restriction or a separate deployment. Authority to choose an audience
-remains a separate decision; deployment-wide role membership alone supplies none.
+release restriction or a separate deployment. The managed resource's DRI chooses
+its audience under the permission-management rule below; deployment-wide read
+role membership alone supplies no audience-change authority.
 
 For example:
 
@@ -665,21 +666,47 @@ The human Global ADMIN helper supplies scoped READ/WRITE and the named control
 actions for creating, editing, moving, retiring and managing Global knowledge.
 ADMIN held elsewhere is insufficient. These actions authorize the administrator
 without requiring actor equality with GLOBAL_ACCOUNT. SYSTEM processing uses its
-own scoped WRITE grant for admitted derived outputs; it does not need a human role
+existing authority within its operation sandbox for derived outputs; it does not need a human role
 or impersonate the resource owner. Moving/copying private material or changing
 its audience additionally requires source release and retained input permissions.
-Curator or another worker cannot approve a release/ownership transfer merely by
-having WRITE or a forced MANAGER exception. The administrative and processing
-role helpers must map those distinct actions explicitly.
+WRITE alone does not authorize audience changes or transfers. A worker with valid
+resource MANAGER/control authority may manage that resource's audience within its
+retained sandbox and applicable agent ceilings. A move/transfer into Global still
+needs the human Global ADMIN destination authority; audience management does not
+supply that separate operation.
 
 Granting `GLOBAL_READ` access to an otherwise private resource changes its
 audience. It requires the existing controller's authorized audience/release action
 and compliance with mandatory policy, not merely possession of `GLOBAL_READ`.
 It does not transfer the resource to `GLOBAL_ACCOUNT` or grant that account
-control over the original. The detailed issuer matrix for non-Global audience
-changes remains a separate decision. Draft/final, excluded, withdrawn, deleted
+control over the original. The managed resource's MANAGER/DRI has this audience
+authority as part of resource management, as specified below. Draft/final, excluded, withdrawn, deleted
 and processing readiness remain independent lifecycle properties; a Global home
 is not a finalisation or processing command.
+
+### Resource manager responsibility for audience changes
+
+A resource's MANAGER is its directly responsible individual (DRI) for permission
+management. The MANAGER role helper supplies scoped access-management authority
+over managed documents, including adding/removing group readers and granting or
+removing `GLOBAL_READ`. Choosing deployment-wide reading does not require a
+separate audience-expansion grant, human ADMIN approval or ownership/home transfer.
+Scope identifies which resources the manager controls; it does not confine the
+read audience they can select to existing project members.
+
+CONTRIBUTOR and READER do not receive this permission-management authority from
+their roles. ADMIN uses its explicit administrative scope; management of existing
+`GLOBAL_ACCOUNT` knowledge remains the human Global ADMIN operation. A project
+manager can therefore make a project document generally readable while its
+home and creator provenance remain unchanged, without gaining control of Global
+or other projects.
+
+Current manager authority, root-document policy version, retained execution
+limits and mandatory/input/reference restrictions still apply. Managing one
+document does not authorize releasing private source documents controlled by
+others or overriding mandatory policy. Audit the manager, target and audience
+change through the common access-management action; content WRITE and changing
+publication state do not substitute for that action.
 
 ### Publication, audience and root-document permissions
 
@@ -961,10 +988,10 @@ All schema changes belong in new Flyway migrations after separate authorization.
    including policy administration versus data access, authorized issuance of
    forced MANAGER exceptions for agents, and emergency recovery. Agent ADMIN
    rejection and the default CONTRIBUTOR ceiling are fixed proposal requirements.
-4. Define publication audiences and release authority, especially for Personal
-   content, derived outputs and existing server-shared material. `GLOBAL_ACCOUNT`
-   management requires human ADMIN; define who may authorize `GLOBAL_READ` on
-   resources owned elsewhere without changing their owner or home.
+4. Map the adopted MANAGER/DRI audience authority to access-management actions,
+   including GLOBAL_READ without extra ADMIN approval. Reconcile Personal,
+   derived-input and legacy shared policies. `GLOBAL_ACCOUNT` management remains
+   human ADMIN; transfers still need source and destination authority.
 5. Specify explicit catalogue availability, instruction imports and operation
    defaults; keep shipped ordinary bots usable without implicit authority.
 6. Review legacy classification and the coordinated server/SDK/client cutover.
