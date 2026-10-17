@@ -135,24 +135,36 @@ restrictions through generic authentication and admission boundaries.
 Agents cannot receive ADMIN or SYSTEM. CONTRIBUTOR is their default maximum;
 MANAGER requires the explicit exception described below. Being SYSTEM-owned,
 having trusted `is-system` classification, or running as an internal worker does
-not assign the agent the SYSTEM role. A worker executed by the SYSTEM account receives bounded task
-authority, not its own copy of the root role.
+not assign the agent the SYSTEM role. A worker executes under the SYSTEM account's
+existing authority through an operation sandbox, not its own copy of the root role.
 
-Internal executors obtain workload authority through trusted server admission.
+Internal executors enter an operation sandbox through trusted server admission.
 A request for internal processing cannot select an unrestricted SYSTEM execution.
-The server derives a bounded task grant from the sponsoring admission and the
-worker's permitted operations. An unattended maintenance task needs its own
+The server retains operation limits from the sponsoring admission and the
+worker's permitted operations; it does not need to issue fresh account grants to
+SYSTEM for each task. An unattended maintenance task needs its own
 explicit operator-authorized policy, targets and limits.
 
 SYSTEM execution is reserved for platform functions, such as the memory system.
-The executor remains the SYSTEM account; its effective authority while running
-is bounded by the admitted task, not the account's full root authority. For
+SYSTEM already has the underlying authority as the root account. The executor
+remains SYSTEM; the operation sandbox restricts how that authority can be used
+while running, without removing the account's underlying permissions. For
 example, a memory worker admitted to write one project's designated memory area
 can write there, but cannot write another project's memories, Global knowledge
 or access-policy records without separately authorized admission. Its reads and
 other effects also need their own admitted scope/actions. The task cannot use
-SYSTEM's root grant-issuing authority to enlarge its own bounds. This uses the
-same scoped evaluator and retained ceilings, not a separate SYSTEM-name bypass.
+SYSTEM's root grant-issuing authority to enlarge its own sandbox. Permission and
+sandbox checks are separate requirements, enforced at protected effects:
+
+```text
+effective operation authority = account authority INTERSECT operation sandbox
+```
+
+Resource/lifecycle and other mandatory restrictions still apply. A sandbox
+narrows authority; it never supplies a permission the account lacks. SYSTEM's
+authority is represented by root policy/grants through the common evaluator,
+not an identity-name/UUID bypass. Ordinary executions use the same distinction
+between account permissions and retained operation limits.
 
 An authenticated administrator holds its own account and an ADMIN grant issued
 under root authority. The grant can permit management of identities, grants or
@@ -356,16 +368,16 @@ asynchronous admissions under the retained ceiling rather than relying only on
 the original conversation-create check.
 
 Global is governed by the same account/scope/action grants. This supersedes the
-earlier blanket rule that Global could never support execution. SYSTEM has scoped
-READ, WRITE and EXECUTION authority for bounded Global processing; a task retains
-only its admitted purpose, resources, actions, tools and budget. No equality check
+earlier blanket rule that Global could never support execution. SYSTEM's existing
+root authority covers READ, WRITE and EXECUTION there; the operation sandbox
+retains only its admitted purpose, resources, actions, tools and budget. No equality check
 against SYSTEM's name/UUID supplies an authorization bypass.
 
 | Executing principal and binding | Global knowledge authority |
 | --- | --- |
 | Ordinary human/Application with GLOBAL_READ | READ of resources authorizing that role; no WRITE or EXECUTION from this role |
 | Human with ADMIN over Global | Scoped READ/WRITE/control actions; EXECUTION is not implied |
-| SYSTEM under an admitted Global-processing grant | Required READ/WRITE, CONVERSATION_CREATE and RUN_MODEL within the task's retained limits |
+| SYSTEM within an admitted Global-processing sandbox | Existing SYSTEM authority for READ/WRITE, CONVERSATION_CREATE and RUN_MODEL, restricted by the operation's retained limits |
 | GLOBAL_ACCOUNT as resource owner | Ownership itself supplies no execution identity or grant |
 
 The information summarizer can execute as SYSTEM within the explicit Global
@@ -379,7 +391,8 @@ authorization applies to the intended knowledge resources and projections.
 
 An authorized human write may trigger a separately authorized SYSTEM processing
 service. Admit that declared workflow using both the caller's permitted trigger
-and SYSTEM's scoped worker grants; the caller need not acquire RUN_MODEL or
+and SYSTEM's existing account authority plus the worker's operation sandbox;
+the caller need not acquire RUN_MODEL or
 SYSTEM authority to upload a document. A denied arbitrary run must not be
 silently rerouted to SYSTEM. Ordinary delegated children remain bounded by their
 parent authority; independently admitted platform services have their own explicit

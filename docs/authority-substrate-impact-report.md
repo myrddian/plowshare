@@ -50,8 +50,9 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
 
 - SYSTEM is the locked root account; its role cannot be assigned to agents.
 - SYSTEM execution is reserved for platform functions. A memory worker remains
-  SYSTEM but can write only its admitted memory area, with separately bounded
-  reads/effects; root identity cannot expand the task or issue itself more grants.
+  SYSTEM with its existing root authority, but an operation sandbox limits writes
+  to the admitted memory area and bounds other effects. The sandbox is not a new
+  per-task grant to SYSTEM and cannot be expanded by the running worker.
 - `GLOBAL_ACCOUNT` is a knowledge owner, not a project or execution identity.
   Human ADMIN controls its knowledge without logging in as that account.
 - `GLOBAL_READ` is held by authenticated humans, Applications and service
@@ -85,7 +86,7 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
 | Existing roles, manifests and project tokens | Reusable inputs plus compatibility decision | Map current roles to common actions deliberately; do not discard them or put GLOBAL_READ into the ordered enum |
 | CREATE/RUN_MODEL separation | New capability gap | Introduce action checks using existing admission/dispatch seams; current CONTRIBUTOR combines work actions |
 | Omitted Application conversation/run target | Optional new admission behavior | Human Personal and explicit Application/project requests already work; select a trusted Application binding for omission |
-| Global summarization/preparation | Reuse with grant integration | Keep processing in Global under bounded SYSTEM grants; no new execution scope is inherently needed |
+| Global summarization/preparation | Reuse with authority/sandbox integration | Keep processing in Global using existing SYSTEM authority restricted by an operation sandbox; no new execution scope is inherently needed |
 | Public Global conversation resume | Separate API/exposure decision | Existing user-facing refusal can remain; internal summarization does not use that entry point |
 | Existing Shared audience | Deliberate policy/data migration | Preserve ownership; admitting formerly excluded service readers is an explicit audience expansion |
 | Implicit server-admin MANAGER | Deliberate compatibility policy | Decide explicit replacement grants; removing this privilege is not a prerequisite to unrelated Global reads |
@@ -164,15 +165,16 @@ follow the same pattern.
 uses Information selection to choose a document-question execution home.
 
 These paths are not inherently invalid because their processing scope is Global.
-SYSTEM can receive scoped EXECUTION and required READ/WRITE grants there; there
-is no mandatory move to a new operational scope. They still need explicit typed
+SYSTEM's existing authority covers EXECUTION and required READ/WRITE there; an
+operation sandbox limits each run. There is no mandatory move to a new operational
+scope. They still need explicit typed
 targets, executor and retained action authority. Personal documents also use
 these null paths, so their execution/log location does not prove Global knowledge
 ownership. Preserve distinct input owner, execution scope, initiating actor,
 sponsor, output grants and private log policy.
 
-An authorized human upload can trigger a declared SYSTEM service under its own
-worker grants. Requiring the human's RUN_MODEL grant for every internal service
+An authorized human upload can trigger a declared SYSTEM service using SYSTEM's
+existing authority within its operation sandbox. Requiring the human's RUN_MODEL grant for every internal service
 would break that workflow; silently lending SYSTEM to an arbitrary denied run
 would defeat authorization. Specify the service trigger, inputs/outputs and
 spending contract without changing ordinary child-delegation ceilings.
@@ -385,7 +387,7 @@ bill the Global owner by implication or make private processing logs public.
 | Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
-| Processing/log scope and service sponsorship | Settled: platform workers remain SYSTEM with task-bounded area/action grants, not full root authority. Define each workflow's authorized trigger, exact inputs/outputs, sponsor and private logs; billing policy remains unspecified |
+| Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without issuing fresh per-task account grants. Define each workflow's trigger, inputs/outputs, sandbox, sponsor and private logs; billing policy remains unspecified |
 | SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
@@ -448,7 +450,7 @@ that they already implement the complete substrate.
 | [LiveActingAuthorization:28](../plowshare-server/src/main/java/io/aeyer/plowshare/server/acting/LiveActingAuthorization.java) | Reuse actor/subject proof, Application identity, current consent/membership and narrowing ceilings; extend read targets deliberately instead of dropping the proof model |
 | [JobRuntime retained admission:215](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java) and [JobStore admitted submission:762](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobStore.java) | Keep checks around steps, tools, inference and disclosure, plus receipt-before-start ordering; generalize from supported retained turns to common actions |
 | [Chat dispatch:172](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/LlmDispatcher.java) and [beforeDispatch:64](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/InferenceObserver.java) | Live callback checks already exist for chat dispatch variants, including after queueing. Supply actual grant authority where requests currently default DIRECT; embeddings need equivalent carriage if required by their action policy |
-| [Information lifecycle:148](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationLifecycle.java) and [Summariser.forRevision:310](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/Summariser.java) | Keep claims, generation fences, lease renewal, pre/post gates, budgets/checkpoints and the separately supplied home/owner/parent fields. Attach SYSTEM grants; processing can remain in Global |
+| [Information lifecycle:148](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationLifecycle.java) and [Summariser.forRevision:310](../plowshare-server/src/main/java/io/aeyer/plowshare/server/documents/Summariser.java) | Keep claims, generation fences, lease renewal, pre/post gates, budgets/checkpoints and the separately supplied home/owner/parent fields. Retain SYSTEM identity/authority and enforce the operation sandbox; processing can remain in Global |
 | [Shared transition:830](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java) | Existing audience changes preserve owner/home. Reuse that distinction and receipts for GLOBAL_READ migration without treating it as ownership transfer |
 | [InformationSql:10](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationSql.java), [reference composition:147](../plowshare-server/src/main/resources/db/migration/V147__document_navigation_policy.sql) and [InformationJobs:46](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationJobs.java) | Reuse filtering before paging/counts, retained-input/reference obligations and current disclosure checks; adapt their target vocabulary rather than bypass predicates |
 | [Metadata-only revisions:501](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationCatalogue.java) and [projection reuse:461](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationProjectionRepository.java) | Preserve immutable revision IDs, explicit_only processing and compatible committed output reuse. Saving metadata must not acquire a new model-execution requirement or schedule paid work |

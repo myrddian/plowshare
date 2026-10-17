@@ -390,9 +390,11 @@ separately from ordinary child-agent authority.
 
 Platform functions such as memory processing can execute as SYSTEM while WRITE
 is restricted to a specific admitted memory area. Identity remains SYSTEM;
-effective task permissions do not include its ambient root authority or the
-ability to issue grants that enlarge the task. Reads and other effects must also
-fit their admitted scopes/actions. This does not assign SYSTEM to ordinary agents.
+the account already has root authority, and a separate operation sandbox limits
+its use. No fresh account grant is required for each SYSTEM task. Reads and other
+effects must also fit the sandbox, which the worker cannot enlarge by issuing
+grants. Effective operation authority is account authority intersected with that
+sandbox and mandatory restrictions. This does not assign SYSTEM to ordinary agents.
 
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and
@@ -418,7 +420,8 @@ invocation. External tools retain explicit owner/project/provider/agent assignme
 and credential subjects, even when configuration is reused by several projects.
 The current contracts require concrete projects, not a project-less wildcard grant.
 The Global account knowledge scope is not a project or provider-tool binding
-target. SYSTEM processing there requires scoped execution grants. SDK reads can include Global/general-read knowledge through
+target. SYSTEM processing there uses its existing authority within an admitted
+operation sandbox. SDK reads can include Global/general-read knowledge through
 an admitted read selection; they do not acquire Global write or provider authority.
 Current service-token Shared refusals and unsupported acting consumers require
 an explicit public-read contract migration before supporting those reads.
@@ -453,8 +456,9 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
    do not silently widen existing private content access.
 2. **Publication:** define the source-release and destination/audience actions
    and who may issue them. Human `GLOBAL_ACCOUNT` resource administration uses
-   scoped ADMIN READ/WRITE/control actions; SYSTEM derived processing uses bounded
-   worker grants. Source authority is still required for transfers. `GLOBAL_READ` grants
+   scoped ADMIN READ/WRITE/control actions; SYSTEM derived processing uses existing
+   SYSTEM authority restricted by an operation sandbox. Source authority is still
+   required for transfers. `GLOBAL_READ` grants
    general reading without ownership transfer; specify its audience-change issuers
    independently. Other Release cells do not assign those rights to every editor
    or manager. Preserve authorized export
