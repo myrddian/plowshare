@@ -33,6 +33,11 @@ class ActingContextSocketTest {
   })
   static class Wiring {
     @Bean
+    io.aeyer.plowshare.server.requests.RequestProjects requestProjects() {
+      return io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+    }
+
+    @Bean
     SocketAuthorization socketAuthorization() {
       var authorization = mock(SocketAuthorization.class);
       when(authorization.attach(any())).thenReturn(true);

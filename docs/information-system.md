@@ -23,10 +23,18 @@ conflicting privacy subjects and unclassified homes stay quarantined. Original
 per-revision flags remain historical evidence and cannot change the root policy.
 
 Service credentials may select Shared/includeShared for general reads; Personal
-remains unavailable and their internal project-only default remains unchanged.
+remains unavailable. Omitted scope on an active Application-owned credential selects
+its exact single registered project, with includeShared disabled; generic service
+tokens and ambiguous/missing Application context require an explicit scope. Internal
+retained runs keep their exact project-only selection. Invalid explicit names,
+conflicting selectors and unknown scope members refuse without falling back.
 These selectors grant no project membership, content WRITE, processing-log access
 or execution. Global-account policy control requires human Global Admin authority.
-No new Global creation/move selector or public API is added. The
+Existing share/unshare can manage the audience of an already scoped Global resource
+through its owning Admin check, independent of client label. Shared is not a writable
+Global destination: existing upload/new-document selectors cannot express one, and
+no account UUID is interpreted through a project-name field. No new Global
+creation/move selector or public API is added. The
 [root-policy specification](authority-substrate-slices/05-root-policy-specification.md)
 records migration, privacy and concurrency behavior.
 

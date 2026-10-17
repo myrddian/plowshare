@@ -20,7 +20,7 @@ class ScopedInspectionTest {
         new ProjectAuthorization(
             mock(ResourceScopeRepository.class), members, mock(AdminStore.class));
     String principal = "@service/fixture";
-    for (String operation : List.of("schedule.files", "schedule.list", "document.detail")) {
+    for (String operation : List.of("schedule.files", "schedule.list")) {
       assertThrows(
           CallerFault.class,
           () -> authorizer.require(operation, AccessRequest.project(null), principal));

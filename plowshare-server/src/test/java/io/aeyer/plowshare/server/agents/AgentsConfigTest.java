@@ -129,6 +129,9 @@ class AgentsConfigTest {
         // which is DataProperties' whole argument for the blank.
         .withUserConfiguration(AgentsConfig.class, DataConfig.class)
         .withBean(
+            io.aeyer.plowshare.server.requests.RequestProjects.class,
+            () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
+        .withBean(
             io.aeyer.plowshare.server.access.OperationAuthority.class,
             () -> mock(io.aeyer.plowshare.server.access.OperationAuthority.class))
         .withBean(

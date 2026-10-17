@@ -77,6 +77,7 @@ public record InformationContext(
         if (project == null || project.isBlank()) {
           throw new IllegalArgumentException("project information selection needs a project");
         }
+        io.aeyer.plowshare.protocol.Home.of(project);
       } else if (project != null) {
         throw new IllegalArgumentException("only project selection may name a project");
       }

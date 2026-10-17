@@ -14,28 +14,41 @@ import java.util.Objects;
  */
 public final class InformationAccess {
   private final ScopedPermissions permissions;
+  private final io.aeyer.plowshare.server.requests.RequestProjects projects;
 
   public InformationAccess(ScopedPermissions permissions) {
+    this(permissions, io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY);
+  }
+
+  public InformationAccess(
+      ScopedPermissions permissions, io.aeyer.plowshare.server.requests.RequestProjects projects) {
     this.permissions = Objects.requireNonNull(permissions, "permissions");
+    this.projects = Objects.requireNonNull(projects, "projects");
   }
 
   public InformationContext resolve(String account, InformationContext.Selection selection) {
     if (account == null || account.isBlank()) {
       throw new CallerFault("information needs a socket or run authenticated as an account");
     }
-    InformationContext context =
-        new InformationContext(
-            account, selection == null ? InformationContext.Selection.personal() : selection);
+    if (selection == null)
+      selection =
+          projects
+              .implicit(account)
+              .map(project -> projectSelection(account, project))
+              .orElseGet(InformationContext.Selection::personal);
+    InformationContext context = new InformationContext(account, selection);
     requireSelection(context);
     return context;
   }
 
   public InformationContext forRun(String account, io.aeyer.plowshare.protocol.Home home) {
+    if (home.isGlobal())
+      throw new CallerFault("A retained run needs an explicit Personal or project home");
     // A run's Personal home is a server-owned workspace project, while its retained information
     // belongs to the account namespace. Require the exact owner before mapping either address.
     String project = PersonalSpaces.resolveAddress(home.project(), account);
     PersonalSpaces.requireOwn(project, account);
-    boolean personal = home.isGlobal() || PersonalSpaces.name(account).equals(project);
+    boolean personal = PersonalSpaces.name(account).equals(project);
     return resolve(
             account,
             personal ? InformationContext.Selection.personal() : projectSelection(account, project))

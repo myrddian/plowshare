@@ -1,7 +1,7 @@
 # Slice 13: Existing API, scope-selection and client contract cutover
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented for the verified existing consumers in this branch,
+18 October 2026, under explicit authorization. No new API or deployment.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -65,16 +65,92 @@ match the eventual change:
 
 **PostgreSQL justification:** Normally mocked transport/contract tests suffice. Select PostgreSQL only if this slice itself changes SQL, persisted selectors or transactional authorization; prior persistence proof is not rerun by habit.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+The implementation evidence below distinguishes completed checks from the original
+planned matrix. Existing fixture links do not imply database execution. Unsupported
+paths remain explicit and uncertain mutations are not replayed.
 
 ## Specification required before implementation
 
-Make an operation-by-operation coverage and compatibility inventory. If an existing operation cannot express the required target safely, record the exact gap and stop that route's exposure instead of adding an inferred API.
+The [operation and compatibility inventory](13-contract-coverage-specification.md)
+was recorded before enforcement. It identifies the supported selectors, current
+client/SDK representations, explicit refusal behavior and exact missing targets.
+An operation unable to express its destination remains refused.
 
 ## Rollout and rollback
 
 Define versioned refusal for clients/servers unable to represent the new scope. Do not silently downgrade a mutation, retry uncertain delivery, remap Global to null or impersonate its account.
+
+
+## Implementation and activation limits
+
+`RequestProjects` is an internal trusted-default capability. Its production
+implementation reads existing identity, credential and Application repositories;
+it checks the exact active issued Application binding, sole project scope,
+expiry/revocation, active owner and current project access. It never chooses the
+first of multiple projects or grants a role. Generic service tokens and service
+accounts need explicit targets. The existing Personal home resolver and information
+admission reuse it; supported front-door execution checks resolve that same live
+Application context before authorization. Owning services recheck the actual home
+before effects. Human omission retains Personal. SYSTEM/built-in identities do not
+receive an interactive default.
+
+Explicit information selectors now validate original project names, scope fields
+and selector conflicts before typed DTO normalization. HTTP multipart uses the
+same selection validation; invalid selectors return the existing caller refusal
+instead of a server error. Omission remains distinct from malformed explicit
+context. Supporting-view commands retain the admitted default rather than resetting
+to Personal. A retained run's null Home cannot be reinterpreted as Personal.
+
+Existing `document.*` read handlers now admit authenticated service readers through
+their scoped document services, including list counts. They use the same current
+root/input SQL policy already proven in slice 05. The existing information
+share/unshare boundary uses audience authority rather than a generic content-WRITE
+selection check. Its owning repository still checks Global human ADMIN or resource
+home MANAGER, mandatory dependencies and the original command receipt. Client labels
+never supply authority. Shared creation, processing and generic content WRITE
+remain refused.
+
+Explicit definition project lookup is now strict across run, listing and authoring:
+missing names, malformed values and outages cannot select another tier. Agent and
+procedure resolvers refuse deleted projects and broken authoritative merged tiers;
+operator diagnostics and source-change recovery remain. Valid projects still layer
+deployment/bundle ordinary definitions under the requesting account. Declared SYSTEM
+services retain their separate deployment-only resolver and operation sandbox.
+
+No protocol field, role value, scope kind, operation, SDK method, SQL or schema
+changed. Existing wire project roles remain MANAGER/CONTRIBUTOR/VIEWER compatibility
+helpers. Standard RBAC remains the normal management surface; this slice adds no
+ACL editor or client allowlist. The read-only contract generator checks unchanged
+outputs rather than generating new capabilities.
+
+Missing interfaces stay explicit: no ordinary Global conversation/run target, no
+Global destination selector for uploads/new documents or Global type registry, no
+separate public Global read-source plus Personal execution selector, and no assumed
+coverage in scope-unaware legacy document SDK methods. Legacy null memory/storage
+homes, historical classification and integrated migration/restart proof remain
+slice 14. Existing embedding/search and nested-orchestration allowance gaps remain
+unchanged. This is not a complete deployment cutover.
+
+## Verification evidence
+
+Verification uses mocked owning repositories, real admission/catalogue services,
+HTTP multipart and public frame boundaries. It covers trusted Application defaults,
+invalid/ambiguous context, exact project named `global`, account UUID text in project
+fields, no membership mutation, live role loss, service general reads and scoped
+counts, Global audience management independent of client label, private/unsupported
+work refusal, and deleted/broken definition tiers without fallback.
+
+No PostgreSQL tests are required or run: this slice changes no SQL, persisted
+selectors, schema, transactions or receipt storage. Existing policy persistence
+proof is reused without claiming a new live integration.
+
+- `./gradlew format formatCheck check sdkContractCheck` passed: 5,836 default
+  server tests, zero failures and zero skips, plus the client/integration,
+  formatting, Javadoc and contract checks in those tasks.
+- The owning read-only generator verified 276 operations and 17 outcome codes,
+  unchanged. No shared contract graph or generated outputs needed regeneration.
+- A final selector-comment correction was followed by
+  `./gradlew format formatCheck :plowshare-server:javadoc`, which passed.
+- `git diff --check` and the slice documents' local-link checks passed.
+- No PostgreSQL suite, native SDK parity acceptance, live deployment, push or
+  migration rehearsal was run. Slice 14 remains unimplemented.

@@ -99,8 +99,8 @@ public class DocumentController {
             account instanceof String handle ? handle : null,
             project == null
                 ? null
-                : io.aeyer.plowshare.server.information.InformationContext.Selection.project(
-                    project))
+                : io.aeyer.plowshare.server.information.InformationScopes.from(
+                    java.util.Map.of("project", project)))
         .withView(
             io.aeyer.plowshare.server.information.InformationContentInputs.view(
                 request.getRequest().getParameter("view")));

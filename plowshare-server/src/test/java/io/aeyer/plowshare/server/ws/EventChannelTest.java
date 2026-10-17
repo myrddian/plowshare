@@ -1666,6 +1666,11 @@ class EventChannelTest {
   })
   static class Wiring {
     @org.springframework.context.annotation.Bean
+    io.aeyer.plowshare.server.requests.RequestProjects requestProjects() {
+      return io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+    }
+
+    @org.springframework.context.annotation.Bean
     io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization() {
       var authorization =
           org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);

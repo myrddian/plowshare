@@ -65,6 +65,9 @@ class RunsTest {
     jobs = mock(JobStore.class);
     turns = mock(Turn.class);
     projects = mock(ProjectStore.class);
+    // Named fixture projects are real contexts; an unstubbed project must now refuse.
+    when(projects.id("payments")).thenReturn(9L);
+    when(projects.id("ledger")).thenReturn(8L);
     registry =
         new AgentRegistry(
             Map.of(
@@ -75,7 +78,7 @@ class RunsTest {
     // default, since resolving a turn's caller reads this home before
     // anything else in the body is looked at.
     when(turns.homeOf(anyString())).thenReturn(Home.global());
-    wire(resolverOver(registry, DataLayout.NONE, false));
+    wire(resolverOver(registry, DataLayout.NONE, true));
   }
 
   private void wire(DefinitionResolver resolver) {
@@ -159,7 +162,7 @@ class RunsTest {
     runs =
         new Runs(
             new Callers(
-                resolverOver(registry, DataLayout.NONE, false),
+                resolverOver(registry, DataLayout.NONE, true),
                 projects,
                 turns,
                 new CallerAccess(new io.aeyer.plowshare.server.session.SessionRegistry(), members)),
@@ -234,7 +237,7 @@ class RunsTest {
     runs =
         new Runs(
             new Callers(
-                resolverOver(registry, DataLayout.NONE, false),
+                resolverOver(registry, DataLayout.NONE, true),
                 projects,
                 turns,
                 new CallerAccess(sessions, members)),
@@ -264,7 +267,7 @@ class RunsTest {
     runs =
         new Runs(
             new Callers(
-                resolverOver(registry, DataLayout.NONE, false),
+                resolverOver(registry, DataLayout.NONE, true),
                 projects,
                 turns,
                 new CallerAccess(new io.aeyer.plowshare.server.session.SessionRegistry(), members)),
@@ -317,7 +320,7 @@ class RunsTest {
     runs =
         new Runs(
             new Callers(
-                resolverOver(registry, DataLayout.NONE, false),
+                resolverOver(registry, DataLayout.NONE, true),
                 projects,
                 turns,
                 new CallerAccess(sessions, members)),

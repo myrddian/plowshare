@@ -89,6 +89,12 @@ public final class InformationContentInputs {
   }
 
   public static InformationRequest command(String operation, Map<String, Object> fields) {
+    return command(operation, fields, InformationContext.Selection.personal());
+  }
+
+  /** The owning boundary supplies the already admitted default; omission cannot reset it. */
+  public static InformationRequest command(
+      String operation, Map<String, Object> fields, InformationContext.Selection admitted) {
     if (!InformationContent.VIEW.equals(fields.get("view")))
       throw new CallerFault("unsupported-view");
     // Optional absence is distinct from explicit null. Null remains valid inside a metadata
@@ -106,7 +112,14 @@ public final class InformationContentInputs {
     var corpus = body.remove("corpus");
     var view = body.remove("view");
     var selection = new LinkedHashMap<String, Object>();
-    selection.put("scope", scope == null ? Map.of("kind", "personal") : scope);
+    selection.put(
+        "scope",
+        scope == null
+            ? new InformationRequest.Scope(
+                admitted.scope().name().toLowerCase(java.util.Locale.ROOT),
+                admitted.project(),
+                admitted.includeShared())
+            : scope);
     selection.put("corpus", corpus);
     selection.put("view", view);
     body.put("selection", selection);

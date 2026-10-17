@@ -35,6 +35,9 @@ class DocumentsConfigTest {
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
           .withUserConfiguration(DocumentsConfig.class)
           .withBean(
+              io.aeyer.plowshare.server.requests.RequestProjects.class,
+              () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
+          .withBean(
               io.aeyer.plowshare.server.archive.ProjectMembers.class,
               () -> Mockito.mock(io.aeyer.plowshare.server.archive.ProjectMembers.class))
           .withBean(JdbcTemplate.class, () -> Mockito.mock(JdbcTemplate.class))

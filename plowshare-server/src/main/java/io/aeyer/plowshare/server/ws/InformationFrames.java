@@ -97,6 +97,9 @@ public final class InformationFrames implements FrameArea {
   }
 
   private Outcome handle(String verb, Map<String, Object> payload, Asking asking) {
+    // Validate the original selector before typed DTO construction can normalize an identity.
+    // Navigation/interchange still require their own explicit scope and command contracts.
+    var selection = verb.startsWith("migration.") ? null : InformationScopes.from(payload);
     if (verb.startsWith("interchange.")) {
       return Outcome.ok(
           interchange.execute(
@@ -113,9 +116,7 @@ public final class InformationFrames implements FrameArea {
 
     InformationContext context =
         access
-            .resolve(
-                asking.requireHandle("information." + verb),
-                verb.startsWith("migration.") ? null : InformationScopes.from(payload))
+            .resolve(asking.requireHandle("information." + verb), selection)
             .withCorpus(
                 io.aeyer.plowshare.server.information.InformationInputs.corpus(
                     payload.get("corpus")))
@@ -129,7 +130,8 @@ public final class InformationFrames implements FrameArea {
         && (context.facets().contentType() != null
             || context.facets().contentTypeVersion() != null
             || context.facets().untyped() != null)) throw new CallerFault("unsupported-view");
-    if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
+    if (verb.equals("share") || verb.equals("unshare")) access.requireAudience(context);
+    else if (io.aeyer.plowshare.server.access.ProjectAuthorization.required("information." + verb)
             != io.aeyer.plowshare.server.archive.ProjectRole.VIEWER
         && !verb.startsWith("migration.")) access.requireWork(context);
     Object result;
@@ -141,7 +143,7 @@ public final class InformationFrames implements FrameArea {
               io.aeyer.plowshare.protocol.DocumentMetadata.PROFILE,
               contentSettings.writesEnabled()));
     if (verb.startsWith("types.") || verb.startsWith("content.")) {
-      var command = InformationContentInputs.command(verb, payload);
+      var command = InformationContentInputs.command(verb, payload, context.selection());
       return Outcome.ok(
           switch (command) {
             case io.aeyer.plowshare.protocol.InformationRequest.TypeList q ->
@@ -209,7 +211,7 @@ public final class InformationFrames implements FrameArea {
             context.account(),
             required(payload, "payload"),
             required(payload, "owner"),
-            InformationScopes.from(payload),
+            access.resolve(context.account(), InformationScopes.from(payload)).selection(),
             uuids(payload, "inputs"),
             required(payload, "reason"),
             uuid(payload, "requestId"),

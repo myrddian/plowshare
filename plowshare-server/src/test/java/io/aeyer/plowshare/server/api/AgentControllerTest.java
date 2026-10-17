@@ -90,16 +90,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
  * at boot cannot be built here either — which is what keeps the agents this file lists to a console
  * the same shape as the agents a deployment has.
  *
- * <p><b>{@link DefinitionResolver} is real too, built over that registry as its boot set.</b>
- * {@code projects} is a mock whose {@code id(String)} answers {@code null} for every project name a
- * request names unless a test stubs it — Mockito's own default for an unstubbed method returning an
- * object — and {@link DefinitionResolver#forCaller} reads a {@code null} project id as "no project
- * tier to read" and falls straight back to the boot set. Most of these tests are not about a
- * project's own {@code agents/} or {@code bots/} shadowing the boot set, so most requests here
- * resolve to exactly {@code registry}, the same registry a test built with {@link
- * #wire(AgentRegistry)}. The ones that <em>are</em> about it — "per-caller scoping" below — stub
- * {@code projects.id} and build their own {@link DefinitionResolver} over a real {@link
- * DataLayout}, through {@link #wire(DefinitionResolver)}.
+ * <p><b>{@link DefinitionResolver} is real too, built over that registry as its boot set.</b> Named
+ * fixture projects have explicit IDs. They use the boot definitions when their valid context has no
+ * configured directory; unknown explicit names refuse instead of selecting root. Tests of
+ * project-local definitions supply their own real DataLayout.
  */
 class AgentControllerTest {
 
@@ -122,6 +116,9 @@ class AgentControllerTest {
         .thenAnswer(invocation -> jobs.get(invocation.getArgument(0)));
     curator = mock(Curator.class);
     projects = mock(ProjectStore.class);
+    // Named fixture projects are real contexts; an unstubbed project must now refuse.
+    when(projects.id("payments")).thenReturn(9L);
+    when(projects.id("ledger")).thenReturn(8L);
     turns = mock(Turn.class);
     // Every conversation-carrying request in this file speaks into the
     // global tier unless a test says otherwise -- a stub and not
@@ -151,7 +148,7 @@ class AgentControllerTest {
    */
   private void wire(AgentRegistry bootSet) {
     channel = mock(SessionChannel.class);
-    // DataLayout.NONE, an always-false projectExists and a mocked channel:
+    // DataLayout.NONE, registered fixture projects and a mocked channel:
     // none of the three is ever consulted by most tests in this file,
     // because every Caller they build resolves with a null project id
     // (this class's own javadoc says why) and DefinitionResolver.forCaller
@@ -163,7 +160,7 @@ class AgentControllerTest {
         new DefinitionResolver(
             bootSet,
             DataLayout.NONE,
-            id -> false,
+            id -> true,
             Set.of(),
             Set.of(),
             channel,

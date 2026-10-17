@@ -48,6 +48,9 @@ class InformationFeatureConfigTest {
                 ApplicationPolicy.Kind.APPLICATION, Map.of("admin", ProjectRole.VIEWER)));
     new ApplicationContextRunner()
         .withUserConfiguration(DocumentsConfig.class, ApplicationProjectMembers.class)
+        .withBean(
+            io.aeyer.plowshare.server.requests.RequestProjects.class,
+            () -> io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY)
         .withBean("jdbcProjectMembers", ProjectMembers.class, () -> stored)
         .withBean(ApplicationPolicy.class, () -> policy)
         .withBean(

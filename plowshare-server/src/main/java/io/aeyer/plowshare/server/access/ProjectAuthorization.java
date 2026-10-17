@@ -14,6 +14,17 @@ public class ProjectAuthorization {
   private final ResourceScopeRepository resources;
   private final ProjectMembers members;
   private final AdminStore accounts;
+  private io.aeyer.plowshare.server.requests.RequestProjects requestProjects =
+      io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useRequestProjects(io.aeyer.plowshare.server.requests.RequestProjects projects) {
+    requestProjects = Objects.requireNonNull(projects);
+  }
+
+  // Only consumers verified to resolve the same trusted default in their owning service.
+  private static final Set<String> APPLICATION_DEFAULT =
+      Set.of("agent.run", "conversation.open", "orchestration.start", "image.upload");
 
   public ProjectAuthorization(
       ResourceScopeRepository resources, ProjectMembers members, AdminStore accounts) {
@@ -166,6 +177,14 @@ public class ProjectAuthorization {
   // Writes, processing, private receipts and permission changes do not use this admission path.
   private static final Set<String> GENERAL_INFORMATION_READ =
       Set.of(
+          "document.list",
+          "document.detail",
+          "document.chunk",
+          "document.retrieve",
+          "document.rank",
+          "document.stance",
+          "document.search",
+          "document.citations",
           "information.navigation.capabilities",
           "information.documents.list",
           "information.documents.facets",
@@ -207,7 +226,8 @@ public class ProjectAuthorization {
           "firing.list");
 
   private static boolean serviceOperation(String operation) {
-    return operation.startsWith("tool.scope.host.")
+    return GENERAL_INFORMATION_READ.contains(operation)
+        || operation.startsWith("tool.scope.host.")
         || operation.startsWith("provider.credential.")
         || Set.of(
                 "provider.connection.list",
@@ -391,6 +411,18 @@ public class ProjectAuthorization {
     if (service && GENERAL_INFORMATION_READ.contains(operation)) return;
     ProjectRole permission = required(operation);
     Set<String> projects = scopes(payload, account);
+    if (service
+        && projects.isEmpty()
+        && payload.resources().isEmpty()
+        && !payload.projectScope()
+        && (APPLICATION_DEFAULT.contains(operation) || operation.startsWith("information."))) {
+      // The owning handler resolves again and checks the actual selected scope before effects.
+      // Existing Application metadata is the source; arbitrary/multi-project tokens refuse.
+      projects.add(
+          requestProjects
+              .implicit(account)
+              .orElseThrow(() -> new CallerFault("Supply an explicit project")));
+    }
     if (service && projects.isEmpty() && !SERVICE_LISTS.contains(operation))
       throw new CallerFault(
           "Service tokens require an explicit project or a resource in a granted project");

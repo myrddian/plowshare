@@ -25,7 +25,15 @@ class ServiceInformationAuthorizationTest {
             "information.documents.list",
             "information.read",
             "information.events",
-            "information.interchange.export"))
+            "information.interchange.export",
+            "document.list",
+            "document.detail",
+            "document.chunk",
+            "document.retrieve",
+            "document.rank",
+            "document.stance",
+            "document.search",
+            "document.citations"))
       assertDoesNotThrow(
           () ->
               access.require(

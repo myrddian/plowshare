@@ -1617,6 +1617,11 @@ class AuthFilterTest {
   })
   static class Wiring {
     @Bean
+    io.aeyer.plowshare.server.requests.RequestProjects requestProjects() {
+      return io.aeyer.plowshare.server.requests.RequestProjects.EXPLICIT_ONLY;
+    }
+
+    @Bean
     io.aeyer.plowshare.server.access.ProjectAuthorization projectAuthorization() {
       var authorization =
           org.mockito.Mockito.mock(io.aeyer.plowshare.server.access.ProjectAuthorization.class);

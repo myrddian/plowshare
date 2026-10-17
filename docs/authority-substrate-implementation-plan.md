@@ -1,8 +1,8 @@
 # Authority substrate implementation roadmap
 
-Status: implementation roadmap, updated 18 October 2026. Slices 01–12 have been
-explicitly authorized and implemented in this branch. Slices 13–14 remain proposed
-and unauthorized. This roadmap does not authorize their execution.
+Status: implementation roadmap, updated 18 October 2026. Slices 01–13 have been
+explicitly authorized and implemented in this branch. Slice 14 remains proposed
+and unauthorized. This roadmap does not authorize its execution.
 
 ## Count and scope
 
@@ -23,7 +23,8 @@ identities and scoped roles (01–03), knowledge homes and current-root policy
 (04–05), retained execution/inference and bounded SYSTEM services (06–08), and
 scheduling plus Relay/message integration (09–10), followed by retained independent
 orchestration roots and synchronous agent children (11), and action checks for
-the existing acting consumers (12). See each slice's document
+the existing acting consumers (12), and verified existing-contract selectors and
+client boundaries (13). See each slice's document
 for verification and limits. This is not a complete platform cutover: configured
 embedding/search operation budgets remain missing, and nested/model-triggered
 orchestration starts remain refused without a supported parent-budget sharing
@@ -140,7 +141,7 @@ For future implementation:
    retained-state fixtures for the affected slice. New Flyway migrations only;
    never rewrite a shipped migration or relabel historical usage as new authority.
 
-The slice 01–12 documents record implementation checks. The original roadmap
+The slice 01–13 documents record implementation checks. The original roadmap
 planning task ran no Java, PostgreSQL, SDK or live integration tests; its
 documentation checks are distinct from implementation verification.
 
@@ -167,8 +168,8 @@ the adopted account/scope/action and sandbox rules, required migration/negative/
 recovery evidence passes, and the supported end-to-end path in slice 14 works.
 Unsupported capabilities remain explicitly unsupported.
 
-Slices 01–12 are implemented under subsequent explicit requests; slices 13–14
-remain proposed and unauthorized.
+Slices 01–13 are implemented under subsequent explicit requests; slice 14
+remains proposed and unauthorized.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.

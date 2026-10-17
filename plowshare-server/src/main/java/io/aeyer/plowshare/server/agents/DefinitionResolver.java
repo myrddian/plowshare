@@ -63,26 +63,11 @@ import org.slf4j.LoggerFactory;
  * #refusalsFor} — an agent silently not being the one an operator wrote is the invisible-fact
  * failure this codebase designs against throughout {@link AgentRegistry}.
  *
- * <p><b>Every refusal this class decides is also logged at {@code WARN}, because {@link
- * #refusalsFor} answers only somebody who already suspects.</b> A structured map is the right form
- * for a surface to render, and it is the wrong and only form for an operator who is looking at a
- * file and wondering why nothing changed. The two that would otherwise be silent are the {@code
- * required}-name collision above and the whole-project fallback in {@link #readProject} — that
- * fallback was accepted <em>because</em> it fails visibly rather than silently, and a map with no
- * reader is not visible. The per-file disablements are logged by {@code AgentRegistry.read} itself,
- * in the same words, whichever tier it is reading; the ones {@link DefinitionChecks} adds after
- * that loop has run are logged by {@link #build}.
- *
- * <p><b>A fault that only exists once the tier is merged with the boot set is caught, not
- * thrown.</b> The tier's own read cannot see everything: a callee whose own file failed to parse is
- * still a name the tier believes exists (the disable rule), but that name is never added to the
- * merged map, so a caller of it becomes a genuinely unreachable callee only once merged; a shadowed
- * agent an inherited caller calls, or a grant that escalates once two directories are combined, are
- * the same shape one level over. Those are still faults of <em>this project's own tier</em> and
- * must not propagate out of {@link #forCaller} as an exception mid-run, so {@link #readProject}
- * wraps the merge in a catch: on a set-level fault the whole project falls back to the unmodified
- * boot set and the failure is named once, under a key no real agent can have, in {@link
- * #refusalsFor}.
+ * <p><b>Per-file refusals are recorded and logged.</b> Required-name collisions keep their
+ * protected deployment definition; ordinary invalid files remain disabled under their current
+ * per-file rules. A graph-level or authoritative merged-tier failure instead refuses resolution:
+ * substituting the deployment tier could execute a different definition under the same name.
+ * Refusals remain keyed by the caller's project/session and visible to its operator.
  *
  * <p><b>Registered Applications read their resources from the server workspace.</b> They work
  * without a definitions data directory or a connected client. Externals with no data directory
@@ -279,7 +264,7 @@ public final class DefinitionResolver implements SessionCloseListener {
   private record Cached(Stamp stamp, AgentRegistry inherited, AgentRegistry registry) {}
 
   /**
-   * The {@link #refusalsFor} key for a project-wide fallback — no real agent name can collide with
+   * The {@link #refusalsFor} key for a project-wide refusal — no real agent name can collide with
    * it, since a name is a file stem and never carries parentheses or spaces.
    */
   private static final String TIER = "(the project tier)";
@@ -549,13 +534,12 @@ public final class DefinitionResolver implements SessionCloseListener {
 
   /**
    * The registry {@code caller} sees: its project's own definitions, layered over the boot set, or
-   * the boot set itself when there is no project — or when the project named no longer has a row.
+   * the boot set itself when there is no project. A deleted explicit project refuses.
    *
    * <p><b>{@code projectExists} is asked before the cache and before the disk</b>, which is the
    * ordering Spec §9.6 requires: the database decides whether there is a project tier to read at
-   * all, and the filesystem is never asked first. A caller naming a deleted project's id gets the
-   * boot set on every call, at the cost of one predicate test — cheaper than the cache lookup it
-   * precedes, and paid whether or not {@code projects/<id>/} exists on disk.
+   * all, and the filesystem is never asked first. A caller naming a deleted project's id is refused
+   * before any cache, disk or client-channel lookup, even if stale files remain on disk.
    *
    * <p><b>A cached tier is served only while its {@link Stamp} still holds</b>, which is what makes
    * a bot dropped into {@code projects/&lt;id&gt;/bots/} resolvable on the next lookup with no
@@ -584,9 +568,10 @@ public final class DefinitionResolver implements SessionCloseListener {
     if (caller.projectId() == null && personalIds.apply(caller) != null) {
       caller = new Caller(personalIds.apply(caller), caller.sessionId(), caller.handle());
     }
-    if (caller.projectId() == null || !projectExists.test(caller.projectId())) {
-      return inherited;
-    }
+    if (caller.projectId() == null) return inherited;
+    if (!projectExists.test(caller.projectId()))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "The selected definition project is unavailable");
     if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
       // No data directory means no tree to hold a project tier at all --
       // every caller for every project resolves to the boot set, exactly
@@ -665,6 +650,10 @@ public final class DefinitionResolver implements SessionCloseListener {
    */
   public Optional<DefaultBot> defaultBot(Caller caller) {
     Objects.requireNonNull(caller, "caller");
+    Long selected = caller.projectId() == null ? personalIds.apply(caller) : caller.projectId();
+    if (selected != null && !projectExists.test(selected))
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "The selected definition project is unavailable");
     if (!data.keepsAnything() && applicationResources.root(caller.projectId()).isEmpty()) {
       return shippedDefaultIfDefined();
     }
@@ -857,12 +846,9 @@ public final class DefinitionResolver implements SessionCloseListener {
    * here</b>, because {@link #stamp} calls {@code data.agentsFor}/{@code botsFor} before this
    * method is ever reached and both throw on a {@code null} root.
    *
-   * <p>Never throws. Every per-file fault the tier's own read can absorb is folded into {@link
-   * #refusalsFor} by {@link #build}; a fault that only exists once this tier is merged with the
-   * boot set is caught here, and costs the whole project a fallback to the unmodified boot set
-   * rather than escaping as an exception mid-run. {@link ChannelDefinitions} itself never throws
-   * either way — every channel failure is already an empty listing by the time this method's caller
-   * sees it.
+   * <p>Per-file faults remain disabled definitions with recorded refusals. A graph-level or
+   * authoritative tier failure refuses the lookup rather than replacing the requested definition
+   * with the deployment tier. Channel availability remains governed by its existing provider fence.
    */
   private AgentRegistry readProject(CacheKey key, AgentRegistry inherited) {
     Long projectId = key.projectId();
@@ -888,38 +874,13 @@ public final class DefinitionResolver implements SessionCloseListener {
         throw new io.aeyer.plowshare.server.faults.CallerFault(
             "Application definitions are unavailable", brokenTier);
       }
-      // The tier's own per-file disable rule could not absorb this: a
-      // graph-level fault visible only once the tier is combined with
-      // the boot set -- a caller of a name that failed to parse and so
-      // never made it into the merged map (AgentRegistry.read's own
-      // disable rule keeps such an edge alive at the tier level, on the
-      // promise that the callee still exists somewhere; the promise is
-      // broken here, because it does not survive into `merged`), a
-      // shadowed non-required agent an inherited caller calls, a grant
-      // that escalates once two directories are combined, or the
-      // directory itself being unreadable. No single project may take
-      // its own resolution down further than "you get the boot set",
-      // so this project falls back to it entirely and the one thing an
-      // operator is told is that it happened and why -- named under a
-      // key no real agent can collide with, since `readProject` never
-      // recorded a per-name refusal for a merge that did not complete.
-      String reason =
-          "this project's own definitions could not be resolved, so none of them"
-              + " are being served; the boot set is running unmodified for this project"
-              + " instead: "
-              + brokenTier.getMessage();
+      // A graph-level failure invalidates this authoritative tier. Substituting the boot set
+      // would execute a different definition under the same requested name.
+      String reason = "Project definitions are unavailable: " + brokenTier.getMessage();
       refusals.put(key, Map.of(TIER, reason));
-      // AND SAID OUT LOUD, not merely recorded. refusalsFor is the
-      // structured form and it is answered only when something asks;
-      // dropping every override an operator wrote for a project is not a
-      // fact they should have to make an API call to discover. This is
-      // the one refusal in this class with no per-agent row on the agents
-      // surface to carry it either -- TIER is not a name anything lists --
-      // so the log is the only place it can be met. AgentRegistry.read
-      // logs its own disablements at WARN in these same words, which is
-      // where the voice comes from.
       log.warn("The definitions of project {} are ALL WITHHELD, because: {}", projectId, reason);
-      return inherited;
+      throw new io.aeyer.plowshare.server.faults.CallerFault(
+          "Project definitions are unavailable", brokenTier);
     }
   }
 
@@ -1007,7 +968,7 @@ public final class DefinitionResolver implements SessionCloseListener {
     // Built before the map write below: if this throws (a set-level fault
     // only visible once merged with the boot set), readProject's catch
     // must find no refusalsFor entry from this attempt -- the two maps
-    // must never disagree, and the whole-project fallback it records is
+    // must never disagree, and the whole-project refusal it records is
     // the only account of what happened.
     AgentRegistry registry = inherited.replacing(merged);
     refusals.put(key, Map.copyOf(refused));

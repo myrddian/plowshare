@@ -21,17 +21,16 @@ package io.aeyer.plowshare.server.ws;
  * does with it is a {@code requests} type's: {@link
  * io.aeyer.plowshare.server.requests.RequestedHome} for the four that read the archive, {@link
  * io.aeyer.plowshare.server.requests.RequestedProjectId#forListing} for {@code agent.list}, which
- * resolves a name to an id rather than to a home. Both carry the same reading of the two absent-ish
- * values — null is the global tier and a blank is refused rather than folded into it — which is why
- * one record spans them.
+ * resolves an explicit name to an existing id rather than to a home. A blank refuses on both paths.
+ * Omission is interpreted by the owning consumer: archive operations retain their legacy storage
+ * tier, while definition listings use the caller's Personal/deployment catalogue. This DTO does not
+ * select a Global account or grant access.
  *
  * <p><b>{@code agent.list} declared its own copy of this record and no longer does.</b> That
  * handler was written at Task 3, two tasks before this type existed, and a second one-field {@code
  * project} record is exactly the third copy this type was extracted to prevent.
  *
- * @param project the tier to answer from, or null for {@link
- *     io.aeyer.plowshare.protocol.Home#global()} — for {@code agent.list}, for the global {@code
- *     agents/} and {@code bots/} alone. A present-but-blank value is refused rather than read as
- *     global, which is the rule {@code Home.of} carries and neither surface may reinvent
+ * @param project an explicit project name, or null for the owning operation's existing default.
+ *     Definition lookups refuse missing explicit projects; omission cannot repair invalid context.
  */
 public record Tiered(String project) {}

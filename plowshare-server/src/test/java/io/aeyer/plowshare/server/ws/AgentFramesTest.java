@@ -155,6 +155,9 @@ class AgentFramesTest {
         .thenCallRealMethod();
     when(jobs.jobsFor(org.mockito.ArgumentMatchers.nullable(String.class))).thenCallRealMethod();
     projects = mock(ProjectStore.class);
+    // Named fixture projects are real contexts; an unstubbed project must now refuse.
+    when(projects.id("payments")).thenReturn(9L);
+    when(projects.id("ledger")).thenReturn(8L);
     conversations = mock(ConversationStore.class);
     when(conversations.find(anyString()))
         .thenAnswer(asked -> Optional.of(mock(ConversationRecord.class)));
@@ -182,14 +185,13 @@ class AgentFramesTest {
     pictures = new Pictures(images);
     passes = new Passes(jobs, curator, props);
     limits = new Limits(jobs);
-    // AgentControllerTest's own wiring: a real resolver whose projectExists
-    // always says no, so every caller resolves to the boot set. What varies
-    // between the two surfaces in this file is never the registry.
+    // Valid fixture projects have no configured definition tree, so both surfaces use
+    // the same deployment definitions while preserving their selected project context.
     useResolver(
         new DefinitionResolver(
             registry,
             DataLayout.NONE,
-            id -> false,
+            id -> true,
             Set.of(),
             Set.of(),
             channel,
