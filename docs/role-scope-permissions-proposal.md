@@ -388,6 +388,12 @@ its own scoped authority, without lending the caller SYSTEM execution or
 silently rescuing a denied arbitrary run. Define service budgets and inputs/outputs
 separately from ordinary child-agent authority.
 
+Platform functions such as memory processing can execute as SYSTEM while WRITE
+is restricted to a specific admitted memory area. Identity remains SYSTEM;
+effective task permissions do not include its ambient root authority or the
+ability to issue grants that enlarge the task. Reads and other effects must also
+fit their admitted scopes/actions. This does not assign SYSTEM to ordinary agents.
+
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and
 FileStore grants. A host FileStore VIEWER grant is needed for direct source read;

@@ -144,6 +144,16 @@ The server derives a bounded task grant from the sponsoring admission and the
 worker's permitted operations. An unattended maintenance task needs its own
 explicit operator-authorized policy, targets and limits.
 
+SYSTEM execution is reserved for platform functions, such as the memory system.
+The executor remains the SYSTEM account; its effective authority while running
+is bounded by the admitted task, not the account's full root authority. For
+example, a memory worker admitted to write one project's designated memory area
+can write there, but cannot write another project's memories, Global knowledge
+or access-policy records without separately authorized admission. Its reads and
+other effects also need their own admitted scope/actions. The task cannot use
+SYSTEM's root grant-issuing authority to enlarge its own bounds. This uses the
+same scoped evaluator and retained ceilings, not a separate SYSTEM-name bypass.
+
 An authenticated administrator holds its own account and an ADMIN grant issued
 under root authority. The grant can permit management of identities, grants or
 platform policy without granting arbitrary tenant or Personal body reads. The

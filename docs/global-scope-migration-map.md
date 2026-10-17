@@ -282,6 +282,9 @@ Default mocked/fake tests should cover:
 - Authorized user knowledge writes can trigger a separately admitted SYSTEM worker
   with declared inputs/outputs and spending limits. The user does not receive
   SYSTEM/RUN_MODEL authority, and denied arbitrary execution is not auto-escalated.
+- A SYSTEM memory worker admitted to one memory area cannot write another project,
+  Global knowledge or policy/grant records, or enlarge its own task grants. Audit
+  retains SYSTEM as executor while scoped authority refuses those effects.
 - Application and human role helpers resolve to common scoped grants. ADMIN writes
   Global knowledge through WRITE/control authority while retaining GLOBAL_ACCOUNT
   ownership and the initiating human's audit identity.

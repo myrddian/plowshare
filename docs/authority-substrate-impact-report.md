@@ -49,6 +49,9 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
 ## Adopted requirements assessed
 
 - SYSTEM is the locked root account; its role cannot be assigned to agents.
+- SYSTEM execution is reserved for platform functions. A memory worker remains
+  SYSTEM but can write only its admitted memory area, with separately bounded
+  reads/effects; root identity cannot expand the task or issue itself more grants.
 - `GLOBAL_ACCOUNT` is a knowledge owner, not a project or execution identity.
   Human ADMIN controls its knowledge without logging in as that account.
 - `GLOBAL_READ` is held by authenticated humans, Applications and service
@@ -382,7 +385,7 @@ bill the Global owner by implication or make private processing logs public.
 | Meaning of RUN_MODEL | Cover chat, embeddings, reranking, model validators, preparation and side calls; decide whether bounded read-service inference uses requester grants or an explicit service sponsor |
 | Non-model execution | CREATE plus RUN_MODEL is the adopted bundle, but does not by itself classify tool-only jobs, scripts, CPU stages, messaging or schedule effects |
 | Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
-| Processing/log scope and service sponsorship | SYSTEM can process within Global through scoped grants; define authorized triggers, exact inputs/outputs, sponsor and private logs without lending execution to callers |
+| Processing/log scope and service sponsorship | Settled: platform workers remain SYSTEM with task-bounded area/action grants, not full root authority. Define each workflow's authorized trigger, exact inputs/outputs, sponsor and private logs; billing policy remains unspecified |
 | SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
 | Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
 | Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
