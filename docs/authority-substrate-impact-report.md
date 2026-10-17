@@ -69,7 +69,12 @@ selectors remain refused. Slice 14 now records the [classification and retained-
 proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md#implementation-record-18-october-2026).
 Final cutover remains incomplete; no Global account intake or absent budget
 contract was added. Historical null jobs are preserved rather than assigned
-invented authority; new digest jobs persist the selected home.
+invented authority; new digest jobs persist the selected home. The agreed
+[plan to finish slice 14](authority-substrate-slices/14-completion-plan.md) now
+scopes an explicit Global account destination and document embeddings using the
+existing processing budget. This is planning only; no contract or runtime behavior
+has changed. Query embedding, independent background repair, nested orchestration
+and transient-child recovery budgets remain deferred.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
 the listed ordinary catalogue/content/import/relationship owner-mutation checks.
@@ -575,12 +580,14 @@ proceed. A later slice must resolve the relevant gap before exposing that behavi
 | Advanced ACL facilities | Resource-specific ACLs fit the substrate, but arbitrary denies, nested groups and new management interfaces are not assumed or required. RBAC helpers remain the routine path, and GLOBAL_READ has no individual exclusions. |
 | Detailed spending-pool mechanics | Operation sponsorship is settled. Pool configuration, reservation/settlement races and migration remain separate technical work under ADR 0025. |
 
-Concrete activation limits after slice 11:
+Current activation limits (implementation unchanged by the completion plan):
 
-- Embedding/search query, write and repair calls need an explicitly configured
-  operation-budget source. The dispatcher refuses unclassified calls; slices
-  07–08 do not supply an invented allowance or wallet. This branch is not ready
-  for deployment-wide activation of those paths.
+- Document-preparation embedding currently lacks claimed allowance/authorization
+  carriage. The slice 14 completion plan reuses the existing retained processing
+  allowance for chunk and summary embeddings rather than adding a wallet.
+  Semantic-query embedding and independent background repair/rebuild still need
+  their own explicit budget contracts and remain deferred. Unclassified calls
+  continue to refuse; this is not deployment-wide activation of those paths.
 - Independent Relay orchestration roots now retain authority. Nested/model-started
   orchestration allowances still require a supported parent-budget contract, and
   non-conversation child leases cannot be replaced on resume. Existing caller-log

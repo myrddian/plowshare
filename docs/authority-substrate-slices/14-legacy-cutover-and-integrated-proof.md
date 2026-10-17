@@ -1,8 +1,9 @@
 # Slice 14: Legacy classification, cutover and integrated migration proof
 
-Status: authorized implementation subset completed, 18 October 2026; final cutover
-blocked. The implementation request authorizes this slice only. No new public
-capability or deployment is included.
+Status: implementation subset completed; bounded completion plan agreed,
+18 October 2026. Final Global document cutover remains incomplete. The new
+[completion plan](14-completion-plan.md) is documentation only; implementation of
+its contract extension and embedding changes is not yet authorized.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -12,7 +13,10 @@ test policy and cross-slice activation rules.
 
 ## Outcome and dependencies
 
-Finish the core migration with reviewed data classification, compatible enforcement and one supported end-to-end Global knowledge path, preserving durable identities and private data.
+Complete the bounded Global document path with reviewed data classification,
+compatible enforcement and integrated migration/recovery proof, preserving durable
+identities and private data. Deferred consumers remain fenced; this outcome does
+not claim unrestricted platform-wide cutover.
 
 **Depends on:** [13 — Existing API, scope-selection and client contract cutover](13-existing-contract-and-client-cutover.md).
 
@@ -172,6 +176,9 @@ reconstruction is a retained-state simulation, not a live process rollout.
 
 ### Remaining cutover and rollback gates
 
+These gates record the implementation state at `007c832`. The completion plan
+below now defines the agreed follow-on scope; none of its changes is implemented.
+
 1. A separately authorized existing-contract decision is needed for Global-owned
    document admission/manual adoption. The current API cannot express it. This
    slice does not add that capability or silently rehome a published manual.
@@ -187,3 +194,33 @@ reconstruction is a retained-state simulation, not a live process rollout.
    onto this schema: old writers can omit required evidence or meet intentional
    write fences. Preserve grants, receipts, policies, creator evidence and costs;
    no reverse migration or restore is authorized by this implementation.
+
+
+## Agreed plan to finish slice 14, planning only
+
+The [completion plan](14-completion-plan.md) defines two changes:
+
+1. An explicit Global account-knowledge destination on existing information
+   operations, with scoped human ADMIN WRITE, separate actor/creator provenance,
+   transactional Java/SQL enforcement and destination-bound installer receipts.
+2. Document chunk and summary embedding authorization and claims against the
+   existing retained processing allowance, including both applicable embedding
+   implementations, stable source/claim identity and generation/lease/output fences.
+
+The destination is a planned public-contract extension, not a new endpoint or an
+already supported capability. Shared remains a read selection. No existing
+Personal/manual resources are silently moved or reattributed. Model-call limits
+will cover all preparation inference, so the same total may exhaust earlier.
+
+Semantic-query embedding, independent background repair/rebuild, nested or
+caller-conversation orchestration budgets, and transient-child budget recovery
+remain deferred with their current refusals. They are not prerequisites for the
+bounded Global document acceptance path. This does not remove curation,
+compatibility-removal or broader rollout gates or certify those consumers.
+
+The required proof is Global ADMIN admission → bounded SYSTEM preparation using
+its retained processing budget → human/service read/list, including creator access
+loss, rejected callers, exhaustion, invalidation and retained-state recovery without
+uncertain replay or private-log leakage. Prior test results above do not verify
+this planned behavior. No runtime, SDK/schema, migration or deployment changes are
+authorized by this documentation request.

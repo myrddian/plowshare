@@ -3,7 +3,9 @@
 Status: implementation roadmap, updated 18 October 2026. Slices 01–13 have been
 explicitly authorized and implemented in this branch. Slice 14 is authorized and
 partially implemented: classification/rehearsal and digest attribution are complete;
-final cutover is blocked by the documented unsupported Global admission route.
+final cutover remains incomplete. The agreed [completion plan](authority-substrate-slices/14-completion-plan.md)
+adds an explicit Global document destination and preparation embeddings charged to
+the existing processing budget. It is planning only; other budget gaps stay deferred.
 
 ## Count and scope
 
@@ -52,7 +54,7 @@ it is not a new exhaustive runtime/SDK audit or evidence of live deployment.
 | 11 | [Orchestration and agent-child authority lineage](authority-substrate-slices/11-orchestration-and-agent-lineage.md) | 06, 07 | Carry common authority, action limits and operation budgets through existing orchestration and agent-child lifecycles without automatic privilege inheritance. |
 | 12 | [Account acting delegation and action ceilings](authority-substrate-slices/12-account-acting-delegation.md) | 03, 06, 07 | Map the existing Application-on-behalf-of-user flow to common actions while preserving separate actor/subject proof and the currently supported target/operation set. |
 | 13 | [Existing API, scope-selection and client contract cutover](authority-substrate-slices/13-existing-contract-and-client-cutover.md) | 05, 08, 09, 10, 11, 12 | Expose the migrated semantics only through verified existing supported operations, coordinating affected contracts without requiring SDK/client parity or creating new APIs. |
-| 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Finish the core migration with reviewed data classification, compatible enforcement and one supported end-to-end Global knowledge path, preserving durable identities and private data. |
+| 14 | [Legacy classification, cutover and integrated migration proof](authority-substrate-slices/14-legacy-cutover-and-integrated-proof.md) | 13 | Complete reviewed legacy classification and the bounded Global document admission/preparation/read path, preserving identities and private data; separately deferred consumers remain fenced. |
 
 The existing first-slice document remains authoritative for slice 01; it is not
 duplicated in the slice directory. Slice 14 depends transitively on 01–13
@@ -107,7 +109,9 @@ because an earlier schema or role exists.
 - **Existing interfaces only:** map verified supported operations. Account/role
   decides authority, not client label. Coordinate affected existing contracts,
   but do not require SDK parity, invent methods/APIs or use private integration
-  access to bypass a public gap.
+  access to bypass a public gap. The explicitly agreed slice 14 destination
+  extension is a planned exception limited to the existing information operations;
+  it is not implementation authorization or an SDK parity requirement.
 - **No uncertain replay:** preserve resource/request/receipt identities, current
   delivery controls and historical costs. Recovery reconciles durable owning
   records instead of relaunching an effect to reconstruct authority.
@@ -172,7 +176,11 @@ Unsupported capabilities remain explicitly unsupported.
 Slices 01–13 are implemented under subsequent explicit requests. Slice 14 has
 implemented its safe subset; its [cutover specification](authority-substrate-slices/14-cutover-specification.md)
 records why the full migration remains incomplete. No new capability or permissive
-fallback was added to close the missing Global route.
+fallback was added to close the missing Global route. The agreed
+[completion plan](authority-substrate-slices/14-completion-plan.md) now scopes that
+route and document embedding on the existing processing allowance. Implementing
+it requires a subsequent instruction. Finishing this bounded path does not enable
+deferred budget consumers or establish unrestricted platform-wide cutover.
 Each later implementation request determines which further slices to execute; no migration
 execution, credential issuance, external notification, production deployment or
 automatic follow-up is scheduled by this roadmap.
