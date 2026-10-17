@@ -166,6 +166,19 @@ authority is represented by root policy/grants through the common evaluator,
 not an identity-name/UUID bypass. Ordinary executions use the same distinction
 between account permissions and retained operation limits.
 
+For conversation compaction, the memory summariser executes as SYSTEM, whose
+account authority permits reading any conversation and writing the relevant
+memory/summary records. This task does not need a fresh READ or WRITE grant.
+The task's supplied conversation inputs and bound tools restrict which content
+it can actually obtain and where it can persist its result. Tool implementations
+enforce those task bindings, including any caller-supplied resource identifiers;
+the summariser cannot use a general read/write route to reach other resources.
+Thus a broad account permission and a narrow scope of work coexist. Scope here
+describes the operation sandbox established through inputs and capabilities,
+not a new account-permission area that must be granted before each compaction.
+Tools and input fences retain their existing capability mechanisms; this does
+not extend account RBAC into a new tool-permission hierarchy.
+
 An authenticated administrator holds its own account and an ADMIN grant issued
 under root authority. The grant can permit management of identities, grants or
 platform policy without granting arbitrary tenant or Personal body reads. The

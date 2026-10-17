@@ -286,6 +286,10 @@ Default mocked/fake tests should cover:
   Global knowledge or policy/grant records outside its operation sandbox, or enlarge
   that sandbox. Audit retains SYSTEM as executor with its existing root authority;
   sandbox enforcement refuses those effects without fresh per-task SYSTEM grants.
+- A compaction summariser has existing SYSTEM conversation READ/summary WRITE,
+  but can reach only supplied inputs and bound tool targets. Attempts to supply
+  another conversation/output identifier are refused by the capability binding;
+  no per-compaction account grant or new tool RBAC is required.
 - Application and human role helpers resolve to common scoped grants. ADMIN writes
   Global knowledge through WRITE/control authority while retaining GLOBAL_ACCOUNT
   ownership and the initiating human's audit identity.

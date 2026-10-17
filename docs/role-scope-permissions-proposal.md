@@ -396,6 +396,11 @@ effects must also fit the sandbox, which the worker cannot enlarge by issuing
 grants. Effective operation authority is account authority intersected with that
 sandbox and mandatory restrictions. This does not assign SYSTEM to ordinary agents.
 
+For memory compaction, SYSTEM can already read conversations and write summaries.
+The selected conversation inputs and bound read/write tools limit this task's
+reachable content and output destinations. Those capability bindings enforce the
+sandbox; they are not new per-task account READ/WRITE grants or new RBAC tool roles.
+
 Application projects use the project matrix, intersected with current manifest
 roles, token ceilings, active deployment identity, routing, writable areas and
 FileStore grants. A host FileStore VIEWER grant is needed for direct source read;

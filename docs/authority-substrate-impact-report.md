@@ -53,6 +53,10 @@ Client/native SDK coverage is an impact inventory, not a complete client audit.
   SYSTEM with its existing root authority, but an operation sandbox limits writes
   to the admitted memory area and bounds other effects. The sandbox is not a new
   per-task grant to SYSTEM and cannot be expanded by the running worker.
+- For compaction, the SYSTEM summariser already has conversation READ and summary
+  WRITE authority. Selected inputs and bound tools constrain its reachable
+  resources and outputs. Preserve/enforce those capability fences rather than
+  invent per-compaction account grants or an account-role hierarchy for tools.
 - `GLOBAL_ACCOUNT` is a knowledge owner, not a project or execution identity.
   Human ADMIN controls its knowledge without logging in as that account.
 - `GLOBAL_READ` is held by authenticated humans, Applications and service
