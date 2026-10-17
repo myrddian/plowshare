@@ -107,6 +107,16 @@ public final class ProjectRelayPorts implements RelayPorts {
       causation =
           new RelayCausation(ancestry.rootId(), parent.event().eventId(), ancestry.depth() + 1);
     }
+    // Parent/source inspection may involve IO. Recheck both live WRITE eligibility and the exact
+    // project identity before either publishing mutation; later grants cannot retarget this call.
+    var current =
+        require(
+            account,
+            request.project(),
+            request.topic(),
+            RelayPortProperties.Direction.INGRESS,
+            null);
+    if (!topic.equals(current)) throw new CallerFault("Relay publication project changed");
     relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
     Instant occurred = RelayValues.time(request.occurredAt());
     var publication =

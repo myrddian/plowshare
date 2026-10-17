@@ -137,7 +137,8 @@ public class BoardConfig {
                     cap,
                     source,
                     ended,
-                    command);
+                    command,
+                    instance.account());
               }
 
               public boolean busy(String conversation) {
@@ -158,7 +159,9 @@ public class BoardConfig {
                     lease,
                     cap,
                     Speaker.harness(),
-                    ended);
+                    ended,
+                    false,
+                    instance.account());
               }
 
               public String speakCommand(
@@ -176,7 +179,8 @@ public class BoardConfig {
                     cap,
                     Speaker.harness(),
                     ended,
-                    true);
+                    true,
+                    instance.account());
               }
 
               public String continueApproved(
@@ -194,7 +198,9 @@ public class BoardConfig {
                     lease,
                     cap,
                     Speaker.approval(approval),
-                    ended);
+                    ended,
+                    false,
+                    instance.account());
               }
 
               public String resumeDelegate(
@@ -500,10 +506,18 @@ public class BoardConfig {
               }
 
               @Override
-              public void speak(String conversation, String agent, String text, Speaker speaker) {
+              public void speakForAccount(
+                  String conversation, String agent, String text, Speaker speaker, String account) {
+                callers.requireConversationProject(conversation, account);
+                try {
+                  callers.requireWork(turn.homeOf(conversation).project(), account);
+                } catch (io.aeyer.plowshare.server.faults.CallerFault denied) {
+                  throw new Turn.Refused("The recipient cannot execute this delivery");
+                }
                 AgentDefinition definition =
                     callers.requireAgent(agent, callers.callerForConversation(conversation, null));
-                turn.deliver(conversation, definition, text, speaker, outcome -> {});
+                turn.deliverForExecutor(
+                    conversation, definition, text, speaker, outcome -> {}, account);
               }
             },
             inbox::notify);

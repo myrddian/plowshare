@@ -1378,15 +1378,27 @@ public class OrchestrationsConfig {
       @Override
       public void speak(
           String conversation, String callerAgent, String utterance, Speaker speaker) {
+        throw new Turn.Refused("A bound recipient is required for result delivery");
+      }
+
+      @Override
+      public void speakForAccount(
+          String conversation,
+          String callerAgent,
+          String utterance,
+          Speaker speaker,
+          String account) {
+        callers.requireConversationProject(conversation, account);
         AgentDefinition agent;
         try {
+          callers.requireWork(turn.homeOf(conversation).project(), account);
           agent =
               callers.requireAgent(callerAgent, callers.callerForConversation(conversation, null));
         } catch (RuntimeException unresolved) {
           throw new Turn.Refused(
               unresolved.getMessage() != null ? unresolved.getMessage() : unresolved.toString());
         }
-        turn.deliver(conversation, agent, utterance, speaker, outcome -> {});
+        turn.deliverForExecutor(conversation, agent, utterance, speaker, outcome -> {}, account);
       }
     };
   }

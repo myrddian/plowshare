@@ -396,6 +396,35 @@ public final class Turn {
         null);
   }
 
+  /** A result notification uses its explicit recipient account, preserving its harness source. */
+  public String deliverForExecutor(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      String executor) {
+    if (executor == null || executor.isBlank())
+      throw new Refused("A recipient executor is required");
+    Objects.requireNonNull(definition);
+    Objects.requireNonNull(speaker);
+    Objects.requireNonNull(ended);
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        null,
+        null,
+        null,
+        ended,
+        Turn::requireSpeakable,
+        false,
+        speaker,
+        null,
+        null,
+        executor);
+  }
+
   /**
    * The harness speaking to an orchestration's own conductor, on the conversation's own origin's
    * allowance — the only door into an orchestration's conversation.
@@ -834,6 +863,38 @@ public final class Turn {
       Speaker speaker,
       Consumer<Outcome> ended,
       boolean incomingCommand) {
+    return messageTurn(
+        conversation, definition, utterance, lease, cap, speaker, ended, incomingCommand, null);
+  }
+
+  /** Bound receiver authority is separate from the sender, event speaker and log custodian. */
+  public String speakToMessage(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean command,
+      String executor) {
+    if (executor == null || executor.isBlank())
+      throw new Refused("A bound message executor is required");
+    return messageTurn(
+        conversation, definition, utterance, lease, cap, speaker, ended, command, executor);
+  }
+
+  private String messageTurn(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      Budget lease,
+      TurnCap cap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      boolean incomingCommand,
+      String executor) {
+
     return speak(
         conversation,
         definition,
@@ -850,7 +911,9 @@ public final class Turn {
         },
         incomingCommand,
         speaker,
-        lease);
+        lease,
+        null,
+        executor);
   }
 
   /**

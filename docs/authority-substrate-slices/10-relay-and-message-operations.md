@@ -1,7 +1,8 @@
 # Slice 10: Relay and message-triggered operation authority
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: implemented in this branch, 18 October 2026, under explicit authorization.
+No new public API or deployment. New Relay orchestration starts remain fenced
+pending slice 11's retained authority lineage; original receipts remain inspectable.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -65,16 +66,50 @@ match the eventual change:
 
 **PostgreSQL justification:** Conditional: existing durable Relay/provider stores require selected tagged tests only when their persistence/transaction behavior changes. Pure authorization/route tests use mocks.
 
-These are future checks, not tests run for this planning document. Add mocked
-boundary/authorization tests for new behavior; existing suite links do not imply
-every test is non-database. Follow the shared roadmap's focused-test, formatting
-and check requirements. Completion requires the outcome and negative/recovery
-cases above, with unsupported paths still explicit and no uncertain-effect replay.
+The implementation evidence below distinguishes checks run from the original
+planned matrix. Existing suite links do not imply every test is non-database.
+Unsupported paths remain explicit and uncertain effects are never replayed.
 
 ## Specification required before implementation
 
 Inventory the existing message/Relay effect families, classify read versus mutating consumer operations and retain all independent provider/route fences.
 
+The [effect-family specification](10-relay-authority-specification.md) was recorded
+before enforcement and includes the shared person-notification callback.
+
 ## Rollout and rollback
 
 Keep original invocation/delivery/consumer identities and causal chains. Incompatible work is fenced and read-only reconciled, not reissued under different authority.
+
+## Implementation and verification
+
+Project port publication rechecks WRITE and exact registered project identity
+after parent/source lookup. Consume/acknowledge retain their existing work and
+configured account/group/lease fences; READ alone cannot mutate their cursors.
+Manager controls and provider credentials, invocation deadlines and UNKNOWN
+receipts retain their existing independent contracts.
+
+Work receivers check current route/account eligibility before even disclosing a
+known receipt, and again after recording intent before submitting an effect.
+Agent/native work uses common JobStore admission and operation budgets. New
+orchestration starts refuse explicitly until slice 11; existing owning receipts
+can still be read-only reconciled. No receipt or unsupported recovered authority
+is replaced to make work execute.
+
+Board message turns use the bound participant account and existing lease, never
+the sender or conversation creator. Shared result/approval/board notifications
+carry their known recipient into execution. Missing recipients cannot start model
+work; lost READ denies disclosure, while READ without work permission can use the
+existing inbox fallback without inference. The orchestration notification adapter
+only propagates that account; this does not implement orchestration lineage.
+
+Focused mocked tests cover receiver-versus-creator separation, missing recipients,
+READ-only consume/ack refusal, revoked authority and project replacement around
+intent/source lookup, protected receipt disclosure, result-notification admission,
+provider fences and uncertain-effect no-replay. No PostgreSQL run is required for
+this slice: Relay/message persistence, leases and receipt transaction predicates
+are unchanged.
+
+`format` and the focused tests passed. Repository-wide `formatCheck check` passed
+with 5,785 default server tests, zero failures and zero skips. These checks prove
+source/test behavior, not a live deployment or the remaining cutover slices.

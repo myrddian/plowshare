@@ -50,11 +50,19 @@ public class ApprovalsConfig {
               }
 
               @Override
-              public void speak(String conversation, String agent, String text, Speaker speaker) {
+              public void speakForAccount(
+                  String conversation, String agent, String text, Speaker speaker, String account) {
+                callers.requireConversationProject(conversation, account);
+                try {
+                  callers.requireWork(turn.homeOf(conversation).project(), account);
+                } catch (io.aeyer.plowshare.server.faults.CallerFault denied) {
+                  throw new Turn.Refused("The recipient cannot execute this delivery");
+                }
                 AgentDefinition definition =
                     callers.requirePinnedAgent(
                         agent, callers.callerForConversation(conversation, null));
-                turn.deliver(conversation, definition, text, speaker, outcome -> {});
+                turn.deliverForExecutor(
+                    conversation, definition, text, speaker, outcome -> {}, account);
               }
             },
             new PersonDelivery.Inbox() {

@@ -144,8 +144,9 @@ public final class Delivery implements DeliveryPort {
               }
 
               @Override
-              public void speak(String conversation, String agent, String text, Speaker speaker) {
-                caller.speak(conversation, agent, text, speaker);
+              public void speakForAccount(
+                  String conversation, String agent, String text, Speaker speaker, String account) {
+                caller.speakForAccount(conversation, agent, text, speaker, account);
               }
             },
             new PersonDelivery.Inbox() {

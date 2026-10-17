@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.server.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.server.agents.Speaker;
@@ -38,6 +40,40 @@ class PersonDeliveryTest {
 
     assertEquals(PersonDelivery.Result.DELIVERED, result);
     verify(inbox).notify("enzo", "approval", "May I run it?", null);
+  }
+
+  @Test
+  void a_missing_recipient_cannot_borrow_conversation_custody_for_inference() {
+    var conversations = mock(ConversationStore.class);
+    var voice = mock(PersonDelivery.Voice.class);
+    var inbox = mock(PersonDelivery.Inbox.class);
+    var people = new PersonDelivery(conversations, voice, inbox);
+    assertEquals(
+        PersonDelivery.Result.NOWHERE,
+        people.deliver("conversation", "agent", null, "notice", "text", Speaker.harness()));
+    assertEquals(Handover.NOWHERE, people.routeFor("conversation", null));
+    verifyNoInteractions(conversations, voice, inbox);
+  }
+
+  @Test
+  void disclosure_denial_does_not_fall_back_to_an_inbox_copy() {
+    var conversations = mock(ConversationStore.class);
+    var voice = mock(PersonDelivery.Voice.class);
+    var inbox = mock(PersonDelivery.Inbox.class);
+    var record = mock(ConversationRecord.class);
+    when(record.origin()).thenReturn(Origin.TURN);
+    when(conversations.find("conversation")).thenReturn(Optional.of(record));
+    var source = Speaker.harness();
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("READ denied"))
+        .when(voice)
+        .speakForAccount("conversation", "worker", "private output", source, "recipient");
+    var people = new PersonDelivery(conversations, voice, inbox);
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () ->
+            people.deliver(
+                "conversation", "worker", "recipient", "result", "private output", source));
+    verifyNoInteractions(inbox);
   }
 
   /** V68: a question's notice names what it asks about, so it can leave the inbox once settled. */
@@ -103,7 +139,8 @@ class PersonDeliveryTest {
                 Speaker.approval("apr_1"));
 
     assertEquals(PersonDelivery.Result.DELIVERED, result);
-    verify(voice).speak("cnv_turn", "coder", "May I run it?", Speaker.approval("apr_1"));
+    verify(voice)
+        .speakForAccount("cnv_turn", "coder", "May I run it?", Speaker.approval("apr_1"), "enzo");
   }
 
   @Test
@@ -146,7 +183,7 @@ class PersonDeliveryTest {
     when(turn.origin()).thenReturn(Origin.TURN);
     doThrow(new Turn.Refused("budget spent"))
         .when(voice)
-        .speak("cnv_turn", "coder", "done", Speaker.orchestration("orc_1"));
+        .speakForAccount("cnv_turn", "coder", "done", Speaker.orchestration("orc_1"), "enzo");
     PersonDelivery people = new PersonDelivery(conversations, voice, inbox);
 
     assertEquals(Handover.CONVERSATION, people.routeFor("cnv_turn", "enzo"));

@@ -63,12 +63,21 @@ public final class WorkRelayReceiver implements RelayReceiver {
   }
 
   private record Resolved(
-      AgentDefinition agent, Home home, String session, OrchestrationDefinition definition) {}
+      AgentDefinition agent,
+      Home home,
+      String session,
+      OrchestrationDefinition definition,
+      long projectId) {}
 
   public void require(Request request) {
     resolve(request);
-    if (!RelayEffectBound.inspecting(request))
+    if (!RelayEffectBound.inspecting(request)) {
       RelayEffectBound.next(history, request.delivery().publication(), maximum);
+      if (receiver.equals("orchestration.start")
+          && executions
+              .find(request.access().account(), request.access().projectId(), request.identity())
+              .isEmpty()) requireRetainedFamily();
+    }
   }
 
   private Resolved resolve(Request request) {
@@ -106,7 +115,27 @@ public final class WorkRelayReceiver implements RelayReceiver {
       ScriptProgram.manifest(branch.handler().source());
       agent = scripted(agent, branch.handler().source());
     }
-    return new Resolved(agent, home, session, definition);
+    return new Resolved(agent, home, session, definition, destinationId);
+  }
+
+  private void requireResolved(Request request, Resolved resolved) {
+    String account = request.access().account();
+    String target = resolved.home().project();
+    files.requireAccess(request.access());
+    routing.require(account, request.access().project(), target);
+    callers.requireWork(target, account);
+    if (!Objects.equals(projects.id(target), resolved.projectId()))
+      throw new Refused("destination-changed");
+    files.requireAccess(new RelayProjectFiles.Access(account, target, resolved.projectId()));
+    callers.requireSession(resolved.session(), account);
+  }
+
+  private void requireRetainedFamily() {
+    // The owning orchestration API has receipts, but retained grant/child lineage is slice 11.
+    // Do not start an unconverted consumer or synthesize authority from its publisher/creator.
+    // Inspection below remains available for original receipts and never starts replacement work.
+    if (receiver.equals("orchestration.start"))
+      throw new Refused("receiver.retained-orchestration.unsupported");
   }
 
   public boolean handlesScript() {
@@ -116,13 +145,17 @@ public final class WorkRelayReceiver implements RelayReceiver {
   public Result dispatch(Request request) {
     if (request.delivery().state() != RelayDeliveries.State.DISPATCHING)
       throw new IllegalArgumentException("work requires prepared dispatch intent");
+    // Receipt identifiers are protected resource metadata too. Check the bound worker's current
+    // route/account eligibility even when an earlier dispatch has already committed a receipt.
+    var resolved = resolve(request);
     var known =
         executions.find(
             request.access().account(), request.access().projectId(), request.identity());
     if (known.isPresent()) return accepted(known.get().receipt());
-    var resolved = resolve(request);
     var causation = RelayEffectBound.next(history, request.delivery().publication(), maximum);
+    requireRetainedFamily();
     if (!executions.begin(request)) return new Uncertain("execution-intent-without-receipt");
+    requireResolved(request, resolved);
     String message = RelayRouteCodec.event(request.delivery().publication());
     RelayDeliveries.Receipt receipt;
     String conversation;

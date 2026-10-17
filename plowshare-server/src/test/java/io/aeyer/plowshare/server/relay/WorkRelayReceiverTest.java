@@ -206,8 +206,10 @@ class WorkRelayReceiverTest {
   void agent_dispatch_records_intent_before_normal_event_submission_and_receipt_after() {
     var request = request("agent.run", null, null);
     assertInstanceOf(RelayReceiver.Settled.class, receiver("agent.run").dispatch(request));
-    var order = inOrder(executions, jobs);
+    var order = inOrder(executions, routing, jobs);
+    order.verify(routing).require("operator", "project", "project");
     order.verify(executions).begin(request);
+    order.verify(routing).require("operator", "project", "project");
     order
         .verify(jobs)
         .submitEvent(
@@ -224,7 +226,6 @@ class WorkRelayReceiverTest {
     order
         .verify(executions)
         .accepted(request, new RelayDeliveries.Receipt("job", "job_fixture"), "cnv_fixture");
-    verify(routing).require("operator", "project", "project");
   }
 
   @Test
@@ -269,6 +270,48 @@ class WorkRelayReceiverTest {
   }
 
   @Test
+  void permission_or_destination_change_during_intent_does_not_start_work() {
+    for (boolean retarget : List.of(false, true)) {
+      var request = request("agent.run", null, null);
+      when(executions.begin(request))
+          .thenAnswer(
+              call -> {
+                if (retarget) when(projects.id("project")).thenReturn(11L);
+                else
+                  doThrow(new RelayReceiver.Refused("revoked"))
+                      .when(callers)
+                      .requireWork("project", "operator");
+                return true;
+              });
+      assertThrows(RelayReceiver.Refused.class, () -> receiver("agent.run").dispatch(request));
+      verifyNoInteractions(jobs, starts);
+      reset(callers);
+      when(callers.requireAgent(eq("worker"), any())).thenReturn(agent);
+      when(projects.id("project")).thenReturn(9L);
+    }
+  }
+
+  @Test
+  void revoked_worker_authority_cannot_disclose_a_retained_receipt() {
+    var request = request("agent.run", null, null);
+    when(executions.find("operator", 9, request.identity()))
+        .thenReturn(
+            Optional.of(
+                new RelayExecutions.Accepted(
+                    new RelayDeliveries.Receipt("job", "private-job"), "private-conversation")));
+    doThrow(new io.aeyer.plowshare.server.faults.CallerFault("WRITE revoked"))
+        .when(callers)
+        .requireWork("project", "operator");
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> receiver("agent.run").dispatch(request));
+    assertThrows(
+        io.aeyer.plowshare.server.faults.CallerFault.class,
+        () -> receiver("agent.run").inspect(request));
+    verifyNoInteractions(executions, jobs, starts);
+  }
+
+  @Test
   void cross_project_policy_and_command_grants_are_checked_before_intent() {
     var request = request("agent.run", "other", null);
     doThrow(new RelayReceiver.Refused("route-denied"))
@@ -285,8 +328,7 @@ class WorkRelayReceiverTest {
   }
 
   @Test
-  void
-      orchestration_starts_use_the_delivery_uuid_and_the_granted_definition_without_a_caller_turn() {
+  void unconverted_orchestrations_refuse_new_work_but_keep_original_receipt_inspection() {
     var request = request("orchestration.start", null, null);
     var definition = mock(OrchestrationDefinition.class);
     var run = mock(OrchestrationRecord.class);
@@ -294,17 +336,14 @@ class WorkRelayReceiverTest {
     when(run.conductorConversation()).thenReturn("cnv_fixture");
     when(grants.granted(any(), any(), any(), any(), any()))
         .thenReturn(Map.of("review", definition));
-    when(starts.start(any(), eq(request.identity()), anyString())).thenReturn(run);
-    receiver("orchestration.start").dispatch(request);
-    var captured = ArgumentCaptor.forClass(Orchestrations.Start.class);
-    verify(starts).start(captured.capture(), eq(request.identity()), contains("release-event"));
-    assertSame(definition, captured.getValue().definition());
-    assertEquals(Speaker.relay(request.identity()), captured.getValue().source());
-    assertEquals("operator", captured.getValue().callerHandle());
-    assertEquals("worker", captured.getValue().callerAgent());
-    assertNull(captured.getValue().callerConversation());
-    assertNull(captured.getValue().parent());
-    verifyNoInteractions(jobs);
+    assertEquals(
+        "receiver.retained-orchestration.unsupported",
+        assertThrows(
+                RelayReceiver.Refused.class,
+                () -> receiver("orchestration.start").dispatch(request))
+            .code());
+    verify(executions, never()).begin(any());
+    verifyNoInteractions(jobs, starts);
     when(runs.find("orc_fixture")).thenReturn(Optional.of(run));
     when(runs.startReceipt("operator", request.identity()))
         .thenReturn(
@@ -315,7 +354,7 @@ class WorkRelayReceiverTest {
             new RelayDeliveries.Accepted(
                 new RelayDeliveries.Receipt("orchestration", "orc_fixture"))),
         receiver("orchestration.start").inspect(request));
-    verify(starts, times(1)).start(any(), any(), anyString());
+    verifyNoInteractions(starts);
   }
 
   @Test

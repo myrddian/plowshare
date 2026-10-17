@@ -1,18 +1,19 @@
 # Authority substrate and Global impact report
 
-Status: source-grounded impact assessment, 17 October 2026. The broader model
-remains proposed. The separately authorized project READ/WRITE foundation (01),
-additive identities/scopes with locked built-ins (02), and scoped RBAC grants
-with role/agent ceilings (03), and knowledge home/provenance with scoped
-READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
-and retained ordinary operation authority (06) are implemented in this branch.
-Slice 07 adds mandatory dispatcher evidence and retained call claims. SYSTEM/consumer
-slice 08 now classifies bounded SYSTEM services and removes creator-access gates
-from valid processing. Slice 09 now pins the scheduled executor and actual conversation work action.
-Relay/message cutover (10) is authorized next; configured embedding/search allowances are
-a concrete activation gap, and unclassified production calls refuse.
-remaining orchestration/acting/contract cutovers remain later work.
+Status: source-grounded impact assessment, updated 18 October 2026. Separately
+authorized slices 01–10 are implemented in this branch: project READ/WRITE,
+explicit identities and scoped RBAC, knowledge home/provenance and current-root
+audiences, retained operation/inference authority and budgets, bounded SYSTEM
+services, scheduling, and Relay/message integration. SYSTEM processing no longer
+depends on its creator retaining access; ordinary execution uses its actual bound
+account. No new public APIs or deployment are included.
 
+This is not a complete cutover. Configured embedding/search operation allowances
+remain missing; production inference without supported evidence refuses. New Relay
+orchestration starts are explicitly fenced until slice 11 supplies retained grant
+and child lineage; original receipts can still be inspected without replay.
+Slices 11–14 remain proposed and unauthorized, including remaining orchestration,
+acting, client-contract and integrated legacy migration work.
 
 Slice 05 adds V155 root audience versions/history, deliberate legacy Shared and
 ownerOnly reconciliation, live filtering for every revision, and explicit general
@@ -48,13 +49,15 @@ distinguishes converted checks from retained restrictions. The existing archive
 Global tier now has an explicit scope mapping; this does not activate Global
 access or SYSTEM processing. Slice 05 now implements the root audience; slice 06
 implements ordinary retained execution. Slices 07–08 add dispatch/budget evidence
-and bounded SYSTEM processing. Slices 09–10 are authorized next; 11–14
+and bounded SYSTEM processing. Slices 09–10 bind scheduled/message executors and
+recheck Relay effects without replacing route/provider capabilities. Slices 11–14
 remain proposed.
 
 The detailed source findings below retain their audit baseline. Slice 04 replaces
-the listed ordinary catalogue/content/import/relationship owner-mutation checks;
-creator-bound processing, per-revision audience policy, navigation-policy
-administration and supported-client cutover remain deferred as documented.
+the listed ordinary catalogue/content/import/relationship owner-mutation checks.
+Slices 05 and 08 supersede the baseline's per-revision audience and creator-bound
+processing findings respectively. Navigation-policy administration and supported-client
+cutover remain deferred as documented.
 The [14-slice roadmap](authority-substrate-implementation-plan.md) gives every
 follow-on slice its own changes, reuse, verification and rollback document.
 
@@ -553,6 +556,21 @@ proceed. A later slice must resolve the relevant gap before exposing that behavi
 | SDK/client coverage and missing controls | Inventory existing interfaces only. No feature-parity mandate, new APIs/methods, generic job pause/resume/cancel service, operation ACL registry or restartable closure runtime is implied. |
 | Advanced ACL facilities | Resource-specific ACLs fit the substrate, but arbitrary denies, nested groups and new management interfaces are not assumed or required. RBAC helpers remain the routine path, and GLOBAL_READ has no individual exclusions. |
 | Detailed spending-pool mechanics | Operation sponsorship is settled. Pool configuration, reservation/settlement races and migration remain separate technical work under ADR 0025. |
+
+Concrete activation limits after slice 10:
+
+- Embedding/search query, write and repair calls need an explicitly configured
+  operation-budget source. The dispatcher refuses unclassified calls; slices
+  07–08 do not supply an invented allowance or wallet. This branch is not ready
+  for deployment-wide activation of those paths.
+- New Relay orchestration starts require slice 11's retained authority lineage.
+  Original owning receipts remain read-only reconciliation evidence, never a
+  reason to repeat the start.
+- Slice 06's ordinary retained target envelope admits only its exact execution
+  home. Explicit Global/cross-project memory tool references refuse under
+  `PinnedOperationAuthority.requireTargets`; slice 05's standalone knowledge
+  GLOBAL_READ policy does not widen that sandbox. Broader model-tool read targets
+  need an explicit supported envelope in later contract/cutover work.
 
 ## Suggested implementation order and future proof
 

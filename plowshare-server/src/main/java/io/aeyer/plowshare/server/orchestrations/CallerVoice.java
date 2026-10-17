@@ -18,4 +18,10 @@ public interface CallerVoice {
    *     agent that no longer resolves
    */
   void speak(String conversation, String callerAgent, String utterance, Speaker speaker);
+
+  /** Existing result delivery binds its recipient separately from the originating run. */
+  default void speakForAccount(
+      String conversation, String agent, String text, Speaker speaker, String account) {
+    speak(conversation, agent, text, speaker);
+  }
 }
