@@ -1,7 +1,9 @@
 # Slice 07: All-inference dispatch checks and operation budgets
 
-Status: proposed scope, 17 October 2026. Planning only; no implementation,
-new public capability or deployment is authorized by this document.
+Status: dispatcher gate and ordinary operation bindings implemented on this branch,
+18 October 2026, under explicit authorization. SYSTEM consumers cross-activate in
+slice 08. Missing configured budget sources remain explicit activation gaps; no
+new public API, budget configuration mechanism or deployment was added.
 
 Part of the [14-slice roadmap](../authority-substrate-implementation-plan.md).
 Policy comes from [ADR 0030](../decisions/0030-authority-substrate-and-explicit-scopes.md);
@@ -81,3 +83,31 @@ authorization.
 ## Rollout and rollback
 
 Preserve spend/attempt records and budget bindings. Stop incompatible new dispatch rather than recharge a creator, switch pools, treat unknown usage as zero or replay inference.
+
+## Implementation and activation evidence
+
+The [pre-enforcement specification](07-inference-budget-specification.md) records
+all dispatcher routes and direct helper owners. Production composition requires
+an `InferenceBoundary`; isolated fixtures retain explicit compatibility wiring.
+Chat complete/stream/fold/pinned-pool and embedding refuse missing evidence. Live
+checks run before queueing, on the lane worker and before result disclosure.
+Bounded streaming buffers output until that final check. Metadata and model
+selectors confer no authority.
+
+V157 retains immutable operation-to-budget identities, claimed ordinals/ceiling
+snapshots, single-submission fences and optional durable accounting call IDs.
+Existing shared `Budget` claims now return their exact ordinal under the claim
+lock; rechecking never spends again, including the last permitted call. Existing
+explicit limit changes preserve budget identity. Costs/unknown outcomes remain in
+the existing accounting system. Receipt records do not introduce restartable jobs.
+
+Default `formatCheck check` passed with 5,763 server tests. Five new fake-transport
+tests cover all dispatch families, real queued chat/embedding revocation, withheld
+output, missing evidence and last-claim behavior. Two selected PostgreSQL tests
+passed for restart-readable records, immutable source bindings, duplicate ordinal
+refusal and concurrent single submission.
+
+Activation remains gated: slice 08 classifies trusted SYSTEM purposes; the missing
+search/embedding call-budget source is recorded rather than supplied from a queue
+timeout, SYSTEM identity, creator or an invented default. Complete service rollout
+cannot be claimed until configured sources exist. No monetary limit is claimed.

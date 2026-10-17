@@ -24,16 +24,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * {@code agent_run} runs against the budget its parent was given, and re-reading the child's own
  * number there is exactly the per-agent copy this class exists to prevent.
  *
- * <h2>Atomic, though the tree serialises</h2>
+ * <h2>Atomic claims</h2>
  *
- * <p>Task 5's design serialises sub-agent calls within a turn, and a parent blocked on a child is
- * not running, so no two <em>related</em> jobs spend concurrently today. The compare-and-set is
- * here anyway because that is a property of one task's scheduling policy, and a policy is a weaker
- * thing to rest a counter's correctness on than an atomic. It costs a CAS per model call, against a
- * call that takes seconds.
- *
- * <p>{@link #trySpend} is one operation and not a {@code remaining() > 0} test followed by a
- * decrement, for the same reason: two jobs reading a remaining count of one would both proceed.
+ * <p>A claim, its optional durable charge, and operator ceiling changes share one lock. The
+ * immutable claim carries the exact ordinal and ceiling observed while claiming; queue-time
+ * authorization checks reuse it rather than spending again. Children share the same budget identity
+ * and counter. A failed durable charge prevents dispatch and is never refunded by inventing a
+ * replacement claim.
  *
  * <h2>The ceiling moves</h2>
  *
@@ -75,12 +72,11 @@ public final class Budget {
    * granting a run twenty more calls is granting them to the work that run is doing, wherever in
    * the tree it is being done, which is the only reading that matches what a budget is for.
    *
-   * <p><b>Volatile and not guarded by the same compare-and-set as {@code spent}.</b> The two are
-   * not a pair: {@link #trySpend}'s loop re-reads both on every attempt, so a limit that moves
-   * between the read and the compare-and-set is a limit that moved during the call, and the next
-   * call asks again. What the loop guarantees is that no call is made past the limit <em>as it
-   * stood when the call was claimed</em>, which is the strongest thing a moving ceiling can promise
-   * and the thing a caller depends on.
+   * <p><b>Volatile for status readers, and guarded with {@code spent} during claims.</b> The claim
+   * lock pairs the observed ceiling with its spending ordinal. Status readers may see a newer
+   * ceiling; the next claim reads that ceiling under the lock. What the loop guarantees is that no
+   * call is made past the limit <em>as it stood when the call was claimed</em>, which is the
+   * strongest thing a moving ceiling can promise and the thing a caller depends on.
    *
    * <p><b>A boxed {@link Integer}, not an {@code int} and a {@code boolean}, for {@link
    * TurnCap#turns}'s reason: one field means no pair to read between two writes and no combination
@@ -88,6 +84,11 @@ public final class Budget {
    * read once per claim, against a call that takes seconds.
    */
   private volatile Integer limit;
+
+  private final java.util.UUID identity = java.util.UUID.randomUUID();
+
+  /** Immutable evidence of one successful claim, including its ceiling at claim time. */
+  public record Claim(java.util.UUID budget, int ordinal, Integer limit) {}
 
   private final AtomicInteger spent = new AtomicInteger();
   private final Runnable charge;
@@ -252,44 +253,22 @@ public final class Budget {
    *     to.
    */
   public boolean trySpend() {
-    if (charge != null) {
-      claiming.lock();
-      try {
-        Integer ceiling = limit;
-        if (ceiling != null && spent.get() >= ceiling) {
-          return false;
-        }
-        charge.run();
-        spent.incrementAndGet();
-        return true;
-      } finally {
-        claiming.unlock();
-      }
-    }
-    // The retry arm of this loop — a compare-and-set losing to another
-    // thread — has no test and cannot get a deterministic one: it needs two
-    // threads inside these four lines at once. Said here so a green suite is
-    // not read as covering it. What is tested is the invariant the loop
-    // exists to hold, that the limit is never exceeded, which is the part a
-    // caller depends on.
-    while (true) {
+    return tryClaim().isPresent();
+  }
+
+  /** Claims once under the same lock as operator changes and durable charges. */
+  public java.util.Optional<Claim> tryClaim() {
+    claiming.lock();
+    try {
       Integer ceiling = limit;
-      if (ceiling == null) {
-        // Nothing to compare against, so nothing to lose a race on: the
-        // spend is counted and the call is always permitted. A budget
-        // with no ceiling is still a budget with spending to report —
-        // see #lifted — and incrementAndGet is itself atomic, so this
-        // does not need the compare-and-set below it.
-        spent.incrementAndGet();
-        return true;
-      }
-      int now = spent.get();
-      if (now >= ceiling) {
-        return false;
-      }
-      if (spent.compareAndSet(now, now + 1)) {
-        return true;
-      }
+      if (ceiling != null && spent.get() >= ceiling) return java.util.Optional.empty();
+      if (spent.get() == Integer.MAX_VALUE)
+        throw new IllegalStateException("Model allowance counter exhausted");
+      if (charge != null) charge.run();
+      int ordinal = spent.incrementAndGet();
+      return java.util.Optional.of(new Claim(identity, ordinal, ceiling));
+    } finally {
+      claiming.unlock();
     }
   }
 

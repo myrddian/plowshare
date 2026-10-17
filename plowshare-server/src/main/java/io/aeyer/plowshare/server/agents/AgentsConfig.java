@@ -775,7 +775,8 @@ public class AgentsConfig {
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolProperties> relayTools,
       ObjectProvider<io.aeyer.plowshare.server.relay.tools.RelayToolInvocations> relayInvocations,
       ObjectProvider<ScopedTools> scopedTools,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls) {
     JobRuntime runtime =
         new JobRuntime(
             dispatcher,
@@ -890,7 +891,8 @@ public class AgentsConfig {
                 return contextCallers.getObject().find(home, session, account, name);
               }
             },
-            operations);
+            operations,
+            inferenceCalls);
     // Before the registry reads knownTools(): see JobRuntime.useTodos. REQUIRED, not optional:
     // a todo list is how any agent keeps a task of several steps across turns and compactions,
     // so every boot binds todo_read and todo_write and a shipped definition may declare them.

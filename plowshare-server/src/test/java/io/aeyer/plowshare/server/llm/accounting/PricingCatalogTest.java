@@ -193,6 +193,9 @@ class PricingCatalogTest {
 
   private static ApplicationContextRunner runner() {
     return new ApplicationContextRunner()
+        .withBean(
+            io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+            () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
         .withPropertyValues("plowshare.llm.accounting.enabled=false")
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(LlmConfig.class)

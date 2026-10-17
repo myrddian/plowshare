@@ -203,6 +203,7 @@ public final class JobRuntime {
   }
 
   private io.aeyer.plowshare.server.access.OperationAuthority operations;
+  private io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls;
 
   /** Runtime with required authority, used by focused policy fixtures. */
   public JobRuntime(
@@ -225,9 +226,11 @@ public final class JobRuntime {
       RefusalDetector refusals,
       LongSupplier ticker,
       AgentDelegates delegates,
-      io.aeyer.plowshare.server.access.OperationAuthority operations) {
+      io.aeyer.plowshare.server.access.OperationAuthority operations,
+      io.aeyer.plowshare.server.access.InferenceCalls inferenceCalls) {
     this(dispatcher, tools, agents, files, clock, reminding, images, refusals, ticker, delegates);
     this.operations = Objects.requireNonNull(operations);
+    this.inferenceCalls = Objects.requireNonNull(inferenceCalls);
   }
 
   private boolean confined;
@@ -291,6 +294,7 @@ public final class JobRuntime {
     retained.admittedSubject = admittedSubject;
     retained.retainedResources = authority;
     retained.operations = operations;
+    retained.inferenceCalls = inferenceCalls;
     retained.runUsage = runUsage;
     retained.hooks = hooks;
     retained.environments = environments;
@@ -2583,14 +2587,14 @@ public final class JobRuntime {
       // Claimed before the call, not after: a run that dies mid-call has
       // spent that call, and a budget that only counted completed calls
       // would let a flapping endpoint be retried without limit.
-      boolean claimed;
+      java.util.Optional<Budget.Claim> claimed;
       try {
-        claimed = budget.trySpend();
+        claimed = budget.tryClaim();
       } catch (RuntimeException | Error failed) {
         slot.release();
         throw failed;
       }
-      if (!claimed) {
+      if (claimed.isEmpty()) {
         slot.release();
         return budgetSpent(budget, trail, steps, modelCalls);
       }
@@ -2669,7 +2673,9 @@ public final class JobRuntime {
                         .withAuthorization(
                             operation == null
                                 ? io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.DIRECT
-                                : () -> operations.require(operation))
+                                : inferenceCalls == null
+                                    ? () -> operations.require(operation)
+                                    : inferenceCalls.claimed(operation, claimed.orElseThrow()))
                         .withTools(forced ? withTheWayOut(schemas) : schemas),
                     extras,
                     schemas,
@@ -4842,12 +4848,7 @@ public final class JobRuntime {
       Scheduling.Slot slot, ChatRequest request, Deltas sink, BooleanSupplier cancelled) {
     admittedAuthority.run();
     var originalAuthorization = request.authorization();
-    request =
-        request.withAuthorization(
-            () -> {
-              admittedAuthority.run();
-              originalAuthorization.require();
-            });
+    request = request.withAuthorization(originalAuthorization.and(admittedAuthority::run));
     // Bounded answers are disclosed whole after the final check. Delta sinks must not perform
     // database IO while draining a transport, and cannot retract already delivered fragments.
     Deltas authorized =

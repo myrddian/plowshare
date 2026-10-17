@@ -499,6 +499,9 @@ class LlmProviderTest {
     configLog.addAppender(captured);
     try {
       new ApplicationContextRunner()
+          .withBean(
+              io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+              () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
           .withPropertyValues("plowshare.llm.accounting.enabled=false")
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
           .withUserConfiguration(LlmConfig.class)
@@ -567,6 +570,9 @@ class LlmProviderTest {
     try (MockWebServer server = new MockWebServer()) {
       server.setDispatcher(routing(json(MODELS_BODY)));
       new ApplicationContextRunner()
+          .withBean(
+              io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+              () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
           .withPropertyValues("plowshare.llm.accounting.enabled=false")
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
           .withUserConfiguration(LlmConfig.class)
@@ -607,6 +613,9 @@ class LlmProviderTest {
     configLog.addAppender(captured);
     try {
       new ApplicationContextRunner()
+          .withBean(
+              io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.class,
+              () -> io.aeyer.plowshare.server.llm.dispatch.InferenceBoundary.FIXTURE)
           .withPropertyValues("plowshare.llm.accounting.enabled=false")
           .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
           .withUserConfiguration(LlmConfig.class)

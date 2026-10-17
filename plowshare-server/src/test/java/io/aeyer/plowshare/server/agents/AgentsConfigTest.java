@@ -131,6 +131,9 @@ class AgentsConfigTest {
         .withBean(
             io.aeyer.plowshare.server.access.OperationAuthority.class,
             () -> mock(io.aeyer.plowshare.server.access.OperationAuthority.class))
+        .withBean(
+            io.aeyer.plowshare.server.access.InferenceCalls.class,
+            () -> mock(io.aeyer.plowshare.server.access.InferenceCalls.class))
         .withBean(FileStores.class, () -> FileStores.NONE)
         .withBean(ApplicationResources.class, () -> ApplicationResources.NONE)
         .withBean(LlmDispatcher.class, () -> dispatcher)

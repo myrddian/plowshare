@@ -6,7 +6,9 @@ additive identities/scopes with locked built-ins (02), and scoped RBAC grants
 with role/agent ceilings (03), and knowledge home/provenance with scoped
 READ/WRITE/control admission (04), and current-root policy with GLOBAL_READ (05)
 and retained ordinary operation authority (06) are implemented in this branch.
-All-inference/budget and SYSTEM/consumer cutovers (07–10) are authorized next;
+Slice 07 adds mandatory dispatcher evidence and retained call claims. SYSTEM/consumer
+cutovers (08–10) are authorized next; configured embedding/search allowances are
+a concrete activation gap, and unclassified production calls refuse.
 remaining orchestration/acting/contract cutovers remain later work.
 
 
