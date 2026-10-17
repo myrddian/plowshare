@@ -12,6 +12,37 @@ for ADMIN, MANAGER, CONTRIBUTOR and READER. Runtime source baseline:
 `269854a7c5bcc5f7080bc04de01ea8ccce46eaa7` for information feature defaults.
 The authority-substrate changes described here remain documentation only.
 
+## RBAC-first management and role defaults
+
+RBAC is the normal management path. Use the standard scoped helpers below for
+ordinary setup; Application-facing helpers map to the same actions rather than
+requiring custom ACLs or a separate permission engine.
+
+| Setup profile | Sensible role helper |
+| --- | --- |
+| Authorized human administration | ADMIN over the administrative scope; add data/execution grants only as authorized, with Global's scoped READ/WRITE/control helper as specified below |
+| Project/Application or document DRI | MANAGER over the managed resources, including their permissions/audiences |
+| Ordinary task work | CONTRIBUTOR within required scopes, without permission management |
+| Read-only member, librarian or integration | READER within required scopes |
+| Authenticated general-read participation | GLOBAL_READ; only resources authorizing it join that audience |
+| Ordinary agent | Requested READER/CONTRIBUTOR, with CONTRIBUTOR the default maximum; explicit human exception for MANAGER, never ADMIN/SYSTEM |
+
+These are profiles for authorized role assignment, not automatic provisioning or
+membership defaults. Narrower existing token/manifest/acting ceilings still apply.
+Creating ordinary content does not automatically grant its creator MANAGER;
+authority comes from the area's scoped roles and current root-document policy.
+Complex ACLs remain available in the target design for finer resource grants,
+through the same scope/action model and mandatory restrictions. They should not
+be necessary for routine management, reconstruct prohibited agent authority or
+create individual GLOBAL_READ exclusions. No new ACL editor, arbitrary deny
+engine, group hierarchy or SDK capability is required by these tables.
+
+The [settled ADR](decisions/0030-authority-substrate-and-explicit-scopes.md#settled-decisions)
+defines policy. [Migration requirements](authority-substrate-impact-report.md#migration-requirements)
+cover compatibility; [reuse](authority-substrate-impact-report.md#what-can-be-reused)
+and [deferred gaps](authority-substrate-impact-report.md#deferred-gaps) describe
+existing mechanisms and boundaries without implying implementation.
+
 ## Rules for reading the matrices
 
 A role applies only through a valid grant naming its scope and any permitted
@@ -506,13 +537,17 @@ or approvals; does not bypass a lower token/acting ceiling; and does not propaga
 automatically to children. A child needs its own authorized exception. ACL entries,
 tool permissions and granular actions cannot reconstruct ADMIN under another name.
 
-## Permission boundaries that require explicit review
+## Migration reviews and deferred boundaries
+
+The standard roles and their management responsibilities are settled. These
+reviews specify compatibility for future slices, not additional default
+permissions or a requirement to implement every possible control/ACL capability.
 
 1. **ADMIN and data access:** replace current ordinary-project admin-as-MANAGER
    behavior with explicit control and data grants. Review and migrate grants;
    do not silently widen existing private content access.
-2. **Publication:** define the source-release and destination/audience actions
-   and who may issue them. Human `GLOBAL_ACCOUNT` resource administration uses
+2. **Publication:** map settled audience management and source/destination actions
+   onto existing domain contracts. Human `GLOBAL_ACCOUNT` resource administration uses
    scoped ADMIN READ/WRITE/control actions; SYSTEM derived processing uses existing
    SYSTEM authority restricted by an operation sandbox. Source authority is still
    required for transfers. The resource MANAGER/DRI can grant/remove GLOBAL_READ
@@ -529,7 +564,7 @@ tool permissions and granular actions cannot reconstruct ADMIN under another nam
 5. **Human-only actions:** define exact actions eligible for forced MANAGER
    agents. Current human-only navigation policy, consent and approval boundaries
    remain until separately reviewed; a role exception alone cannot remove them.
-6. **Tenant introduction:** specify tenant ADMIN scope and descendant coverage
+6. **Deferred tenant introduction:** specify tenant ADMIN scope and descendant coverage
    after tenant identity exists. The present project matrices do not grant an
    organization administrator automatic Personal/project body reads.
 

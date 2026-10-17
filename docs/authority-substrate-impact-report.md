@@ -7,6 +7,10 @@ Read with [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md),
 the [migration map](global-scope-migration-map.md) and
 [permission matrices](role-scope-permissions-proposal.md).
 
+Navigate by status: [settled decisions](#settled-decisions),
+[migration requirements and source evidence](#migration-requirements),
+[reusable mechanisms](#what-can-be-reused) and [deferred gaps](#deferred-gaps).
+
 ## Result and audit boundaries
 
 The proposed separation is viable, but it is a coordinated authority and ownership
@@ -20,9 +24,10 @@ and mandatory separate-processing-scope workaround. The source findings remain:
 project/null homes conflate several meanings, exact-owner APIs block scoped admin
 writes, and common grants are not carried across all model/admission paths.
 
-Rechecked against the corrected model at proposal commit `af89b7f`, using the same
-three server segments. No runtime has broken because this remains documentation
-only. The compatibility findings describe what fails if the new identities or
+The earlier segmented recheck used proposal commit `af89b7f`; subsequent policy
+clarifications are consolidated in the settled decision record below. No runtime
+has broken because these changes remain documentation only. The compatibility
+findings describe what fails if the new identities or
 grants are enabled against unchanged contracts. Missing action checks and optional
 new defaults are capability gaps, not evidence that existing explicit-project
 workflows are broken. No new runtime, wholesale role replacement, mandatory token
@@ -49,47 +54,54 @@ The adopted account/role authorization rule does not assert SDK/client feature
 parity or require new APIs/SDK methods. Management coverage remains unverified
 unless individually inspected; unsupported surfaces remain capability gaps.
 
-## Adopted requirements assessed
+## Settled decisions
 
-- SYSTEM is the locked root account; its role cannot be assigned to agents.
-- SYSTEM execution is reserved for platform functions. A memory worker remains
-  SYSTEM with its existing root authority, but an operation sandbox limits writes
-  to the admitted memory area and bounds other effects. The sandbox is not a new
-  per-task grant to SYSTEM and cannot be expanded by the running worker.
-- For compaction, the SYSTEM summariser already has conversation READ and summary
-  WRITE authority. Selected inputs and bound tools constrain its reachable
-  resources and outputs. Preserve/enforce those capability fences rather than
-  invent per-compaction account grants or an account-role hierarchy for tools.
-- `GLOBAL_ACCOUNT` is a knowledge owner, not a project or execution identity.
-  Human ADMIN controls its knowledge without logging in as that account.
-- `GLOBAL_READ` is held by authenticated humans, Applications and service
-  principals; resources authorize it independently of ownership. Read grants do
-  not grant publication, execution or unrestricted model spending.
-- `EXECUTION` contains `CONVERSATION_CREATE` and `RUN_MODEL`, independently
-  checked as grants to the executing account over the resolved scope. SYSTEM can
-  execute bounded Global work. GLOBAL_READ grants READ only; Global ADMIN supplies
-  READ/WRITE/control without implicit EXECUTION. No reserved-ID allow branch.
-- RUN_MODEL covers all inference, including embeddings, reranking, validators
-  and side calls. Declared SYSTEM services use existing SYSTEM authority inside
-  the operation sandbox; their caller needs the requested operation's permission,
-  not internal RUN_MODEL. Authorized READER search can therefore use bounded
-  service-side inference. The operation pays from its configured budget, not
-  implicitly from SYSTEM or the creator; accounting remains separate from authority.
-- Role/Application-role helpers use that common substrate. Ordinary knowledge
-  READ/WRITE checks replace actor-equals-owner authorization. `created_by` records
-  original creation provenance with no implicit rights; account home, revision
-  author, actor and source/input policy remain independent. Legacy owner columns
-  cannot be blindly renamed into creator provenance.
-- Omitted execution targets resolve to the admitted Application/project itself,
-  or a direct human's Personal project. Missing/ambiguous context refuses. No
-  ordinary default may choose Global. SYSTEM processing can explicitly select
-  the typed Global scope under retained grants.
-- Resource ownership, execution destination, authorized read sources, output
-  destinations, actor/subject and sponsor are separate facts.
-- Deployment overrides and bundles supply SYSTEM worker definitions; project or
-  client namesakes cannot select the worker or acquire SYSTEM authority.
+Core policy is settled for the proposal; implementation remains separately
+scoped. RBAC is the normal management path, using sensible standard role helpers.
+Complex ACLs provide finer resource grants when needed, through the same substrate;
+routine setup should not require custom per-action ACLs or a second policy engine.
+See the [role profiles](decisions/0030-authority-substrate-and-explicit-scopes.md#standard-role-helpers-and-acl-exceptions)
+and [action matrices](role-scope-permissions-proposal.md).
 
-## Compatibility classification
+| Policy | Settled position |
+| --- | --- |
+| Account/scope/actions | Common substrate; ADMIN/MANAGER/CONTRIBUTOR/READER and Application-facing roles are standard helpers over it, with explicit issuing authority and no ambient cross-scope privilege. |
+| Normal role defaults | Human scoped administration uses ADMIN; resource/project DRI uses MANAGER; ordinary task work uses CONTRIBUTOR; read-only use uses READER. These are authorized setup profiles, not automatic grants or new provisioning features. |
+| SYSTEM | Locked root account, intrinsic non-assignable role. Existing root authority is narrowed by operation inputs/tools/output bounds, not re-granted per task. |
+| Agent limits | Default maximum CONTRIBUTOR; lower requested roles stay lower. MANAGER needs an explicit authorized human exception; ADMIN/SYSTEM cannot be assigned. |
+| Provenance and documents | created_by is historical provenance with no rights. Current root-document permissions govern revisions, including historical/pinned reads; publication state is separate from audience. |
+| Global knowledge | GLOBAL_ACCOUNT is an admin-managed account/home, not a project, login or executor. Global management requires human scoped ADMIN. |
+| General-read audience | Every authenticated active principal type holds GLOBAL_READ. Resources authorizing it have no individual exclusions; restricted readership uses project/group permissions. |
+| Manager responsibility | Resource MANAGER/DRI can grant/remove GLOBAL_READ without extra expansion authority or ADMIN approval, preserving home/created_by and private dependency restrictions. |
+| Actions and controls | EXECUTION bundles CREATE/RUN_MODEL, checked independently. All inference needs RUN_MODEL for its executor; other work checks actual actions. Existing controls use WRITE plus domain rules; no EXECUTE_JOB or CONTROL_EXECUTION is added. |
+| Internal services | Declared SYSTEM services use existing SYSTEM authority within their operation sandbox. Callers need the requested operation's permission, not internal RUN_MODEL. Independent processing continues while document/operation remain valid despite creator access loss. |
+| Operation budgets | The operation pays through its configured budget. Retain budget binding and usage across queues/recovery, without implicit SYSTEM/creator payer or silent pool switching. |
+| Context and acting | Human omission may resolve Personal; admitted Application/project resolves itself; ambiguous/invalid targets refuse. Acting requests retain separate actor/subject proof and live ceilings. |
+| Interfaces and capabilities | Authority follows account/role/policy, not client label. Use existing supported APIs; SDK parity and missing control APIs are not required. Tools, filesystem/providers and Relay retain their capability boundaries. |
+| Disclosure and recovery | Preserve mandatory input/reference policy, current recipient access, durable receipts and uncertain-effect reconciliation. Account authority alone does not widen a retained operation. |
+
+The [ADR decision record](decisions/0030-authority-substrate-and-explicit-scopes.md#settled-decisions)
+is the policy reference. None of these target rules is a claim that the audited
+runtime, every SDK, a generic ACL editor or a new control surface implements it.
+
+## Migration requirements
+
+These are compatibility requirements for separately authorized implementation
+slices, not another list of open architectural policy choices. The source
+findings below identify what must be adapted and what must remain bounded.
+
+| Requirement | Concrete work before enabling the affected target behavior |
+| --- | --- |
+| Identity and typed scopes | Reserve remaining UUIDs, map existing keys to explicit account/project/Personal scopes and define locked-account bootstrap, collision and recovery behavior. Avoid login/acting-subject or accidental Personal provisioning for built-ins. |
+| RBAC/action mapping | Map current VIEWER/CONTRIBUTOR/MANAGER, server-admin state, Application manifests and token scopes to standard scoped helpers. Review implicit admin access and agent exception issuance; retain narrower grants without wholesale credential reissue. |
+| Knowledge authorization/provenance | Replace ordinary exact-owner checks with scoped actions and current root policy; separate created_by from home/control and reconcile ownerOnly without fabricating provenance or dropping mandatory privacy. |
+| Audience and revisions | Reconcile per-revision Shared audiences, preserving IDs and input/reference obligations. Review service-reader audience expansion and the manual's separate Global home/control migration. |
+| SYSTEM operation validity | Retain executor authority and sandbox independently of creator access. Keep generation/availability/input/budget fences, supported control semantics and current recipient disclosure checks. |
+| Actual effects and budgets | Carry action checks through supported APIs, model dispatch/embeddings/side calls, queues and recovery. Bind each operation to its configured budget, preserving accounting attempts and historical costs. |
+| Existing boundaries | Preserve acting proofs, provider/file/tool grants, schedule/Relay lifecycles, private session/credential subjects and uncertain-effect receipts. Map existing controls only; missing interfaces remain gaps. |
+| Cutover and rollback | Classify null-Global database/disk/job/log rows, preserve protected unknowns and stable IDs, specify mixed-version refusal and rollback, and coordinate only affected existing contracts through new migrations/generated outputs. |
+
+### Compatibility classification
 
 | Area | Classification | Minimum consequence under the corrected model |
 | --- | --- | --- |
@@ -102,13 +114,13 @@ unless individually inspected; unsupported surfaces remain capability gaps.
 | Global summarization/preparation | Reuse with authority/sandbox integration | Keep processing in Global using existing SYSTEM authority restricted by an operation sandbox; no new execution scope is inherently needed |
 | Public Global conversation resume | Separate API/exposure decision | Existing user-facing refusal can remain; internal summarization does not use that entry point |
 | Existing Shared audience | Deliberate policy/data migration | Preserve ownership; admitting formerly excluded service readers is an explicit audience expansion |
-| Implicit server-admin MANAGER | Deliberate compatibility policy | Decide explicit replacement grants; removing this privilege is not a prerequisite to unrelated Global reads |
+| Implicit server-admin MANAGER | Deliberate compatibility mapping | Review explicit replacement role/data grants against existing effective access; removing this privilege is not a prerequisite to unrelated Global reads |
 | Digest job recorded with default Global home | Existing persistence mismatch | Store its real scope/admission; do not reconstruct authority from a vanished worker closure |
 | Disk, accounting and legacy rows | Classification/identity extension | Preserve existing lifecycles, IDs, private records and costs; do not move/relabel everything called global |
 
-## Contracts and capability gaps requiring attention
+### Source evidence by area
 
-### 1. Project-only scopes cannot express the new ownership model
+#### 1. Project-only scopes cannot express the new ownership model
 
 [Home.java:9](../plowshare-protocol/src/main/java/io/aeyer/plowshare/protocol/Home.java)
 encodes Global as a null project.
@@ -124,7 +136,7 @@ calling it the account preserves the ambiguity. Introduce typed targets and
 explicit mappings, preserving existing memory/resource IDs and provenance. A
 normal project named global must remain a normal project.
 
-### 2. Existing role checks do not independently represent execution actions
+#### 2. Existing role checks do not independently represent execution actions
 
 [ProjectRole.java:4](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/ProjectRole.java)
 has ordinal VIEWER/CONTRIBUTOR/MANAGER roles.
@@ -148,7 +160,7 @@ SYSTEM summarization runs without that public entry point; enabling controlled
 continuation through it is a separate API/exposure decision. Scoped internal
 processing admission must not accidentally expose worker logs to ordinary callers.
 
-### 3. Ordinary omitted-target Application routing needs a new resolver
+#### 3. Ordinary omitted-target Application routing needs a new resolver
 
 [Asking.java:15](../plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/Asking.java)
 deliberately carries no implicit project.
@@ -166,7 +178,7 @@ binding resolved before authorization. Generic multi-project service credentials
 cannot choose their first project or infer a destination from an account name.
 Preserve explicit resource ownership and retained acting targets over defaults.
 
-### 4. SYSTEM processing needs scoped authority, not a Global-wide ban
+#### 4. SYSTEM processing needs scoped authority, not a Global-wide ban
 
 [InformationWriteGates.java:108](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationWriteGates.java)
 and [InformationStageHooks.java:56](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationStageHooks.java)
@@ -202,7 +214,7 @@ availability, input, cancellation and budget fences. A former creator's inabilit
 to read results must not cancel otherwise valid SYSTEM preparation or disclose
 those results back to that creator. See the [adopted continuation policy](decisions/0030-authority-substrate-and-explicit-scopes.md#system-processing-validity-and-creator-access-changes).
 
-### 5. Reuse chat dispatch authorization; extend authority carriage
+#### 5. Reuse chat dispatch authorization; extend authority carriage
 
 [ChatRequest.java:88](../plowshare-server/src/main/java/io/aeyer/plowshare/server/llm/dispatch/ChatRequest.java)
 defaults ordinary callers to the no-op
@@ -228,7 +240,7 @@ Concrete side-call owners include
 [ScheduleReader.java:247](../plowshare-server/src/main/java/io/aeyer/plowshare/server/events/ScheduleReader.java)
 and [ModelCallValidator.java:86](../plowshare-server/src/main/java/io/aeyer/plowshare/server/harness/ModelCallValidator.java).
 
-### 6. Administrator management conflicts with exact-owner mutation APIs
+#### 6. Administrator management conflicts with exact-owner mutation APIs
 
 [JdbcInformationCatalogueRepository.java:65](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java)
 locks a resource only when owner_handle equals the caller. Admission chooses an
@@ -245,7 +257,7 @@ need migration to evaluate those grants, preserve source/input restrictions and
 record the human action. Logging in as
 Global, rewriting the author, or making all owners ADMIN would defeat the design.
 
-### 7. Universal read needs coordinated Java, SQL and retained admission changes
+#### 7. Universal read needs coordinated Java, SQL and retained admission changes
 
 [InformationAccess.java:51](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/InformationAccess.java)
 refuses service Personal/Shared selection;
@@ -281,7 +293,7 @@ contract. Personal delegation deliberately requires no actor Personal membership
 project delegation still intersects actor and subject project authority. Subject
 consent does not turn ordinary bot interaction into resource access management.
 
-### 8. Shared conversion and Global ownership transfer are different migrations
+#### 8. Shared conversion and Global ownership transfer are different migrations
 
 [JdbcInformationCatalogueRepository.java:830](../plowshare-server/src/main/java/io/aeyer/plowshare/server/information/JdbcInformationCatalogueRepository.java)
 changes a revision's Shared visibility and policy project_id while retaining the
@@ -305,7 +317,7 @@ and original receipts, and update installer ownership/control and reader discove
 contracts together. Otherwise administrators cannot update it, or publish a second
 competing manual under their own namespace. No live installation was inspected.
 
-### 9. Read-source selection and curation currently widen or move data
+#### 9. Read-source selection and curation currently widen or move data
 
 [Archive.java:559](../plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/Archive.java)
 appends Global results to project recall/survey.
@@ -325,7 +337,7 @@ effect. Decide what curation proposes and who can approve it. Recall also
 read telemetry/index maintenance must not require granting readers content-edit
 rights or permit them to change audience/claims.
 
-### 10. Durable jobs need explicit scope and retained grants
+#### 10. Durable jobs need explicit scope and retained grants
 
 [Digests.java:137](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/digests/Digests.java)
 captures the requested home in a closure but submits through an overload that
@@ -337,7 +349,7 @@ references and original request identities. Classify existing jobs rather than
 assigning their null home to GLOBAL_ACCOUNT. Never replay uncertain effects to
 reconstruct missing authority.
 
-### 11. Internal and resumed admissions need the same action checks
+#### 11. Internal and resumed admissions need the same action checks
 
 [JobRuntime.java:206](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/JobRuntime.java)
 defaults ordinary admission checks to no-op; its retained path installs and
@@ -367,7 +379,7 @@ cancellation of every document-processing operation. Map verified controls only;
 missing controls remain absent, not a new implementation requirement, and this
 proposal does not assume a generic operation ACL/resource registry exists.
 
-### 12. Built-in accounts and ADMIN grants need lifecycle migration
+#### 12. Built-in accounts and ADMIN grants need lifecycle migration
 
 [V111:1](../plowshare-server/src/main/resources/db/migration/V111__service_accounts.sql)
 supports USER/SERVICE/SERVICE_TOKEN account kinds, while
@@ -390,7 +402,7 @@ contains administrative project admission. Removing only one bypass disagrees
 with the other; removing both without grant migration removes existing operator
 access. Decide the explicit replacement grants without widening Personal access.
 
-### 13. Definition trust, disk layout and accounting remain separate migrations
+#### 13. Definition trust, disk layout and accounting remain separate migrations
 
 [LayeredDefinitions.java:43](../plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/LayeredDefinitions.java)
 selects the first named definition;
@@ -417,73 +429,29 @@ and recovery. Preserve existing attribution/attempt records while adding that
 binding; SYSTEM execution or creator provenance must not silently select a payer.
 Model-call allowance, capacity routing and monetary reservations are distinct.
 
-## Assumptions and decisions still uncovered
+### First migration slice: specification checklist
 
-| Decision | Why implementation depends on it |
-| --- | --- |
-| Scope kind and account knowledge representation | Define typed account/project/execution targets and stable mappings, rather than reuse project/null or account handles as project names |
-| Built-in identity lifecycle | Reserve SYSTEM/Global/role/scope UUIDs; specify collisions, bootstrap, disable/delete/recovery, credential refusal and acting-subject rules |
-| Trusted Application default | Identify the authenticated binding and precedence; define generic multi-project service behavior and default resolution timing |
-| Root-document policy compatibility | Settled: publication does not imply GLOBAL_READ; current root permissions govern revisions, and the resource MANAGER/DRI may choose GLOBAL_READ without extra ADMIN approval. Reconcile per-revision Shared audiences and atomic policy-version enforcement; lifecycle/draft eligibility remains separate |
-| Meaning of RUN_MODEL | Settled: all inference uses RUN_MODEL, including embeddings, reranking, validators and side calls. Declared SYSTEM services use their own authority within the operation sandbox; callers need permission for the requested operation. Extend every inference dispatch path; operation-budget sponsorship remains independent of permission |
-| Non-model execution | Settled: check the actions actually performed, with no EXECUTE_JOB permission. Tool-only/CPU/scheduled/Relay work needs applicable resource/control authority and existing capability fences; CREATE or RUN_MODEL applies only when that action occurs. EXECUTION is a convenience bundle, not a universal job gate |
-| Existing operation control | Settled: supported lifecycle controls use scoped WRITE plus existing domain eligibility/state rules, with no CONTROL_EXECUTION. Verify controls individually; job.cancel and schedule.pause do not imply generic job pause/resume, universal cancellation or a new operation ACL/registry. Missing capabilities stay out of implementation scope |
-| Independent service admission versus delegated children | A permitted WRITE/read trigger may authorize a declared SYSTEM workflow under its own scoped grant; do not require the caller to hold worker execution, lend it to the caller, or auto-escalate arbitrary denied work |
-| Processing/log scope and service sponsorship | Settled: SYSTEM already has root authority; an operation sandbox restricts its use without fresh per-task account grants, and the operation pays through its configured budget. Map each workflow's trigger, inputs/outputs, sandbox, budget binding and private logs; detailed pool/reservation mechanics remain implementation design |
-| Operation-budget lifecycle | Settled: conversation compaction uses its conversation budget; project/Application preparation uses scope processing budgets; Global/maintenance uses configured deployment budgets; read-side inference uses its search-operation budget. Retain binding and usage across queue/recovery, without creator/SYSTEM fallback or historical cost relabeling |
-| SYSTEM-derived writes versus initial publication | Derived summary/index writes use scoped worker WRITE; initial admission, audience widening and ownership transfer need their separately specified control/release authority. Settle any curation approval policy explicitly |
-| Internal conversation-shaped logs | Decide how CREATE applies to worker/hook/audit logs versus user-facing conversations without granting execution merely because a log must be recorded |
-| Grant narrowing and queued work | Revalidate live authority within retained ceilings at enqueue/dispatch/result disclosure/recovery; decide grant-version and expiry semantics without replaying effects |
-| SYSTEM continuation versus creator revocation | Settled: an admitted independent SYSTEM operation continues while the document and operation remain valid, despite creator/initiator access removal. Replace legacy owner-access lease checks, preserve operation fences and current recipient disclosure checks; delegated user work still needs live acting authority |
-| Global write control | Replace exact-owner mutation authorization with common actions; ordinary reads already support membership/shared audiences. Specify control/release actions and audit |
-| Managed-resource audience authority | Settled: MANAGER/DRI may change its resource's reader groups and grant/remove GLOBAL_READ through access management, without a separate expansion grant or ADMIN approval. Preserve mandatory/private-dependency restrictions; Global-account management and scope transfers retain their separate controls |
-| Legacy owner/creator and ownerOnly migration | Settled: created_by is provenance and grants no permissions. Existing owner_handle/ownerOnly semantics must be reconciled into explicit scope/root-policy grants and any mandatory audience restrictions, preserving actual creation evidence; never substitute caller == created_by or silently remove mandatory policy |
-| Public conversation APIs versus internal SYSTEM work | Internal Global processing does not require exposing public Global create/resume. Decide any controlled continuation API and log visibility separately |
-| Compatibility role mapping | Specify which old VIEWER/CONTRIBUTOR/MANAGER grants map to READ/WRITE/EXECUTION; retain manifest/token identities where valid and distinguish new grants from previously retained ceilings |
-| GLOBAL_READ audience and exclusions | Settled: every authenticated principal holds GLOBAL_READ; resources authorizing it have no individual audience exclusions. Restricted audiences remove that authorization and use project/group permissions. Preserve account/token validity, operation ceilings and mandatory restrictions; introduce no deny-entry/blocklist capability |
-| Tenant isolation and release | Global's audience is settled: all currently authenticated, active principals in the deployment, across project/Application and future tenant boundaries. Preserve private scoped access and source-release/input/reference restrictions; define future tenant mappings separately, without reinterpreting Global as tenant-local |
-| Search aggregation | Decide selected read set, project-plus-public convenience, paging/ranking/coverage, duplicate revisions and reference-only hits before changing current Personal-plus-Shared defaults |
-| Global schema/type registry | Current type management is Personal/Project-scoped; decide where Global-owned typed documents get immutable schemas and how attached access/import behaves |
-| Curation outcome | Choose general-read grant, copy or ownership transfer; define supersession/ID consequences and human approval separately from model assessment |
-| Administration and interface coverage | Settled: account/scoped role and policy determine authority, independently of client. Human Global ADMIN can use existing management APIs; CLI/TUI/GUI are not a security allowlist. No new APIs/SDK methods or feature-parity requirement follows, and SDK management coverage remains unverified unless inspected |
-| Compatibility and rollback | Define mixed-version refusal, coordinated generated contracts, retained-work migration and a rollback that can still enforce new grants/reference records |
+An illustrative Global ADMIN upload, SYSTEM preparation and supported reader
+path needs the following concrete specifications before code is authorized:
 
-Existing role/token/manifest declarations can be preserved through an explicit,
-reviewed compatibility mapping to actions over their already authorized scopes.
-This does not require reissuing every credential or widening old retained tasks.
-New Global read sources and any changed ADMIN rights need intentional policy.
-Client labels establish no authority. Public read does not release consumed
-private inputs; retained dependencies and reference obligations still apply.
+1. Typed account/project/resource targets, reserved identity mapping and safe
+   built-in bootstrap/recovery, alongside existing persistence keys.
+2. Existing role/manifest/token-to-action compatibility and default role profiles,
+   including explicit admin-data and agent-exception treatment.
+3. Each declared service's permitted trigger, SYSTEM executor, operation sandbox,
+   input/output targets, configured operation budget and private-log policy.
+4. Current root-policy enforcement across supported read paths, revision and
+   ownerOnly reconciliation, retained input/reference checks and supported acting
+   read targets. Unsupported consumers stay refused; SDK coverage is not assumed.
+5. Legacy data/audience/manual migration and an auditable rollout/rollback plan
+   preserving resource, request, receipt and historical accounting identities.
 
-### Minimum decisions for the first end-to-end cutover
-
-The larger table is not a requirement to redesign every subsystem before making
-progress. The first working Global ADMIN upload, SYSTEM preparation and SDK
-librarian read path needs these decisions:
-
-1. **Typed targets and identity mapping:** account knowledge versus project scopes,
-   owner versus executor, and fixed built-in IDs alongside existing keys.
-2. **Role-to-action compatibility:** which existing grants supply READ, WRITE,
-   CREATE and RUN_MODEL; Global ADMIN has control/write without implicit execution.
-3. **Declared SYSTEM service admission:** which authorized upload/read triggers
-   which worker, its existing authority and operation sandbox, inputs/outputs,
-   sponsor/budget and private logs.
-4. **Effective read policy:** implement the adopted current root-document policy
-   across revisions and group/project/general-read audiences; settle supported
-   Application/acting read targets, ownerOnly semantics and retained input rules.
-5. **Built-in lifecycle:** noninteractive SYSTEM/Global capabilities, no accidental
-   Personal provisioning, current credential validity and safe grant issuance.
-6. **Cutover policy:** legacy Shared audience expansion and manual ownership
-   adoption, existing role compatibility and narrow retained admissions. Disk,
-   old job/log and historical accounting classification must preserve identities.
-
-Mapping broader CPU/tool-only consumers to the adopted action checks, optional
-public SYSTEM-workflow continuation and general curation transfers can remain
-separately scoped work. They must not
-be silently inferred from this first knowledge-processing slice. Any rollout of
-deployment-wide reading must enforce the settled authenticated audience and its
-source-release/private-resource boundaries. First-class tenant entities remain
-separate design work; they must preserve this deployment-wide audience.
+Resolve grant-version/expiry and dispatch-versus-revocation races in the affected
+consumer contract. Preserve existing log/control semantics while classifying
+internal conversation-shaped logs; this does not imply a new CREATE exemption,
+new control API or generic job-resume capability. Implementation specifications
+must honor the settled rules rather than silently widen access or require custom
+ACL configuration for routine roles.
 
 ## What can be reused
 
@@ -512,17 +480,39 @@ remain separate restrictions. Owner-equality mutation checks can change without
 removing these boundaries. GLOBAL_READ applies to intended knowledge resources,
 not every log, prompt, receipt or accounting row sharing a scope.
 
+## Deferred gaps
+
+These are optional behavior, capability gaps or separately scoped design, not
+requirements to finish a new feature before the core permission mapping can
+proceed. A later slice must resolve the relevant gap before exposing that behavior.
+
+| Topic | What stays deferred |
+| --- | --- |
+| First-class tenant model | Tenant/Personal membership and existing account/project mappings. Deployment-wide GLOBAL_READ and private-scope isolation are settled; do not infer tenant identity from project names. |
+| Generic Application defaults | New omitted-target convenience for multi-project service contexts. Explicit targets remain usable and ambiguous omission refuses; choosing the first token project is not a fallback. |
+| Search aggregation presentation | Paging/ranking/coverage, duplicate/current revisions, reference-only hits and optional project-plus-general-read selection. All-readable unscoped selection remains bounded by admission; no hidden fallback. |
+| Global type/schema authoring | Existing type management is Personal/Project-scoped. A Global registry or new API/SDK authoring surface is not inferred. |
+| General curation outcome | Choose audience grant, copy or home/control transfer, with ID/supersession/approval consequences, before changing promotion. MANAGER audience authority and human Global ADMIN destination control remain fixed. |
+| Broader acting consumers/read targets | Existing retained turns are Personal-scoped and operation-whitelisted. General project work or new Global read targets require an explicit supported contract; never discard acting proof to make them work. |
+| Public SYSTEM-work continuation | Existing public Global conversation refusal can remain; internal processing needs no new public create/resume API. |
+| SDK/client coverage and missing controls | Inventory existing interfaces only. No feature-parity mandate, new APIs/methods, generic job pause/resume/cancel service, operation ACL registry or restartable closure runtime is implied. |
+| Advanced ACL facilities | Resource-specific ACLs fit the substrate, but arbitrary denies, nested groups and new management interfaces are not assumed or required. RBAC helpers remain the routine path, and GLOBAL_READ has no individual exclusions. |
+| Detailed spending-pool mechanics | Operation sponsorship is settled. Pool configuration, reservation/settlement races and migration remain separate technical work under ADR 0025. |
+
 ## Suggested implementation order and future proof
 
 These are review dependencies, not authorization to implement:
 
-1. Settle the decision table, typed target/action contracts and identity lifecycle.
+1. Specify the affected typed targets/actions, role compatibility, identity lifecycle
+   and migration records against the settled policy.
 2. Map role/Application-role helpers to common account/scope/action grants and
    migrate resource READ/WRITE authorization away from actor-equals-owner checks.
-   Keep owner/actor attribution and mandatory input policies.
+   Keep created_by/home/actor distinct, with mandatory input policy intact. Use
+   standard role profiles for routine setup and ACLs only where finer grants are needed.
 3. Add CREATE/RUN_MODEL checks to every owning admission and model dispatch path,
-   including queued and non-conversational work. Give SYSTEM bounded Global worker
-   grants and explicit service-trigger admission before replacing blanket gates.
+   including queued and non-conversational work. Retain existing SYSTEM authority
+   inside an explicit service-operation sandbox with its configured budget before
+   replacing blanket gates and legacy owner-access dependencies.
 4. Introduce Global ownership and general-read policy across Java, SQL, retained
    consumers and public contracts together; preserve narrow legacy admissions.
 5. Classify database and disk records, review audience expansion, migrate the
@@ -530,6 +520,12 @@ These are review dependencies, not authorization to implement:
 
 Focused mocked/fake acceptance coverage should include:
 
+- Routine authorized setup uses ADMIN/MANAGER/CONTRIBUTOR/READER profiles and
+  Application helpers without custom ACLs. Optional finer resource grants use
+  the same evaluator, scope/issuer limits and audit; they cannot bypass mandatory
+  policy, agent ceilings or GLOBAL_READ's no-individual-exclusions rule. Profiles
+  do not automatically create membership, provision new capabilities or widen
+  narrower token/acting limits.
 - Empty conversation creation without inference; first turn/standalone model work
   without RUN_MODEL refused. GLOBAL_READ and human Global ADMIN without execution
   cannot create/run there; bounded SYSTEM EXECUTION succeeds. Check actions before
@@ -610,12 +606,14 @@ None of those properties is established by this source scan.
 
 ## Verification performed
 
-The three server segments were rechecked against the corrected scoped-grant model,
+The earlier three-segment review checked the corrected scoped-grant model,
 including a parent review of Application role binding, user-facing Global resume
 fences, summarizer home/owner parameters and the queue-time chat callback. Findings
 were classified as contract incompatibilities, new capability gaps, policy choices
-or existing mechanisms to reuse. The source scans were read-only. This task changes only the
-proposal, source map, permission matrix, report and documentation index. Document
+or existing mechanisms to reuse. The source scans were read-only. This
+consolidation separates settled policy, migration requirements, reuse and deferred
+gaps; it is not a new exhaustive runtime/client audit. Changes are confined to
+the proposal, source map, permission matrix, report and documentation index. Document
 structure, local links and diff whitespace are checked before commit. No runtime
 or database tests were newly run for these documentation changes.
 

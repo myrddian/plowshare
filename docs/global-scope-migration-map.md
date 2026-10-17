@@ -240,13 +240,18 @@ interpret the same null as both unrestricted legacy work and a refused scope.
 ## Proposed implementation sequence
 
 These slices describe dependencies and review boundaries, not authorization to
-implement them. Early scope/control repairs can be separately authorized while
-the complete substrate remains under design.
+implement them. Core policy is settled in [ADR 0030](decisions/0030-authority-substrate-and-explicit-scopes.md#settled-decisions).
+Use the [impact report](authority-substrate-impact-report.md) to distinguish
+migration requirements, reusable mechanisms and deferred gaps. RBAC with standard
+role helpers is the routine management path; complex ACLs serve finer needs
+through the same substrate rather than becoming a setup requirement.
 
-1. **Settle the authority contract.** Approve tenant/Personal boundaries, the
-   root identity registry, role action sets, grant delegation, publication audiences
-   and admission invariants in ADR 0030. Record changes to ADRs 0025/0026/0028
-   explicitly rather than silently superseding them.
+1. **Specify the affected migration contract.** Map the settled role helpers,
+   actions and audiences to current scopes/grants; assign the remaining reserved
+   identities and define bootstrap, technical grant records and cutover behavior.
+   Do not require a new first-class tenant model or custom ACL setup to begin a
+   separately authorized slice. Record affected ADR 0025/0026/0028 compatibility
+   explicitly; role defaults are authorized setup profiles, not automatic grants.
 2. **Bound the immediate exposure paths.** Give digest jobs their real scope;
    require human ADMIN for Global-owned knowledge management; keep curation assessment
    separate from that decision; stop hidden Global
@@ -263,17 +268,24 @@ the complete substrate remains under design.
    messaging, Relay, approvals and internal workers. Migrate a consumer only when
    its live checks, durable ceiling, output visibility and recovery are complete.
 5. **Separate catalogues and publication.** Make user definition availability,
-   defaults, instruction imports, resource ACL grants and published audiences
+   defaults, instruction imports, standard role assignments, exceptional resource
+   ACL grants and published audiences
    explicit. Keep the internal worker registry independent of project overrides.
 6. **Classify legacy rows and complete contract cutover.** Backfill proven scope,
    preserve restricted unknowns, remove null-as-Global paths and update every
-   affected SDK, generated catalogue, client selector and manual. Enable database
+   affected existing SDK surface, generated catalogue, client selector and manual;
+   no SDK/client feature parity or new interface is required. Enable database
    constraints only after the classification preflight succeeds.
 
 ## Acceptance criteria for future implementation
 
 Default mocked/fake tests should cover:
 
+- Standard scoped RBAC helpers cover routine administration, resource management,
+  contribution and reading without custom ACL setup. Optional complex ACLs refine
+  resource grants through the same substrate and cannot bypass mandatory policy
+  or role/agent limits. Role profiles do not create automatic memberships or new
+  provisioning/ACL-management capabilities.
 - `EXECUTION` includes `CONVERSATION_CREATE` and `RUN_MODEL`; each action still
   requires a retained scoped principal grant and applicable workload validation. An empty
   conversation need not invoke or charge a model. Later turns, children and async

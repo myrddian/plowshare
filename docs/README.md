@@ -19,10 +19,10 @@
 - [Information and evidence](information-system.md)
 - [Authored knowledge and schema-defined document types](authored-knowledge-design.md) (proposed)
 - [Account delegation implementation map](account-delegation-implementation-map.md) (planning for ADR 0026)
-- [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (proposed architecture)
+- [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled proposal policy; implementation deferred)
 - [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)
-- [Role and scope permissions](role-scope-permissions-proposal.md) (proposed action matrices)
-- [Authority substrate impact report](authority-substrate-impact-report.md) (segmented server scan, compatibility risks and open decisions)
+- [Role and scope permissions](role-scope-permissions-proposal.md) (RBAC helpers, default role profiles and proposed action matrices)
+- [Authority substrate impact report](authority-substrate-impact-report.md) (settled policy, migration requirements, reuse and deferred gaps; source evidence)
 - [Authored knowledge implementation plan](authored-knowledge-implementation.md)
 - [Authored information usage](authored-information.md) — Library, typed operations and explicit processing.
 - [Portable information exchange](portable-information.md) — bundles, external authoring and explicit revision imports.
